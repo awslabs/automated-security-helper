@@ -89,14 +89,14 @@ it needs.
 | bandit | no | uv cache | uv-managed Python |
 | checkov | no | uv cache | uv-managed Python |
 | semgrep | yes (registry rules, `p/ci`) | uv cache, `~/.semgrep` | uv-managed Python |
-| opengrep | yes (registry rules) | `~/.opengrep` | single binary |
-| grype | yes (database update) | grype database cache | single binary |
+| opengrep | yes (registry rules) | `~/.opengrep` | single binary; on macOS it unpacks itself into a private directory per spawn |
+| grype | yes (database update) | grype database cache; on macOS the database is read-only and not updated inside the sandbox | single binary |
 | syft | no | syft cache | single binary |
 | trivy | yes (database update) | trivy cache | single binary |
 | npm-audit | yes (registry audit API) | `~/.npm` | Node.js |
 | cfn-nag | no | none | Ruby and its gem paths |
 | detect-secrets | only when `sandbox.network_scanners` names it | none | ASH's Python, in a worker subprocess |
-| cdk-nag | no | jsii's runtime cache | ASH's Python with the cdk extra, and Node.js for jsii, in a worker subprocess |
+| cdk-nag | no | jsii's runtime cache, not used on macOS | ASH's Python with the cdk extra, and Node.js for jsii, in a worker subprocess |
 
 ### Community and third-party plugin scanners
 
@@ -129,6 +129,12 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
         env_prefixes=("MYTOOL_",),
         # Credential-shaped names it needs.
         env_names=("MYTOOL_TOKEN",),
+        # Set under sandbox-exec only, which has no overlay: keep the tool from
+        # writing a cache it gets read-only there.
+        sandbox_exec_env=(("MYTOOL_AUTO_UPDATE", "false"),),
+        # The tool unpacks itself where this variable says and runs what it
+        # unpacked; sandbox-exec points it at a private directory per spawn.
+        unpack_dir_env="XDG_CACHE_HOME",
     )
 ```
 
@@ -345,13 +351,64 @@ than escaping.
 ### macOS: sandbox-exec
 
 `sandbox-exec` applies a Seatbelt (SBPL) profile. ASH generates one per scanner:
-deny by default, allow process creation and Mach service lookup, read everywhere
-except the home directory and the shared temporary directories, read the policy's
-tool paths inside home, write only to the results directory and a private `TMPDIR`.
-With no network, no socket of any kind is allowed. With a network, IP sockets are
-allowed and Unix sockets are not, except the resolver's (`mDNSResponder`), so Docker
-Desktop's socket and the launchd SSH agent stay out of reach. The scanner starts in a
-new session, with no controlling terminal.
+deny by default, read everywhere except the home directory and the shared temporary
+directories, read the policy's tool paths inside home, write only to the results
+directory and a private `TMPDIR`. With no network, no socket of any kind is allowed.
+With a network, IP sockets are allowed and Unix sockets are not, except the
+resolver's (`mDNSResponder`), so Docker Desktop's socket and the launchd SSH agent
+stay out of reach. The scanner starts in a new session, with no controlling terminal.
+
+Programs run only from the system and tool paths the policy makes readable, and from
+uv's cache, where `uv tool run` keeps the environments of tools it was not asked to
+install. Nothing runs from the source tree, the output and results directories, the
+other caches or the private `TMPDIR`, even where a tool path contains one of them (a
+repository checked out under `/opt`), so a program the scanner writes, or one the
+scanned repository ships, cannot be started. A tool path inside the scanned tree, such
+as a virtualenv ASH itself runs from, stays executable.
+
+Mach service lookups are limited to a list measured on the macOS 14, 15 and 26 CI
+runners, where the ten builtin scanners looked up the same thirteen services on all
+three. Nine of them are allowed. Every scanner may reach preferences (`cfprefsd`),
+logging (`logd`), notifications (`notifyd`) and user and group lookups
+(`opendirectoryd`). A scanner with a network may also reach the DNS and network
+configuration (`configd`) and certificate trust (`trustd`). The other four are not
+allowed: LaunchServices, which node looks up on start and does without, and the
+keychain daemon (`SecurityServer`) and a telemetry service, both looked up by
+`/usr/bin/security`. LaunchServices (`launchservicesd`, `coreservicesd`,
+`com.apple.lsd.*`), the pasteboard (`com.apple.pasteboard.*`) and the keychain daemon
+are denied after every allow, so no allow can reach them: LaunchServices asks launchd
+to start an app, and launchd starts it outside the sandbox. The keychain files
+themselves (`/Library/Keychains` and `~/Library/Keychains`) are denied after every
+file rule.
+
+semgrep's core runs `/usr/bin/security` only to read the system root certificates,
+through OCaml's ca-certs. For a scanner that declares this need
+(`SandboxRequirements.system_trust_roots`), ASH exports the same certificates before
+the spawn, outside the sandbox, with the same command (`security find-certificate -a
+-p` on the system root and system keychains), writes them to a file the scanner can
+read and not write, and sets `SSL_CERT_FILE` to it, which ca-certs reads instead. An
+`SSL_CERT_FILE` you set yourself is passed through and wins.
+
+sandbox-exec has no throwaway overlay, so a cache it lets a scanner write is written
+in place, and the next run, sandboxed or not, reads what the scanner left there. The
+macOS-specific locations are therefore declared per scanner and granted as narrowly as
+the tool allows:
+
+- grype's database at `~/Library/Caches/grype` is read-only, and grype runs with
+  `GRYPE_DB_AUTO_UPDATE=false`, so it uses the database it finds and still checks its
+  age online. Update it outside the sandbox (`grype db update`, or an unsandboxed
+  scan) when it is too old.
+- cdk-nag runs with jsii's package cache disabled, so jsii unpacks into its own
+  temporary directory instead of the shared `~/Library/Caches/com.amazonaws.jsii`,
+  whose JavaScript every CDK process on the machine runs.
+- opengrep's macOS binary unpacks itself to `$XDG_CACHE_HOME/opengrep/<version>` and
+  runs `opengrep.bin` from there. `XDG_CACHE_HOME` points at a directory made for the
+  spawn, writable and executable for it alone, and removed when it exits; it is the
+  only writable directory a program may run from.
+- `uv tool run` opens uv's tools-directory lock read-write before it looks for an
+  installed tool. That one file is writable; the tools directory is not.
+- A script's interpreter, from its `#!` line, has its install prefix readable, so a
+  RubyGems wrapper finds its Ruby's library when Ruby is installed under `$HOME`.
 
 sandbox-exec does not end processes the scanner leaves running. ASH's removal of
 symlinks after each spawn and its non-following writes still apply, but a process that
@@ -359,10 +416,16 @@ outlives the scanner could replace a subdirectory of the results directory with 
 link between the sweep and ASH's next write there. That is a known gap of this
 backend.
 
-Mach service lookup is allowed without a filter, because system libraries look up a
-long and version-dependent list of services and a missing one fails in ways that are
-hard to diagnose. A scanner can therefore talk to launchd services the user's session
-exposes (the pasteboard, for example). That is a known gap of this backend.
+A macOS release or a scanner update can make a tool look up a service that is not on
+the list. The profile denies it, the tool usually fails or reports less, and the
+unified log says which service it was:
+
+```bash
+log show --last 10m --predicate 'sender == "Sandbox"' | grep -E 'deny\(1\) (mach-lookup|process-exec)'
+```
+
+The list is `MACH_SERVICES` and `MACH_SERVICES_WITH_NETWORK` in
+`automated_security_helper/utils/sandbox/backends.py`.
 
 Risk to record: Apple has marked `sandbox-exec` deprecated since macOS 10.13 and
 documents SBPL as private. It still works on current macOS and is what Apple's own
@@ -394,5 +457,12 @@ file outside the source tree (a planted `~/.ssh/id_rsa`), write outside its resu
 directory, open a network socket under `--offline`, and modify the source tree. CI runs
 it under each backend available on the runner. Each attempt must fail with the sandbox
 on, and succeed with `--sandbox off`, which is the negative control that proves the
-attempts are real. CI also runs every builtin scanner under bubblewrap against the
-snapshot fixture and asserts the findings match the unsandboxed run.
+attempts are real. CI also runs every builtin scanner under bubblewrap on Linux and
+under sandbox-exec on macOS against the snapshot fixture, offline and online, and
+asserts the findings match the unsandboxed run.
+
+On macOS, `tests/integration/sandbox/test_sandbox_exec_services.py` has the fixture
+scanner open TextEdit through LaunchServices, read a canary back from the pasteboard
+and from the keychain, read the keychain files, and look up the LaunchServices,
+pasteboard and keychain Mach services directly. Each must succeed unsandboxed and fail
+under `sandbox-exec`.

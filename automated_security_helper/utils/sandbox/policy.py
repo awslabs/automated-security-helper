@@ -53,6 +53,28 @@ class SandboxRequirements:
             so the scanner's own declaration does not grant it. It gets a network
             only when ``sandbox.network_scanners``, which only a trusted source
             can set, names it.
+        system_trust_roots: The tool reads the system's root certificates itself
+            rather than through the OS's TLS stack: semgrep-core uses OCaml's
+            ca-certs, which on macOS runs ``security find-certificate`` against the
+            system keychains. The sandbox-exec profile keeps the keychain daemon
+            out of reach, so for such a tool ASH exports the same certificates to
+            a read-only file before the spawn and sets ``SSL_CERT_FILE`` to it,
+            which ca-certs reads instead. Other backends leave the tool alone.
+        sandbox_exec_env: ``(name, value)`` pairs set in the scanner's environment
+            under sandbox-exec only, after the allowlist. That backend has no
+            throwaway overlay, so a cache it could write would be written in place
+            and read by every later run. These keep the tool from writing what it
+            is given read-only there: grype's database (no update inside the
+            sandbox), jsii's package cache (not used at all).
+        unpack_dir_env: The tool unpacks itself and runs what it unpacked, at a
+            location this environment variable decides (opengrep's macOS binary,
+            built with Nuitka's onefile mode, unpacks to
+            ``$XDG_CACHE_HOME/opengrep/<version>`` and runs ``opengrep.bin`` from
+            there). Under sandbox-exec, which runs programs only from tool paths,
+            the variable points at a directory created for the spawn, writable and
+            executable for it alone and removed afterwards, so nothing it unpacks
+            reaches another run. Other backends give the tool a private home
+            directory and do not restrict exec, and leave the variable alone.
     """
 
     network: bool = False
@@ -61,6 +83,9 @@ class SandboxRequirements:
     env_prefixes: Tuple[str, ...] = ()
     env_names: Tuple[str, ...] = ()
     network_requires_grant: bool = False
+    system_trust_roots: bool = False
+    sandbox_exec_env: Tuple[Tuple[str, str], ...] = ()
+    unpack_dir_env: Optional[str] = None
 
 
 #: The baseline environment allowlist. Exact names, then prefixes. Anything else in
@@ -137,6 +162,15 @@ SYSTEM_READ_PATHS = (
 )
 
 
+#: System read paths that hold configuration and data, not programs, so they are
+#: readable and never executable.
+_DATA_SYSTEM_PATHS = (
+    Path("/etc"),
+    Path("/private/etc"),
+    Path("/private/var/db/timezone"),
+)
+
+
 @dataclass(frozen=True)
 class SandboxPolicy:
     """A resolved policy for one scanner invocation. All paths are absolute.
@@ -144,6 +178,15 @@ class SandboxPolicy:
     ``read_only`` and ``writable`` keep the caller's spelling of each path (which may
     run through a symlink, such as a home directory that links elsewhere); backends
     that need real paths resolve them, and recreate the symlinks, themselves.
+
+    ``executable`` and ``scan_data`` are for a backend that can restrict which files
+    a process may execute (sandbox-exec). ``executable`` is ``read_only`` without the
+    scan's own data, so the system and tool paths, plus uv's cache, which is where
+    ``uv tool run`` keeps the environments of tools it was not asked to install.
+    Programs run from there and from nowhere else. ``scan_data`` is the scan's data
+    (the source tree, the output directory, the scan target and the working
+    directory), which stays non-executable even where a tool path contains it, so a
+    repository checked out under ``/opt`` cannot have its own binaries run.
     """
 
     scanner_name: str
@@ -156,6 +199,15 @@ class SandboxPolicy:
     env_prefixes: Tuple[str, ...] = ()
     env_names: Tuple[str, ...] = ()
     extra_env: Dict[str, str] = field(default_factory=dict)
+    executable: Tuple[Path, ...] = ()
+    scan_data: Tuple[Path, ...] = ()
+    system_trust_roots: bool = False
+    sandbox_exec_env: Dict[str, str] = field(default_factory=dict)
+    unpack_dir_env: Optional[str] = None
+    #: uv's tools-directory lock file, which ``uv tool run`` opens read-write before
+    #: it looks for an installed tool. The file, not the directory: writing the
+    #: lock changes nothing a later run reads.
+    uv_tool_locks: Tuple[Path, ...] = ()
 
     def filter_env(self, env: Mapping[str, str]) -> Dict[str, str]:
         """Reduce ``env`` to the allowlist, then point HOME inside."""
@@ -247,6 +299,21 @@ def _uv_directories() -> List[Path]:
             ):
                 found.append(prefix)
     return _existing(found)
+
+
+def _uv_tool_locks() -> List[Path]:
+    """The ``.lock`` file of uv's tools directory, where one exists."""
+    home = Path.home()
+    data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local" / "share")
+    tool_dir = (
+        _expand(os.environ["UV_TOOL_DIR"])
+        if os.environ.get("UV_TOOL_DIR")
+        else data / "uv" / "tools"
+    )
+    if tool_dir is None:
+        return []
+    lock = tool_dir / ".lock"
+    return [lock.absolute()] if lock.is_file() and not lock.is_symlink() else []
 
 
 def uv_cache_directory() -> Optional[Path]:
@@ -348,7 +415,16 @@ def _executable_prefix(argv0: str) -> List[Path]:
         return real in (Path("/"), real_home) or real.parent == real_home
 
     paths: List[Path] = []
-    for candidate in set(_symlink_hops(Path(found))) | {Path(os.path.realpath(found))}:
+    candidates = set(_symlink_hops(Path(found))) | {Path(os.path.realpath(found))}
+    # A script runs on the interpreter its first line names, whose libraries sit in
+    # that interpreter's own prefix: cfn_nag_scan is a RubyGems wrapper whose Ruby,
+    # on the hosted macOS runners, is installed under $HOME.
+    interpreter = _shebang_interpreter(Path(found))
+    if interpreter is not None:
+        candidates |= set(_symlink_hops(interpreter)) | {
+            Path(os.path.realpath(interpreter))
+        }
+    for candidate in candidates:
         parent = candidate.parent
         if parent.name in _BIN_DIR_NAMES or not too_broad(parent):
             if Path(os.path.realpath(parent)) != real_home:
@@ -356,6 +432,27 @@ def _executable_prefix(argv0: str) -> List[Path]:
         if parent.name in _BIN_DIR_NAMES and not too_broad(parent.parent):
             paths.append(parent.parent)
     return _existing(paths)
+
+
+def _shebang_interpreter(script: Path) -> Optional[Path]:
+    """The interpreter a ``#!`` script names, resolved through ``env`` and PATH."""
+    try:
+        with open(script, "rb") as f:
+            first = f.readline(256)
+    except OSError:
+        return None
+    if not first.startswith(b"#!"):
+        return None
+    words = first[2:].decode("utf-8", errors="replace").split()
+    if not words:
+        return None
+    program = words[0]
+    if os.path.basename(program) == "env":
+        names = [w for w in words[1:] if not w.startswith("-")]
+        if not names:
+            return None
+        program = shutil.which(names[0]) or ""
+    return Path(program) if os.path.isabs(program) else None
 
 
 def _ash_paths() -> List[Path]:
@@ -506,6 +603,19 @@ def build_scanner_policy(
     read_only = [p for p in read_only if not _inside_writable(p)]
     cache = [p for p in cache if not _inside_writable(p)]
 
+    scan_data = _existing([source_dir, output_dir, scan_target, cwd])
+    not_programs = {os.path.realpath(p) for p in [*scan_data, *_DATA_SYSTEM_PATHS]}
+    executable = [p for p in read_only if os.path.realpath(p) not in not_programs]
+    # The only writable place programs may run from: `uv tool run --from <req>`
+    # (bandit, checkov and semgrep without `ash dependencies install`) builds the
+    # tool's environment under the cache and runs its entry point from there.
+    uv_cache = uv_cache_directory()
+    executable += [
+        p
+        for p in cache
+        if uv_cache and os.path.realpath(p) == os.path.realpath(uv_cache)
+    ]
+
     extra_env: Dict[str, str] = {}
     if not network:
         # uv otherwise tries the index before using what it has cached, and fails
@@ -523,4 +633,10 @@ def build_scanner_policy(
         env_prefixes=tuple(requirements.env_prefixes),
         env_names=tuple(requirements.env_names),
         extra_env=extra_env,
+        executable=tuple(executable),
+        scan_data=tuple(scan_data),
+        system_trust_roots=requirements.system_trust_roots,
+        sandbox_exec_env=dict(requirements.sandbox_exec_env),
+        unpack_dir_env=requirements.unpack_dir_env,
+        uv_tool_locks=tuple(_uv_tool_locks()),
     )

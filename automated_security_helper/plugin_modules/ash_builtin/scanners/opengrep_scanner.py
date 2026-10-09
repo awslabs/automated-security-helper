@@ -176,6 +176,10 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         network=True,
         cache_paths=("~/.opengrep",),
         env_prefixes=("OPENGREP_", "SEMGREP_"),
+        # The macOS binary is a Nuitka onefile build that unpacks itself to
+        # {CACHE_DIR}/opengrep/<version>, which is $XDG_CACHE_HOME when set, and
+        # runs opengrep.bin from there.
+        unpack_dir_env="XDG_CACHE_HOME",
     )
 
     def model_post_init(self, context):

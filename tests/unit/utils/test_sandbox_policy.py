@@ -4,6 +4,7 @@
 """The backend-neutral sandbox policy and the scope that decides when it applies."""
 
 import os
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,9 +20,11 @@ from automated_security_helper.utils.sandbox import (
     sandbox_scope,
     scanner_sandbox_scope,
 )
+from automated_security_helper.utils.sandbox import backends as backends_module
 from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.backends import (
     BwrapBackend,
+    SandboxExecBackend,
     SpawnPlan,
 )
 from automated_security_helper.utils.sandbox.policy import build_scanner_policy
@@ -145,6 +148,40 @@ class TestPaths:
         monkeypatch.setenv("ASH_TEST_CA", str(extra))
         policy = _policy(layout, extra_read_paths=["$ASH_TEST_CA", "/does/not/exist"])
         assert Path(os.path.realpath(extra)) in _resolved(policy.read_only)
+
+
+class TestExecutable:
+    def test_tool_paths_are_executable_and_the_scan_data_is_not(self, layout):
+        policy = _policy(layout)
+        executable = _resolved(policy.executable)
+        assert Path(os.path.realpath(sys.executable)).parent in executable
+        for data in (layout.source, layout.output):
+            assert Path(os.path.realpath(data)) not in executable
+            assert Path(os.path.realpath(data)) in _resolved(policy.scan_data)
+
+    def test_system_configuration_is_readable_and_not_executable(self, layout):
+        policy = _policy(layout)
+        if not Path("/etc").is_dir():
+            pytest.skip("no /etc on this platform")
+        etc = Path(os.path.realpath("/etc"))
+        assert etc in _resolved(policy.read_only)
+        assert etc not in _resolved(policy.executable)
+
+    def test_nothing_writable_is_executable_but_the_uv_cache(
+        self, layout, monkeypatch, tmp_path
+    ):
+        uv_cache = tmp_path / "uv-cache"
+        other_cache = tmp_path / "grype-cache"
+        uv_cache.mkdir()
+        other_cache.mkdir()
+        monkeypatch.setenv("UV_CACHE_DIR", str(uv_cache))
+        policy = _policy(layout, SandboxRequirements(cache_paths=(str(other_cache),)))
+        executable = _resolved(policy.executable)
+        # `uv tool run` keeps the environments of tools it was not asked to install
+        # in its cache and runs their entry points from there.
+        assert Path(os.path.realpath(uv_cache)) in executable
+        assert Path(os.path.realpath(other_cache)) not in executable
+        assert Path(os.path.realpath(layout.results)) not in executable
 
 
 class TestEnvironment:
@@ -650,3 +687,487 @@ class TestNothingBroaderThanATool:
         monkeypatch.setenv("PATH", str(layout.home.parent))
         exposed = _resolved(_policy(layout).read_only)
         assert Path(os.path.realpath(layout.home.parent)) not in exposed
+
+
+def _sbpl(layout, tmp_path, **overrides):
+    """The sandbox-exec profile for one policy, one rule per line."""
+    policy = _policy(layout, **overrides)
+    return SandboxExecBackend().profile(policy, tmp_path / "private-tmp").splitlines()
+
+
+def _subpaths(rule):
+    return set(re.findall(r'\(subpath "([^"]*)"\)', rule))
+
+
+def _indexed(lines, prefix):
+    return [(i, line) for i, line in enumerate(lines) if line.startswith(prefix)]
+
+
+class TestSandboxExecProfile:
+    """The macOS profile names the Mach services and the exec paths it allows.
+
+    Profile text only, so these run on every platform. The profile itself is run on
+    macOS by tests/integration/sandbox/test_sandbox_exec_services.py and by the
+    scanner parity job.
+    """
+
+    NETWORK = SandboxRequirements(network=True)
+
+    def test_no_rule_allows_every_mach_lookup(self, layout, tmp_path):
+        for requirements in (SandboxRequirements(), self.NETWORK):
+            lines = _sbpl(layout, tmp_path, requirements=requirements)
+            assert "(allow default)" not in lines
+            allows = _indexed(lines, "(allow mach-lookup")
+            assert allows, "no Mach service is allowed at all"
+            for _, rule in allows:
+                # Exact names only: no unfiltered rule, no prefix, no regex.
+                assert rule.startswith("(allow mach-lookup (global-name "), rule
+                assert set(re.findall(r"\((global-name\S*) ", rule)) == {
+                    "global-name"
+                }, rule
+
+    def test_launch_services_and_the_pasteboard_are_denied_after_every_allow(
+        self, layout, tmp_path
+    ):
+        for requirements in (SandboxRequirements(), self.NETWORK):
+            lines = _sbpl(layout, tmp_path, requirements=requirements)
+            denies = _indexed(lines, "(deny mach-lookup")
+            assert len(denies) == 1, denies
+            where, rule = denies[0]
+            for denied in (
+                '(global-name "com.apple.coreservices.launchservicesd")',
+                '(global-name "com.apple.CoreServices.coreservicesd")',
+                '(global-name-prefix "com.apple.lsd.")',
+                '(global-name-prefix "com.apple.pasteboard.")',
+                '(global-name "com.apple.SecurityServer")',
+            ):
+                assert denied in rule
+            # In SBPL the last matching rule wins, so the deny has to come last.
+            assert where > max(i for i, _ in _indexed(lines, "(allow mach-lookup"))
+
+    def test_resolver_services_are_allowed_only_with_a_network(self, layout, tmp_path):
+        offline = "\n".join(_sbpl(layout, tmp_path))
+        online = "\n".join(_sbpl(layout, tmp_path, requirements=self.NETWORK))
+        assert backends_module.MACH_SERVICES_WITH_NETWORK
+        for name in backends_module.MACH_SERVICES_WITH_NETWORK:
+            assert f'"{name}"' not in offline, name
+            assert f'"{name}"' in online, name
+        for name in backends_module.MACH_SERVICES:
+            assert f'"{name}"' in offline, name
+            assert f'"{name}"' in online, name
+
+    def test_the_allowlists_name_no_denied_service_and_no_duplicate(self):
+        always = list(backends_module.MACH_SERVICES)
+        network = list(backends_module.MACH_SERVICES_WITH_NETWORK)
+        assert len(set(always + network)) == len(always) + len(network)
+        for name in always + network:
+            assert name not in (
+                "com.apple.coreservices.launchservicesd",
+                "com.apple.CoreServices.coreservicesd",
+                "com.apple.SecurityServer",
+            ), name
+            assert not name.startswith(("com.apple.lsd.", "com.apple.pasteboard.")), (
+                name
+            )
+
+    def test_exec_is_allowed_only_from_tool_and_system_paths(self, layout, tmp_path):
+        lines = _sbpl(layout, tmp_path)
+        assert "(allow process-exec)" not in lines
+        allows = _indexed(lines, "(allow process-exec ")
+        assert len(allows) == 1, allows
+        allowed = _subpaths(allows[0][1])
+        interpreter = Path(os.path.realpath(sys.executable)).as_posix()
+        assert any(
+            interpreter.startswith(path.rstrip("/") + "/") for path in allowed
+        ), (
+            interpreter,
+            allowed,
+        )
+        for never in (
+            layout.results,
+            tmp_path / "private-tmp",
+            layout.source,
+            layout.output,
+            layout.home,
+        ):
+            assert _as_argv(never) not in allowed, never
+        ((_, deny),) = _indexed(lines, "(deny process-exec ")
+        for denied in (layout.results, tmp_path / "private-tmp", layout.source):
+            assert _as_argv(denied) in _subpaths(deny), denied
+
+    def test_the_uv_cache_is_executable_and_other_caches_are_not(
+        self, layout, monkeypatch, tmp_path
+    ):
+        uv_cache = tmp_path / "uv-cache"
+        other_cache = tmp_path / "grype-cache"
+        uv_cache.mkdir()
+        other_cache.mkdir()
+        monkeypatch.setenv("UV_CACHE_DIR", str(uv_cache))
+        lines = _sbpl(
+            layout,
+            tmp_path,
+            requirements=SandboxRequirements(cache_paths=(str(other_cache),)),
+        )
+        ((_, allow),) = _indexed(lines, "(allow process-exec ")
+        ((_, deny),) = _indexed(lines, "(deny process-exec ")
+        assert _as_argv(uv_cache) in _subpaths(allow)
+        assert _as_argv(uv_cache) not in _subpaths(deny)
+        assert _as_argv(other_cache) in _subpaths(deny)
+        assert _as_argv(other_cache) not in _subpaths(allow)
+
+    def test_the_scan_data_is_not_executable_inside_a_tool_path(self, layout, tmp_path):
+        # A tool path that holds the scanned tree, as /opt holds a repository
+        # checked out under it.
+        lines = _sbpl(layout, tmp_path, extra_read_paths=[str(tmp_path)])
+        ((allow_at, allow),) = _indexed(lines, "(allow process-exec ")
+        ((deny_at, deny),) = _indexed(lines, "(deny process-exec ")
+        assert _as_argv(tmp_path) in _subpaths(allow)
+        assert {_as_argv(layout.source), _as_argv(layout.output)} <= _subpaths(deny)
+        assert deny_at > allow_at
+
+    def test_a_tool_path_inside_the_scan_data_stays_executable(self, layout, tmp_path):
+        # A virtualenv inside the scanned project that ASH itself runs from.
+        venv_bin = layout.source / ".venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        lines = _sbpl(layout, tmp_path, extra_read_paths=[str(venv_bin)])
+        allows = _indexed(lines, "(allow process-exec ")
+        ((deny_at, _),) = _indexed(lines, "(deny process-exec ")
+        assert len(allows) == 2, allows
+        assert allows[1][0] > deny_at
+        assert _subpaths(allows[1][1]) == {_as_argv(venv_bin)}
+
+    def test_the_keychain_files_are_denied_after_every_file_allow(
+        self, layout, tmp_path
+    ):
+        keychains = Path(os.path.realpath(layout.home)) / "Library" / "Keychains"
+        for requirements in (SandboxRequirements(), self.NETWORK):
+            lines = _sbpl(layout, tmp_path, requirements=requirements)
+            ((where, rule),) = _indexed(lines, "(deny file-read* file-write* ")
+            assert _subpaths(rule) == {"/Library/Keychains", keychains.as_posix()}
+            # Last of the file rules, so no path the policy grants can reopen them.
+            assert where > max(i for i, _ in _indexed(lines, "(allow file-"))
+
+
+class TestSystemTrustRoots:
+    """semgrep-core reads root certificates from a file instead of the keychain."""
+
+    # Shaped enough for the export to accept it, and not a certificate.
+    PEM = "-----BEGIN CERTIFICATE-----\nplaceholder, not a certificate\n"
+
+    def _plan(self, layout, monkeypatch, env=None, declared=True, pem=PEM):
+        monkeypatch.setattr(backends_module, "_system_trust_roots", lambda: pem)
+        policy = _policy(layout, SandboxRequirements(system_trust_roots=declared))
+        return SandboxExecBackend().plan(["/usr/bin/true"], env or {}, policy)
+
+    @staticmethod
+    def _profile(plan):
+        return plan.argv[plan.argv.index("-p") + 1].splitlines()
+
+    def test_semgrep_declares_it(self):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+            semgrep_scanner,
+        )
+
+        requirements = semgrep_scanner.SemgrepScanner.sandbox_requirements
+        assert requirements.system_trust_roots is True
+
+    def test_the_roots_are_a_read_only_file_named_by_ssl_cert_file(
+        self, layout, monkeypatch
+    ):
+        plan = self._plan(layout, monkeypatch)
+        try:
+            roots = Path(plan.env["SSL_CERT_FILE"])
+            assert roots.read_text() == self.PEM
+            profile = self._profile(plan)
+            assert f'(allow file-read* (literal "{_as_argv(roots)}"))' in profile
+            writable = set().union(
+                *(
+                    _subpaths(line)
+                    for line in profile
+                    if line.startswith("(allow") and "file-write*" in line
+                )
+            )
+            assert not any(
+                _as_argv(roots).startswith(path.rstrip("/") + "/") for path in writable
+            ), writable
+        finally:
+            plan.run_cleanup()
+        assert not roots.exists()
+
+    def test_an_operator_ssl_cert_file_wins(self, layout, monkeypatch):
+        plan = self._plan(layout, monkeypatch, env={"SSL_CERT_FILE": "/etc/corp.pem"})
+        try:
+            assert plan.env["SSL_CERT_FILE"] == "/etc/corp.pem"
+        finally:
+            plan.run_cleanup()
+
+    def test_nothing_is_set_unless_declared_and_exported(self, layout, monkeypatch):
+        for declared, pem in ((False, self.PEM), (True, None)):
+            plan = self._plan(layout, monkeypatch, declared=declared, pem=pem)
+            try:
+                assert "SSL_CERT_FILE" not in plan.env
+                assert not any(
+                    line.startswith("(allow file-read* (literal ")
+                    for line in self._profile(plan)
+                )
+            finally:
+                plan.run_cleanup()
+
+    def test_the_export_runs_security_once_per_process(self, monkeypatch, tmp_path):
+        keychains = [tmp_path / "roots.keychain", tmp_path / "system.keychain"]
+        for keychain in keychains:
+            keychain.write_text("")
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(argv)
+            ok = argv[-1] == str(keychains[0])
+            return SimpleNamespace(
+                returncode=0 if ok else 44, stdout=self.PEM if ok else "", stderr=""
+            )
+
+        monkeypatch.setattr(
+            backends_module, "_TRUST_ROOT_KEYCHAINS", tuple(map(str, keychains))
+        )
+        monkeypatch.setattr(backends_module, "_trust_roots_cache", [])
+        monkeypatch.setattr(backends_module.subprocess, "run", fake_run)
+        assert backends_module._system_trust_roots() == self.PEM
+        assert backends_module._system_trust_roots() == self.PEM
+        # One call per keychain, and none the second time.
+        assert [argv[:4] for argv in calls] == [
+            ["/usr/bin/security", "find-certificate", "-a", "-p"]
+        ] * 2
+
+
+def _builtin_requirements():
+    from automated_security_helper.plugin_modules.ash_builtin import ASH_SCANNERS
+
+    found = {}
+    for scanner in ASH_SCANNERS:
+        requirements = getattr(scanner, "sandbox_requirements", None)
+        if isinstance(requirements, SandboxRequirements):
+            found[scanner.__name__] = requirements
+    return found
+
+
+class TestMacosScannerDeclarations:
+    """What each builtin scanner is granted for macOS, and how narrowly."""
+
+    def test_grype_reads_its_macos_database_and_never_updates_it_there(self):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+            grype_scanner,
+        )
+
+        requirements = grype_scanner.GrypeScanner.sandbox_requirements
+        assert "~/Library/Caches/grype" in requirements.read_paths
+        assert "~/Library/Caches/grype" not in requirements.cache_paths
+        assert dict(requirements.sandbox_exec_env) == {"GRYPE_DB_AUTO_UPDATE": "false"}
+
+    def test_cdk_nag_does_not_use_the_shared_jsii_cache(self):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+            cdk_nag_scanner,
+        )
+
+        requirements = cdk_nag_scanner.CdkNagScanner.sandbox_requirements
+        assert dict(requirements.sandbox_exec_env) == {
+            "JSII_RUNTIME_PACKAGE_CACHE": "disabled"
+        }
+        assert not any("jsii" in p for p in requirements.cache_paths)
+
+    def test_only_opengrep_unpacks_itself(self):
+        declared = {
+            name: requirements.unpack_dir_env
+            for name, requirements in _builtin_requirements().items()
+            if requirements.unpack_dir_env
+        }
+        assert declared == {"OpengrepScanner": "XDG_CACHE_HOME"}
+
+    def test_no_grant_covers_the_whole_library_caches_directory(self):
+        for name, requirements in _builtin_requirements().items():
+            for path in requirements.read_paths + requirements.cache_paths:
+                parts = Path(path).parts
+                assert parts[-2:] != ("Library", "Caches"), (name, path)
+                assert parts[-1:] != ("Library",), (name, path)
+
+
+class TestSandboxExecEnv:
+    def test_the_declared_values_win_over_the_scanner_environment(self, layout):
+        requirements = SandboxRequirements(
+            env_prefixes=("GRYPE_",),
+            sandbox_exec_env=(("GRYPE_DB_AUTO_UPDATE", "false"),),
+        )
+        plan = SandboxExecBackend().plan(
+            ["/usr/bin/true"],
+            {"GRYPE_DB_AUTO_UPDATE": "true"},
+            _policy(layout, requirements),
+        )
+        try:
+            assert plan.env["GRYPE_DB_AUTO_UPDATE"] == "false"
+        finally:
+            plan.run_cleanup()
+
+    def test_other_backends_ignore_them(self, layout):
+        backend = BwrapBackend()
+        backend._executable = "/usr/bin/bwrap"
+        requirements = SandboxRequirements(sandbox_exec_env=(("JSII_X", "1"),))
+        plan = backend.plan(["/usr/bin/true"], {}, _policy(layout, requirements))
+        assert "JSII_X" not in plan.env
+
+
+class TestUnpackDir:
+    """A self-unpacking tool gets a private directory it may write and run from."""
+
+    REQUIREMENTS = SandboxRequirements(unpack_dir_env="XDG_CACHE_HOME")
+
+    def test_the_variable_names_a_private_writable_executable_directory(self, layout):
+        plan = SandboxExecBackend().plan(
+            ["/usr/bin/true"], {}, _policy(layout, self.REQUIREMENTS)
+        )
+        try:
+            unpack = Path(plan.env["XDG_CACHE_HOME"])
+            assert unpack.is_dir()
+            profile = plan.argv[plan.argv.index("-p") + 1].splitlines()
+            ((_, allow),) = [
+                (i, line)
+                for i, line in enumerate(profile)
+                if line.startswith("(allow process-exec ")
+            ]
+            ((_, deny),) = [
+                (i, line)
+                for i, line in enumerate(profile)
+                if line.startswith("(deny process-exec ")
+            ]
+            assert _as_argv(unpack) in _subpaths(allow)
+            assert _as_argv(unpack) not in _subpaths(deny)
+            writable = set().union(
+                *(
+                    _subpaths(line)
+                    for line in profile
+                    if line.startswith("(allow file-read* file-write* ")
+                )
+            )
+            assert _as_argv(unpack) in writable
+        finally:
+            plan.run_cleanup()
+        assert not unpack.exists(), "the unpack directory outlived its spawn"
+
+    def test_each_spawn_gets_its_own(self, layout):
+        policy = _policy(layout, self.REQUIREMENTS)
+        first = SandboxExecBackend().plan(["/usr/bin/true"], {}, policy)
+        second = SandboxExecBackend().plan(["/usr/bin/true"], {}, policy)
+        try:
+            assert first.env["XDG_CACHE_HOME"] != second.env["XDG_CACHE_HOME"]
+        finally:
+            first.run_cleanup()
+            second.run_cleanup()
+
+    def test_without_the_field_nothing_is_set_or_executable(self, layout):
+        plan = SandboxExecBackend().plan(["/usr/bin/true"], {}, _policy(layout))
+        try:
+            assert "XDG_CACHE_HOME" not in plan.env
+            assert "ash-sandbox-unpack-" not in plan.argv[plan.argv.index("-p") + 1]
+        finally:
+            plan.run_cleanup()
+
+
+class TestUvToolLock:
+    """uv tool run opens its tools-directory lock read-write; nothing else there."""
+
+    def test_the_lock_file_is_writable_and_the_tools_directory_is_not(
+        self, layout, monkeypatch, tmp_path
+    ):
+        tools = tmp_path / "uv-tools"
+        tools.mkdir()
+        (tools / ".lock").write_text("")
+        monkeypatch.setenv("UV_TOOL_DIR", str(tools))
+        policy = _policy(layout)
+        assert [Path(p) for p in policy.uv_tool_locks] == [(tools / ".lock").absolute()]
+        lines = _sbpl(layout, tmp_path)
+        writable = [
+            line for line in lines if line.startswith("(allow file-read* file-write* ")
+        ]
+        assert any(
+            f'(literal "{_as_argv(tools / ".lock")}")' in line for line in writable
+        )
+        assert not any(_as_argv(tools) in _subpaths(line) for line in writable)
+
+    def test_no_lock_file_no_grant(self, layout, monkeypatch, tmp_path):
+        tools = tmp_path / "uv-tools"
+        tools.mkdir()
+        monkeypatch.setenv("UV_TOOL_DIR", str(tools))
+        assert _policy(layout).uv_tool_locks == ()
+
+    def test_a_lock_that_is_a_symlink_is_not_granted(
+        self, layout, monkeypatch, tmp_path
+    ):
+        tools = tmp_path / "uv-tools"
+        tools.mkdir()
+        victim = tmp_path / "victim"
+        victim.write_text("")
+        (tools / ".lock").symlink_to(victim)
+        monkeypatch.setenv("UV_TOOL_DIR", str(tools))
+        assert _policy(layout).uv_tool_locks == ()
+
+
+class TestScriptInterpreter:
+    """A script's interpreter prefix is readable, as cfn_nag_scan's Ruby must be."""
+
+    def _install(self, tmp_path, shebang):
+        prefix = tmp_path / "toolcache" / "Ruby" / "3.3.12"
+        (prefix / "bin").mkdir(parents=True)
+        (prefix / "lib").mkdir()
+        ruby = prefix / "bin" / "ruby"
+        ruby.write_text("")
+        ruby.chmod(0o755)
+        script_dir = tmp_path / "ash-bin"
+        script_dir.mkdir()
+        script = script_dir / "cfn_nag_scan"
+        script.write_text(shebang.format(ruby=ruby) + "\nputs 1\n")
+        script.chmod(0o755)
+        return prefix, script
+
+    def test_an_absolute_shebang(self, layout, tmp_path):
+        prefix, script = self._install(tmp_path, "#!{ruby}")
+        policy = _policy(layout, argv0=str(script))
+        assert Path(os.path.realpath(prefix)) in _resolved(policy.read_only)
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="PATH lookup on Windows needs an extension, and #! is a POSIX launch",
+    )
+    def test_an_env_shebang_is_resolved_through_path(
+        self, layout, monkeypatch, tmp_path
+    ):
+        prefix, script = self._install(tmp_path, "#!/usr/bin/env ruby")
+        monkeypatch.setenv("PATH", str(prefix / "bin"))
+        policy = _policy(layout, argv0=str(script))
+        assert Path(os.path.realpath(prefix)) in _resolved(policy.read_only)
+
+    def test_a_binary_is_not_read_as_a_script(self, layout, tmp_path):
+        binary = tmp_path / "tool"
+        binary.write_bytes(b"\xcf\xfa\xed\xfe#!/opt/evil/bin/x")
+        policy = _policy(layout, argv0=str(binary))
+        assert not any("evil" in p.as_posix() for p in _resolved(policy.read_only))
+
+
+class TestSandboxExecWorkingDirectory:
+    """A spawn without a cwd of its own starts in the private TMPDIR, not in ASH's."""
+
+    def _chdir_arg(self, plan):
+        return plan.argv[plan.argv.index(backends_module._SETSID_EXEC) + 1]
+
+    def test_a_probe_without_a_cwd_starts_in_its_private_tmpdir(self, layout):
+        plan = SandboxExecBackend().plan(
+            ["/usr/bin/true"], {}, _policy(layout, cwd=None)
+        )
+        try:
+            assert self._chdir_arg(plan) == plan.env["TMPDIR"]
+        finally:
+            plan.run_cleanup()
+
+    def test_a_spawn_with_a_cwd_keeps_it(self, layout):
+        plan = SandboxExecBackend().plan(["/usr/bin/true"], {}, _policy(layout))
+        try:
+            assert self._chdir_arg(plan) == ""
+        finally:
+            plan.run_cleanup()

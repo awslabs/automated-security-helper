@@ -834,7 +834,8 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # Scanner sandbox: escape tests on real backends, and scanner parity under bwrap.
+  # Scanner sandbox: escape tests on real backends, and scanner parity under bwrap
+  # on Linux and sandbox-exec on macOS.
   #
   # tests/integration/sandbox runs a malicious fixture scanner through a real
   # `ash scan` and requires every escape attempt to fail under each backend and to
@@ -904,6 +905,14 @@ jobs:
             tests/unit/utils/test_sandbox_choke_point.py \
             --run-integration --no-cov -p no:randomly -n 0 -v \
             --junit-xml=test-results/sandbox.junit.xml
+      # A Mach service or exec path the macOS profile does not allow shows up in the
+      # unified log as a deny line naming it, which is the first thing to look at
+      # when a macOS image update turns this job red.
+      - name: Show what sandbox-exec denied
+        if: failure() && runner.os == 'macOS'
+        run: |
+          sudo log show --last 30m --predicate 'sender == "Sandbox"' --style compact \
+            | grep -E 'deny\(1\) (mach-lookup|process-exec)' | tail -n 200 || true
       - name: Collect the suite report
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -914,11 +923,22 @@ jobs:
           if-no-files-found: warn
 
   sandbox-scanner-parity:
-    name: "sandbox scanner parity (bwrap, ubuntu-latest)"
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
+    name: "sandbox scanner parity (${{ matrix.sandbox }}, ${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            sandbox: bwrap
+          # sandbox-exec has no throwaway overlay and runs programs only from tool
+          # paths, so on macOS each scanner's cache and unpack locations are
+          # declared per scanner; this leg is what proves the declarations right.
+          - os: macos-latest
+            sandbox: sandbox-exec
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -934,6 +954,7 @@ jobs:
         with:
           ruby-version: "3.3"
       - name: Install bubblewrap
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q bubblewrap
@@ -946,8 +967,8 @@ jobs:
         run: |
           pip install ".[cdk]"
           ash dependencies install
-      # Every scanner runs twice over one fixture, with --sandbox off and --sandbox
-      # bwrap, offline and online, and status plus findings must match per scanner.
+      # Every scanner runs twice over one fixture, with --sandbox off and under the
+      # backend, offline and online, and status plus findings must match per scanner.
       # --require names the scanners that must actually have run, so a scanner that
       # is MISSING in both runs cannot pass parity by being absent.
       - name: Compare every scanner with and without the sandbox
@@ -956,16 +977,39 @@ jobs:
         env:
           TMPDIR: ${{ runner.temp }}
           PARITY_REPORT: ${{ runner.temp }}/sandbox-parity.json
+          SANDBOX: ${{ matrix.sandbox }}
         run: |
           python scripts/verify_sandbox_scanner_parity.py \
-            --sandbox bwrap --online --ash ash \
+            --sandbox "$SANDBOX" --online --ash ash \
             --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft \
             --report "$PARITY_REPORT"
+      # What a sandboxed scanner was refused, from the unified log, and the end of
+      # each sandboxed scanner's stderr. System daemons log their own sandbox
+      # denials too, so only the processes the scanners run are kept.
+      - name: Show what sandbox-exec denied the scanners
+        if: failure() && runner.os == 'macOS'
+        env:
+          WORK: ${{ runner.temp }}
+        run: |
+          sudo log show --last 60m --predicate 'sender == "Sandbox"' --style compact \
+            | grep -E 'Sandbox: (Python|python3?[.0-9]*|uv|node|npm|grype|syft|semgrep-core|pysemgrep|opengrep|opengrep\.bin|opengrep-core|ruby|bash|sh|git|security|env)\([0-9]+\) deny' \
+            | sed -E 's/^.*Sandbox: //; s/\([0-9]+\) / /' | sort | uniq -c | sort -rn | head -n 150 || true
+          for log in "$WORK"/ash-sandbox-parity-*/out-*-sandbox-exec/ash.log; do
+            echo "::group::$log (errors and warnings)"
+            grep -E "ERROR|WARNING|MISSING" "$log" | cut -c1-400 | head -n 80
+            echo "::endgroup::"
+          done
+          for log in "$WORK"/ash-sandbox-parity-*/out-*-sandbox-exec/scanners/*/*/*stderr*; do
+            [ -s "$log" ] || continue
+            echo "::group::$log"
+            tail -n 40 "$log"
+            echo "::endgroup::"
+          done
       - name: Collect the parity report and scan output
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: sandbox-scanner-parity
+          name: sandbox-scanner-parity-${{ matrix.os }}
           path: |
             ${{ runner.temp }}/sandbox-parity.json
             ${{ runner.temp }}/ash-sandbox-parity-*
