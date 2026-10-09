@@ -235,7 +235,14 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                     env,
                     "its checks bundle",
                 )
-        return ["--skip-db-update", *(["--skip-check-update"] if wants_checks else [])]
+        # The Java database too, as OFFLINE_FLAGS skip it: fs and repository scans
+        # never open it (trivy 0.75), so it is not fetched, and the flag keeps a
+        # read-only cache from ever being asked for it.
+        return [
+            "--skip-db-update",
+            "--skip-java-db-update",
+            *(["--skip-check-update"] if wants_checks else []),
+        ]
 
     def _run_update(self, argv: List[str], env: Dict[str, str], what: str) -> None:
         """Run one trivy update command; raise ScannerError naming its stderr."""

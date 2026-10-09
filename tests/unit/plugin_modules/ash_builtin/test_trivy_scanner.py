@@ -1102,7 +1102,13 @@ def test_the_scan_skips_the_update_it_ran_first(tmp_path, monkeypatch):
         ]
     ]
     (final,) = ran
-    assert final[:4] == ["trivy", "fs", "--skip-db-update", "--cache-backend=memory"]
+    assert final[:5] == [
+        "trivy",
+        "fs",
+        "--skip-db-update",
+        "--skip-java-db-update",
+        "--cache-backend=memory",
+    ]
     assert "--skip-check-update" not in final
     # In place, so the invocation ASH records is the one that ran.
     assert command == final
@@ -1121,7 +1127,11 @@ def test_misconfig_also_fetches_the_checks_bundle_and_skips_it(tmp_path, monkeyp
         "--config=/r/c.yaml",
         (tmp_path / "results" / "trivy-checks-update").as_posix(),
     ]
-    assert ran[0][2:4] == ["--skip-db-update", "--skip-check-update"]
+    assert ran[0][2:5] == [
+        "--skip-db-update",
+        "--skip-java-db-update",
+        "--skip-check-update",
+    ]
 
 
 def test_two_concurrent_scanners_never_update_at_the_same_time(tmp_path, monkeypatch):

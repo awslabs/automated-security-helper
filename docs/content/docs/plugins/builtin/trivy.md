@@ -84,7 +84,7 @@ Symbol-scoped suppressions (function or class) do not apply: a dependency findin
 
 The database is declared as `trivy-db` in `automated_security_helper/utils/content_databases.py`, with a 24h bound measured from its `UpdatedAt`, which is trivy's own rule for its published database. After the scan, ASH reads `UpdatedAt` from `trivy version --format json` and fails the scan when the database is older than that (`content_db_staleness: warn` or `--allow-stale-content-db` turns the failure into a warning carried in every report). This is the same check grype's database gets.
 
-- Online, trivy refreshes a database past its `NextUpdate` itself before scanning, and fails if it cannot download one.
+- Online, ASH updates the database once per scan before trivy and trivy-repo run (`trivy image --download-db-only`, outside the scanner sandbox and under a lock in trivy's cache, so the two never write it at the same time), and fails the scan if it cannot download one. Both scanners then run with `--skip-db-update --skip-java-db-update`, and `--skip-check-update` when `misconfig` is on, so the scan only reads the cache. `fs` and `repository` scans never read the Java database.
 - Offline, ASH passes `--skip-db-update --skip-java-db-update --offline-scan --skip-check-update`, so trivy uses whatever database is in its cache, and the post-scan check holds it to the bound.
 
 The database is only read by the `vuln` scanner; with `vuln` off nothing is measured.
