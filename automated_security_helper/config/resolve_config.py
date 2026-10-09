@@ -5,6 +5,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from pydantic import ValidationError
 import yaml
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.client_config_policy import (
+    ClientConfigRules,
+    apply_client_config_rules,
+)
 from automated_security_helper.config.config_sources import (
     _resolve_dict_key,
     default_confinement_root,
@@ -19,6 +23,9 @@ from automated_security_helper.config.default_config import (
 )
 from automated_security_helper.config.plugin_module_trust import (
     confine_plugin_modules,
+)
+from automated_security_helper.config.reporter_trust import (
+    confine_reporter_destinations,
 )
 from automated_security_helper.config.sandbox_grants import (
     confine_sandbox_grants,
@@ -200,6 +207,7 @@ def resolve_config(
     scanned_root: Path | str | None = None,
     trusted_config_path: Path | str | None = None,
     untrusted_config: bool = False,
+    client_config_policy: Optional[ClientConfigRules] = None,
 ) -> AshConfig:
     """
     Load configuration from file or return default configuration.
@@ -230,12 +238,17 @@ def resolve_config(
             base instead, its ``network_scanners`` list only removes network,
             and its ``sandbox.mode`` cannot turn off or replace a mode the
             trusted base sets. Its ``ash_plugin_modules`` are limited the same way
-            as an in-tree file's (``config/plugin_module_trust.py``).
+            as an in-tree file's (``config/plugin_module_trust.py``), and so are
+            its reporter destinations (``config/reporter_trust.py``).
+        client_config_policy: The rules a file of the chain that an MCP client
+            delivered is checked against; see ``config/client_config_policy.py``.
+            None takes the trusted base's.
 
     Returns:
         The resolved AshConfig object
     """
     chain: List[Path] = []
+    documents: Dict[Path, Any] = {}
     config = _resolve_config(
         config_path,
         source_dir,
@@ -243,9 +256,18 @@ def resolve_config(
         config_overrides,
         permit_base,
         chain,
+        documents,
     )
     if config is None:
         return config
+    config = apply_client_config_rules(
+        config,
+        documents,
+        rules=client_config_policy,
+        trusted_config_path=trusted_config_path,
+        source_dir=source_dir,
+        permit_base=permit_base,
+    )
     if scanned_root is None:
         scanned_root = source_dir if source_dir is not None else Path.cwd()
     trees = scanned_trees(Path(scanned_root))
@@ -288,6 +310,7 @@ def resolve_config(
     confine_plugin_modules(
         config, trusted, config_overrides, Path(scanned_root), in_tree
     )
+    confine_reporter_destinations(config, trusted, config_overrides, in_tree)
     return config
 
 
@@ -326,8 +349,13 @@ def _resolve_config(
     config_overrides: Optional[List[str]],
     permit_base: Optional[Callable[[Path], bool]],
     chain: List[Path],
+    documents: Dict[Path, Any],
 ) -> AshConfig:
-    """resolve_config without the sandbox confinement. Appends every file read to ``chain``."""
+    """resolve_config without the sandbox confinement.
+
+    Appends every file read to ``chain``, and each file's parsed document to
+    ``documents``.
+    """
     try:
         # Start with default config
         config = get_default_config() if fallback_to_default else None
@@ -417,6 +445,7 @@ def _resolve_config(
             )
             config = AshConfig.model_validate(document.data, strict=True)
             chain.extend(document.chain)
+            documents.update(document.documents)
             ASH_LOGGER.debug(f"Loaded config from file: {config_path}")
 
             # Apply config overrides if provided

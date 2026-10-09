@@ -530,6 +530,8 @@
               '/ash_plugin_modules/**',
               '/global_settings/ignore_paths',
               '/global_settings/suppressions',
+              '/global_settings/mcp',
+              '/global_settings/mcp/**',
               '/reporters/bedrock-summary-reporter/options/aws_*',
               '/reporters/cloudwatch-logs/**',
             ]),
@@ -919,6 +921,8 @@
               '/ash_plugin_modules/**',
               '/global_settings/ignore_paths',
               '/global_settings/suppressions',
+              '/global_settings/mcp',
+              '/global_settings/mcp/**',
               '/reporters/bedrock-summary-reporter/options/aws_*',
               '/reporters/cloudwatch-logs/**',
             ]),
@@ -1308,6 +1312,8 @@
               '/ash_plugin_modules/**',
               '/global_settings/ignore_paths',
               '/global_settings/suppressions',
+              '/global_settings/mcp',
+              '/global_settings/mcp/**',
               '/reporters/bedrock-summary-reporter/options/aws_*',
               '/reporters/cloudwatch-logs/**',
             ]),
@@ -1789,6 +1795,7 @@
     ]),
     'result': dict({
       'json': dict({
+        'client_supplied': False,
         'expiration': '2031-01-31',
         'line_end': 12,
         'line_start': 12,
@@ -1798,6 +1805,7 @@
       }),
       'success': True,
       'yaml': '''
+        client_supplied: false
         expiration: '2031-01-31'
         line_end: 12
         line_start: 12
@@ -1812,6 +1820,23 @@
 # ---
 # name: test_suggest_suppression_defaults[default_justification]
   'Suppressed via ASH MCP suggest_suppression tool — review before merging'
+# ---
+# name: test_validate_config[denied_field][result]
+  dict({
+    'client_messages': list([
+    ]),
+    'result': dict({
+      'errors': list([
+        dict({
+          'field': 'fail_on_findings',
+          'message': "fail_on_findings may not be set by a config an MCP client delivers: path '/fail_on_findings' matches denied_paths entry '/fail_on_findings'",
+          'type': 'denied_by_runtime_policy',
+        }),
+      ]),
+      'valid': False,
+    }),
+    'tool': 'validate_config',
+  })
 # ---
 # name: test_validate_config[file_not_found][result]
   dict({

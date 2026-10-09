@@ -112,6 +112,7 @@ import asyncio
 from contextlib import suppress
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
     Awaitable,
     Callable,
@@ -123,6 +124,7 @@ from typing import (
     Tuple,
 )
 
+from automated_security_helper.cli.mcp.profile_registry import session_client_rules
 from automated_security_helper.cli.mcp.progress_monitor import (
     monitor_workspace_progress,
 )
@@ -173,6 +175,11 @@ from automated_security_helper.workspace.execution import (
 )
 from automated_security_helper.workspace.plan import WorkspacePlan
 from automated_security_helper.workspace.resolver import resolve_workspace
+
+if TYPE_CHECKING:
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
 
 _logger = ASH_LOGGER
 
@@ -270,6 +277,7 @@ def _resolve(
     allow_missing_projects: bool,
     config_overrides: Optional[Sequence[str]],
     default_config: Optional[str] = None,
+    client_config_rules: Optional["ClientConfigRules"] = None,
 ) -> WorkspacePlan:
     """Resolve the workspace, or raise.
 
@@ -293,6 +301,7 @@ def _resolve(
         ),
         config_overrides=tuple(config_overrides or ()),
         default_config=Path(default_config) if default_config else None,
+        client_config_rules=client_config_rules,
     )
 
 
@@ -472,7 +481,10 @@ class ProfileNotRegisteredError(ValueError):
 
 
 def _gate_client_overrides(
-    config_overrides: Optional[Sequence[str]], session_config: Optional[str]
+    config_overrides: Optional[Sequence[str]],
+    session_config: Optional[str],
+    session_id: Optional[str] = None,
+    profile: Optional[str] = None,
 ) -> None:
     """Refuse ``config_overrides`` the session's runtime-override allowlist does not allow.
 
@@ -483,9 +495,11 @@ def _gate_client_overrides(
     gate ``select_profile``'s ``patch_ops`` and ``override_yaml`` go through
     applies: the overrides are applied to the session's config (its bound or
     per-call profile, else the defaults), and the change is checked with
-    ``apply_runtime_override`` against that config's
-    ``global_settings.mcp.runtime_overrides``. Runtime overrides are off by
-    default, so without a profile that enables them no override is accepted.
+    ``apply_runtime_override`` against the registered profile's
+    ``global_settings.mcp.runtime_overrides``. That is the profile as the operator
+    registered it, not the session's materialized copy, which a client's
+    ``patch_ops`` may have changed. Runtime overrides are off by default, so
+    without a profile that enables them no override is accepted.
 
     Each override is checked twice: by the key it names (``check_runtime_ops``
     on an ``add`` at the pointer it resolves to in the session config), and by
@@ -511,14 +525,19 @@ def _gate_client_overrides(
         check_runtime_ops,
     )
 
+    from automated_security_helper.cli.mcp.profile_registry import (
+        session_profile_entry,
+    )
+    from automated_security_helper.config.client_config_policy import policy_of
+
     base = (
         AshConfig.from_file(config_path=Path(session_config))
         if session_config
         else AshConfig()
     )
-    mcp_cfg = getattr(base.global_settings, "mcp", None)
+    entry = session_profile_entry(session_id, profile)
     allowlist = (
-        mcp_cfg.runtime_overrides if mcp_cfg is not None else RuntimeOverridesConfig()
+        policy_of(entry.config) if entry is not None else RuntimeOverridesConfig()
     )
     # Each override is checked by the key it names, whatever it changes. A diff
     # against the session config alone misses one whose value the session config
@@ -548,6 +567,7 @@ def _gate_client_overrides(
                 }
             ],
             allowlist=allowlist,
+            config=base,
         )
     after = apply_config_overrides(base, list(config_overrides))
     apply_runtime_override(base, after, allowlist=allowlist)
@@ -625,6 +645,7 @@ def _scan_options(
     offline: bool,
     allow_missing_projects: bool,
     config_path: Optional[str] = None,
+    client_config_rules: Optional["ClientConfigRules"] = None,
 ) -> ScanOptions:
     """Assemble the ``ScanOptions`` the shared settings builder reads.
 
@@ -652,6 +673,8 @@ def _scan_options(
         # the shared builder rather than set on the settings record afterwards, so
         # the CLI and MCP paths cannot disagree about which field carries it.
         config=config_path,
+        # The same rules the plan was resolved with; see ``_resolve``.
+        client_config_policy=client_config_rules,
         workspace_plan=plan,
         allow_missing_projects=allow_missing_projects,
         config_overrides=list(config_overrides or []),
@@ -915,8 +938,13 @@ async def _execute(
     settings: ProjectScanSettings,
     project_outputs: Dict[str, Path],
     progress_reporter: Optional[ProgressReporter],
+    session_id: Optional[str] = None,
 ) -> WorkspaceRunResult:
     """Run the workspace off the event loop, with a progress monitor beside it.
+
+    Under the session's scan lock, taken on the worker thread as the single-target
+    scan takes it, so a delivery into this session is refused while the scans
+    read the tree (``source_delivery._no_scan_running``).
 
     ``execute_workspace`` is synchronous and blocks for as long as the scans take,
     which for N repositories is minutes. Awaiting it inline would stall every
@@ -952,6 +980,36 @@ async def _execute(
         monitor = asyncio.create_task(
             monitor_workspace_progress(progress_reporter, dict(project_outputs))
         )
+    try:
+        return await asyncio.to_thread(_under_session_lock, session_id, plan, settings)
+    finally:
+        if monitor is not None:
+            monitor.cancel()
+            with suppress(asyncio.CancelledError):
+                await monitor
+
+
+def _under_session_lock(
+    session_id: Optional[str], plan: WorkspacePlan, settings: ProjectScanSettings
+) -> WorkspaceRunResult:
+    """``execute_workspace``, holding the session's scan lock when there is a session.
+
+    ``ASH_OFFLINE`` is set once the lock is held, not before: a workspace scan
+    waiting behind another scan of its session would otherwise hold the
+    process-wide variable for that scan's duration too.
+    """
+    if session_id is None:
+        return _offline_aware(plan, settings)
+    from automated_security_helper.cli.mcp.sessions import get_default_registry
+
+    with get_default_registry().get_or_create(session_id).lock:
+        return _offline_aware(plan, settings)
+
+
+def _offline_aware(
+    plan: WorkspacePlan, settings: ProjectScanSettings
+) -> WorkspaceRunResult:
+    """``execute_workspace`` with ``ASH_OFFLINE`` set for its duration when requested."""
     # Under the process-wide environment lock, because other sessions' scans may
     # be copying the environment for a spawn on another thread right now.
     offline_previous = (
@@ -960,14 +1018,10 @@ async def _execute(
     try:
         # Resolved from this module's globals at call time, so a test that
         # replaces cli.mcp.workspace.execute_workspace is what runs.
-        return await asyncio.to_thread(execute_workspace, plan, settings)
+        return execute_workspace(plan, settings)
     finally:
         if offline_previous is not None:
             restore_environ(offline_previous)
-        if monitor is not None:
-            monitor.cancel()
-            with suppress(asyncio.CancelledError):
-                await monitor
 
 
 # ---------------------------------------------------------------------------
@@ -1044,7 +1098,8 @@ async def mcp_resolve_workspace(
         )
 
     try:
-        _gate_client_overrides(config_overrides, session_config)
+        _gate_client_overrides(config_overrides, session_config, session_id, profile)
+        rules = session_client_rules(session_id, profile)
     except Exception as exc:  # noqa: BLE001 -- a refusal, reported not raised
         return _error_response(
             exc,
@@ -1059,6 +1114,7 @@ async def mcp_resolve_workspace(
             allow_missing_projects,
             config_overrides,
             default_config=session_config,
+            client_config_rules=rules,
         )
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "resolve_workspace")
@@ -1195,7 +1251,8 @@ async def mcp_scan_workspace(
         )
 
     try:
-        _gate_client_overrides(config_overrides, session_config)
+        _gate_client_overrides(config_overrides, session_config, session_id, profile)
+        rules = session_client_rules(session_id, profile)
     except Exception as exc:  # noqa: BLE001 -- a refusal, reported not raised
         return _error_response(
             exc,
@@ -1212,6 +1269,7 @@ async def mcp_scan_workspace(
             # Same value the settings builder gets below. They must agree; see
             # ``_resolve`` and ``ProjectScanSettings.default_config_path``.
             default_config=session_config,
+            client_config_rules=rules,
         )
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "scan_workspace")
@@ -1250,13 +1308,16 @@ async def mcp_scan_workspace(
                 offline=offline,
                 allow_missing_projects=allow_missing_projects,
                 config_path=session_config,
+                client_config_rules=rules,
             )
         )
         project_outputs = _prepare_project_outputs(
             plan, settings, clean_output=clean_output
         )
         registered = _register_projects(plan, project_outputs)
-        result = await _execute(plan, settings, project_outputs, progress_reporter)
+        result = await _execute(
+            plan, settings, project_outputs, progress_reporter, session_id
+        )
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         _close_registrations(registered, None, error=str(exc))
         return _error_response(exc, "scan_workspace")

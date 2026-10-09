@@ -1,7 +1,7 @@
 """Unit tests for the S3 reporter plugin."""
 
 import json
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import MagicMock, patch
 import os
 from pathlib import Path
 
@@ -246,7 +246,10 @@ def test_s3_reporter_report_json_format(mock_boto3, ash_temp_path):
 
     # Mock file operations
     with (
-        patch("builtins.open", mock_open()) as mock_file,
+        patch(
+            "automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.write_report_file",
+            return_value=None,
+        ) as mock_file,
         patch.object(Path, "mkdir") as mock_mkdir,
     ):
         # Call report
@@ -303,7 +306,10 @@ def test_s3_reporter_report_yaml_format(mock_yaml, mock_boto3, ash_temp_path):
 
     # Mock file operations
     with (
-        patch("builtins.open", mock_open()) as mock_file,
+        patch(
+            "automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.write_report_file",
+            return_value=None,
+        ) as mock_file,
         patch.object(Path, "mkdir") as mock_mkdir,
     ):
         # Call report

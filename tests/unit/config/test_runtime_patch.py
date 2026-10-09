@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any, Dict, List
 
 import pytest
 
@@ -1192,3 +1193,300 @@ class TestDenialsMatchEveryPluginSpelling:
         check_runtime_ops(
             [{"op": "add", "path": path, "value": "x"}], allowlist=allowlist
         )
+
+
+def _lookup_reads(section: str, written: str, plugin_key: str) -> bool:
+    """Whether get_plugin_config reads a section keyed ``written`` as ``plugin_key``'s."""
+    plugin_type = {"scanners": "scanner", "reporters": "reporter"}[section]
+    config = AshConfig.model_validate({section: {written: {"options": {}}}})
+    return config.get_plugin_config(plugin_type, plugin_key) is not None
+
+
+def _spellings(key: str) -> List[str]:
+    """Spellings of a kebab-case plugin key that the lookup may read as it."""
+    words = key.split("-")
+    camel = "".join(word.capitalize() for word in words)
+    return [
+        camel,
+        camel.lower(),
+        key.upper(),
+        "--".join(words),
+        " ".join(words),
+        "/".join(words),
+        "~".join(words),
+        camel + "Scanner",
+        camel + "Reporter",
+        camel + "ReporterConfig",
+        "_".join(word.upper() for word in words),
+    ]
+
+
+# (denial, section, field written below the plugin's section, plugin keys the
+# glob covers, plugin keys it does not)
+_GLOB_DENIALS = [
+    (
+        "/scanners/trivy-*/options/ignore_file",
+        "scanners",
+        "options/ignore_file",
+        ["trivy-repo"],
+        ["bandit", "ferret-scan", "detect-secrets"],
+    ),
+    (
+        "/scanners/trivy?repo/options/ignore_file",
+        "scanners",
+        "options/ignore_file",
+        ["trivy-repo"],
+        ["grype", "bandit"],
+    ),
+    (
+        "/reporters/bedrock-*/**",
+        "reporters",
+        "options/aws_region",
+        ["bedrock-summary-reporter"],
+        ["csv", "cloudwatch-logs", "sarif"],
+    ),
+    (
+        "/reporters/bedrock*/options/aws_*",
+        "reporters",
+        "options/aws_region",
+        ["bedrock-summary-reporter"],
+        ["csv", "cloudwatch-logs"],
+    ),
+]
+
+
+def _write(section: str, written: str, field: str) -> Dict[str, Any]:
+    plugin = written.replace("~", "~0").replace("/", "~1")
+    return {"op": "add", "path": f"/{section}/{plugin}/{field}", "value": "x"}
+
+
+class TestGlobPluginDenials:
+    """A denial whose plugin segment is a glob covers every plugin key the glob
+    matches, so it has to refuse every spelling get_plugin_config reads as one of
+    those keys, not only spellings the glob matches as written.
+    """
+
+    @pytest.mark.parametrize(
+        "denial,section,field,covered,_",
+        _GLOB_DENIALS,
+        ids=[case[0] for case in _GLOB_DENIALS],
+    )
+    def test_every_spelling_the_lookup_reads_is_refused(
+        self,
+        denial: str,
+        section: str,
+        field: str,
+        covered: List[str],
+        _: List[str],
+    ) -> None:
+        allowlist = RuntimeOverridesConfig(
+            enabled=True, allowed_paths=["/**"], denied_paths=[denial]
+        )
+        checked = 0
+        for key in covered:
+            for written in [key, *_spellings(key)]:
+                if not _lookup_reads(section, written, key):
+                    continue
+                checked += 1
+                with pytest.raises(RuntimePatchDeniedError) as excinfo:
+                    check_runtime_ops(
+                        [_write(section, written, field)], allowlist=allowlist
+                    )
+                assert "denied_paths" in excinfo.value.rule, written
+        # The lookup reads most of the generated spellings; a run that checked
+        # only the canonical keys would not exercise the glob at all.
+        assert checked >= 5 * len(covered)
+
+    @pytest.mark.parametrize(
+        "denial,section,field,_,uncovered",
+        _GLOB_DENIALS,
+        ids=[case[0] for case in _GLOB_DENIALS],
+    )
+    def test_another_plugins_spellings_are_not_refused(
+        self,
+        denial: str,
+        section: str,
+        field: str,
+        _: List[str],
+        uncovered: List[str],
+    ) -> None:
+        allowlist = RuntimeOverridesConfig(
+            enabled=True, allowed_paths=["/**"], denied_paths=[denial]
+        )
+        for key in uncovered:
+            for written in [key, *_spellings(key)]:
+                check_runtime_ops(
+                    [_write(section, written, field)], allowlist=allowlist
+                )
+
+    def test_a_value_pattern_bound_through_a_glob_covers_every_spelling(self) -> None:
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=[],
+            denied_value_patterns={"/scanners/trivy-*/options/ignore_file": r"."},
+        )
+        ops = [
+            {
+                "op": "add",
+                "path": "/scanners/TrivyRepo",
+                "value": {"options": {"ignore_file": "standin.txt"}},
+            }
+        ]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            check_runtime_ops(ops, allowlist=allowlist)
+        assert "denied_value_patterns" in excinfo.value.rule
+
+
+class TestGlobDenialsNameKnownPlugins:
+    """A glob plugin segment is matched against the keys of known plugins, so it
+    refuses another spelling only of a plugin whose key it matches."""
+
+    @pytest.mark.parametrize(
+        "section,glob",
+        [
+            ("scanners", "c*"),
+            ("scanners", "[a-c]*"),
+            ("scanners", "*-scan*"),
+            ("reporters", "s*"),
+            ("reporters", "*-reporter"),
+            ("reporters", "*json*"),
+        ],
+    )
+    def test_only_keys_the_glob_matches_are_refused(
+        self, section: str, glob: str
+    ) -> None:
+        import fnmatch
+
+        from automated_security_helper.config.runtime_patch import known_plugin_keys
+
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=[f"/{section}/{glob}/options/field"],
+        )
+        keys = sorted(known_plugin_keys()[section])
+        assert keys
+        for key in keys:
+            ops = [_write(section, key, "options/field")]
+            folded = key.replace("-", "_")
+            if fnmatch.fnmatchcase(key, glob) or fnmatch.fnmatchcase(
+                folded, glob.replace("-", "_")
+            ):
+                with pytest.raises(RuntimePatchDeniedError):
+                    check_runtime_ops(ops, allowlist=allowlist)
+            else:
+                check_runtime_ops(ops, allowlist=allowlist)
+
+    @pytest.mark.parametrize(
+        "denial",
+        [
+            "/*/trivy-repo/options/ignore_file",
+            "/scanner?/trivy-*/options/ignore_file",
+            "/[s]canners/trivy-repo/options/ignore_file",
+        ],
+    )
+    def test_a_glob_section_segment_is_respelled_too(self, denial: str) -> None:
+        allowlist = RuntimeOverridesConfig(
+            enabled=True, allowed_paths=["/**"], denied_paths=[denial]
+        )
+        with pytest.raises(RuntimePatchDeniedError):
+            check_runtime_ops(
+                [_write("scanners", "TrivyRepo", "options/ignore_file")],
+                allowlist=allowlist,
+            )
+
+    def test_a_section_the_config_already_has_is_a_known_key(self) -> None:
+        base = AshConfig.model_validate({"scanners": {"acme-scan": {"enabled": False}}})
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=["/scanners/acme-*/options/ignore_file"],
+        )
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_patch(
+                base,
+                [
+                    {
+                        "op": "add",
+                        "path": "/scanners/AcmeScan",
+                        "value": {"options": {"ignore_file": "standin.txt"}},
+                    }
+                ],
+                allowlist=allowlist,
+            )
+        assert "denied_paths" in excinfo.value.rule
+
+    def test_the_shipped_table_matches_the_plugin_packages(self, tmp_path) -> None:
+        """The table stands in for importing the packages; this imports them, apart.
+
+        Compared with the plugins the manager resolves after loading every module
+        under ``plugin_modules``, which is the set a scan iterates, so a plugin
+        its decorator registers but its package's ``ASH_*`` list leaves out is
+        caught too.
+        """
+        import json as json_module
+        import subprocess
+        import sys
+
+        from automated_security_helper.config.runtime_patch import (
+            _SHIPPED_PLUGIN_KEYS,
+        )
+
+        code = (
+            "import json, pkgutil\n"
+            "from automated_security_helper.base.plugin_config import plugin_config_key\n"
+            "from automated_security_helper.plugins import ash_plugin_manager\n"
+            "from automated_security_helper.plugins.loader import (\n"
+            "    load_additional_plugin_modules, load_internal_plugins)\n"
+            "import automated_security_helper.plugin_modules as pm\n"
+            "load_internal_plugins()\n"
+            "load_additional_plugin_modules(\n"
+            "    [pm.__name__ + '.' + info.name for info in pkgutil.iter_modules(pm.__path__)])\n"
+            "print(json.dumps({\n"
+            "    section: sorted({plugin_config_key(c)\n"
+            "                     for c in ash_plugin_manager.plugin_modules(kind)})\n"
+            "    for section, kind in (('scanners', 'scanner'), ('reporters', 'reporter'),\n"
+            "                          ('converters', 'converter'))}))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        resolved = json_module.loads(result.stdout.strip().splitlines()[-1])
+        assert resolved == {
+            section: sorted(keys) for section, keys in _SHIPPED_PLUGIN_KEYS.items()
+        }
+
+    def test_building_the_keys_imports_no_plugin_module(self, tmp_path) -> None:
+        """Importing a plugin module registers its plugins, and a scan runs them all."""
+        import subprocess
+        import sys
+
+        code = (
+            "import sys\n"
+            "from automated_security_helper.plugins.loader import load_internal_plugins\n"
+            "from automated_security_helper.config.ash_config import AshConfig\n"
+            "from automated_security_helper.config.runtime_patch import known_plugin_keys\n"
+            "load_internal_plugins()\n"
+            "def loaded():\n"
+            "    return sorted(m for m in sys.modules if 'plugin_modules.ash_' in m)\n"
+            "before = loaded()\n"
+            "config = AshConfig.model_validate(\n"
+            "    {'ash_plugin_modules': ['standin_not_imported']})\n"
+            "known_plugin_keys(config)\n"
+            "assert loaded() == before, sorted(set(loaded()) - set(before))\n"
+            "assert 'standin_not_imported' not in sys.modules\n"
+            "print('unchanged')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr[-2000:]
+        assert result.stdout.strip().endswith("unchanged")

@@ -6,6 +6,7 @@ from typing import Dict, Iterable, List, Sequence
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.reporter_plugin import (
+    confined_report_path,
     reporter_format_name,
     reporter_matches_requested_formats,
 )
@@ -415,7 +416,12 @@ class ReportPhase(EnginePhase):
                             output_filename = f"ash.{extension}"
 
                         # Write the report to a file
-                        output_file = report_dir.joinpath(output_filename)
+                        output_file = confined_report_path(report_dir, output_filename)
+                        if output_file is None:
+                            raise ValueError(
+                                f"{display_name}'s report file {output_filename!r} "
+                                f"is not a file in {report_dir}; nothing was written"
+                            )
                         ASH_LOGGER.info(
                             f"Writing {display_name} report to {output_file}"
                         )

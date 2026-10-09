@@ -1388,6 +1388,8 @@
                   "/ash_plugin_modules/**",
                   "/global_settings/ignore_paths",
                   "/global_settings/suppressions",
+                  "/global_settings/mcp",
+                  "/global_settings/mcp/**",
                   "/reporters/bedrock-summary-reporter/options/aws_*",
                   "/reporters/cloudwatch-logs/**"
                 ],
@@ -1776,6 +1778,8 @@
                 "/ash_plugin_modules/**",
                 "/global_settings/ignore_paths",
                 "/global_settings/suppressions",
+                "/global_settings/mcp",
+                "/global_settings/mcp/**",
                 "/reporters/bedrock-summary-reporter/options/aws_*",
                 "/reporters/cloudwatch-logs/**"
               ],
@@ -1830,6 +1834,8 @@
               "/ash_plugin_modules/**",
               "/global_settings/ignore_paths",
               "/global_settings/suppressions",
+              "/global_settings/mcp",
+              "/global_settings/mcp/**",
               "/reporters/bedrock-summary-reporter/options/aws_*",
               "/reporters/cloudwatch-logs/**"
             ],
@@ -1845,6 +1851,12 @@
     "AshSuppression": {
       "description": "Represents a finding suppression rule.",
       "properties": {
+        "client_supplied": {
+          "default": false,
+          "description": "Set by the server: True when the config of a tree an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client's own config.",
+          "title": "Client Supplied",
+          "type": "boolean"
+        },
         "expiration": {
           "anyOf": [
             {
@@ -8556,6 +8568,12 @@
     "IgnorePathWithReason": {
       "description": "Represents a path exclusion entry.",
       "properties": {
+        "client_supplied": {
+          "default": false,
+          "description": "Set by the server: True when the config of a tree an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client's own config.",
+          "title": "Client Supplied",
+          "type": "boolean"
+        },
         "expiration": {
           "anyOf": [
             {
@@ -16038,6 +16056,8 @@
             "/ash_plugin_modules/**",
             "/global_settings/ignore_paths",
             "/global_settings/suppressions",
+            "/global_settings/mcp",
+            "/global_settings/mcp/**",
             "/reporters/bedrock-summary-reporter/options/aws_*",
             "/reporters/cloudwatch-logs/**"
           ],

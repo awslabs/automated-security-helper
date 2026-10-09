@@ -228,6 +228,7 @@ async def test_get_config(isolated_mcp_state, snapshot):
         "valid",
         "unknown_field",
         "wrong_type",
+        "denied_field",
         "yaml_syntax_error",
         "file_valid",
         "file_not_found",
@@ -251,11 +252,22 @@ async def test_validate_config(case, allowed, tmp_path, monkeypatch, snapshot):
         tempfile, "_get_candidate_names", lambda: iter(["validate_config"])
     )
     contents = {
-        "valid": "project_name: demo\nfail_on_findings: true\n",
+        "valid": "project_name: demo\nglobal_settings:\n  severity_threshold: HIGH\n",
         "unknown_field": "project_name: demo\nnot_a_setting: 1\n",
-        "wrong_type": "project_name: demo\nfail_on_findings: [1, 2]\n",
+        "wrong_type": "project_name: demo\nglobal_settings:\n  severity_threshold: [1, 2]\n",
+        # fail_on_findings is a default denied_paths entry. Content from a remote
+        # caller is a config a client delivers, so the denial is listed.
+        "denied_field": "project_name: demo\nfail_on_findings: false\n",
         "yaml_syntax_error": "project_name: [unclosed\n",
     }
+    if case == "denied_field":
+        result = await _call(
+            "validate_config",
+            make_ctx({"mcp-session-id": "remote-session"}),
+            config_content=contents[case],
+        )
+        assert result == snapshot(name="result")
+        return
     if case in contents:
         kwargs = {"config_content": contents[case]}
     elif case == "file_valid":

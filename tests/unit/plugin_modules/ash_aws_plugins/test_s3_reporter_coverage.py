@@ -123,7 +123,10 @@ def test_s3_reporter_report_json_format(mock_boto3):
     mock_path.parent.mkdir = MagicMock()
 
     with (
-        patch("builtins.open", mock_open()) as mock_file,
+        patch(
+            "automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.write_report_file",
+            return_value=None,
+        ) as mock_file,
         patch.object(Path, "mkdir") as mock_mkdir,
     ):
         # Call report
@@ -179,7 +182,10 @@ def test_s3_reporter_report_yaml_format(mock_boto3):
 
     # Mock file operations - we need to mock the specific path operations
     with (
-        patch("builtins.open", mock_open()) as mock_file,
+        patch(
+            "automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.write_report_file",
+            return_value=None,
+        ) as mock_file,
         patch.object(Path, "mkdir") as mock_mkdir,
     ):
         # Call report

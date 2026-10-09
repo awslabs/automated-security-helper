@@ -260,7 +260,23 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from threading import Event, Lock
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Set, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Tuple,
+)
+
+if TYPE_CHECKING:
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
 
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.exceptions import (
@@ -375,6 +391,11 @@ class ProjectScanSettings:
     #: plan the scan does not run, with nothing raising. The MCP workspace tools
     #: set both from one variable for that reason.
     default_config_path: Optional[str] = None
+    #: The rules a project config an MCP client delivered is checked against,
+    #: the session's (config/client_config_policy.py). Set by the MCP workspace
+    #: tools with the same value they resolved the plan with; None takes the
+    #: trusted base's, which is ``default_config_path``'s.
+    client_config_rules: Optional["ClientConfigRules"] = None
 
 
 @dataclass
@@ -895,6 +916,7 @@ def _project_config_with_policy(
         # operator's file still decides the sandbox when the project's is in the
         # tree, the same as it would for a project that has none.
         trusted_config_path=settings.default_config_path,
+        client_config_policy=settings.client_config_rules,
     )
 
     # The scanners' own checks on tool config file paths (config/path_trust.py)

@@ -129,6 +129,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.client_config_policy import ClientConfigRules
 from automated_security_helper.config.resolve_config import (
     find_config_file,
     resolve_config,
@@ -426,6 +427,7 @@ def _resolve_project_config(
     config_overrides: Tuple[str, ...] = (),
     default_config: Optional[Path] = None,
     workspace_root: Optional[Path] = None,
+    client_config_rules: Optional[ClientConfigRules] = None,
 ) -> Tuple[AshConfig, Optional[Path]]:
     """Load one project's config through ASH's ordinary resolution path.
 
@@ -491,6 +493,7 @@ def _resolve_project_config(
             config_overrides=list(config_overrides),
             scanned_root=workspace_root,
             trusted_config_path=default_config,
+            client_config_policy=client_config_rules,
         )
         return config, config_path
     except ASHConfigValidationError as exc:
@@ -708,6 +711,7 @@ def resolve_workspace(
     workspace_config: Optional[PathLike] = None,
     config_overrides: Tuple[str, ...] = (),
     default_config: Optional[PathLike] = None,
+    client_config_rules: Optional[ClientConfigRules] = None,
 ) -> WorkspacePlan:
     """Resolve and validate a workspace, returning an inspectable plan.
 
@@ -789,6 +793,7 @@ def resolve_workspace(
             config_overrides,
             default_config=Path(default_config) if default_config else None,
             workspace_root=definition.root,
+            client_config_rules=client_config_rules,
         )
         scanners, pins = _scanner_state(config)
         label = _project_label(config, candidate.key)

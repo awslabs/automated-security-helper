@@ -320,6 +320,28 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
         },
         {"suppressions": [_SUPPRESS_ALL]},
     ),
+    "/global_settings/mcp": (
+        {
+            "op": "replace",
+            "path": "/global_settings/mcp/runtime_overrides/denied_paths",
+            "value": [],
+        },
+        {"global_settings": {"mcp": {"runtime_overrides": {"denied_paths": []}}}},
+    ),
+    "/global_settings/mcp/**": (
+        {
+            "op": "add",
+            "path": "/global_settings/mcp/runtime_overrides/allowed_paths/-",
+            "value": "/fail_on_findings",
+        },
+        {
+            "global_settings": {
+                "mcp": {
+                    "runtime_overrides": {"allowed_paths": ["/**", "/fail_on_findings"]}
+                }
+            }
+        },
+    ),
     "/reporters/bedrock-summary-reporter/options/aws_*": (
         {
             "op": "add",
@@ -369,9 +391,19 @@ def _override_for(document: Dict[str, Any], changes: Dict[str, Any]) -> str:
     block the restatement has to keep.
     """
     restated = yaml.safe_load(yaml.safe_dump(document))
+
+    def merge(into: Dict[str, Any], change: Dict[str, Any]) -> None:
+        for key, value in change.items():
+            if isinstance(value, dict) and isinstance(into.get(key), dict):
+                merge(into[key], value)
+            else:
+                into[key] = value
+
     for key, value in changes.items():
         if key in ("ignore_paths", "suppressions"):
             restated["global_settings"][key] = value
+        elif key == "global_settings":
+            merge(restated["global_settings"], value)
         else:
             restated[key] = value
     return yaml.safe_dump(restated)
@@ -398,7 +430,7 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
     covering = next(
         (
             prefix
-            for prefix in ("/sandbox", "/ash_plugin_modules")
+            for prefix in ("/sandbox", "/ash_plugin_modules", "/global_settings/mcp")
             if entry.startswith(prefix)
         ),
         entry,
@@ -552,5 +584,26 @@ def test_a_denied_plugin_section_is_refused_in_every_spelling(
             "denied_paths entry '/reporters/bedrock-summary-reporter/options/aws_*'"
             in result["error"]
         ), result["error"]
+    _assert_unbound("patch")
+    _assert_unbound("override")
+
+
+@pytest.mark.parametrize("spelling", ["TrivyRepo", "trivyrepo", "TRIVY-REPO"])
+def test_a_glob_denial_on_a_plugin_section_is_refused_in_every_spelling(
+    tmp_path: Path, spelling: str
+) -> None:
+    denial = "/scanners/trivy-*/options/ignore_file"
+    document = _profile(allowed_paths=["/**"], denied_paths=[denial])
+    _install(tmp_path, document)
+    section = {"options": {"ignore_file": "standin.txt"}}
+
+    patched, overridden = _both_routes(
+        {"op": "add", "path": f"/scanners/{spelling}", "value": section},
+        _override_for(document, {"scanners": {spelling: section}}),
+    )
+
+    for result in (patched, overridden):
+        assert result["success"] is False, result
+        assert f"denied_paths entry {denial!r}" in result["error"], result["error"]
     _assert_unbound("patch")
     _assert_unbound("override")

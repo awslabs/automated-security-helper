@@ -313,15 +313,28 @@ def config_is_client_supplied(config_path: str | Path) -> bool:
     A scan whose selected config is client-supplied resolves it with
     ``resolve_config(untrusted_config=True)``, which keeps its sandbox settings
     restrict-only. The path is resolved first, so a symlink is judged by the
-    file it reaches.
+    file it reaches. Ancestry is also checked by file identity
+    (``os.path.samefile``), so on a case-insensitive volume a spelling of the
+    root that differs only in case is still the root.
     """
 
     shared = shared_workspace_root()
     if shared is None:
         return False
+    resolved = Path(config_path).resolve()
+    parts: Optional[Tuple[str, ...]] = None
     try:
-        parts = Path(config_path).resolve().relative_to(shared).parts
+        parts = resolved.relative_to(shared).parts
     except ValueError:
+        if shared.exists():
+            for ancestor in resolved.parents:
+                try:
+                    if os.path.samefile(ancestor, shared):
+                        parts = resolved.relative_to(ancestor).parts
+                        break
+                except OSError:
+                    continue
+    if parts is None:
         return False
     return not (len(parts) >= 2 and parts[1] == CONFIG_DIR_NAME)
 

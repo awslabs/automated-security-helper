@@ -514,9 +514,18 @@ def _check_ignore_paths(
     ignore_paths: List[IgnorePathWithReason],
 ) -> str | None:
     """Return the reason string if *normalized_uri* matches any ignore path, else None."""
+    matched = _matching_ignore_path(normalized_uri, ignore_paths)
+    return matched.reason if matched is not None else None
+
+
+def _matching_ignore_path(
+    normalized_uri: str,
+    ignore_paths: List[IgnorePathWithReason],
+) -> IgnorePathWithReason | None:
+    """The first ignore path *normalized_uri* matches, or None."""
     for ignore_path in ignore_paths:
         if file_path_matches(normalized_uri, ignore_path.path):
-            return ignore_path.reason
+            return ignore_path
     return None
 
 
@@ -561,10 +570,18 @@ def _apply_config_suppression(
         f"'{escape_markup(flat_finding.file_path)}' based on suppression rule: "
         f"[yellow]{escape_markup(reason)}[/yellow]"
     )
+    client_supplied = getattr(matching_suppression, "client_supplied", False) is True
     result.suppressions.append(
         Suppression(
             kind=Kind1.inSource,
-            justification=f"(ASH) Suppressing finding for rule '{result.ruleId}' in '{flat_finding.file_path}' with reason: {reason}",
+            justification=(
+                f"(ASH{', client-supplied config' if client_supplied else ''}) "
+                f"Suppressing finding for rule '{result.ruleId}' in "
+                f"'{flat_finding.file_path}' with reason: {reason}"
+            ),
+            # A suppression from the config of a tree an MCP client delivered,
+            # marked so a reader can tell it from the operator's.
+            properties=PropertyBag(clientSupplied=True) if client_supplied else None,
         )
     )
     return True
@@ -817,6 +834,10 @@ def apply_suppressions_to_sarif(
         updated_results = []
         for result in run.results:
             is_in_ignorable_path = False
+            # A match on an ignore path the client's own delivered config supplied.
+            # The finding is kept, suppressed and marked, rather than dropped, so the
+            # results show what the client chose to hide.
+            client_ignored: IgnorePathWithReason | None = None
 
             # --- Step 1: ignore-path check ---
             if result.locations:
@@ -872,17 +893,38 @@ def apply_suppressions_to_sarif(
                         excluded_by_output_path += 1
                         is_in_ignorable_path = True
                         continue
-                    ignore_reason = _check_ignore_paths(uri, ignore_paths)
-                    if ignore_reason is not None:
+                    matched_ignore = _matching_ignore_path(uri, ignore_paths)
+                    if matched_ignore is not None:
                         ASH_LOGGER.verbose(
                             f"Ignoring finding on rule '{escape_markup(result.ruleId)}' "
                             f"file location '{escape_markup(uri)}' based on ignore_path "
                             f"match with global reason: "
-                            f"[yellow]{escape_markup(ignore_reason)}[/yellow]"
+                            f"[yellow]{escape_markup(matched_ignore.reason)}[/yellow]"
                         )
-                        is_in_ignorable_path = True
+                        # ``is True``: an ignore path is a model here, and a stand-in
+                        # without the field must not count as the client's.
+                        if getattr(matched_ignore, "client_supplied", False) is True:
+                            client_ignored = matched_ignore
+                        else:
+                            is_in_ignorable_path = True
 
             if is_in_ignorable_path:
+                continue
+
+            if client_ignored is not None:
+                result.suppressions = [
+                    *(result.suppressions or []),
+                    Suppression(
+                        kind=Kind1.external,
+                        justification=(
+                            "(ASH, client-supplied config) Ignoring finding under "
+                            f"ignore path '{client_ignored.path}' with reason: "
+                            f"{client_ignored.reason}"
+                        ),
+                        properties=PropertyBag(clientSupplied=True),
+                    ),
+                ]
+                updated_results.append(result)
                 continue
 
             ASH_LOGGER.debug(

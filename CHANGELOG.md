@@ -95,6 +95,25 @@
 
 ### Behavior changes
 
+- **A config file an MCP client delivered may not change a field the session's
+  runtime-override policy denies.** That covers an upload named as
+  `config_path`, a delivered tree's own `.ash.yaml`, a project config in a
+  delivered workspace, and every such file in an `extends` chain. Before, only
+  `patch_ops`, `override_yaml` and workspace `config_overrides` were checked
+  against `denied_paths` and `denied_value_patterns`. A value equal to the
+  server's is accepted, so an `ash config init` file scans; `sandbox` and
+  `ash_plugin_modules` keep their existing restrict-only limits. A file that
+  changes a denied field is refused with the field named
+  (`error_type: config_field_denied`), and `validate_config` reports it. A
+  delivered tree's own suppressions and ignore paths apply, marked
+  `client_supplied` in the results, unless the profile's own `denied_paths`
+  lists them. Files under a client-supplied ignore path are still converted and
+  scanned, and each finding there is kept as a marked, suppressed result. The policy comes from the registered profile, never from the
+  session's patched copy, and `/global_settings/mcp` joins the default
+  `denied_paths`. Delivering source while a scan of the session runs is refused.
+  See
+  [Config files in delivered source](docs/content/docs/mcp/streamable-http.md#config-files-in-delivered-source).
+
 - **A config file inside the scanned tree can no longer choose what ASH installs,
   imports or hands a scanner as its own configuration.** It applies to a discovered
   `.ash/.ash.yaml`, a `--config` inside the tree, an `extends` base, or `ASH_CONFIG`:
@@ -122,6 +141,30 @@
     `sandbox.extra_read_paths`.
   - ferret-scan's `tool_version` no longer accepts a bare version or `latest`;
     write `==1.2.3`, or leave it unset for the supported range.
+  - The AWS reporters' destinations and credentials come only from the defaults,
+    `--config-overrides` or a config file outside the tree: `aws_region` and
+    `aws_profile` of the Security Hub, Bedrock summary and S3 reporters, Security
+    Hub's `account_id`, the Bedrock reporter's `model_id` and its three output
+    files, S3's `bucket_name` and `key_prefix`, and CloudWatch Logs' `aws_region`,
+    `log_group_name` and `log_stream_name`. This covers the section under any
+    spelling ASH reads as that reporter's, such as `BedrockSummary`. The reporters'
+    other options still apply from the tree.
+  - Such a file can no longer add `automated_security_helper.plugin_modules.ash_aws_plugins`
+    (or a module inside it) to `ash_plugin_modules`. Its reporters are enabled by
+    default and send findings to AWS with the operator's credentials, so only
+    `--ash-plugin-modules`, `--config-overrides` or a config file outside the tree
+    can add it.
+  - A reporter's `extension` has to be a filename suffix, from any source: a value
+    with `/`, `\`, `..` or NUL is replaced by the reporter's default, with a
+    warning naming the key. Reports, the files the unused-suppressions, S3 and
+    Bedrock summary reporters write beside them, and the workspace report
+    manifest are written only when the resolved file is directly inside the
+    reports directory, and a symlink at the file's name is replaced rather than
+    written through. A file that cannot be written is logged and does not stop
+    the reporter's main report or the other reporters. The Bedrock summary
+    reporter's `output_file`, `output_executive_file` and `output_technical_file`
+    are file names in the reports directory: a path there is refused with a
+    warning, and that file is not written.
 
   Under the MCP server, a config a client delivered is limited the same way, and a
   file any MCP client delivered (under the MCP workspace root, except each session's
@@ -134,7 +177,8 @@
   delivered, named or found beside the definition, is refused.
   `/ash_plugin_modules` joins the default `denied_paths`, and `denied_paths` and
   `denied_value_patterns` now match a key spelled with either `-` or `_`, and a
-  plugin's section under every spelling ASH reads as that plugin's config.
+  plugin's section under every spelling ASH reads as that plugin's config,
+  including when the entry names plugins with a glob such as `trivy-*`.
 
   Each value that is not honored is logged once as a warning naming the key. See
   [Settings a repository's config cannot choose](docs/content/docs/configuration-guide.md#settings-a-repositorys-config-cannot-choose).

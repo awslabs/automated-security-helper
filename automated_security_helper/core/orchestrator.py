@@ -23,6 +23,8 @@ from automated_security_helper.core.execution_engine import (
 )
 
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.models.core import ignore_paths_that_skip_scanning
+from automated_security_helper.config.client_config_policy import ClientConfigRules
 from automated_security_helper.core.exceptions import (
     ASHValidationError,
 )
@@ -108,6 +110,17 @@ class ASHScanOrchestrator(BaseModel):
                 "The operator's config the sandbox grants come from when "
                 "untrusted_config is set, in place of ASH_CONFIG or the defaults. "
                 "Passed to resolve_config."
+            ),
+        ),
+    ] = None
+    client_config_policy: Annotated[
+        Optional[ClientConfigRules],
+        Field(
+            None,
+            description=(
+                "The rules a config file an MCP client delivered is checked "
+                "against (the session's). Passed to resolve_config; see "
+                "config/client_config_policy.py."
             ),
         ),
     ] = None
@@ -248,6 +261,7 @@ class ASHScanOrchestrator(BaseModel):
                 ("config_overrides", self.config_overrides),
                 ("untrusted_config", self.untrusted_config),
                 ("trusted_config_path", self.trusted_config_path),
+                ("client_config_policy", self.client_config_policy),
             )
             if value
         ]
@@ -300,6 +314,7 @@ class ASHScanOrchestrator(BaseModel):
                 permit_base=self.config_base_gate,
                 trusted_config_path=self.trusted_config_path,
                 untrusted_config=self.untrusted_config,
+                client_config_policy=self.client_config_policy,
             )
 
         # Surface config resolution warnings prominently
@@ -357,7 +372,9 @@ class ASHScanOrchestrator(BaseModel):
             excluded_scanners=self.excluded_scanners,
             show_progress=self.show_progress,
             show_summary=self.show_summary,
-            global_ignore_paths=self.config.global_settings.ignore_paths,
+            global_ignore_paths=ignore_paths_that_skip_scanning(
+                self.config.global_settings.ignore_paths
+            ),
             color_system=self.color_system,  # type: ignore[arg-type]
             verbose=self.verbose,
             debug=self.debug,

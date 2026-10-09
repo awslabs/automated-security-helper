@@ -56,7 +56,9 @@ import shutil
 import subprocess  # nosec B404 - git is invoked as a subprocess; see _validate_clone_url
 import zipfile
 from pathlib import Path
-from typing import Dict, Optional
+import contextlib
+import functools
+from typing import Any, Callable, Dict, Iterator, Optional, TypeVar
 
 from automated_security_helper.cli.mcp.session_paths import (
     session_directory,
@@ -97,6 +99,49 @@ _S_IFMT_SHIFTED = 0xF000 << 16
 # ---------------------------------------------------------------------------
 
 _SESSION_SOURCE_DIRS: Dict[str, Path] = {}
+
+
+class SourceDeliveryBusyError(RuntimeError):
+    """A delivery was refused because a scan of the same session is running.
+
+    Delivering replaces the tree, and the config files in it, that the running
+    scan is reading, so the config the scan checked would not be the config it
+    used.
+    """
+
+
+@contextlib.contextmanager
+def _no_scan_running(session_id: str) -> Iterator[None]:
+    """Hold the session's scan lock for a delivery, or refuse if a scan holds it.
+
+    Not blocking: a delivery is called on the server's event loop, and waiting
+    there for a scan to finish would stall every other session.
+    """
+    from automated_security_helper.cli.mcp.sessions import get_default_registry
+
+    lock = get_default_registry().get_or_create(session_id).lock
+    if not lock.acquire(blocking=False):
+        raise SourceDeliveryBusyError(
+            "a scan of this session is running; deliver the source after it finishes"
+        )
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _while_no_scan_runs(function: _F) -> _F:
+    """Run a delivery under ``_no_scan_running`` for its ``session_id``."""
+
+    @functools.wraps(function)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        with _no_scan_running(kwargs["session_id"]):
+            return function(*args, **kwargs)
+
+    return wrapper  # type: ignore[return-value]
 
 
 def get_session_source_dir(session_id: str) -> Optional[Path]:
@@ -294,6 +339,7 @@ def local_clone_path(url: str) -> Optional[Path]:
     return Path(url)
 
 
+@_while_no_scan_runs
 def set_source_git(
     url: str,
     ref: Optional[str] = None,
@@ -606,6 +652,7 @@ def _validate_zip_member(name: str) -> None:
             raise ValueError(f"path traversal in zip: {name!r}")
 
 
+@_while_no_scan_runs
 def set_source_zip_finalize(
     upload_id: str,
     expected_sha256: str,

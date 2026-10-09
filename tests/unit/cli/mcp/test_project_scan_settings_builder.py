@@ -56,6 +56,9 @@ from typing import Any, Dict, List, Tuple
 
 import pytest
 
+from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.client_config_policy import rules_from
+
 from automated_security_helper.core.enums import (
     ExecutionPhase,
     ExecutionStrategy,
@@ -195,7 +198,12 @@ def _opts(tmp_path: Path) -> ScanOptions:
         mode=RunMode.precommit,
         ash_plugin_modules=["my_plugins"],
         allow_missing_projects=True,
+        client_config_policy=_RULES,
     )
+
+
+#: Non-None, so the entry discriminates against the dataclass default.
+_RULES = rules_from(AshConfig())
 
 
 def _expected(tmp_path: Path) -> Dict[str, Any]:
@@ -237,6 +245,7 @@ def _expected(tmp_path: Path) -> Dict[str, Any]:
         "project_timeout": 90.0,
         "allow_missing_projects": True,
         "default_config_path": str(tmp_path / "work" / ".ash.yaml"),
+        "client_config_rules": _RULES,
     }
 
 

@@ -13,6 +13,7 @@ import zipfile
 
 from pydantic import Field
 
+from automated_security_helper.models.core import ignore_paths_that_skip_scanning
 from automated_security_helper.core.constants import (
     KNOWN_SCANNABLE_EXTENSIONS,
 )
@@ -267,7 +268,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     ASH_LOGGER.debug(f"Skipping directory: {archive_file}")
                     skip_item = True
                 else:
-                    for ignore_path in self.context.config.global_settings.ignore_paths:
+                    for ignore_path in ignore_paths_that_skip_scanning(
+                        self.context.config.global_settings.ignore_paths
+                    ):
                         rel_path = (
                             Path(archive_file)
                             .relative_to(self.context.source_dir)

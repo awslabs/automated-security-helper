@@ -34,6 +34,16 @@ class IgnorePathWithReason(BaseModel):
     expiration: Annotated[
         str | None, Field(None, description="(Optional) Expiration date (YYYY-MM-DD)")
     ] = None
+    client_supplied: Annotated[
+        bool,
+        Field(
+            description=(
+                "Set by the server: True when the config of a tree an MCP client "
+                "delivered supplied this entry, so results show which "
+                "suppressions and ignored paths came from the client's own config."
+            ),
+        ),
+    ] = False
 
     def matches_path(self, file_path: str) -> bool:
         """Return True if ``file_path`` matches this entry's path pattern.
@@ -42,6 +52,20 @@ class IgnorePathWithReason(BaseModel):
         (``tests/**/*.py``). Matching is case-insensitive for OS portability.
         """
         return _path_pattern_matches(file_path, self.path)
+
+
+def ignore_paths_that_skip_scanning(
+    ignore_paths: "List[IgnorePathWithReason] | None",
+) -> "List[IgnorePathWithReason]":
+    """The ignore paths that keep a file from being converted or scanned at all.
+
+    Those the operator supplied. A path a delivered tree's own config supplied
+    (``client_supplied``) is left to the SARIF step instead, which keeps a finding
+    under it as a marked, suppressed result, so the results show what the
+    client's config hid. Applying it before the scan as well would mean no
+    finding to keep. The cost is that those files are scanned.
+    """
+    return [path for path in ignore_paths or [] if path.client_supplied is not True]
 
 
 class ToolArgs(BaseModel):

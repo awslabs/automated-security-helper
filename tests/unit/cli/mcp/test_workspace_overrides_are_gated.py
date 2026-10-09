@@ -22,9 +22,19 @@ from automated_security_helper.cli.mcp import workspace as workspace_module
 
 @pytest.fixture(autouse=True)
 def _clear_policy_env(monkeypatch):
+    from automated_security_helper.cli.mcp.profile_registry import (
+        clear_profile_registry,
+        clear_session_state,
+    )
+
     monkeypatch.delenv("ASH_MCP_ALLOWED_ROOTS", raising=False)
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
     monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
+    clear_profile_registry()
+    clear_session_state()
+    yield
+    clear_profile_registry()
+    clear_session_state()
 
 
 def _workspace(tmp_path: Path) -> Path:
@@ -45,11 +55,20 @@ def _with_profile(monkeypatch, tmp_path: Path, allowed_paths, extra: str = "") -
         "      enabled: true\n"
         f"      allowed_paths: {json.dumps(list(allowed_paths))}\n"
     )
-    monkeypatch.setattr(
-        workspace_module,
-        "_resolve_session_config",
-        lambda session_id, profile_name: str(profile),
+    _register_and_bind(profile)
+
+
+def _register_and_bind(profile: Path) -> None:
+    """Register ``profile`` and bind it, so the gate reads the registered policy."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        register_profiles,
+        set_profile_registry,
     )
+    from automated_security_helper.cli.mcp_tools import mcp_select_profile
+
+    set_profile_registry(register_profiles([f"op={profile}"]))
+    bound = mcp_select_profile("op")
+    assert bound["success"] is True, bound
 
 
 async def _resolve(tmp_path: Path, overrides):
@@ -293,13 +312,10 @@ async def test_an_operator_denial_holds_for_every_mix_of_separators(
         '      allowed_paths: ["/**"]\n'
         '      denied_paths: ["/scanners/trivy-repo/options/ignore_file"]\n'
     )
-    monkeypatch.setattr(
-        workspace_module,
-        "_resolve_session_config",
-        lambda session_id, profile_name: str(profile),
-    )
+    _register_and_bind(profile)
     result = await _resolve(tmp_path, [override])
     assert result["success"] is False, result
+    assert "denied_paths" in result["error"], result
 
 
 @pytest.mark.asyncio

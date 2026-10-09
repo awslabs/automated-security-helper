@@ -476,12 +476,16 @@ class ResolvedConfigDocument:
 
     ``chain`` lists every file read, in merge order: bases before the files that
     extend them, the root config last. A file reached on two branches appears
-    twice, because it was merged twice.
+    twice, because it was merged twice. ``documents`` holds each file's document
+    as it was parsed, before its ``extends`` and ``patch`` were applied, so a
+    caller checking what a file sets checks what was read rather than reading the
+    file again.
     """
 
     data: Any
     chain: List[Path] = field(default_factory=list)
     root: Optional[Path] = None
+    documents: Dict[Path, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -490,6 +494,7 @@ class _ChainState:
     permit_base: Optional[PermitBase] = None
     files_read: int = 0
     order: List[Path] = field(default_factory=list)
+    documents: Dict[Path, Any] = field(default_factory=dict)
 
 
 def _format_chain(paths: Tuple[Path, ...]) -> str:
@@ -712,6 +717,7 @@ def _resolve(
                 f"{type(data).__name__}"
             )
 
+    state.documents.setdefault(real, copy.deepcopy(data))
     if not isinstance(data, dict) or (
         EXTENDS_KEY not in data and PATCH_KEY not in data
     ):
@@ -767,7 +773,9 @@ def resolve_config_document(
     )
     state = _ChainState(root=root, permit_base=permit_base)
     data = _resolve(config_path, (), state)
-    return ResolvedConfigDocument(data=data, chain=state.order, root=root)
+    return ResolvedConfigDocument(
+        data=data, chain=state.order, root=root, documents=state.documents
+    )
 
 
 def load_config_document(

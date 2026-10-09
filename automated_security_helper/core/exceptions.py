@@ -36,6 +36,27 @@ class ASHConfigInputNotPermittedError(ASHConfigSourceError):
     """
 
 
+class ASHConfigFieldDeniedError(ASHConfigValidationError):
+    """A config file an MCP client delivered sets a field the session's policy denies.
+
+    The policy is ``global_settings.mcp.runtime_overrides``' ``denied_paths`` and
+    ``denied_value_patterns``, the rules a client's ``patch_ops`` and
+    ``config_overrides`` are held to. A subclass of ``ASHConfigValidationError``
+    so every caller that refuses an invalid config refuses this one, and distinct
+    so the MCP tools can report it as a refusal naming the field.
+    """
+
+
+class ASHConfigPolicyUnreadableError(ASHConfigValidationError):
+    """The policy a client-delivered config is checked against cannot be established.
+
+    The profile the session bound is no longer registered, or the trusted config
+    has two sections that read as the same plugin. Raised only when the config
+    being resolved has a client-delivered file in its chain, so a scan that reads
+    no such file is unaffected.
+    """
+
+
 class WorkspacePatternError(ASHValidationError):
     """Exception raised when a glob pattern cannot be rebased between the
     project and workspace path spaces.

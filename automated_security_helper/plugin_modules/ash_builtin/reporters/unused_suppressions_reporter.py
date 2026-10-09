@@ -164,11 +164,15 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             if hasattr(self.context, "output_dir"):
                 from pathlib import Path
 
+                from automated_security_helper.base.reporter_plugin import (
+                    write_report_file,
+                )
+
                 report_dir = Path(self.context.output_dir) / "reports"
                 report_dir.mkdir(parents=True, exist_ok=True)
-                markdown_file = report_dir / "ash.unused-suppressions.md"
-                with open(markdown_file, "w", encoding="utf-8") as f:
-                    f.write(markdown_output)
+                write_report_file(
+                    report_dir, "ash.unused-suppressions.md", markdown_output
+                )
 
             # Return JSON as the primary output
             return json_output

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
+    Any,
     Callable,
     Dict,
     List,
@@ -47,6 +48,8 @@ from automated_security_helper.core.enums import (
     ScannerStatus,
 )
 from automated_security_helper.core.exceptions import (
+    ASHConfigFieldDeniedError,
+    ASHConfigPolicyUnreadableError,
     ASHConfigValidationError,
     ScannerSelectionError,
     WorkspaceDefinitionError,
@@ -91,6 +94,9 @@ if TYPE_CHECKING:
     # Imported for annotations only. A runtime import here would pull the
     # workspace executor -- and through it core.orchestrator -- into every
     # single-directory scan's import graph.
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
     from automated_security_helper.workspace.execution import (
         ProjectScanSettings,
         WorkspaceRunResult,
@@ -131,6 +137,11 @@ class ScanOptions(BaseModel):
     # grants come from instead. Both go to resolve_config, in local mode only.
     untrusted_config: bool = False
     trusted_config_path: Optional[str] = None
+    # The session's ClientConfigRules, which a config file an MCP client
+    # delivered is checked against. Goes to
+    # resolve_config, in local mode only. Typed Any to keep config imports out of
+    # this module's import time, as the other config inputs here are.
+    client_config_policy: Optional[Any] = Field(default=None, exclude=True)
     offline: bool = False
     strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL
     scanners: Optional[List[str]] = Field(default_factory=list)
@@ -1934,6 +1945,7 @@ def _run_local_mode(
             config_base_gate=opts.config_base_gate,
             untrusted_config=opts.untrusted_config,
             trusted_config_path=opts.trusted_config_path,
+            client_config_policy=opts.client_config_policy,
             verbose=opts.verbose or opts.debug,
             debug=opts.debug,
             strategy=(
@@ -2024,6 +2036,14 @@ def _run_local_mode(
 
         return results, _config_fail_on_findings
 
+    except (ASHConfigFieldDeniedError, ASHConfigPolicyUnreadableError) as e:
+        # An MCP caller passed the rules, and it records the error it is handed
+        # as the scan's; an exit code would leave the client with "exited with
+        # code 3" and the fields named only in the server log.
+        if opts.client_config_policy is not None:
+            raise
+        print(f"[bold red]ERROR (3) Invalid configuration: {e}[/bold red]")
+        sys.exit(3)
     except ASHConfigValidationError as e:
         print(f"[bold red]ERROR (3) Invalid configuration: {e}[/bold red]")
         sys.exit(3)
@@ -2213,6 +2233,9 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         # threaded through two layers, and silently ignored, which is the same
         # shape of defect as the ``ASH_OFFLINE`` one recorded in cli/mcp/workspace.
         default_config_path=opts.config,
+        # The rules a project config an MCP client delivered is checked against.
+        # The same value the plan was resolved with, for the reason above.
+        client_config_rules=opts.client_config_policy,
     )
 
 
@@ -2919,6 +2942,7 @@ def run_ash_scan(
     config_base_gate: Optional[Callable[[Path], bool]] = None,
     untrusted_config: bool = False,
     trusted_config_path: Optional[str] = None,
+    client_config_policy: "Optional[ClientConfigRules]" = None,
     *args,
     **kwargs,
 ):
@@ -2990,20 +3014,27 @@ def run_ash_scan(
         config_base_gate=config_base_gate,
         untrusted_config=untrusted_config,
         trusted_config_path=trusted_config_path,
+        client_config_policy=client_config_policy,
     )
 
     # Only the local orchestrator resolves with these. Container and nix mode run
     # a separate ASH that is handed the config path alone, and workspace mode
     # resolves each project's own config, so in any of them the restriction would
     # be dropped without a word.
-    if opts.untrusted_config and (
-        opts.mode in (RunMode.container, RunMode.nix) or opts.workspace_plan is not None
+    for name, value, workspace_ok in (
+        ("untrusted_config", opts.untrusted_config, False),
+        # Workspace mode carries it to every project through the settings builder.
+        ("client_config_policy", opts.client_config_policy, True),
     ):
-        raise ValueError(
-            "untrusted_config is applied only to a single-directory scan in local "
-            f"mode, not to mode={opts.mode.value!r}"
-            + (" with a workspace plan" if opts.workspace_plan is not None else "")
-        )
+        if value and (
+            opts.mode in (RunMode.container, RunMode.nix)
+            or (opts.workspace_plan is not None and not workspace_ok)
+        ):
+            raise ValueError(
+                f"{name} is applied only to a single-directory scan in local "
+                f"mode, not to mode={opts.mode.value!r}"
+                + (" with a workspace plan" if opts.workspace_plan is not None else "")
+            )
 
     _apply_log_level_env(opts)
     _refuse_symlinked_output_dir(opts)
@@ -3022,8 +3053,14 @@ def run_ash_scan(
         return workspace_result
 
     config_fail_on_findings: Optional[bool] = _resolve_config_fail_on_findings(opts)
+    # Read from the file before the scan only where the verdict cannot wait for the
+    # orchestrator's resolution. A local scan's results carry the config it
+    # actually resolved, which a client-delivered file is checked in; a pre-read
+    # here would be an unchecked second read of the same file.
     config_fail_on_incomplete_scanners: Optional[bool] = (
         _resolve_config_fail_on_incomplete_scanners(opts)
+        if opts.mode != RunMode.local
+        else None
     )
     results: Optional[AshAggregatedResults]
     if opts.mode == RunMode.container:
