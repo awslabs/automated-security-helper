@@ -1060,7 +1060,7 @@ class TestPluginManagerSingletonState:
         shape that reintroduces the registry defect, so it has to be a deliberate
         decision rather than a drive-by.
 
-        Four files are allowed in; the widened walk surfaced the first two:
+        Six files are allowed in; the widened walk surfaced the first two:
 
         * ``plugin_manager.py`` owns the attributes.
         * ``tests/unit/plugins/test_plugin_system.py`` is the test *of* the plugin
@@ -1077,6 +1077,12 @@ class TestPluginManagerSingletonState:
           conftest code: it reads the registry to prove a plugin first imported
           inside a snapshot test is merged back afterwards, and removes the probe
           plugin it registered.
+        * ``tests/conftest.py`` (by path) restores the resolved-plugin memo, the
+          event handlers and the registrations after every test, so a plugin one
+          test registers by hand does not reach the next. Same category: it stops
+          leakage between tests.
+        * ``tests/unit/test_conftest_tool_state_isolation.py`` is the test of that
+          conftest code, and removes the probe plugin it registers.
 
         Anything else, in production or in a new test, fails this and has to
         justify itself.
@@ -1088,6 +1094,8 @@ class TestPluginManagerSingletonState:
                 "test_plugin_system.py",
                 "tests/snapshot/conftest.py",
                 "tests/snapshot/test_snapshot_plugin_registry.py",
+                "tests/conftest.py",
+                "tests/unit/test_conftest_tool_state_isolation.py",
             ),
         )
         assert offenders == {}, (
