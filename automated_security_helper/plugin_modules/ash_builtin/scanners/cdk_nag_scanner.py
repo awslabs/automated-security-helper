@@ -48,7 +48,13 @@ from automated_security_helper.utils.cdk_nag_worker import cdk_nag_worker_batch
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.cfn_template_model import describe_parse_error
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.scanned_tree import (
+    TreeInputRefused,
+    refusal_reason,
+    relative_display,
+)
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.utils.subprocess_utils import find_executable
@@ -1163,6 +1169,13 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         outdir = self.results_dir.joinpath(target_type)
         sarif_results: List[Result] = []
+        # The tree the candidates came from. Each template is checked against it here,
+        # before it reaches the worker, and the worker reads it under the same rule.
+        scan_root = (
+            self.context.work_dir
+            if target_type == "converted"
+            else self.context.source_dir
+        )
         # One worker child evaluates every template in this loop; see
         # utils/cdk_nag_worker.py. The block encloses the loop so the child starts
         # inside the sandbox scope the executor entered around this scan() call.
@@ -1172,6 +1185,19 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             scannable, work_root=outdir, timeout=self._effective_scan_timeout()
         ):
             for cfn_file in scannable:
+                # Refused before it is counted or read: a symlink, or a file outside the
+                # tree, is not known to be CloudFormation, so it is the same expected
+                # skip as a file that is not, and it is said out loud in the error
+                # stream rather than left to a debug line.
+                refused = refusal_reason(cfn_file, scan_root)
+                if refused is not None:
+                    self._plugin_log(
+                        f"Skipped {relative_display(cfn_file, scan_root)}: {refused}",
+                        target_type=target_type,
+                        level=logging.WARNING,
+                        append_to_stream="stderr",
+                    )
+                    continue
                 self.targets_attempted += 1
                 try:
                     # Run CDK synthesis for this file
@@ -1209,6 +1235,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         # Every other consumer of this field in the codebase reads it directly
                         # too, so this is also the house form.
                         honor_template_suppressions=not self.context.ignore_suppressions,
+                        scan_root=scan_root,
                     )
                     if nag_result_dict is None:
                         # Not counted as a failure: a non-CloudFormation file in the scan set is
@@ -1249,6 +1276,16 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                             f"Found {len(findings)} findings for {pack} on template {cfn_file}"
                         )
                         sarif_results.extend(findings)
+                except TreeInputRefused as refused_late:
+                    # The worker's own read refused the template: it was replaced
+                    # between the check above and the read. The same skip as above.
+                    self.targets_attempted -= 1
+                    self._plugin_log(
+                        f"Skipped {refused_late.path}: {refused_late.reason}",
+                        target_type=target_type,
+                        level=logging.WARNING,
+                        append_to_stream="stderr",
+                    )
                 except (YAMLError, UnicodeDecodeError) as e:
                     # NOT a failed target, and NOT silent either. Both halves are the point.
                     #
@@ -1306,10 +1343,13 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     # gate should see. Nor is ``CloudFormationTemplateModelError``, which the
                     # wrapper converts into a ``failure`` handled above.
                     self.targets_attempted -= 1
+                    #
+                    # The exception is named by type and line, not by its text: PyYAML
+                    # quotes the offending line, and this message reaches ash.log.
                     self._plugin_log(
                         f"{cfn_file} is not parseable as YAML or JSON "
-                        f"({type(e).__name__}: {e}), so it is not a CloudFormation template "
-                        "and cdk-nag evaluated no rule against it.",
+                        f"({describe_parse_error(e)}), so it is not a CloudFormation "
+                        "template and cdk-nag evaluated no rule against it.",
                         target_type=target_type,
                         level=logging.INFO,
                         append_to_stream="stderr",

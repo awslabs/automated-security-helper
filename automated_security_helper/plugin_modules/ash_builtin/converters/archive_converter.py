@@ -4,8 +4,9 @@
 """Module containing the ArchiveConverter implementation."""
 
 import os
-import sys
-from pathlib import Path
+import shutil
+import stat
+from pathlib import Path, PurePosixPath
 import tarfile
 from typing import Annotated, List, Literal, Optional
 import zipfile
@@ -25,6 +26,10 @@ from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
+from automated_security_helper.utils.scanned_tree import (
+    TreeInputRefused,
+    relative_display,
+)
 from automated_security_helper.utils.suppression_matcher import (
     file_path_matches as path_matches_pattern,
 )
@@ -32,6 +37,63 @@ from automated_security_helper.utils.suppression_matcher import (
 
 class ArchiveConverterConfigOptions(ConverterOptionsBase):
     pass
+
+
+# tarfile's "data" extraction filter refuses links that leave the destination, device
+# files and absolute names, and drops unsafe mode bits. It is in 3.12 and was
+# backported to 3.10.12 and 3.11.4, so it is detected rather than inferred from the
+# version. The member checks below apply whether or not it is present.
+_TAR_HAS_DATA_FILTER = hasattr(tarfile, "data_filter")
+
+_MEMBER_ABSOLUTE = "its path is absolute"
+_MEMBER_PARENT = "its path contains a '..' component"
+_MEMBER_ESCAPES = "it would be extracted outside the destination directory"
+_MEMBER_LINK = "it is a symbolic or hard link"
+_MEMBER_NOT_REGULAR = "it is not a regular file"
+
+
+def _copy_tar_members(
+    tar_ref: tarfile.TarFile, members: List[tarfile.TarInfo], target_path: Path
+) -> None:
+    """Write each member's bytes under ``target_path``, applying none of its metadata.
+
+    For a Python whose tarfile has no "data" filter. ``extractall`` without one applies
+    each member's mode, owner and times, so a setuid bit or a foreign owner (when ASH
+    runs as root) would carry over. The members reaching here are regular files whose
+    names inspect_members has already checked, so copying their content is all there
+    is to do. Each file is created without following a link at its name.
+    """
+    for member in members:
+        source = tar_ref.extractfile(member)
+        if source is None:
+            continue
+        destination = target_path.joinpath(*PurePosixPath(member.name).parts)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(
+            destination,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_TRUNC
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_BINARY", 0),
+            0o644,
+        )
+        with source, os.fdopen(fd, "wb") as out:
+            shutil.copyfileobj(source, out)
+
+
+def _member_name_problem(member_name: str) -> Optional[str]:
+    """Why an archive member's name is unsafe to extract, or None.
+
+    Read on the text with both separators, so a name written on Windows is judged
+    the same way on every platform.
+    """
+    normalized = member_name.replace("\\", "/")
+    if normalized.startswith("/") or (len(normalized) > 1 and normalized[1] == ":"):
+        return _MEMBER_ABSOLUTE
+    if ".." in PurePosixPath(normalized).parts:
+        return _MEMBER_PARENT
+    return None
 
 
 class ArchiveConverterConfig(ConverterPluginConfigBase):
@@ -84,48 +146,80 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
         return False
 
+    def _refuse_member(self, archive: Optional[str], member: str, reason: str) -> None:
+        if archive is None:
+            ASH_LOGGER.warning(f"Skipped archive member '{member}': {reason}")
+        else:
+            self.record_refused_input(TreeInputRefused(archive, reason), member=member)
+
     def inspect_members(
         self,
         members: List[str | zipfile.ZipInfo | tarfile.TarInfo],
         target_path: Optional[Path] = None,
+        archive: Optional[str] = None,
     ):
+        """The members worth extracting: scannable, regular files that stay inside.
+
+        A member is refused, with a warning naming it, when it is a link (a tar
+        symlink or hard link, or a zip entry whose mode marks it a symlink), is not a
+        regular file, or has a name that is absolute, contains ``..`` or would land
+        outside ``target_path``. Members without a scannable extension are left out
+        silently, as before, so a refusal is only reported for a member that would
+        otherwise have been extracted.
+
+        Args:
+            members: The archive's members.
+            target_path: The extraction directory. The escape check needs it, so it
+                is skipped when this is None.
+            archive: The archive's path relative to the scanned tree. When given, each
+                refusal is also recorded in the converter's results row.
+        """
         ASH_LOGGER.verbose(f"Inspecting {len(members)} members from archive")
         filtered_members = []
         for member in members:
             if isinstance(member, tarfile.TarInfo):
                 member_name = member.name
-                member_ext = member_name.split(".")[-1]
-
-                # Reject symlinks and hard links in tar archives
-                if member.issym() or member.islnk():
-                    ASH_LOGGER.warning(
-                        f"Skipping symbolic/hard link in archive: {member_name}"
-                    )
+                if member.isdir():
                     continue
+                is_link = member.issym() or member.islnk()
+                is_regular = member.isreg()
             elif isinstance(member, zipfile.ZipInfo):
                 member_name = member.filename
-                member_ext = member_name.split(".")[-1]
+                if member.is_dir():
+                    continue
+                # Unix mode bits live in the high 16 bits of external_attr. zipfile
+                # writes a symlink entry out as a file holding the link's target, so
+                # it would not become a link, but it is not a file either.
+                is_link = stat.S_ISLNK(member.external_attr >> 16)
+                is_regular = True
             elif isinstance(member, str):
                 member_name = member
-                member_ext = member.split(".")[-1]
+                is_link = False
+                is_regular = True
             else:
                 ASH_LOGGER.debug(
                     f"Skipping uknown extension from archive: {type(member)}"
                 )
                 continue
 
-            # Validate path safety when target_path is provided
-            if target_path is not None and self._is_path_traversal(
-                member_name, target_path
-            ):
-                ASH_LOGGER.warning(
-                    f"Skipping archive member with path traversal: {member_name}"
-                )
+            member_ext = member_name.split(".")[-1]
+            if member_ext not in KNOWN_SCANNABLE_EXTENSIONS:
                 continue
 
-            if member_ext in KNOWN_SCANNABLE_EXTENSIONS:
-                ASH_LOGGER.verbose(f"Found .{member_ext} file: {member}")
-                filtered_members.append(member)
+            problem = _member_name_problem(member_name)
+            if problem is None and target_path is not None:
+                if self._is_path_traversal(member_name, target_path):
+                    problem = _MEMBER_ESCAPES
+            if problem is None and is_link:
+                problem = _MEMBER_LINK
+            if problem is None and not is_regular:
+                problem = _MEMBER_NOT_REGULAR
+            if problem is not None:
+                self._refuse_member(archive, member_name, problem)
+                continue
+
+            ASH_LOGGER.verbose(f"Found .{member_ext} file: {member}")
+            filtered_members.append(member)
         return filtered_members
 
     def convert(self) -> List[Path]:
@@ -188,6 +282,10 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 if skip_item:
                     continue
 
+                archive_display = relative_display(
+                    archive_file, self.context.source_dir
+                )
+
                 short_archive_file = get_shortest_name(archive_file)
                 normalized_archive_file = get_normalized_filename(short_archive_file)
                 target_path = self.results_dir.joinpath(normalized_archive_file)
@@ -195,44 +293,58 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     f"Extracting {archive_file} contents to target_path: {Path(target_path).as_posix()}"
                 )
 
-                # Create target directory if it doesn't exist
-                target_path.mkdir(parents=True, exist_ok=True)
-
-                # Extract ZIP to target path after inspecting members
-                if archive_file.lower().endswith(".zip") and zipfile.is_zipfile(
-                    archive_file
-                ):
-                    with zipfile.ZipFile(archive_file, "r") as zip_ref:
-                        zip_ref.extractall(
-                            path=target_path,
-                            members=self.inspect_members(
-                                zip_ref.filelist, target_path=target_path
-                            ),
-                        )
-                # Extract Tarball to target path after inspecting members
-                elif tarfile.is_tarfile(archive_file):
-                    with tarfile.open(
-                        archive_file, mode="r", encoding="utf-8"
-                    ) as tar_ref:
-                        safe_members = self.inspect_members(
-                            tar_ref.getmembers(), target_path=target_path
-                        )
-                        if sys.version_info >= (3, 12):
-                            tar_ref.extractall(  # nosec B202
-                                path=target_path,
-                                members=safe_members,
-                                filter="data",
-                            )
-                        else:
-                            tar_ref.extractall(  # nosec B202
-                                path=target_path,
-                                members=safe_members,
-                            )
-                else:
-                    ASH_LOGGER.debug(
-                        f"Skipping unsupported archive format: {archive_file}"
-                    )
+                # Opened under the scanned-tree rule, and everything below reads from
+                # this handle rather than reopening the path, so the archive that is
+                # extracted is the one that was checked.
+                try:
+                    archive_handle = self.open_source_file(archive_file)
+                except TreeInputRefused as refused:
+                    self.record_refused_input(refused)
                     continue
+
+                with archive_handle:
+                    # Create target directory if it doesn't exist
+                    target_path.mkdir(parents=True, exist_ok=True)
+
+                    # Extract ZIP to target path after inspecting members
+                    is_zip = archive_file.lower().endswith(
+                        ".zip"
+                    ) and zipfile.is_zipfile(archive_handle)
+                    archive_handle.seek(0)
+                    if is_zip:
+                        with zipfile.ZipFile(archive_handle, "r") as zip_ref:
+                            zip_ref.extractall(
+                                path=target_path,
+                                members=self.inspect_members(
+                                    zip_ref.infolist(),
+                                    target_path=target_path,
+                                    archive=archive_display,
+                                ),
+                            )
+                    # Extract Tarball to target path after inspecting members
+                    elif tarfile.is_tarfile(archive_handle):
+                        archive_handle.seek(0)
+                        with tarfile.open(
+                            fileobj=archive_handle, mode="r:*", encoding="utf-8"
+                        ) as tar_ref:
+                            safe_members = self.inspect_members(
+                                tar_ref.getmembers(),
+                                target_path=target_path,
+                                archive=archive_display,
+                            )
+                            if _TAR_HAS_DATA_FILTER:
+                                tar_ref.extractall(  # nosec B202
+                                    path=target_path,
+                                    members=safe_members,
+                                    filter="data",
+                                )
+                            else:
+                                _copy_tar_members(tar_ref, safe_members, target_path)
+                    else:
+                        ASH_LOGGER.debug(
+                            f"Skipping unsupported archive format: {archive_file}"
+                        )
+                        continue
 
                 # Add the extracted directory to results
                 results.append(target_path)

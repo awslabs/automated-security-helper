@@ -44,6 +44,10 @@ from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.scanned_tree import (
+    TreeInputRefused,
+    open_in_scanned_tree,
+)
 
 PACKAGE_NAME_KEY = "package_name"
 PACKAGE_VERSION_KEY = "package_version"
@@ -81,17 +85,37 @@ def _name_from_key(key: str, entry: Dict[str, Any]) -> str:
     return key[idx + len(marker) :] if idx >= 0 else posixpath.basename(key)
 
 
-def load_npm_lock_entries(lockfile: Path) -> Optional[List[NpmLockEntry]]:
+def load_npm_lock_entries(
+    lockfile: Path, scan_root: Optional[Path] = None
+) -> Optional[List[NpmLockEntry]]:
     """Parse an npm v2+ lockfile into its ``packages`` entries.
 
     Returns None when the file is not an npm lockfile, cannot be read, or has
     no ``packages`` map (lockfile v1). The root entry (key ``""``) is skipped.
+
+    With ``scan_root``, the lockfile is read under the scanned-tree rule
+    (``utils/scanned_tree.py``), because the names and versions it holds are copied
+    into SARIF properties; a lockfile that breaks the rule answers None. A link
+    whose target is inside the tree is followed: a scanner reported the lockfile
+    under that path, and what it points at is tree content.
     """
     if lockfile.name not in NPM_LOCKFILE_NAMES:
         return None
     try:
-        text = lockfile.read_text(encoding="utf-8")
+        if scan_root is None:
+            text = lockfile.read_text(encoding="utf-8")
+        else:
+            with open_in_scanned_tree(
+                lockfile, scan_root, follow_links_inside=True
+            ) as handle:
+                text = handle.read().decode("utf-8")
         data = json.loads(text)
+    except TreeInputRefused as refused:
+        ASH_LOGGER.warning(
+            f"Lockfile '{refused.path}' was not read for package identity: "
+            f"{refused.reason}"
+        )
+        return None
     except (OSError, ValueError) as exc:
         ASH_LOGGER.debug(f"Could not read npm lockfile {lockfile}: {exc}")
         return None
@@ -211,7 +235,9 @@ class NpmLockIndex:
         if rel not in self._cache:
             # Path() because the root may be a PurePath kept for its flavor, and
             # only a concrete path can be read.
-            self._cache[rel] = load_npm_lock_entries(Path(self.root / rel))
+            self._cache[rel] = load_npm_lock_entries(
+                Path(self.root / rel), scan_root=Path(self.root)
+            )
         return self._cache[rel]
 
     def entry(self, lockfile_rel: str, key: str) -> Optional[NpmLockEntry]:

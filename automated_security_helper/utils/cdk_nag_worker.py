@@ -78,7 +78,8 @@ if TYPE_CHECKING:
     from automated_security_helper.utils.cdk_nag_wrapper import CdkNagWrapperResponse
 
 #: Bumped when the request or response shape changes, so a stale child is refused.
-PROTOCOL_VERSION = 1
+#: 2 added ``scan_root`` to the options.
+PROTOCOL_VERSION = 2
 
 _WORK_DIR_NAME = ".cdk-nag-worker"
 
@@ -140,10 +141,14 @@ def _shortest_name_relative_to(cwd: Path) -> Callable[["str | Path"], "str | Pat
 def _exception_kind(exc: BaseException) -> str:
     from yaml import YAMLError
 
+    from automated_security_helper.utils.scanned_tree import TreeInputRefused
+
     if isinstance(exc, YAMLError):
         return "yaml"
     if isinstance(exc, UnicodeDecodeError):
         return "unicode"
+    if isinstance(exc, TreeInputRefused):
+        return "refused"
     return "other"
 
 
@@ -210,6 +215,9 @@ def _evaluate(request: Dict[str, Any], out: IO[str]) -> None:
                 include_compliant_checks=options["include_compliant_checks"],
                 stack_name=options["stack_name"],
                 honor_template_suppressions=options["honor_template_suppressions"],
+                scan_root=(
+                    Path(options["scan_root"]) if options.get("scan_root") else None
+                ),
             )
             answer = _answer_for_response(response)
         except Exception as exc:
@@ -219,6 +227,11 @@ def _evaluate(request: Dict[str, Any], out: IO[str]) -> None:
                 "type": type(exc).__name__,
                 "message": str(exc),
             }
+            # A refusal is re-raised in the parent as the class itself, with its
+            # path and reason, so the scanner treats it as the skip it is.
+            if answer["kind"] == "refused":
+                answer["path"] = getattr(exc, "path", None)
+                answer["reason"] = getattr(exc, "reason", None)
         answer["logs"] = collector.take()
         out.write(json.dumps(answer) + "\n")
         out.flush()
@@ -253,6 +266,12 @@ def _raise_as_reported(answer: Dict[str, Any]) -> None:
     name = str(answer.get("type") or "Exception")
     message = str(answer.get("message") or "")
     kind = answer.get("kind")
+    if kind == "refused":
+        from automated_security_helper.utils.scanned_tree import TreeInputRefused
+
+        raise TreeInputRefused(
+            str(answer.get("path") or ""), str(answer.get("reason") or message)
+        )
     if kind == "yaml":
         raise type(name, (YAMLError,), {})(message)
     if kind == "unicode":
@@ -578,6 +597,7 @@ def run_cdk_nag_against_cfn_template(
     include_compliant_checks: bool = False,
     stack_name: str = "ASHCDKNagScanner",
     honor_template_suppressions: bool = True,
+    scan_root: Optional[Path] = None,
 ) -> "Optional[CdkNagWrapperResponse]":
     """``cdk_nag_wrapper.run_cdk_nag_against_cfn_template``, evaluated in a child.
 
@@ -590,6 +610,7 @@ def run_cdk_nag_against_cfn_template(
         "include_compliant_checks": include_compliant_checks,
         "stack_name": stack_name,
         "honor_template_suppressions": honor_template_suppressions,
+        "scan_root": Path(scan_root).as_posix() if scan_root is not None else None,
     }
     batch = _ACTIVE_BATCH.get()
     if batch is None:

@@ -2,7 +2,6 @@
 
 import pytest
 from pathlib import Path
-import tempfile
 import zipfile
 import tarfile
 import json
@@ -21,10 +20,15 @@ class TestArchiveConverter:
     """Test cases for ArchiveConverter."""
 
     @pytest.fixture
-    def temp_dir(self):
-        """Create a temporary directory for test files."""
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            yield Path(tmpdirname)
+    def temp_dir(self, test_plugin_context):
+        """The scan root, where scan_set would have found these inputs.
+
+        Converters read only files inside the scanned tree, so an input placed in an
+        unrelated temporary directory is refused rather than converted.
+        """
+        source_dir = Path(test_plugin_context.source_dir)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        return source_dir
 
     @pytest.fixture
     def sample_zip_file(self, temp_dir):
@@ -154,10 +158,15 @@ class TestArchiveConverterPathTraversal:
     """Security tests for path traversal prevention in ArchiveConverter."""
 
     @pytest.fixture
-    def temp_dir(self):
-        """Create a temporary directory for test files."""
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            yield Path(tmpdirname)
+    def temp_dir(self, test_plugin_context):
+        """The scan root, where scan_set would have found these inputs.
+
+        Converters read only files inside the scanned tree, so an input placed in an
+        unrelated temporary directory is refused rather than converted.
+        """
+        source_dir = Path(test_plugin_context.source_dir)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        return source_dir
 
     @pytest.fixture
     def converter(self, test_plugin_context):
@@ -374,10 +383,15 @@ class TestJupyterConverter:
     """Test cases for JupyterConverter."""
 
     @pytest.fixture
-    def temp_dir(self):
-        """Create a temporary directory for test files."""
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            yield Path(tmpdirname)
+    def temp_dir(self, test_plugin_context):
+        """The scan root, where scan_set would have found these inputs.
+
+        Converters read only files inside the scanned tree, so an input placed in an
+        unrelated temporary directory is refused rather than converted.
+        """
+        source_dir = Path(test_plugin_context.source_dir)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        return source_dir
 
     @pytest.fixture
     def sample_notebook(self, temp_dir):
