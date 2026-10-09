@@ -39,6 +39,7 @@ from automated_security_helper.utils.sandbox.policy import (
     SandboxRequirements,
     SandboxUnavailable as SandboxUnavailable,
     _refuse_symlinked_results_dir,
+    refuse_symlinked_output_dir,
     build_scanner_policy,
 )
 
@@ -182,6 +183,7 @@ def scanner_sandbox_scope(
         results_dir = Path(context.output_dir).joinpath("scanners", name)
     # Checked here as well as when each spawn's policy is built, so a planted
     # symlink makes the scanner MISSING with the reason rather than ERROR.
+    refuse_symlinked_output_dir(Path(context.source_dir), Path(context.output_dir))
     _refuse_symlinked_results_dir(Path(context.output_dir), Path(results_dir))
     # Registered before the scanner runs anything, so even ASH's first write
     # there (a worker's request file) is guarded.
@@ -278,6 +280,23 @@ def sandbox_scope(scope: Optional[SandboxScope]) -> Iterator[None]:
 
 def active_scope() -> "SandboxScope | RefusingScope | None":
     return _ACTIVE.get()
+
+
+@contextmanager
+def outside_scanner_sandbox() -> Iterator[None]:
+    """Run the block's spawns unsandboxed, for ASH's own work on a scanner's behalf.
+
+    For preparing content a sandboxed scanner then reads, such as trivy's database:
+    a sandbox may mount the cache read-only or through a throwaway overlay, so an
+    update made inside it would not reach the host, or would let one scanner change
+    what the next one reads. The block runs no scanner code and reads nothing from
+    the scanned tree.
+    """
+    previous = _ACTIVE.set(None)
+    try:
+        yield
+    finally:
+        _ACTIVE.reset(previous)
 
 
 def prepare_spawn(

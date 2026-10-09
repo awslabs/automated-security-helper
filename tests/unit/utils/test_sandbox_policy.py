@@ -23,11 +23,17 @@ from automated_security_helper.utils.sandbox import (
 from automated_security_helper.utils.sandbox import backends as backends_module
 from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.backends import (
+    BACKENDS,
+    LANDLOCK_EXEC,
     BwrapBackend,
+    FirejailBackend,
     SandboxExecBackend,
     SpawnPlan,
 )
-from automated_security_helper.utils.sandbox.policy import build_scanner_policy
+from automated_security_helper.utils.sandbox.policy import (
+    build_scanner_policy,
+    refuse_symlinked_output_dir,
+)
 
 
 @pytest.fixture
@@ -167,7 +173,7 @@ class TestExecutable:
         assert etc in _resolved(policy.read_only)
         assert etc not in _resolved(policy.executable)
 
-    def test_nothing_writable_is_executable_but_the_uv_cache(
+    def test_nothing_writable_or_cached_is_executable(
         self, layout, monkeypatch, tmp_path
     ):
         uv_cache = tmp_path / "uv-cache"
@@ -177,11 +183,10 @@ class TestExecutable:
         monkeypatch.setenv("UV_CACHE_DIR", str(uv_cache))
         policy = _policy(layout, SandboxRequirements(cache_paths=(str(other_cache),)))
         executable = _resolved(policy.executable)
-        # `uv tool run` keeps the environments of tools it was not asked to install
-        # in its cache and runs their entry points from there.
-        assert Path(os.path.realpath(uv_cache)) in executable
-        assert Path(os.path.realpath(other_cache)) not in executable
-        assert Path(os.path.realpath(layout.results)) not in executable
+        # The host caches are read-only wherever exec is restricted; uv runs from
+        # the spawn's private cache, which the backend makes executable.
+        for path in (uv_cache, other_cache, layout.results):
+            assert Path(os.path.realpath(path)) not in executable, path
 
 
 class TestEnvironment:
@@ -256,6 +261,255 @@ class TestBwrapCommandLine:
     def test_plan_before_probe_is_refused(self, layout):
         with pytest.raises(RuntimeError, match="probe"):
             BwrapBackend().plan(["/usr/bin/true"], {}, _policy(layout))
+
+
+class TestSocketFilterWrapper:
+    """bwrap and firejail start the scanner through the seccomp socket filter.
+
+    Their mounts hide most socket paths but not one in a directory they mount, and
+    with a network they share the host's abstract Unix sockets, so the same filter
+    Landlock uses has to run inside them. Measured on bwrap before this: the Nix
+    daemon's socket under /nix answered, offline and online.
+    """
+
+    # firejail's plan reads os.getuid(), which Windows lacks; neither backend runs there.
+    @pytest.mark.skipif(sys.platform == "win32", reason="no backend runs on Windows")
+    @pytest.mark.parametrize("backend_class", [BwrapBackend, FirejailBackend])
+    @pytest.mark.parametrize("network", [False, True])
+    def test_the_scanner_runs_under_the_filter(self, layout, backend_class, network):
+        backend = backend_class()
+        backend._executable = "/usr/bin/sandbox"
+        policy = _policy(layout, SandboxRequirements(network=network))
+        argv = backend.plan(["/usr/bin/true", "--flag"], {}, policy).argv
+        # The backend's own options end at its first "--"; the rest is what runs.
+        inside = argv[argv.index("--") + 1 :]
+        assert inside == [
+            sys.executable,
+            "-I",
+            str(LANDLOCK_EXEC),
+            "--socket-filter",
+            "unix",
+            "--",
+            "/usr/bin/true",
+            "--flag",
+        ]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="no backend runs on Windows")
+class TestHostCachesAreNotWrittenInPlace:
+    """A host cache is writable only where the write is thrown away.
+
+    bwrap's overlay discards what a scanner writes to a cache. firejail, Landlock,
+    sandbox-exec, and bwrap without overlay support would write in place, changing
+    what later runs read: uv hard-links its cache into the tool environments a
+    later unsandboxed `uv tool install` builds. So they mount every cache
+    read-only, and point UV_CACHE_DIR, and each variable a scanner names in
+    cache_env, at a private directory under the results directory that is
+    removed after the spawn.
+    """
+
+    @pytest.fixture
+    def cache(self, layout, monkeypatch):
+        cache = layout.home.parent / "uv-cache"
+        cache.mkdir()
+        monkeypatch.setenv("UV_CACHE_DIR", str(cache))
+        return cache
+
+    def _plan(self, name, layout, requirements=SandboxRequirements(), overlay=False):
+        backend = BACKENDS[name]()
+        if hasattr(backend, "_executable"):
+            backend._executable = f"/usr/bin/{name}"
+        if name == "bwrap":
+            backend._overlay = overlay
+        return backend.plan(
+            ["/usr/bin/true"], {"PATH": "/usr/bin"}, _policy(layout, requirements)
+        )
+
+    def _assert_private(self, plan, layout, variable):
+        private = Path(plan.env[variable])
+        assert private.is_dir()
+        assert private.parent.name.startswith(".sandbox-cache-")
+        assert _resolved([private.parent.parent]) == _resolved([layout.results])
+        plan.run_cleanup()
+        assert not private.parent.exists()
+
+    def test_bwrap_keeps_its_throwaway_overlay(self, layout, cache):
+        plan = self._plan("bwrap", layout, overlay=True)
+        real = _as_argv(cache)
+        i = plan.argv.index("--overlay-src")
+        assert plan.argv[i : i + 4] == ["--overlay-src", real, "--tmp-overlay", real]
+        # Through the overlay the host cache itself is used, read and written.
+        assert "UV_CACHE_DIR" not in plan.env
+        plan.run_cleanup()
+
+    def test_bwrap_without_an_overlay_mounts_caches_read_only(self, layout, cache):
+        plan = self._plan("bwrap", layout, overlay=False)
+        real = _as_argv(cache)
+        binds = [
+            plan.argv[i]
+            for i in range(len(plan.argv) - 1)
+            if plan.argv[i + 1] == real and plan.argv[i].startswith("--")
+        ]
+        assert binds == ["--ro-bind"], binds
+        self._assert_private(plan, layout, "UV_CACHE_DIR")
+
+    def test_firejail_mounts_caches_read_only(self, layout, cache):
+        plan = self._plan("firejail", layout)
+        real = _as_argv(cache)
+        assert f"--read-only={real}" in plan.argv
+        assert f"--read-write={real}" not in plan.argv
+        self._assert_private(plan, layout, "UV_CACHE_DIR")
+
+    def test_landlock_grants_caches_read_only(self, layout, cache):
+        import json
+
+        plan = self._plan("landlock", layout)
+        document = json.loads(plan.argv[plan.argv.index("--policy") + 1])
+        assert _as_argv(cache) in document["read_only"]
+        assert _as_argv(cache) not in document["writable"]
+        self._assert_private(plan, layout, "UV_CACHE_DIR")
+
+    def test_sandbox_exec_grants_caches_read_only(self, layout, cache, tmp_path):
+        backend = BACKENDS["sandbox-exec"]()
+        profile = backend.profile(_policy(layout), tmp_path)
+        writable = [line for line in profile.splitlines() if "file-write*" in line]
+        assert not any(_as_argv(cache) in line for line in writable), writable
+        assert any(
+            _as_argv(cache) in line and "file-write*" not in line
+            for line in profile.splitlines()
+        )
+        plan = self._plan("sandbox-exec", layout)
+        self._assert_private(plan, layout, "UV_CACHE_DIR")
+
+    @pytest.mark.parametrize("name", ["firejail", "landlock", "sandbox-exec"])
+    def test_a_declared_cache_variable_gets_a_private_directory(
+        self, layout, cache, name, tmp_path
+    ):
+        npm_cache = tmp_path / "npm-cache"
+        npm_cache.mkdir()
+        requirements = SandboxRequirements(
+            cache_paths=(str(npm_cache),), cache_env=("npm_config_cache",)
+        )
+        plan = self._plan(name, layout, requirements)
+        assert (
+            Path(plan.env["npm_config_cache"]).parent
+            == Path(plan.env["UV_CACHE_DIR"]).parent
+        )
+        self._assert_private(plan, layout, "npm_config_cache")
+
+    def test_a_redirect_replaces_a_differently_cased_copy(self, layout, cache):
+        # npm reads npm_config_* whatever the case, so a NPM_CONFIG_CACHE from the
+        # parent would compete with the private npm_config_cache.
+        backend = BACKENDS["landlock"]()
+        requirements = SandboxRequirements(
+            env_prefixes=("NPM_CONFIG_",), cache_env=("npm_config_cache",)
+        )
+        plan = backend.plan(
+            ["/usr/bin/true"],
+            {"PATH": "/usr/bin", "NPM_CONFIG_CACHE": "/host/npm"},
+            _policy(layout, requirements),
+        )
+        assert "NPM_CONFIG_CACHE" not in plan.env
+        self._assert_private(plan, layout, "npm_config_cache")
+
+    def test_bundled_scanners_that_write_a_cache_declare_where(self):
+        """Measured under Landlock with the caches read-only: these failed or lost
+        findings until redirected (semgrep and opengrep cannot open their log under
+        ~/.semgrep or ~/.opengrep; npm-audit lost the vulnerable ranges it reads
+        from registry metadata it caches). grype's and trivy's databases are only
+        read, so they are not redirected."""
+        declared = {
+            getattr(cls, "__name__"): getattr(cls, "sandbox_requirements").cache_env
+            for cls in _bundled_scanner_classes()
+            if isinstance(
+                getattr(cls, "sandbox_requirements", None), SandboxRequirements
+            )
+        }
+        assert declared["SemgrepScanner"] == ("XDG_CONFIG_HOME",)
+        assert declared["OpengrepScanner"] == ("XDG_CONFIG_HOME",)
+        assert declared["NpmAuditScanner"] == ("npm_config_cache",)
+        assert declared["GrypeScanner"] == ()
+        assert declared["TrivyRepoScanner"] == ()
+
+
+#: Variables that name a local IPC endpoint: the SSH agent, the session bus, the
+#: Docker and Podman sockets, and the per-user runtime directory holding them.
+IPC_ENDPOINT_VARIABLES = {
+    "SSH_AUTH_SOCK": "/run/user/1000/ssh-agent.socket",
+    "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+    "DOCKER_HOST": "unix:///run/docker.sock",
+    "CONTAINER_HOST": "unix:///run/podman/podman.sock",
+    "XDG_RUNTIME_DIR": "/run/user/1000",
+}
+
+
+def _bundled_scanner_classes():
+    import importlib
+
+    for module in (
+        "ash_builtin",
+        "ash_snyk_plugins",
+        "ash_trivy_plugins",
+        "ash_ferret_plugins",
+    ):
+        package = importlib.import_module(
+            f"automated_security_helper.plugin_modules.{module}"
+        )
+        yield from package.ASH_SCANNERS
+
+
+def _every_declared_requirement():
+    """The sandbox requirements every bundled scanner declares on its class."""
+    found = []
+    for scanner in _bundled_scanner_classes():
+        declared = getattr(scanner, "sandbox_requirements", None)
+        # detect-secrets computes its own per instance; it declares no
+        # environment, only a network.
+        if isinstance(declared, SandboxRequirements):
+            found.append(declared)
+    return found
+
+
+class TestIpcEndpointVariables:
+    """None of IPC_ENDPOINT_VARIABLES reaches a scanner, on any backend.
+
+    The sockets themselves are out of reach (the escape suite asserts that under a
+    real scan); dropping the variables keeps a scanner from learning where they
+    are and from passing the address to a tool that would use it.
+    """
+
+    @pytest.mark.parametrize("network", [False, True])
+    def test_no_declared_prefix_lets_one_through(self, layout, network):
+        declared = _every_declared_requirement()
+        assert len(declared) >= 10, "too few scanners found to mean anything"
+        everything = SandboxRequirements(
+            network=network,
+            env_prefixes=tuple(p for r in declared for p in r.env_prefixes),
+            env_names=tuple(n for r in declared for n in r.env_names),
+        )
+        env = _policy(layout, everything).filter_env(
+            {"PATH": "/usr/bin", **IPC_ENDPOINT_VARIABLES}
+        )
+        assert env["PATH"] == "/usr/bin"
+        assert not set(IPC_ENDPOINT_VARIABLES) & set(env)
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="no backend runs on Windows")
+    @pytest.mark.parametrize("name", sorted(BACKENDS))
+    @pytest.mark.parametrize("network", [False, True])
+    def test_no_backend_hands_one_to_the_scanner(self, layout, name, network):
+        backend = BACKENDS[name]()
+        if hasattr(backend, "_executable"):
+            # Planning needs only the path; nothing is started.
+            backend._executable = f"/usr/bin/{name}"
+        policy = _policy(layout, SandboxRequirements(network=network))
+        plan = backend.plan(
+            ["/usr/bin/true"], {"PATH": "/usr/bin", **IPC_ENDPOINT_VARIABLES}, policy
+        )
+        try:
+            assert plan.env["PATH"] == "/usr/bin"
+            assert not set(IPC_ENDPOINT_VARIABLES) & set(plan.env), name
+        finally:
+            plan.run_cleanup()
 
 
 def _context(tmp_path, mode="bwrap"):
@@ -457,6 +711,100 @@ class TestReviewFindings:
                 spawn_run(["/usr/bin/true"])
         finally:
             _ACTIVE.reset(scope_reset)
+
+
+class TestSymlinkedOutputDirectory:
+    """The scanned repository cannot choose where the output directory really is.
+
+    The output directory is mounted into every sandbox and written by ASH, so a
+    link the repository commits on the way to it (``build -> /host/dir`` with
+    ``--output-dir build/ash``) would hand the repository a host directory.
+    """
+
+    @pytest.fixture
+    def tree(self, tmp_path):
+        source = tmp_path / "src"
+        source.mkdir()
+        target = tmp_path / "elsewhere"
+        (target / "deep").mkdir(parents=True)
+        return SimpleNamespace(source=source, target=target, root=tmp_path)
+
+    def test_a_link_on_the_way_down_is_refused(self, tree):
+        (tree.source / "build").symlink_to(tree.target, target_is_directory=True)
+        with pytest.raises(SandboxUnavailable, match="build is a symlink"):
+            refuse_symlinked_output_dir(tree.source, tree.source / "build" / "ash")
+
+    def test_the_default_location_as_a_link_is_refused(self, tree):
+        (tree.source / ".ash").mkdir()
+        (tree.source / ".ash" / "ash_output").symlink_to(
+            tree.target, target_is_directory=True
+        )
+        with pytest.raises(SandboxUnavailable, match="ash_output is a symlink"):
+            refuse_symlinked_output_dir(
+                tree.source, tree.source / ".ash" / "ash_output"
+            )
+
+    def test_a_dotdot_after_a_link_is_refused(self, tree):
+        # Reads as <source>/out; the kernel resolves it under the link's target.
+        (tree.source / "build").symlink_to(
+            tree.target / "deep", target_is_directory=True
+        )
+        with pytest.raises(SandboxUnavailable, match="build is a symlink"):
+            refuse_symlinked_output_dir(
+                tree.source, tree.source / "build" / ".." / "out"
+            )
+
+    def test_an_output_directory_that_is_a_link_is_refused_outside_the_tree(self, tree):
+        link = tree.root / "out-link"
+        link.symlink_to(tree.target, target_is_directory=True)
+        with pytest.raises(SandboxUnavailable, match="out-link is a symlink"):
+            refuse_symlinked_output_dir(tree.source, link)
+
+    def test_ordinary_output_directories_are_accepted(self, tree):
+        refuse_symlinked_output_dir(tree.source, tree.root / "out")
+        refuse_symlinked_output_dir(tree.source, tree.source / ".ash" / "ash_output")
+        (tree.source / ".ash" / "ash_output").mkdir(parents=True)
+        refuse_symlinked_output_dir(tree.source, tree.source / ".ash" / "ash_output")
+
+    def test_a_link_at_or_above_the_source_directory_is_the_operators(self, tree):
+        # A home directory that links elsewhere, or macOS's /var -> /private/var.
+        real = tree.root / "real"
+        (real / "src").mkdir(parents=True)
+        link = tree.root / "home-link"
+        link.symlink_to(real, target_is_directory=True)
+        source = link / "src"
+        refuse_symlinked_output_dir(source, source / ".ash" / "ash_output")
+        refuse_symlinked_output_dir(source, link / "out")
+
+    @pytest.mark.parametrize("mode", ["off", "landlock"])
+    def test_a_sandboxed_scan_stops_before_writing_through_it(self, tree, mode):
+        # The orchestrator checks before ensure_directories, which would create
+        # and clear subdirectories under the link's target.
+        from automated_security_helper.core.exceptions import ASHValidationError
+        from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+
+        (tree.source / "build").symlink_to(tree.target, target_is_directory=True)
+        orchestrator = ASHScanOrchestrator(
+            source_dir=tree.source, output_dir=tree.source / "build" / "ash"
+        )
+        orchestrator.config = AshConfig(sandbox=SandboxConfig(mode=mode))
+        if mode == "off":
+            orchestrator._refuse_symlinked_output_dir()
+        else:
+            with pytest.raises(ASHValidationError, match="build is a symlink"):
+                orchestrator._refuse_symlinked_output_dir()
+        assert sorted(p.name for p in tree.target.iterdir()) == ["deep"]
+
+    def test_every_spawn_policy_refuses_it(self, layout, tmp_path):
+        target = tmp_path / "elsewhere"
+        target.mkdir()
+        (layout.source / "build").symlink_to(target, target_is_directory=True)
+        with pytest.raises(SandboxUnavailable, match="build is a symlink"):
+            _policy(
+                layout,
+                output_dir=layout.source / "build" / "ash",
+                results_dir=layout.source / "build" / "ash" / "scanners" / "grype",
+            )
 
 
 class TestProbeScope:
@@ -795,25 +1143,41 @@ class TestSandboxExecProfile:
         for denied in (layout.results, tmp_path / "private-tmp", layout.source):
             assert _as_argv(denied) in _subpaths(deny), denied
 
-    def test_the_uv_cache_is_executable_and_other_caches_are_not(
+    def test_the_spawns_private_uv_cache_is_executable_and_nothing_else_written(
         self, layout, monkeypatch, tmp_path
     ):
         uv_cache = tmp_path / "uv-cache"
-        other_cache = tmp_path / "grype-cache"
+        other_cache = tmp_path / "npm-cache"
         uv_cache.mkdir()
         other_cache.mkdir()
         monkeypatch.setenv("UV_CACHE_DIR", str(uv_cache))
-        lines = _sbpl(
-            layout,
-            tmp_path,
-            requirements=SandboxRequirements(cache_paths=(str(other_cache),)),
+        requirements = SandboxRequirements(
+            cache_paths=(str(other_cache),), cache_env=("npm_config_cache",)
         )
-        ((_, allow),) = _indexed(lines, "(allow process-exec ")
-        ((_, deny),) = _indexed(lines, "(deny process-exec ")
-        assert _as_argv(uv_cache) in _subpaths(allow)
-        assert _as_argv(uv_cache) not in _subpaths(deny)
-        assert _as_argv(other_cache) in _subpaths(deny)
-        assert _as_argv(other_cache) not in _subpaths(allow)
+        plan = SandboxExecBackend().plan(
+            ["/usr/bin/true"], {}, _policy(layout, requirements)
+        )
+        try:
+            private_uv = _as_argv(plan.env["UV_CACHE_DIR"])
+            private_npm = _as_argv(plan.env["npm_config_cache"])
+            profile = plan.argv[plan.argv.index("-p") + 1].splitlines()
+            allowed = set().union(
+                *(
+                    _subpaths(rule)
+                    for _, rule in _indexed(profile, "(allow process-exec ")
+                )
+            )
+            ((deny_at, deny),) = _indexed(profile, "(deny process-exec ")
+            # `uv tool run` builds an uninstalled tool's environment in its cache
+            # and runs it from there; the private cache is this spawn's alone.
+            assert private_uv in allowed
+            last_allow = max(i for i, _ in _indexed(profile, "(allow process-exec "))
+            assert last_allow > deny_at
+            for never in (private_npm, _as_argv(uv_cache), _as_argv(other_cache)):
+                assert never not in allowed, never
+            assert {_as_argv(uv_cache), _as_argv(other_cache)} <= _subpaths(deny)
+        finally:
+            plan.run_cleanup()
 
     def test_the_scan_data_is_not_executable_inside_a_tool_path(self, layout, tmp_path):
         # A tool path that holds the scanned tree, as /opt holds a repository
@@ -953,7 +1317,7 @@ def _builtin_requirements():
 class TestMacosScannerDeclarations:
     """What each builtin scanner is granted for macOS, and how narrowly."""
 
-    def test_grype_reads_its_macos_database_and_never_updates_it_there(self):
+    def test_grype_reads_its_macos_database_read_only(self):
         from automated_security_helper.plugin_modules.ash_builtin.scanners import (
             grype_scanner,
         )
@@ -961,7 +1325,9 @@ class TestMacosScannerDeclarations:
         requirements = grype_scanner.GrypeScanner.sandbox_requirements
         assert "~/Library/Caches/grype" in requirements.read_paths
         assert "~/Library/Caches/grype" not in requirements.cache_paths
-        assert dict(requirements.sandbox_exec_env) == {"GRYPE_DB_AUTO_UPDATE": "false"}
+        # Not updated inside the sandbox: content_db_refresh updates the database
+        # outside it before an online scan and sets GRYPE_DB_AUTO_UPDATE=false.
+        assert dict(requirements.sandbox_exec_env) == {}
 
     def test_cdk_nag_does_not_use_the_shared_jsii_cache(self):
         from automated_security_helper.plugin_modules.ash_builtin.scanners import (
@@ -1027,17 +1393,14 @@ class TestUnpackDir:
             unpack = Path(plan.env["XDG_CACHE_HOME"])
             assert unpack.is_dir()
             profile = plan.argv[plan.argv.index("-p") + 1].splitlines()
-            ((_, allow),) = [
-                (i, line)
-                for i, line in enumerate(profile)
-                if line.startswith("(allow process-exec ")
-            ]
-            ((_, deny),) = [
-                (i, line)
-                for i, line in enumerate(profile)
-                if line.startswith("(deny process-exec ")
-            ]
-            assert _as_argv(unpack) in _subpaths(allow)
+            allowed = set().union(
+                *(
+                    _subpaths(rule)
+                    for _, rule in _indexed(profile, "(allow process-exec ")
+                )
+            )
+            ((_, deny),) = _indexed(profile, "(deny process-exec ")
+            assert _as_argv(unpack) in allowed
             assert _as_argv(unpack) not in _subpaths(deny)
             writable = set().union(
                 *(

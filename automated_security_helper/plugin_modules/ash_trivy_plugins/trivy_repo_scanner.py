@@ -42,6 +42,12 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.content_db_refresh import (
+    default_cache_dir,
+    prepare_content_db,
+    sandboxed_online,
+    scan_id_for,
+)
 from automated_security_helper.utils.process_env import snapshot_environ
 
 
@@ -497,6 +503,32 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 f"--ignorefile={self._ignore_file()}",
                 f"--secret-config={self._secret_config_file()}",
             ]
+            subprocess_env = (
+                {**snapshot_environ(), **self.extra_env} if self.extra_env else None
+            )
+            if sandboxed_online(self._scanner_offline()):
+                # The sandbox mounts trivy's cache read-only, so its database (and
+                # the checks bundle, for misconfiguration scans) is updated first,
+                # outside the sandbox, and trivy only reads it: no update of its
+                # own, and its scan cache in memory rather than in that cache. See
+                # utils/content_db_refresh.py. Not the Java database: `trivy
+                # repository` does not analyze JAR, WAR or EAR files and never reads
+                # it (measured with trivy 0.75), so its update is skipped rather
+                # than downloading about 935 MiB the scan would not use.
+                checks = "misconfig" in (self.config.options.scanners or [])
+                prepare_content_db(
+                    "trivy",
+                    default_cache_dir("trivy", subprocess_env or snapshot_environ()),
+                    offline=False,
+                    checks=checks,
+                    scan_id=scan_id_for(self.context),
+                )
+                final_args[insert_at:insert_at] = [
+                    "--skip-db-update",
+                    "--skip-java-db-update",
+                    *(["--skip-check-update"] if checks else []),
+                    "--cache-backend=memory",
+                ]
 
             self._plugin_log(
                 f"Running command: {' '.join(final_args)}",
@@ -504,9 +536,6 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 level=logging.VERBOSE,
             )
 
-            subprocess_env = (
-                {**snapshot_environ(), **self.extra_env} if self.extra_env else None
-            )
             self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,

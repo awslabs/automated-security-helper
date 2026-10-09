@@ -176,6 +176,9 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
         cache_paths=("~/.opengrep",),
+        # opengrep keeps semgrep's rule: its log and settings go to
+        # $XDG_CONFIG_HOME/.opengrep when that is set.
+        cache_env=("XDG_CONFIG_HOME",),
         env_prefixes=("OPENGREP_", "SEMGREP_"),
         # The macOS binary is a Nuitka onefile build that unpacks itself to
         # {CACHE_DIR}/opengrep/<version>, which is $XDG_CACHE_HOME when set, and

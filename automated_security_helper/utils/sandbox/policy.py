@@ -40,9 +40,16 @@ class SandboxRequirements:
             database, a rule pack, or registry data). Never granted under --offline.
         read_paths: Extra host paths, ``~`` and ``$VAR`` expanded, mounted read-only.
             Missing paths are skipped.
-        cache_paths: Host paths the tool writes caches or settings to. Mounted
-            writable through a throwaway overlay where the backend supports one, so
-            writes never reach the host; read-write otherwise.
+        cache_paths: Host paths the tool keeps caches, settings or a content
+            database in. Writable through a throwaway overlay where the backend has
+            one (bwrap), so writes never reach the host; read-only everywhere else,
+            because a write in place would change what later runs, sandboxed or
+            not, read from the cache.
+        cache_env: Variables that move a tool's writable cache (``npm_config_cache``).
+            Where ``cache_paths`` are read-only, each variable named here points at
+            a private, empty directory for the spawn, so a tool that has to write
+            its cache still can. A cache that is only read, such as a vulnerability
+            database prepared before the scan, is not listed.
         env_prefixes: Environment variable name prefixes passed through in addition to
             the baseline allowlist (``GRYPE_``, ``SEMGREP_``, ...). Credential-shaped
             names under an allowed prefix are still dropped; see ``env_names``.
@@ -63,9 +70,9 @@ class SandboxRequirements:
         sandbox_exec_env: ``(name, value)`` pairs set in the scanner's environment
             under sandbox-exec only, after the allowlist. That backend has no
             throwaway overlay, so a cache it could write would be written in place
-            and read by every later run. These keep the tool from writing what it
-            is given read-only there: grype's database (no update inside the
-            sandbox), jsii's package cache (not used at all).
+            and read by every later run. For a tool that would otherwise reach for
+            a shared cache that backend keeps out of reach: cdk-nag turns jsii's
+            package cache (``~/Library/Caches/com.amazonaws.jsii``) off.
         unpack_dir_env: The tool unpacks itself and runs what it unpacked, at a
             location this environment variable decides (opengrep's macOS binary,
             built with Nuitka's onefile mode, unpacks to
@@ -80,6 +87,7 @@ class SandboxRequirements:
     network: bool = False
     read_paths: Tuple[str, ...] = ()
     cache_paths: Tuple[str, ...] = ()
+    cache_env: Tuple[str, ...] = ()
     env_prefixes: Tuple[str, ...] = ()
     env_names: Tuple[str, ...] = ()
     network_requires_grant: bool = False
@@ -181,9 +189,9 @@ class SandboxPolicy:
 
     ``executable`` and ``scan_data`` are for a backend that can restrict which files
     a process may execute (sandbox-exec). ``executable`` is ``read_only`` without the
-    scan's own data, so the system and tool paths, plus uv's cache, which is where
-    ``uv tool run`` keeps the environments of tools it was not asked to install.
-    Programs run from there and from nowhere else. ``scan_data`` is the scan's data
+    scan's own data, so the system and tool paths. Programs run from there, and from
+    the spawn's private uv cache, which the backend adds because ``uv tool run``
+    keeps the environments of tools it was not asked to install there. ``scan_data`` is the scan's data
     (the source tree, the output directory, the scan target and the working
     directory), which stays non-executable even where a tool path contains it, so a
     repository checked out under ``/opt`` cannot have its own binaries run.
@@ -199,6 +207,9 @@ class SandboxPolicy:
     env_prefixes: Tuple[str, ...] = ()
     env_names: Tuple[str, ...] = ()
     extra_env: Dict[str, str] = field(default_factory=dict)
+    #: Variables a backend points at a private writable directory when it mounts
+    #: ``cache`` read-only, which is everywhere but bwrap's throwaway overlay.
+    cache_env: Tuple[str, ...] = ()
     executable: Tuple[Path, ...] = ()
     scan_data: Tuple[Path, ...] = ()
     system_trust_roots: bool = False
@@ -208,6 +219,11 @@ class SandboxPolicy:
     #: it looks for an installed tool. The file, not the directory: writing the
     #: lock changes nothing a later run reads.
     uv_tool_locks: Tuple[Path, ...] = ()
+
+    @property
+    def results_dir(self) -> Path:
+        """The scanner's results directory, the one writable path."""
+        return self.writable[0]
 
     def filter_env(self, env: Mapping[str, str]) -> Dict[str, str]:
         """Reduce ``env`` to the allowlist, then point HOME inside."""
@@ -552,6 +568,61 @@ def _readable_cwd(cwd: Optional[Path]) -> Optional[Path]:
     return None if absolute == Path(absolute.anchor) else cwd
 
 
+def refuse_symlinked_output_dir(source_dir: Path, output_dir: Path) -> None:
+    """Refuse an output directory reached through a symlink in the scanned tree.
+
+    Every sandbox mounts the output directory read-only and the results directory
+    below it writable, and ASH writes there unsandboxed. The default
+    ``.ash/ash_output``, or an ``--output-dir`` inside the source tree, is spelled
+    through directories the scanned repository controls: committing
+    ``build -> /some/host/dir`` and being scanned with ``--output-dir build/ash``
+    would let the repository pick a host directory for the sandbox to show and
+    for ASH to write.
+
+    Refused, with the path in the message: any component from below the source
+    directory down to the output directory that is a symlink; the output
+    directory itself if it is one, wherever it is; and an output directory inside
+    the source tree whose real path is not the source directory's real path plus
+    the rest of its spelling (a ``..`` after a symlink resolves elsewhere than it
+    reads). Components at and above the source directory are the operator's own
+    spelling (a home directory that links elsewhere, macOS's ``/var``) and are not
+    examined, so an ordinary output directory outside the tree is unaffected.
+    """
+    source = Path(os.path.abspath(source_dir))
+    spelled = Path(output_dir).absolute()
+
+    def refuse_link(path: Path) -> None:
+        if path.is_symlink():
+            raise SandboxUnavailable(
+                f"the output directory path {path.as_posix()} is a symlink, so "
+                "mounting the output directory would expose wherever it points"
+            )
+
+    # Walked as spelled, `..` included, so a link that a later `..` would step
+    # back out of is still seen.
+    current = Path(spelled.anchor)
+    for part in spelled.parts[1:]:
+        if part == "..":
+            current = current.parent
+            continue
+        if part in ("", "."):
+            continue
+        current = current / part
+        if source in current.parents:
+            refuse_link(current)
+    refuse_link(current)
+    lexical = Path(os.path.abspath(spelled))
+    if source in lexical.parents:
+        expected = Path(os.path.realpath(source)) / lexical.relative_to(source)
+        actual = Path(os.path.realpath(lexical))
+        if actual != expected:
+            raise SandboxUnavailable(
+                f"the output directory {lexical.as_posix()} resolves to "
+                f"{actual.as_posix()}, not where its path inside the source "
+                "directory reads, so mounting it would expose another directory"
+            )
+
+
 def build_scanner_policy(
     scanner_name: str,
     requirements: SandboxRequirements,
@@ -601,6 +672,7 @@ def build_scanner_policy(
         [uv_cache_directory()] + [_expand(p) for p in requirements.cache_paths]
     )
 
+    refuse_symlinked_output_dir(source_dir, output_dir)
     _refuse_symlinked_results_dir(output_dir, results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
     writable = [results_dir.absolute()]
@@ -621,21 +693,15 @@ def build_scanner_policy(
     scan_data = _existing([source_dir, output_dir, scan_target, cwd])
     not_programs = {os.path.realpath(p) for p in [*scan_data, *_DATA_SYSTEM_PATHS]}
     executable = [p for p in read_only if os.path.realpath(p) not in not_programs]
-    # The only writable place programs may run from: `uv tool run --from <req>`
-    # (bandit, checkov and semgrep without `ash dependencies install`) builds the
-    # tool's environment under the cache and runs its entry point from there.
-    uv_cache = uv_cache_directory()
-    executable += [
-        p
-        for p in cache
-        if uv_cache and os.path.realpath(p) == os.path.realpath(uv_cache)
-    ]
 
     extra_env: Dict[str, str] = {}
     if not network:
         # uv otherwise tries the index before using what it has cached, and fails
         # with a DNS error rather than running the tool.
         extra_env["UV_OFFLINE"] = "1"
+    # uv opens its cache for writing on every run, to lock it, so it cannot use one
+    # it may only read: where the host cache is read-only, uv gets a private one.
+    cache_env = tuple(dict.fromkeys(("UV_CACHE_DIR", *requirements.cache_env)))
 
     return SandboxPolicy(
         scanner_name=scanner_name,
@@ -648,6 +714,7 @@ def build_scanner_policy(
         env_prefixes=tuple(requirements.env_prefixes),
         env_names=tuple(requirements.env_names),
         extra_env=extra_env,
+        cache_env=cache_env,
         executable=tuple(executable),
         scan_data=tuple(scan_data),
         system_trust_roots=requirements.system_trust_roots,

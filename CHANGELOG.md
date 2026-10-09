@@ -77,6 +77,9 @@
   `MISSING` with the reason and the scan exits 1. ASH never falls back to running it
   unsandboxed. `auto` picks bubblewrap, then firejail, then Landlock on Linux, and
   sandbox-exec on macOS. There is no Windows backend: use WSL2 or container mode.
+  firejail counts as available only when a test command it runs lands in a sandbox:
+  inside a container with its own PID namespace firejail runs commands without one,
+  so there it is unavailable and `auto` moves on to Landlock.
   Container mode ignores the setting, because the container is the boundary.
 
   Two timeout behaviors change with the worker move, sandbox or not. cdk-nag now

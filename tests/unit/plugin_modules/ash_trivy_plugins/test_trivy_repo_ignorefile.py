@@ -156,3 +156,41 @@ def test_the_flags_follow_the_subcommand_however_the_target_is_spelled(tmp_path)
     assert argv[2].startswith("--ignorefile=")
     assert argv[3].startswith("--secret-config=")
     assert argv[4:] == resolved[2:]
+
+
+def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_update(
+    tmp_path,
+):
+    """Both changes to trivy-repo's argv at once: an online scan in a sandbox.
+
+    The database is prepared outside the sandbox and trivy is told not to update
+    it, and the ignore file is still ASH's own, not the scanned tree's .trivyignore.
+    """
+    from automated_security_helper.plugin_modules.ash_trivy_plugins import (
+        trivy_repo_scanner,
+    )
+
+    source = _tree(tmp_path)
+    prepared = []
+    with (
+        patch.object(trivy_repo_scanner, "sandboxed_online", return_value=True),
+        patch.object(
+            trivy_repo_scanner,
+            "prepare_content_db",
+            side_effect=lambda tool, *a, **k: prepared.append((tool, k)),
+        ),
+    ):
+        argv = _argv(tmp_path, source, {"ignore_file": ".trivyignore"})
+    assert [tool for tool, _ in prepared] == ["trivy"]
+    assert prepared[0][1]["offline"] is False
+    passed = _ignorefile(argv)
+    assert not passed.resolve().is_relative_to(source.resolve())
+    assert passed.read_text() == ""
+    flags = ["--skip-db-update", "--skip-java-db-update", "--cache-backend=memory"]
+    for flag in flags:
+        assert flag in argv, argv
+    # Every inserted flag sits between the subcommand and the target.
+    subcommand_at = argv.index("repository")
+    target_at = max(i for i, a in enumerate(argv) if Path(a) == source)
+    for flag in [*flags, f"--ignorefile={passed}"]:
+        assert subcommand_at < argv.index(flag) < target_at, argv

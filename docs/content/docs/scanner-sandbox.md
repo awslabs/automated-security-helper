@@ -47,12 +47,28 @@ it needs.
 - `/tmp` and `$HOME` are private and empty. Your real home directory is not visible.
   The tool locations a scanner needs (ASH's bin directory, uv's tool and Python
   directories, the scanner's declared caches) are mounted at their usual paths.
-- Tool caches a scanner writes to (uv's cache, grype's and trivy's databases, semgrep's
-  settings) are writable through a throwaway overlay under bwrap (bubblewrap 0.8+ and
-  Linux 5.11+): writes succeed but are discarded when the scanner exits, so a scanner
-  cannot change the cache another scanner or a later run reads. firejail and Landlock
-  have no such overlay and mount these caches writable in place, so under them a
-  scanner can change what later runs, sandboxed or not, read from its caches.
+- Tool caches (uv's cache, grype's and trivy's databases, semgrep's settings) are
+  writable only where the writes are thrown away: under bwrap (bubblewrap 0.8+ and
+  Linux 5.11+) through an overlay, so writes succeed but are discarded when the
+  scanner exits. firejail, Landlock, sandbox-exec, and bwrap without overlay support
+  mount them read-only, because a write in place would change what later runs,
+  sandboxed or not, read; uv hard-links its cache into the tool environments it
+  builds. There, uv and the scanners that have to write a cache (semgrep, opengrep,
+  npm-audit) get a private, empty one under the results directory, removed after the
+  spawn, so uv starts from an empty cache: online it downloads what it runs, offline
+  it has nothing cached.
+- grype and trivy cannot update their databases from inside a sandbox, so before a
+  sandboxed online scan ASH updates them itself, outside the sandbox: `grype db
+  update`, and `trivy image --download-db-only` plus, for a misconfiguration scan,
+  trivy's checks bundle. Nothing from the scanned repository reaches these: they run
+  from an empty directory outside every checkout, with an explicit empty config file,
+  against the cache directory the scan reads. A lock in that cache directory makes
+  concurrent scans take turns, and each tool is updated once per scan. The scanners
+  then run with their own update turned off (`--skip-db-update`,
+  `GRYPE_DB_AUTO_UPDATE=false`). Offline nothing is updated, and in both cases ASH's
+  staleness check still holds the database to its bound. trivy's Java database
+  (about 935 MiB) is not updated and trivy-repo runs with `--skip-java-db-update`:
+  `trivy repository` does not analyze JAR, WAR or EAR files and never reads it.
 - System directories (`/usr`, `/etc`, `/opt`, `/nix`) and the directories on `PATH`
   are read-only. Inside `$HOME` only `PATH` entries named `bin`, `sbin` or `Scripts`
   are mounted, and a tool's install prefix only when it is deeper than a directory
@@ -63,11 +79,24 @@ it needs.
   `AUTH`, `CREDENTIAL`, `API_KEY` or `SESSION`, and any value carrying
   `user:password@` in a URL, is dropped unless the scanner names that exact variable
   (snyk-code names `SNYK_TOKEN`). Cloud credentials and tokens are not passed in.
-- No local IPC endpoint is reachable: not the Docker or Podman socket, the session
-  bus, `$SSH_AUTH_SOCK`, nor anything else under `/run`.
+- No local IPC endpoint is reachable, with or without a network: not the Docker or
+  Podman socket, the session bus, `$SSH_AUTH_SOCK`, the journal, nor a socket in a
+  directory the sandbox mounts, such as the Nix daemon's under `/nix`. On Linux every
+  backend refuses `socket(AF_UNIX)` and datagram `socketpair()` with a seccomp filter
+  (see Landlock below), so neither a socket path nor an abstract socket can be
+  reached. The variables that name these endpoints (`SSH_AUTH_SOCK`,
+  `DBUS_SESSION_BUS_ADDRESS`, `DOCKER_HOST`, `CONTAINER_HOST`, `XDG_RUNTIME_DIR`)
+  are not passed in. firejail sets `DBUS_SESSION_BUS_ADDRESS` itself, to a path of
+  its own that `--dbus-user=none` leaves unserved.
 - A results directory that is, or is reached through, a symlink is refused (the
   scanner is recorded `MISSING`). The default output directory is inside the source
   tree, so the scanned repository could otherwise plant one pointing anywhere.
+- So is an output directory that is a symlink, or that is reached through one below
+  the source directory (a committed `build -> /some/host/dir` scanned with
+  `--output-dir build/ash`), or whose real path differs from where its path inside
+  the source directory reads. A sandboxed scan stops with an error before ASH writes
+  anything there. Links at or above the source directory are your own and are not
+  examined, and with the sandbox off the output goes where you send it, as before.
 - ASH writes into the results directory after the scanner exits, and ASH is not
   sandboxed. So after every sandboxed spawn, and again after the scan, ASH removes
   every symlink and special file the scanner left there, and ASH's own writes there
@@ -84,13 +113,13 @@ it needs.
 
 ### Per-scanner needs
 
-| Scanner | Network when online | Writable caches | Runtime |
-|---------|--------------------|-----------------|---------|
+| Scanner | Network when online | Caches | Runtime |
+|---------|--------------------|--------|---------|
 | bandit | no | uv cache | uv-managed Python |
 | checkov | no | uv cache | uv-managed Python |
 | semgrep | yes (registry rules, `p/ci`) | uv cache, `~/.semgrep` | uv-managed Python |
 | opengrep | yes (registry rules) | `~/.opengrep` | single binary; on macOS it unpacks itself into a private directory per spawn |
-| grype | yes (database update) | grype database cache; on macOS the database is read-only and not updated inside the sandbox | single binary |
+| grype | yes (database update) | grype database cache; on macOS, `~/Library/Caches/grype` | single binary |
 | syft | no | syft cache | single binary |
 | trivy | yes (database update) | trivy cache | single binary |
 | npm-audit | yes (registry audit API) | `~/.npm` | Node.js |
@@ -123,15 +152,17 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
         network=True,
         # Extra read-only paths.
         read_paths=("~/.my-tool/rules",),
-        # Writable, through an overlay where the backend has one.
+        # Read-only, or writable through bwrap's throwaway overlay.
         cache_paths=("~/.cache/my-tool",),
+        # Where the cache is read-only, these point at a private, empty
+        # directory, for a tool that has to write its cache.
+        cache_env=("MYTOOL_CACHE_DIR",),
         # Variables passed through.
         env_prefixes=("MYTOOL_",),
         # Credential-shaped names it needs.
         env_names=("MYTOOL_TOKEN",),
-        # Set under sandbox-exec only, which has no overlay: keep the tool from
-        # writing a cache it gets read-only there.
-        sandbox_exec_env=(("MYTOOL_AUTO_UPDATE", "false"),),
+        # Set under sandbox-exec only, after the allowlist.
+        sandbox_exec_env=(("MYTOOL_PACKAGE_CACHE", "disabled"),),
         # The tool unpacks itself where this variable says and runs what it
         # unpacked; sandbox-exec points it at a private directory per spawn.
         unpack_dir_env="XDG_CACHE_HOME",
@@ -244,8 +275,10 @@ Out of scope:
   this; review the plugin modules a repository's config names before you scan it.
 - Resource exhaustion. A scanner can still use all the CPU and memory it can get, or
   fork until a limit stops it; the existing per-scanner `scan_timeout` bounds how long.
-- A scanner allowed a network under bwrap shares the host's network namespace, which
-  includes abstract Unix sockets bound by host processes.
+- A scanner allowed a network shares the host's network, so TCP and UDP services
+  listening on the host, loopback included, are reachable from it under every
+  backend. Abstract Unix sockets bound by host processes are not: the socket filter
+  refuses Unix sockets.
 - A scanner allowed a network can still send what it can read (the source tree)
   wherever it likes. The online allowlist is per scanner, not per host. Host-level
   filtering would need a proxy inside the sandbox, which tools can bypass unless the
@@ -283,6 +316,15 @@ network namespaces. It needs no setuid binary on distributions that allow unpriv
 user namespaces. ASH passes `--die-with-parent` and `--new-session`, so a scanner
 cannot outlive ASH or inject keystrokes into the terminal through `TIOCSTI`.
 
+bwrap's mounts hide `/run` and `$HOME`, but not a Unix socket inside a directory it
+does mount (the Nix daemon's socket is under `/nix`), and a scanner with a network
+shares the host's network namespace and every abstract Unix socket bound there. So
+the scanner is started through the Landlock wrapper in `--socket-filter` mode, which
+installs only its seccomp socket filter (described under Landlock) and then execs the
+scanner. IP sockets are left to the network namespace, so a tool can still use its own
+loopback when it has no network. ASH's probe runs the filter inside bwrap once, so an
+architecture the filter does not cover makes bwrap unavailable rather than unfiltered.
+
 Ubuntu 23.10 and later restrict unprivileged user namespaces through AppArmor
 (`kernel.apparmor_restrict_unprivileged_userns=1`). Install bubblewrap from the
 distribution (`apt install bubblewrap`); if `bwrap --unshare-all --ro-bind / / true`
@@ -294,8 +336,8 @@ start is reported as unavailable with the error it printed, not used and found b
 mid-scan.
 
 The throwaway cache overlay uses `--overlay-src`/`--tmp-overlay`, which needs
-bubblewrap 0.8 and Linux 5.11. On older systems those caches are mounted read-write
-instead, and the log says so.
+bubblewrap 0.8 and Linux 5.11. On older systems those caches are mounted read-only
+instead, as under the other backends, and the log says so.
 
 ### Linux: firejail (fallback)
 
@@ -308,8 +350,21 @@ makes `/` read-only, blacklists the container runtime sockets, `/run/user/<uid>`
 `$SSH_AUTH_SOCK`, whitelists inside `$HOME` (and `/tmp`) only the paths the policy
 lists, uses `--private-tmp` when the policy lists nothing under `/tmp`, and makes the
 results directory read-write. Paths outside `$HOME` that your user can read remain readable, and scanner
-caches are mounted read-write because firejail has no throwaway overlay. Use bwrap
+caches are read-only because firejail has no throwaway overlay. Because
+everything outside `$HOME` stays visible, `/run` and its sockets included, the
+scanner is started through the same seccomp socket filter as under bwrap. Use bwrap
 when you can.
+
+firejail also decides for itself whether to build a sandbox at all. When it finds no
+kernel threads among the first ten PIDs, as inside a container that has its own PID
+namespace, it concludes it is already sandboxed and runs the command with none of the
+options above. The command still exits 0, and the only sign is a warning that
+`--quiet` hides. So ASH's probe runs `readlink /proc/self/ns/mnt` under the same
+options, without `--quiet`, and requires a mount namespace other than ASH's own, since
+every sandbox firejail builds has one. When the command reports ASH's namespace, or
+firejail prints that warning, firejail is unavailable with that reason:
+`--sandbox firejail` records each scanner `MISSING`, and `--sandbox auto` moves on to
+Landlock.
 
 ### Linux: Landlock
 
@@ -323,11 +378,20 @@ library only) that restricts itself and then `exec`s the scanner:
 - Sockets: Landlock does not mediate `connect()` on a Unix socket path, so a scanner
   that could create a Unix socket could talk to the Docker socket or the session bus
   whatever the filesystem rules say. A seccomp filter therefore refuses
-  `socket(AF_UNIX)` always (`socketpair`, used for pipes, still works), refuses
+  `socket(AF_UNIX)` always. `socketpair()` of the stream and seqpacket kinds, which
+  tools use for pipes, still works; a datagram pair is refused, because a datagram
+  socket can `sendto()` or `connect()` any datagram socket by path, such as the
+  journal's `/dev/log`, however it was created. The filter also refuses
   `socket()` for every family when the scanner has no network, which blocks UDP and
   DNS too, and refuses `io_uring_setup`, because io_uring can create sockets without
   the `socket` syscall. Landlock's own network rules (ABI 4, Linux 6.7) cover only TCP
   and are added as a second layer.
+- A tool that creates a Unix socket of its own fails too, under this backend and, since
+  bwrap and firejail run the same filter, under every Linux backend. Python 3.14's
+  default multiprocessing start method, `forkserver`, is one: it listens on a Unix
+  socket, so a Python tool on 3.14 that relies on the default fails with
+  `PermissionError`, while the `fork` and `spawn` methods work. ASH's own workers
+  select `fork`, and the builtin scanners do not rely on the default.
 - The wrapper starts a new session before it execs the scanner, so the scanner has no
   controlling terminal to inject keystrokes into.
 - `/dev/shm` is the host's and is writable, because POSIX semaphores live there and
@@ -346,8 +410,8 @@ library only) that restricts itself and then `exec`s the scanner:
 Landlock cannot mount an empty `/tmp` or `$HOME` over the real ones; it denies them
 instead. `TMPDIR` and `HOME` point at a fresh private directory, and each path the
 policy grants under the real home appears in the private one as a symlink to the real
-path, so tools that write settings under `~` keep working. Granted caches are writable
-in place rather than through an overlay. A tool that hard-codes `/tmp` fails rather
+path, so tools that write settings under `~` keep working. Granted caches are read-only,
+as Landlock has no overlay. A tool that hard-codes `/tmp` fails rather
 than escaping.
 
 ### macOS: sandbox-exec
@@ -361,12 +425,14 @@ resolver's (`mDNSResponder`), so Docker Desktop's socket and the launchd SSH age
 stay out of reach. The scanner starts in a new session, with no controlling terminal.
 
 Programs run only from the system and tool paths the policy makes readable, and from
-uv's cache, where `uv tool run` keeps the environments of tools it was not asked to
-install. Nothing runs from the source tree, the output and results directories, the
-other caches or the private `TMPDIR`, even where a tool path contains one of them (a
-repository checked out under `/opt`), so a program the scanner writes, or one the
-scanned repository ships, cannot be started. A tool path inside the scanned tree, such
-as a virtualenv ASH itself runs from, stays executable.
+two directories made for the spawn alone: its private uv cache, where `uv tool run`
+keeps the environments of tools it was not asked to install, and a self-unpacking
+tool's unpack directory (below). Nothing runs from the source tree, the output and
+results directories, the host caches, the other private caches or the private
+`TMPDIR`, even where a tool path contains one of them (a repository checked out under
+`/opt`), so a program the scanner writes, or one the scanned repository ships, cannot
+be started. A tool path inside the scanned tree, such as a virtualenv ASH itself runs
+from, stays executable.
 
 Mach service lookups are limited to a list measured on the macOS 14, 15 and 26 CI
 runners, where the ten builtin scanners looked up the same thirteen services on all
@@ -391,15 +457,13 @@ the spawn, outside the sandbox, with the same command (`security find-certificat
 read and not write, and sets `SSL_CERT_FILE` to it, which ca-certs reads instead. An
 `SSL_CERT_FILE` you set yourself is passed through and wins.
 
-sandbox-exec has no throwaway overlay, so a cache it lets a scanner write is written
-in place, and the next run, sandboxed or not, reads what the scanner left there. The
-macOS-specific locations are therefore declared per scanner and granted as narrowly as
-the tool allows:
+sandbox-exec has no throwaway overlay, so caches are read-only there, as above. The
+macOS-specific locations are declared per scanner and granted as narrowly as the tool
+allows:
 
-- grype's database at `~/Library/Caches/grype` is read-only, and grype runs with
-  `GRYPE_DB_AUTO_UPDATE=false`, so it uses the database it finds and still checks its
-  age online. Update it outside the sandbox (`grype db update`, or an unsandboxed
-  scan) when it is too old.
+- grype's database at `~/Library/Caches/grype`, its default location on macOS, is
+  read-only. Before an online scan ASH updates it there, outside the sandbox, as it
+  does `~/.cache/grype` on Linux.
 - cdk-nag runs with jsii's package cache disabled, so jsii unpacks into its own
   temporary directory instead of the shared `~/Library/Caches/com.amazonaws.jsii`,
   whose JavaScript every CDK process on the machine runs.

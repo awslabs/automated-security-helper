@@ -105,6 +105,9 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
         cache_paths=("~/.semgrep",),
+        # semgrep writes its settings, log and rule files to $XDG_CONFIG_HOME/.semgrep
+        # when that is set; where ~/.semgrep is read-only, that is a private one.
+        cache_env=("XDG_CONFIG_HOME",),
         env_prefixes=("SEMGREP_",),
         # semgrep-core loads root certificates through OCaml's ca-certs, which on
         # macOS runs /usr/bin/security against the system keychains.
