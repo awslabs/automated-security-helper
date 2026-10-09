@@ -215,7 +215,7 @@ jobs:
     permissions:
       contents: read
     container:
-      image: gradle:jdk21@sha256:4debe478645a3ad9208f3403ac021859fdf4d1a819d59970d75309b098f28f76
+      image: gradle:jdk21@sha256:d5c815d1281e3edc7e986ca573b1b309639747fa0d91a2199adadf327cfdf634
       options: --init
     defaults:
       run:
