@@ -46,6 +46,7 @@ rather than just its plumbing:
 
 import base64
 import json
+import re
 import sys
 import types
 from pathlib import Path
@@ -2326,3 +2327,27 @@ def test_the_debug_log_does_not_dump_the_template(cdk_doubles, template_file, ou
     messages = [r.getMessage() for r in records]
     assert not any(SCANNED_TREE_MARKER.lower() in m for m in messages), messages
     assert any("2 resource(s)" in m for m in messages), messages
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs symlinks")
+def test_a_link_left_at_the_copys_name_is_not_written_through(
+    cdk_doubles, include_contents, template_file, outdir, tmp_path
+):
+    """The copy for CfnInclude is created fresh, never through what is at its name."""
+    other = tmp_path / "elsewhere.yaml"
+    other.write_text("unchanged\n", encoding="utf-8")
+    synth_dir = outdir.joinpath(
+        re.sub(
+            r"(\/|\\|\.)+",
+            "--",
+            str(cdk_nag_wrapper.get_shortest_name(input=template_file)).lstrip("/"),
+        )
+    )
+    synth_dir.mkdir(parents=True)
+    (synth_dir / ".ash-cfn-include.yaml").symlink_to(other)
+    cdk_doubles.report_text = _one_violation_report()
+
+    _run(template_file, outdir, scan_root=template_file.parent)
+
+    assert other.read_text(encoding="utf-8") == "unchanged\n"
+    assert include_contents == [TEMPLATE_YAML]

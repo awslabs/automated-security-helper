@@ -123,6 +123,12 @@ def write_notebook(directory: Path, name: str) -> Path:
     return path
 
 
+def notebook_arg(cmd) -> str:
+    """The notebook on an nbconvert command line, found by its suffix."""
+    (path,) = [arg for arg in cmd if str(arg).endswith(".ipynb")]
+    return path
+
+
 def nbconvert_double(returncode=0, stdout="", stderr="", create_output=True):
     """Stand in for subprocess.run over `jupyter nbconvert`.
 
@@ -137,7 +143,7 @@ def nbconvert_double(returncode=0, stdout="", stderr="", create_output=True):
         calls.append(list(cmd))
         # What nbconvert was given to read, captured while it still exists: the
         # converter hands it a staged copy that is removed afterwards.
-        inputs.append(Path(cmd[6]).read_bytes() if len(cmd) > 6 else None)
+        inputs.append(Path(notebook_arg(cmd)).read_bytes())
         if create_output and "--output" in cmd:
             out = Path(cmd[cmd.index("--output") + 1] + ".py")
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -537,12 +543,14 @@ class TestConvert:
         ]
         # nbconvert reads a copy made through the checked handle, never the tree
         # path itself, so a link swapped in after the check cannot be followed.
-        assert Path(cmd[6]).name == notebook.name
-        assert cmd[6] != str(notebook)
+        assert Path(notebook_arg(cmd)).name == notebook.name
+        assert notebook_arg(cmd) != str(notebook)
         assert run.inputs == [notebook.read_bytes()]
-        assert not Path(cmd[6]).exists(), "the staged copy is removed afterwards"
-        assert cmd[7] == "--output"
-        assert not cmd[8].endswith(".py"), "nbconvert appends .py itself"
+        assert not Path(notebook_arg(cmd)).exists(), "the staged copy is removed"
+        assert "--output" in cmd
+        assert not cmd[cmd.index("--output") + 1].endswith(".py"), (
+            "nbconvert appends .py itself"
+        )
 
     def test_directories_in_the_scan_set_are_skipped(
         self, converter, ash_log_records, monkeypatch
@@ -596,8 +604,11 @@ class TestConvert:
         run = nbconvert_double()
         monkeypatch.setattr(f"{MODULE}.subprocess.run", run)
 
+        uv_cwds = []
+
         def fake_uv(cmd, timeout=60, cwd=None):
             # Stand in for nbconvert succeeding under uv: write the output file.
+            uv_cwds.append(cwd)
             out = Path(cmd[cmd.index("--output") + 1] + ".py")
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text("converted\n", encoding="utf-8")
@@ -609,6 +620,14 @@ class TestConvert:
 
         assert len(results) == 1
         assert run.calls == [], "subprocess must not run when uv succeeded"
+        # uv runs nbconvert outside the scanned tree, never inheriting a cwd.
+        (cwd,) = uv_cwds
+        assert cwd is not None
+        assert (
+            not Path(cwd)
+            .resolve()
+            .is_relative_to(converter.context.source_dir.resolve())
+        )
 
     def test_uv_failure_falls_back_to_subprocess(
         self, converter, ash_log_records, monkeypatch
@@ -669,7 +688,7 @@ class TestConvert:
         )
 
         def _run(cmd, *args, **kwargs):
-            if Path(cmd[6]).name == broken.name:
+            if Path(notebook_arg(cmd)).name == broken.name:
                 return subprocess.CompletedProcess(cmd, 1, "", stderr_text)
             out = Path(cmd[cmd.index("--output") + 1] + ".py")
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -738,7 +757,7 @@ class TestConvert:
         real = nbconvert_double()
 
         def _run(cmd, *args, **kwargs):
-            if Path(cmd[6]).name == first.name:
+            if Path(notebook_arg(cmd)).name == first.name:
                 raise ValueError("something unexpected")
             return real(cmd, *args, **kwargs)
 

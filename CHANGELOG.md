@@ -164,8 +164,8 @@
 
 - **The Jupyter converter runs nbconvert outside the scanned tree, with an exporter
   ASH chooses.** nbconvert runs in a directory that holds only a copy of the
-  notebook, so files in the scanned tree are not on its import path and its
-  `jupyter_nbconvert_config` files are not read from there. The exporter is
+  notebook, so files in the scanned tree are not on its import path (nbconvert puts
+  its working directory first on `sys.path`). The exporter is
   `python` for a Python notebook (or one that names no language) and `script`
   otherwise, and `language_info.nbconvert_exporter` is removed from the copy, so the
   notebook's metadata does not choose the exporter class. A Python notebook whose

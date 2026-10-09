@@ -47,6 +47,7 @@ pytestmark = pytest.mark.skipif(
 DRIVER = textwrap.dedent(
     """
     import json
+    import os
     import subprocess
     import sys
     from pathlib import Path
@@ -54,29 +55,46 @@ DRIVER = textwrap.dedent(
     from automated_security_helper.plugin_modules.ash_builtin.converters import (
         jupyter_converter,
     )
+    from automated_security_helper.utils import uv_tool_runner
 
-    real_run = subprocess.run
+    real_get_runner = uv_tool_runner.get_uv_tool_runner
+    calls_log = Path(os.environ["ASH_TEST_NBCONVERT_CALLS"])
 
-    def nbconvert_to_script(cmd, *args, **kwargs):
-        if list(cmd[:2]) != ["jupyter", "nbconvert"]:
-            return real_run(cmd, *args, **kwargs)
-        notebook = json.loads(Path(cmd[6]).read_text(encoding="utf-8"))
-        code = "".join(
-            "".join(cell.get("source", []))
-            for cell in notebook.get("cells", [])
-            if cell.get("cell_type") == "code"
-        )
-        output = Path(cmd[cmd.index("--output") + 1] + ".py")
-        output.write_text(code, encoding="utf-8")
-        return subprocess.CompletedProcess(cmd, 0, "", "")
+    class Runner:
+        # The real runner for everything except running nbconvert, which is done
+        # here the way `nbconvert --to script` does it, and recorded.
+        def __init__(self, real):
+            self._real = real
 
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def is_uv_available(self):
+            return True
+
+        def run_tool(self, **kwargs):
+            if kwargs.get("tool_name") != "jupyter-nbconvert":
+                return self._real.run_tool(**kwargs)
+            args = list(kwargs["args"])
+            (notebook_path,) = [a for a in args if a.endswith(".ipynb")]
+            with calls_log.open("a", encoding="utf-8") as log:
+                log.write(
+                    json.dumps({"args": args, "cwd": str(kwargs.get("cwd"))}) + "\\n"
+                )
+            notebook = json.loads(Path(notebook_path).read_text(encoding="utf-8"))
+            code = "".join(
+                "".join(cell.get("source", []))
+                for cell in notebook.get("cells", [])
+                if cell.get("cell_type") == "code"
+            )
+            output = Path(args[args.index("--output") + 1] + ".py")
+            output.write_text(code, encoding="utf-8")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+    uv_tool_runner.get_uv_tool_runner = lambda: Runner(real_get_runner())
     jupyter_converter.JupyterConverter.validate_plugin_dependencies = (
         lambda self: True
     )
-    jupyter_converter.JupyterConverter._execute_nbconvert_via_uv = (
-        lambda self, cmd, timeout=60, cwd=None: False
-    )
-    subprocess.run = nbconvert_to_script
 
     from automated_security_helper.cli.main import app
 
@@ -162,6 +180,9 @@ def scan(tmp_path_factory):
     env = dict(os.environ)
     # Keep the child off the network and away from the caller's terminal settings.
     env.update({"ASH_OFFLINE": "YES", "NO_COLOR": "1", "COLUMNS": "200"})
+    # Where the child records each nbconvert call: outside the output directory, so
+    # the output sweeps below see only what ASH wrote.
+    env["ASH_TEST_NBCONVERT_CALLS"] = str(base / "nbconvert-calls.jsonl")
     # `-I` keeps the child's imports to the interpreter's own site-packages, which is
     # the ASH under test when the suite runs from an installed checkout, as CI does.
     completed = subprocess.run(  # nosec B603 - fixed argv, the test's own interpreter
@@ -197,6 +218,21 @@ def scan(tmp_path_factory):
     assert (output / "ash.log").is_file()
     assert (output / "ash_aggregated_results.json").is_file()
     return tree, host, output
+
+
+def test_nbconvert_ran_outside_the_tree_on_a_copy(scan):
+    """The default route (uv tool run) was taken, in a directory outside the tree."""
+    tree, _, output = scan
+    calls = [
+        json.loads(line)
+        for line in (output.parent / "nbconvert-calls.jsonl").read_text().splitlines()
+    ]
+    assert len(calls) == 1, calls  # ok.ipynb; nb.ipynb was refused
+    (call,) = calls
+    (notebook_path,) = [a for a in call["args"] if a.endswith(".ipynb")]
+    assert Path(notebook_path).name == "ok.ipynb"
+    for path in (call["cwd"], notebook_path):
+        assert not Path(path).resolve().is_relative_to(tree.resolve()), path
 
 
 def test_no_host_content_reaches_the_output_directory(scan):
