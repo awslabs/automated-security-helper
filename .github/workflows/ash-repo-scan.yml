@@ -69,6 +69,11 @@ jobs:
       # scan -- correctly, because the CloudFormation in this repository was
       # never actually being checked.
       install-cfn-nag: true
+      # The binary scanners that are on by default and do not install themselves.
+      install-actionlint: true
+      install-cfn-guard: true
+      install-gitleaks: true
+      install-trivy: true
 
   # Uploads the scan's SARIF report to code scanning. It is a separate job because
   # security-events: write has to be granted to a called workflow that declares it,
