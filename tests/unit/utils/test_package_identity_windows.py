@@ -117,7 +117,7 @@ def lockfile_on_disk(tmp_path, monkeypatch):
     lock = _lockfile(tmp_path)
     real = package_identity.load_npm_lock_entries
 
-    def load(path):
+    def load(path, scan_root=None):
         if PureWindowsPath(str(path)).name == "package-lock.json":
             return real(lock)
         return None

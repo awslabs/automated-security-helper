@@ -2216,3 +2216,113 @@ def test_a_reason_not_labeled_encoded_is_left_alone_even_when_it_looks_like_base
     assert finding.suppressions is not None
     assert ENCODED_REASON_B64 in finding.suppressions[0].justification
     assert ENCODED_REASON_TEXT not in finding.suppressions[0].justification
+
+
+# ---------------------------------------------------------------------------
+# Reading the template under the scanned-tree rule
+# ---------------------------------------------------------------------------
+#
+# With ``scan_root`` the wrapper reads the template once, through
+# ``utils/scanned_tree.py``, and uses that one read for the model, the line map and
+# the file CfnInclude synthesizes. These tests use the doubles above, so CfnInclude
+# is recorded rather than run; the double's constructor is wrapped to capture what
+# the file it was given held at the moment it was constructed, which is when the real
+# CfnInclude reads it.
+
+SCANNED_TREE_MARKER = "HOST-ONLY-CONTENT-c6d2"
+
+
+@pytest.fixture
+def include_contents(cdk_doubles, monkeypatch):
+    """The text of each file CfnInclude was given, read as it was constructed."""
+    contents: list[str] = []
+    cfn_include = sys.modules["aws_cdk.cloudformation_include"].CfnInclude
+    original = cfn_include.__init__
+
+    def recording_init(self, scope, id, template_file):  # noqa: A002
+        contents.append(Path(template_file).read_text(encoding="utf-8"))
+        original(self, scope, id=id, template_file=template_file)
+
+    monkeypatch.setattr(cfn_include, "__init__", recording_init)
+    return contents
+
+
+def test_with_a_scan_root_cfninclude_reads_a_copy_of_the_checked_text(
+    cdk_doubles, include_contents, template_file, outdir
+):
+    cdk_doubles.report_text = _one_violation_report()
+
+    with_root = _run(
+        template_file,
+        outdir,
+        nag_packs=["AwsSolutionsChecks"],
+        scan_root=template_file.parent,
+    )
+
+    (include,) = cdk_doubles.cfn_includes
+    assert Path(include.template_file) != template_file
+    assert not Path(include.template_file).exists(), "the copy is removed afterwards"
+    assert include_contents == [TEMPLATE_YAML]
+    # The logical id is still named after the real template.
+    assert include.id == cdk_nag_wrapper.get_shortest_name(input=template_file)
+    # Findings are placed on the same lines as a read by path places them.
+    finding = with_root.results["AwsSolutions"][0]
+    region = finding.locations[0].physicalLocation.root.region
+    assert region.startLine == BUCKET_DECLARATION_LINE
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs symlinks")
+def test_with_a_scan_root_a_symlinked_template_is_refused_before_it_is_read(
+    cdk_doubles, tmp_path, outdir
+):
+    from automated_security_helper.utils.scanned_tree import TreeInputRefused
+
+    host = tmp_path / "host"
+    host.mkdir()
+    (host / "t.yaml").write_text(
+        TEMPLATE_YAML.replace("placeholder-name", SCANNED_TREE_MARKER.lower()),
+        encoding="utf-8",
+    )
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "t.yaml").symlink_to(host / "t.yaml")
+    cdk_doubles.report_text = _one_violation_report()
+
+    with pytest.raises(TreeInputRefused):
+        _run(tree / "t.yaml", outdir, scan_root=tree)
+
+    assert cdk_doubles.cfn_includes == []
+    assert recorder_is_untouched(cdk_doubles)
+    for path in outdir.rglob("*"):
+        if path.is_file():
+            assert SCANNED_TREE_MARKER.lower() not in path.read_text(encoding="utf-8")
+
+
+def test_the_debug_log_does_not_dump_the_template(cdk_doubles, template_file, outdir):
+    """The model is the template's content; the debug line gives a count instead."""
+    import logging
+
+    records: list[logging.LogRecord] = []
+
+    class _Collector(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    template_file.write_text(
+        TEMPLATE_YAML.replace("placeholder-name", SCANNED_TREE_MARKER.lower()),
+        encoding="utf-8",
+    )
+    logger = logging.getLogger("ash")
+    handler = _Collector(level=logging.DEBUG)
+    previous = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        _run(template_file, outdir)
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous)
+
+    messages = [r.getMessage() for r in records]
+    assert not any(SCANNED_TREE_MARKER.lower() in m for m in messages), messages
+    assert any("2 resource(s)" in m for m in messages), messages

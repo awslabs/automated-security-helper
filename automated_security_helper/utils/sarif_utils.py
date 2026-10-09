@@ -1,6 +1,7 @@
 """Utility functions for working with SARIF reports."""
 
 import math
+import os
 import random
 from contextlib import suppress
 from typing import List
@@ -575,15 +576,28 @@ def _apply_inline_suppression(
     source_dir: Path,
     result_line: int,
     inline_cache: dict[str, list],
+    work_dir: Path | None = None,
 ) -> bool:
     """Scan the source file for an inline suppression comment matching *result*.
 
     Mutates result.suppressions on match. Returns True when a suppression was applied.
+
+    The file is read under the scanned-tree rule against the tree it belongs to: the
+    source tree, or ``work_dir`` for a finding in a converted file, whose URI is
+    absolute and so replaces ``source_dir`` in the join below. A converted notebook
+    keeps its ``ash-ignore`` comments, so those findings stay suppressible.
     """
     file_path = source_dir / normalized_uri
     file_key = str(file_path)
     if file_key not in inline_cache:
-        inline_cache[file_key] = find_inline_suppressions(file_path)
+        scan_root = source_dir
+        if work_dir is not None and Path(os.path.abspath(file_path)).is_relative_to(
+            os.path.abspath(work_dir)
+        ):
+            scan_root = work_dir
+        inline_cache[file_key] = find_inline_suppressions(
+            file_path, scan_root=scan_root
+        )
     for isup in inline_cache[file_key]:
         if (
             isup.rule_id.lower() == result.ruleId.lower()
@@ -1002,6 +1016,7 @@ def apply_suppressions_to_sarif(
                             plugin_context.source_dir,
                             result_line,
                             _inline_suppression_cache,
+                            work_dir=getattr(plugin_context, "work_dir", None),
                         )
 
             updated_results.append(result)

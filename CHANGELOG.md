@@ -139,6 +139,40 @@
   Each value that is not honored is logged once as a warning naming the key. See
   [Settings a repository's config cannot choose](docs/content/docs/configuration-guide.md#settings-a-repositorys-config-cannot-choose).
 
+- **ASH no longer follows symlinks out of the scanned tree when it reads tree files
+  into its own output.** This covers converter inputs (archives and notebooks), the
+  JSON and YAML files cfn-nag and cdk-nag read to decide whether they are
+  CloudFormation, the `.gitignore` and `.ignore` files copied into
+  `ash-ignore-report.txt`, the files read for inline `ash-ignore` comments, and the
+  `package-lock.json` files read for package identity. Each is read only when it is a
+  regular file inside the scanned tree: not a symlink, not under a symlinked
+  directory, not outside the tree, and with a single hard link. The inline-suppression
+  and lockfile lookups, which read a file a scanner already reported, follow a symlink
+  whose target is inside the tree. Anything else is skipped with one warning naming
+  it. A converter records each skipped input under
+  `converter_results.<name>.refused_inputs` in `ash_aggregated_results.json`, cfn-nag
+  and cdk-nag record it in the scanner's error output, and a skipped ignore file is
+  noted in `ash-ignore-report.txt`. Archive members that are symlinks, hard links or
+  special files, or whose names are absolute or contain `..`, are skipped and
+  recorded the same way, with the member's name. A tree that relied on a symlinked
+  notebook, archive or ignore file loses that coverage or those ignore rules until
+  the link is replaced with the file. cfn-nag and cdk-nag also stop quoting template
+  content in their log messages: a parse or validation error is reported by file,
+  error type and, where the parser knows it, line. `cfn_nag_scan` and cdk-nag's
+  `CfnInclude` read a copy of the template text ASH checked, and findings keep the
+  template's own path.
+
+- **The Jupyter converter runs nbconvert outside the scanned tree, with an exporter
+  ASH chooses.** nbconvert runs in a directory that holds only a copy of the
+  notebook, so files in the scanned tree are not on its import path and its
+  `jupyter_nbconvert_config` files are not read from there. The exporter is
+  `python` for a Python notebook (or one that names no language) and `script`
+  otherwise, and `language_info.nbconvert_exporter` is removed from the copy, so the
+  notebook's metadata does not choose the exporter class. A Python notebook whose
+  metadata named no exporter used to go through nbconvert's generic script template;
+  it now goes through the Python exporter, which adds `# In[ ]:` cell markers to the
+  converted file.
+
 - **`ash dependencies install --tool` selects the archive converter as `archive`.**
   Every plugin is now listed and selected by its config key. The archive converter
   was the one bundled plugin listed under its class name, so its canonical `--tool`
