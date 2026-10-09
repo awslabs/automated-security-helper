@@ -125,7 +125,11 @@
     reason. trivy and trivy-repo share trivy's cache and run at the same time, so
     online ASH updates the database once per scan, under a lock in that cache, and
     both scanners then run with `--skip-db-update` and `--skip-java-db-update` (and
-    `--skip-check-update` when `misconfig` is on). An image built with `OFFLINE=YES`
+    `--skip-check-update` when `misconfig` is on), pointed at that cache with
+    `--cache-dir`. The update is the one sandboxed scans already use
+    (`utils/content_db_refresh.py`): it runs from an empty directory outside the
+    scanned tree with an explicit `--config`, so a `trivy.yaml` in the scanned
+    repository cannot change where the database comes from. An image built with `OFFLINE=YES`
     ships the database, and the
     nix shell updates it on every entry.
 

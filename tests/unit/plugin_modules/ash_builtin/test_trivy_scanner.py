@@ -1066,7 +1066,8 @@ def test_trivy_repo_honors_an_override_for_its_config(tmp_path, monkeypatch):
 
 # --------------------------------------------------------------------------- #
 # trivy and trivy-repo share trivy's cache and run concurrently, so the database
-# update happens once, under a lock, and the scans skip it.
+# update happens once, under a lock (utils/content_db_refresh.prepare_content_db),
+# and the scans skip it.
 # --------------------------------------------------------------------------- #
 
 import threading  # noqa: E402
@@ -1075,6 +1076,7 @@ import time  # noqa: E402
 from automated_security_helper.plugin_modules.ash_builtin.scanners import (  # noqa: E402
     _trivy_scanner_base as trivy_base,
 )
+from automated_security_helper.utils import content_db_refresh as refresh  # noqa: E402
 
 
 class _FakeTrivy:
@@ -1082,6 +1084,7 @@ class _FakeTrivy:
 
     def __init__(self, returncode=0, stderr="", hold=0.0):
         self.calls = []
+        self.kwargs = []
         self.returncode = returncode
         self.stderr = stderr
         self.hold = hold
@@ -1094,6 +1097,7 @@ class _FakeTrivy:
             self.active += 1
             self.max_active = max(self.max_active, self.active)
             self.calls.append(list(argv))
+            self.kwargs.append(kwargs)
         time.sleep(self.hold)
         with self._lock:
             self.active -= 1
@@ -1103,10 +1107,11 @@ class _FakeTrivy:
 
 
 def _update_env(tmp_path, monkeypatch, fake):
-    monkeypatch.setattr(trivy_base, "spawn_run", fake)
+    monkeypatch.setattr(refresh, "spawn_run", fake)
     monkeypatch.setattr(trivy_base, "find_executable", lambda name: f"/bin/{name}")
     monkeypatch.setenv("TRIVY_CACHE_DIR", str(tmp_path / "trivy-cache"))
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    refresh.forget_prepared()
     ran = []
 
     def fake_base_run(self, command, *args, **kwargs):
@@ -1119,6 +1124,14 @@ def _update_env(tmp_path, monkeypatch, fake):
     return ran
 
 
+def _cache_flag(tmp_path) -> str:
+    return f"--cache-dir={(tmp_path / 'trivy-cache').absolute().as_posix()}"
+
+
+def _value(argv, flag):
+    return argv[argv.index(flag) + 1]
+
+
 def test_the_scan_skips_the_update_it_ran_first(tmp_path, monkeypatch):
     fake = _FakeTrivy()
     ran = _update_env(tmp_path, monkeypatch, fake)
@@ -1127,21 +1140,18 @@ def test_the_scan_skips_the_update_it_ran_first(tmp_path, monkeypatch):
 
     scanner._run_subprocess(command=command, results_dir=tmp_path / "results")
 
-    assert fake.calls == [
-        [
-            "/bin/trivy",
-            "image",
-            "--download-db-only",
-            "--no-progress",
-            "--config=/r/trivy-config.yaml",
-        ]
-    ]
+    (update,) = fake.calls
+    assert update[:4] == ["/bin/trivy", "image", "--download-db-only", "--no-progress"]
+    assert Path(_value(update, "--cache-dir")) == (tmp_path / "trivy-cache").absolute()
+    # The update gets an empty config of its own, not one from where ASH runs.
+    assert Path(_value(update, "--config")).name == "empty-config.yaml"
     (final,) = ran
-    assert final[:5] == [
+    assert final[:6] == [
         "trivy",
         "fs",
         "--skip-db-update",
         "--skip-java-db-update",
+        _cache_flag(tmp_path),
         "--cache-backend=memory",
     ]
     assert "--skip-check-update" not in final
@@ -1158,15 +1168,42 @@ def test_misconfig_also_fetches_the_checks_bundle_and_skips_it(tmp_path, monkeyp
     scanner._run_subprocess(command=command, results_dir=tmp_path / "results")
 
     assert [c[1] for c in fake.calls] == ["image", "config"]
-    assert fake.calls[1][2:] == [
-        "--config=/r/c.yaml",
-        (tmp_path / "results" / "trivy-checks-update").as_posix(),
-    ]
-    assert ran[0][2:5] == [
+    assert Path(fake.calls[1][-1]).name == "empty-target"
+    assert ran[0][2:6] == [
         "--skip-db-update",
         "--skip-java-db-update",
         "--skip-check-update",
+        _cache_flag(tmp_path),
     ]
+
+
+def test_the_operators_trivy_config_reaches_the_update(tmp_path, monkeypatch):
+    """A database mirror in the operator's trivy.yaml applies to the update too."""
+    fake = _FakeTrivy()
+    _update_env(tmp_path, monkeypatch, fake)
+    chosen = tmp_path / "operator" / "trivy.yaml"
+    chosen.parent.mkdir()
+    chosen.write_text("db:\n  repository: mirror.example/trivy-db\n", encoding="utf-8")
+    scanner = _scanner(tmp_path, operator=True, config_file=str(chosen))
+
+    scanner._run_subprocess(command=["trivy", "fs", "/t"], results_dir=tmp_path)
+
+    (update,) = fake.calls
+    assert Path(_value(update, "--config")) == chosen.resolve()
+
+
+def test_a_tree_set_trivy_config_does_not_reach_the_update(tmp_path, monkeypatch):
+    fake = _FakeTrivy()
+    _update_env(tmp_path, monkeypatch, fake)
+    chosen = tmp_path / "elsewhere" / "trivy.yaml"
+    chosen.parent.mkdir()
+    chosen.write_text("db:\n  repository: sentinel.invalid/db\n", encoding="utf-8")
+    scanner = _scanner(tmp_path, config_file=str(chosen))
+
+    scanner._run_subprocess(command=["trivy", "fs", "/t"], results_dir=tmp_path)
+
+    (update,) = fake.calls
+    assert Path(_value(update, "--config")).name == "empty-config.yaml"
 
 
 def test_two_concurrent_scanners_never_update_at_the_same_time(tmp_path, monkeypatch):
@@ -1195,7 +1232,7 @@ def test_two_concurrent_scanners_never_update_at_the_same_time(tmp_path, monkeyp
     assert errors == []
     assert len([c for c in fake.calls if c[1] == "image"]) == 2
     assert fake.max_active == 1, "two trivy updates overlapped"
-    assert (tmp_path / "trivy-cache" / trivy_base.UPDATE_LOCK_NAME).exists()
+    assert refresh.update_lock_path("trivy", tmp_path / "trivy-cache").exists()
 
 
 def test_offline_runs_no_update(tmp_path, monkeypatch):

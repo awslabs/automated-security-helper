@@ -26,12 +26,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.subprocess_utils import find_executable
-from automated_security_helper.utils.content_db_refresh import (
-    default_cache_dir,
-    prepare_content_db,
-    sandboxed_online,
-    scan_id_for,
-)
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 
@@ -303,10 +297,6 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 target=target,
                 results_file=results_file,
             )
-            # Before the target, which _resolve_arguments places after the options;
-            # trivy also accepts flags after it, so they are appended when the
-            # target is not found as given.
-
             # Right after `trivy repository`, which needs no knowledge of how the
             # target is spelled further on; trivy takes flags in any position.
             head = [self.command, *self.subcommands]
@@ -321,29 +311,9 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             subprocess_env = (
                 {**snapshot_environ(), **self.extra_env} if self.extra_env else None
             )
-            if sandboxed_online(self._scanner_offline()):
-                # The sandbox mounts trivy's cache read-only, so its database (and
-                # the checks bundle, for misconfiguration scans) is updated first,
-                # outside the sandbox, and trivy only reads it: no update of its
-                # own, and its scan cache in memory rather than in that cache. See
-                # utils/content_db_refresh.py. Not the Java database: `trivy
-                # repository` does not analyze JAR, WAR or EAR files and never reads
-                # it (measured with trivy 0.75), so its update is skipped rather
-                # than downloading about 935 MiB the scan would not use.
-                checks = "misconfig" in (self.config.options.scanners or [])
-                prepare_content_db(
-                    "trivy",
-                    default_cache_dir("trivy", subprocess_env or snapshot_environ()),
-                    offline=False,
-                    checks=checks,
-                    scan_id=scan_id_for(self.context),
-                )
-                final_args[insert_at:insert_at] = [
-                    "--skip-db-update",
-                    "--skip-java-db-update",
-                    *(["--skip-check-update"] if checks else []),
-                    "--cache-backend=memory",
-                ]
+            # The database update, its skip flags and --cache-backend=memory are
+            # added by TrivyScannerBase._run_subprocess, for trivy and trivy-repo
+            # alike (utils/content_db_refresh.py).
 
             self._plugin_log(
                 f"Running command: {' '.join(final_args)}",

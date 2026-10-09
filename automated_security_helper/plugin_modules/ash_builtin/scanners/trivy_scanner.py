@@ -81,14 +81,15 @@ default. Measured on v0.69.3 against the fixture repository (10 findings): a
 A scanned repository should not be able to quietly shape its own report, so ASH
 passes ``--config``, ``--ignorefile`` and ``--secret-config`` pointing at files of
 its own that set nothing. ``config_file``, ``ignore_file`` and
-``secret_config_file`` opt in to real ones. ``config_file`` is honored only from the
-operator and only for a file outside the scanned tree
-(``TrivyScannerBase._operator_path``), because a trivy.yaml can also load WASM
-modules (``module.dir``); ``trivy-repo`` passes its own ``--config`` and
-``--module-dir`` under the same rule. ``ignore_file`` and ``secret_config_file``
-(or ``TRIVY_IGNOREFILE`` and ``TRIVY_SECRET_CONFIG``) are honored for a file outside
-the scanned tree, which is how ``trivy-repo`` treats them too: both scanners take
-them from ``TrivyScannerBase._trivy_input_file``. trivy 0.75.0 reads nothing else from a
+``secret_config_file`` opt in to real ones, each honored only from the operator and
+only for a file outside the scanned tree (``TrivyScannerBase._operator_path``): a
+trivy.yaml can also load WASM modules (``module.dir``), and the other two drop
+findings. ``trivy-repo`` passes its own ``--config``, ``--module-dir``,
+``--ignorefile`` and ``--secret-config`` under the same rule, and both scanners take
+the last two from ``TrivyScannerBase._trivy_input_file``, which falls back to
+``TRIVY_IGNOREFILE`` and ``TRIVY_SECRET_CONFIG`` for a file outside the tree. The
+database update runs from outside the tree with an explicit ``--config``
+(``TrivyScannerBase._shared_update_flags``). trivy 0.75.0 reads nothing else from a
 default location: ``--ignore-policy`` (a Rego file) has none, and an ignore policy
 named by the tree's ``trivy.yaml`` does not apply because that file is not read
 (``tests/integration/scanners/test_trivy_real_binary.py``).
