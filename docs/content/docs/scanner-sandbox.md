@@ -361,16 +361,20 @@ scanned repository ships, cannot be started. A tool path inside the scanned tree
 as a virtualenv ASH itself runs from, stays executable.
 
 Mach service lookups are limited to a list measured on the macOS 14, 15 and 26 CI
-runners: everything the ten builtin scanners looked up there, which was the same on
-all three. Every scanner may reach preferences (`cfprefsd`), logging (`logd`),
-notifications (`notifyd`) and user and group lookups (`opendirectoryd`). A scanner
-with a network may also reach the DNS and network configuration (`configd`) and
-certificate trust (`trustd`). LaunchServices (`launchservicesd`, `coreservicesd`,
-`com.apple.lsd.*`) and the pasteboard (`com.apple.pasteboard.*`) are denied after
-every allow, so no allow can reach them: LaunchServices asks launchd to start an app,
-and launchd starts it outside the sandbox. The keychain (`com.apple.SecurityServer`)
-is not on the list either, which keeps a scanner from reading keychain items through
-`/usr/bin/security`.
+runners, where the ten builtin scanners looked up the same thirteen services on all
+three. Ten of them are allowed. Every scanner may reach preferences (`cfprefsd`),
+logging (`logd`), notifications (`notifyd`) and user and group lookups
+(`opendirectoryd`). A scanner with a network may also reach the DNS and network
+configuration (`configd`), certificate trust (`trustd`) and the keychain daemon
+(`SecurityServer`), which semgrep needs because its core runs `/usr/bin/security` for
+the system root certificates. With that service allowed, `security` under the profile
+still could not find an item it had itself added to the login keychain; the keychain
+files are under the home directory, which the scanner cannot read. The other three
+are not allowed: LaunchServices, which node looks up on start and does without, and a
+telemetry service of `/usr/bin/security`. LaunchServices (`launchservicesd`,
+`coreservicesd`, `com.apple.lsd.*`) and the pasteboard (`com.apple.pasteboard.*`) are
+denied after every allow, so no allow can reach them: LaunchServices asks launchd to
+start an app, and launchd starts it outside the sandbox.
 
 sandbox-exec does not end processes the scanner leaves running. ASH's removal of
 symlinks after each spawn and its non-following writes still apply, but a process that
@@ -423,6 +427,6 @@ attempts are real. CI also runs every builtin scanner under bubblewrap against t
 snapshot fixture and asserts the findings match the unsandboxed run.
 
 On macOS, `tests/integration/sandbox/test_sandbox_exec_services.py` has the fixture
-scanner open TextEdit through LaunchServices, read a canary back from the pasteboard,
-and look up the LaunchServices and pasteboard Mach services directly. Each must
-succeed unsandboxed and fail under `sandbox-exec`.
+scanner open TextEdit through LaunchServices, read a canary back from the pasteboard
+and from the keychain, and look up the LaunchServices, pasteboard and keychain Mach
+services directly. Each must succeed unsandboxed and fail under `sandbox-exec`.
