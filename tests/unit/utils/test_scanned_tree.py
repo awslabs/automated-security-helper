@@ -335,6 +335,15 @@ class TestReplacedAfterTheCheck:
 
 
 class TestHelpers:
+    def test_the_prefix_comparison_folds_case_where_the_platform_does(
+        self, monkeypatch
+    ):
+        """On Windows ``C:`` and ``c:`` are one drive; normcase is how that is seen."""
+        assert not scanned_tree._starts_with(Path("/A/b/c"), Path("/a/b"))
+        monkeypatch.setattr(scanned_tree.os.path, "normcase", str.lower)
+        assert scanned_tree._starts_with(Path("/A/b/c"), Path("/a/b"))
+        assert not scanned_tree._starts_with(Path("/a/bc"), Path("/a/b/c"))
+
     def test_relative_display_is_posix_and_relative(self, layout):
         tree, host = layout
         assert relative_display(tree / "real" / "deep" / "ok.txt", tree) == (

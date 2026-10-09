@@ -186,9 +186,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             cmd: Command list to execute (should start with 'jupyter')
             timeout: Timeout in seconds
             cwd: Working directory for nbconvert. It must not be the scanned tree:
-                nbconvert puts its working directory first on ``sys.path`` and reads
-                ``jupyter_nbconvert_config`` files from it. With no value, an empty
-                temporary directory is used.
+                ``NbConvertApp.init_syspath`` puts the working directory first on
+                ``sys.path``, so a module there is importable by the exporter name a
+                notebook gives. With no value, an empty temporary directory is used.
 
         Returns:
             True if execution succeeded, False otherwise
@@ -350,9 +350,8 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         """Run nbconvert on ``notebook``, writing ``target_path``.
 
         nbconvert runs in the staged notebook's directory, which holds nothing but the
-        copy: it puts its working directory first on ``sys.path`` and reads
-        ``jupyter_nbconvert_config`` files from there, so it must not run in the
-        scanned tree.
+        copy. ``NbConvertApp.init_syspath`` puts the working directory first on
+        ``sys.path``, so it must not run in the scanned tree.
 
         Args:
             notebook: The staged copy to convert.
