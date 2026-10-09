@@ -20,6 +20,9 @@ from automated_security_helper.config.default_config import (
 from automated_security_helper.config.plugin_module_trust import (
     confine_plugin_modules,
 )
+from automated_security_helper.config.reporter_trust import (
+    confine_reporter_destinations,
+)
 from automated_security_helper.config.sandbox_grants import (
     confine_sandbox_grants,
     files_inside,
@@ -230,7 +233,8 @@ def resolve_config(
             base instead, its ``network_scanners`` list only removes network,
             and its ``sandbox.mode`` cannot turn off or replace a mode the
             trusted base sets. Its ``ash_plugin_modules`` are limited the same way
-            as an in-tree file's (``config/plugin_module_trust.py``).
+            as an in-tree file's (``config/plugin_module_trust.py``), and so are
+            its reporter destinations (``config/reporter_trust.py``).
 
     Returns:
         The resolved AshConfig object
@@ -288,6 +292,7 @@ def resolve_config(
     confine_plugin_modules(
         config, trusted, config_overrides, Path(scanned_root), in_tree
     )
+    confine_reporter_destinations(config, trusted, config_overrides, in_tree)
     return config
 
 
