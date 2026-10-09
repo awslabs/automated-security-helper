@@ -448,8 +448,15 @@ file elsewhere. When any file the configuration was built from is inside the sca
 tree (a discovered `.ash/.ash.yaml`, a `--config` path inside the tree, an `extends`
 base, or the file `ASH_CONFIG` names), a few settings are limited, because they decide
 what ASH installs, imports or hands a scanner as its own configuration. The scanned
-tree is the enclosing git checkout of the source directory, or the source directory
-itself outside a checkout.
+tree is the outermost git checkout around the source directory, or the source
+directory itself outside a checkout.
+
+Under the MCP server, a config file a client delivered (an upload or a file in a
+delivered tree, named as `config_path`) is limited the same way, wherever it is. A
+file any MCP client delivered also counts as inside the scanned tree for the path
+and module checks below: everything under the MCP workspace root
+(`$ASH_MCP_WORKSPACE_ROOT`, by default `~/.cache/ash-mcp/`) except each session's
+`config/` directory, which only the server writes.
 
 | Setting | From a config file inside the scanned tree |
 |---|---|

@@ -229,7 +229,8 @@ def resolve_config(
             tree is, wherever it is: its sandbox grants come from the trusted
             base instead, its ``network_scanners`` list only removes network,
             and its ``sandbox.mode`` cannot turn off or replace a mode the
-            trusted base sets. Nothing else about the config changes.
+            trusted base sets. Its ``ash_plugin_modules`` are limited the same way
+            as an in-tree file's (``config/plugin_module_trust.py``).
 
     Returns:
         The resolved AshConfig object

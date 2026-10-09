@@ -37,21 +37,28 @@ def reset_path_refusal_warnings() -> None:
 
 
 def in_scanned_tree(path: Union[str, Path], scan_root: Union[str, Path]) -> bool:
-    """Whether ``path`` is in a tree the repository being scanned controls.
+    """Whether ``path`` was written by the party whose code is being scanned.
 
-    The one membership test this module and ``plugin_module_trust`` use, so the
-    rule for which trees those are (``sandbox_grants.scanned_trees`` of the scan
-    root, the same trees ``resolve_config`` checks config files against) changes
-    in one place.
+    True for a path in a tree the scanned repository controls
+    (``sandbox_grants.scanned_trees`` of the scan root, the same trees
+    ``resolve_config`` checks config files against), and, under the MCP server,
+    for any file an MCP client delivered (``cli.mcp.sandbox
+    .config_is_client_supplied``: a delivered tree, an upload or its staging, in
+    this session or another), which a client-written config could otherwise name
+    from outside the tree it scans. The one membership test this module and
+    ``plugin_module_trust`` use, so the rule changes in one place.
     """
     # Imported here: sandbox_grants imports ash_config, which imports the scanners
     # that import this module.
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
     from automated_security_helper.config.sandbox_grants import (
         is_within,
         scanned_trees,
     )
 
-    return any(is_within(Path(path), tree) for tree in scanned_trees(Path(scan_root)))
+    if any(is_within(Path(path), tree) for tree in scanned_trees(Path(scan_root))):
+        return True
+    return config_is_client_supplied(path)
 
 
 #: Fallback working directories already made, by filesystem root, so a process
@@ -194,7 +201,8 @@ def honored_path(
         ASH_LOGGER.warning(
             f"Ignoring {key} ({path.as_posix()}): it is inside the scanned tree "
             "(the outermost git checkout around the source directory, or the source "
-            "directory outside a checkout). A file there is not passed to the tool "
-            "whoever names it; name one outside that tree."
+            "directory outside a checkout) or is a file an MCP client delivered. "
+            "Such a file is not passed to the tool whoever names it; name one "
+            "outside them."
         )
     return None
