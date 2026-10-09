@@ -34,8 +34,9 @@
 # soak that already existed rather than creating one, and deleting `cooldown` would not make
 # updates arrive immediately.
 #
-# The root uv entry's `cooldown` is scoped by `include` to the CDK packages, which is what
-# replaced their `ignore` rules: a cooldown never applies to security updates, an `ignore` does.
+# The root uv entry's `cooldown` soaks every dependency 90 days on minor and patch, which
+# replaced the CDK `ignore` rules: a cooldown never applies to security updates, an `ignore`
+# does.
 #
 # Security updates are deliberately left ungrouped. `applies-to` defaults to `version-updates`,
 # so every group here batches version updates only and advisories keep arriving one at a time.
@@ -125,12 +126,11 @@ updates:
       # Majors wait the same week before a PR is opened, so a same-day upstream regression is
       # not proposed immediately.
       semver-major-days: 7
+      # Routine minors and patches soak 90 days, for every dependency in this entry. 90 is
+      # the largest value the published dependabot.yml schema accepts. Security updates are
+      # not affected: cooldown never applies to them.
       semver-minor-days: 90
       semver-patch-days: 90
-      include:
-        - "aws-cdk-lib*"
-        - "cdk-nag*"
-        - "constructs*"
     commit-message:
       prefix: "build"
     labels:
@@ -180,21 +180,21 @@ updates:
     # that run. CDK v2 minors are additive, so the ones worth a human are the majors, which
     # scanner-major-upgrade below still files on their own.
     #
-    # These three entries used to be `ignore` rules for minor and patch. `ignore` also
-    # suppresses SECURITY updates for the versions it covers, so an advisory fixed in a CDK
-    # minor or patch never produced a pull request (a brace-expansion fix bundled inside
-    # aws-cdk-lib had to be done by hand). `ignore` has no option to limit it to version
-    # updates, and `applies-to` exists only on `groups`. The `cooldown` block above is
-    # documented as "only available for version updates, not security updates", so it can
-    # slow these packages down without touching advisories. Security updates for aws-cdk-lib,
-    # cdk-nag and constructs now open pull requests again.
+    # The three CDK packages (aws-cdk-lib, cdk-nag, constructs) used to have `ignore` rules
+    # for minor and patch. `ignore` also suppresses SECURITY updates for the versions it
+    # covers, so an advisory fixed in a CDK minor or patch never produced a pull request (a
+    # brace-expansion fix bundled inside aws-cdk-lib had to be done by hand). `ignore` has no
+    # option to limit it to version updates, and `applies-to` exists only on `groups`. The
+    # `cooldown` block above is documented as "only available for version updates, not
+    # security updates", so it slows routine bumps without touching advisories. Security
+    # updates for these packages now open pull requests again.
     #
-    # Known limits of that swap. 90 days is the largest value the published dependabot.yml
-    # schema accepts, so this delays CDK minors and patches rather than skipping them: once a
-    # release is 90 days old it is proposed, and CDK releases nearly daily. Also, `include`
-    # scopes the whole `cooldown` block, so the 7-day soak above now applies to these three
-    # packages only, and every other dependency in this entry falls back to no configured
-    # cooldown.
+    # The whole entry gets the 90-day minor and patch soak, not just the CDK packages,
+    # because a single `cooldown` block cannot give some dependencies different days from the
+    # rest, and `include` would leave every other dependency with no configured cooldown.
+    #
+    # Known limit: this delays CDK minors and patches rather than skipping them. Once a
+    # release is 90 days old it is proposed, and CDK releases nearly daily.
     groups:
       # A major bump of a scanner or its engine is the case that needs a human reading the
       # upstream changelog before merge, so it gets its own PR with a name that says so.
