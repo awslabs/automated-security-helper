@@ -125,6 +125,10 @@ def _passed(argv: List[str], flag: str) -> str:
     return values[0]
 
 
+def _inside(path: Path, tree: Path) -> bool:
+    return Path(os.path.realpath(path)).is_relative_to(Path(os.path.realpath(tree)))
+
+
 def _real(path: Path) -> str:
     return Path(os.path.realpath(path)).as_posix()
 
@@ -275,9 +279,46 @@ def test_trivy_is_handed_the_path_that_was_checked(
 
     argv = _argv(tmp_path, source, config, scanner, option, value)
 
-    assert _passed(argv, flag) == _real(chosen)
+    passed = _passed(argv, flag)
     assert _real(planted) not in " ".join(argv)
-    assert _passed(argv, flag) != _real(lexical)
+    assert passed != _real(lexical)
+    # Where the filesystem itself takes the spelling. On POSIX "jump/../<name>"
+    # goes through the link to <outside>/<name>; Windows collapses ".." before
+    # following links, so there it is <source>/<name>, inside the tree, and ASH's
+    # own file is passed instead.
+    target = Path(
+        os.path.realpath(source / value if spelling.startswith("relative") else chosen)
+    )
+    if _inside(target, source):
+        assert Path(passed).is_relative_to(Path(os.path.realpath(tmp_path / "out")))
+    else:
+        assert passed == _real(target) == _real(chosen)
+
+
+@pytest.mark.parametrize("option, flag, name, content", OPTIONS)
+@pytest.mark.parametrize("scanner", SCANNERS)
+def test_windows_dotdot_semantics_refuse_the_in_tree_target(
+    tmp_path, monkeypatch, scanner, option, flag, name, content
+):
+    """Windows collapses ".." before it follows a link (measured in CI on
+    windows-latest), so "jump/../<name>" is <source>/<name> there. Emulated here
+    by normalizing before resolving: the in-tree file is refused, not passed."""
+    source = _source(tmp_path)
+    chosen = _outside(tmp_path, name, content)
+    lexical = source / name
+    lexical.write_text("module:\n  dir: ./planted\n", encoding="utf-8")
+    value = _spelled(tmp_path, source, chosen, "relative-dotdot-through-link")
+    real = os.path.realpath
+    monkeypatch.setattr(
+        os.path, "realpath", lambda p, *a, **k: real(os.path.normpath(p), *a, **k)
+    )
+    operator = _write_config(tmp_path / "operator" / "ash.yaml", scanner, option, value)
+    config = resolve_config(config_path=operator, source_dir=source)
+
+    passed = _passed(_argv(tmp_path, source, config, scanner, option, value), flag)
+
+    assert passed != _real(lexical)
+    assert Path(passed).is_relative_to(Path(real(tmp_path / "out")))
 
 
 @pytest.mark.parametrize("option, flag, name, content", OPTIONS)
