@@ -18,10 +18,17 @@ holds the database it reads to the bound declared in
 
 What runs
 ---------
-grype: ``grype db update``. trivy: ``trivy image --download-db-only``, and with
-``checks`` (a scan that includes misconfiguration checks) ``trivy config`` of an
-empty directory, which is how trivy fetches its checks bundle; it has no command
-that fetches only that. Offline, nothing runs.
+grype: ``grype db update``. trivy: ``trivy image --download-db-only``; with
+``checks`` (a scan that includes misconfiguration checks) also ``trivy config`` of
+an empty directory, which is how trivy fetches its checks bundle, as it has no
+command that fetches only that; and with ``java`` also ``trivy image
+--download-java-db-only``. Offline, nothing runs.
+
+The Java database (about 935 MiB) is only for trivy modes that analyze JAR, WAR
+and EAR files, which ``image`` and ``rootfs`` do. ``repository`` and ``fs`` do not:
+measured with trivy 0.75, a repository holding a jar and a pom.xml reports the
+pom.xml's vulnerabilities, ignores the jar, and never opens or downloads the Java
+database. So a caller asks for it only for a mode that reads it.
 
 Isolation
 ---------
@@ -85,7 +92,7 @@ GRYPE_PREPARED_ENV = {
 }
 
 _prepared_lock = threading.Lock()
-_prepared: Set[Tuple[str, str, bool, str]] = set()
+_prepared: Set[Tuple[str, str, bool, bool, str]] = set()
 
 
 def default_cache_dir(tool: str, env: Optional[Mapping[str, str]] = None) -> Path:
@@ -132,6 +139,7 @@ def prepare_content_db(
     offline: bool,
     *,
     checks: bool = False,
+    java: bool = False,
     scan_id: Optional[str] = None,
     executable: Optional[str] = None,
 ) -> None:
@@ -143,6 +151,8 @@ def prepare_content_db(
         offline: When true nothing runs; the database is used as it is.
         checks: trivy only: also fetch the checks bundle a misconfiguration scan
             reads.
+        java: trivy only: also update the Java database, for a mode that analyzes
+            JAR, WAR and EAR files (``image``, ``rootfs``).
         scan_id: Refresh at most once per tool, cache and scan id. None refreshes
             on every call (the tool itself returns at once when current).
         executable: The tool to run; found on PATH when not given.
@@ -155,7 +165,7 @@ def prepare_content_db(
     if offline:
         return
     cache = Path(os.path.abspath(Path(cache_dir).expanduser()))
-    key = (tool, cache.as_posix(), checks, scan_id or "")
+    key = (tool, cache.as_posix(), checks, java, scan_id or "")
     if scan_id is not None:
         with _prepared_lock:
             if key in _prepared:
@@ -172,7 +182,7 @@ def prepare_content_db(
             config.write_text("")
             cwd = workdir if not _inside_a_checkout(workdir) else Path(workdir.anchor)
             for argv, env, what in _commands(
-                tool, program, cache, config, workdir, checks
+                tool, program, cache, config, workdir, checks, java
             ):
                 _run(argv, env, cwd, f"{tool} {what}")
         finally:
@@ -183,7 +193,13 @@ def prepare_content_db(
 
 
 def _commands(
-    tool: str, program: str, cache: Path, config: Path, workdir: Path, checks: bool
+    tool: str,
+    program: str,
+    cache: Path,
+    config: Path,
+    workdir: Path,
+    checks: bool,
+    java: bool,
 ) -> List[Tuple[List[str], Dict[str, str], str]]:
     env = snapshot_environ()
     if tool == "grype":
@@ -197,6 +213,14 @@ def _commands(
             "database",
         )
     ]
+    if java:
+        commands.append(
+            (
+                [program, "image", "--download-java-db-only", "--no-progress", *common],
+                env,
+                "Java database",
+            )
+        )
     if checks:
         empty = workdir / "empty-target"
         empty.mkdir()

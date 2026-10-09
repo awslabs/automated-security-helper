@@ -125,7 +125,22 @@ def test_trivy_gets_its_database_and_when_asked_its_checks_bundle(recorder, tmp_
 
 def test_without_checks_trivy_only_updates_its_database(recorder, tmp_path):
     refresh.prepare_content_db("trivy", tmp_path, offline=False, executable="trivy")
-    assert [c.argv[1] for c in recorder.calls] == ["image"]
+    assert [c.argv[1:3] for c in recorder.calls] == [["image", "--download-db-only"]]
+
+
+def test_the_java_database_is_updated_only_when_asked(recorder, tmp_path):
+    """About 935 MiB, and only modes that analyze JAR, WAR and EAR files read it."""
+    refresh.prepare_content_db(
+        "trivy", tmp_path, offline=False, java=True, executable="trivy"
+    )
+    db, java = recorder.calls
+    assert java.argv[1:3] == ["image", "--download-java-db-only"]
+    assert java.scope is None and java.config_text == ""
+    assert java.argv[java.argv.index("--cache-dir") + 1] == tmp_path.as_posix()
+    refresh.prepare_content_db(
+        "trivy", tmp_path, offline=True, java=True, executable="trivy"
+    )
+    assert len(recorder.calls) == 2, "offline, the Java database is not updated"
 
 
 def test_once_per_scan(recorder, tmp_path):
@@ -339,6 +354,10 @@ class TestScannersUseThePreparedDatabase:
         (command,) = commands
         assert command[:2] == ["trivy", "repository"]
         assert "--skip-db-update" in command
+        # trivy repository never reads the Java database, so it is neither updated
+        # nor allowed to update itself in the read-only cache.
+        assert not getattr(call, "java", False)
+        assert "--skip-java-db-update" in command
         assert "--cache-backend=memory" in command
 
 

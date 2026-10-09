@@ -511,7 +511,10 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 # the checks bundle, for misconfiguration scans) is updated first,
                 # outside the sandbox, and trivy only reads it: no update of its
                 # own, and its scan cache in memory rather than in that cache. See
-                # utils/content_db_refresh.py.
+                # utils/content_db_refresh.py. Not the Java database: `trivy
+                # repository` does not analyze JAR, WAR or EAR files and never reads
+                # it (measured with trivy 0.75), so its update is skipped rather
+                # than downloading about 935 MiB the scan would not use.
                 checks = "misconfig" in (self.config.options.scanners or [])
                 prepare_content_db(
                     "trivy",
@@ -522,6 +525,7 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 )
                 final_args[insert_at:insert_at] = [
                     "--skip-db-update",
+                    "--skip-java-db-update",
                     *(["--skip-check-update"] if checks else []),
                     "--cache-backend=memory",
                 ]

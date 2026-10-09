@@ -66,7 +66,9 @@ it needs.
   concurrent scans take turns, and each tool is updated once per scan. The scanners
   then run with their own update turned off (`--skip-db-update`,
   `GRYPE_DB_AUTO_UPDATE=false`). Offline nothing is updated, and in both cases ASH's
-  staleness check still holds the database to its bound.
+  staleness check still holds the database to its bound. trivy's Java database
+  (about 935 MiB) is not updated and trivy-repo runs with `--skip-java-db-update`:
+  `trivy repository` does not analyze JAR, WAR or EAR files and never reads it.
 - System directories (`/usr`, `/etc`, `/opt`, `/nix`) and the directories on `PATH`
   are read-only. Inside `$HOME` only `PATH` entries named `bin`, `sbin` or `Scripts`
   are mounted, and a tool's install prefix only when it is deeper than a directory
