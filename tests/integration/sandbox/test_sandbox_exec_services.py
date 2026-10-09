@@ -13,8 +13,9 @@ which is what the profile's Mach rules decide and which a process could use with
 going through those tools.
 
 Each attempt is made twice. ``--sandbox off`` is the control and has to succeed: that
-proves the session has a pasteboard and a LaunchServices to reach, which a login over
-SSH without a GUI session does not. Then ``--sandbox sandbox-exec``, where the tool must
+proves the session has the service to reach, which a login over SSH without a GUI
+session may not (no pasteboard, no LaunchServices, a locked keychain). Then
+``--sandbox sandbox-exec``, where the tool must
 start (exec is allowed) and the service must refuse it. A control that fails skips the
 test, unless ASH_REQUIRE_SANDBOX_BACKENDS names sandbox-exec, as CI's macOS leg does,
 in which case it fails.
@@ -54,10 +55,11 @@ REFUSED = {
     "keychain_read": "blocked: RuntimeError: security did not return the keychain item",
 }
 
-#: Services a scanner has no use for, looked up directly. LaunchServices
-#: (launchservicesd, coreservicesd and the lsd database) can start apps outside the
-#: sandbox; the pasteboard holds whatever the user last copied; SecurityServer is the
-#: keychain.
+#: Services a scanner with no network has no use for, looked up directly; the probe
+#: scanner has none. LaunchServices (launchservicesd, coreservicesd and the lsd
+#: database) can start apps outside the sandbox, and the pasteboard holds whatever
+#: the user last copied: both are denied to every scanner. SecurityServer, the
+#: keychain daemon, is allowed only with a network.
 UNNEEDED_SERVICES = (
     "com.apple.coreservices.launchservicesd",
     "com.apple.CoreServices.coreservicesd",

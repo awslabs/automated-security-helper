@@ -19,6 +19,8 @@ running" apart from "the tool ran and the service refused it".
 - ``keychain_read``: ``security find-generic-password -w`` for an item the test added
   to the default keychain. An item added by ``security`` trusts ``security``, so it
   comes back without a prompt, which is how a command line tool's stored token would.
+  The keychain daemon is not reachable without a network, and the keychain files
+  are under the home directory, which the scanner cannot read.
 - ``mach_lookup``: ``bootstrap_look_up`` of the Mach service the spec names, through
   ctypes, which is the lookup itself with no client library around it. ``open`` is
   also refused by the profile's default deny of the ``lsopen`` operation; this check

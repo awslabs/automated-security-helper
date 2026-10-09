@@ -508,11 +508,11 @@ _SETSID_EXEC = "import os,sys;os.setsid();os.execv(sys.argv[1],sys.argv[1:])"
 #: The Mach services every sandboxed scanner may look up. Measured: the ten builtin
 #: scanners were run through the scanner parity fixture on the macOS 14.8, 15.7 and
 #: 26.6 CI runners with every lookup reported, and they looked up the same thirteen
-#: services on all three. Nine are allowed, below and in the network list. Not
-#: allowed: LaunchServices (denied below), com.apple.SecurityServer, which is the
-#: keychain, and com.apple.analyticsd, both looked up by /usr/bin/security when
-#: semgrep-core runs it for the system root certificates. See
-#: docs/content/docs/scanner-sandbox.md for finding a service that is missing.
+#: services on all three. Ten are allowed, here and in the network list. Not
+#: allowed: LaunchServices (denied below), which node looks up on start and does
+#: without, and com.apple.analyticsd, telemetry from /usr/bin/security, which works
+#: without it. See docs/content/docs/scanner-sandbox.md for finding a service that
+#: is missing.
 MACH_SERVICES: Tuple[str, ...] = (
     # CFPreferences, which CoreFoundation reads on start (Python, Go, node, ruby).
     "com.apple.cfprefsd.agent",
@@ -531,6 +531,12 @@ MACH_SERVICES_WITH_NETWORK: Tuple[str, ...] = (
     "com.apple.SystemConfiguration.DNSConfiguration",
     "com.apple.SystemConfiguration.configd",
     "com.apple.trustd.agent",
+    # The keychain daemon. semgrep-core runs /usr/bin/security to read the system
+    # root certificates, and semgrep's online scan fails without it. Keychain items
+    # stay out of reach: with this service allowed, CI measured an item that
+    # security itself had added coming back as "could not be found", and the
+    # keychain files are under the home directory, which the profile hides.
+    "com.apple.SecurityServer",
 )
 
 #: Denied after every allow, so no allowlist entry can ever reach them: in SBPL the
