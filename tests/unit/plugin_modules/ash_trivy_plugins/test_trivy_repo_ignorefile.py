@@ -28,6 +28,7 @@ PluginContext.model_rebuild()
 @pytest.fixture(autouse=True)
 def _fresh_warnings(monkeypatch):
     monkeypatch.delenv("TRIVY_IGNOREFILE", raising=False)
+    monkeypatch.delenv("TRIVY_SECRET_CONFIG", raising=False)
     reset_path_refusal_warnings()
     yield
     reset_path_refusal_warnings()
@@ -96,3 +97,38 @@ def test_an_ignore_file_inside_the_tree_is_not_passed(tmp_path, value):
     passed = _ignorefile(_argv(tmp_path, source, {"ignore_file": value}))
     assert not passed.resolve().is_relative_to(source.resolve())
     assert passed.read_text() == ""
+
+
+def _flag(argv: list, name: str) -> Path:
+    values = [a.split("=", 1)[1] for a in argv if a.startswith(f"{name}=")]
+    assert len(values) == 1, argv
+    return Path(values[0])
+
+
+def test_the_trees_trivy_secret_yaml_is_not_used(tmp_path):
+    source = _tree(tmp_path)
+    (source / "trivy-secret.yaml").write_text("disable-rules:\n  - github-pat\n")
+    passed = _flag(_argv(tmp_path, source), "--secret-config")
+    assert not passed.resolve().is_relative_to(source.resolve())
+    assert passed.read_text().strip() == "{}"
+
+
+def test_an_operator_secret_config_outside_the_tree_is_passed(tmp_path):
+    source = _tree(tmp_path)
+    operator = tmp_path / "operator" / "trivy-secret.yaml"
+    operator.parent.mkdir()
+    operator.write_text("{}\n")
+    argv = _argv(tmp_path, source, {"secret_config_file": str(operator)})
+    assert _flag(argv, "--secret-config") == operator.resolve()
+
+
+def test_a_refused_option_does_not_hide_the_operators_environment_file(
+    tmp_path, monkeypatch
+):
+    source = _tree(tmp_path)
+    operator = tmp_path / "operator" / "trivyignore"
+    operator.parent.mkdir()
+    operator.write_text("github-pat\n")
+    monkeypatch.setenv("TRIVY_IGNOREFILE", str(operator))
+    argv = _argv(tmp_path, source, {"ignore_file": ".trivyignore"})
+    assert _ignorefile(argv) == operator.resolve()

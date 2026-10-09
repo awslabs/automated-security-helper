@@ -1,10 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Real trivy: a .trivyignore in the scanned tree does not remove trivy-repo findings.
+"""Real trivy: trivy input files in the scanned tree do not remove trivy-repo findings.
 
-trivy reads .trivyignore from its working directory when --ignorefile is not given
-(measured with trivy 0.75.0), and trivy-repo runs it in the source directory. The
+trivy reads .trivyignore and trivy-secret.yaml from its working directory when
+--ignorefile and --secret-config are not given (measured with trivy 0.75.0), and
+trivy-repo runs it in the source directory. The
 fixture is a git repository with one generated GitHub token, which trivy's secret
 scanner reports as ``github-pat``; secret scanning needs no vulnerability database.
 Skipped when trivy is not installed.
@@ -121,3 +122,41 @@ def test_an_operator_ignore_file_still_applies(tmp_path, monkeypatch):
     found = _ash_rule_ids(tmp_path, source, {"ignore_file": str(operator)})
     assert "gitlab-pat" not in found
     assert "github-pat" in found
+
+
+def test_a_trivy_secret_yaml_in_the_tree_does_not_disable_rules(tmp_path, monkeypatch):
+    trivy = _trivy()
+    monkeypatch.setenv("TRIVY_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.delenv("TRIVY_SECRET_CONFIG", raising=False)
+    source = _repo(tmp_path)
+    (source / ".trivyignore").unlink()
+    (source / "trivy-secret.yaml").write_text("disable-rules:\n  - github-pat\n")
+
+    out = tmp_path / "control.json"
+    subprocess.run(  # nosec B603 - fixed argv, trivy from PATH
+        [
+            trivy,
+            "repository",
+            "--scanners",
+            "secret",
+            "--skip-db-update",
+            "--skip-check-update",
+            "--disable-telemetry",
+            "--format",
+            "json",
+            "--output",
+            str(out),
+            ".",
+        ],
+        cwd=source,
+        capture_output=True,
+        check=False,
+    )
+    control_ids = {
+        s["RuleID"]
+        for r in json.loads(out.read_text()).get("Results", [])
+        for s in r.get("Secrets") or []
+    }
+    assert "github-pat" not in control_ids and control_ids
+
+    assert "github-pat" in _ash_rule_ids(tmp_path, source)
