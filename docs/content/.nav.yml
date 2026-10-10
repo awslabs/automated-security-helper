@@ -79,6 +79,7 @@ nav:
       - UV Tool Management: developer-guide/uv-tool-management.md
   - Contributing:
       - How to Contribute: contributing.md
+      - Testing the Documentation: contributing/documentation.md
       - Testing:
           - Overview: docs/testing/index.md
           - Test Organization: docs/testing/test_organization.md
