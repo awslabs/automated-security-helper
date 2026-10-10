@@ -121,6 +121,10 @@ _EXCLUDED_MD_DIRS = frozenset(
         ".mypy_cache",
         "test-results",
         "__pycache__",
+        # Gitignored caches: the docs build's privacy plugin and the jsii package
+        # cache the cdk-nag tests extract, which holds the README of every bundled
+        # npm package. The docs-example runner would otherwise run their examples.
+        ".cache",
     }
 )
 
