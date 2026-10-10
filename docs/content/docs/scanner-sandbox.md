@@ -69,9 +69,10 @@ it needs.
   staleness check still holds the database to its bound. trivy's Java database
   (about 935 MiB) is not updated and trivy-repo runs with `--skip-java-db-update`:
   `trivy repository` does not analyze JAR, WAR or EAR files and never reads it.
-  Under every backend, online or offline, trivy-repo keeps its scan cache in memory
-  (`--cache-backend=memory`), because trivy otherwise opens `fanal/fanal.db` in a
-  cache directory it may only read, and exits 1.
+  In every run, sandboxed or not, online or offline, trivy-repo keeps its scan cache
+  in memory (`--cache-backend=memory`), because trivy otherwise opens
+  `fanal/fanal.db` in a cache directory it may only read, and exits 1. A cache can
+  be read-only outside a sandbox too, when it is shared or baked into an image.
 - The cache directory is the one grype or trivy itself uses on the host:
   `GRYPE_DB_CACHE_DIR` or `TRIVY_CACHE_DIR` when set, else `$XDG_CACHE_HOME` when set
   (on macOS, grype only), else `~/.cache` on Linux and `~/Library/Caches` on macOS.

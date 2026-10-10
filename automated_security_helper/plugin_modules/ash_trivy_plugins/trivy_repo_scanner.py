@@ -44,7 +44,6 @@ from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.content_db_refresh import (
     default_cache_dir,
-    in_scanner_sandbox,
     prepare_content_db,
     sandboxed_online,
     scan_id_for,
@@ -527,7 +526,7 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 f"--secret-config={self._secret_config_file()}",
                 f"--cache-dir={cache.as_posix()}",
             ]
-            sandbox_flags: List[str] = []
+            cache_flags: List[str] = []
             if sandboxed_online(self._scanner_offline()):
                 # The sandbox mounts trivy's cache read-only, so its database (and
                 # the checks bundle, for misconfiguration scans) is updated first,
@@ -547,21 +546,22 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                     checks=checks,
                     scan_id=scan_id_for(self.context),
                 )
-                sandbox_flags += [
+                cache_flags += [
                     "--skip-db-update",
                     "--skip-java-db-update",
                     *(["--skip-check-update"] if checks else []),
                 ]
-            if in_scanner_sandbox():
-                # Online or offline: trivy keeps its scan cache (fanal/fanal.db) in
-                # the cache directory, which every sandbox backend but bwrap mounts
-                # read-only. Measured with trivy 0.75.0 against a read-only cache,
-                # offline: "unable to initialize fs cache: failed to create cache
-                # dir ... permission denied", exit 1, and with --cache-backend=memory
-                # the same scan's findings. The scan cache only saves re-analysing an
-                # unchanged target, so the results are the same either way.
-                sandbox_flags.append("--cache-backend=memory")
-            final_args[insert_at:insert_at] = sandbox_flags
+            # Every run, sandboxed or not, online or offline: trivy keeps its scan
+            # cache (fanal/fanal.db) in the cache directory, which every sandbox
+            # backend but bwrap mounts read-only, and which can be read-only with
+            # no sandbox at all (a shared or image-baked cache). Measured with trivy
+            # 0.75.0 against a read-only cache, offline, sandboxed and not: "unable
+            # to initialize fs cache: failed to create cache dir ... permission
+            # denied", exit 1, and with --cache-backend=memory the same scan's
+            # findings. The scan cache only saves re-analysing an unchanged target,
+            # so the results are the same either way.
+            cache_flags.append("--cache-backend=memory")
+            final_args[insert_at:insert_at] = cache_flags
 
             self._plugin_log(
                 f"Running command: {' '.join(final_args)}",

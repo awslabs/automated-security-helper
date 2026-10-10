@@ -585,14 +585,16 @@ class TestScannersUseThePreparedDatabase:
 
 
 class TestTrivyScanCacheUnderASandbox:
-    """trivy-repo keeps its scan cache in memory in every sandboxed run.
+    """trivy-repo keeps its scan cache in memory in every run, sandboxed or not.
 
     trivy writes its scan cache (fanal/fanal.db) into its cache directory, which
-    every backend but bwrap mounts read-only. Measured with trivy 0.75.0 offline
-    against a read-only cache: "unable to initialize fs cache: failed to create
-    cache dir ... permission denied", exit 1; with --cache-backend=memory, the same
-    findings as a writable cache. Online the flag was already there; offline it
-    was not, so an offline scan under sandbox-exec, Landlock or firejail failed.
+    every backend but bwrap mounts read-only, and which can be read-only outside a
+    sandbox as well. Measured with trivy 0.75.0 offline against a read-only cache:
+    "unable to initialize fs cache: failed to create cache dir ... permission
+    denied", exit 1; with --cache-backend=memory, the same findings as a writable
+    cache. Online the flag was already there under a sandbox; offline it was not,
+    so an offline scan under sandbox-exec, Landlock or firejail failed, and neither
+    was it there unsandboxed.
     """
 
     def _command(self, context, tmp_path, monkeypatch, sandboxed: bool):
@@ -614,10 +616,12 @@ class TestTrivyScanCacheUnderASandbox:
         assert "--offline-scan" in command
         assert "--cache-backend=memory" in command
 
-    def test_not_without_a_sandbox(self, test_plugin_context, tmp_path, monkeypatch):
+    def test_and_without_one(self, test_plugin_context, tmp_path, monkeypatch):
+        """A cache can be read-only with no sandbox too; see
+        test_a_read_only_cache_outside_a_sandbox_still_scans."""
         monkeypatch.setenv("ASH_OFFLINE", "YES")
         command = self._command(test_plugin_context, tmp_path, monkeypatch, False)
-        assert not any(a.startswith("--cache-backend") for a in command)
+        assert "--cache-backend=memory" in command
 
 
 def _grype_scanner(context):

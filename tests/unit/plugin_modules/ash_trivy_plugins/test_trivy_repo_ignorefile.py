@@ -153,11 +153,13 @@ def test_the_flags_follow_the_subcommand_however_the_target_is_spelled(tmp_path)
         scanner.scan(target=source, target_type="source")
     argv = run.call_args.kwargs["command"]
     assert argv[:2] == ["trivy", "repository"]
-    assert argv[2].startswith("--ignorefile=")
-    assert argv[3].startswith("--secret-config=")
+    # The scan cache in memory, in every run: the cache may be read-only.
+    assert argv[2] == "--cache-backend=memory"
+    assert argv[3].startswith("--ignorefile=")
+    assert argv[4].startswith("--secret-config=")
     # The cache the scan, the refresh and the staleness check all read.
-    assert argv[4].startswith("--cache-dir=")
-    assert argv[5:] == resolved[2:]
+    assert argv[5].startswith("--cache-dir=")
+    assert argv[6:] == resolved[2:]
 
 
 def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_update(
@@ -176,7 +178,6 @@ def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_updat
     prepared = []
     with (
         patch.object(trivy_repo_scanner, "sandboxed_online", return_value=True),
-        patch.object(trivy_repo_scanner, "in_scanner_sandbox", return_value=True),
         patch.object(
             trivy_repo_scanner,
             "prepare_content_db",

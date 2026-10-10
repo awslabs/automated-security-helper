@@ -160,3 +160,25 @@ def test_a_trivy_secret_yaml_in_the_tree_does_not_disable_rules(tmp_path, monkey
     assert "github-pat" not in control_ids and control_ids
 
     assert "github-pat" in _ash_rule_ids(tmp_path, source)
+
+
+def test_a_read_only_cache_outside_a_sandbox_still_scans(tmp_path, monkeypatch):
+    """A prepared cache can be read-only with no sandbox involved (a shared or
+    image-baked cache). trivy keeps its scan cache, fanal/fanal.db, there unless
+    told otherwise, and trivy 0.75.0 then fails with "unable to initialize fs
+    cache". trivy-repo keeps the scan cache in memory in every run."""
+    _trivy()
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    monkeypatch.setenv("TRIVY_CACHE_DIR", str(cache))
+    monkeypatch.delenv("TRIVY_IGNOREFILE", raising=False)
+    source = _repo(tmp_path)
+    (source / ".trivyignore").unlink()
+    cache.chmod(0o555)
+    try:
+        if os.access(cache, os.W_OK):  # pragma: no cover - root ignores the mode
+            pytest.skip("this user can write a read-only directory")
+        found = _ash_rule_ids(tmp_path, source)
+    finally:
+        cache.chmod(0o755)
+    assert {"github-pat", "gitlab-pat"} <= found
