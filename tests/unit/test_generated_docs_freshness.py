@@ -286,6 +286,57 @@ def test_options_tables_carry_the_doctest_marker(page: str) -> None:
     assert options_tables == len(marker_lines) > 0
 
 
+#: First header cells that make a table one the docs checks compare with the code,
+#: as scripts/docs_checks.py decides it (a Default column does too). Environment
+#: variable tables are not such tables.
+_KEYED_HEADERS = {
+    "option",
+    "options",
+    "key",
+    "keys",
+    "field",
+    "fields",
+    "setting",
+    "settings",
+    "argument",
+}
+#: Pages whose every keyed table must be marked. mcp-tools.md is not here: its
+#: tables list MCP tool parameters, which are neither config keys nor CLI options.
+MARKED_PAGES = sorted(set(REFERENCE_PAGES.values()) - {"mcp-tools.md"})
+_HEADING_COMMAND = re.compile(
+    r"^#{2,3} (?:<a id=\"[^\"]+\"></a>)?`ash((?: [a-z][\w-]*)*)`$"
+)
+
+
+@pytest.mark.parametrize("page", MARKED_PAGES)
+def test_every_keyed_table_names_what_it_documents(page: str) -> None:
+    """A table of options or keys carries a marker; on cli.md it names its command.
+
+    The docs checks treat a keyed table without a marker as an error, so a
+    generated page that emitted one would fail them; on cli.md the marker must be
+    of=cli.<the command words of the heading above the table>.
+    """
+    text = (REFERENCE_DIR / page).read_text(encoding="utf-8")
+    lines = text.splitlines()
+    marker_re = re.compile(r"^<!-- doctest: options of=(\S+) -->$")
+    for index, above, rows in _tables(text):
+        header = [re.sub(r"[`*_]", "", c).strip().lower() for c in _cells(rows[0])]
+        keyed = header[0] not in ("variable", "environment variable") and (
+            header[0] in _KEYED_HEADERS or "default" in header
+        )
+        match = marker_re.match(above)
+        if not keyed:
+            assert match is None, f"{page}:{index + 1}: marker on {rows[0]!r}"
+            continue
+        assert match, f"{page}:{index + 1}: {rows[0]!r} has no options marker"
+        if page == "cli.md":
+            heading = next(
+                m for ln in reversed(lines[:index]) if (m := _HEADING_COMMAND.match(ln))
+            )
+            expected = ".".join(["cli", *heading.group(1).split()])
+            assert match.group(1) == expected, f"cli.md:{index + 1}: {above}"
+
+
 #: Bare phrases a Default cell may hold (generate_config_reference.py, "Default cells").
 DEFAULT_PHRASES = {
     "required",
@@ -295,6 +346,9 @@ DEFAULT_PHRASES = {
     "the plugin's own name",
     "the plugin's defaults",
 }
+#: The CLI page's phrases (generate_cli_docs.py, "Defaults"), which also has no
+#: environment or platform forms: an option's variable has its own column.
+CLI_DEFAULT_PHRASES = {"required", "computed at run time", "not set", "on", "off"}
 _SPAN = r"(?:``.+?``|`[^`]+`)"
 _PLATFORMS = r"(?:Linux|macOS|Windows)(?:(?:, (?:Linux|macOS|Windows))* and (?:Linux|macOS|Windows))?"
 DEFAULT_FORMS = (
@@ -303,7 +357,7 @@ DEFAULT_FORMS = (
 )
 
 
-@pytest.mark.parametrize("page", ["configuration.md", *sorted(OPTIONS_PAGES)])
+@pytest.mark.parametrize("page", ["cli.md", "configuration.md", *sorted(OPTIONS_PAGES)])
 def test_default_cells_keep_to_the_documented_forms(page: str) -> None:
     """Every Default cell of a key or option table is a form the docs checks can read.
 
@@ -313,6 +367,11 @@ def test_default_cells_keep_to_the_documented_forms(page: str) -> None:
     import yaml
 
     text = (REFERENCE_DIR / page).read_text(encoding="utf-8")
+    phrases, forms = (
+        (CLI_DEFAULT_PHRASES, DEFAULT_FORMS[:1])
+        if page == "cli.md"
+        else (DEFAULT_PHRASES, DEFAULT_FORMS)
+    )
     checked = 0
     for _index, _above, rows in _tables(text):
         header = _cells(rows[0])
@@ -321,9 +380,11 @@ def test_default_cells_keep_to_the_documented_forms(page: str) -> None:
         for row in rows[1:]:
             cell = _cells(row)[2]
             checked += 1
-            if cell in DEFAULT_PHRASES:
+            if cell in phrases:
                 continue
-            match = next((m for f in DEFAULT_FORMS if (m := f.match(cell))), None)
+            if page == "cli.md" and cell.startswith("from `"):
+                raise AssertionError(f"cli.md: environment form in {row}")
+            match = next((m for f in forms if (m := f.match(cell))), None)
             assert match is not None, f"{page}: Default cell {cell!r} in {row}"
             value = match.groupdict().get("value")
             if value:

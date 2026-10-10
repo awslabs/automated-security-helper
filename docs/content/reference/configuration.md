@@ -52,6 +52,7 @@ A config file can name base files with `extends`. A chain may be at most 10 leve
 
 A key not listed here is ignored, without an error, when the configuration is loaded.
 
+<!-- doctest: options of=config -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="project_name"></a>`project_name` | string | from `ASH_PROJECT_NAME`, else `ash-scan` | Name of the project being scanned |
@@ -78,6 +79,7 @@ A key not listed here is ignored, without an error, when the configuration is lo
 
 A key not listed here is an error when the configuration is loaded.
 
+<!-- doctest: options of=global_settings -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="global_settings.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` | from `ASH_DEFAULT_SEVERITY_LEVEL`, else `MEDIUM` | Global minimum severity level to consider findings as failures across all scanners |
@@ -93,6 +95,7 @@ Each entry in the list has these keys.
 
 A key not listed here is ignored, without an error, when the configuration is loaded.
 
+<!-- doctest: options of=global_settings.ignore_paths -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="global_settings.ignore_paths.path"></a>`path` | string | required | Path or pattern to exclude |
@@ -107,6 +110,7 @@ Each entry in the list has these keys.
 
 A key not listed here is ignored, without an error, when the configuration is loaded.
 
+<!-- doctest: options of=global_settings.suppressions -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="global_settings.suppressions.path"></a>`path` | string | required | Path or pattern to exclude |
@@ -126,6 +130,7 @@ MCP-server-specific config bundle (transport-agnostic).
 
 A key not listed here is an error when the configuration is loaded.
 
+<!-- doctest: options of=global_settings.mcp -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="global_settings.mcp.runtime_overrides"></a>`runtime_overrides` | [section](#section-global_settings-mcp-runtime_overrides) | see the section | Allowlist for runtime JSON-Patch overrides. |
@@ -136,6 +141,7 @@ Allowlist + denylist controlling which JSON-Patch ops the MCP server accepts.
 
 A key not listed here is an error when the configuration is loaded.
 
+<!-- doctest: options of=global_settings.mcp.runtime_overrides -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="global_settings.mcp.runtime_overrides.enabled"></a>`enabled` | boolean | `false` | Master switch — runtime patches are rejected unless True. |
@@ -149,6 +155,7 @@ OS-level sandboxing of scanner subprocesses. Off by default.
 
 A key not listed here is an error when the configuration is loaded.
 
+<!-- doctest: options of=sandbox -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="sandbox.mode"></a>`mode` | one of `off`, `auto`, `bwrap`, `firejail`, `landlock`, `sandbox-exec` | `"off"` | How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. Ignored in container mode, where the container is the boundary. |
@@ -163,6 +170,7 @@ Each entry in the list has these keys.
 
 A key not listed here is an error when the configuration is loaded.
 
+<!-- doctest: options of=content_db_staleness_overrides -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="content_db_staleness_overrides.database"></a>`database` | string | required | The content database's registry name, as listed in automated_security_helper/utils/content_databases.py: grype-db, trivy-db, semgrep-offline-rules or opengrep-offline-rules. |
@@ -176,6 +184,7 @@ Configuration model for build-time settings.
 
 A key not listed here is an error when the configuration is loaded.
 
+<!-- doctest: options of=build -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="build.build_mode"></a>`build_mode` | one of `ONLINE`, `OFFLINE` | `ONLINE` | Build mode for the container image build. If enabled, also enables offline mode during the scan phase without any explicit directive when scanning. |
@@ -188,6 +197,7 @@ Configuration model for MCP resource management settings.
 
 A key not listed here is an error when the configuration is loaded.
 
+<!-- doctest: options of=mcp-resource-management -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="mcp-resource-management.max_concurrent_scans"></a>`max_concurrent_scans` | integer, at least 1, at most 10 | `3` | Maximum number of concurrent scans allowed |
@@ -213,6 +223,7 @@ How many projects a workspace scan runs at once, and how long each may take.
 
 A key not listed here is an error when the configuration is loaded.
 
+<!-- doctest: options of=workspace -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="workspace.max_parallel_projects"></a>`max_parallel_projects` | integer or null, at least 1, at most 64 | `null` | Maximum number of projects scanned concurrently. Unset means min(4, cpu_count). This is an outer bound over each project's own scanner thread pool, not a replacement for it. |
@@ -222,6 +233,7 @@ A key not listed here is an error when the configuration is loaded.
 
 `scanners`, `reporters` and `converters` each map a plugin name to that plugin's configuration. Every plugin's entry has these keys; what goes under `options` is specific to the plugin and is listed on its reference page.
 
+<!-- doctest: options of=scanners.* -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `name` | string, length at least 1, matches `^[a-zA-Z][\w-]+$` | the plugin's own name | Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter. |
@@ -232,6 +244,7 @@ A key not listed here is an error when the configuration is loaded.
 
 The scanners ASH declares a configuration for. Other scanner names are accepted too (the section allows extra keys), for scanners loaded from `ash_plugin_modules`.
 
+<!-- doctest: options of=scanners -->
 | Key | Enabled by default | Scanner options |
 |-----|--------------------|---------------|
 | <a id="scanners.bandit"></a>`bandit` | yes | [`bandit` options](scanners.md#bandit) |
@@ -249,6 +262,7 @@ The scanners ASH declares a configuration for. Other scanner names are accepted 
 
 The reporters ASH declares a configuration for. Other reporter names are accepted too (the section allows extra keys), for reporters loaded from `ash_plugin_modules`.
 
+<!-- doctest: options of=reporters -->
 | Key | Enabled by default | Reporter options |
 |-----|--------------------|---------------|
 | <a id="reporters.csv"></a>`csv` | yes | [`csv` options](reporters.md#csv) |
@@ -271,6 +285,7 @@ The reporters ASH declares a configuration for. Other reporter names are accepte
 
 The converters ASH declares a configuration for. Other converter names are accepted too (the section allows extra keys), for converters loaded from `ash_plugin_modules`.
 
+<!-- doctest: options of=converters -->
 | Key | Enabled by default | Converter options |
 |-----|--------------------|---------------|
 | <a id="converters.archive"></a>`archive` | yes | [`archive` options](converters.md#archive) |
@@ -288,6 +303,7 @@ Exactly one may exist: when ASH finds more than one, it refuses the workspace ra
 
 A key not listed here is an error when the configuration is loaded.
 
+<!-- doctest: options of=workspace-policy -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="workspace-policy.workspace"></a>`workspace` | [section](#workspace-section-workspace) | see the section | Workspace-wide policy. Distinct from AshConfig.workspace, which holds execution scheduling knobs in a project config; nothing here can be set from a project's own file. |
@@ -298,6 +314,7 @@ Workspace-wide policy: the `workspace` block of the policy file.
 
 A key not listed here is an error when the configuration is loaded.
 
+<!-- doctest: options of=workspace-policy.workspace -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="workspace-policy.workspace.max_severity_threshold"></a>`max_severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | The LOOSEST severity threshold any project may use. A project configuring something stricter keeps it; a project configuring something looser is tightened to this value. 'max' refers to permissiveness, not to severity: the strictness order is ALL &lt; LOW &lt; MEDIUM &lt; HIGH &lt; CRITICAL, so raising this value LOOSENS the ceiling. Unset means no ceiling. Case-sensitive. |
@@ -314,6 +331,7 @@ Each entry in the list has these keys.
 
 A key not listed here is ignored, without an error, when the configuration is loaded.
 
+<!-- doctest: options of=workspace-policy.workspace.suppressions -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="workspace-policy.workspace.suppressions.path"></a>`path` | string | required | Path or pattern to exclude |
@@ -335,6 +353,7 @@ Each entry in the list has these keys.
 
 A key not listed here is ignored, without an error, when the configuration is loaded.
 
+<!-- doctest: options of=workspace-policy.workspace.ignore_paths -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | <a id="workspace-policy.workspace.ignore_paths.path"></a>`path` | string | required | Path or pattern to exclude |

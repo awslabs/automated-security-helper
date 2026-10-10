@@ -54,6 +54,13 @@ is a ``str`` mixin (``AshLogLevel``, ``RunMode``, ``BuildTarget``), and
 and later, so formatting the member directly made this page depend on the
 interpreter that generated it. ``.value`` is also what a user types:
 ``BuildTarget.NON_ROOT`` is not an accepted value, ``non-root`` is.
+
+A Default cell is a value in one code span that reads back with
+``yaml.safe_load`` (a list is one JSON list), or one of the phrases ``required``,
+``computed at run time``, ``not set``, ``on`` and ``off``. A boolean flag's
+default is ``on`` or ``off`` whether or not it has a ``--no-`` spelling: the
+Option column already shows both spellings. The docs checks compare each cell
+with the option's default, so the forms are kept this small.
 """
 
 from __future__ import annotations
@@ -76,9 +83,11 @@ from _reference_docs import (  # noqa: E402
     generated_note,
     md_prose,
     normalize_paths,
+    options_marker,
     prepare_environment,
     reference_dir,
     write_or_check,
+    yaml_value,
 )
 
 GENERATOR = "scripts/generate_cli_docs.py"
@@ -126,16 +135,15 @@ def param_anchor(path: list[str], param: Any) -> str:
     return f"{base}--{name.lstrip('-')}"
 
 
-def _format_value(value: Any) -> str:
+def _plain_value(value: Any) -> Any:
+    """A default as the value a user would write: enums by value, paths as text."""
     if isinstance(value, enum.Enum):
         value = value.value
-    if isinstance(value, bool):
-        return "true" if value else "false"
     if isinstance(value, Path):
-        return code(normalize_paths(value.as_posix()))
-    if value == "":
-        return code('""')
-    return code(normalize_paths(str(value)))
+        value = value.as_posix()
+    if isinstance(value, str):
+        value = normalize_paths(value)
+    return value
 
 
 def format_default(param: Any) -> str:
@@ -146,20 +154,16 @@ def format_default(param: Any) -> str:
     if callable(default):
         return "computed at run time"
     if getattr(param, "is_flag", False) and getattr(param, "is_bool_flag", True):
-        secondary = list(getattr(param, "secondary_opts", None) or [])
         if default is None:
             return "not set"
-        if secondary:
-            chosen = param.opts[0] if default else secondary[0]
-            return code(chosen)
-        return "off" if not default else "on"
+        return "on" if default else "off"
     if default is None:
         return "not set"
     if isinstance(default, (list, tuple)):
         if not default:
             return "not set"
-        return ", ".join(_format_value(v) for v in default)
-    return _format_value(default)
+        return code(yaml_value([_plain_value(v) for v in default]))
+    return code(yaml_value(_plain_value(default)))
 
 
 def format_type(param: Any) -> str:
@@ -285,12 +289,17 @@ def _param_signature(param: Any) -> tuple:
 
 
 def render_param_table(path: list[str], params: list[Any], seen: set[str]) -> list[str]:
-    """One table for the command's arguments, then one for its options."""
+    """One table for the command's arguments, then one for its options.
+
+    Each is marked for the docs checks with ``of=cli.<command words>``.
+    """
     arguments = [p for p in params if p.param_type_name == "argument"]
     options = [p for p in params if p.param_type_name != "argument"]
+    marker = options_marker(".".join(["cli", *path]))
     out: list[str] = []
     if arguments:
         out += [
+            marker,
             "| Argument | Type | Default | Environment variable | Description |",
             "|----------|------|---------|----------------------|-------------|",
             *(_param_row(path, p, seen) for p in arguments),
@@ -298,6 +307,7 @@ def render_param_table(path: list[str], params: list[Any], seen: set[str]) -> li
         ]
     if options:
         out += [
+            marker,
             "| Option | Type | Default | Environment variable | Description |",
             "|--------|------|---------|----------------------|-------------|",
             *(_param_row(path, p, seen) for p in options),

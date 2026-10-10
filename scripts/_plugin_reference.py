@@ -57,7 +57,7 @@ from unittest import mock
 from pathlib import Path
 from typing import Any, Optional
 
-from _reference_docs import NO_DESCRIPTION, code, md_prose
+from _reference_docs import NO_DESCRIPTION, code, md_prose, options_marker
 from generate_config_reference import (
     ENV_DEFAULT_NOTE,
     constraints_text,
@@ -227,11 +227,6 @@ def package_note(plugin: Plugin) -> str:
     )
 
 
-def options_marker(section: str, plugin: Plugin) -> str:
-    """The doctest marker that names the plugin an options table belongs to."""
-    return f"<!-- doctest: options of={section}.{plugin.name} -->"
-
-
 def install_text(instance: Any) -> str:
     """How ASH installs the tool a plugin runs, from what the instance declares."""
     if instance is None:
@@ -330,7 +325,7 @@ def options_table(plugin: Plugin, config_prefix: str, missing: list[str]) -> lis
         f"Options, under {code(f'{config_prefix}.{plugin.name}.options')}. "
         + unknown_keys_text(model),
         "",
-        options_marker(config_prefix, plugin),
+        options_marker(f"{config_prefix}.{plugin.name}"),
         "| Option | Type | Default | Description |",
         "|--------|------|---------|-------------|",
         *rows,

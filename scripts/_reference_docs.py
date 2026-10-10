@@ -64,10 +64,12 @@ from __future__ import annotations
 import argparse
 import difflib
 import importlib.util
+import json
 import os
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = "automated_security_helper"
@@ -243,12 +245,49 @@ def md_prose(text: object) -> str:
     return "".join(out)
 
 
+def yaml_value(value: Any) -> str:
+    """``value`` as the code-span content of a Default cell (see "Default cells" in
+    ``generate_config_reference.py``).
+
+    ``yaml.safe_load`` of the result gives ``value`` back: a string that YAML would
+    read as something else (``true``, ``5``, ``~``, ``""``) is JSON-quoted.
+    """
+    import yaml
+
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return json.dumps(value)
+    if isinstance(value, str):
+        try:
+            plain = yaml.safe_load(value) == value and value == value.strip()
+        except yaml.YAMLError:
+            plain = False
+        return value if plain and value else json.dumps(value)
+    return json.dumps(value, sort_keys=isinstance(value, dict))
+
+
 def code(text: object) -> str:
     """Render ``text`` as inline code, choosing a fence the text does not contain."""
     value = str(text)
     fence = "``" if "`" in value else "`"
     pad = " " if value.startswith("`") or value.endswith("`") else ""
     return f"{fence}{pad}{value}{pad}{fence}"
+
+
+def options_marker(of: str) -> str:
+    """The docs-check marker on the line directly above a table of options or keys.
+
+    ``of`` names what the table documents, as the docs checks resolve it:
+    ``scanners.bandit`` (a plugin's options), ``global_settings`` or ``config`` (a
+    config section, or the top level), ``workspace-policy.<path>``, or
+    ``cli.<command words>`` (``cli.config.init``; ``cli`` for ``ash`` itself). The
+    checks compare every row and Default cell with the code, and treat a table that
+    looks like one of these without a marker as an error.
+    """
+    return f"<!-- doctest: options of={of} -->"
 
 
 def banner(generator: str, source: str, extra: list[str] | None = None) -> list[str]:

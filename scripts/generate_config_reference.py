@@ -67,7 +67,6 @@ import ast
 import datetime as _dt
 import enum
 import inspect
-import json
 import sys
 import tempfile
 import textwrap
@@ -85,9 +84,11 @@ from _reference_docs import (  # noqa: E402
     generated_note,
     md_prose,
     normalize_paths,
+    options_marker,
     prepare_environment,
     reference_dir,
     write_or_check,
+    yaml_value,
 )
 
 GENERATOR = "scripts/generate_config_reference.py"
@@ -316,29 +317,6 @@ def per_platform_text(values: list[tuple[str, Any]], render) -> str:
         )
         parts.append(f"{shown} on {where}")
     return "; ".join(parts)
-
-
-def yaml_value(value: Any) -> str:
-    """``value`` as the code-span content of a Default cell (see "Default cells").
-
-    ``yaml.safe_load`` of the result gives ``value`` back: a string that YAML would
-    read as something else (``true``, ``5``, ``~``, ``""``) is JSON-quoted.
-    """
-    import yaml
-
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)):
-        return json.dumps(value)
-    if isinstance(value, str):
-        try:
-            plain = yaml.safe_load(value) == value and value == value.strip()
-        except yaml.YAMLError:
-            plain = False
-        return value if plain and value else json.dumps(value)
-    return json.dumps(value, sort_keys=isinstance(value, dict))
 
 
 def default_text(field, per_platform: Optional[list] = None) -> str:
@@ -836,6 +814,7 @@ def _plugin_section_rows(
 ) -> list[str]:
     """The plugin keys a segment declares, each linked to its options on ``page``."""
     rows = [
+        options_marker(segment_name),
         f"| Key | Enabled by default | {kind.capitalize()} options |",
         "|-----|--------------------|---------------|",
     ]
@@ -970,6 +949,7 @@ def generate() -> tuple[str, dict]:
                 lines += ["Each entry in the list has these keys.", ""]
         lines += [unknown_keys_text(section.model), ""]
         lines += [
+            options_marker(anchor_for(section.path) or "config"),
             "| Key | Type | Default | Description |",
             "|-----|------|---------|-------------|",
         ]
@@ -995,6 +975,8 @@ def generate() -> tuple[str, dict]:
             "page."
         ),
         "",
+        # Checked against a scanner entry; reporters' and converters' share the keys.
+        options_marker("scanners.*"),
         "| Key | Type | Default | Description |",
         "|-----|------|---------|-------------|",
     ]
@@ -1052,6 +1034,7 @@ def generate() -> tuple[str, dict]:
     emit_ws = ws_sections[0]
     lines += ["### Workspace policy keys", "", unknown_keys_text(emit_ws.model), ""]
     lines += [
+        options_marker("workspace-policy"),
         "| Key | Type | Default | Description |",
         "|-----|------|---------|-------------|",
     ]
@@ -1073,6 +1056,7 @@ def generate() -> tuple[str, dict]:
             lines += ["Each entry in the list has these keys.", ""]
         lines += [unknown_keys_text(section.model), ""]
         lines += [
+            options_marker(f"workspace-policy.{anchor_for(section.path)}"),
             "| Key | Type | Default | Description |",
             "|-----|------|---------|-------------|",
         ]
