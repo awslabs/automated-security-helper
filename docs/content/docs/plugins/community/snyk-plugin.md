@@ -65,15 +65,33 @@ snyk code test --help
 
 ### Basic Configuration
 
-Snyk code plugin is not included by default with ASH since it requires authentication.
-Include Snyk plugin module in your `.ash/.ash.yaml` configuration file
+The Snyk Code plugin is not loaded by default. Its scanner sends the scanned source
+to Snyk with your Snyk token, so only the operator running ASH can load it. A config
+file inside the scanned tree, such as the repository's own `.ash/.ash.yaml`, cannot:
+an `ash_plugin_modules` entry there that names the package, or a module inside it,
+is ignored with a warning naming the entry.
+
+Load it with `--ash-plugin-modules`:
+
+```bash
+uv run ash --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
+```
+
+or with the `ASH_PLUGIN_MODULES` environment variable, which the commands on the
+rest of this page assume is set:
+
+```bash
+export ASH_PLUGIN_MODULES=automated_security_helper.plugin_modules.ash_snyk_plugins
+```
+
+A config file outside the scanned tree, passed with `--config`, can list it too:
 
 ```yaml
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_snyk_plugins
 ```
 
-Add to your `.ash/.ash.yaml`:
+The scanner's settings can stay in the repository's `.ash/.ash.yaml`:
 
 ```yaml
 scanners:
@@ -161,7 +179,7 @@ uv run ash --scanners snyk-code,bandit,semgrep
 
 ```bash
 # Run in container mode for CI/CD
-uv run ash --mode container --scanners snyk-code
+uv run ash --mode container --scanners snyk-code --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
 ```
 
 ## Output Integration
@@ -239,7 +257,7 @@ repos:
     hooks:
       - id: ash-snyk-code
         name: ASH Snyk Code Security Scan
-        entry: uv run ash --scanners snyk-code --mode precommit
+        entry: uv run ash --scanners snyk-code --mode precommit --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
         language: system
         pass_filenames: false
 ```
@@ -261,6 +279,7 @@ jobs:
       - name: Run ASH with Snyk Code
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          ASH_PLUGIN_MODULES: automated_security_helper.plugin_modules.ash_snyk_plugins
         run: |
           uv run ash --scanners snyk-code --output-format sarif
       - name: Upload SARIF results
@@ -282,6 +301,7 @@ snyk-security-scan:
     - uv run ash --scanners snyk-code
   variables:
     SNYK_TOKEN: $SNYK_TOKEN
+    ASH_PLUGIN_MODULES: automated_security_helper.plugin_modules.ash_snyk_plugins
   artifacts:
     reports:
       sast: .ash/ash_output/reports/ash.sarif

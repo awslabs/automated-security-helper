@@ -32,8 +32,8 @@ the defaults, resolves. A ``patch`` op is refused whatever it writes.
 client-delivered file both are already restrict-only: ``sandbox_grants`` keeps
 its grants out and lets its mode only turn the sandbox on, and
 ``plugin_module_trust`` keeps only installed modules outside the tree (and no
-package that sends findings off the host). Refusing them as well would refuse a
-file that tightens the sandbox.
+package that sends findings or source off the host). Refusing them as well would
+refuse a file that tightens the sandbox.
 
 The rules are a ``ClientConfigRules``: the policy and the trusted config it came
 from. The MCP tools pass the session's, taken from the registered profile the

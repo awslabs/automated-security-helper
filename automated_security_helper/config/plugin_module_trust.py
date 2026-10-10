@@ -18,12 +18,13 @@ Packages named this way keep working, which is what ASH's own
 kept even when that directory is in the tree, as it is for an editable install of
 the repository being scanned; that code is already running.
 
-The exception is ASH's own packages in ``OFF_HOST_PLUGIN_PACKAGES``, whose
-reporters send findings to a remote service with the operator's credentials, from
-the ASH process and outside the scanner sandbox. Their reporters are enabled by
-default, so naming the package is enough to send the findings. An in-tree file's
-entry naming one of them, or a module inside one, is kept only when the trusted
-list names it or its package.
+The exception is ASH's own packages in ``OFF_HOST_PLUGIN_PACKAGES``, which send
+data to a remote service with the operator's credentials: ``ash_aws_plugins``'
+reporters send findings, from the ASH process and outside the scanner sandbox, and
+``ash_snyk_plugins``' scanner sends the scanned source to Snyk with the operator's
+Snyk token. Their plugins are enabled by default, so naming the package is enough
+to send the data. An in-tree file's entry naming one of them, or a module inside
+one, is kept only when the trusted list names it or its package.
 
 Each level of a dotted name is located without importing its parent packages
 (``_spec_without_importing``), so checking a name runs no code.
@@ -37,7 +38,7 @@ import importlib.util
 import sys
 from importlib.machinery import ModuleSpec, PathFinder
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from automated_security_helper.config.config_sources import describe_config_path
 from automated_security_helper.config.path_trust import in_scanned_tree
@@ -48,12 +49,19 @@ if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
 
 
-#: ASH's plugin packages whose reporters send findings off the host. Derived from
-#: the packages' reporters and event handlers by
+#: ASH's plugin packages that send findings or source off the host, with what each
+#: sends, as the warning names it. Derived from the packages' reporters, event
+#: handlers and scanners by
 #: tests/unit/config/test_off_host_plugin_modules_from_repo_config.py.
-OFF_HOST_PLUGIN_PACKAGES: Tuple[str, ...] = (
-    "automated_security_helper.plugin_modules.ash_aws_plugins",
-)
+OFF_HOST_PLUGIN_SENDS: Dict[str, str] = {
+    "automated_security_helper.plugin_modules.ash_aws_plugins": (
+        "its reporters send findings off the host"
+    ),
+    "automated_security_helper.plugin_modules.ash_snyk_plugins": (
+        "its scanner sends the scanned source off the host"
+    ),
+}
+OFF_HOST_PLUGIN_PACKAGES: Tuple[str, ...] = tuple(OFF_HOST_PLUGIN_SENDS)
 
 
 def off_host_package(name: str) -> Optional[str]:
@@ -176,7 +184,7 @@ def confine_plugin_modules(
             continue
         package = off_host_package(name)
         if package is not None and package not in trusted_names:
-            refused.append(f"{name!r} (its reporters send findings off the host)")
+            refused.append(f"{name!r} ({OFF_HOST_PLUGIN_SENDS[package]})")
             continue
         reason = refusal_reason(name, scanned_root)
         if reason is None:
@@ -191,6 +199,6 @@ def confine_plugin_modules(
         f"Ignoring ash_plugin_modules entries {', '.join(refused)} from {files}: "
         "the file is inside the scanned tree, so only installed modules outside the "
         "tree are imported from it, and not ASH's plugin packages that send "
-        "findings off the host. Name other modules with --ash-plugin-modules, "
-        "--config-overrides or a config file outside the tree."
+        "findings or source off the host. Name other modules with "
+        "--ash-plugin-modules, --config-overrides or a config file outside the tree."
     )

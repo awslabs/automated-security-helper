@@ -179,6 +179,13 @@
     default and send findings to AWS with the operator's credentials, so only
     `--ash-plugin-modules`, `--config-overrides` or a config file outside the tree
     can add it.
+  - The same applies to `automated_security_helper.plugin_modules.ash_snyk_plugins`
+    (or a module inside it). Its Snyk Code scanner is enabled by default and sends
+    the scanned source to Snyk with the operator's Snyk token, so only
+    `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`, `--config-overrides` or a config
+    file outside the tree can add it. This repository's
+    `.ash/.ash_community_plugins.yaml` no longer lists it; its CI legs pass it with
+    `--ash-plugin-modules`.
   - A reporter's `extension` has to be a filename suffix, from any source: a value
     with `/`, `\`, `..` or NUL is replaced by the reporter's default, with a
     warning naming the key. Reports, the files the unused-suppressions, S3 and

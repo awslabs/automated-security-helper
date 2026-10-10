@@ -182,7 +182,7 @@ Within what the policy allows, its sandbox settings are restrict-only, the same 
 - The file's `network_scanners` list still applies as a limit, so it can take network away from a scanner but never give it one.
 - `sandbox.mode` can turn the sandbox on, but cannot turn it off or move it to another backend when the server's config sets a mode.
 
-A delivered file's reporter destinations and credentials, and its `ash_plugin_modules` entries, are limited as a config file inside the scanned tree's are; see [Settings a repository's config cannot choose](../configuration-guide.md#settings-a-repositorys-config-cannot-choose).
+Its `ash_plugin_modules` entries are imported only when they name an installed module outside the scanned tree, and never when they name `automated_security_helper.plugin_modules.ash_aws_plugins` or `automated_security_helper.plugin_modules.ash_snyk_plugins` (or a module inside either), which send findings or source off the host with the operator's credentials. Its reporter destinations and credentials come from the server's config, as a config file inside the scanned tree's do. See [Settings a repository's config cannot choose](../configuration-guide.md#settings-a-repositorys-config-cannot-choose).
 
 Everything else in the file applies as usual. The config the server materializes for `select_profile`, under the session's `config/` directory, is the operator's and keeps its grants, as does a file under `ASH_MCP_ALLOWED_CONFIG_ROOTS`.
 

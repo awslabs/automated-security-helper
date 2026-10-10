@@ -21,8 +21,11 @@ content_db_staleness_overrides:
       inside its 24h bound. Time-boxed so the scan fails on a stale trivy-db again
       without anyone having to remember to turn it back on.
 #ash_plugin_modules: []
+# automated_security_helper.plugin_modules.ash_snyk_plugins is not listed: this file
+# is inside the scanned tree, and such a file cannot load it, because its scanner
+# sends the scanned source to Snyk with the operator's token. The CI legs that use
+# this file pass it with --ash-plugin-modules (.github/actions/run-scan-test).
 ash_plugin_modules:
-  - automated_security_helper.plugin_modules.ash_snyk_plugins
   - automated_security_helper.plugin_modules.ash_trivy_plugins
   - automated_security_helper.plugin_modules.ash_ferret_plugins
 external_reports_to_include: []

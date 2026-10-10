@@ -1,14 +1,15 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A config in the scanned tree cannot load ASH's plugin packages that send findings off the host.
+"""A config in the scanned tree cannot load ASH's plugin packages that send data off the host.
 
 ASH's own plugin packages are installed code, so ``plugin_module_trust`` keeps an
-in-tree config's entries that name them. The exception is a package whose
-reporters send findings to a remote service with the operator's credentials
-(``ash_aws_plugins``). Every one of its reporters is enabled by default, so naming
-the package was enough to send the findings off the host. Only the operator can
-add it now. See config/plugin_module_trust.py.
+in-tree config's entries that name them. The exception is a package that sends
+findings or source to a remote service with the operator's credentials:
+``ash_aws_plugins``, whose reporters send findings to AWS, and ``ash_snyk_plugins``,
+whose scanner sends the scanned source to Snyk with the operator's Snyk token. Their
+plugins are enabled by default, so naming the package was enough to send the data
+off the host. Only the operator can add them now. See config/plugin_module_trust.py.
 """
 
 import ast
@@ -17,7 +18,8 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -26,11 +28,14 @@ from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.utils.log import ASH_LOGGER
 
 AWS = "automated_security_helper.plugin_modules.ash_aws_plugins"
+SNYK = "automated_security_helper.plugin_modules.ash_snyk_plugins"
+OFF_HOST = [AWS, SNYK]
+#: The community packages an in-tree config can still add.
 COMMUNITY = [
-    "automated_security_helper.plugin_modules.ash_snyk_plugins",
     "automated_security_helper.plugin_modules.ash_trivy_plugins",
     "automated_security_helper.plugin_modules.ash_ferret_plugins",
 ]
+BUILTIN = "automated_security_helper.plugin_modules.ash_builtin"
 REPO = Path(__file__).resolve().parents[3]
 
 
@@ -57,6 +62,10 @@ def _warnings(records: List[logging.LogRecord]) -> List[str]:
     return [r.getMessage() for r in records if r.levelno >= logging.WARNING]
 
 
+def _module_warnings(records: List[logging.LogRecord]) -> List[str]:
+    return [w for w in _warnings(records) if "ash_plugin_modules" in w]
+
+
 def _tree(tmp_path: Path, modules: List[str]) -> Path:
     source = tmp_path / "repo"
     (source / ".ash").mkdir(parents=True)
@@ -67,31 +76,45 @@ def _tree(tmp_path: Path, modules: List[str]) -> Path:
 
 
 @pytest.mark.parametrize(
-    "entry", [AWS, f"{AWS}.s3_reporter", f"{AWS}.bedrock_summary_reporter"]
+    "entry, sends",
+    [
+        (AWS, "findings"),
+        (f"{AWS}.s3_reporter", "findings"),
+        (f"{AWS}.bedrock_summary_reporter", "findings"),
+        (SNYK, "source"),
+        (f"{SNYK}.snyk_code_scanner", "source"),
+    ],
 )
-def test_an_in_tree_config_cannot_add_the_aws_reporters(tmp_path, ash_log, entry):
+def test_an_in_tree_config_cannot_add_them(tmp_path, ash_log, entry, sends):
     source = _tree(tmp_path, [entry])
 
     config = resolve_config(source_dir=source)
 
     assert entry not in config.ash_plugin_modules
-    warnings = [w for w in _warnings(ash_log) if "ash_plugin_modules" in w]
+    warnings = _module_warnings(ash_log)
     assert len(warnings) == 1, _warnings(ash_log)
-    assert entry in warnings[0]
+    # The entry, then what its package sends, in parentheses.
+    reason = warnings[0].split(f"{entry!r} (", 1)[1].split(")", 1)[0]
+    assert reason.endswith(f"{sends} off the host"), warnings[0]
+    assert "--ash-plugin-modules" in warnings[0]
 
 
 def test_the_other_entries_of_that_config_are_kept(tmp_path, ash_log):
-    source = _tree(tmp_path, [AWS, *COMMUNITY])
+    source = _tree(tmp_path, [AWS, SNYK, *COMMUNITY])
 
     config = resolve_config(source_dir=source)
 
     assert config.ash_plugin_modules == COMMUNITY
+    warnings = _module_warnings(ash_log)
+    assert len(warnings) == 1, _warnings(ash_log)
+    assert repr(AWS) in warnings[0] and repr(SNYK) in warnings[0]
 
 
-def test_an_uploaded_config_cannot_add_them(tmp_path, ash_log):
+@pytest.mark.parametrize("package", OFF_HOST)
+def test_an_uploaded_config_cannot_add_them(tmp_path, ash_log, package):
     upload = tmp_path / "upload" / "ash.yaml"
     upload.parent.mkdir()
-    upload.write_text(yaml.safe_dump({"ash_plugin_modules": [AWS]}))
+    upload.write_text(yaml.safe_dump({"ash_plugin_modules": [package]}))
     source = tmp_path / "repo"
     source.mkdir()
 
@@ -99,24 +122,70 @@ def test_an_uploaded_config_cannot_add_them(tmp_path, ash_log):
         config_path=upload, source_dir=source, untrusted_config=True
     )
 
-    assert AWS not in config.ash_plugin_modules
+    assert package not in config.ash_plugin_modules
 
 
-def test_an_operator_config_outside_the_tree_can(tmp_path, ash_log):
+@pytest.mark.parametrize("package", OFF_HOST)
+@pytest.mark.parametrize("delivered", ["upload", "tree"])
+def test_a_config_an_mcp_client_delivered_cannot_add_them(
+    tmp_path, monkeypatch, ash_log, package, delivered
+):
+    """Resolved the way the MCP tools resolve a client's config.
+
+    An upload named as ``config_path`` is resolved with ``untrusted_config`` when
+    ``config_is_client_supplied`` says a client delivered it; a delivered tree's
+    own ``.ash/.ash.yaml`` is found inside the scanned tree.
+    """
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+
+    root = tmp_path / "ash-mcp"
+    source = root / "session-a" / "source"
+    source.mkdir(parents=True)
+    (root / "session-a" / "config").mkdir()
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
+    document = yaml.safe_dump(
+        {"project_name": "delivered", "ash_plugin_modules": [package, *COMMUNITY]}
+    )
+    if delivered == "upload":
+        config_path = root / "session-a" / "upload-staging" / "ash.yaml"
+    else:
+        config_path = source / ".ash" / ".ash.yaml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(document)
+    assert config_is_client_supplied(config_path)
+
+    config = resolve_config(
+        config_path=config_path,
+        source_dir=source,
+        untrusted_config=config_is_client_supplied(config_path),
+        fallback_to_default=True,
+    )
+
+    assert config.ash_plugin_modules == COMMUNITY
+    warnings = _module_warnings(ash_log)
+    assert len(warnings) == 1, _warnings(ash_log)
+    assert repr(package) in warnings[0]
+
+
+@pytest.mark.parametrize("package", OFF_HOST)
+def test_an_operator_config_outside_the_tree_can(tmp_path, ash_log, package):
     _tree(tmp_path, [])
     operator = tmp_path / "operator.yaml"
-    operator.write_text(yaml.safe_dump({"ash_plugin_modules": [AWS]}))
+    operator.write_text(yaml.safe_dump({"ash_plugin_modules": [package]}))
 
     config = resolve_config(config_path=operator, source_dir=tmp_path / "repo")
 
-    assert config.ash_plugin_modules == [AWS]
+    assert config.ash_plugin_modules == [package]
     assert not _warnings(ash_log)
 
 
-def test_an_operator_default_config_replaced_by_the_tree_can(tmp_path, ash_log):
-    source = _tree(tmp_path, [AWS])
+@pytest.mark.parametrize("package", OFF_HOST)
+def test_an_operator_default_config_replaced_by_the_tree_can(
+    tmp_path, ash_log, package
+):
+    source = _tree(tmp_path, [package])
     operator = tmp_path / "operator.yaml"
-    operator.write_text(yaml.safe_dump({"ash_plugin_modules": [AWS]}))
+    operator.write_text(yaml.safe_dump({"ash_plugin_modules": [package]}))
 
     config = resolve_config(
         config_path=source / ".ash" / ".ash.yaml",
@@ -124,20 +193,108 @@ def test_an_operator_default_config_replaced_by_the_tree_can(tmp_path, ash_log):
         trusted_config_path=operator,
     )
 
-    assert config.ash_plugin_modules == [AWS]
+    assert config.ash_plugin_modules == [package]
 
 
+@pytest.mark.parametrize("package", OFF_HOST)
 @pytest.mark.parametrize("key", ["ash_plugin_modules", "ash-plugin-modules"])
-def test_config_overrides_can(tmp_path, ash_log, key):
+def test_config_overrides_can(tmp_path, ash_log, key, package):
     source = _tree(tmp_path, [])
 
-    config = resolve_config(source_dir=source, config_overrides=[f'{key}+=["{AWS}"]'])
+    config = resolve_config(
+        source_dir=source, config_overrides=[f'{key}+=["{package}"]']
+    )
 
-    assert AWS in config.ash_plugin_modules
+    assert package in config.ash_plugin_modules
 
 
-def test_ash_community_plugins_file_keeps_all_three_modules(tmp_path, ash_log):
-    """This repository's own CI scan loads these from a config inside its tree."""
+@pytest.mark.parametrize("package", OFF_HOST)
+@pytest.mark.parametrize("how", ["option", "environment"])
+def test_the_command_line_hands_them_to_the_scan(tmp_path, monkeypatch, how, package):
+    """``--ash-plugin-modules`` and ``ASH_PLUGIN_MODULES`` reach the scan as given."""
+    from typer.testing import CliRunner
+
+    from automated_security_helper.cli.main import app
+
+    source = _tree(tmp_path, [package])
+    monkeypatch.chdir(source)
+    args = ["scan", "--source-dir", str(source)]
+    env = {"ASH_PLUGIN_MODULES": package} if how == "environment" else {}
+    if how == "option":
+        args += ["--ash-plugin-modules", package]
+
+    with patch("automated_security_helper.cli.scan.run_ash_scan") as run:
+        result = CliRunner(env=env).invoke(app, args)
+
+    assert result.exit_code == 0, result.output
+    assert run.call_args.kwargs["ash_plugin_modules"] == [package]
+
+
+# Run in a subprocess, because loading a plugin package registers its plugins for
+# the rest of the process: the scan engine built over a config resolved from an
+# in-tree file that lists argv[2], with argv[3:] as --ash-plugin-modules.
+_ENGINE_LOADS = """
+import json, sys
+from pathlib import Path
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.core.execution_engine import ScanExecutionEngine
+from automated_security_helper.plugins import ash_plugin_manager
+
+source = Path(sys.argv[1])
+config = resolve_config(source_dir=source)
+ScanExecutionEngine(
+    context=PluginContext(source_dir=source, output_dir=source.parent / "out",
+                          work_dir=source.parent / "work", config=config),
+    show_progress=False,
+    ash_plugin_modules=sys.argv[3:],
+)
+print(json.dumps({
+    "config": config.ash_plugin_modules,
+    "loaded": sorted({c.__module__ for kind in ("scanner", "reporter")
+                      for c in ash_plugin_manager.plugin_modules(kind)
+                      if c.__module__.startswith(sys.argv[2] + ".")}),
+}))
+"""
+
+
+@pytest.mark.parametrize(
+    "package, plugin",
+    [
+        (AWS, f"{AWS}.s3_reporter"),
+        (SNYK, f"{SNYK}.snyk_code_scanner"),
+    ],
+)
+def test_the_scan_engine_loads_them_only_from_the_command_line(
+    tmp_path, package, plugin
+):
+    source = _tree(tmp_path, [package])
+
+    def engine(*cli_modules: str) -> Dict[str, List[str]]:
+        result = subprocess.run(
+            [sys.executable, "-c", _ENGINE_LOADS, str(source), package, *cli_modules],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=300,
+        )
+        return json.loads(result.stdout.strip().splitlines()[-1])
+
+    from_the_tree = engine()
+    from_the_command_line = engine(package)
+
+    assert from_the_tree == {"config": [], "loaded": []}
+    assert from_the_command_line["config"] == []
+    assert plugin in from_the_command_line["loaded"]
+
+
+def test_ash_community_plugins_file_keeps_its_modules(tmp_path, ash_log):
+    """This repository's own CI scan loads these from a config inside its tree.
+
+    snyk is not among them: the CI legs that use this file pass it with
+    --ash-plugin-modules (.github/actions/run-scan-test/action.yml).
+    """
     community = REPO / ".ash" / ".ash_community_plugins.yaml"
     source = tmp_path / "repo"
     (source / ".ash").mkdir(parents=True)
@@ -147,7 +304,24 @@ def test_ash_community_plugins_file_keeps_all_three_modules(tmp_path, ash_log):
     config = resolve_config(config_path=copied, source_dir=source)
 
     assert config.ash_plugin_modules == COMMUNITY
-    assert not [w for w in _warnings(ash_log) if "ash_plugin_modules" in w]
+    assert not _module_warnings(ash_log)
+
+
+def test_the_ci_legs_using_that_file_pass_snyk_on_the_command_line():
+    """Every scan the run-scan-test action starts with the community file names snyk."""
+    action = (REPO / ".github" / "actions" / "run-scan-test" / "action.yml").read_text()
+    scans = [
+        line
+        for line in action.splitlines()
+        if ".ash_community_plugins.yaml" in line
+        and line.lstrip().startswith(("ash ", "./ash ", "Invoke-ASH "))
+        and " config validate " not in line
+        and " dependencies install" not in line
+    ]
+
+    assert len(scans) == 5, scans
+    for line in scans:
+        assert f"--ash-plugin-modules {SNYK}" in line, line
 
 
 _NETWORK_MODULES = {
@@ -255,6 +429,22 @@ _REVIEWED_DYNAMIC_IMPORTS = {
 }
 
 
+#: Scanners that ask the sandbox for a network (``sandbox_requirements.network`` or
+#: ``network_requires_grant``), in the packages an in-tree config can add, with what
+#: the network is for. A scanner reaches the network through the program it runs,
+#: which the import walk below cannot see, so its declaration is read instead. A new
+#: one fails the test below until it is added here, or its package is added to
+#: OFF_HOST_PLUGIN_PACKAGES. A scanner that is also handed a credential
+#: (``sandbox_requirements.env_names``) sends with the operator's identity, so it
+#: cannot be listed here.
+_REVIEWED_NETWORK_SCANNERS = {
+    "trivy-repo": (
+        "trivy, scanning against the databases ASH downloads before an online scan "
+        "(utils/content_db_refresh.py); it is handed no credential"
+    ),
+}
+
+
 def _module_file(name: str, repo: Path) -> Path:
     relative = Path(*name.split("."))
     package = repo / relative / "__init__.py"
@@ -327,8 +517,14 @@ def _reached(module: str, repo: Path = REPO) -> Dict[str, Set[str]]:
     return found
 
 
-def test_every_plugin_package_whose_reporters_reach_the_network_is_listed(tmp_path):
-    """Derived from the code: each package's ASH_REPORTERS and event handlers.
+def test_every_plugin_package_that_sends_data_off_the_host_is_listed(tmp_path):
+    """Derived from the code: each package's ASH_REPORTERS, event handlers and ASH_SCANNERS.
+
+    A reporter or event handler sends from the ASH process, so the modules it
+    reaches are walked for network imports. A scanner sends through the program it
+    runs, so its ``sandbox_requirements`` are read. ash_builtin's scanners are not
+    checked: ``load_internal_plugins`` loads that package on every scan, so a config
+    naming it adds nothing.
 
     Loaded in a subprocess, because loading a plugin package registers its
     plugins for the rest of the process.
@@ -337,14 +533,27 @@ def test_every_plugin_package_whose_reporters_reach_the_network_is_listed(tmp_pa
         "import json, pkgutil\n"
         "import automated_security_helper.plugin_modules as pm\n"
         "import importlib\n"
+        "from automated_security_helper.base.plugin_config import plugin_config_key\n"
+        "from automated_security_helper.utils.sandbox.policy import SandboxRequirements\n"
         "out = {}\n"
         "for info in pkgutil.iter_modules(pm.__path__):\n"
         "    name = pm.__name__ + '.' + info.name\n"
         "    module = importlib.import_module(name)\n"
         "    handlers = getattr(module, 'ASH_EVENT_HANDLERS', {}) or {}\n"
-        "    out[name] = sorted(\n"
-        "        {c.__module__ for c in getattr(module, 'ASH_REPORTERS', [])}\n"
-        "        | {f.__module__ for fs in handlers.values() for f in fs})\n"
+        "    needs = {plugin_config_key(c): c.sandbox_requirements\n"
+        "             for c in getattr(module, 'ASH_SCANNERS', [])}\n"
+        # A scanner that decides per instance (a property) reads as None: networked
+        # and not known to be without a credential.
+        "    out[name] = {\n"
+        "        'reporters': sorted(\n"
+        "            {c.__module__ for c in getattr(module, 'ASH_REPORTERS', [])}\n"
+        "            | {f.__module__ for fs in handlers.values() for f in fs}),\n"
+        "        'network_scanners': {\n"
+        "            key: bool(need.env_names)\n"
+        "            if isinstance(need, SandboxRequirements) else None\n"
+        "            for key, need in needs.items()\n"
+        "            if not isinstance(need, SandboxRequirements)\n"
+        "            or need.network or need.network_requires_grant}}\n"
         "print(json.dumps(out))\n"
     )
     from automated_security_helper.config.plugin_module_trust import (
@@ -358,24 +567,35 @@ def test_every_plugin_package_whose_reporters_reach_the_network_is_listed(tmp_pa
         text=True,
         check=True,
     )
-    in_process: Dict[str, List[str]] = json.loads(
-        result.stdout.strip().splitlines()[-1]
-    )
+    in_process: Dict[str, Dict] = json.loads(result.stdout.strip().splitlines()[-1])
 
-    reaching: Set[str] = set()
+    reporting: Set[str] = set()
+    scanning: Set[str] = set()
+    reviewed: Dict[str, Optional[bool]] = {}
     unreviewed: Dict[str, Set[str]] = {}
-    for package, modules in in_process.items():
-        for module in modules:
+    for package, found in in_process.items():
+        for module in found["reporters"]:
             reached = _reached(module)
             if reached["network"]:
-                reaching.add(package)
+                reporting.add(package)
             launching = reached["processes"] - set(_REVIEWED_LOCAL_PROCESSES)
             dynamic = reached["dynamic"] - set(_REVIEWED_DYNAMIC_IMPORTS)
             if (launching or dynamic) and package not in OFF_HOST_PLUGIN_PACKAGES:
                 unreviewed.setdefault(package, set()).update(launching | dynamic)
-    assert reaching == set(OFF_HOST_PLUGIN_PACKAGES)
-    assert AWS in reaching
-    assert not reaching & set(COMMUNITY)
+        if package == BUILTIN:
+            continue
+        for scanner, credential in found["network_scanners"].items():
+            if scanner in _REVIEWED_NETWORK_SCANNERS:
+                reviewed[scanner] = credential
+            else:
+                scanning.add(package)
+    assert BUILTIN in in_process
+    assert reporting | scanning == set(OFF_HOST_PLUGIN_PACKAGES)
+    assert AWS in reporting
+    assert SNYK in scanning
+    assert not (reporting | scanning) & set(COMMUNITY)
+    # Each reviewed scanner still asks for a network, and none is handed a credential.
+    assert reviewed == dict.fromkeys(_REVIEWED_NETWORK_SCANNERS, False)
     assert not unreviewed
 
 

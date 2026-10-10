@@ -1209,8 +1209,10 @@ fully scanned — coverage cut short by a timeout/budget, or the file could not 
 ## ASH Integration Registration
 
 When adding this plugin to an ASH installation (or contributing it upstream), three
-files outside the plugin directory must be updated. Both the Snyk and Trivy community
-plugins follow this same pattern.
+files outside the plugin directory must be updated. The Trivy community plugin follows
+this same pattern. The Snyk plugin is not in `.ash/.ash_community_plugins.yaml`: that
+file is inside the scanned tree, and such a file cannot load a plugin package that
+sends the scanned source off the host, so CI passes it with `--ash-plugin-modules`.
 
 ### 1. Register in `.ash/.ash_community_plugins.yaml`
 
@@ -1218,7 +1220,6 @@ Add the plugin module to `ash_plugin_modules`:
 
 ```yaml
 ash_plugin_modules:
-  - automated_security_helper.plugin_modules.ash_snyk_plugins
   - automated_security_helper.plugin_modules.ash_trivy_plugins
   - automated_security_helper.plugin_modules.ash_ferret_plugins   # <-- add
 ```

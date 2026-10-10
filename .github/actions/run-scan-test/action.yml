@@ -198,6 +198,13 @@ runs:
         ruby-version: "3.3"
 
     # Community plugin tools
+    #
+    # The community legs scan with .ash/.ash_community_plugins.yaml, a config file
+    # inside the scanned tree. Such a file cannot load ash_snyk_plugins, whose
+    # scanner sends the scanned source to Snyk with the operator's token
+    # (config/plugin_module_trust.py), so every community scan below names it with
+    # --ash-plugin-modules instead. snyk-code is disabled in that file; loading the
+    # module keeps the plugin and its config section exercised.
     - name: Install Community Plugin Tools
       if: inputs.config-file == 'community'
       shell: bash
@@ -444,7 +451,7 @@ runs:
         # Teed so the cache report below can count the build steps the layer cache
         # served. pipefail (bash's default here) keeps ash's exit status.
         if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
-          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_community_plugins.yaml 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
+          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
         else
           ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
         fi
@@ -543,7 +550,7 @@ runs:
         ash dependencies install
         ash config get
         if ("$env:ASH_TEST_CONFIG_FILE" -eq "community") {
-          ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_community_plugins.yaml
+          ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
         } else {
           ash --mode local --build-target ci --verbose --no-progress
         }
@@ -615,7 +622,7 @@ runs:
         ash dependencies install
         ash config get
         if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
-          ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_community_plugins.yaml
+          ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
         else
           ash --mode local --build-target ci --verbose --no-progress
         fi
@@ -654,7 +661,7 @@ runs:
         Get-Help Invoke-ASH -Full
         $runner = if ($env:OCI_RUNNER) { $env:OCI_RUNNER } else { "docker" }
         if ("$env:ASH_TEST_CONFIG_FILE" -eq "community") {
-          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner -ConfigFile ".ash/.ash_community_plugins.yaml"
+          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner -ConfigFile ".ash/.ash_community_plugins.yaml" --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
         } else {
           Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner
         }
@@ -700,7 +707,7 @@ runs:
         echo "Testing ASH using Bash on ${ASH_TEST_OS} (${ASH_TEST_PLATFORM}) with config: ${ASH_TEST_CONFIG_FILE}"
         chmod +x ./ash
         if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
-          ./ash --build-target ci --verbose --config .ash/.ash_community_plugins.yaml
+          ./ash --build-target ci --verbose --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
         else
           ./ash --build-target ci --verbose
         fi

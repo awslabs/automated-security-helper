@@ -273,6 +273,9 @@ Out of scope:
   [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)),
   but an installed package still runs with ASH's access. The sandbox doesn't change
   this; review the plugin modules a repository's config names before you scan it.
+  ASH's own `ash_aws_plugins` and `ash_snyk_plugins` packages are not imported from
+  such a file at all, because they send findings or source off the host with the
+  operator's credentials.
 - Resource exhaustion. A scanner can still use all the CPU and memory it can get, or
   fork until a limit stops it; the existing per-scanner `scan_timeout` bounds how long.
 - A scanner allowed a network shares the host's network, so TCP and UDP services
