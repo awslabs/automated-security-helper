@@ -473,6 +473,17 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/workflows/ash-unified-ci.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,
+        publishes="name=docs-examples-report path=test-results/docs-examples.junit.xml",
+        reason=(
+            "One JUnit XML report from the docs-example runner: page, block line, "
+            "command and output tail of each failing docs example, run in a "
+            "throwaway fixture project with no credentials."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-unified-ci.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
         publishes="name=sandbox-escape-report-${{ matrix.os }} path=test-results/sandbox.junit.xml",
         reason="Failure evidence only: one JUnit XML report from the sandbox escape suite.",
     ),

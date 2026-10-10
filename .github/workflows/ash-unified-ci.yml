@@ -1247,10 +1247,25 @@ jobs:
   # tests/integration/scanners/test_detect_secrets_scanner.py:111 and :139. Those are
   # unconditional @pytest.mark.skip with a written reason, and they report as skipped with
   # that reason rather than vanishing.
+  #
+  # THE DOCS EXAMPLES ARE A SECOND STEP, NOT PART OF THE POPULATIONS ABOVE
+  #
+  # tests/integration/docs runs every runnable shell and python block in the docs
+  # (scripts/docs_checks.py decides which), one test per page. The integration step
+  # passes --ignore for that directory, so every figure above still describes the same
+  # population it was measured on, and the docs examples run in their own step with
+  # their own time limit. Two reasons for the split: their population is a property of
+  # the docs, not of the test code, and moves with every page added; and a page whose
+  # commands hang must not take the integration suite's verdict down with it when the
+  # job times out. Measured on the branch that added it: 100 items, which are 90 pages
+  # with a runnable block, 9 proofs that the runner reports each kind of failure
+  # (test_docs_runner_can_fail.py), and 1 guard that discovery found any page at all.
+  # -n 4 because pages are independent sessions in their own directories and the
+  # runner is mostly waiting on subprocesses; ubuntu-latest has 4 vCPUs.
   integration-test:
     name: integration-test (ubuntu-latest)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -1273,9 +1288,20 @@ jobs:
           uv run pytest \
             tests/integration \
             tests/unit/cli/mcp/test_source_delivery_scan_e2e.py \
+            --ignore=tests/integration/docs \
             --run-integration --run-slow \
             --no-cov -p no:randomly -n 0 \
             --junit-xml=test-results/integration.junit.xml
+      # Runs even when the step above failed, so the two verdicts stay separate.
+      - name: Run the docs examples
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        run: |
+          uv run pytest \
+            tests/integration/docs \
+            --run-integration \
+            --no-cov -p no:randomly -n 4 \
+            --junit-xml=test-results/docs-examples.junit.xml
       # A red run leaves per-test evidence rather than only the summary line.
       - name: Collect the suite report
         if: failure()
@@ -1283,6 +1309,14 @@ jobs:
         with:
           name: integration-suite-report
           path: test-results/integration.junit.xml
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Collect the docs examples report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docs-examples-report
+          path: test-results/docs-examples.junit.xml
           retention-days: 7
           if-no-files-found: warn
 
