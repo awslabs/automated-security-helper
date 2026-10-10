@@ -9,15 +9,51 @@ docs_dir: "docs/content"
 site_dir: "public"
 # use_directory_urls: true
 
+# Every option below that makes the build strict or offline is checked by
+# scripts/docs_checks.py check_site_build, so removing one fails the lint job.
+
+# Moved pages keep their old URLs: docs/redirects.yml maps each old page to its new
+# one, and this hook writes a redirect page at every old URL.
+hooks:
+  - docs/hooks/redirects.py
+
+# Pages that are built but deliberately left out of the navigation, one gitignore-style
+# pattern per line, each with a comment saying why. A page that is in no .nav.yml and
+# matches nothing here fails the build (validation.nav.omitted_files below).
+not_in_nav: |
+
+# With `mkdocs build --strict` every warning is an error, so these make a broken link,
+# a missing anchor, a link that leaves docs_dir and a page the navigation cannot reach
+# fail the build. mkdocs leaves most of them at info by default.
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    absolute_links: warn
+    unrecognized_links: warn
+    anchors: warn
+
 plugins:
+  # The privacy plugin downloads external assets at build time and serves them from
+  # the site. The build must not need the network, so the two assets that cannot be
+  # downloaded offline are left external rather than fetched: mermaid, which the
+  # browser loads from unpkg (the diagrams on the site already depended on unpkg
+  # through mermaid2), and the star-history chart, a live image that a downloaded
+  # copy would freeze and whose server refuses the build anyway (403). Emoji are
+  # written as Unicode characters by the emoji extension below, so nothing else is
+  # fetched.
   - privacy:
       assets_exclude:
         - 'github.com/*/actions/workflows/*'
+        - 'unpkg.com/mermaid@*'
+        - 'api.star-history.com/*'
   - search
   - awesome-nav
   - autorefs
   - mkdocstrings
-  - mermaid2
 
 theme:
   name: material
@@ -53,8 +89,11 @@ theme:
 
 markdown_extensions:
   - admonition
+  # to_alt writes an emoji shortcode as its Unicode character. The default generator
+  # writes an <img> from a CDN, which the privacy plugin then has to download.
   - pymdownx.emoji:
       emoji_index: !!python/name:pymdownx.emoji.twemoji
+      emoji_generator: !!python/name:pymdownx.emoji.to_alt
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
@@ -62,7 +101,10 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences:
+      # Material renders mermaid fences itself. The mermaid2 plugin did the same job
+      # and checked its script URL over the network on every build, which an
+      # offline build cannot do.
       custom_fences:
         - name: mermaid
           class: mermaid
-          format: !!python/name:mermaid2.fence_mermaid_custom
+          format: !!python/name:pymdownx.superfences.fence_code_format

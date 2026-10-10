@@ -160,7 +160,6 @@ dev = [
  "types-boto3-sqs>=1.43,<2.0.0",
  "types-boto3-sts>=1.43.94,<2.0.0",
  "mkdocs-awesome-nav>=3.3,<4.0.0",
- "mkdocs-mermaid2-plugin>=1.2,<2.0.0",
  "pytest-xdist>=3.8,<4.0.0",
  "toml>=0.10",
  "hatchling>=1.32.4",

@@ -1,0 +1,13 @@
+# Old page -> the page it moved to, both relative to docs/content.
+#
+# docs/hooks/redirects.py writes a page at each old page's URL that sends the reader
+# to the new one, so a link or bookmark to a moved page keeps working. The lint job
+# checks every entry (scripts/docs_checks.py check_nav): the old page must no longer
+# exist, and the new one must, including any #anchor.
+#
+# Example:
+#
+#   redirects:
+#     docs/quick-start-guide.md: getting-started/quick-start.md
+#     docs/cli-reference.md: reference/cli.md#scan
+redirects: {}

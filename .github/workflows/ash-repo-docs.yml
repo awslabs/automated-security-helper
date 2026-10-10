@@ -81,7 +81,7 @@ jobs:
         run: uv sync
 
       - name: Build documentation
-        run: uv run mkdocs build --clean
+        run: uv run mkdocs build --clean --strict
 
   deploy-docs:
     name: Deploy documentation
