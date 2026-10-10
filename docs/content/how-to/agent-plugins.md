@@ -30,19 +30,53 @@ reuses that copy afterwards. The plugin does not need ASH installed separately.
 
 ## Prerequisites
 
-- [uv](https://docs.astral.sh/uv/), with `uvx` on the PATH that the agent uses. Desktop apps
-  often do not see your shell's PATH; if the agent cannot start the server, replace `uvx` in
-  its config with the absolute path that `command -v uvx` prints.
+- [uv](https://docs.astral.sh/uv/), with `uvx` on the PATH that the agent uses. On Linux and
+  macOS, uv's installer is:
+
+    <!-- doctest: illustrative reason="installs uv from the network" -->
+    ```bash
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    ```
+
+    Desktop apps often do not see your shell's PATH. If the agent cannot start the server,
+    replace `uvx` in its config with the absolute path that `command -v uvx` prints.
 - git, and network access to GitHub the first time the server starts.
 - The scanner tools. Install them once for your user:
 
     <!-- doctest: illustrative reason="downloads ASH and scanner tools from the network" -->
     ```bash
-    uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash dependencies install
+    uvx --python 3.12 --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash dependencies install
     ```
 
     Without them the scans still run, but they end with status `incomplete` and list the
     missing scanners.
+
+The generated configs let uv choose the Python version. ASH needs Python 3.10 to 3.14, and on
+a machine whose newest Python is outside that range, uv can pick it and ASH then fails to
+install. Add `"--python", "3.12"` at the start of the config's arguments; uv downloads Python
+3.12 if it is not installed:
+
+<!-- doctest: config kind=mcp-client -->
+```json
+{
+  "mcpServers": {
+    "ash": {
+      "command": "uvx",
+      "args": [
+        "--python",
+        "3.12",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
+        "ash",
+        "mcp"
+      ]
+    }
+  }
+}
+```
+
+The plugins do not set `ASH_MCP_ALLOWED_ROOTS`, so a project in a directory the server refuses
+by default, such as `/root`, needs it added to the config's environment; see
+[step 5 of the tutorial](../getting-started/agents.md#5-ask-for-a-scan).
 
 - The plugin files, from a clone of the repository:
 

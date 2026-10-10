@@ -107,6 +107,10 @@ The agent calls `check_installation`. You should see `"installed": true` and the
 If the agent says it has no ASH tools, the server did not start: check the configuration from
 step 3.
 
+`check_installation` tells you that ASH itself runs. It does not check the scanner tools, so a
+healthy answer does not mean every scanner will run. The scan in the next step reports any
+scanner whose tool is missing.
+
 ## 5. Ask for a scan
 
 Ask the agent, with the path that `pwd` printed in step 2:
@@ -147,6 +151,29 @@ MEDIUM. The LOW finding is reported but does not fail a scan.
 
 If the status is `incomplete`, ask the agent which scanners were incomplete and why. Install
 their tools (step 1) and ask for the scan again.
+
+If the agent reports "Scan target is outside the permitted roots", the project is inside one of
+the system directories the server refuses by default: `/boot`, `/dev`, `/etc`, `/proc`, `/root`
+or `/sys`. This happens when you work as root, in a container for example. Name the directory
+that holds your projects in `ASH_MCP_ALLOWED_ROOTS`, in the server's environment, and restart
+the agent:
+
+<!-- doctest: config kind=mcp-client -->
+```json
+{
+  "mcpServers": {
+    "ash": {
+      "command": "ash",
+      "args": ["mcp"],
+      "env": {
+        "ASH_MCP_ALLOWED_ROOTS": "/root/projects"
+      }
+    }
+  }
+}
+```
+
+Once the variable is set, the server scans only the directories it names.
 
 ## 6. Read the results
 

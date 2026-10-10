@@ -78,7 +78,8 @@ What the tools do not do:
 
 After a scan, `get_scan_progress` reports `scanner_statuses` for every scanner ASH considered
 and `skipped_scanners` for the ones that did not run. Use them to tell "ran and found nothing"
-from "never ran".
+from "never ran". `check_installation` reports only that ASH itself runs; it does not check
+the scanner tools.
 
 The [MCP tools reference](https://github.com/awslabs/automated-security-helper/blob/main/docs/content/reference/mcp-tools.md)
 lists every tool and its parameters.

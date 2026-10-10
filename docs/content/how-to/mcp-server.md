@@ -64,8 +64,9 @@ effect on any transport.
 On stdio, with `ASH_MCP_ALLOWED_ROOTS` unset, an agent can scan, and read results from, any
 directory the server's user can read, except a short list of system directories: `/boot`,
 `/dev`, `/etc`, `/proc`, `/root` and `/sys`, or on Windows the Windows, Program Files and
-ProgramData directories. To limit scan targets and result paths to the directories you
-name, set the variable in the server's environment:
+ProgramData directories. A project inside one of them, such as `/root` when you work as root
+in a container, is refused until you name it in the variable. To limit scan targets and
+result paths to the directories you name, set the variable in the server's environment:
 
 <!-- doctest: config kind=mcp-client -->
 ```json
