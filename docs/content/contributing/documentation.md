@@ -184,6 +184,16 @@ An inline code span that is a dotted config path starting with a top-level confi
 resolve in ASH's config models, community plugins included when this ASH has them. Use
 `*` or `<name>` for a plugin name that is not fixed: `scanners.<name>.enabled`.
 
+Two more kinds of name are accepted. A build argument, declared with `ARG` in the
+Dockerfile ASH ships or passed by ASH as `--build-arg NAME=...` (as it passes the
+image name to a custom Containerfile), is documented like any variable. A variable
+only the test suite reads or CI sets (in `tests/`, or in an `env:` block under
+`.github/`) is accepted on contributor pages, the pages under
+`docs/content/contributing/` and the repository's `CONTRIBUTING.md` and
+`DEVELOPMENT.md`, and reported anywhere else, because a user cannot use it. Running
+the checks with `scripts/verify_docs_freshness.py --verbose` prints which of these
+sets each accepted name matched.
+
 One kind of read is not in the read set: a config value written as `${NAME}`, which
 ASH's config loader resolves for any name its rule allows (every `ASH_*` name, and a few
 AWS ones). A name that one of the page's ASH config blocks references that way counts as
@@ -314,7 +324,9 @@ code and the end of the output.
 
 ### env
 
-The name is not one ASH reads. Check the spelling against the
+`is read only by the test suite or CI` means the name is real but only contributors
+can use it: move it to a contributor page. Otherwise the name is not one ASH reads,
+nor a build argument. Check the spelling against the
 [environment variable reference](../docs/cli-reference.md), or delete it if the
 variable was removed. If ASH builds the name at runtime, the finding says how many
 lookups could not be resolved; make the lookup a literal or a module constant.

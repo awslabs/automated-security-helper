@@ -602,6 +602,119 @@ def test_env_check_can_fail(tmp_path, case, text, expected, line):
     _assert_reports(dc.check_env_vars([page], tmp_path, READ), expected, line)
 
 
+KNOWN = dc.EnvReadSet(
+    names={"ASH_REAL"},
+    dynamic=[],
+    source="test",
+    build_args={"ASH_REAL_BUILD_ARG": "Dockerfile:3 (ARG)"},
+    test_only={"ASH_TEST_ONLY": "read in tests/conftest.py"},
+)
+
+
+def test_a_build_argument_passes_where_a_made_up_name_fails(tmp_path):
+    page = _write(
+        tmp_path,
+        "docs/content/guide.md",
+        "Build with `ASH_REAL_BUILD_ARG` set. `ASH_MADE_UP_ARG` does nothing.\n",
+    )
+    notes: list[str] = []
+    findings = dc.check_env_vars([page], tmp_path, KNOWN, notes=notes)
+    assert [f.message.split()[0] for f in findings] == ["ASH_MADE_UP_ARG"], _messages(
+        findings
+    )
+    assert any(
+        "ASH_REAL_BUILD_ARG matched the build argument (Dockerfile:3 (ARG))" in n
+        for n in notes
+    )
+
+
+@pytest.mark.parametrize(
+    "rel", ["docs/content/contributing/testing.md", "CONTRIBUTING.md", "DEVELOPMENT.md"]
+)
+def test_a_test_suite_variable_passes_on_a_contributor_page(tmp_path, rel):
+    page = _write(tmp_path, rel, "Set `ASH_TEST_ONLY=1` to make the tests strict.\n")
+    assert dc.check_env_vars([page], tmp_path, KNOWN) == []
+
+
+@pytest.mark.parametrize(
+    "rel", ["docs/content/guide.md", "README.md", "docs/DEVELOPMENT.md"]
+)
+def test_a_test_suite_variable_fails_anywhere_else(tmp_path, rel):
+    page = _write(tmp_path, rel, "Set `ASH_TEST_ONLY=1` to make the tests strict.\n")
+    _assert_reports(
+        dc.check_env_vars([page], tmp_path, KNOWN),
+        "ASH_TEST_ONLY is read only by the test suite or CI (read in tests/conftest.py)",
+        1,
+    )
+
+
+def test_dockerfile_args_are_parsed_not_grepped():
+    text = (
+        "# syntax=docker/dockerfile:1\n"
+        "# ARG ASH_IN_A_COMMENT=1\n"
+        "ARG BASE_IMAGE=python:3.12\n"
+        "FROM ${BASE_IMAGE}\n"
+        "arg ASH_LOWER_KEYWORD\n"
+        "ARG ASH_CONTINUED=value \\\n    ASH_NEXT_LINE\n"
+        'ARG ASH_QUOTED="a b" ASH_SECOND\n'
+        "RUN echo ASH_IN_A_RUN_LINE && cat <<EOF\n"
+        "ARG ASH_IN_A_HEREDOC\n"
+        "EOF\n"
+    )
+    declared = dc.dockerfile_args(text, "Dockerfile")
+    assert set(declared) == {
+        "BASE_IMAGE",
+        "ASH_LOWER_KEYWORD",
+        "ASH_CONTINUED",
+        "ASH_NEXT_LINE",
+        "ASH_QUOTED",
+        "ASH_SECOND",
+    }
+    assert declared["ASH_CONTINUED"] == "Dockerfile:6 (ARG)"
+
+
+def test_build_args_the_package_passes_are_build_arguments():
+    tree = ast.parse(
+        'cmd = ["docker", "build", "--build-arg", f"ASH_PASSED={image}", "--build-arg", value]\n'
+        'other = "--build-arg ASH_IN_ONE_STRING=x"\n'
+    )
+    assert {name for _line, name in dc._passed_build_args(tree, {})} == {
+        "ASH_PASSED",
+        "ASH_IN_ONE_STRING",
+    }
+
+
+def test_the_real_build_arguments_include_args_and_passed_names():
+    found = dc.build_argument_names(REPO_ROOT)
+    assert "ASH_REPO_CLONE_URL" in found and "(ARG)" in found["ASH_REPO_CLONE_URL"]
+    assert "ASH_BASE_IMAGE" in found and "(--build-arg)" in found["ASH_BASE_IMAGE"]
+
+
+def test_suite_env_names_come_from_tests_and_ci_env(tmp_path):
+    _write(
+        tmp_path, "tests/test_x.py", 'import os\nos.environ.get("ASH_FROM_A_TEST")\n'
+    )
+    _write(
+        tmp_path,
+        ".github/workflows/ci.yml",
+        "env:\n  ASH_FROM_WORKFLOW_ENV: '1'\njobs:\n  a:\n    steps:\n"
+        "      - run: true\n        env:\n          ASH_FROM_STEP_ENV: '1'\n",
+    )
+    _write(
+        tmp_path,
+        ".github/actions/x/action.yml",
+        "runs:\n  steps:\n    - run: true\n      env:\n        ASH_FROM_ACTION: '1'\n",
+    )
+    found = dc.suite_env_names(tmp_path)
+    assert set(found) == {
+        "ASH_FROM_A_TEST",
+        "ASH_FROM_WORKFLOW_ENV",
+        "ASH_FROM_STEP_ENV",
+        "ASH_FROM_ACTION",
+    }
+    assert found["ASH_FROM_A_TEST"] == "read in tests/test_x.py"
+
+
 def test_env_read_set_resolves_constant_keys():
     """os.environ.get(SOME_CONSTANT) counts as reading the constant's value."""
     import ast as std_ast

@@ -79,6 +79,22 @@ DOCS_WORKFLOW = ".github/workflows/ash-repo-docs.yml"
 DOC_FIXTURES_DIR = "tests/test_data/docs_fixtures"
 DEFAULT_FIXTURE = "sample-project"
 
+#: The container definitions ASH ships, relative to the code tree. Their ARG names are
+#: build arguments, a second set of names the env check accepts.
+SHIPPED_DOCKERFILES = ("Dockerfile",)
+
+#: Pages for contributors. Variables only the test suite and CI read are documented
+#: here and nowhere else (a path ending in "/" is a directory).
+CONTRIBUTOR_PAGES = ("docs/content/contributing/", "CONTRIBUTING.md", "DEVELOPMENT.md")
+
+#: Where the test suite and CI live in the code tree, for those test-only variables.
+TEST_SOURCES = "tests"
+CI_ENV_SOURCES = (
+    ".github/workflows/*.yml",
+    ".github/workflows/*.yaml",
+    ".github/actions/**/action.yml",
+)
+
 #: The repository's pre-commit hook manifest, for ``config kind=pre-commit``.
 PRE_COMMIT_HOOKS = ".pre-commit-hooks.yaml"
 
@@ -1764,6 +1780,31 @@ class EnvReadSet:
     names: set[str]
     dynamic: list[str]
     source: str
+    #: Build arguments: name -> where it is declared (a shipped Dockerfile ARG) or
+    #: passed (a --build-arg in the package). None until first needed.
+    build_args: dict[str, str] | None = None
+    #: Names only the test suite or CI reads: name -> where. Allowed on contributor
+    #: pages only. None until first needed: walking tests/ takes seconds.
+    test_only: dict[str, str] | None = None
+    #: The code tree the two sets above are read from when they are first needed.
+    code: Path | None = None
+
+    def known_build_args(self) -> dict[str, str]:
+        if self.build_args is None:
+            found = build_argument_names(self.code) if self.code else {}
+            self.build_args = {n: w for n, w in found.items() if n not in self.names}
+        return self.build_args
+
+    def known_test_only(self) -> dict[str, str]:
+        if self.test_only is None:
+            found = suite_env_names(self.code) if self.code else {}
+            build_args = self.known_build_args()
+            self.test_only = {
+                n: w
+                for n, w in found.items()
+                if n not in self.names and n not in build_args
+            }
+        return self.test_only
 
 
 def _load_by_path(name: str, path: Path) -> Any:
@@ -1788,16 +1829,137 @@ def load_env_read_set(root_str: str = str(REPO_ROOT)) -> EnvReadSet:
     this module is in, since a docs branch may carry a newer generator than the code.
     """
     root = Path(root_str)
+    read: EnvReadSet | None = None
     for generator in (root / ENV_VAR_GENERATOR, REPO_ROOT / ENV_VAR_GENERATOR):
         if generator.is_file():
             module = _load_by_path("_ash_env_var_reference", generator)
             names, dynamic = module.read_env_names(root)
-            return EnvReadSet(
+            read = EnvReadSet(
                 set(names), list(dynamic), f"{ENV_VAR_GENERATOR} over {root}"
             )
-    names, dynamic = _collect_package_env_names(root / ASH_MODULE, root)
-    return EnvReadSet(
-        names, dynamic, f"{ASH_MODULE}/ only, because {ENV_VAR_GENERATOR} is absent"
+            break
+    if read is None:
+        names, dynamic = _collect_package_env_names(root / ASH_MODULE, root)
+        read = EnvReadSet(
+            names, dynamic, f"{ASH_MODULE}/ only, because {ENV_VAR_GENERATOR} is absent"
+        )
+    read.code = root
+    return read
+
+
+def dockerfile_args(text: str, label: str) -> dict[str, str]:
+    """Names an ``ARG`` instruction declares in a Dockerfile, parsed by instruction.
+
+    Continuation lines are joined, comments and here-document bodies skipped, and only
+    an instruction whose keyword is ARG counts, so a name in a comment, a RUN line or a
+    string is not a declaration.
+    """
+    import shlex
+
+    declared: dict[str, str] = {}
+    lines = text.split("\n")
+    index = 0
+    while index < len(lines):
+        start = index
+        line = lines[index]
+        index += 1
+        if line.lstrip().startswith("#"):
+            continue
+        while line.rstrip().endswith("\\") and index < len(lines):
+            line = line.rstrip()[:-1] + " " + lines[index]
+            index += 1
+        heredoc = re.search(r"<<-?\s*['\"]?(\w+)['\"]?", line)
+        if heredoc:
+            delimiter = heredoc.group(1)
+            while index < len(lines) and lines[index].strip() != delimiter:
+                index += 1
+            index += 1
+        match = re.match(r"^\s*ARG\s+(.*)$", line, re.IGNORECASE)
+        if not match:
+            continue
+        try:
+            words = shlex.split(match.group(1), comments=True)
+        except ValueError:
+            words = match.group(1).split()
+        for word in words:
+            name = word.split("=", 1)[0]
+            if _ENV_NAME.match(name):
+                declared.setdefault(name, f"{label}:{start + 1} (ARG)")
+    return declared
+
+
+def build_argument_names(code: Path) -> dict[str, str]:
+    """Build arguments: ARGs of the shipped Dockerfiles, and --build-arg names ASH passes."""
+    found: dict[str, str] = {}
+    for rel in SHIPPED_DOCKERFILES:
+        path = code / rel
+        if path.is_file():
+            found.update(dockerfile_args(path.read_text(encoding="utf-8"), rel))
+    package = code / ASH_MODULE
+    if package.is_dir():
+        for path, tree, constants in package_modules(package):
+            label = rel_path(path, code)
+            for line, name in _passed_build_args(tree, constants):
+                found.setdefault(name, f"{label}:{line} (--build-arg)")
+    return found
+
+
+def _passed_build_args(
+    tree: ast.AST, constants: dict[str, str]
+) -> Iterator[tuple[int, str]]:
+    """(line, NAME) of every ``--build-arg NAME=...`` the code builds."""
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.List, ast.Tuple)):
+            continue
+        for first, second in zip(node.elts, node.elts[1:]):
+            if not (isinstance(first, ast.Constant) and first.value == "--build-arg"):
+                continue
+            text = None
+            if isinstance(second, ast.Constant) and isinstance(second.value, str):
+                text = second.value
+            elif isinstance(second, ast.JoinedStr) and second.values:
+                head = second.values[0]
+                if isinstance(head, ast.Constant):
+                    text = str(head.value)
+            match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=", text or "")
+            if match:
+                yield second.lineno, match.group(1)
+    for line, text in code_strings(tree, constants):
+        for match in re.finditer(r"--build-arg[ =]([A-Za-z_][A-Za-z0-9_]*)=", text):
+            yield line, match.group(1)
+
+
+def suite_env_names(code: Path) -> dict[str, str]:
+    """Names the test suite reads (AST of tests/**/*.py) or CI sets in an ``env:`` block."""
+    import yaml
+
+    found: dict[str, str] = {}
+    tests = code / TEST_SOURCES
+    if tests.is_dir():
+        for path, tree, constants in package_modules(tests):
+            label = rel_path(path, code)
+            names, _dynamic = env_lookups(tree, label, constants)
+            for name in sorted(names):
+                found.setdefault(name, f"read in {label}")
+    for pattern in CI_ENV_SOURCES:
+        for path in sorted(code.glob(pattern)):
+            try:
+                document = yaml.safe_load(path.read_text(encoding="utf-8"))
+            except (OSError, yaml.YAMLError):
+                continue
+            for mapping in _dicts_with_key(document, "env"):
+                env = mapping.get("env")
+                if isinstance(env, dict):
+                    for name in env:
+                        if isinstance(name, str) and _ENV_NAME.match(name):
+                            found.setdefault(name, f"set in {rel_path(path, code)}")
+    return found
+
+
+def is_contributor_page(rel: str) -> bool:
+    return any(
+        rel.startswith(entry) if entry.endswith("/") else rel == entry
+        for entry in CONTRIBUTOR_PAGES
     )
 
 
@@ -1939,9 +2101,15 @@ def package_modules(package: Path) -> list[tuple[Path, ast.AST, dict[str, str]]]
     for path in _package_sources(package):
         relative = path.relative_to(package.parent).with_suffix("")
         parts = relative.parts[:-1] if relative.name == "__init__" else relative.parts
-        tree = ast.parse(
-            path.read_text(encoding="utf-8", errors="replace"), filename=str(path)
-        )
+        import warnings
+
+        with warnings.catch_warnings():
+            # A test file's docstring with "\`" warns when parsed; the warning is
+            # about that file, not about anything this check reports.
+            warnings.simplefilter("ignore", SyntaxWarning)
+            tree = ast.parse(
+                path.read_text(encoding="utf-8", errors="replace"), filename=str(path)
+            )
         trees[".".join(parts)] = (path, tree)
     own = {
         module: _module_string_constants(tree)
@@ -2056,13 +2224,6 @@ def _python_string_names(body: str) -> list[str] | None:
     return names
 
 
-def _name_is_read(name: str, read: EnvReadSet) -> bool:
-    if name.endswith(("*", "_")):
-        prefix = name.rstrip("*")
-        return any(candidate.startswith(prefix) for candidate in read.names)
-    return name in read.names
-
-
 #: An environment reference in a config value, as the config loader matches it.
 _CONFIG_ENV_REFERENCE = re.compile(r"\$\{(\w+)(?::[^}]*)?\}")
 
@@ -2078,19 +2239,35 @@ def _config_interpolation_rule() -> Callable[[str], bool]:
     return config_env_var_is_interpolatable
 
 
+def _matching(name: str, names: Iterable[str]) -> str | None:
+    """The member of names that name is, or that a family name (ASH_X_*) prefixes."""
+    if name.endswith(("*", "_")):
+        prefix = name.rstrip("*")
+        return next((n for n in sorted(names) if n.startswith(prefix)), None)
+    return name if name in names else None
+
+
 def check_env_vars(
     files: Iterable[Path],
     root: Path = REPO_ROOT,
     read: EnvReadSet | None = None,
     code: Path | None = None,
+    notes: list[str] | None = None,
 ) -> list[Finding]:
     """Every ASH_* name in the docs, and every env-var table row, is a variable ASH reads.
 
-    One kind of read cannot be in the read set: a config file's ``${NAME}`` reference,
-    which the config loader resolves for any name its rule allows (every ``ASH_*``
-    name and a few AWS ones). A name that one of the page's ASH config blocks
-    references that way counts as read everywhere on that page, so a page may export
-    the variable its own config example consumes.
+    A name may also be one of three other known kinds, each from the code tree:
+
+    - a config file's ``${NAME}`` reference, which the config loader resolves for any
+      name its rule allows. A name one of the page's ASH config blocks references that
+      way counts everywhere on that page, so a page may set what its config consumes;
+    - a build argument: an ``ARG`` of a shipped Dockerfile, or a ``--build-arg NAME=``
+      the package passes (``ASH_BASE_IMAGE`` reaches a custom Containerfile that way);
+    - a variable only the test suite reads or CI sets, which is allowed on contributor
+      pages (CONTRIBUTOR_PAGES) and is an error anywhere else.
+
+    ``notes``, when given, receives which set every accepted name matched, for the
+    gate's --verbose output.
     """
     read = read or load_env_read_set(str(code or code_root(root)))
     interpolatable = _config_interpolation_rule()
@@ -2100,17 +2277,6 @@ def check_env_vars(
         if read.dynamic
         else ""
     )
-
-    def report(rel: str, line: int, name: str, where: str) -> None:
-        findings.append(
-            Finding(
-                "env",
-                rel,
-                line,
-                f"{name}{where} is not an environment variable ASH reads "
-                f"(read set: {read.source}{dynamic_note})",
-            )
-        )
 
     for page in load_pages(files, root):
         if page.rel in HISTORICAL_DOCS:
@@ -2122,33 +2288,78 @@ def check_env_vars(
             for name in _CONFIG_ENV_REFERENCE.findall(block.body)
             if interpolatable(name)
         }
+        contributor = is_contributor_page(page.rel)
+        noted: set[str] = set()
 
-        def is_read(name: str) -> bool:
-            return name in via_config or _name_is_read(name, read)
+        def accepted(name: str, line: int, where: str) -> bool:
+            kinds = (
+                ("read set", lambda: read.names, False),
+                ("config ${NAME} reference on this page", lambda: via_config, False),
+                ("build argument", read.known_build_args, True),
+                ("test suite and CI", read.known_test_only, True),
+            )
+            for kind, load, has_origins in kinds:
+                names = load()
+                origins = names if has_origins else None
+                match = _matching(name, names)
+                if match is None:
+                    continue
+                if kind == "test suite and CI" and not contributor:
+                    findings.append(
+                        Finding(
+                            "env",
+                            page.rel,
+                            line,
+                            f"{name}{where} is read only by the test suite or CI "
+                            f"({read.known_test_only()[match]}); document it on a contributor page "
+                            f"({', '.join(CONTRIBUTOR_PAGES)}), not here",
+                        )
+                    )
+                    return True
+                if notes is not None and name not in noted:
+                    noted.add(name)
+                    origin = f" ({origins[match]})" if origins else ""
+                    notes.append(
+                        f"{page.rel}:{line}: {name} matched the {kind}{origin}"
+                    )
+                return True
+            return False
+
+        def check(name: str, line: int, where: str) -> None:
+            if not accepted(name, line, where):
+                findings.append(
+                    Finding(
+                        "env",
+                        page.rel,
+                        line,
+                        f"{name}{where} is not an environment variable ASH reads "
+                        f"(read set: {read.source}{dynamic_note}), nor a build argument "
+                        "of a shipped Dockerfile",
+                    )
+                )
 
         seen: set[tuple[int, str]] = set()
         for number, line in page.prose:
             for name in _ash_tokens(line):
-                if not is_read(name) and (number, name) not in seen:
+                if (number, name) not in seen:
                     seen.add((number, name))
-                    report(page.rel, number, name, "")
+                    check(name, number, "")
         for block in page.blocks:
             if block.family == "python":
                 names = _python_string_names(block.body)
                 if names is None:
                     names = _ash_tokens(block.body)
                 for name in sorted(set(names)):
-                    if not is_read(name):
-                        report(page.rel, block.fence_line, name, " in a python block")
+                    check(name, block.fence_line, " in a python block")
                 continue
             for number, line in block.body_lines():
                 for name in _ash_tokens(line):
-                    if not is_read(name) and (number, name) not in seen:
+                    if (number, name) not in seen:
                         seen.add((number, name))
-                        report(page.rel, number, name, "")
+                        check(name, number, "")
         for number, name in env_table_names(page):
-            if not name.startswith("ASH_") and name not in read.names:
-                report(page.rel, number, name, " (in an environment-variable table)")
+            if not name.startswith("ASH_"):
+                check(name, number, " (in an environment-variable table)")
     return findings
 
 

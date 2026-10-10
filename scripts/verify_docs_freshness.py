@@ -910,10 +910,16 @@ def check_doc_cli() -> list[str]:
     return [str(f) for f in _docs_checks().check_cli(collect_md_files(), REPO_ROOT)]
 
 
+#: Set by --verbose: checks that can say why something passed print it.
+_VERBOSE = False
+
+
 def check_doc_env_vars() -> list[str]:
-    return [
-        str(f) for f in _docs_checks().check_env_vars(collect_md_files(), REPO_ROOT)
-    ]
+    notes: list[str] | None = [] if _VERBOSE else None
+    findings = _docs_checks().check_env_vars(collect_md_files(), REPO_ROOT, notes=notes)
+    for note in notes or []:
+        print(f"        note: {note}")
+    return [str(f) for f in findings]
 
 
 def check_doc_config_blocks() -> list[str]:
@@ -1010,7 +1016,14 @@ def main(argv: list[str] | None = None) -> int:
         help="check the docs in this checkout against the installed ASH's code "
         "(default: the checkout this script is in)",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="also say which known set each accepted environment variable matched",
+    )
     args = parser.parse_args(argv)
+    global _VERBOSE
+    _VERBOSE = args.verbose
     if args.docs_root is not None:
         _use_trees(args.docs_root)
     print(f"ASH package: {_docs_checks().installed_package_dir()}")
