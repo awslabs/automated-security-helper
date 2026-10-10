@@ -79,6 +79,16 @@ NON_VACUITY_COVERAGE = {
     "Config file path consistency": "test_config_path_check_can_fail",
     "Suppression field name": "test_suppression_check_can_fail",
     "Plugin options in docs exist and validate": "test_plugin_options_check_can_fail",
+    # Checks 9-16 live in scripts/docs_checks.py, and so do their proofs, in
+    # test_docs_checks_can_fail.py; "<file>::<test>" names a test in that file.
+    "Doc block markers are well formed": "test_docs_checks_can_fail.py::test_marker_check_can_fail",
+    "ASH commands in docs match the CLI": "test_docs_checks_can_fail.py::test_cli_check_can_fail",
+    "ASH environment variables in docs are read by ASH": "test_docs_checks_can_fail.py::test_env_check_can_fail",
+    "Config blocks in docs validate": "test_docs_checks_can_fail.py::test_config_check_can_fail",
+    "Python blocks in docs parse and import": "test_docs_checks_can_fail.py::test_python_check_can_fail",
+    "Links and anchors in docs resolve": "test_docs_checks_can_fail.py::test_links_check_can_fail",
+    "Docs navigation and redirects resolve": "test_docs_checks_can_fail.py::test_nav_check_can_fail",
+    "Docs site build is strict and offline": "test_docs_checks_can_fail.py::test_site_build_check_can_fail",
 }
 
 
@@ -129,9 +139,21 @@ def test_the_coverage_table_names_real_tests():
     """A typo in the table above would silently exempt a check."""
     module = sys.modules[__name__]
     for check, test_name in sorted(NON_VACUITY_COVERAGE.items()):
-        assert hasattr(module, test_name), (
-            f"{check!r} claims to be covered by {test_name!r}, which does not "
-            f"exist in this module"
+        file_name, separator, function = test_name.rpartition("::")
+        if not separator:
+            assert hasattr(module, test_name), (
+                f"{check!r} claims to be covered by {test_name!r}, which does not "
+                f"exist in this module"
+            )
+            continue
+        other = Path(__file__).parent / file_name
+        defined = {
+            node.name
+            for node in ast.parse(other.read_text(encoding="utf-8")).body
+            if isinstance(node, ast.FunctionDef)
+        }
+        assert function in defined, (
+            f"{check!r} claims to be covered by {test_name!r}, which does not exist"
         )
 
 

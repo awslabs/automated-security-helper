@@ -861,6 +861,81 @@ def check_plugin_option_keys() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Checks 9-16: doc blocks, commands, environment variables, links, navigation
+# ---------------------------------------------------------------------------
+#
+# Implemented in scripts/docs_checks.py, which the docs-example runner in
+# tests/integration/docs/ loads too, so the checks and the runner agree on what a
+# block and its marker are. Each wrapper below hands that module this script's corpus
+# and root, so a test that monkeypatches collect_md_files or REPO_ROOT here steers
+# these checks the same way it steers the eight above.
+
+DOCS_CHECKS = REPO_ROOT / "scripts" / "docs_checks.py"
+_docs_checks_module = None
+
+
+def _docs_checks():
+    """Load scripts/docs_checks.py by path, once.
+
+    Registered in sys.modules before it runs: its dataclasses resolve their
+    annotations through the module's entry there.
+    """
+    global _docs_checks_module
+    if _docs_checks_module is None:
+        import importlib.util
+
+        name = "_ash_docs_checks"
+        spec = importlib.util.spec_from_file_location(name, DOCS_CHECKS)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"cannot load {DOCS_CHECKS}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        _docs_checks_module = module
+    return _docs_checks_module
+
+
+def check_doc_markers() -> list[str]:
+    return [str(f) for f in _docs_checks().check_markers(collect_md_files(), REPO_ROOT)]
+
+
+def check_doc_cli() -> list[str]:
+    return [str(f) for f in _docs_checks().check_cli(collect_md_files(), REPO_ROOT)]
+
+
+def check_doc_env_vars() -> list[str]:
+    return [
+        str(f) for f in _docs_checks().check_env_vars(collect_md_files(), REPO_ROOT)
+    ]
+
+
+def check_doc_config_blocks() -> list[str]:
+    return [
+        str(f)
+        for f in _docs_checks().check_config_blocks(collect_md_files(), REPO_ROOT)
+    ]
+
+
+def check_doc_python_blocks() -> list[str]:
+    return [
+        str(f)
+        for f in _docs_checks().check_python_blocks(collect_md_files(), REPO_ROOT)
+    ]
+
+
+def check_doc_links() -> list[str]:
+    return [str(f) for f in _docs_checks().check_links(collect_md_files(), REPO_ROOT)]
+
+
+def check_doc_nav() -> list[str]:
+    return [str(f) for f in _docs_checks().check_nav(REPO_ROOT)]
+
+
+def check_doc_site_build() -> list[str]:
+    return [str(f) for f in _docs_checks().check_site_build(REPO_ROOT)]
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -875,6 +950,14 @@ def main() -> int:
         ("Config file path consistency", check_config_path),
         ("Suppression field name", check_suppression_field_name),
         ("Plugin options in docs exist and validate", check_plugin_option_keys),
+        ("Doc block markers are well formed", check_doc_markers),
+        ("ASH commands in docs match the CLI", check_doc_cli),
+        ("ASH environment variables in docs are read by ASH", check_doc_env_vars),
+        ("Config blocks in docs validate", check_doc_config_blocks),
+        ("Python blocks in docs parse and import", check_doc_python_blocks),
+        ("Links and anchors in docs resolve", check_doc_links),
+        ("Docs navigation and redirects resolve", check_doc_nav),
+        ("Docs site build is strict and offline", check_doc_site_build),
     ]
 
     all_failures: list[tuple[str, list[str]]] = []
