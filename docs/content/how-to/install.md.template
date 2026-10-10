@@ -1,0 +1,216 @@
+# Install ASH
+
+ASH is a Python command-line tool that you install from its GitHub repository. It is
+not published on PyPI. The PyPI project named `automated-security-helper` is not
+published by this project, so `pip install automated-security-helper` and
+`uvx automated-security-helper` install someone else's package. Always install from
+the GitHub URL, as on this page.
+
+Installing ASH gives you the `ash` command. The scanners it runs are separate tools:
+after installing, run `ash dependencies install`, described in
+[Manage scanner tools](../docs/advanced-usage.md).
+
+## Requirements
+
+- Python 3.10 to 3.14. uv and pipx can fetch a matching Python for you.
+- git, which the installer uses to fetch the repository.
+- Linux (x86-64 or arm64), macOS, or Windows (x86-64). CI installs ASH with pip and
+  pipx on Python 3.10 to 3.14 and with uvx on 3.12, on Ubuntu (x86-64 and arm64),
+  macOS on Apple silicon, and Windows. Intel Macs and Windows on arm64 are not tested.
+
+Some scanner tools are not available on every platform: see
+[Platform limits](../docs/advanced-usage.md#platform-limits).
+
+Always pass a Python version to uv and pipx, as the commands below do. The `v3.7.x`
+releases accept any Python 3 version from 3.10 up, so on a machine with no suitable
+Python, uv picks the newest release, 3.15, and the install fails while building a
+dependency that does not support it yet.
+
+## Choose an install method
+
+| Method | Use it when | Status |
+|---|---|---|
+| [`uv tool install`](#install-with-uv) | you want `ash` on your `PATH` in its own environment | recommended |
+| [`uvx`](#run-without-installing-uvx) | you want to run ASH without installing it | supported |
+| [`pipx`](#install-with-pipx) | you already use pipx | supported |
+| [`pip` in a virtual environment](#install-with-pip) | you manage Python environments yourself | supported |
+| [Container image](#container-image) | you want every scanner without installing them | build it yourself |
+| [Nix mode](#nix-mode) | you use Nix | works from a source checkout only |
+| [Homebrew](#homebrew) | | not supported |
+| pre-commit | you want a scan on every commit | see [Run ASH with pre-commit](pre-commit.md) |
+| From a clone | you are changing ASH | see [Contributing](../contributing/index.md) |
+
+## Install with uv
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:
+
+<!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
+```bash
+uv tool install --python 3.12 git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+ash --version
+```
+
+```text
+awslabs/automated-security-helper v{{VERSION}}
+```
+
+The install provides three names for the same program: `ash`, `ashv3`, and
+`automated-security-helper`. On Windows, Git Bash and MSYS2 ship an unrelated shell
+named `ash` that can come first on your `PATH`. Use `ashv3` there.
+
+To move to another version, run the install command again with the new tag, as
+`uv tool install --force`.
+
+## Run without installing: uvx
+
+<!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
+```bash
+uvx --python 3.12 --from git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}} ash --version
+```
+
+uvx builds the environment once and reuses it, so later runs start quickly. Every
+command needs the full `uvx --from` specification, so you may want a shell alias:
+
+<!-- doctest: illustrative reason="changes the reader's shell configuration" -->
+```bash
+alias ash='uvx --python 3.12 --from git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}} ash'
+```
+
+## Install with pipx
+
+<!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
+```bash
+pipx install --python python3.12 git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+```
+
+pipx needs the named Python on your `PATH`.
+
+ASH installs bandit, checkov, semgrep, cfn-lint and zizmor with uv, and it looks for
+the `uv` command on your `PATH`. pipx does not put the `uv` that ASH depends on
+there, so install uv as well. Without it those five scanners show as MISSING.
+
+## Install with pip
+
+Create a virtual environment outside the projects you will scan, and install into it:
+
+<!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
+```bash
+python3.12 -m venv ~/.venvs/ash
+~/.venvs/ash/bin/pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+~/.venvs/ash/bin/ash --version
+```
+
+Keep the environment outside the scanned directory. During a scan ASH does not run
+tools that it finds inside the directory it is scanning, so scanners installed into a
+virtual environment inside the project show as MISSING. See
+[Tools inside the scanned directory](../docs/advanced-usage.md#tools-inside-the-scanned-directory).
+
+As with pipx, ASH needs `uv` on your `PATH` for its scan-time installs. Activating the
+virtual environment puts the environment's `uv` there.
+
+## Extras
+
+| Extra | Adds | Needed for |
+|---|---|---|
+| `cdk` | `aws-cdk-lib`, `cdk-nag`, `constructs` | the cdk-nag scanner, which also needs Node.js |
+| `symbols` | tree-sitter grammars for Python, JavaScript, TypeScript and Java | `symbol` in suppressions; see [Suppress findings](suppress-findings.md) |
+
+To install an extra from git, use the direct-reference form `name[extra] @ URL`:
+
+<!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
+```bash
+uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}'
+```
+
+The same form works with pipx and pip. List several extras with commas, as in
+`[cdk,symbols]`.
+
+With uv, install the `cdk` extra this way rather than later: `ash dependencies install`
+tries to add the cdk packages with pip, and a uv tool environment has no pip, so that
+step fails.
+
+The `symbols` extra is in `main` and not in releases up to 3.7.x. Its tree-sitter
+packages publish no wheels for Linux on arm64 with musl (Alpine), so on that platform
+the install needs a C compiler.
+
+## Choose a version to pin
+
+| Reference | What you get |
+|---|---|
+| `@v{{VERSION}}` | That release. The release process creates each version tag once and moves only the `v3` tag. |
+| a full commit SHA | That commit. The only reference that cannot change. |
+| `@v3` | The latest 3.x release. It moves with each release. |
+| `@main` | The current development state. |
+
+ASH releases are git tags. Nothing is signed, so if you need a reference that cannot
+change, pin a commit SHA.
+
+The `v3` tag moves to each new 3.x release, and that release is not always on `main`.
+v3.7.1 was a backport made on a separate branch, so until the next 3.x release, `v3`
+points at a commit outside `main`'s history that does not have most of the features
+these docs describe. A 3.x release can also include breaking changes, so read the
+release notes before upgrading a `v3` or `<4` pin.
+
+### Install from main
+
+These docs describe `main`. To use a feature documented here before the next release
+includes it, install from `main`:
+
+<!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
+```bash
+uv tool install --python 3.12 git+https://github.com/awslabs/automated-security-helper.git@main
+```
+
+`main` reports the same version number as the latest release until the next release
+is made, so `ash --version` does not tell the two apart. Pin a commit SHA instead of
+`@main` when you need to know which code you ran.
+
+## Container image
+
+No ASH image is published. `ash --mode container` builds an image with every scanner
+on your machine the first time you scan, and `ash build-image` builds one to push to
+your own registry. See [Run ASH in a container](run-in-a-container.md).
+
+## Nix mode
+
+`ash --mode nix` runs the scan inside a Nix shell whose scanner tools come from
+ASH's `flake.nix`. It needs Nix with flakes enabled, on Linux or macOS (on Windows,
+inside WSL2). It does not install ASH itself: install ASH with one of the methods
+above first.
+
+When ASH runs from a source checkout, it uses that checkout's `flake.nix`. An
+installed ASH uses the flake at its own release tag, and no release up to 3.7.x
+contains `flake.nix`, so Nix mode fails there with an error saying `flake.nix` does
+not exist. Set `ASH_NIX_FLAKE_REF` to a flake reference that has it: a checkout,
+written `path:` followed by its absolute path, or a branch or commit that has it, such
+as `github:awslabs/automated-security-helper/main`.
+
+## Homebrew
+
+The repository contains a Homebrew formula, `Formula/ash.rb`, but it is not a
+supported install method. The formula declares none of ASH's Python dependencies, so
+a Homebrew install would not include them, and CI only checks the formula's Ruby
+syntax. No tap is published. On macOS, install with uv instead.
+
+## Uninstall
+
+Remove ASH with the tool that installed it:
+
+<!-- doctest: illustrative reason="removes software from the reader's machine" -->
+```bash
+uv tool uninstall automated-security-helper
+pipx uninstall automated-security-helper
+```
+
+For a pip install, delete the virtual environment.
+
+The scanner tools and data that ASH installed stay behind. To remove them too:
+
+- `~/.ash/`, which holds the binaries from `ash dependencies install` (or the
+  directory you named with `--bin-path` or `ASH_BIN_PATH`), their install records,
+  and the cfn-guard rules.
+- The scanners installed as uv tools:
+  `uv tool uninstall bandit checkov semgrep cfn-lint zizmor nbconvert`.
+- The cfn-nag gem: `gem uninstall cfn-nag`.
+- The scanners' own caches, such as `~/.cache/grype` and `~/.cache/trivy`.
+- The `.ash/ash_output/` directory that each scan writes in the project it scanned.

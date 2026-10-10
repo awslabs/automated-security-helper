@@ -1,0 +1,306 @@
+# Run your first scan
+
+In this tutorial you install ASH and its scanner tools, scan a small Python project,
+read the results, suppress a false positive, and fix a real issue. It takes about
+15 minutes, most of it spent on downloads.
+
+The commands are for a POSIX shell on Linux, macOS, or Windows Subsystem for Linux.
+For native Windows, see [Install ASH](../how-to/install.md).
+
+## Before you start
+
+You need:
+
+- git
+- Node.js, which npm-audit and cdk-nag use
+- Ruby with a C compiler, to install cfn-nag
+- network access: the first install and the first scan download scanner tools,
+  rules, and vulnerability databases
+
+ASH runs without Node.js or Ruby, but the scanners that need them show as MISSING
+and the scan exits 1. Step 5 shows what to do in that case.
+
+## 1. Install uv
+
+ASH installs and runs with [uv](https://docs.astral.sh/uv/). Install it with the
+official installer:
+
+<!-- doctest: illustrative reason="downloads and runs the uv installer from the network" -->
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Open a new terminal so that uv's directory is on your `PATH`. `uv --version` then
+prints a version number.
+
+## 2. Install ASH
+
+<!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
+```bash
+uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+```
+
+This installs the `v3.7.0` release from GitHub, with the `cdk` extra that the
+cdk-nag scanner needs, into its own environment on Python 3.12 (uv downloads that
+Python if you do not have it). ASH is not published on PyPI: a package named
+`automated-security-helper` on PyPI belongs to someone else, so never install ASH by
+that name. [Install ASH](../how-to/install.md) covers the other install methods and
+pins.
+
+Check the install:
+
+```bash
+ash --version
+```
+
+```text
+awslabs/automated-security-helper v3.7.0
+```
+
+## 3. Install the scanner tools
+
+ASH runs other projects' scanners. Install the ones it can install for you:
+
+<!-- doctest: illustrative reason="downloads scanner tools from GitHub releases and PyPI" -->
+```bash
+ash dependencies install
+```
+
+It prints a table with one row per scanner and ends with a box like this:
+
+```text
+╭─────────────────────────── Installation Complete ────────────────────────────╮
+│ Commands run: 15 (0 failed)                                                  │
+│ Tools verified on PATH: 16 -- actionlint, bandit, cdk-nag, cfn-guard,        │
+│ cfn-lint, cfn-nag, checkov, gitleaks, grype, jupyter, npm-audit, opengrep,   │
+│ semgrep, syft, trivy, zizmor                                                 │
+│ No install path on this platform: cdk-nag, detect-secrets, npm-audit         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+The "No install path" line is expected: cdk-nag comes from the `cdk` extra,
+detect-secrets is part of ASH, and npm-audit uses the `npm` that comes with Node.js.
+If Ruby or a C compiler is missing, the cfn-nag install fails, the box reads
+"Installation Incomplete", and the command exits 1. You can continue anyway.
+
+[Manage scanner tools](../docs/advanced-usage.md) explains where each tool goes and
+how ASH finds it.
+
+## 4. Create a project to scan
+
+Create a directory with one Python file that has two problems in it:
+
+```bash
+mkdir ash-tutorial
+cd ash-tutorial
+cat > app.py <<'EOF'
+import hashlib
+import subprocess
+
+
+def cache_key(data: bytes) -> str:
+    """Name a cache entry after its contents. Not used for security."""
+    return hashlib.md5(data).hexdigest()
+
+
+def archive(directory: str) -> None:
+    subprocess.run(f"tar -czf backup.tgz {directory}", shell=True, check=True)
+EOF
+```
+
+`cache_key` uses MD5, which scanners flag as a weak hash, but here it only names cache
+entries. `archive` passes its argument to a shell, so a directory name such as
+`x; touch injected` would run a second command.
+
+## 5. Run the scan
+
+Run `ash` with no arguments. It scans the current directory with every scanner:
+
+<!-- doctest: illustrative reason="the scan downloads the grype vulnerability database and semgrep rules; the docs job has no network" -->
+```bash
+ash
+echo "exit code: $?"
+```
+
+The first scan takes a minute or two, most of it grype downloading its vulnerability
+database. Later scans of this project take about 20 seconds. The scan prints a
+summary table, then where it wrote the results:
+
+```text
+                           ASH Scan Results Summary
+┏━━━━━━━━━━━━━━━━┳━━━┳━━━┳━━━┳━━━┳━━━┳━━━┳━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┓
+┃ Scanner        ┃ S ┃ C ┃ H ┃ M ┃ L ┃ I ┃ Time  ┃ Action ┃ Result  ┃ Thresh  ┃
+┡━━━━━━━━━━━━━━━━╇━━━╇━━━╇━━━╇━━━╇━━━╇━━━╇━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━┩
+│ actionlint     │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 25ms  │ 0      │ SKIPPED │ MED (g) │
+│ bandit         │ 0 │ 0 │ 2 │ 0 │ 1 │ 0 │ 468ms │ 2      │ FAILED  │ MED (g) │
+│ cdk-nag        │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 25ms  │ 0      │ SKIPPED │ MED (g) │
+│ cfn-guard      │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 72ms  │ 0      │ SKIPPED │ MED (g) │
+│ cfn-lint       │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 171ms │ 0      │ SKIPPED │ MED (g) │
+│ cfn-nag        │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 30ms  │ 0      │ SKIPPED │ MED (g) │
+│ checkov        │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 3.8s  │ 0      │ PASSED  │ MED (g) │
+│ detect-secrets │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 373ms │ 0      │ PASSED  │ MED (g) │
+│ gitleaks       │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 594ms │ 0      │ PASSED  │ MED (g) │
+│ grype          │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 3.0s  │ 0      │ PASSED  │ MED (g) │
+│ npm-audit      │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 227ms │ 0      │ PASSED  │ MED (g) │
+│ opengrep       │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 5.1s  │ 0      │ PASSED  │ MED (g) │
+│ semgrep        │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 4.7s  │ 0      │ PASSED  │ MED (g) │
+│ syft           │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 1.4s  │ 0      │ PASSED  │ MED (g) │
+│ trivy          │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 458ms │ 0      │ PASSED  │ MED (g) │
+│ zizmor         │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ <1ms  │ 0      │ SKIPPED │ MED (g) │
+└────────────────┴───┴───┴───┴───┴───┴───┴───────┴────────┴─────────┴─────────┘
+                                source-dir: '.'
+                         output-dir: '.ash/ash_output'
+...
+ERROR (2) Exiting due to 2 actionable findings found in ASH scan
+exit code: 2
+```
+
+Each row is one scanner:
+
+- S is the number of suppressed findings, and C, H, M, L and I count the rest by
+  severity: critical, high, medium, low and informational.
+- Thresh is the lowest severity that counts against the scan. `MED (g)` means MEDIUM,
+  set globally, which is the default.
+- Action counts the findings at or above that threshold. bandit found two HIGH
+  findings and one LOW one, so Action is 2.
+- Result is PASSED, FAILED (actionable findings), SKIPPED (the scanner did not run:
+  here, because this project has nothing for it, such as no GitHub workflows or
+  CloudFormation templates), MISSING (its tool is not available), or ERROR (it ran
+  and failed).
+
+The exit code is the scan's verdict: 0 when nothing is actionable, 2 when something
+is, and 1 when the scan is incomplete or ASH hit an error. An incomplete scan exits 1
+even when it also has findings. See [Exit codes](../reference/exit-codes.md).
+
+The results are in `.ash/ash_output/`. The `reports/` directory there holds an HTML
+report, Markdown and text summaries, SARIF, and other formats. Keep
+`.ash/ash_output/` out of version control, for example by adding it to your
+`.gitignore`.
+
+### If a scanner shows MISSING
+
+A MISSING scanner makes the scan exit 1 and print which scanners did not run:
+
+```text
+ERROR (1) Exiting because the scan was incomplete: 2 selected scanner(s) did not
+evaluate everything they were given
+  cdk-nag: MISSING
+  npm-audit: MISSING
+```
+
+Install the tool the scanner needs ([Troubleshoot](../how-to/troubleshoot.md#a-scanner-shows-missing)
+lists the fix for each), or leave out the scanners you cannot run. For example,
+without Node.js:
+
+<!-- doctest: illustrative reason="same scan as above; needs the network" -->
+```bash
+ash --exclude-scanners cdk-nag,npm-audit
+```
+
+An excluded scanner shows as SKIPPED and does not fail the scan. Add the same
+`--exclude-scanners` option to the scans in the rest of this tutorial.
+
+## 6. Look at a finding
+
+`ash report` prints the latest results in the terminal, one block per actionable
+finding:
+
+<!-- doctest: illustrative reason="reads the results of the scan in step 5, which the docs job does not run" -->
+```bash
+ash report
+```
+
+```text
+Finding 1: B324
+
+ • Severity: HIGH
+ • Scanner: bandit
+ • Rule ID: B324
+ • Location: app.py:7
+
+Description: Use of weak MD5 hash for security. Consider usedforsecurity=False
+
+Code Snippet:
+
+ """Name a cache entry after its contents. Not used for security."""
+     return hashlib.md5(data).hexdigest()
+```
+
+Finding 2 is B602, `subprocess call with shell=True`, at `app.py:11`. To browse the
+findings interactively, run `ash inspect findings`, or open
+`.ash/ash_output/reports/ash.html` in a browser.
+
+## 7. Suppress the false positive
+
+B324 is a false positive here, because the hash only names cache entries. Create a
+directory named `.ash` in `ash-tutorial`, and in it a file named `.ash.yaml` with this
+content:
+
+```yaml
+global_settings:
+  suppressions:
+    - rule_id: B324
+      path: app.py
+      reason: MD5 only names cache entries here. It is not used for security.
+      expiration: "2027-04-30"
+```
+
+`rule_id` and `path` select the findings to suppress. `reason` is required.
+`expiration` is optional: from that date the suppression stops applying and the
+finding counts again, so set it to a date a few months from today, when you want
+to look at the decision again. [Suppress findings](../how-to/suppress-findings.md)
+covers line ranges, symbols, and inline comments.
+
+## 8. Scan again
+
+<!-- doctest: illustrative reason="the scan needs the network for its scanners; the docs job has none" -->
+```bash
+ash
+echo "exit code: $?"
+```
+
+bandit now shows the B324 finding as suppressed (S is 1), and one actionable finding
+remains:
+
+```text
+│ bandit         │ 1 │ 0 │ 1 │ 0 │ 1 │ 0 │ 428ms │ 1      │ FAILED  │ MED (g) │
+...
+ERROR (2) Exiting due to 1 actionable findings found in ASH scan
+exit code: 2
+```
+
+## 9. Fix the real issue
+
+In `app.py`, replace the `archive` function with this version, which passes its
+arguments as a list and starts no shell:
+
+```python
+def archive(directory: str) -> None:
+    subprocess.run(["tar", "-czf", "backup.tgz", directory], check=True)
+```
+
+Scan once more:
+
+<!-- doctest: illustrative reason="the scan needs the network for its scanners; the docs job has none" -->
+```bash
+ash
+echo "exit code: $?"
+```
+
+```text
+│ bandit         │ 1 │ 0 │ 0 │ 0 │ 3 │ 0 │ 429ms │ 0      │ PASSED  │ MED (g) │
+...
+exit code: 0
+```
+
+The three LOW findings are below the MEDIUM threshold, so they do not fail the scan.
+They are still listed in the SARIF and HTML reports.
+
+## Next steps
+
+- [Suppress findings](../how-to/suppress-findings.md) in other ways, and ignore paths.
+- [Set the gate](../how-to/set-the-gate.md): choose which findings fail a scan.
+- [Run ASH with pre-commit](../how-to/pre-commit.md) before each commit.
+- [Add ASH to CI](ci.md).
+- [Read results](../how-to/read-results.md): what each output file is for.
+- [Troubleshoot](../how-to/troubleshoot.md) a scan that does not do what you expect.
