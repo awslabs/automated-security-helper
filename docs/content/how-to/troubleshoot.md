@@ -256,10 +256,11 @@ bandit still running on source (60s elapsed)
 ```
 
 Cause: each scanner has a time limit, `scan_timeout`, which defaults to 1800 seconds
-(30 minutes). A scanner that reaches it is stopped and shows as ERROR:
+(30 minutes). A scanner that reaches it is stopped and shows as ERROR. With
+`scan_timeout` set to 65, for example:
 
 ```text
-(bandit @ source) timed out after 1800s and was killed. Raise scanners.bandit.options.scan_timeout if this target legitimately needs longer.
+(bandit @ source) timed out after 65.0s and was killed. Raise scanners.bandit.options.scan_timeout if this target legitimately needs longer.
 ```
 
 There is no limit on the scan as a whole.
