@@ -140,10 +140,15 @@ GOLDEN: tuple[tuple[str, str], ...] = (
         "generated MCP tool reference",
     ),
     ("docs/content/reference/cli.md", "generated CLI reference"),
+    ("docs/content/reference/configuration.md", "generated configuration reference"),
+    ("docs/content/reference/converters.md", "generated converter reference"),
     (
         "docs/content/reference/environment-variables.md",
         "generated environment variable reference",
     ),
+    ("docs/content/reference/mcp-tools.md", "generated MCP tool reference page"),
+    ("docs/content/reference/reporters.md", "generated reporter reference"),
+    ("docs/content/reference/scanners.md", "generated scanner reference"),
 )
 
 

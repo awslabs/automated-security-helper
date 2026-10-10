@@ -43,6 +43,12 @@ from the docstring's first line, which is accurate and specific enough to publis
 (measured across all 21). What *is* an error is a ``TOOL_NOTES`` entry naming a
 tool that is not registered, because that is a stale note.
 
+The docs-site page
+------------------
+The same content is also written to docs/content/reference/mcp-tools.md, under the
+reference pages' common banner. Bold is dropped there because the docs' house
+style keeps bold out of running prose; the agent-facing file keeps it.
+
 Usage
 -----
     uv run python scripts/generate_mcp_tool_reference.py           # rewrite
@@ -73,6 +79,8 @@ TARGET = (
     REPO_ROOT
     / "ash-agent-plugins/agentic-coding/transpiler/_base/references/tool-reference.md"
 )
+REFERENCE_PAGE = REPO_ROOT / "docs" / "content" / "reference" / "mcp-tools.md"
+GENERATOR = "scripts/generate_mcp_tool_reference.py"
 
 NUMBER_WORDS = {
     1: "one",
@@ -491,6 +499,94 @@ def _render_tool(name: str, description: str, schema: dict, func) -> list[str]:
 
 
 def render() -> str:
+    """The agent-facing tool-reference.md."""
+    header, body = _render_parts()
+    return "\n".join(header + body)
+
+
+def render_reference_page() -> str:
+    """docs/content/reference/mcp-tools.md: the same body under the reference banner."""
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _reference_docs import banner, generated_note
+
+    _header, body = _render_parts()
+    lines = banner(GENERATOR, "the MCP server's registered tools and resources")
+    lines += [
+        "# MCP tools reference",
+        "",
+        generated_note(
+            GENERATOR,
+            "the tools and resources the ASH MCP server registers, with editorial notes "
+            "kept in the generator",
+        ),
+        "",
+    ]
+    return "\n".join(_docs_site_markdown(lines + body))
+
+
+#: Marker the docs doctest reads on a fenced JSON block that is an example, not an
+#: ASH config (see the doctest contract's "Config blocks").
+_RESPONSE_EXAMPLE_MARKER = (
+    '<!-- doctest: config kind=other reason="example MCP tool response" -->'
+)
+
+
+def _docs_site_markdown(lines: list[str]) -> list[str]:
+    """Adapt the agent-facing markdown to the docs site's rules.
+
+    * No bold in running prose (the docs' house style). Bold that wraps a code span
+      is unwrapped too; ``**`` inside a code span or a fence is left alone.
+    * A ```json response example that does not parse as JSON (``bool``, ``[...]``
+      placeholders) becomes a ```text block, because the docs doctest parses every
+      JSON block. One that parses keeps its language and gets the marker saying it
+      is an example rather than an ASH config.
+    """
+    import json
+    import re
+
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.strip() == "```json":
+            end = i + 1
+            while end < len(lines) and lines[end].strip() != "```":
+                end += 1
+            block = lines[i + 1 : end]
+            try:
+                json.loads("\n".join(block))
+                parsed = True
+            except ValueError:
+                parsed = False
+            if out and out[-1] != "":
+                out.append("")
+            if parsed:
+                out += [_RESPONSE_EXAMPLE_MARKER, "```json"]
+            else:
+                out.append("```text")
+            out += block
+            out.append("```")
+            i = end + 1
+            continue
+        if line.startswith("```"):
+            out.append(line)
+            i += 1
+            continue
+        spans: list[str] = []
+
+        def hide(match):
+            spans.append(match.group(0))
+            return f"\x00{len(spans) - 1}\x00"
+
+        hidden = re.sub(r"`[^`]*`", hide, line)
+        hidden = hidden.replace("**", "")
+        out.append(re.sub(r"\x00(\d+)\x00", lambda m: spans[int(m.group(1))], hidden))
+        i += 1
+    return out
+
+
+def _render_parts() -> tuple[list[str], list[str]]:
     from automated_security_helper.cli import mcp_server
 
     tools = asyncio.run(mcp_server.mcp.list_tools())
@@ -529,6 +625,9 @@ def render() -> str:
         "     generator (prose and caveats live in its TOOL_NOTES table) and re-run it,",
         "     then `agentic-plugins build` to propagate to every plugin backend. -->",
         "",
+    ]
+    header_length = len(lines)
+    lines += [
         (
             f"The ASH MCP server exposes {_spell(len(tools))} tools and "
             f"{_spell(len(resources))} resources."
@@ -561,7 +660,7 @@ def render() -> str:
         "",
     ]
 
-    return "\n".join(lines)
+    return lines[:header_length], lines[header_length:]
 
 
 def main() -> int:
@@ -569,44 +668,62 @@ def main() -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Do not write. Exit non-zero with a diff if the file is stale.",
+        help="Do not write. Exit non-zero with a diff if either file is stale.",
     )
     args = parser.parse_args()
 
-    expected = render()
-    actual = TARGET.read_text(encoding="utf-8") if TARGET.exists() else ""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _reference_docs import scrub_import_time_environment
+
+    scrub_import_time_environment()
+    status = 0
+    for target, expected, after in (
+        (
+            TARGET,
+            render(),
+            (
+                "Then propagate: uv run --project "
+                "ash-agent-plugins/agentic-coding/transpiler agentic-plugins build"
+            ),
+        ),
+        (REFERENCE_PAGE, render_reference_page(), ""),
+    ):
+        status |= _write_or_check(target, expected, args.check, after)
+    return status
+
+
+def _write_or_check(target: Path, expected: str, check: bool, after: str) -> int:
+    actual = target.read_text(encoding="utf-8") if target.exists() else ""
+    rel = target.relative_to(REPO_ROOT)
 
     if expected == actual:
-        if args.check:
-            print(f"{TARGET.relative_to(REPO_ROOT)} is up to date.", file=sys.stderr)
+        if check:
+            print(f"{rel} is up to date.", file=sys.stderr)
         return 0
 
-    if args.check:
+    if check:
         print(
-            f"{TARGET.relative_to(REPO_ROOT)} is stale relative to the MCP registry.\n"
+            f"{rel} is stale relative to the MCP registry.\n"
             f"Regenerate with: uv run python scripts/generate_mcp_tool_reference.py\n"
-            f"Then propagate: uv run --project "
-            f"ash-agent-plugins/agentic-coding/transpiler agentic-plugins build\n",
+            + (f"{after}\n" if after else ""),
             file=sys.stderr,
         )
         sys.stderr.writelines(
             difflib.unified_diff(
                 actual.splitlines(keepends=True),
                 expected.splitlines(keepends=True),
-                fromfile="tool-reference.md (on disk)",
-                tofile="tool-reference.md (regenerated)",
+                fromfile=f"{rel.name} (on disk)",
+                tofile=f"{rel.name} (regenerated)",
                 n=1,
             )
         )
         return 1
 
-    TARGET.write_text(expected, encoding="utf-8")
-    print(f"Wrote {TARGET.relative_to(REPO_ROOT)}", file=sys.stderr)
-    print(
-        "Now run: uv run --project ash-agent-plugins/agentic-coding/transpiler "
-        "agentic-plugins build",
-        file=sys.stderr,
-    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(expected, encoding="utf-8")
+    print(f"Wrote {rel}", file=sys.stderr)
+    if after:
+        print(f"Now run: {after.removeprefix('Then propagate: ')}", file=sys.stderr)
     return 0
 
 

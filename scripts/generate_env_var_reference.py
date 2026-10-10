@@ -871,7 +871,10 @@ def _python_default(
         if constant is not None and isinstance(constant[0], str):
             return constant[0]
         return None
-    return ast.unparse(node)
+    # The source as written, not ast.unparse(): unparse's spelling of an f-string
+    # changed in Python 3.12, and this page is checked on 3.10 through 3.14.
+    segment = ast.get_source_segment("\n".join(mod.lines), node)
+    return " ".join(segment.split()) if segment else ast.unparse(node)
 
 
 def _python_reads(repo_root: Path, scan: EnvScan) -> None:
@@ -1401,13 +1404,13 @@ def generate(
         lines += [
             "## Variables a configuration file can read",
             "",
-            "A configuration file can substitute an environment variable into a value "
-            "with `${NAME}` or `${NAME:default}`. Only names that start with "
+            "A value in a configuration file that begins with `${NAME}` or "
+            "`${NAME:default}` has the reference replaced by that environment "
+            "variable. Only names that start with "
             f"{code(prefix)} and these names are substituted: "
             + ", ".join(code(n) for n in allowlist)
-            + f". Any other reference is left as written. The rule is "
-            f"`ASH_CONFIG_ENV_VAR_PREFIX` and `ASH_CONFIG_ENV_VAR_ALLOWLIST` in "
-            f"{code(where)}.",
+            + ". Any other reference is left as written, with a warning. The prefix "
+            f"and the list are defined in {code(where)}.",
             "",
         ]
     lines += [

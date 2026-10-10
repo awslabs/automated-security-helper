@@ -30,6 +30,14 @@ for". The check is instead a completeness one -- a reporter registered with no
 That way a newly added reporter cannot reach the docs as a blank row, and cannot
 be silently omitted either.
 
+The reference page
+------------------
+Besides the regions, this script writes docs/content/reference/reporters.md whole:
+the built-in table above, every reporter in a plugin module (the AWS reporters),
+and each reporter's options from its options model. The regions stay until the
+pages that hold them are rewritten to link to the reference page; ``REGIONS``
+below is the list to shorten then.
+
 Usage
 -----
     uv run python scripts/generate_reporter_docs.py           # rewrite the docs
@@ -50,6 +58,8 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+REFERENCE_PAGE = REPO_ROOT / "docs" / "content" / "reference" / "reporters.md"
+GENERATOR = "scripts/generate_reporter_docs.py"
 
 BEGIN = "<!-- BEGIN GENERATED: {name} -->"
 END = "<!-- END GENERATED: {name} -->"
@@ -372,6 +382,142 @@ def render_plugins_index_bullet(rows: list[dict]) -> str:
     )
 
 
+def _reference_table(rows: list[dict]) -> list[str]:
+    """The built-in table for the reference page, each row linked to its own section.
+
+    Not ``render_output_formats_table``: that one links to output-formats.md's
+    sections through ``REPORTER_DOCS[...]["anchor"]``, which name headings on that
+    page (``#junit-xml``), not on this one.
+    """
+    lines = [
+        "| Reporter | File extension | Enabled by default | Primary use case | Standard |",
+        "|----------|----------------|--------------------|------------------|----------|",
+    ]
+    for r in rows:
+        doc = REPORTER_DOCS[r["name"]]
+        lines.append(
+            f"| [{doc['title']}](#{r['name']}) (`{r['name']}`) | `.{r['extension']}` | "
+            f"{'yes' if r['enabled'] else 'no'} | {doc['use_case']} | {doc['standard']} |"
+        )
+    return lines
+
+
+def render_reference_page(rows: list[dict]) -> tuple[str, list[str]]:
+    """The whole of docs/content/reference/reporters.md, and the options with no description.
+
+    ``rows`` is :func:`registered_reporters`, computed before anything here imports
+    the other plugin packages: the plugin registry is process-global, and
+    importing ``ash_aws_plugins`` adds its reporters to it.
+    """
+    import inspect
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _plugin_reference import (
+        discover,
+        instantiate,
+        options_table,
+        package_note,
+        yes_no,
+    )
+    from _reference_docs import banner, code, generated_note, md_prose
+
+    plugins = discover("reporter")
+    builtin = sorted(p.name for p in plugins if p.builtin)
+    registered = sorted(r["name"] for r in rows)
+    if builtin != registered:
+        raise SystemExit(
+            "ERROR: the built-in reporters ash_builtin declares "
+            f"({builtin}) differ from the registered reporter set ({registered})."
+        )
+    instantiate(plugins)
+    missing: list[str] = []
+
+    lines = banner(
+        GENERATOR,
+        "the reporter plugins declared under automated_security_helper/plugin_modules",
+        extra=[
+            "",
+            "Anchors: each reporter's heading id is its config name (#sarif, #flat-json);",
+            "each option has <a id> reporters.<name>.options.<option>.",
+            "The use-case and standard columns are editorial, from REPORTER_DOCS in the generator.",
+        ],
+    )
+    lines += [
+        "# Reporters reference",
+        "",
+        generated_note(GENERATOR, "the reporter plugins in the ASH source code"),
+        "",
+        "## Built-in reporters",
+        "",
+        *_reference_table(rows),
+        "",
+        render_output_formats_defaults(rows),
+        "",
+    ]
+    others = [p for p in plugins if not p.builtin]
+    if others:
+        lines += [
+            "## Reporters in plugin modules",
+            "",
+            (
+                "These are loaded only when the configuration's `ash_plugin_modules` names "
+                "their module."
+            ),
+            "",
+            "| Reporter | File extension | Enabled by default | Provided by |",
+            "|----------|----------------|--------------------|-------------|",
+        ]
+        for p in others:
+            extension = None
+            if p.config_cls is not None:
+                try:
+                    extension = getattr(p.config_cls(), "extension", None)
+                except Exception:
+                    extension = None
+            lines.append(
+                f"| [{code(p.name)}](#{p.name}) | "
+                f"{code('.' + extension) if extension else 'none'} | "
+                f"{yes_no(p.enabled)} | {package_note(p)} |"
+            )
+        lines.append("")
+
+    for p in plugins:
+        lines += [f"## {code(p.name)}", ""]
+        doc = p.cls.__dict__.get("__doc__")
+        if doc:
+            lines += [md_prose(inspect.cleandoc(doc).split("\n\n")[0]), ""]
+        extension = None
+        if p.config_cls is not None:
+            try:
+                extension = getattr(p.config_cls(), "extension", None)
+            except Exception:
+                extension = None
+        python_only = None
+        if p.instance is not None:
+            try:
+                python_only = bool(p.instance.is_python_only())
+            except Exception:
+                python_only = None
+        facts = [
+            ("Class", code(f"{p.cls.__module__}.{p.cls.__name__}")),
+            ("Provided by", package_note(p)),
+            ("Enabled by default", yes_no(p.enabled)),
+            ("File extension", code("." + extension) if extension else "none"),
+            ("Runs with `--python-only`", yes_no(python_only)),
+        ]
+        if p.instance_error:
+            facts.append(
+                ("Could not be built for inspection", md_prose(p.instance_error))
+            )
+        lines += [f"- {label}: {value}" for label, value in facts]
+        lines.append("")
+        lines += options_table(p, "reporters", missing)
+
+    while lines and lines[-1] == "":
+        lines.pop()
+    return "\n".join(lines) + "\n", missing
+
+
 REGIONS: list[tuple[str, str, object]] = [
     (
         "docs/content/docs/output-formats.md",
@@ -422,7 +568,7 @@ def _replacement(name: str, body: str) -> str:
     return "\n".join([BEGIN.format(name=name), REGEN_NOTE, body, END.format(name=name)])
 
 
-def apply_regions(check: bool) -> int:
+def apply_regions(check: bool, missing_descriptions_path: str | None = None) -> int:
     rows = registered_reporters()
     _check_editorial_coverage(rows)
 
@@ -450,6 +596,23 @@ def apply_regions(check: bool) -> int:
             path.write_text(updated, encoding="utf-8")
             print(f"updated {rel_path} [{name}]", file=sys.stderr)
 
+    page, missing = render_reference_page(rows)
+    on_disk = (
+        REFERENCE_PAGE.read_text(encoding="utf-8") if REFERENCE_PAGE.exists() else ""
+    )
+    page_rel = REFERENCE_PAGE.relative_to(REPO_ROOT).as_posix()
+    if page != on_disk:
+        if check:
+            stale.append((page_rel, "whole page", on_disk, page))
+        else:
+            REFERENCE_PAGE.parent.mkdir(parents=True, exist_ok=True)
+            REFERENCE_PAGE.write_text(page, encoding="utf-8")
+            print(f"updated {page_rel}", file=sys.stderr)
+    if missing_descriptions_path:
+        Path(missing_descriptions_path).write_text(
+            "\n".join(missing) + "\n", encoding="utf-8"
+        )
+
     if check and stale:
         print(
             "Reporter documentation is stale relative to the registered reporter set.\n"
@@ -472,7 +635,8 @@ def apply_regions(check: bool) -> int:
         print(
             f"Reporter documentation is up to date "
             f"({len(rows)} registered reporters, "
-            f"{sum(1 for r in rows if r['enabled'])} enabled by default).",
+            f"{sum(1 for r in rows if r['enabled'])} enabled by default; "
+            f"{len(missing)} reporter options with no description in the model).",
             file=sys.stderr,
         )
     return 0
@@ -485,8 +649,19 @@ def main() -> int:
         action="store_true",
         help="Do not write. Exit non-zero with a diff if any region is stale.",
     )
+    parser.add_argument(
+        "--missing-descriptions",
+        default=None,
+        help="Also write the reporter options that have no description to this path.",
+    )
     args = parser.parse_args()
-    return apply_regions(check=args.check)
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _reference_docs import scrub_import_time_environment
+
+    scrub_import_time_environment()
+    return apply_regions(
+        check=args.check, missing_descriptions_path=args.missing_descriptions
+    )
 
 
 if __name__ == "__main__":

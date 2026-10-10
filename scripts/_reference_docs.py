@@ -66,11 +66,14 @@ def normalize_paths(text: str) -> str:
     The checkout path is replaced before the home directory because the checkout
     is usually inside it.
     """
-    repo = str(REPO_ROOT)
-    home = str(Path.home())
-    text = text.replace(repo, "<repository>")
-    if home and home != "/":
-        text = text.replace(home, "~")
+    for repo in (str(REPO_ROOT), REPO_ROOT.as_posix()):
+        text = text.replace(repo, "<repository>")
+    home = Path.home()
+    # Both spellings: on Windows a default rendered with as_posix() carries
+    # C:/Users/x while str() is C:\\Users\\x.
+    for spelling in (str(home), home.as_posix()):
+        if spelling and spelling != "/":
+            text = text.replace(spelling, "~")
     return text
 
 
@@ -191,7 +194,10 @@ def write_or_check(
 
     path.parent.mkdir(parents=True, exist_ok=True)
     if actual != content:
-        path.write_text(content, encoding="utf-8")
+        # newline="\n" so a page written on Windows is byte-identical to one written
+        # anywhere else; read_text() above already folds CRLF for the comparison.
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
         print(f"Wrote {rel}. {summary}".rstrip(), file=sys.stderr)
     else:
         print(f"{rel} unchanged. {summary}".rstrip(), file=sys.stderr)
