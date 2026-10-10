@@ -24,7 +24,7 @@ scanners:
   gitleaks:
     enabled: true
     options:
-      # A gitleaks TOML config, relative to the source directory.
+      # A gitleaks TOML config; relative paths resolve against the source directory.
       config_file: null
       # A gitleaks JSON report whose findings gitleaks ignores (--baseline-path).
       baseline_path: null
@@ -32,6 +32,9 @@ scanners:
       max_target_megabytes: null
       # Seconds before the gitleaks process is killed. Inherited by every scanner.
       scan_timeout: 1800
+      # This scanner's override of the global severity threshold. Every gitleaks
+      # finding is CRITICAL, so any threshold still fails on them.
+      severity_threshold: null
 ```
 
 ### Which gitleaks config is used
@@ -42,11 +45,11 @@ The scanned repository's own gitleaks configuration is not used. A `.gitleaks.to
 2. Otherwise, if `GITLEAKS_CONFIG` or `GITLEAKS_CONFIG_TOML` is set in the environment, gitleaks resolves the config from it. Under `--sandbox` those variables are not passed in, and step 3 applies.
 3. Otherwise gitleaks' default rules, through a config ASH writes that extends them and adds nothing. It is passed as `--config`, so gitleaks does not fall back to a `.gitleaks.toml` in the scanned tree.
 
-`config_file` or `baseline_path` set by an ASH config inside the scanned tree (`.ash/.ash.yaml`) is ignored with a warning, and a `.gitleaks.toml` or `.ash/.gitleaks.toml` in the tree is noted at INFO. The operator's files may be absolute paths or point outside the source directory.
+`config_file` or `baseline_path` set by an ASH config inside the scanned tree (`.ash/.ash.yaml`) is ignored with a warning, and a `.gitleaks.toml` or `.ash/.gitleaks.toml` in the tree is noted at INFO. The operator's files may be absolute paths or point outside the source directory, and a file the operator names may also be inside the scanned tree.
 
 gitleaks always reads `.gitleaksignore` at the root of the path it scans, whatever `--gitleaks-ignore-path` says, and has no flag to turn that off. When the scan root has one, ASH runs gitleaks again on each file it names, one file per run (such a run reads no `.gitleaksignore`), and reports the findings the first run dropped. A failed re-run fails the scan.
 
-gitleaks's options are described by the JSON schema (`automated_security_helper/schemas/AshConfig.json`) and listed below.
+gitleaks' options are described by the JSON schema (`automated_security_helper/schemas/AshConfig.json`) and listed above.
 
 ## Severity
 

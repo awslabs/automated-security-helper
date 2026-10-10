@@ -8,7 +8,7 @@
 
 **Description**: The Trivy plugin integrates Aquasec's Trivy CLI tool to provide comprehensive repository scanning for vulnerabilities, misconfigurations, secrets, and license issues. This plugin extends ASH's security scanning capabilities with Trivy's advanced detection algorithms and extensive vulnerability database.
 
-**Repository**: Built-in ASH plugin (part of core distribution)
+**Repository**: Ships with ASH; loaded only when listed in `ash_plugin_modules`
 
 **Author**: ASH Development Team
 
@@ -28,7 +28,7 @@ The ASH Trivy plugin provides seamless integration with Trivy's repository scann
 
 ### Trivy CLI Installation
 
-The Trivy plugin requires the Trivy CLI to be installed and available in your system PATH.
+`ash dependencies install` installs the pinned trivy release (v0.75.0, checked against the SHA256 in `automated_security_helper/utils/tool_downloads.py`) that both `trivy` and `trivy-repo` run, and the ASH container image ships it. A trivy you install yourself, as below, is used when it is on `PATH`; ASH is tested against the pinned version.
 
 #### Installation Options
 
@@ -106,14 +106,20 @@ scanners:
 | Option               | Type      | Default                                      | Description                                                             |
 | -------------------- | --------- | -------------------------------------------- | ----------------------------------------------------------------------- |
 | `scanners`           | List[str] | `["vuln", "misconfig", "secret", "license"]` | Types of scans to perform                                               |
-| `severity_threshold` | str       | `"MEDIUM"`                                   | Minimum severity level to report (UNKNOWN, LOW, MEDIUM, HIGH, CRITICAL) |
-| `ignore_unfixed`     | bool      | `false`                                      | Ignore vulnerabilities without available fixes                          |
-| `license_full`       | bool      | `false`                                      | Enable full license scanning (more comprehensive but slower)            |
+| `severity_threshold` | str       | `null`                                       | Minimum severity to report (`ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`); `null` uses the global threshold, `ALL` passes no `--severity` |
+| `ignore_unfixed`     | bool      | `true`                                       | Ignore vulnerabilities without available fixes                          |
+| `license_full`       | bool      | `true`                                       | Enable full license scanning (more comprehensive but slower)            |
 | `disable_telemetry`  | bool      | `true`                                       | Disable Trivy telemetry data collection                                 |
 | `config_file`        | str       | `null`                                       | A trivy config file, passed as `--config`; see below                    |
 | `module_dir`         | str       | `null`                                       | A directory of trivy modules, passed as `--module-dir`; see below       |
+| `ignore_file`        | str       | `null`                                       | A trivy ignore file, passed as `--ignorefile`; see below                |
+| `secret_config_file` | str       | `null`                                       | A trivy secret-scanning config, passed as `--secret-config`; see below  |
+| `offline`            | bool      | `false`                                      | Run offline even when ASH does not; ASH's offline mode applies regardless |
+| `scan_timeout`       | int       | `1800`                                       | Seconds ASH lets trivy run; trivy's own 5-minute `--timeout` still applies |
 
 trivy-repo always passes `--config` and `--module-dir`, so trivy does not load a `trivy.yaml` from the directory it runs in. Unset, they name an empty config file and an empty directory ASH creates in the scanner's results directory. `config_file` and `module_dir` are honored only when set through `--config-overrides` or a config file outside the scanned tree, and only for paths outside that tree; otherwise they are ignored with a warning. A configured path that does not exist fails the scan.
+
+`ignore_file` and `secret_config_file` follow the same rule. Unset or refused, trivy-repo uses `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG` from the environment for a file outside the scanned tree, and otherwise an empty file ASH writes, so a `.trivyignore` or `trivy-secret.yaml` in the scanned repository does not remove findings or disable secret rules.
 
 ### Scanner Types
 
@@ -1084,8 +1090,10 @@ EOF
    # Download database separately
    trivy image --download-db-only --cache-dir /shared/trivy-cache
    
-   # Use cached database
+   # Use cached database, with ASH offline: online, ASH updates the database
+   # before the scan and fails without network
    export TRIVY_CACHE_DIR=/shared/trivy-cache
+   export ASH_OFFLINE=YES
    ash --scanners trivy-repo
    ```
 
@@ -1241,11 +1249,12 @@ EOF
          reason: "Third-party code"
    ```
 
-3. **Custom Ignore Files**: Use Trivy's ignore functionality
+3. **Custom Ignore Files**: A `.trivyignore` in the scanned repository is not read.
+   Use ASH suppressions, or an operator ignore file outside the scanned tree:
    ```bash
-   # Create .trivyignore file
-   echo "CVE-2023-12345" > .trivyignore
-   echo "GHSA-abcd-1234" >> .trivyignore
+   echo "CVE-2023-12345" > /etc/ash/trivyignore
+   ash --scanners trivy-repo \
+     --config-overrides 'scanners.trivy-repo.options.ignore_file=/etc/ash/trivyignore'
    ```
 
 ### Debug Mode and Logging
@@ -1445,7 +1454,9 @@ Trivy supports extensive configuration through environment variables:
 export TRIVY_CACHE_DIR=/custom/cache/path
 export TRIVY_DB_REPOSITORY=custom-db-repo
 export TRIVY_TIMEOUT=10m
-export TRIVY_OFFLINE_SCAN=true
+# Offline scans: set ASH_OFFLINE=YES (or options.offline: true). TRIVY_OFFLINE_SCAN
+# alone does not stop the database update ASH runs before an online scan.
+export ASH_OFFLINE=YES
 
 # Network and proxy
 export HTTP_PROXY=http://proxy.company.com:8080
@@ -1487,7 +1498,7 @@ rsync -av /shared/trivy-cache/ airgapped-server:/opt/trivy-cache/
 
 # 3. Configure offline scanning
 export TRIVY_CACHE_DIR=/opt/trivy-cache
-export TRIVY_OFFLINE_SCAN=true
+export ASH_OFFLINE=YES
 ash --scanners trivy-repo
 ```
 

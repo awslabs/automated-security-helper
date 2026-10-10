@@ -9,7 +9,7 @@ The `trivy` scanner is a builtin scanner, enabled by default: a default scan run
 ## Installing trivy
 
 - Container image: included. The image installs the pinned release (currently v0.75.0).
-- Local mode: `ash dependencies install` downloads the pinned release asset from GitHub and checks it against the SHA256 recorded in `automated_security_helper/utils/tool_downloads.py` before installing it.
+- Local mode: `ash dependencies install` downloads the pinned release asset from GitHub and checks it against the SHA256 recorded in `automated_security_helper/utils/tool_downloads.py` before installing it. trivy publishes no Windows arm64 asset, so there it has to be installed another way.
 - Nix mode: the flake supplies nixpkgs' `trivy`, and the nix shell keeps its vulnerability database in `TRIVY_CACHE_DIR` (default `~/.cache/ash/trivy`), updating it on every entry; trivy returns at once when the database is current. Nix mode scans offline, so when the shell had no network and nothing is cached, trivy is reported `MISSING` with the reason; see [Offline and air-gapped use](#offline-and-air-gapped-use).
 - A `trivy` already on `PATH` is used as is. ASH is tested against the pinned version.
 
@@ -100,10 +100,10 @@ trivy needs a database in its cache to scan offline. With none, ASH reports triv
 TRIVY_CACHE_DIR=/path/to/cache trivy image --download-db-only
 ```
 
-and point the offline scan at the same `TRIVY_CACHE_DIR`. In nix mode, export `TRIVY_CACHE_DIR` before running `ash scan --mode nix`; the variable is passed through to the scan. The container image built with `--offline` does not bake a trivy database in; set `TRIVY_CACHE_DIR` to a mounted cache, or run trivy online.
+and point the offline scan at the same `TRIVY_CACHE_DIR`. In nix mode, export `TRIVY_CACHE_DIR` before running `ash scan --mode nix`; the variable is passed through to the scan. The container image built with `--offline` ships a trivy database (in `/deps/.trivy`, its `TRIVY_CACHE_DIR`), downloaded at build time. Once that database is older than the 24h bound, rebuild the image, mount a fresher cache as `TRIVY_CACHE_DIR`, or set `content_db_staleness: warn`.
 
 ## Running it alongside the trivy-repo community plugin
 
-The community `trivy-repo` plugin (enabled through `ash_plugin_modules`) keeps its name and its defaults (all four trivy scanners, unfixed vulnerabilities dropped). It names its own config file and modules directory, so a `trivy.yaml` in the scanned repository is not loaded, and settings that file made no longer apply. The two share their implementation but are separate scanners.
+The community `trivy-repo` plugin (enabled through `ash_plugin_modules`) keeps its name and its defaults (all four trivy scanners, unfixed vulnerabilities dropped, `license_full: true`), and has a `module_dir` option `trivy` does not. It names its own config file and modules directory, so a `trivy.yaml` in the scanned repository is not loaded, and settings that file made no longer apply. The two share their implementation (the database update, the cache and the treatment of trivy's input files) but are separate scanners. trivy-repo keeps its own scan path: it gets no `--timeout` (trivy's 5-minute default applies), no `--skip-dirs` for ASH's output directory, no offline check for a missing database, and its findings are rated by ASH's usual SARIF mapping rather than at trivy's own severity (see [Severity](#severity)), so one finding can carry different ASH severities in the two scanners.
 
 `trivy` is on by default, so listing the Trivy plugin for `trivy-repo` runs trivy twice, and each finding is reported once per scanner, under that scanner's name. Both read the same database, which is measured once for each. The rule ids are the same, so one suppression by `rule_id` and `path` covers both. To avoid the duplicate, keep one: set `scanners.trivy.enabled: false`, or stop listing the plugin.

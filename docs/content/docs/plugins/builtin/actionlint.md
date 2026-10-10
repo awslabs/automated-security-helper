@@ -29,7 +29,7 @@ scanners:
   actionlint:
     enabled: true           # the default; false turns it off
     options:
-      config_file: null     # actionlint config, relative to the source directory
+      config_file: null     # actionlint config; relative paths resolve against the source directory
       shellcheck: null      # "shellcheck" to enable it; null disables the integration
       pyflakes: null        # "pyflakes" to enable it; null disables the integration
       severity_threshold: null
@@ -40,7 +40,7 @@ scanners:
 
 ASH always hands actionlint an explicit `-config-file`, and it is never the scanned repository's own:
 
-1. `options.config_file`, when the operator set it: from `--config-overrides`, or an ASH config file outside the scanned tree. A path that does not exist fails the scan with `ERROR`.
+1. `options.config_file`, when the operator set it: from `--config-overrides`, or an ASH config file outside the scanned tree. A relative path resolves against the source directory and an absolute one is used as given; the file the operator names may be inside the scanned tree. A path that does not exist fails the scan with `ERROR`.
 2. Otherwise an empty config ASH writes into its own results directory.
 
 A `.github/actionlint.yaml` or `.github/actionlint.yml` in the scanned repository is not read (ASH notes it at INFO), and `config_file` set by an ASH config inside the scanned tree is ignored with a warning. A config's `paths.<glob>.ignore` patterns make actionlint drop findings before ASH sees them, so they would be neither reported nor counted as suppressed. Tune findings with ASH suppressions, which are both. If the operator's config has `ignore` patterns, ASH logs a warning naming them.
@@ -51,13 +51,13 @@ actionlint runs `shellcheck` on `run:` scripts and `pyflakes` on `shell: python`
 
 To use them, set the option to `shellcheck` or `pyflakes`, which is looked up on `PATH` and in ASH's bin directory. If the configured tool cannot be found or is not executable, the scanner reports `MISSING` rather than running without it. shellcheck and pyflakes findings are LOW severity. Neither is installed in the ASH container image.
 
-Each option names the program actionlint pipes every `run:` script to, started from the root of the scanned tree. Set to a shell or an interpreter, that program runs the repository's code. ASH's config usually comes from the repository being scanned (`.ash/.ash.yaml`), so from a config file inside the scanned tree each option accepts only its own name. Another program, or an absolute path, is honored only from `--config-overrides` or a config file outside the scanned tree:
+Each option names the program actionlint pipes every `run:` script to, started from the root of the scanned tree. Set to a shell or an interpreter, that program runs the repository's code. ASH's config usually comes from the repository being scanned (`.ash/.ash.yaml`), so from a config file inside the scanned tree each option accepts only its own name. Another program, or any path, is honored only from `--config-overrides` or a config file outside the scanned tree:
 
 ```bash
 ash scan --config-overrides 'scanners.actionlint.options.shellcheck=/opt/shellcheck/bin/shellcheck'
 ```
 
-Whoever sets it, a program that resolves inside the scanned tree is refused, and so is a relative path. A refused value is logged as a warning and actionlint runs with that integration off.
+Whoever sets it, a program that resolves inside the scanned tree is refused. An operator's relative path is resolved against the source directory and must land outside the tree. A refused value is logged as a warning and actionlint runs with that integration off.
 
 ## Severity mapping
 

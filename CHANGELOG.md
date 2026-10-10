@@ -98,9 +98,10 @@
   entries in the config schema, and are enabled by default (see Behavior changes).
   `scanners.<name>.enabled: false` turns one off. The container image ships every
   tool, pinned, digest-verified and with its license files; `ash dependencies install`
-  installs the same pinned builds locally; and nix mode supplies them (cfn-guard from
-  its pinned release asset, its rules and trivy's database seeded by the shell on first
-  entry). A tool that is absent is MISSING, as for every builtin scanner. Under
+  installs the same pinned binaries locally, and the uv tools (cfn-lint and zizmor)
+  within their `tool_version` ranges; and nix mode supplies them (cfn-guard from its
+  pinned release asset, its rules seeded by the shell on first entry and trivy's
+  database refreshed on every entry). A tool that is absent is MISSING, as for every builtin scanner. Under
   `--sandbox` each gets what it declares, listed in
   `docs/content/docs/scanner-sandbox.md`. See
   [Built-in Scanners](docs/content/docs/plugins/builtin/scanners.md).
@@ -178,6 +179,8 @@
   suppressions, which are both. Unless the operator names a config, through
   `--config-overrides` or an ASH config file outside the scanned tree:
   - actionlint runs with an empty config ASH writes, not `.github/actionlint.yaml`;
+  - cfn-lint runs with an empty config ASH writes, not a `.cfnlintrc` in the
+    repository or the home directory;
   - gitleaks runs with its default rules, not `.gitleaks.toml` or
     `.ash/.gitleaks.toml`, and ASH re-scans each file a root `.gitleaksignore`
     names (gitleaks always reads that file) and reports what it dropped;
@@ -193,7 +196,12 @@
   `secret_config_file` and cfn-guard's `rules_paths` (cfn-guard prints a rules
   file it cannot parse, so a path the repository chose could put any readable file
   into the report); `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG` still apply, for a
-  file outside the scanned tree. With `rules_paths` ignored and `rule_sets` empty,
+  file outside the scanned tree. trivy's and trivy-repo's `config_file`,
+  `ignore_file` and `secret_config_file`, trivy-repo's `module_dir` and cfn-lint's
+  `config_file` are also refused when the file is inside the scanned tree, even when
+  the operator names it; actionlint's, gitleaks' and zizmor's `config_file`,
+  gitleaks' `baseline_path` and cfn-guard's `rules_paths` may name a file in the tree
+  when the operator sets them. With `rules_paths` ignored and `rule_sets` empty,
   cfn-guard falls back to `wa-Security-Pillar`. In an operator's rules directory, a
   rules file that resolves outside it through a symlink is refused, and cfn-guard
   is given copies of the files ASH read. Inline comments (`gitleaks:allow`,

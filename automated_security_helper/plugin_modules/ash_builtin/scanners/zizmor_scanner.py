@@ -14,7 +14,7 @@ file, and only those:
   directory, which is the only place GitHub runs a workflow from;
 * composite actions: any file named ``action.yml`` or ``action.yaml``.
 
-The files come from ASH's scan set, so ``.gitignore``, ``.ashignore`` and the
+The files come from ASH's scan set, so ``.gitignore``, ``.ignore`` and the
 global ``ignore_paths`` exclusions apply, and are passed to zizmor explicitly. A
 directory input would make zizmor walk the tree itself and skip ASH's ignore
 rules. zizmor reads a symlinked input where it points, so a file whose real path
@@ -640,7 +640,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     ) -> List[Path]:
         """Workflows and composite actions under ``target``, after ASH's exclusions.
 
-        Source files come from the scan set (``.gitignore``, ``.ashignore``),
+        Source files come from the scan set (``.gitignore``, ``.ignore``),
         minus anything under ASH's output directory, as detect-secrets does.
         Converted files are everything under ``work_dir``. Both then drop
         ``KNOWN_IGNORE_PATHS`` (``node_modules/`` and virtualenvs, which hold

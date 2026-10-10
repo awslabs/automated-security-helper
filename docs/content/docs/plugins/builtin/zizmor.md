@@ -12,18 +12,18 @@ reported by each, under its own rule id.
 
 ## Enabling it
 
-zizmor is a builtin scanner, enabled by default: a default scan runs it. `scanners.zizmor.enabled: false` in the ASH config turns it off, and `--scanners` and `--exclude-scanners` select it as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
+zizmor is a builtin scanner, enabled by default: a default scan runs it. `scanners.zizmor.enabled: false` in the ASH config turns it off, and `--scanners` and `--exclude-scanners` select it as they select any scanner. If no zizmor satisfying `tool_version` is found, ASH installs one with `uv tool install` (online only). If that fails, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
 
 ## What gets scanned
 
 ASH passes zizmor two kinds of file, taken from its scan set so `.gitignore`,
-`.ashignore` and `global_settings.ignore_paths` apply:
+`.ignore` and `global_settings.ignore_paths` apply:
 
 - workflows: `*.yml` and `*.yaml` directly inside a `.github/workflows` directory
   (the only place GitHub runs a workflow from; subdirectories are not scanned);
 - composite actions: every `action.yml` and `action.yaml`.
 
-Files under `node_modules/` and virtual environments are skipped, and so is a
+Files under directories named `node_modules`, `.venv` or `venv` are skipped, and so is a
 file that is a symlink resolving outside the scan root, with a warning: zizmor
 would read it where it points. A repository
 with neither kind of file does not start zizmor; the scanner reports `SKIPPED`
@@ -66,7 +66,12 @@ scanners:
   offending text of a config it cannot parse in its error, and that error reaches
   ASH's log and the scanner's stderr log, so do not point this at a file holding
   anything else.
-- `tool_version`: the pip-style constraint for installing zizmor.
+- `tool_version`: the pip-style constraint for installing zizmor. A value that is
+  not a valid constraint is ignored with a warning and the default is used.
+- `install_timeout`: seconds allowed for `uv tool install` of zizmor.
+- `scan_timeout`: seconds zizmor may run; past it zizmor is killed and the scanner
+  reports `ERROR`.
+- `severity_threshold`: this scanner's override of the global severity threshold.
 
 ## Network access and tokens
 
@@ -84,7 +89,8 @@ scanned tree; set by a config in the scanned tree, or by an MCP client, it is
 ignored with a warning and zizmor runs offline without the tokens. ASH never
 reads, copies or logs the token and never puts it on zizmor's command line.
 ASH's own offline mode (`ASH_OFFLINE=true` or `ash scan --offline`) overrides
-`online_audits`.
+`online_audits`. Under `--sandbox`, online audits currently get neither network
+access nor the token.
 
 `ZIZMOR_CONFIG`, `ZIZMOR_OFFLINE` and `ZIZMOR_NO_ONLINE_AUDITS` are always
 removed from zizmor's environment, so a scan's result depends on the repository
@@ -134,8 +140,8 @@ no packages, and a workflow has no functions or classes.
 
 ## Installation
 
-`ash dependencies install` installs zizmor with `uv tool install`, and the ASH
-container image ships it. ASH also uses any `zizmor` already on `PATH` whose
+`ash dependencies install` installs zizmor with `uv tool install`, the newest
+release within `tool_version`, and the ASH container image ships zizmor 1.30.1. ASH also uses any `zizmor` already on `PATH` whose
 `zizmor --version` satisfies `tool_version`, which covers the nix flake (nixpkgs
 supplies zizmor), Homebrew, and `cargo install`. Offline, ASH does not try to
 install zizmor; install it first.

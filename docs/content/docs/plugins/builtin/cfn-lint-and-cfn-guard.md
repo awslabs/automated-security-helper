@@ -4,7 +4,7 @@ cfn-lint and cfn-guard are two builtin CloudFormation scanners. Both read the sa
 
 ## Enabling it
 
-cfn-lint and cfn-guard are builtin scanners, enabled by default: a default scan runs them. `scanners.cfn-lint.enabled: false` in the ASH config turns one off, and `--scanners` and `--exclude-scanners` select them as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
+cfn-lint and cfn-guard are builtin scanners, enabled by default: a default scan runs them. `scanners.cfn-lint.enabled: false` in the ASH config turns one off, and `--scanners` and `--exclude-scanners` select them as they select any scanner. If cfn-guard is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner. cfn-lint is installed on first use when ASH is online, and is `MISSING` only when that install fails and none is on `PATH`. `ash dependencies install` and the container image provide both.
 
 ## cfn-lint
 
@@ -18,11 +18,11 @@ cfn-lint is a Python package (MIT-0). ASH installs it with `uv tool install 'cfn
 ash dependencies install --tool cfn-lint
 ```
 
-The `sarif` extra is required; it provides the SARIF output format ASH reads. An existing cfn-lint on `PATH` is used when it satisfies that requirement. The ASH container image ships cfn-lint, and the Nix flake supplies nixpkgs' cfn-lint with the `sarif` extra.
+The `sarif` extra is required; it provides the SARIF output format ASH reads. An existing cfn-lint on `PATH` is used when it satisfies that requirement; without uv, any cfn-lint on `PATH` is used as it is. The ASH container image ships cfn-lint, and the Nix flake supplies nixpkgs' cfn-lint with the `sarif` extra.
 
 ### Which files it scans
 
-The same files cfn-nag scans: every `.json`, `.yaml` and `.yml` file in the scan set (after ASH's ignore paths and `.gitignore`) that parses as YAML or JSON and has a top-level `Resources` mapping. A file with a `Resources` mapping that ASH cannot model as CloudFormation is reported as a target the scanner could not evaluate, so it counts toward partial coverage instead of disappearing.
+The same files cfn-nag scans: every `.json`, `.yaml` and `.yml` file in the scan set (after ASH's ignore paths and `.gitignore`) that parses as YAML or JSON and has a top-level `Resources` mapping. A file with a `Resources` mapping that ASH cannot model as CloudFormation is reported as a target the scanner could not evaluate, so it counts toward partial coverage instead of disappearing. Templates in the converted target (archives ASH extracted) are scanned too. A template that is a symlink, sits under a symlinked directory, or has more than one hard link is skipped with a warning, because cfn-lint would read it where it points.
 
 ### Configuration
 
@@ -34,7 +34,8 @@ scanners:
       # A .cfnlintrc to use, outside the scanned tree. When unset, ASH gives
       # cfn-lint an empty configuration (see "Configuration files" below).
       config_file: /etc/ash/cfnlintrc
-      # Regions to validate against. Defaults to cfn-lint's own default (us-east-1).
+      # Regions to validate against, or [ALL_REGIONS]. Defaults to cfn-lint's own
+      # default (us-east-1).
       regions: [us-east-1, eu-west-1]
       # Rule ids or prefixes to skip everywhere, or to enable (e.g. "I" for
       # informational rules, which cfn-lint does not run by default).
@@ -42,7 +43,10 @@ scanners:
       include_checks: [I]
       # Version constraint for the installed tool.
       tool_version: ">=1.43.3,<2.0.0"
-      # Seconds before cfn-lint is killed.
+      # Seconds allowed for the uv install of cfn-lint.
+      install_timeout: 300
+      # Seconds each cfn-lint invocation may run before it is killed (the default;
+      # null means no limit).
       scan_timeout: 1800
 ```
 
@@ -52,9 +56,9 @@ Region names, rule ids and prefixes are validated when the config is loaded, so 
 
 Left to itself, cfn-lint reads a `.cfnlintrc` from the directory it runs in (the scanned repository) and from your home directory. ASH does not let it: unless `config_file` names a file, ASH passes cfn-lint an empty configuration of its own, which stops both lookups. A `.cfnlintrc` is not passive settings. Its `append_rules` key loads Python files as rules, which runs them during the scan, and `ignore_checks: [E, W]` turns every finding off without anything showing up in ASH's suppression reporting. In a repository whose changes you scan before trusting them, such as a pull request in CI, that is code execution and a silent bypass.
 
-For the same reason `config_file` is honored only when the operator sets it, through `--config-overrides` or a config file outside the scanned tree, and only for a file outside the scanned tree. A `config_file` from the repository's own `.ash/.ash.yaml`, or one naming a file inside the tree, is ignored with a warning and cfn-lint gets ASH's empty configuration. A file you name this way is used with `append_rules` included.
+For the same reason `config_file` is honored only when the operator sets it, through `--config-overrides` or a config file outside the scanned tree, and only for a file outside the scanned tree. A `config_file` from the repository's own `.ash/.ash.yaml` or from an MCP client, or one naming a file inside the tree, is ignored with a warning and cfn-lint gets ASH's empty configuration. A file you name this way is used with `append_rules` included, and one that does not exist fails the scan. Under `--sandbox`, a file outside the tree is not mounted unless it is listed in `sandbox.extra_read_paths`.
 
-`tool_version` is appended to the package name when ASH installs cfn-lint, so it must be a version constraint such as `>=1.43.3,<2.0.0`. Anything else, a direct reference such as `@ file:///...` included, fails config validation.
+`tool_version` is appended to the package name when ASH installs cfn-lint, so it must be a version constraint such as `>=1.43.3,<2.0.0`. Anything else, including a direct reference such as `@ file:///...`, is ignored with a warning and the default constraint is used.
 
 ### Severity mapping
 
@@ -117,17 +121,17 @@ ash dependencies install --tool cfn-guard
 installs two pinned artifacts, each verified against a SHA256 recorded in ASH's source (`automated_security_helper/utils/tool_downloads.py`):
 
 - the cfn-guard 3.2.1 release binary for your platform (Linux, macOS and Windows, amd64 and arm64), into `ASH_BIN_PATH`;
-- the AWS Guard Rules Registry release 1.0.2 rules archive, extracted into `$ASH_CFN_GUARD_RULES_DIR`, or `<ASH_BIN_PATH>/../share/cfn-guard-rules` when that is unset.
+- the AWS Guard Rules Registry release 1.0.2 rules archive. Its `output/*.guard` files are extracted into `aws-guard-rules-registry-1.0.2/` under `$ASH_CFN_GUARD_RULES_DIR`, or under `<ASH_BIN_PATH>/../share/cfn-guard-rules` when that is unset, with a `.ash-rules-manifest.json` recording each file's digest.
 
 A download whose bytes do not match the pinned digest is refused. The ASH container image ships both, installed read-only for the scan user. nixpkgs has no cfn-guard package, so the nix flake packages the same pinned release binary (`nix/cfn-guard.nix`), and the nix shell installs the rules bundle into `ASH_CFN_GUARD_RULES_DIR` on first entry.
 
-Before every scan ASH checks the installed rules against the manifest written at install time: a rules file that is missing, or no longer hashes to what was installed, makes the scanner MISSING with the reinstall command rather than scanning with whatever is left.
+Before every scan ASH checks the installed rules against the manifest written at install time: a manifest naming a different pin, or a selected rule-set file that is missing or no longer hashes to what was installed, makes the scanner MISSING with the reinstall command rather than scanning with whatever is left.
 
 ### Rule sets
 
 The registry release contains 50 rule-set files: one per compliance framework (CIS AWS Benchmark, NIST 800-53, PCI DSS, HIPAA and others), a Well-Architected Security Pillar set, a Well-Architected Reliability Pillar set, and `guard-rules-registry-all-rules`.
 
-The default is `wa-Security-Pillar`, the registry's mapping of the AWS Well-Architected Security Pillar (44 rules: public access, encryption, logging, TLS, IAM and similar). `guard-rules-registry-all-rules` (66 rules) was considered and not chosen: it adds 22 reliability and operations rules, such as backup plans, Multi-AZ, deletion protection, S3 replication and object lock, and Lambda concurrency, which are not security findings and would fail templates for reasons a security scan should not. The compliance-framework sets are a choice for your own context rather than a default.
+The default is `wa-Security-Pillar`, the registry's mapping of the AWS Well-Architected Security Pillar (45 rules: public access, encryption, logging, TLS, IAM and similar). `guard-rules-registry-all-rules` (67 rules) was considered and not chosen: it adds 22 reliability and operations rules, such as backup plans, Multi-AZ, deletion protection, S3 replication and object lock, and Lambda concurrency, which are not security findings and would fail templates for reasons a security scan should not. The compliance-framework sets are a choice for your own context rather than a default.
 
 ```yaml
 scanners:
@@ -142,14 +146,15 @@ scanners:
       # Evaluated in addition to rule_sets; set rule_sets: [] to use only these.
       rules_paths:
         - policy/guard
+      # Seconds each per-template cfn-guard run may take.
       scan_timeout: 1800
 ```
 
-An unknown rule-set name is reported with the list of available names.
+A rule-set name with a `.guard` extension or characters outside letters, digits, `.`, `_` and `-` fails config validation. A well-formed name that is not in the bundle makes the scanner MISSING, with the list of available names.
 
-`rules_paths` is honored only when you set it as the operator, with `--config-overrides` or an ASH config file outside the scanned tree. Set by an ASH config inside the tree, or by an MCP client, it is ignored with a warning, and if that config also empties `rule_sets`, cfn-guard evaluates the default `wa-Security-Pillar` set instead of nothing. cfn-guard prints a rules file it cannot parse, all of it, in its error, so a path the scanned repository chose could otherwise put any file the scan can read into the report.
+`rules_paths` is honored only when you set it as the operator, with `--config-overrides` or an ASH config file outside the scanned tree; a path the operator names may be inside the scanned tree. Set by an ASH config inside the tree, or by an MCP client, it is ignored with a warning, and if `rule_sets` is empty as well, cfn-guard evaluates the default `wa-Security-Pillar` set instead of nothing. cfn-guard prints a rules file it cannot parse, all of it, in its error, so a path the scanned repository chose could otherwise put any file the scan can read into the report.
 
-For a directory, ASH collects the files cfn-guard would read from it: `.guard` and `.ruleset` files at any depth, case-sensitively, not entering symlinked subdirectories. cfn-guard follows a symlinked rules file, so one that resolves outside the directory you named is refused with a warning; a link that stays inside it is read. ASH reads each file itself and gives cfn-guard a copy under the scanner's results directory, which is also why `rules_paths` needs no sandbox grant. A directory with no rules files selects nothing, which fails the scan when nothing else is selected: cfn-guard given such a directory reports a clean run.
+For a directory, ASH collects the files cfn-guard would read from it: `.guard` and `.ruleset` files at any depth, case-sensitively, not entering symlinked subdirectories. cfn-guard follows a symlinked rules file, so one that resolves outside the directory you named is refused with a warning; a link that stays inside it is read. ASH reads each file itself and gives cfn-guard a copy under the scanner's results directory (`cfn-guard-rules/`), which is also why `rules_paths` needs no sandbox grant. A directory with no rules files selects nothing, and when nothing else is selected the scanner is MISSING ("no cfn-guard rules are selected"): cfn-guard given such a directory would report a clean run. A `rules_paths` entry that does not exist, a named file that is not a regular file, or a subdirectory that cannot be listed also makes the scanner MISSING.
 
 #### Why the rules are not age-checked
 

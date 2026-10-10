@@ -46,10 +46,12 @@ database's own ``UpdatedAt`` through ``utils/content_db_staleness.py`` and fails
 the scan (or warns, under ``content_db_staleness: warn``) when it is past the
 declared 24h.
 
-* Online, trivy applies its own rule: a database past its ``NextUpdate`` is
-  replaced before the scan, and the scan fails if the download does. ASH passes
-  nothing to change that, because trivy has no max-age control to pass; the
-  registry's bound IS trivy's rule, so the post-scan check agrees with it.
+* Online, ASH updates the database once per scan before trivy runs, outside the
+  scanner sandbox and under a lock (``TrivyScannerBase._shared_update_flags``,
+  ``utils/content_db_refresh.py``), and the scan fails if that update does. trivy
+  then runs with ``--skip-db-update`` against the database the update wrote.
+  trivy's own rule (a database past its ``NextUpdate`` is replaced) is the
+  registry's 24h bound, so the post-scan check agrees with it.
 * Offline, ASH passes ``--skip-db-update`` (with ``--skip-java-db-update``,
   ``--offline-scan`` and ``--skip-check-update``), which makes trivy use any
   database it has. The post-scan check is what holds that database to the bound.

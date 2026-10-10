@@ -127,7 +127,7 @@ Offline mode is decided when each scanner runs, from these sources in order:
    environment, or an image built with `ash build-image --offline`. It applies to
    every scanner, and no scanner option turns it off.
 2. A scanner's own `options.offline: true` (checkov, grype, npm-audit, opengrep,
-   semgrep, syft, trivy-repo). It runs that one scanner offline while the rest of the
+   semgrep, syft, trivy, trivy-repo). It runs that one scanner offline while the rest of the
    scan stays online.
 
 `options.offline: false` is the default and means "follow ASH's offline mode". It does

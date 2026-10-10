@@ -465,14 +465,20 @@ and module checks below: everything under the MCP workspace root
 | `ash_plugin_modules` | An entry is imported only if it names an installed module that Python finds outside the scanned tree. An entry that is not importable, or that would be imported from a file in the tree, is skipped. |
 | `scanners.checkov.options.config_file`, `scanners.ferret-scan.options.config_file` | Passed to the tool only when the file is outside the scanned tree. The same applies to the `.checkov.yaml` and `ferret.yaml` files these scanners look for by name. ferret-scan then uses its bundled config. checkov and ferret-scan also read such a file from their working directory on their own, so ASH runs both from the filesystem root and always passes ferret-scan a `--config`; finding paths are unchanged. |
 | `scanners.detect-secrets.options.scan_settings` plugins and filters | An entry that names a file (`file://...`) is kept only when the file is outside the scanned tree. This includes entries read from a baseline file. detect-secrets' built-in plugins and filters are unaffected. |
-| trivy-repo's ignore file and secret config | trivy-repo always gets `--ignorefile` and `--secret-config`, so trivy does not read a `.trivyignore` or `trivy-secret.yaml` from the scanned repository. `scanners.trivy-repo.options.ignore_file` and `secret_config_file`, set by `--config-overrides` or a config file outside the scanned tree, or else `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`, name the files to use; each is passed only when it is outside the scanned tree, and a file that sets nothing is passed otherwise. |
+| trivy's and trivy-repo's ignore file and secret config | Both always get `--ignorefile` and `--secret-config`, so trivy does not read a `.trivyignore` or `trivy-secret.yaml` from the scanned repository. `scanners.trivy.options.ignore_file` and `secret_config_file` (and trivy-repo's), set by `--config-overrides` or a config file outside the scanned tree, or else `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`, name the files to use; each is passed only when it is outside the scanned tree, and a file that sets nothing is passed otherwise. |
+| `scanners.trivy.options.config_file`, `scanners.trivy-repo.options.config_file` and `module_dir`, `scanners.cfn-lint.options.config_file` | Ignored with a warning. Honored only from `--config-overrides` or a config file outside the scanned tree, and only for a path outside the tree, because these files can make the tool load code (trivy modules, cfn-lint `append_rules`). Without them the tool gets an empty config of ASH's. |
+| `scanners.actionlint.options.config_file`, `scanners.gitleaks.options.config_file` and `baseline_path`, `scanners.zizmor.options.config_file`, `scanners.cfn-guard.options.rules_paths` | Ignored with a warning, and the tool runs without it: on ASH's own empty or default-rules config, or for cfn-guard on the bundled rule sets. Honored from `--config-overrides` or a config file outside the scanned tree, where the file named may also be inside the tree. |
+| `scanners.actionlint.options.shellcheck` and `pyflakes` | Only the option's own name (`shellcheck`, `pyflakes`), looked up on `PATH`. Another program, or a path, only from the operator. A program that resolves inside the scanned tree is refused whoever set it. |
+| `scanners.zizmor.options.online_audits` | Ignored with a warning: zizmor runs `--offline` without GitHub tokens. Only the operator turns online audits on. |
 | `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.mode` | See [Scanner sandbox](scanner-sandbox.md). |
 
 Each setting that is not honored is logged once, as a warning that names it.
 
 To set any of these for a repository you trust, use `--config-overrides`,
 `--ash-plugin-modules`, or a config file outside the scanned tree. A file path set
-that way still has to point outside the tree. Under `--sandbox`, a file outside the
+that way still has to point outside the tree, except the findings configs above
+(actionlint's, gitleaks' and zizmor's `config_file`, gitleaks' `baseline_path` and
+cfn-guard's `rules_paths`). Under `--sandbox`, a file outside the
 system paths the sandbox already reads also has to be listed in
 `sandbox.extra_read_paths`, or the tool cannot open it and the scanner reports an
 error.

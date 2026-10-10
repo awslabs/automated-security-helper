@@ -312,7 +312,7 @@ scanners:
 
 ### Gitleaks
 
-**Purpose**: Finds committed credentials with `gitleaks dir` (working tree only), beside detect-secrets. Findings are CRITICAL and values are redacted.
+**Purpose**: Finds credentials in the working tree's files with `gitleaks dir` (no git history), beside detect-secrets. Findings are CRITICAL and values are redacted.
 
 **Dependencies**: `gitleaks` binary (pinned). See [Gitleaks](gitleaks.md).
 
@@ -324,7 +324,7 @@ scanners:
 
 ### zizmor
 
-**Purpose**: Static analysis of GitHub Actions workflows and composite actions, run with `--offline`; GitHub tokens are withheld unless `options.online_audits` is true.
+**Purpose**: Static analysis of GitHub Actions workflows and composite actions, run with `--offline`; GitHub tokens are withheld unless the operator sets `options.online_audits` (`--config-overrides` or a config outside the scanned tree).
 
 **Dependencies**: `zizmor` (uv tool). See [zizmor](zizmor.md).
 
