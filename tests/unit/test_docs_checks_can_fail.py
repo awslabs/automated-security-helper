@@ -1089,7 +1089,38 @@ NAV_DEFECTS = [
         {},
         "nav:\n  - index.md\n  - b.md\n  - sub/c.md\n  - gone.md\n",
         "redirects: {}\n",
-        "nav entry 'gone.md' names no page",
+        "The nav item 'gone.md' doesn't match any files or directories",
+    ),
+    (
+        "titled entry naming no page",
+        {},
+        "nav:\n  - index.md\n  - b.md\n  - sub/c.md\n  - Gone: gone.md\n",
+        "redirects: {}\n",
+        "nav entry 'Gone: gone.md' names no page",
+    ),
+    (
+        "glob matching nothing",
+        {},
+        "nav:\n  - index.md\n  - b.md\n  - sub/c.md\n  - plugins/*.md\n",
+        "redirects: {}\n",
+        "The nav item 'plugins/*.md' doesn't match any files or directories",
+    ),
+    (
+        "glob of pages already listed",
+        {},
+        "nav:\n  - index.md\n  - b.md\n  - sub/c.md\n  - sub/*.md\n",
+        "redirects: {}\n",
+        "The nav item 'sub/*.md' doesn't match any files or directories",
+    ),
+    (
+        "page a glob leaves out",
+        {
+            "docs/content/plugins/alpha.md": "# A\n",
+            "docs/content/plugins/beta.md": "# B\n",
+        },
+        "nav:\n  - index.md\n  - b.md\n  - sub/c.md\n  - plugins/a*.md\n",
+        "redirects: {}\n",
+        "no reader can reach it",
     ),
     (
         "redirect from a page",
@@ -1128,6 +1159,35 @@ NAV_DEFECTS = [
 def test_nav_check_can_fail(tmp_path, case, extra, nav, redirects, expected):
     root = _site(tmp_path, {**CLEAN_PAGES, **extra}, nav=nav, redirects=redirects)
     _assert_reports(dc.check_nav(root), expected)
+
+
+def test_nav_globs_expand_the_way_awesome_nav_does(tmp_path):
+    """Globs, a glob entry with options, and a directory with its own .nav.yml."""
+    pages = {
+        **CLEAN_PAGES,
+        "docs/content/plugins/builtin/one.md": "# One\n",
+        "docs/content/plugins/builtin/two.md": "# Two\n",
+        "docs/content/plugins/community/three.md": "# Three\n",
+        "docs/content/guides/deep/four.md": "# Four\n",
+        "docs/content/section/first.md": "# First\n",
+        "docs/content/section/second.md": "# Second\n",
+    }
+    nav = (
+        "nav:\n  - index.md\n  - b.md\n  - sub/c.md\n"
+        "  - Built in: plugins/builtin\n"
+        "  - plugins/community/*.md\n"
+        # A glob entry with options. With no other key, {glob: x} is a titled link to
+        # x in awesome-nav, which the titled-entry case above reports.
+        "  - glob: 'guides/**/*.md'\n    flatten_single_child_sections: true\n"
+        "  - section\n"
+    )
+    root = _site(tmp_path, pages, nav=nav)
+    _write(root, "docs/content/section/.nav.yml", "nav:\n  - second.md\n  - first.md\n")
+    assert dc.check_nav(root) == []
+
+    # The directory's own .nav.yml decides what of it is reachable.
+    _write(root, "docs/content/section/.nav.yml", "nav:\n  - second.md\n")
+    _assert_reports(dc.check_nav(root), "no reader can reach it")
 
 
 def test_site_build_check_passes_a_strict_offline_config(tmp_path):
@@ -1184,6 +1244,180 @@ def test_site_build_check_can_fail(tmp_path, case, mkdocs, workflow, expected):
 def test_the_real_mkdocs_config_is_strict_and_offline():
     """The committed mkdocs.yml and docs workflow pass the build-settings check."""
     assert dc.check_site_build(REPO_ROOT) == []
+
+
+# ---------------------------------------------------------------------------
+# Option tables and config paths in prose
+# ---------------------------------------------------------------------------
+
+CLEAN_OPTIONS = f"""# Options
+
+Options, under `scanners.bandit.options`:
+
+<!-- doctest: options of=scanners.bandit -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.bandit.options.confidence_level"></a>`confidence_level` | string | `all` | x |
+| `ignore_nosec` | boolean | `false` | x |
+| `excluded_paths` | list | `[]` | x |
+| `severity_threshold` | string | `null` | x |
+| `tool_version` | string | `">=1.7.0,<2.0.0"` | x |
+| `scan_timeout` | number | `1800` | x |
+
+<!-- doctest: options of=global_settings -->
+| Key | Default |
+|-----|---------|
+| `severity_threshold` | from `ASH_DEFAULT_SEVERITY_LEVEL`, else `MEDIUM` |
+| `suppressions` | `[]` |
+| `mcp` | see the section |
+
+<!-- doctest: options of=global_settings.suppressions -->
+| Field | Default |
+|-------|---------|
+| `reason` | required |
+| `rule_id` | None |
+
+<!-- doctest: options of=cli.mcp -->
+| Option | Default |
+|--------|---------|
+| `--port` | `8000` |
+| `--transport` | `stdio` |
+| `--debug` | off |
+| `--auth-header-name` | not set |
+
+<!-- doctest: options of=workspace-policy.workspace -->
+| Key | Default |
+|-----|---------|
+| `suppressions` | `[]` |
+
+| Variable | Default |
+|----------|---------|
+| `OCI_RUNNER` | `docker` |
+
+| Scanner | Type |
+|---------|------|
+| bandit | SAST |
+
+Set `scanners.bandit.options.severity_threshold`, `global_settings.suppressions[0].reason`,
+`fail_on_findings`, `scanners.<name>.enabled`, `scanners.*.options.tool_version`,
+`scanners.bandit.enabled=false`, `sandbox.mode: off` or `workspace.suppressions`, and read
+`sandbox.md` and `reporters.csv`. A {FENCE}`scanners.cdk-nag.options.nag_packs`{FENCE} works too.
+"""
+
+OPTION_DEFECTS = [
+    (
+        "unmarked option table",
+        "| Option | Default |\n|--------|---------|\n| `confidence_level` | `all` |\n",
+        "documents options or keys but names no section",
+        1,
+    ),
+    (
+        "unmarked table with a Default column",
+        "| Name | Default |\n|------|---------|\n| `confidence_level` | `all` |\n",
+        "documents options or keys but names no section",
+        1,
+    ),
+    (
+        "nonexistent option",
+        "<!-- doctest: options of=scanners.bandit -->\n| Option | Default |\n|---|---|\n| `severity_level` | `HIGH` |\n",
+        "'severity_level' is not a key of scanners.bandit",
+        4,
+    ),
+    (
+        "wrong default",
+        "<!-- doctest: options of=scanners.bandit -->\n| Option | Default |\n|---|---|\n| `confidence_level` | `high` |\n",
+        "'confidence_level' default says `high`, but the default is",
+        4,
+    ),
+    (
+        "wrong boolean default",
+        "<!-- doctest: options of=scanners.bandit -->\n| Option | Default |\n|---|---|\n| `ignore_nosec` | true |\n",
+        "'ignore_nosec' default says true",
+        4,
+    ),
+    (
+        "required that is not",
+        "<!-- doctest: options of=scanners.bandit -->\n| Option | Default |\n|---|---|\n| `ignore_nosec` | required |\n",
+        "says required, but the default is",
+        4,
+    ),
+    (
+        "wrong CLI default",
+        "<!-- doctest: options of=cli.mcp -->\n| Option | Default |\n|---|---|\n| `--port` | `9000` |\n",
+        "'--port' default says `9000`",
+        4,
+    ),
+    (
+        "prose default",
+        "<!-- doctest: options of=scanners.bandit -->\n| Option | Default |\n|---|---|\n| `confidence_level` | `all` or `high` |\n",
+        "is not a value or a recognized phrase",
+        4,
+    ),
+    (
+        "unknown plugin",
+        "<!-- doctest: options of=scanners.gosec -->\n| Option | Default |\n|---|---|\n| `x` | `1` |\n",
+        "ships no scanner named 'gosec'",
+        1,
+    ),
+    (
+        "marker without of",
+        "<!-- doctest: options -->\n| Option | Default |\n|---|---|\n| `x` | `1` |\n",
+        "needs of=<section>",
+        1,
+    ),
+    (
+        "nonexistent dotted path",
+        "Set `scanners.bandit.options.severity_level` to HIGH.\n",
+        "BanditScannerConfigOptions has no key 'severity_level'",
+        1,
+    ),
+    (
+        "nonexistent top-level section key",
+        "Set `global_settings.severity` to HIGH.\n",
+        "AshConfigGlobalSettingsSection has no key 'severity'",
+        1,
+    ),
+    (
+        "path into an unknown scanner",
+        "Set `scanners.gosec.enabled` to true.\n",
+        "ships no scanner named 'gosec'",
+        1,
+    ),
+]
+
+
+def test_option_tables_check_passes_every_valid_form(tmp_path):
+    page = _write(tmp_path, "docs/page.md", CLEAN_OPTIONS)
+    assert dc.check_option_tables([page], tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "case,text,expected,line", OPTION_DEFECTS, ids=[c[0] for c in OPTION_DEFECTS]
+)
+def test_option_tables_check_can_fail(tmp_path, case, text, expected, line):
+    page = _write(tmp_path, "docs/page.md", text)
+    _assert_reports(dc.check_option_tables([page], tmp_path), expected, line)
+
+
+def test_an_options_marker_binds_only_to_a_table(fixture_root):
+    """Above a fence, or with a gap before the table, it is a markers finding."""
+    above_fence = _write(
+        fixture_root,
+        "docs/a.md",
+        f"<!-- doctest: options of=global_settings -->\n{FENCE}yaml\na: 1\n{FENCE}\n",
+    )
+    _assert_reports(
+        dc.check_markers([above_fence], fixture_root), "not above a code block"
+    )
+    above_prose = _write(
+        fixture_root,
+        "docs/b.md",
+        "<!-- doctest: options of=global_settings -->\nSome prose.\n",
+    )
+    _assert_reports(
+        dc.check_markers([above_prose], fixture_root),
+        "directly followed by a table's header row",
+    )
 
 
 # ---------------------------------------------------------------------------

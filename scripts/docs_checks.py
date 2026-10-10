@@ -44,6 +44,7 @@ import logging
 import os
 import posixpath
 import re
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -245,6 +246,17 @@ class Block:
 
 
 @dataclass
+class Table:
+    """A markdown table in a page's prose, with the options marker above it, if any."""
+
+    header_line: int
+    header: list[str]
+    #: (line number, cells) of every data row.
+    rows: list[tuple[int, list[str]]]
+    marker: Marker | None = None
+
+
+@dataclass
 class Page:
     path: Path
     rel: str
@@ -254,6 +266,8 @@ class Page:
     prose: list[tuple[int, str]] = field(default_factory=list)
     #: Problems found while splitting the page: markers with no block, unclosed fences.
     structure: list[Finding] = field(default_factory=list)
+    #: Every table in the prose.
+    tables: list[Table] = field(default_factory=list)
 
 
 def rel_path(path: Path, root: Path) -> str:
@@ -347,7 +361,8 @@ def parse_page(path: Path, root: Path, text: str | None = None) -> Page:
 
     A marker binds to the fence on the very next line. Blank lines in between are an
     error rather than tolerated, so a marker can never drift onto the wrong block when
-    the text around it is edited.
+    the text around it is edited. The one marker that is not for a block is
+    ``options``, which binds to the table whose header row is on the next line.
     """
     if text is None:
         text = path.read_text(encoding="utf-8")
@@ -359,6 +374,7 @@ def parse_page(path: Path, root: Path, text: str | None = None) -> Page:
     pending: Marker | None = None
     pending_line = 0
     index = 0
+    table_markers: dict[int, Marker] = {}
 
     def flush_pending(reason: str) -> None:
         nonlocal pending
@@ -393,6 +409,17 @@ def parse_page(path: Path, root: Path, text: str | None = None) -> Page:
                     else candidate.lstrip()
                 )
                 scan += 1
+            if pending is not None and pending.mode == "options":
+                page.structure.append(
+                    Finding(
+                        "markers",
+                        rel,
+                        pending_line,
+                        "an options marker goes on the line directly above a table's "
+                        "header row, not above a code block",
+                    )
+                )
+                pending = None
             block = Block(
                 path=path,
                 lang=_fence_language(info),
@@ -444,19 +471,61 @@ def parse_page(path: Path, root: Path, text: str | None = None) -> Page:
                                 rel,
                                 lineno,
                                 "a blank line separates this marker from the block below it; "
-                                "the marker must be on the line directly above the opening fence",
+                                "the marker must be on the line directly above the opening "
+                                "fence (for an options marker, the table's header row)",
                             )
                         )
                         pending = None
             index += 1
             continue
 
+        if pending is not None and pending.mode == "options":
+            following = lines[index + 1] if index + 1 < len(lines) else ""
+            if _table_cells(line) and _is_delimiter_row(following):
+                table_markers[lineno] = pending
+                pending = None
+            else:
+                flush_pending(
+                    "an options marker must be directly followed by a table's header row"
+                )
         flush_pending("marker is not directly followed by a fenced code block")
         page.prose.append((lineno, line))
         index += 1
 
     flush_pending("marker is the last line of the page, with no block after it")
+    page.tables = _prose_tables(page.prose, table_markers)
     return page
+
+
+def _prose_tables(
+    prose: list[tuple[int, str]], markers: dict[int, Marker]
+) -> list[Table]:
+    """Every table in the prose: a header row, a delimiter row, then contiguous rows."""
+    tables: list[Table] = []
+    position = 0
+    while position < len(prose):
+        number, line = prose[position]
+        header = _table_cells(line)
+        following = prose[position + 1] if position + 1 < len(prose) else None
+        if (
+            header
+            and following is not None
+            and following[0] == number + 1
+            and _is_delimiter_row(following[1])
+        ):
+            rows: list[tuple[int, list[str]]] = []
+            scan = position + 2
+            while scan < len(prose) and prose[scan][0] == prose[scan - 1][0] + 1:
+                cells = _table_cells(prose[scan][1])
+                if not cells:
+                    break
+                rows.append((prose[scan][0], cells))
+                scan += 1
+            tables.append(Table(number, header, rows, markers.get(number)))
+            position = scan
+            continue
+        position += 1
+    return tables
 
 
 def _fence_language(info: str) -> str:
@@ -1934,10 +2003,35 @@ def env_table_names(page: Page) -> list[tuple[int, str]]:
 
 
 def _table_cells(line: str) -> list[str]:
+    """The cells of a table row; a pipe escaped as \\| or inside a code span is text."""
     stripped = line.strip()
     if not stripped.startswith("|"):
         return []
-    return [cell.strip() for cell in stripped.strip("|").split("|")]
+    cells: list[str] = []
+    cell: list[str] = []
+    index, ticks = 0, 0
+    body = stripped[1:]
+    while index < len(body):
+        char = body[index]
+        if char == "\\" and index + 1 < len(body) and body[index + 1] == "|":
+            cell.append("|")
+            index += 2
+            continue
+        if char == "`":
+            run = len(body[index:]) - len(body[index:].lstrip("`"))
+            ticks = 0 if ticks == run else (run if ticks == 0 else ticks)
+            cell.append(body[index : index + run])
+            index += run
+            continue
+        if char == "|" and not ticks:
+            cells.append("".join(cell).strip())
+            cell = []
+        else:
+            cell.append(char)
+        index += 1
+    if "".join(cell).strip():
+        cells.append("".join(cell).strip())
+    return cells
 
 
 def _is_delimiter_row(line: str) -> bool:
@@ -2139,6 +2233,8 @@ class ConfigModels:
     passthrough: frozenset[str]
     #: Options base class -> undeclared keys that ASH reads from every subclass anyway.
     generic_option_keys: dict[type, frozenset[str]] = field(default_factory=dict)
+    #: The workspace policy file's model, a second config schema, if this ASH has one.
+    workspace_policy: type | None = None
 
 
 #: Option keys the scanner base class reads from ANY scanner's options with getattr,
@@ -2206,12 +2302,19 @@ def load_config_models() -> ConfigModels:
                         configs[section].setdefault(default, obj)
     from automated_security_helper.base.options import ScannerOptionsBase
 
+    try:
+        from automated_security_helper.config.ash_workspace_config import (
+            AshWorkspaceConfig,
+        )
+    except ImportError:  # an ASH without workspace mode
+        AshWorkspaceConfig = None
     return ConfigModels(
         AshConfig,
         segments,
         configs,
         PASSTHROUGH_MODELS,
         {ScannerOptionsBase: GENERIC_SCANNER_OPTION_KEYS},
+        AshWorkspaceConfig,
     )
 
 
@@ -2481,6 +2584,588 @@ def check_config_blocks(files: Iterable[Path], root: Path = REPO_ROOT) -> list[F
                 findings.append(
                     Finding("config", page.rel, block.fence_line, f"{label}: {problem}")
                 )
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Check: option tables and config paths in prose
+# ---------------------------------------------------------------------------
+#
+# Config blocks are validated whole, but options are also documented in tables and
+# named in prose, and those had no check: a table could list an option that does not
+# exist or a default that changed. So a table that documents options or config keys
+# carries a marker naming the section it documents,
+#
+#     <!-- doctest: options of=scanners.bandit -->
+#     | Option | Type | Default | Description |
+#
+# and every row must be a key of that section, with the Default cell equal to the
+# model's default. A table that looks like one and has no marker is an error, so a
+# new table cannot skip the check by omission.
+
+#: First header cells that make a table an options table. A Default column does too.
+OPTION_TABLE_HEADERS = frozenset(
+    {
+        "option",
+        "options",
+        "key",
+        "keys",
+        "field",
+        "fields",
+        "setting",
+        "settings",
+        "argument",
+    }
+)
+#: ``of=`` prefix for the workspace policy file, whose schema is not AshConfig's.
+WORKSPACE_POLICY = "workspace-policy"
+#: Keys an ASH config file may carry that are loader directives, not AshConfig fields.
+LOADER_KEYS = {"extends": None, "patch": None}
+#: Default-cell phrases that state no comparable value (refgen's reference pages).
+DEFAULT_PHRASES_NOT_COMPARED = frozenset(
+    {
+        "computed at run time",
+        "depends on the platform",
+        "the plugin's own name",
+        "the plugin's defaults",
+    }
+)
+_WILDCARD = re.compile(r"^(\*|<[^>]*>|\{[^}]*\}|\.\.\.)$")
+_PLATFORMS = {"linux": "Linux", "darwin": "macOS", "win32": "Windows"}
+#: Not a value, so nothing to compare: the sentinel for a section's default.
+SECTION = object()
+COMPUTED = object()
+
+
+@dataclass
+class KeySpec:
+    """One key a table row may name: its spellings, and the default to compare against."""
+
+    names: tuple[str, ...]
+    required: bool = False
+    default: Any = None
+    compare: bool = True
+
+
+@dataclass
+class Section:
+    """What an options marker's ``of=`` names: a label and the keys under it."""
+
+    label: str
+    keys: dict[str, KeySpec]
+
+
+def _model_of(annotation: Any) -> tuple[str, Any]:
+    """('model' | 'list' | 'dict' | 'value', model class or None) for a field type."""
+    import typing
+
+    from pydantic import BaseModel
+
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return "model", annotation
+    origin = typing.get_origin(annotation)
+    args = [a for a in typing.get_args(annotation) if a is not type(None)]
+    if origin in (list, tuple, set, frozenset):
+        inner = next(
+            (a for a in args if isinstance(a, type) and issubclass(a, BaseModel)), None
+        )
+        return ("list", inner) if inner else ("value", None)
+    if origin is dict:
+        inner = args[1] if len(args) == 2 else None
+        kind, model = _model_of(inner) if inner is not None else ("value", None)
+        return ("dict", model if kind == "model" else None)
+    for arg in args:
+        kind, model = _model_of(arg)
+        if model is not None:
+            return kind, model
+    return "value", None
+
+
+def _plugin_entry_base(section: str, models: ConfigModels) -> type | None:
+    """The base config class every plugin of a section derives from (name, enabled, options)."""
+    for config_cls in models.plugin_configs.get(section, {}).values():
+        for base in config_cls.__mro__:
+            if base.__name__.endswith("PluginConfigBase"):
+                return base
+    return None
+
+
+def _options_model(config_cls: type) -> type | None:
+    info = config_cls.model_fields.get("options")
+    return _model_of(info.annotation)[1] if info is not None else None
+
+
+@dataclass
+class PathEnd:
+    """Where a config path ends: a model, or a value (model None)."""
+
+    model: type | None
+    plugin: str | None = None
+    #: The path ended at a free-form mapping or a placeholder; nothing more is checked.
+    open: bool = False
+
+
+def resolve_config_path(
+    segments: list[str], models: ConfigModels
+) -> tuple[PathEnd | None, str | None]:
+    """Walk a dotted config path from the top of an ASH config, as ASH reads it.
+
+    Under scanners, reporters and converters a segment is a plugin name, which must be
+    one this ASH ships (community plugins included, when their module imports). A
+    placeholder there (``*``, ``<name>``) stands for any plugin: the rest of the path
+    must hold for the plugin base or for at least one plugin. A placeholder elsewhere
+    ends the check. A list of sections is entered directly
+    (``global_settings.suppressions.reason``).
+    """
+    return _resolve_from(models.ash_config, segments, [], models)
+
+
+def _resolve_from(
+    current: type | None, segments: list[str], walked: list[str], models: ConfigModels
+) -> tuple[PathEnd | None, str | None]:
+    from automated_security_helper.base.options import ScannerOptionsBase
+
+    walked = list(walked)
+    plugin: str | None = None
+    position = 0
+    while position < len(segments):
+        segment = re.sub(r"\[\d*\]$", "", segments[position])
+        position += 1
+        walked.append(segment)
+        here = ".".join(walked)
+        section = next(
+            (n for n, seg in models.segments.items() if seg is current), None
+        )
+        if section is not None:
+            if _WILDCARD.match(segment):
+                base = _plugin_entry_base(section, models)
+                rest = segments[position:]
+                if not rest:
+                    return PathEnd(base, plugin="*"), None
+                first_problem = None
+                candidates = [base, *models.plugin_configs.get(section, {}).values()]
+                for candidate in candidates:
+                    end, problem = _resolve_from(candidate, rest, walked, models)
+                    if problem is None:
+                        return end, None
+                    first_problem = first_problem or problem
+                return None, first_problem
+            config_cls = models.plugin_configs.get(section, {}).get(segment)
+            if config_cls is None:
+                field_name = _field_keys(current).get(segment)
+                if field_name is not None:
+                    config_cls = _model_of(current.model_fields[field_name].annotation)[
+                        1
+                    ]
+            if config_cls is None:
+                known = sorted(models.plugin_configs.get(section, {}))
+                close = difflib.get_close_matches(segment, known, n=1)
+                hint = f"; did you mean '{close[0]}'?" if close else ""
+                return (
+                    None,
+                    f"{here}: this ASH ships no {section[:-1]} named '{segment}'{hint}",
+                )
+            current, plugin = config_cls, segment
+            continue
+        plugin = None
+        if current is None:
+            return (
+                None,
+                f"{'.'.join(walked[:-1])} is a value, so it has no key '{segment}'",
+            )
+        if _WILDCARD.match(segment):
+            return PathEnd(None, open=True), None
+        keys = dict(_field_keys(current))
+        if current is models.ash_config:
+            keys.update({key: key for key in LOADER_KEYS})
+        if issubclass(current, ScannerOptionsBase):
+            keys.update(
+                {key: key for key in GENERIC_SCANNER_OPTION_KEYS if key not in keys}
+            )
+        if segment not in keys:
+            close = difflib.get_close_matches(segment, sorted(keys), n=1)
+            hint = f"; did you mean '{close[0]}'?" if close else ""
+            return None, f"{here}: {current.__name__} has no key '{segment}'{hint}"
+        field_name = keys[segment]
+        if field_name not in current.model_fields:
+            current = None  # a loader directive or a generically read option
+            continue
+        kind, model = _model_of(current.model_fields[field_name].annotation)
+        if kind == "dict":
+            if model is None or position >= len(segments):
+                return PathEnd(None, open=True), None
+            position += 1  # the free key under the mapping
+            walked.append(segments[position - 1])
+        current = model
+    return PathEnd(current, plugin=plugin), None
+
+
+def _normalize(value: Any) -> Any:
+    import enum
+
+    from pydantic import BaseModel
+
+    if isinstance(value, BaseModel):
+        return SECTION
+    if isinstance(value, enum.Enum):
+        return value.value
+    if isinstance(value, Path):
+        return value.as_posix()
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_normalize(item) for item in value]
+    if isinstance(value, dict):
+        return {str(k): _normalize(v) for k, v in value.items()}
+    return value
+
+
+def _model_keys(model: type) -> dict[str, KeySpec]:
+    from pydantic import BaseModel  # noqa: F401 -- for the isinstance in _normalize
+
+    keys: dict[str, KeySpec] = {}
+    spellings = _field_keys(model)
+    for field_name, info in model.model_fields.items():
+        names = tuple(sorted({k for k, v in spellings.items() if v == field_name}))
+        if info.is_required():
+            spec = KeySpec(names, required=True, compare=True)
+        else:
+            try:
+                spec = KeySpec(
+                    names,
+                    default=_normalize(info.get_default(call_default_factory=True)),
+                )
+            except Exception:  # noqa: BLE001 -- a factory that needs the other fields
+                spec = KeySpec(names, default=COMPUTED, compare=False)
+        for name in names:
+            keys[name] = spec
+    return keys
+
+
+def options_section(of: str, models: ConfigModels) -> tuple[Section | None, str | None]:
+    """The keys an ``options of=`` marker names, or why it names nothing."""
+    from automated_security_helper.base.options import ScannerOptionsBase
+
+    if of == "config":
+        keys = _model_keys(models.ash_config)
+        keys.update({key: KeySpec((key,), default=None) for key in LOADER_KEYS})
+        return Section("the top level of an ASH config", keys), None
+    if of == "cli" or of.startswith("cli."):
+        return cli_section(of)
+    if of == WORKSPACE_POLICY or of.startswith(WORKSPACE_POLICY + "."):
+        if models.workspace_policy is None:
+            return None, f"of={of}: this ASH has no workspace policy file"
+        rest = of.split(".")[1:]
+        if not rest:
+            return Section(
+                "the workspace policy file", _model_keys(models.workspace_policy)
+            ), None
+        end, problem = _resolve_from(
+            models.workspace_policy, rest, [WORKSPACE_POLICY], models
+        )
+        if problem:
+            return None, problem
+        if end.model is None:
+            return None, f"of={of} names a value, not a section with keys"
+        return Section(f"{of} ({end.model.__name__})", _model_keys(end.model)), None
+    end, problem = resolve_config_path(of.split("."), models)
+    if problem:
+        return None, problem
+    model = end.model
+    if end.plugin and end.plugin != "*" and model is not None:
+        model = _options_model(model)  # a plugin's table lists its options
+    if model is None:
+        return None, f"of={of} names a value, not a section with keys"
+    keys = _model_keys(model)
+    if issubclass(model, ScannerOptionsBase):
+        for key in GENERIC_SCANNER_OPTION_KEYS:
+            keys.setdefault(key, KeySpec((key,), compare=False))
+    return Section(f"{of} ({model.__name__})", keys), None
+
+
+def cli_section(of: str) -> tuple[Section | None, str | None]:
+    """The options and arguments of an ``ash`` command, from the click tree."""
+    import typer
+
+    from automated_security_helper.cli.main import app
+
+    command = typer.main.get_command(app)
+    words = of.split(".")[1:]
+    for word in words:
+        sub = getattr(command, "commands", {}).get(word)
+        if sub is None:
+            return None, f"of={of}: ash {' '.join(words)} is not a command"
+        command = sub
+    keys: dict[str, KeySpec] = {}
+    for param in command.params:
+        if param.param_type_name == "option":
+            names = tuple(param.opts) + tuple(param.secondary_opts)
+        else:
+            names = (param.name, param.name.upper(), param.human_readable_name)
+        default = param.default
+        compare = not callable(default)
+        spec = KeySpec(
+            names,
+            required=bool(param.required),
+            default=_normalize(default) if compare else COMPUTED,
+            compare=compare,
+        )
+        for name in names:
+            keys[name] = spec
+    keys["--help"] = KeySpec(("--help",), compare=False)
+    return Section(f"of={of} (ash {' '.join(words)})".replace(" )", ")"), keys), None
+
+
+_SPAN = re.compile(r"(`+)(.+?)\1")
+_ENV_FORM = re.compile(r"^(?:from `([A-Za-z_][A-Za-z0-9_]*)`, else )+")
+_ENV_NAMES = re.compile(r"from `([A-Za-z_][A-Za-z0-9_]*)`, else ")
+
+
+def _cell_value(text: str) -> tuple[bool, Any]:
+    """(parsed, value) of a Default cell holding one value, in a code span or bare."""
+    import yaml
+
+    spans = _SPAN.findall(text)
+    if len(spans) == 1 and _SPAN.fullmatch(text.strip()):
+        content = spans[0][1].strip()
+    elif not spans:
+        content = text.strip()
+        if content.lower() in ("", "-", "—", "none", "null", "n/a"):
+            return True, None
+    else:
+        return False, None
+    try:
+        return True, yaml.safe_load(content) if content else ""
+    except yaml.YAMLError:
+        return True, content
+
+
+def _same_default(written: Any, actual: Any) -> bool:
+    if isinstance(written, str) and isinstance(actual, str):
+        if written.startswith("<repository>/"):
+            return actual.endswith(written[len("<repository>") :])
+        if written.startswith("~/"):
+            return actual == os.path.expanduser(written) or actual.endswith(written[1:])
+    if (
+        isinstance(written, (int, float))
+        and isinstance(actual, (int, float))
+        and not isinstance(written, bool)
+    ):
+        return float(written) == float(actual) and not isinstance(actual, bool)
+    if written is None and actual in (None, "", [], {}):
+        return True
+    return written == actual
+
+
+def default_problem(cell: str, spec: KeySpec) -> str | None:
+    """Why a Default cell does not state the model's default, or None."""
+    text = re.sub(r"<[^>]+>", "", cell).strip()
+    lowered = text.lower()
+    if lowered in DEFAULT_PHRASES_NOT_COMPARED or not spec.compare:
+        return None
+    if lowered == "required":
+        return (
+            None
+            if spec.required
+            else f"says required, but the default is {_shown(spec.default)}"
+        )
+    if spec.required:
+        return f"says {text or 'nothing'}, but the key is required"
+    if lowered == "see the section":
+        return (
+            None
+            if spec.default is SECTION
+            else f"says see the section, but the default is {_shown(spec.default)}"
+        )
+    if lowered in ("not set", "off", "on"):
+        allowed = {"not set": (None, False, [], ""), "off": (False,), "on": (True,)}[
+            lowered
+        ]
+        return (
+            None
+            if any(spec.default == a and type(spec.default) is type(a) for a in allowed)
+            else f"says {text}, but the default is {_shown(spec.default)}"
+        )
+    env = _ENV_FORM.match(text)
+    if env:
+        names = _ENV_NAMES.findall(text)
+        if any(name in os.environ for name in names):
+            return None  # the model's default was read from this environment
+        text = text[env.end() :]
+    platform = _PLATFORMS.get(sys.platform)
+    if " on " in text and re.search(r"\bon (Linux|macOS|Windows)\b", text):
+        chosen = None
+        for group in text.split("; "):
+            value, _, where = group.rpartition(" on ")
+            names = re.split(r", | and ", where)
+            if platform in names:
+                chosen = value
+        if chosen is None:
+            return None  # this platform is not one the cell names
+        text = chosen
+    parsed, value = _cell_value(text)
+    if not parsed:
+        return f"'{cell}' is not a value or a recognized phrase; put the default in one code span"
+    if spec.default is SECTION:
+        return f"says {text}, but the key is a section (write: see the section)"
+    if not _same_default(value, spec.default):
+        return f"says {text}, but the default is {_shown(spec.default)}"
+    return None
+
+
+def _shown(value: Any) -> str:
+    if value is SECTION:
+        return "a section"
+    return "`" + json.dumps(value, default=str) + "`"
+
+
+def _is_options_table(table: Table) -> bool:
+    if not table.header:
+        return False
+    cells = [re.sub(r"[`*_]", "", cell).strip().lower() for cell in table.header]
+    if cells[0] in _ENV_TABLE_HEADERS:
+        return False
+    return cells[0] in OPTION_TABLE_HEADERS or "default" in cells
+
+
+def _row_key(cell: str) -> str:
+    """The key a row names: its first code span, after any anchor element."""
+    cell = re.sub(r"<a\s[^>]*>\s*</a>", "", cell)
+    span = _SPAN.search(cell)
+    return (span.group(2) if span else re.sub(r"<[^>]+>", "", cell)).strip()
+
+
+#: A config path in prose: a top-level key, dotted, maybe with a value after it.
+_CONFIG_PATH_SPAN = re.compile(
+    r"^(?P<path>[A-Za-z_][\w-]*(?:\.(?:[\w-]+|\*|<[^<>]+>|\{[^{}]+\})(?:\[\d*\])?)+)"
+    r"(?:\s*(?:\+?=|:)\s*.*)?$"
+)
+_FILE_EXTENSIONS = frozenset(
+    {
+        "md",
+        "yaml",
+        "yml",
+        "json",
+        "toml",
+        "py",
+        "txt",
+        "sh",
+        "html",
+        "xml",
+        "csv",
+        "sarif",
+        "zip",
+        "tar",
+        "gz",
+        "js",
+        "ts",
+        "lock",
+    }
+)
+
+
+def config_path_problem(span: str, models: ConfigModels) -> str | None:
+    """Why a code span that is a dotted config path does not resolve, or None."""
+    match = _CONFIG_PATH_SPAN.match(span.strip())
+    if not match:
+        return None
+    segments = match.group("path").split(".")
+    top = dict(_field_keys(models.ash_config))
+    top.update({key: key for key in LOADER_KEYS})
+    if segments[0] not in top or "/" in span:
+        return None
+    if len(segments) == 2 and segments[-1].lower() in _FILE_EXTENSIONS:
+        return None  # sandbox.md and reporters.csv read as file names
+    _end, problem = resolve_config_path(segments, models)
+    if problem and models.workspace_policy is not None:
+        # The workspace policy file is a second schema whose top-level key,
+        # workspace, is also an AshConfig key; a path that holds there is valid.
+        _end, other = _resolve_from(models.workspace_policy, segments, [], models)
+        if other is None:
+            return None
+    return f"`{span}`: {problem}" if problem else None
+
+
+def check_option_tables(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding]:
+    """Option tables name their section, list its keys with its defaults; config paths resolve."""
+    models = load_config_models()
+    findings: list[Finding] = []
+    for page in load_pages(files, root):
+        if page.rel in HISTORICAL_DOCS:
+            continue
+        for table in page.tables:
+            if table.marker is None:
+                if _is_options_table(table):
+                    findings.append(
+                        Finding(
+                            "options",
+                            page.rel,
+                            table.header_line,
+                            "this table documents options or keys but names no section: put "
+                            "<!-- doctest: options of=<section> --> on the line above its header, "
+                            "for example of=scanners.bandit, of=global_settings or of=cli.scan",
+                        )
+                    )
+                continue
+            line = table.marker.line
+            of = table.marker.keys.get("of")
+            extra = set(table.marker.keys) - {"of"}
+            if extra:
+                findings.append(
+                    Finding(
+                        "options",
+                        page.rel,
+                        line,
+                        f"an options marker takes only of=, not {sorted(extra)}",
+                    )
+                )
+            if not isinstance(of, str) or not of:
+                findings.append(
+                    Finding(
+                        "options",
+                        page.rel,
+                        line,
+                        "an options marker needs of=<section>",
+                    )
+                )
+                continue
+            section, problem = options_section(of, models)
+            if problem:
+                findings.append(Finding("options", page.rel, line, problem))
+                continue
+            headers = [
+                re.sub(r"[`*_]", "", cell).strip().lower() for cell in table.header
+            ]
+            default_column = headers.index("default") if "default" in headers else None
+            for number, cells in table.rows:
+                key = _row_key(cells[0]) if cells else ""
+                spec = section.keys.get(key)
+                if spec is None:
+                    close = difflib.get_close_matches(key, sorted(section.keys), n=1)
+                    hint = f"; did you mean '{close[0]}'?" if close else ""
+                    findings.append(
+                        Finding(
+                            "options",
+                            page.rel,
+                            number,
+                            f"'{key}' is not a key of {section.label}{hint}",
+                        )
+                    )
+                    continue
+                if default_column is not None and default_column < len(cells):
+                    problem = default_problem(cells[default_column], spec)
+                    if problem:
+                        findings.append(
+                            Finding(
+                                "options",
+                                page.rel,
+                                number,
+                                f"'{key}' default {problem}",
+                            )
+                        )
+        for number, line in page.prose:
+            for span in inline_code_spans(line):
+                problem = config_path_problem(span, models)
+                if problem:
+                    findings.append(Finding("options", page.rel, number, problem))
     return findings
 
 
@@ -3230,55 +3915,144 @@ def _nav_entries(document: Any) -> Iterator[str]:
             yield from _nav_entries(value)
 
 
-def nav_targets(site: Site) -> tuple[set[Path], list[tuple[str, int, str]]]:
-    """Pages reachable from the navigation, and nav entries that name nothing."""
-    import yaml
+def _uses_awesome_nav(site: Site) -> tuple[bool, str]:
+    """Whether mkdocs.yml enables awesome-nav, and the nav file name it reads."""
+    for plugin in site.config.get("plugins") or []:
+        if plugin == "awesome-nav":
+            return True, NAV_FILE_NAME
+        if isinstance(plugin, dict) and "awesome-nav" in plugin:
+            options = plugin["awesome-nav"] or {}
+            return True, str(options.get("filename", NAV_FILE_NAME))
+    return False, NAV_FILE_NAME
+
+
+def awesome_nav_targets(
+    site: Site, filename: str
+) -> tuple[set[Path], list[tuple[str, int, str]]]:
+    """Pages in the navigation awesome-nav builds, and the entries it cannot resolve.
+
+    Runs mkdocs-awesome-nav's own resolver over the docs_dir's files, so a glob means
+    exactly what it means in the build: wcmatch with GLOBSTAR and EXTGLOB, relative to
+    the .nav.yml it is in, matched against pages and directories that no explicit
+    entry already took, in awesome-nav's priority order (explicit pages, then
+    directories, deepest first, then patterns). A pattern that matches nothing is what
+    awesome-nav logs as a warning, which --strict makes a build failure; here it is a
+    finding. A titled entry naming a page that does not exist becomes a link in
+    awesome-nav and a nav "not found" warning in mkdocs, and is a finding too.
+    """
+    from mkdocs.structure.files import File, Files, InclusionLevel
+    from mkdocs_awesome_nav import log as nav_log
+    from mkdocs_awesome_nav.nav.context import MkdocsFilesContext
+    from mkdocs_awesome_nav.nav.directory import RootNavDirectory
+    from mkdocs_awesome_nav.nav.link import NavLink
+    from mkdocs_awesome_nav.nav.page import NavPage
+    from mkdocs_awesome_nav.nav.section import NavSection
+
+    unlisted = _not_in_nav_spec(site)
+    files = []
+    for path in sorted(p for p in site.docs_dir.rglob("*") if p.is_file()):
+        rel = path.relative_to(site.docs_dir).as_posix()
+        inclusion = (
+            InclusionLevel.NOT_IN_NAV
+            if rel.endswith(".md") and unlisted(rel)
+            else InclusionLevel.INCLUDED
+        )
+        files.append(
+            File(
+                rel,
+                str(site.docs_dir),
+                str(site.docs_dir.parent / ".docs-check-site"),
+                site.use_directory_urls,
+                inclusion=inclusion,
+            )
+        )
+
+    class Capture(logging.Handler):
+        def __init__(self) -> None:
+            super().__init__(logging.WARNING)
+            self.messages: list[str] = []
+
+        def emit(self, record: logging.LogRecord) -> None:
+            self.messages.append(record.getMessage())
+
+    capture = Capture()
+    logger = logging.getLogger("mkdocs.plugins.awesome-nav")
+    logger.addHandler(capture)
+    try:
+        nav_log.levels = nav_log.LogLevelsConfig()
+        context = MkdocsFilesContext(Files(files), filename)
+        root_section = RootNavDirectory(context.root).resolve(context)
+    finally:
+        logger.removeHandler(capture)
 
     reachable: set[Path] = set()
-    missing: list[tuple[str, int, str]] = []
-    nav_files = sorted(site.docs_dir.rglob(NAV_FILE_NAME))
-    sources: list[tuple[Path, Any]] = []
-    for nav_file in nav_files:
-        document = yaml.safe_load(nav_file.read_text(encoding="utf-8")) or {}
-        sources.append(
-            (nav_file, document.get("nav", []) if isinstance(document, dict) else [])
-        )
-    if not nav_files and site.config.get("nav"):
-        sources.append((site.docs_dir / MKDOCS_YML, site.config["nav"]))
-    for nav_file, nav in sources:
-        base = nav_file.parent
-        text = nav_file.read_text(encoding="utf-8") if nav_file.is_file() else ""
-        for entry in _nav_entries(nav):
-            if re.match(r"^[a-z]+://", entry):
-                continue
-            line = next(
-                (n for n, l in enumerate(text.splitlines(), 1) if entry in l), 1
-            )
-            if any(char in entry for char in "*?["):
-                matched = [p for p in base.glob(entry) if p.suffix == ".md"]
-                if not matched:
-                    missing.append(
-                        (
-                            rel_path(nav_file, site.root),
-                            line,
-                            f"nav pattern '{entry}' matches no page",
-                        )
-                    )
-                reachable |= {p.resolve() for p in matched}
-                continue
-            target = (base / entry).resolve()
-            if target.is_dir():
-                reachable |= {p.resolve() for p in target.rglob("*.md")}
-            elif target.is_file():
-                reachable.add(target)
-            else:
-                missing.append(
+    problems: list[tuple[str, int, str]] = []
+
+    def walk(items: list) -> None:
+        for item in items:
+            if isinstance(item, NavPage):
+                reachable.add((site.docs_dir / item.page.path.as_posix()).resolve())
+            elif isinstance(item, NavSection):
+                walk(item.children)
+            elif isinstance(item, NavLink) and not re.match(
+                r"^[a-z]+:|^/|^#", item.url
+            ):
+                problems.append(
                     (
-                        rel_path(nav_file, site.root),
-                        line,
-                        f"nav entry '{entry}' names no page",
+                        rel_path(site.docs_dir / filename, site.root),
+                        1,
+                        f"nav entry '{item.title}: {item.url}' names no page",
                     )
                 )
+
+    walk(root_section.children)
+    for message in capture.messages:
+        located = re.search(r"\[([^\]]+)\]$", message)
+        where = (
+            rel_path(site.docs_dir / located.group(1), site.root)
+            if located
+            else rel_path(site.docs_dir / filename, site.root)
+        )
+        pattern = re.search(r"'([^']+)'", message)
+        line = _line_of(site.root / where, pattern.group(1) if pattern else "")
+        problems.append((where, line, re.sub(r"\s*\[[^\]]+\]$", "", message)))
+    return reachable, problems
+
+
+def _line_of(path: Path, needle: str) -> int:
+    if not needle or not path.is_file():
+        return 1
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if needle in line:
+            return number
+    return 1
+
+
+def nav_targets(site: Site) -> tuple[set[Path], list[tuple[str, int, str]]]:
+    """Pages reachable from the navigation, and nav entries that name nothing.
+
+    With awesome-nav, its own resolver decides (awesome_nav_targets). Without it, the
+    ``nav`` in mkdocs.yml is read: each entry is a page or a URL.
+    """
+    awesome, filename = _uses_awesome_nav(site)
+    if awesome:
+        return awesome_nav_targets(site, filename)
+    reachable: set[Path] = set()
+    missing: list[tuple[str, int, str]] = []
+    for entry in _nav_entries(site.config.get("nav") or []):
+        if re.match(r"^[a-z]+://", entry):
+            continue
+        target = (site.docs_dir / entry).resolve()
+        if target.is_file():
+            reachable.add(target)
+        else:
+            missing.append(
+                (
+                    MKDOCS_YML,
+                    _line_of(site.root / MKDOCS_YML, entry),
+                    f"nav entry '{entry}' names no page",
+                )
+            )
     return reachable, missing
 
 
@@ -3317,8 +4091,8 @@ def check_nav(root: Path = REPO_ROOT) -> list[Finding]:
                 "nav",
                 rel_path(page, root),
                 1,
-                f"page is in no {NAV_FILE_NAME} and not in mkdocs.yml not_in_nav, so no reader "
-                "can reach it from the site navigation",
+                f"page is in no {NAV_FILE_NAME} entry or glob and not in mkdocs.yml "
+                "not_in_nav, so no reader can reach it from the site navigation",
             )
         )
     redirects, error = load_redirects(root)

@@ -946,6 +946,13 @@ def check_doc_code_links() -> list[str]:
     return [str(f) for f in _docs_checks().check_code_links(REPO_ROOT)]
 
 
+def check_doc_option_tables() -> list[str]:
+    return [
+        str(f)
+        for f in _docs_checks().check_option_tables(collect_md_files(), REPO_ROOT)
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Docs from one tree, code from another
 # ---------------------------------------------------------------------------
@@ -1028,6 +1035,10 @@ def main(argv: list[str] | None = None) -> int:
         ("Docs navigation and redirects resolve", check_doc_nav),
         ("Docs site build is strict and offline", check_doc_site_build),
         ("Docs links in the ASH source resolve", check_doc_code_links),
+        (
+            "Option tables and config paths in docs match the models",
+            check_doc_option_tables,
+        ),
     ]
 
     all_failures: list[tuple[str, list[str]]] = []

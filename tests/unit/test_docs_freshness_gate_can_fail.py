@@ -90,6 +90,7 @@ NON_VACUITY_COVERAGE = {
     "Docs navigation and redirects resolve": "test_docs_checks_can_fail.py::test_nav_check_can_fail",
     "Docs site build is strict and offline": "test_docs_checks_can_fail.py::test_site_build_check_can_fail",
     "Docs links in the ASH source resolve": "test_docs_checks_can_fail.py::test_code_links_check_can_fail",
+    "Option tables and config paths in docs match the models": "test_docs_checks_can_fail.py::test_option_tables_check_can_fail",
 }
 
 
