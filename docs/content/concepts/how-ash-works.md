@@ -31,7 +31,7 @@ Where the scan runs is a separate choice, the run mode. `local` (the default) ru
 
 ASH ships 16 built-in scanners, all enabled by default. For each scanner it knows about, ASH asks these questions in order and records the first answer that stops the scanner:
 
-1. Is it enabled? `scanners.<name>.enabled: false` in the config turns a scanner off, and `--scanners` cannot turn it back on.
+1. Is it enabled? `scanners.<name>.enabled: false` in the config turns a scanner off. `--scanners` cannot turn it back on; `ash scan --config-overrides scanners.<name>.enabled=true` can.
 2. Was it selected? `--scanners` is an allowlist and `--exclude-scanners` removes names from it. A scanner that is not selected is recorded SKIPPED.
 3. Does it support this platform? A scanner without a build for the operating system (semgrep and opengrep on Windows) is recorded SKIPPED.
 4. Are its dependencies there? A scanner whose tool cannot be found, or is found only inside the scanned directory, is recorded MISSING with the reason.

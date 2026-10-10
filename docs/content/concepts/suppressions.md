@@ -13,7 +13,7 @@ ASH has three ways to keep a finding from failing a scan, and they differ in wha
 | Counts toward the gate? | No | No | No |
 | Expiration | Enforced | Accepted but not enforced | None |
 
-Each scanner's own inline comments, such as bandit's `# nosec`, act like scanner exclusions: the scanner does not report the finding, so ASH never sees it.
+A scanner's own inline suppression comment works one of two ways, depending on the tool. bandit (`# nosec`) and detect-secrets (`# pragma: allowlist secret`) drop the finding, so ASH never sees it, as with a scanner exclusion. semgrep and opengrep (`# nosemgrep`) and checkov (`checkov:skip=<check>:<reason>`) report the finding with a SARIF suppression, and ASH keeps it in the results as a suppressed finding with the tool's justification, which can be empty. Either way the finding does not count toward the gate. For other scanners, see the tool's own documentation.
 
 ## How a suppression matches
 
@@ -43,13 +43,13 @@ An ignore path also accepts an `expiration`, but ASH does not enforce it: an exp
 
 Only unsuppressed findings at or above the severity threshold count toward `fail_on_findings`. Suppressed findings, findings under an ignore path and findings a scanner never reported do not count, whatever their severity. [Set the gate](../how-to/set-the-gate.md) covers thresholds.
 
-`--ignore-suppressions` turns the whole suppression step off. Configured suppressions, inline `ash-ignore` comments and ignore paths all stop applying, so their findings come back and count toward the gate. Files a scanner skipped on its own, through its exclusion options, its inline comments or an ignore path it was given, stay unreported.
+`--ignore-suppressions` turns ASH's whole suppression step off. Configured suppressions, inline `ash-ignore` comments and ignore paths all stop applying, so their findings come back and count toward the gate. It does not touch what the scanners did themselves: files a scanner skipped through its exclusion options, its inline comments or an ignore path it was given stay unreported, and findings a scanner reported as suppressed stay suppressed.
 
 ## In the reports
 
 | Output | A suppressed finding |
 |---|---|
-| `ash.sarif` and `ash_aggregated_results.json` | Kept, with a `suppressions` entry: `kind: inSource` and a justification that starts with `(ASH)` for a configured suppression or `(ASH inline)` for a comment |
+| `ash.sarif` and `ash_aggregated_results.json` | Kept, with a `suppressions` entry: `kind: inSource` and a justification that starts with `(ASH)` for a configured suppression or `(ASH inline)` for an `ash-ignore` comment. A suppression the scanner reported keeps the scanner's own justification. |
 | `ash.flat.json`, `ash.csv` | Kept, with `is_suppressed` and the justification |
 | `ash.html` | Listed in a separate table of suppressed findings, with the justification |
 | `ash.junit.xml` | A `<skipped type="suppression">` test case with the justification |
