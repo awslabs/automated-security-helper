@@ -124,6 +124,49 @@ A `pre-commit` block must use hook ids that
 [`.pre-commit-hooks.yaml`](https://github.com/awslabs/automated-security-helper/blob/main/.pre-commit-hooks.yaml)
 defines.
 
+### Option tables
+
+A table that documents options or config keys (its first header cell is Option, Key,
+Field, Setting or Argument, or it has a Default column) carries a marker naming the
+section it documents, on the line directly above its header row:
+
+````markdown
+<!-- doctest: options of=scanners.bandit -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `confidence_level` | string | `all` | Lowest confidence bandit reports |
+````
+
+Every row's first code span must be a key of that section, and its Default cell must
+state the default the code has. A table that looks like an options table and has no
+marker is an error, so a new table cannot skip the check. Tables headed Variable or
+Environment variable are checked as environment variables instead.
+
+| `of=` | The rows are |
+|-------|--------------|
+| `scanners.bandit`, `reporters.sarif`, `converters.archive` | that plugin's options (the same as adding `.options`) |
+| `scanners.*` | the keys every scanner entry has (`name`, `enabled`, `options`) |
+| `config` | the top-level keys of an ASH config |
+| `global_settings`, `sandbox`, `global_settings.suppressions`, ... | the keys under that config path; a path through a list means one item of it |
+| `workspace-policy`, `workspace-policy.workspace`, ... | keys of the workspace policy file |
+| `cli`, `cli.scan`, `cli.config.get`, ... | the options and arguments of that `ash` command |
+
+A Default cell is one of:
+
+- a value in one code span, read as YAML: `` `true` ``, `` `1800` ``, `` `[]` ``,
+  `` `null` ``, `` `ash-scan` ``, or `` `">=1.7.0,<2.0.0"` `` for a string that YAML would
+  read as something else. A path under the repository or home directory starts
+  `<repository>/` or `~/`;
+- ``from `ENV_NAME`, else `VALUE` `` (one or more `from` parts) for a default ASH reads
+  from the environment; `VALUE` is the default when the variable is unset;
+- `` `VALUE` on Linux and macOS; `VALUE` on Windows `` for a default that depends on the
+  platform;
+- one of the phrases `required`, `see the section` (the key is a nested section),
+  `computed at run time` or `depends on the platform`, and for `ash` options `off`,
+  `on` or `not set`.
+
+A bare word such as `true` or `None` is read the same way; anything else is reported.
+
 ### Commands, options and variables in prose
 
 An inline code span that starts with `ash`, or with a wrapper that runs it (`uvx`,
@@ -134,6 +177,12 @@ the program: `pytest --run-integration`, not the bare option.
 Every `ASH_*` name anywhere on a page must be a variable ASH reads. So must every name
 in the first column of a table headed "Variable" or "Environment variable". Write a
 family as `ASH_MCP_*`; at least one variable ASH reads must start with the prefix.
+
+An inline code span that is a dotted config path starting with a top-level config key
+(`scanners.bandit.options.severity_threshold`, `global_settings.suppressions`,
+`sandbox.mode`, also with a value after it, as in `scanners.bandit.enabled=false`) must
+resolve in ASH's config models, community plugins included when this ASH has them. Use
+`*` or `<name>` for a plugin name that is not fixed: `scanners.<name>.enabled`.
 
 One kind of read is not in the read set: a config value written as `${NAME}`, which
 ASH's config loader resolves for any name its rule allows (every `ASH_*` name, and a few
@@ -149,8 +198,14 @@ read everywhere on the page, so the page can set the variable its own config use
   mkdocs cannot publish anything else. Link to other repository files with their
   GitHub URL, `https://github.com/awslabs/automated-security-helper/blob/main/<path>`;
   the path must exist.
-- Every page is listed in a `.nav.yml`, or matches a pattern in `not_in_nav` in
-  `mkdocs.yml` with a comment saying why.
+- Every page is reachable from a `.nav.yml`, or matches a pattern in `not_in_nav` in
+  `mkdocs.yml` with a comment saying why. A `.nav.yml` entry may be a page, a
+  directory (which then uses its own `.nav.yml`, or lists everything in it), or a glob
+  such as `docs/plugins/community/*.md`. The check runs awesome-nav's own resolver, so
+  a glob means what it means in the build, including that it only picks up pages no
+  other entry already took. A glob that matches nothing is an error. A glob with
+  options is written `- glob: "<pattern>"` with at least one option beside it; on its
+  own, `- glob: "<pattern>"` is a titled link to a page named by the pattern.
 - When you move or rename a page, add the old path to
   [`docs/redirects.yml`](https://github.com/awslabs/automated-security-helper/blob/main/docs/redirects.yml).
   The site build writes a page at the old URL that forwards readers to the new one,
@@ -281,6 +336,18 @@ lookups could not be resolved; make the lookup a literal or a module constant.
 name` mean an import does not resolve in the project's environment: the module was
 renamed or removed, or the block needs an extra that is not installed.
 
+### options
+
+| Message contains | Fix |
+|------------------|-----|
+| documents options or keys but names no section | add `<!-- doctest: options of=<section> -->` above the table |
+| is not a key of | the row names an option the section does not have; the message suggests the nearest |
+| default says ..., but the default is | the code's default changed; state the one in the message |
+| says required, but the default is / but the key is required | the key does (or does not) have a default |
+| is not a value or a recognized phrase | write the default in one code span |
+| has no key, ships no scanner named | a dotted config path in a code span does not exist |
+| needs of= / an options marker goes on the line directly above a table | fix the marker |
+
 ### code-links
 
 | Message contains | Fix |
@@ -302,6 +369,8 @@ renamed or removed, or the block needs an extra that is not installed.
 | links to a directory | link to the page in it |
 | no page on the site serves this URL | the page moved; update the link or add a redirect |
 | no reader can reach it | add the page to a `.nav.yml`, or to `not_in_nav` with a reason |
+| doesn't match any files or directories | a nav entry or glob reaches no page that is not already listed elsewhere |
+| nav entry ... names no page | a titled nav entry points at a page that does not exist |
 | still exists, which is not a page, itself redirected | fix the entry in `docs/redirects.yml` |
 | must be 'warn', does not pass --strict, hooks does not list | `mkdocs.yml` or the docs workflow lost a strict-build setting; restore it |
 
