@@ -5,9 +5,16 @@
 
 docs/redirects.yml maps an old page path to the page that replaced it, both relative
 to docs_dir. After the build, this writes a small HTML page at the URL the old page
-was served from. It sends the reader to the new page with a meta refresh, names the
-new page as canonical so search engines index it rather than the redirect, and asks
-them not to index the redirect itself.
+was served from. It sends the reader to the new page, names the new page as canonical
+so search engines index it rather than the redirect, and asks them not to index the
+redirect itself.
+
+The fragment of the URL the reader followed is carried across: a link to
+old-page/#some-section lands on new-page/#some-section. A meta refresh cannot do that
+(the browser drops the fragment), so a script does it with location.hash, and the
+meta refresh is the fallback without JavaScript, going to the redirect's own fragment
+if it has one. scripts/docs_checks.py checks that the fragment exists on the new page,
+for links in the docs and for docs URLs in the ASH source.
 
 A hook rather than the mkdocs-redirects plugin: it is about sixty lines and needs no
 new dependency. The build fails, rather than writing a broken redirect, when an old
@@ -19,6 +26,7 @@ build.
 from __future__ import annotations
 
 import html
+import json
 import posixpath
 from pathlib import Path
 
@@ -37,6 +45,7 @@ _PAGE = """<!doctype html>
 <title>Redirecting to {title}</title>
 <link rel="canonical" href="{canonical}">
 <meta name="robots" content="noindex">
+<script>location.replace({target_js} + (location.hash || {fragment_js}));</script>
 <meta http-equiv="refresh" content="0; url={relative}">
 </head>
 <body>
@@ -83,10 +92,10 @@ def on_files(files, config):
 def on_post_build(config):
     site_url = (config.site_url or "").rstrip("/") + "/"
     for source, target_url, fragment in _redirects:
-        relative = get_relative_url(target_url, source.url) + (
-            f"#{fragment}" if fragment else ""
-        )
-        canonical = site_url + target_url + (f"#{fragment}" if fragment else "")
+        own_fragment = f"#{fragment}" if fragment else ""
+        target = get_relative_url(target_url, source.url)
+        relative = target + own_fragment
+        canonical = site_url + target_url + own_fragment
         output = Path(source.abs_dest_path)
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(
@@ -96,6 +105,10 @@ def on_post_build(config):
                 ),
                 canonical=html.escape(canonical, quote=True),
                 relative=html.escape(relative, quote=True),
+                # json.dumps quotes and escapes for JavaScript. No page path or
+                # fragment contains "<", so nothing can end the script element early.
+                target_js=json.dumps(target),
+                fragment_js=json.dumps(own_fragment),
             ),
             encoding="utf-8",
         )

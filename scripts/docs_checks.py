@@ -263,6 +263,42 @@ def rel_path(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
+# ---------------------------------------------------------------------------
+# Which tree the code comes from
+# ---------------------------------------------------------------------------
+#
+# The docs and the code may come from different checkouts: a docs rewrite describes
+# code that is not on main yet, so its pages are checked against another tree's ASH.
+# Every check is handed a docs root, and markdown, the nav, mkdocs.yml, the redirect
+# map and the runner's fixtures come from there. Everything about the code comes from
+# the ASH the interpreter imports: the click tree, the config models, the environment
+# variables it reads, and the files shipped beside the package (.pre-commit-hooks.yaml,
+# action.yml files). With one checkout, the two are the same tree.
+
+
+@functools.lru_cache(maxsize=1)
+def installed_package_dir() -> Path:
+    """The automated_security_helper package this interpreter imports, without importing it."""
+    spec = importlib.util.find_spec(ASH_MODULE)
+    if spec is None or not spec.submodule_search_locations:
+        raise RuntimeError(f"this interpreter cannot import {ASH_MODULE}")
+    return Path(next(iter(spec.submodule_search_locations))).resolve()
+
+
+def code_root(docs_root: Path) -> Path:
+    """The checkout the installed ASH comes from, or docs_root when it is not a checkout.
+
+    An editable install (uv sync, pip install -e) imports the package from a checkout,
+    whose root holds pyproject.toml. A wheel install has no checkout; the files the
+    code ships beside the package are then read from docs_root.
+    """
+    try:
+        parent = installed_package_dir().parent
+    except RuntimeError:
+        return docs_root
+    return parent if (parent / "pyproject.toml").is_file() else docs_root
+
+
 @functools.lru_cache(maxsize=None)
 def current_version(root: str) -> str:
     """The version templates render to, from [tool.commitizen] like the version manager."""
@@ -1408,8 +1444,15 @@ def _mcp_client_commands(document: Any) -> Iterator[list[str]]:
             yield from _mcp_client_commands(item)
 
 
-def block_invocations(block: Block, root: Path) -> tuple[list[Invocation], list[str]]:
-    """Every ash invocation a block makes, plus problems found while looking for them."""
+def block_invocations(
+    block: Block, root: Path, code: Path | None = None
+) -> tuple[list[Invocation], list[str]]:
+    """Every ash invocation a block makes, plus problems found while looking for them.
+
+    ``code`` is the tree whose .pre-commit-hooks.yaml and action.yml files a CI block
+    is checked against; it defaults to ``root``.
+    """
+    code = code or root
     found: list[Invocation] = []
     problems: list[str] = []
     if block.family == "shell":
@@ -1436,11 +1479,11 @@ def block_invocations(block: Block, root: Path) -> tuple[list[Invocation], list[
                     for words in _mcp_client_commands(document):
                         found += find_invocations(words)
                 if kind == "pre-commit":
-                    pre_found, pre_problems = _pre_commit_invocations(document, root)
+                    pre_found, pre_problems = _pre_commit_invocations(document, code)
                     found += pre_found
                     problems += pre_problems
                 if kind == "github-actions":
-                    problems += _github_action_uses(document, root)
+                    problems += _github_action_uses(document, code)
     return found, problems
 
 
@@ -1534,17 +1577,21 @@ def _dicts_with_key(document: Any, key: str) -> Iterator[dict]:
 
 
 def check_cli(
-    files: Iterable[Path], root: Path = REPO_ROOT, cli: CliCommand | None = None
+    files: Iterable[Path],
+    root: Path = REPO_ROOT,
+    cli: CliCommand | None = None,
+    code: Path | None = None,
 ) -> list[Finding]:
     """Every ash invocation in a block or inline code span parses against the real CLI."""
     cli = cli or load_cli()
+    code = code or code_root(root)
     every_option = all_option_names(cli)
     findings: list[Finding] = []
     for page in load_pages(files, root):
         if page.rel in HISTORICAL_DOCS:
             continue
         for block in page.blocks:
-            invocations, problems = block_invocations(block, root)
+            invocations, problems = block_invocations(block, root, code)
             for problem in problems:
                 findings.append(Finding("cli", page.rel, block.fence_line, problem))
             for invocation in invocations:
@@ -1651,22 +1698,34 @@ class EnvReadSet:
 
 
 def _load_by_path(name: str, path: Path) -> Any:
+    """Load a script as a module, registered first so its dataclasses can resolve."""
+    import sys
+
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load {path}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
 @functools.lru_cache(maxsize=None)
 def load_env_read_set(root_str: str = str(REPO_ROOT)) -> EnvReadSet:
+    """Every variable the code in ``root_str`` reads, and the lookups it cannot resolve.
+
+    ``root_str`` is the code tree: its package and entry scripts are what is read. The
+    generator that reads them is taken from that tree, or failing that from the tree
+    this module is in, since a docs branch may carry a newer generator than the code.
+    """
     root = Path(root_str)
-    generator = root / ENV_VAR_GENERATOR
-    if generator.is_file():
-        module = _load_by_path("_ash_env_var_reference", generator)
-        names, dynamic = module.read_env_names()
-        return EnvReadSet(set(names), list(dynamic), ENV_VAR_GENERATOR)
+    for generator in (root / ENV_VAR_GENERATOR, REPO_ROOT / ENV_VAR_GENERATOR):
+        if generator.is_file():
+            module = _load_by_path("_ash_env_var_reference", generator)
+            names, dynamic = module.read_env_names(root)
+            return EnvReadSet(
+                set(names), list(dynamic), f"{ENV_VAR_GENERATOR} over {root}"
+            )
     names, dynamic = _collect_package_env_names(root / ASH_MODULE, root)
     return EnvReadSet(
         names, dynamic, f"{ASH_MODULE}/ only, because {ENV_VAR_GENERATOR} is absent"
@@ -1764,10 +1823,51 @@ def _module_string_constants(tree: ast.AST) -> dict[str, str]:
     return found
 
 
-def _collect_package_env_names(package: Path, root: Path) -> tuple[set[str], list[str]]:
-    """The fallback read set: every env lookup in the package, constants resolved."""
+def _package_sources(package: Path) -> list[Path]:
+    """The package's .py files, without the ignored build copies git does not track.
+
+    Uses git's own listing when the package sits in a checkout, so a gitignored copy
+    (the build writes some modules into automated_security_helper/assets/) is not read
+    twice; a plain walk otherwise.
+    """
+    import subprocess
+
+    checkout = package.parent
+    listing = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(checkout),
+            "ls-files",
+            "-z",
+            "-co",
+            "--exclude-standard",
+            "--",
+            f"{package.name}/*.py",
+        ],
+        capture_output=True,
+        check=False,
+    )
+    if listing.returncode == 0 and listing.stdout:
+        found = [
+            checkout / os.fsdecode(entry)
+            for entry in listing.stdout.split(b"\0")
+            if entry
+        ]
+        return sorted(path for path in found if path.is_file())
+    return sorted(package.rglob("*.py"))
+
+
+def package_modules(package: Path) -> list[tuple[Path, ast.AST, dict[str, str]]]:
+    """(path, syntax tree, string constants in scope) for every module in the package.
+
+    The constants are the module's own ``NAME = "literal"`` assignments plus those it
+    imports from other modules of the package, by ``from x import NAME`` or as
+    ``x.NAME`` after ``import x``. Both the env-var fallback and the code-links check
+    use them to resolve a key or a URL that the source spells as a constant.
+    """
     trees: dict[str, tuple[Path, ast.AST]] = {}
-    for path in sorted(package.rglob("*.py")):
+    for path in _package_sources(package):
         relative = path.relative_to(package.parent).with_suffix("")
         parts = relative.parts[:-1] if relative.name == "__init__" else relative.parts
         tree = ast.parse(
@@ -1778,8 +1878,7 @@ def _collect_package_env_names(package: Path, root: Path) -> tuple[set[str], lis
         module: _module_string_constants(tree)
         for module, (_path, tree) in trees.items()
     }
-    names: set[str] = set()
-    dynamic: list[str] = []
+    modules = []
     for module, (path, tree) in trees.items():
         constants = dict(own[module])
         for node in ast.walk(tree):
@@ -1800,6 +1899,15 @@ def _collect_package_env_names(package: Path, root: Path) -> tuple[set[str], lis
                             constants[f"{alias.asname or alias.name}.{constant}"] = (
                                 value
                             )
+        modules.append((path, tree, constants))
+    return modules
+
+
+def _collect_package_env_names(package: Path, root: Path) -> tuple[set[str], list[str]]:
+    """The fallback read set: every env lookup in the package, constants resolved."""
+    names: set[str] = set()
+    dynamic: list[str] = []
+    for path, tree, constants in package_modules(package):
         found, sites = env_lookups(tree, rel_path(path, root), constants)
         names |= found
         dynamic += sites
@@ -1861,11 +1969,37 @@ def _name_is_read(name: str, read: EnvReadSet) -> bool:
     return name in read.names
 
 
+#: An environment reference in a config value, as the config loader matches it.
+_CONFIG_ENV_REFERENCE = re.compile(r"\$\{(\w+)(?::[^}]*)?\}")
+
+
+def _config_interpolation_rule() -> Callable[[str], bool]:
+    """The installed ASH's rule for which names a config ``${NAME}`` may read."""
+    try:
+        from automated_security_helper.config.ash_config import (
+            config_env_var_is_interpolatable,
+        )
+    except ImportError:  # an older ASH without the rule interpolates nothing here
+        return lambda name: False
+    return config_env_var_is_interpolatable
+
+
 def check_env_vars(
-    files: Iterable[Path], root: Path = REPO_ROOT, read: EnvReadSet | None = None
+    files: Iterable[Path],
+    root: Path = REPO_ROOT,
+    read: EnvReadSet | None = None,
+    code: Path | None = None,
 ) -> list[Finding]:
-    """Every ASH_* name in the docs, and every env-var table row, is a variable ASH reads."""
-    read = read or load_env_read_set(str(root))
+    """Every ASH_* name in the docs, and every env-var table row, is a variable ASH reads.
+
+    One kind of read cannot be in the read set: a config file's ``${NAME}`` reference,
+    which the config loader resolves for any name its rule allows (every ``ASH_*``
+    name and a few AWS ones). A name that one of the page's ASH config blocks
+    references that way counts as read everywhere on that page, so a page may export
+    the variable its own config example consumes.
+    """
+    read = read or load_env_read_set(str(code or code_root(root)))
+    interpolatable = _config_interpolation_rule()
     findings: list[Finding] = []
     dynamic_note = (
         f"; {len(read.dynamic)} lookup(s) build their name at runtime and are not resolved"
@@ -1887,10 +2021,21 @@ def check_env_vars(
     for page in load_pages(files, root):
         if page.rel in HISTORICAL_DOCS:
             continue
+        via_config = {
+            name
+            for block in page.blocks
+            if block.family == "config" and block.config_kind in ASH_CONFIG_KINDS
+            for name in _CONFIG_ENV_REFERENCE.findall(block.body)
+            if interpolatable(name)
+        }
+
+        def is_read(name: str) -> bool:
+            return name in via_config or _name_is_read(name, read)
+
         seen: set[tuple[int, str]] = set()
         for number, line in page.prose:
             for name in _ash_tokens(line):
-                if not _name_is_read(name, read) and (number, name) not in seen:
+                if not is_read(name) and (number, name) not in seen:
                     seen.add((number, name))
                     report(page.rel, number, name, "")
         for block in page.blocks:
@@ -1899,12 +2044,12 @@ def check_env_vars(
                 if names is None:
                     names = _ash_tokens(block.body)
                 for name in sorted(set(names)):
-                    if not _name_is_read(name, read):
+                    if not is_read(name):
                         report(page.rel, block.fence_line, name, " in a python block")
                 continue
             for number, line in block.body_lines():
                 for name in _ash_tokens(line):
-                    if not _name_is_read(name, read) and (number, name) not in seen:
+                    if not is_read(name) and (number, name) not in seen:
                         seen.add((number, name))
                         report(page.rel, number, name, "")
         for number, name in env_table_names(page):
@@ -2402,17 +2547,22 @@ def _module_exists(name: str) -> bool:
         return False
 
 
-def check_python_blocks(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding]:
+def check_python_blocks(
+    files: Iterable[Path], root: Path = REPO_ROOT, code: Path | None = None
+) -> list[Finding]:
     """Every python block parses, and every import in it resolves; imports are never waived.
 
-    "Resolves" means in the docs environment: the project's virtualenv with the
-    repository root importable, as it is for a contributor working in a checkout, so a
-    contributing page may import tests.utils.
+    "Resolves" means in the docs environment: the interpreter's ASH and its virtualenv,
+    with the root of the checkout that ASH comes from importable, as it is for a
+    contributor working in a checkout, so a contributing page may import tests.utils.
+    That root is the code tree, never the docs root: putting a separate docs checkout
+    first on the path would import its copy of the package instead.
     """
     import sys
 
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
+    code = code or code_root(root)
+    if str(code) not in sys.path:
+        sys.path.insert(0, str(code))
         _module_exists.cache_clear()
     findings: list[Finding] = []
     for page in load_pages(files, root):
@@ -2487,6 +2637,8 @@ class Site:
     docs_dir: Path
     use_directory_urls: bool
     site_url: str
+    #: The code tree (see code_root); a repository path may exist there instead.
+    code: Path
 
 
 def load_site(root_str: str = str(REPO_ROOT)) -> Site:
@@ -2498,6 +2650,7 @@ def load_site(root_str: str = str(REPO_ROOT)) -> Site:
         docs_dir=(root / str(config.get("docs_dir", "docs"))).resolve(),
         use_directory_urls=bool(config.get("use_directory_urls", True)),
         site_url=str(config.get("site_url") or "").rstrip("/"),
+        code=code_root(root),
     )
 
 
@@ -2665,6 +2818,71 @@ _GITHUB_REPO_PAGES = frozenset(
 )
 
 
+def repository_file(rel: str, site: Site) -> Path | None:
+    """A repository path in the docs root or, failing that, the code tree."""
+    for base in (site.root, site.code):
+        path = base / rel
+        if path.exists():
+            return path
+    return None
+
+
+def repository_path_problem(
+    target: str, rel: str, fragment: str, site: Site
+) -> str | None:
+    """Why a path in this repository, named by a GitHub URL, does not resolve."""
+    path = repository_file(rel, site)
+    if path is None:
+        return f"{target}: {rel} does not exist in this repository"
+    if fragment and path.is_file() and path.suffix == ".md":
+        if fragment not in _github_page_ids(
+            str(path), path.read_text(encoding="utf-8")
+        ):
+            return f"{target}: {rel} has no heading or anchor '#{fragment}'"
+    return None
+
+
+def site_target(
+    url_path: str, site: Site, redirects: dict[str, str]
+) -> tuple[Path | None, str, str | None]:
+    """(page, the redirect's own fragment, the redirected old page) a site URL reaches."""
+    served = _url_path_to_page(url_path, site)
+    if served is not None:
+        return served, "", None
+    source = unquote(url_path).strip("/")
+    for old, new in redirects.items():
+        if _redirect_url(old, site).strip("/") == source:
+            new_path, _, new_fragment = new.partition("#")
+            target = site.docs_dir / new_path
+            return (target if target.is_file() else None), new_fragment, old
+    return None, "", None
+
+
+def site_url_problem(
+    target: str, url_path: str, fragment: str, site: Site, redirects: dict[str, str]
+) -> str | None:
+    """Why a URL on the published site does not reach an existing page and anchor.
+
+    A redirect is followed. The redirect page carries the URL's own fragment across
+    (docs/hooks/redirects.py), so that fragment, or the redirect's when the URL has
+    none, must exist on the page the redirect ends at.
+    """
+    page, redirect_fragment, via = site_target(url_path, site, redirects)
+    if page is None:
+        if via:
+            return (
+                f"{target}: the redirect from {via} ends at a page that does not exist"
+            )
+        return f"{target}: no page on the site serves this URL, and no redirect does"
+    wanted = fragment or redirect_fragment
+    if wanted and wanted not in _page_ids(page, site):
+        through = f" (through the redirect from {via})" if via else ""
+        return (
+            f"{target}: {rel_path(page, site.root)}{through} has no anchor '#{wanted}'"
+        )
+    return None
+
+
 def link_problem(
     page: Page, target: str, site: Site, redirects: dict[str, str]
 ) -> str | None:
@@ -2682,28 +2900,13 @@ def link_problem(
         for form in ("blob", "tree"):
             prefix = f"{repo}/{form}/main/"
             if lowered.startswith(prefix) or lowered == prefix.rstrip("/"):
-                rel = unquote(url[len(prefix) :]).strip("/")
-                path = root / rel
-                if not path.exists():
-                    return f"{target}: {rel} does not exist in this repository"
-                if fragment and path.is_file() and path.suffix == ".md":
-                    if fragment not in _github_page_ids(
-                        str(path), path.read_text(encoding="utf-8")
-                    ):
-                        return f"{target}: {rel} has no heading or anchor '#{fragment}'"
-                return None
+                return repository_path_problem(
+                    target, unquote(url[len(prefix) :]).strip("/"), fragment, site
+                )
         if site.site_url and lowered.startswith(site.site_url.lower()):
-            url_path = url[len(site.site_url) :]
-            served = _url_path_to_page(url_path, site)
-            if served is None:
-                source = url_path.strip("/")
-                if any(
-                    _redirect_url(old, site).strip("/") == source for old in redirects
-                ):
-                    return None
-                return f"{target}: no page on the site serves this URL, and no redirect does"
-            if fragment and fragment not in _page_ids(served, site):
-                return f"{target}: {rel_path(served, root)} has no anchor '#{fragment}'"
+            return site_url_problem(
+                target, url[len(site.site_url) :], fragment, site, redirects
+            )
         return None
     if parts.scheme or parts.netloc:
         return None
@@ -2792,6 +2995,226 @@ def check_links(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding]:
             problem = link_problem(page, target, site, redirects)
             if problem:
                 findings.append(Finding("links", page.rel, number, problem))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Check: docs links in the ASH source
+# ---------------------------------------------------------------------------
+#
+# The package names docs pages too: error messages and help text point at the site
+# (an advanced-usage anchor), at a raw GitHub file (`ash get-genai-guide` fetches the
+# GenAI guide by path), or at a docs path in the repository. A docs reorganization
+# that moves those pages breaks them silently, because nothing renders them. So every
+# such reference in the package must reach a page, file and anchor that exist.
+
+#: Stands for a part of an f-string this check cannot resolve to a literal.
+DYNAMIC = "\x00"
+
+_REPO_URL_IN_TEXT = re.compile(
+    r"https://(?:raw\.githubusercontent\.com/awslabs/automated-security-helper/(?P<raw>[^\s\"'<>)\]]+)"
+    r"|github\.com/awslabs/automated-security-helper/(?:blob|tree|raw)/(?P<rest>[^\s\"'<>)\]]+))"
+)
+_DOCS_PATH_IN_TEXT = re.compile(r"(?<![\w/.:-])(docs/[\w./-]+\.md)(?:#([\w-]+))?")
+_HEADING_REFERENCE = re.compile(
+    "[\"'\u2018\u201c]([^\"'\u2019\u201d\n]{3,100})[\"'\u2019\u201d] in (docs/[\\w./-]+\\.md)"
+)
+
+
+def _docstring_ids(tree: ast.AST) -> set[int]:
+    ids = set()
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            body = getattr(node, "body", [])
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+            ):
+                ids.add(id(body[0].value))
+    return ids
+
+
+def code_strings(tree: ast.AST, constants: dict[str, str]) -> Iterator[tuple[int, str]]:
+    """(line, text) of every string the code builds, docstrings excepted.
+
+    An f-string becomes its text with each placeholder replaced by the constant it
+    names, or by DYNAMIC when it names something else. A chain of ``/`` joins with
+    string operands (``Path(...) / "docs" / "content" / "x.md"``) becomes the path its
+    string operands spell.
+    """
+    skip = _docstring_ids(tree)
+    for node in ast.walk(tree):
+        if id(node) in skip:
+            continue
+        if isinstance(node, ast.JoinedStr):
+            parts = []
+            for value in node.values:
+                for inner in ast.walk(value):
+                    skip.add(id(inner))
+                if isinstance(value, ast.Constant):
+                    parts.append(str(value.value))
+                elif isinstance(value, ast.FormattedValue) and isinstance(
+                    value.value, (ast.Name, ast.Attribute)
+                ):
+                    parts.append(constants.get(_attr_chain(value.value), DYNAMIC))
+                else:
+                    parts.append(DYNAMIC)
+            yield node.lineno, "".join(parts)
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            operands: list[ast.AST] = []
+
+            def flatten(item: ast.AST) -> None:
+                if isinstance(item, ast.BinOp) and isinstance(item.op, ast.Div):
+                    skip.add(id(item))
+                    flatten(item.left)
+                    flatten(item.right)
+                else:
+                    operands.append(item)
+
+            flatten(node)
+            segments = [
+                o.value
+                for o in operands
+                if isinstance(o, ast.Constant) and isinstance(o.value, str)
+            ]
+            for operand in operands:
+                if isinstance(operand, ast.Constant):
+                    skip.add(id(operand))
+            if "docs" in segments:
+                yield node.lineno, "/".join(segments[segments.index("docs") :])
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            yield node.lineno, node.value
+
+
+def _is_docs_path(rel: str, site: Site) -> bool:
+    """A path the docs tree owns: under docs/, which holds docs_dir and the redirect map."""
+    return rel == MKDOCS_YML or rel.startswith("docs/")
+
+
+def _docs_path_problem(
+    shown: str,
+    rel: str,
+    fragment: str,
+    site: Site,
+    redirects: dict[str, str],
+    *,
+    fetched: bool,
+) -> str | None:
+    """Why a docs path the code names does not exist in the docs root."""
+    path = site.root / rel
+    if path.is_file():
+        if fragment and path.suffix == ".md" and fragment not in _page_ids(path, site):
+            return f"{shown}: {rel} has no heading or anchor '#{fragment}'"
+        return None
+    docs_rel = rel_path(site.root / rel, site.docs_dir)
+    moved = redirects.get(docs_rel)
+    if moved:
+        how = (
+            "a fetch of the file does not follow it"
+            if fetched
+            else "point at the new page"
+        )
+        return f"{shown}: {rel} moved to {moved} (docs/redirects.yml); {how}"
+    return f"{shown}: {rel} does not exist in the docs"
+
+
+def code_reference_problems(
+    text: str, site: Site, redirects: dict[str, str]
+) -> list[str]:
+    """Why each docs URL or docs path in one string the code builds does not resolve."""
+    problems: list[str] = []
+
+    def shown(value: str) -> str:
+        return value.replace(DYNAMIC, "{...}")
+
+    dynamic_note = "is built at runtime from a value this check cannot resolve; write its path as a literal"
+    if site.site_url:
+        pattern = re.escape(site.site_url) + "(?P<path>[^\\s\"'<>)\\]]*)"
+        for match in re.finditer(pattern, text):
+            whole = match.group(0).rstrip(".,;:")
+            url, _, fragment = whole.partition("#")
+            if DYNAMIC in whole:
+                problems.append(f"{shown(whole)} {dynamic_note}")
+                continue
+            problem = site_url_problem(
+                whole, url[len(site.site_url) :], unquote(fragment), site, redirects
+            )
+            if problem:
+                problems.append(problem)
+    for match in _REPO_URL_IN_TEXT.finditer(text):
+        whole = match.group(0).rstrip(".,;:")
+        rest = (match.group("raw") or match.group("rest") or "").rstrip(".,;:")
+        segments = rest.split("/")
+        skip = (
+            3
+            if match.group("raw")
+            and segments[:2] in (["refs", "heads"], ["refs", "tags"])
+            else 1
+        )
+        rel, _, fragment = "/".join(segments[skip:]).partition("#")
+        if DYNAMIC in rel:
+            problems.append(f"{shown(whole)} {dynamic_note}")
+            continue
+        if not rel:
+            continue
+        if _is_docs_path(rel, site):
+            problem = _docs_path_problem(
+                shown(whole), rel, unquote(fragment), site, redirects, fetched=True
+            )
+        else:
+            problem = repository_path_problem(
+                shown(whole), rel, unquote(fragment), site
+            )
+        if problem:
+            problems.append(problem)
+    # A docs path after a placeholder (f"{root}/docs/content/x.md") is still a docs
+    # path: only its prefix is unknown.
+    for match in re.finditer(DYNAMIC + "/(docs/[\\w./-]+\\.md)", text):
+        problem = _docs_path_problem(
+            match.group(1), match.group(1), "", site, redirects, fetched=False
+        )
+        if problem:
+            problems.append(problem)
+    for match in _DOCS_PATH_IN_TEXT.finditer(text):
+        problem = _docs_path_problem(
+            match.group(0),
+            match.group(1),
+            match.group(2) or "",
+            site,
+            redirects,
+            fetched=False,
+        )
+        if problem:
+            problems.append(problem)
+    for match in _HEADING_REFERENCE.finditer(text):
+        heading, rel = match.group(1), match.group(2)
+        path = site.root / rel
+        if path.is_file() and path.suffix == ".md":
+            from markdown.extensions.toc import slugify
+
+            if slugify(heading, "-") not in _page_ids(path, site):
+                problems.append(f"'{heading}' in {rel}: that page has no such heading")
+    return list(dict.fromkeys(problems))
+
+
+def check_code_links(
+    root: Path = REPO_ROOT, package: Path | None = None
+) -> list[Finding]:
+    """Docs URLs, docs paths and heading references in the ASH source all resolve."""
+    site = load_site(str(root))
+    redirects, _error = load_redirects(root)
+    package = package or installed_package_dir()
+    findings: list[Finding] = []
+    for path, tree, constants in package_modules(package):
+        rel = rel_path(path, package.parent)
+        for line, text in code_strings(tree, constants):
+            if "docs/" not in text and "github" not in text:
+                continue
+            for problem in code_reference_problems(text, site, redirects):
+                findings.append(Finding("code-links", rel, line, problem))
     return findings
 
 

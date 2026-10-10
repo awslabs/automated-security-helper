@@ -145,9 +145,18 @@ set -e
 class PageRunner:
     """Runs one page's blocks in one session and returns a result per block."""
 
-    def __init__(self, page, scratch: Path, default_timeout: float | None = None):
+    def __init__(
+        self,
+        page,
+        scratch: Path,
+        default_timeout: float | None = None,
+        docs_root: Path | None = None,
+    ):
         self.checks = load_docs_checks()
         self.page = page
+        # Fixtures are docs data, so they come from the docs tree; the commands run
+        # with the ASH in this interpreter's environment, whichever tree that is.
+        self.docs_root = docs_root or REPO_ROOT
         self.scratch = scratch
         self.default_timeout = default_timeout or self.checks.DEFAULT_TIMEOUT_S
         self.session: Session | None = None
@@ -211,7 +220,7 @@ class PageRunner:
             self.session.blocked_port.close()
         root = Path(tempfile.mkdtemp(prefix="session-", dir=self.scratch))
         work = root / "project"
-        source = REPO_ROOT / self.checks.DOC_FIXTURES_DIR / fixture
+        source = self.docs_root / self.checks.DOC_FIXTURES_DIR / fixture
         shutil.copytree(source, work, ignore=shutil.ignore_patterns(".keep"))
         port = _refusing_port()
         env = self._base_env(root, port.getsockname()[1])

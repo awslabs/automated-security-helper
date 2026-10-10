@@ -125,6 +125,9 @@ _EXCLUDED_MD_DIRS = frozenset(
         # cache the cdk-nag tests extract, which holds the README of every bundled
         # npm package. The docs-example runner would otherwise run their examples.
         ".cache",
+        # syrupy's golden files. A markdown reporter snapshot is generated output, so
+        # checking it as a docs page reports the fixture's text, not the docs.
+        "__snapshots__",
     }
 )
 
@@ -939,12 +942,74 @@ def check_doc_site_build() -> list[str]:
     return [str(f) for f in _docs_checks().check_site_build(REPO_ROOT)]
 
 
+def check_doc_code_links() -> list[str]:
+    return [str(f) for f in _docs_checks().check_code_links(REPO_ROOT)]
+
+
+# ---------------------------------------------------------------------------
+# Docs from one tree, code from another
+# ---------------------------------------------------------------------------
+#
+# A docs rewrite describes code that is not on main yet, so its pages have to be
+# checked against another checkout's code. `--docs-root <tree>` reads every markdown
+# file, the nav, mkdocs.yml and the redirect map from <tree>, while everything about
+# the code comes from the ASH this interpreter imports: run it as
+#
+#     <code-tree>/.venv/bin/python <docs-tree>/scripts/verify_docs_freshness.py \
+#         --docs-root <docs-tree>
+#
+# The path constants at the top of this file are rebased here rather than rewritten,
+# so they stay the single statement of where each file is.
+
+#: Constants naming a file the docs tree owns, and ones naming a package source file.
+_DOCS_PATHS = (
+    "README_MD",
+    "README_TEMPLATE_MD",
+    "DOCS_DIR",
+    "CLI_REFERENCE_MD",
+    "OUTPUT_FORMATS_MD",
+    "DOCS_INDEX_MD",
+)
+_CODE_PATHS = ("CLI_SCAN_PY", "MCP_SERVER_PY")
+
+
+def _use_trees(docs_root: Path) -> None:
+    """Read docs from docs_root and code from the installed ASH, for every check."""
+    names = globals()
+    old_root = names["REPO_ROOT"]
+    docs_root = docs_root.resolve()
+    package = _docs_checks().installed_package_dir()
+    code = _docs_checks().code_root(docs_root)
+    for name in _DOCS_PATHS:
+        names[name] = docs_root / names[name].relative_to(old_root)
+    for name in _CODE_PATHS:
+        names[name] = package / names[name].relative_to(old_root / package.name)
+    names["PYPROJECT_TOML"] = code / "pyproject.toml"
+    names["REPO_ROOT"] = docs_root
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
+    parser.add_argument(
+        "--docs-root",
+        type=Path,
+        help="check the docs in this checkout against the installed ASH's code "
+        "(default: the checkout this script is in)",
+    )
+    args = parser.parse_args(argv)
+    if args.docs_root is not None:
+        _use_trees(args.docs_root)
+    print(f"ASH package: {_docs_checks().installed_package_dir()}")
+    print(f"Docs root:   {REPO_ROOT}")
+    print()
+
     checks = [
         ("CLI flags in docs match source", check_cli_flags),
         ("Reporter list in docs matches code", check_reporters),
@@ -962,6 +1027,7 @@ def main() -> int:
         ("Links and anchors in docs resolve", check_doc_links),
         ("Docs navigation and redirects resolve", check_doc_nav),
         ("Docs site build is strict and offline", check_doc_site_build),
+        ("Docs links in the ASH source resolve", check_doc_code_links),
     ]
 
     all_failures: list[tuple[str, list[str]]] = []

@@ -269,3 +269,16 @@ assert time.monotonic() - started < 5, "the network failed slowly"
 """,
     )
     assert all(r.ok for r in results), runner.failure_report(results)
+
+
+def test_fixtures_come_from_the_docs_root(tmp_path):
+    """With --docs-root, a page starts in that tree's fixture, not this checkout's."""
+    docs_root = tmp_path / "docs-tree"
+    fixture = docs_root / checks.DOC_FIXTURES_DIR / checks.DEFAULT_FIXTURE
+    fixture.mkdir(parents=True)
+    (fixture / "only-in-the-docs-tree.txt").write_text("x\n", encoding="utf-8")
+    scratch = tmp_path / "sessions"
+    scratch.mkdir()
+    page = _page(tmp_path, f"{FENCE}bash\ntest -f only-in-the-docs-tree.txt\n{FENCE}\n")
+    results = runner.PageRunner(page, scratch, docs_root=docs_root).run()
+    assert all(r.ok for r in results), runner.failure_report(results)

@@ -89,6 +89,7 @@ NON_VACUITY_COVERAGE = {
     "Links and anchors in docs resolve": "test_docs_checks_can_fail.py::test_links_check_can_fail",
     "Docs navigation and redirects resolve": "test_docs_checks_can_fail.py::test_nav_check_can_fail",
     "Docs site build is strict and offline": "test_docs_checks_can_fail.py::test_site_build_check_can_fail",
+    "Docs links in the ASH source resolve": "test_docs_checks_can_fail.py::test_code_links_check_can_fail",
 }
 
 
@@ -588,6 +589,8 @@ def test_the_md_corpus_reaches_past_the_docs_directory(gate):
     # Build output and caches must stay out: mkdocs' site/ is a rendered copy of
     # docs/, so including it would double every finding.
     assert not any(f.startswith(("site/", ".venv/", "node_modules/")) for f in files)
+    # syrupy's markdown golden files are reporter output, not docs.
+    assert not any("/__snapshots__/" in f for f in files)
 
 
 def test_the_md_corpus_includes_the_templates_docs_are_generated_from(gate):

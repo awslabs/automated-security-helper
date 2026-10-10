@@ -541,6 +541,16 @@ ASH_CONSTANT_IN_CODE = os.environ.get("ASH_REAL")
 |----------|---------|
 | `OCI_RUNNER` | the container runtime |
 | `ASH_REAL` | something |
+
+A config may read a variable of its own. ASH resolves `${{ASH_FROM_CONFIG}}` itself:
+
+{FENCE}bash
+export ASH_FROM_CONFIG=my-project
+{FENCE}
+
+{FENCE}yaml
+project_name: ${{ASH_FROM_CONFIG}}
+{FENCE}
 """
 
 ENV_DEFECTS = [
@@ -559,8 +569,14 @@ ENV_DEFECTS = [
     ),
     (
         "config block",
-        f"{FENCE}yaml\nproject_name: !ENV ${{ASH_INVENTED}}\n{FENCE}\n",
+        f"{FENCE}yaml\n# set ASH_INVENTED before the scan\nproject_name: x\n{FENCE}\n",
         "ASH_INVENTED",
+        2,
+    ),
+    (
+        "read through another page's config",
+        f"{FENCE}bash\nexport ASH_FROM_CONFIG=x\n{FENCE}\n",
+        "ASH_FROM_CONFIG",
         2,
     ),
     (
@@ -599,14 +615,20 @@ def test_env_read_set_resolves_constant_keys():
 
 
 def test_env_read_set_prefers_the_generator(tmp_path):
-    """When scripts/generate_env_var_reference.py exists, its read_env_names() is the set."""
+    """When scripts/generate_env_var_reference.py exists, its read_env_names() is the set.
+
+    It is handed the code tree to read, which with separate docs and code trees is not
+    the tree the generator file sits in.
+    """
     _write(
         tmp_path,
         dc.ENV_VAR_GENERATOR,
-        "def read_env_names():\n    return {'ASH_FROM_GENERATOR'}, ['x.py:1 [getenv]']\n",
+        "def read_env_names(repo_root=None):\n"
+        "    return {'ASH_FROM_GENERATOR', str(repo_root)}, ['x.py:1 [getenv]']\n",
     )
     read = dc.load_env_read_set(str(tmp_path))
-    assert read.names == {"ASH_FROM_GENERATOR"} and read.source == dc.ENV_VAR_GENERATOR
+    assert read.names == {"ASH_FROM_GENERATOR", str(tmp_path)}
+    assert read.source.startswith(dc.ENV_VAR_GENERATOR)
 
 
 # ---------------------------------------------------------------------------
@@ -1165,6 +1187,203 @@ def test_the_real_mkdocs_config_is_strict_and_offline():
 
 
 # ---------------------------------------------------------------------------
+# Docs links in the ASH source
+# ---------------------------------------------------------------------------
+
+SITE_REDIRECTS = "redirects:\n  old-b.md: b.md\n  moved.md: sub/c.md\n"
+
+CLEAN_CODE = """\
+from pathlib import Path
+
+SITE = "https://example.github.io/project"
+PAGE = f"{SITE}/b/#section-two"
+THROUGH_A_REDIRECT = "https://example.github.io/project/old-b/#custom-anchor"
+SCHEMA = (
+    "https://raw.githubusercontent.com/awslabs/automated-security-helper/"
+    "refs/heads/main/docs/content/b.md"
+)
+README = "https://github.com/awslabs/automated-security-helper/blob/main/README.md#getting-started"
+HELP = "See 'Section two' in docs/content/b.md, and docs/content/sub/c.md."
+
+
+def guide(branch):
+    \"\"\"A docstring may name docs/content/gone.md; only strings the code uses count.\"\"\"
+    local = Path(__file__).parent / "docs" / "content" / "b.md"
+    remote = f"https://raw.githubusercontent.com/awslabs/automated-security-helper/{branch}/docs/content/b.md"
+    return local, remote
+"""
+
+CODE_LINK_DEFECTS = [
+    (
+        "site page",
+        'URL = "https://example.github.io/project/nowhere/"\n',
+        "no page on the site serves",
+    ),
+    (
+        "site URL built from a constant",
+        'SITE = "https://example.github.io/project"\nURL = f"{SITE}/nowhere/"\n',
+        "https://example.github.io/project/nowhere/: no page on the site serves",
+    ),
+    (
+        "docs path after a runtime prefix",
+        'def guide(root):\n    return f"{root}/docs/content/gone.md"\n',
+        "docs/content/gone.md does not exist in the docs",
+    ),
+    (
+        "site anchor",
+        'URL = "https://example.github.io/project/b/#no-such-part"\n',
+        "has no anchor '#no-such-part'",
+    ),
+    (
+        "anchor through a redirect",
+        'URL = "https://example.github.io/project/old-b/#no-such-part"\n',
+        "(through the redirect from old-b.md) has no anchor '#no-such-part'",
+    ),
+    (
+        "raw docs file",
+        'URL = "https://raw.githubusercontent.com/awslabs/automated-security-helper/main/docs/content/gone.md"\n',
+        "docs/content/gone.md does not exist in the docs",
+    ),
+    (
+        "raw fetch of a moved page",
+        'URL = "https://raw.githubusercontent.com/awslabs/automated-security-helper/main/docs/content/moved.md"\n',
+        "a fetch of the file does not follow it",
+    ),
+    (
+        "repository file",
+        'URL = "https://github.com/awslabs/automated-security-helper/blob/main/NOPE.py"\n',
+        "NOPE.py does not exist in this repository",
+    ),
+    (
+        "dynamic path",
+        'def url(page):\n    return f"https://example.github.io/project/{page}/"\n',
+        "is built at runtime",
+    ),
+    (
+        "path chain",
+        'from pathlib import Path\nGUIDE = Path(__file__).parent / "docs" / "content" / "gone.md"\n',
+        "docs/content/gone.md does not exist in the docs",
+    ),
+    (
+        "bare path",
+        'HELP = "See docs/content/gone.md for more."\n',
+        "docs/content/gone.md does not exist",
+    ),
+    (
+        "heading",
+        "HELP = \"See 'No such heading' in docs/content/b.md.\"\n",
+        "that page has no such heading",
+    ),
+]
+
+
+def _package(tmp_path: Path, source: str) -> Path:
+    package = tmp_path / "pkg" / "automated_security_helper"
+    _write(package, "__init__.py", "")
+    _write(package, "module.py", source)
+    return package
+
+
+def test_code_links_check_passes_every_valid_form(tmp_path):
+    root = _site(tmp_path, CLEAN_PAGES, redirects=SITE_REDIRECTS)
+    assert dc.check_code_links(root, _package(tmp_path, CLEAN_CODE)) == []
+
+
+@pytest.mark.parametrize(
+    "case,source,expected", CODE_LINK_DEFECTS, ids=[c[0] for c in CODE_LINK_DEFECTS]
+)
+def test_code_links_check_can_fail(tmp_path, case, source, expected):
+    root = _site(tmp_path, CLEAN_PAGES, redirects=SITE_REDIRECTS)
+    findings = dc.check_code_links(root, _package(tmp_path, source))
+    _assert_reports(findings, expected)
+    assert all(f.path == "automated_security_helper/module.py" for f in findings)
+
+
+def test_a_docs_link_through_a_redirect_needs_the_anchor_on_the_new_page(tmp_path):
+    """The same rule for links in the docs: the redirect carries the fragment across."""
+    pages = {
+        **CLEAN_PAGES,
+        "docs/content/index.md": "# Home\n\n[x](https://example.github.io/project/old-b/#nope)\n",
+    }
+    root = _site(tmp_path, pages, redirects=SITE_REDIRECTS)
+    _assert_reports(
+        dc.check_links([root / "docs/content/index.md"], root),
+        "(through the redirect from old-b.md) has no anchor '#nope'",
+        3,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Docs from one tree, code from another
+# ---------------------------------------------------------------------------
+
+
+def test_the_code_tree_is_the_installed_package_checkout():
+    package = dc.installed_package_dir()
+    import automated_security_helper
+
+    assert package == Path(automated_security_helper.__file__).resolve().parent
+    assert dc.code_root(Path("/nonexistent-docs-root")) == package.parent
+
+
+def test_use_trees_rebases_docs_paths_onto_the_docs_root(tmp_path):
+    gate = _load("_ash_docs_gate_rebased", GATE_PATH)
+    gate._use_trees(tmp_path)
+    package = dc.installed_package_dir()
+    assert gate.REPO_ROOT == tmp_path.resolve()
+    assert (
+        gate.CLI_REFERENCE_MD
+        == tmp_path.resolve() / "docs/content/docs/cli-reference.md"
+    )
+    assert gate.README_TEMPLATE_MD == tmp_path.resolve() / "README.md.template"
+    assert gate.CLI_SCAN_PY == package / "cli" / "scan.py"
+    assert gate.PYPROJECT_TOML == package.parent / "pyproject.toml"
+
+
+def test_the_gate_checks_the_docs_root_it_is_given(tmp_path):
+    """--docs-root: markdown from that tree, and the header says which trees were used."""
+    import subprocess
+
+    root = _site(tmp_path, CLEAN_PAGES)
+    _write(
+        root,
+        "docs/content/index.md",
+        f"# Home\n\n<!-- doctest: execute -->\n{FENCE}bash\nash --bogus\n{FENCE}\n",
+    )
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    result = subprocess.run(
+        [sys.executable, str(GATE_PATH), "--docs-root", str(root)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    # The package a fresh interpreter imports, which is what the gate process sees; in
+    # this process the current directory may come first on the import path.
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            (
+                "import importlib.util, pathlib; s = importlib.util.find_spec("
+                "'automated_security_helper'); print(pathlib.Path("
+                "next(iter(s.submodule_search_locations))).resolve())"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    lines = result.stdout.splitlines()
+    assert lines[0] == f"ASH package: {probe.stdout.strip()}", result.stdout[:500]
+    assert lines[1] == f"Docs root:   {root.resolve()}"
+    assert "docs/content/index.md:3: [markers] unknown mode 'execute'" in result.stdout
+    assert "'ash --bogus': --bogus is not an option of 'ash'" in result.stdout
+    assert result.returncode == 1
+
+
+# ---------------------------------------------------------------------------
 # The redirect hook, in a real (tiny) mkdocs build
 # ---------------------------------------------------------------------------
 
@@ -1205,6 +1424,8 @@ def test_the_redirect_hook_writes_a_page_at_the_old_url(tmp_path):
     )
     page = (site / "old" / "page" / "index.html").read_text(encoding="utf-8")
     assert 'content="0; url=../../new/place/#part"' in page
+    # The fragment the reader followed wins over the redirect's own.
+    assert 'location.replace("../../new/place/" + (location.hash || "#part"));' in page
     assert (
         '<link rel="canonical" href="https://example.github.io/project/new/place/#part">'
         in page
@@ -1247,6 +1468,7 @@ def test_every_check_in_the_module_is_registered_in_the_gate():
         and isinstance(node.func, ast.Attribute)
         and isinstance(node.func.value, ast.Call)
         and getattr(node.func.value.func, "id", None) == "_docs_checks"
+        and node.func.attr.startswith("check_")
     }
     assert module_checks == called, (
         f"in docs_checks.py but not called by the gate: {sorted(module_checks - called)}; "

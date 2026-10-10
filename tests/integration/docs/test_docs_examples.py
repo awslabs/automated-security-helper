@@ -15,6 +15,12 @@ they render, which has the same blocks with the version filled in.
 
 Here rather than in the unit suite because the examples run real commands, ``ash``
 among them, and that belongs in the Linux integration-test job, not on every unit leg.
+
+To run a docs tree's examples against another tree's code, run this directory with
+that tree's interpreter and name the docs tree (conftest.py adds the option):
+
+    <code-tree>/.venv/bin/pytest <docs-tree>/tests/integration/docs \
+        --run-integration --docs-root <docs-tree>
 """
 
 from __future__ import annotations
@@ -47,30 +53,42 @@ gate = _load(
 checks = runner.load_docs_checks()
 
 
-def _pages_with_examples():
+def docs_root_of(config) -> Path:
+    """The docs tree: --docs-root (see conftest.py), or the checkout this file is in."""
+    value = config.getoption("--docs-root", default=None)
+    return Path(value).resolve() if value else REPO_ROOT
+
+
+def pages_with_examples(docs_root: Path) -> list:
+    if docs_root != gate.REPO_ROOT:
+        gate._use_trees(docs_root)
     pages = []
     for path in gate.collect_md_files():
         if path.suffix != ".md":
             continue
-        page = checks.parse_page(path, REPO_ROOT)
+        page = checks.parse_page(path, docs_root)
         if runner.runnable_blocks(page):
             pages.append(page)
     return pages
 
 
-PAGES = _pages_with_examples()
+def pytest_generate_tests(metafunc):
+    if "page" in metafunc.fixturenames:
+        pages = pages_with_examples(docs_root_of(metafunc.config))
+        metafunc.parametrize("page", pages, ids=[page.rel for page in pages])
 
 
-def test_the_docs_have_runnable_examples():
+def test_the_docs_have_runnable_examples(request):
     """No pages would mean no parametrized tests below, which passes by running nothing."""
-    assert PAGES, (
+    assert pages_with_examples(docs_root_of(request.config)), (
         "no docs page has a runnable block; the parser or the corpus is broken"
     )
 
 
-@pytest.mark.parametrize("page", PAGES, ids=[page.rel for page in PAGES])
-def test_doc_examples_run(page, tmp_path):
-    results = runner.PageRunner(page, tmp_path).run()
+def test_doc_examples_run(page, tmp_path, request):
+    results = runner.PageRunner(
+        page, tmp_path, docs_root=docs_root_of(request.config)
+    ).run()
     assert results, f"{page.rel} was selected for a runnable block but none ran"
     if not all(result.ok for result in results):
         pytest.fail(runner.failure_report(results), pytrace=False)
