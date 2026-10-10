@@ -21,203 +21,94 @@ tables had no generator at all:
 
 * ``docs/content/docs/cli-reference.md`` documented five environment variables
   that do not exist anywhere in ``automated_security_helper/`` -- ``ASH_NO_COLOR``,
-  ``ASH_QUIET``, and three ``ASH_CONTAINER_*`` names -- and named a sixth,
-  ``ASH_OCI_RUNNER``, that exists only in a PowerShell helper and is not the
-  variable the CLI reads (that is ``OCI_RUNNER``). These were invented rather
+  ``ASH_QUIET``, and three ``ASH_CONTAINER_*`` names. These were invented rather
   than drifted, which is why no comparison against a previous version would have
-  found them; only a comparison against the code does.
+  found them; only a comparison against the code does. The environment-variable
+  reference is now generated from the code that reads each variable, and the docs
+  doctest uses the same collector to refuse a name nothing reads.
 
 WHAT EACH TEST PINS, AND WHAT IT DOES NOT
 -----------------------------------------
-``test_cli_reference_generated_is_current`` re-runs the CLI doc generator in
-process and diffs. It pins the whole rendered document, so a flag renamed, an
-alias added, an envvar changed, or a command added all surface here. It does not
-check that the document is *good*, only that it is current.
+``test_reference_page_is_current`` runs each reference generator's ``--check``
+in a fresh interpreter. It pins the whole rendered page, so a flag renamed, a
+config key added, a variable read somewhere new or a scanner registered all
+surface here. It does not check that a page is *good*, only that it is current.
+A fresh interpreter rather than an in-process call because the plugin registry
+is process-global (another test importing a plugin package changes what a
+generator would see) and because each generator removes ``ASH_*`` variables
+before importing ASH, which it can only do before the first import.
 
-``test_reporter_docs_are_current`` delegates to the reporter generator's own
-``--check`` mode rather than reimplementing its rendering, so the two cannot
-disagree about what "current" means.
+``test_reporter_docs_are_current`` and ``test_mcp_tool_reference_is_current``
+delegate to those generators' ``--check`` for the files they own outside
+``docs/content/reference/``.
 
-``test_documented_env_vars_exist`` compares the environment-variable column of
-the hand-written CLI reference against every env-var name reachable in the
-package. The reachable set is built by walking the AST for every expression that
-reaches an environment lookup, NOT by grepping for names: a name assembled at
-runtime from fragments would not appear as a literal anywhere, and a grep-based
-check would call it absent. Any non-literal key expression is surfaced as such,
-so the test can refuse to make an absence claim it cannot support.
+The ``read_env_names`` tests prove the collector behind the environment-variable
+page can find each kind of read, and can refuse each kind of non-read, on a
+planted tree, so the page being "current" means something.
+
+Paths live in the constants below and in each generator's own constants. The
+pages these tests used to read, ``docs/content/docs/cli-reference-generated.md``
+and the hand-written ``docs/content/docs/cli-reference.md``, are no longer read by
+any test.
 """
 
 from __future__ import annotations
 
-import ast
+import os
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PACKAGE_ROOT = REPO_ROOT / "automated_security_helper"
 SCRIPTS = REPO_ROOT / "scripts"
-GENERATED_CLI_REFERENCE = REPO_ROOT / "docs/content/docs/cli-reference-generated.md"
-HAND_WRITTEN_CLI_REFERENCE = REPO_ROOT / "docs/content/docs/cli-reference.md"
+REFERENCE_DIR = REPO_ROOT / "docs" / "content" / "reference"
 
-# Environment objects an attribute chain may resolve to for a lookup to count.
-_ENV_OBJECTS = {"os.environ", "environ", "os.environb"}
-_GETENV = {"os.getenv", "getenv"}
-_ENV_METHODS = {"get", "setdefault", "pop", "__contains__"}
-
-
-def _attr_chain(node: ast.AST) -> str:
-    parts: list[str] = []
-    while isinstance(node, ast.Attribute):
-        parts.append(node.attr)
-        node = node.value
-    if isinstance(node, ast.Name):
-        parts.append(node.id)
-    return ".".join(reversed(parts))
+#: Every generated reference page: generator script -> the page it writes.
+REFERENCE_PAGES = {
+    "generate_cli_docs.py": "cli.md",
+    "generate_env_var_reference.py": "environment-variables.md",
+}
 
 
-def _collect_env_names() -> tuple[set[str], list[str]]:
-    """Return (literal env names reachable in the package, dynamic key sites).
-
-    The second element is the honesty valve. Every key expression that is not a
-    plain string literal lands there, and a caller that wants to assert a name is
-    absent must account for those sites rather than assume the literal set is
-    exhaustive.
-    """
-    literals: set[str] = set()
-    dynamic: list[str] = []
-
-    for path in sorted(PACKAGE_ROOT.rglob("*.py")):
-        tree = ast.parse(
-            path.read_text(encoding="utf-8", errors="replace"), filename=str(path)
-        )
-        rel = path.relative_to(REPO_ROOT)
-
-        def record(key_node: ast.AST, shape: str, lineno: int) -> None:
-            if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
-                literals.add(key_node.value)
-            else:
-                dynamic.append(f"{rel}:{lineno} [{shape}]")
-
-        for node in ast.walk(tree):
-            lineno = getattr(node, "lineno", 0)
-
-            if (
-                isinstance(node, ast.Subscript)
-                and _attr_chain(node.value) in _ENV_OBJECTS
-            ):
-                record(node.slice, "subscript", lineno)
-
-            if isinstance(node, ast.Compare):
-                for op, comp in zip(node.ops, node.comparators):
-                    if (
-                        isinstance(op, (ast.In, ast.NotIn))
-                        and _attr_chain(comp) in _ENV_OBJECTS
-                    ):
-                        record(node.left, "in-environ", lineno)
-
-            if isinstance(node, ast.Call):
-                if _attr_chain(node.func) in _GETENV and node.args:
-                    record(node.args[0], "getenv", lineno)
-                if (
-                    isinstance(node.func, ast.Attribute)
-                    and node.func.attr in _ENV_METHODS
-                    and _attr_chain(node.func.value) in _ENV_OBJECTS
-                    and node.args
-                ):
-                    record(node.args[0], f"environ.{node.func.attr}", lineno)
-                for kw in node.keywords:
-                    if kw.arg != "envvar":
-                        continue
-                    value = kw.value
-                    if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                        literals.add(value.value)
-                    elif isinstance(value, (ast.List, ast.Tuple)):
-                        for element in value.elts:
-                            record(element, "envvar-list", lineno)
-                    else:
-                        record(value, "envvar", lineno)
-
-    return literals, dynamic
+def _run_generator(script: str, *args: str) -> subprocess.CompletedProcess:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("ASH_")}
+    return subprocess.run(
+        [sys.executable, str(SCRIPTS / script), *args],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
 
 
-def _documented_env_vars() -> set[str]:
-    """Env var names appearing in an 'Environment Variable' column of the CLI reference.
-
-    Scoped to that column on purpose. The page also mentions names inside shell
-    examples and as output filenames (``ash get-genai-guide -o
-    ASH_INTEGRATION_GUIDE.md``), and treating those as documented variables would
-    make this test fail on a filename.
-    """
-    names: set[str] = set()
-    lines = HAND_WRITTEN_CLI_REFERENCE.read_text(encoding="utf-8").splitlines()
-
-    env_column_index: int | None = None
-    for line in lines:
-        if not line.startswith("|"):
-            env_column_index = None
-            continue
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        lowered = [c.lower() for c in cells]
-        if "environment variable" in lowered:
-            env_column_index = lowered.index("environment variable")
-            continue
-        if "variable" in lowered and "description" in lowered:
-            # The "Additional Environment Variables" table names the column
-            # simply "Variable".
-            env_column_index = lowered.index("variable")
-            continue
-        if env_column_index is None or env_column_index >= len(cells):
-            continue
-        cell = cells[env_column_index]
-        if set(cell) <= {"-", " "}:
-            continue
-        for token in cell.replace(",", " ").split():
-            token = token.strip("`")
-            if token.isupper() and "_" in token:
-                names.add(token)
-    return names
+@pytest.mark.parametrize("script", sorted(REFERENCE_PAGES))
+def test_reference_page_is_current(script: str) -> None:
+    """The committed reference page equals what its generator emits now."""
+    page = REFERENCE_DIR / REFERENCE_PAGES[script]
+    assert page.is_file(), f"{page.relative_to(REPO_ROOT)} is missing"
+    result = _run_generator(script, "--check")
+    assert result.returncode == 0, (
+        f"{page.relative_to(REPO_ROOT)} is stale.\n"
+        f"Regenerate with: uv run python scripts/{script}\n\n"
+        + result.stdout
+        + result.stderr
+    )
 
 
-def test_cli_reference_generated_is_current() -> None:
-    """The committed generated CLI reference equals what the generator emits now."""
-    sys.path.insert(0, str(REPO_ROOT))
-    try:
-        from scripts.generate_cli_docs import generate_cli_docs
-    finally:
-        sys.path.pop(0)
-
-    expected = generate_cli_docs()
-    actual = GENERATED_CLI_REFERENCE.read_text(encoding="utf-8")
-
-    if expected != actual:
-        import difflib
-
-        diff = "".join(
-            difflib.unified_diff(
-                actual.splitlines(keepends=True),
-                expected.splitlines(keepends=True),
-                fromfile="cli-reference-generated.md (committed)",
-                tofile="cli-reference-generated.md (regenerated)",
-                n=2,
-            )
-        )
-        pytest.fail(
-            "docs/content/docs/cli-reference-generated.md is stale.\n"
-            "Regenerate with: uv run python scripts/generate_cli_docs.py\n\n" + diff
-        )
+@pytest.mark.parametrize("script", sorted(REFERENCE_PAGES))
+def test_reference_page_names_its_generator(script: str) -> None:
+    """Each page's banner names the script that writes it and how to rerun it."""
+    head = (REFERENCE_DIR / REFERENCE_PAGES[script]).read_text(encoding="utf-8")[:600]
+    assert f"Generated by scripts/{script}" in head
+    assert f"uv run python scripts/{script}" in head
 
 
 def test_reporter_docs_are_current() -> None:
     """The reporter inventory tables match the registered reporter set."""
-    result = subprocess.run(
-        [sys.executable, str(SCRIPTS / "generate_reporter_docs.py"), "--check"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
+    result = _run_generator("generate_reporter_docs.py", "--check")
     assert result.returncode == 0, (
         "Reporter documentation is stale relative to the registered reporter set.\n"
         "Regenerate with: uv run python scripts/generate_reporter_docs.py\n\n"
@@ -235,12 +126,7 @@ def test_mcp_tool_reference_is_current() -> None:
     says nothing about whether the source matches ``mcp_server.py``. It was
     passing while ``_base/`` was 13 tools and 3 resources behind.
     """
-    result = subprocess.run(
-        [sys.executable, str(SCRIPTS / "generate_mcp_tool_reference.py"), "--check"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
+    result = _run_generator("generate_mcp_tool_reference.py", "--check")
     assert result.returncode == 0, (
         "The MCP tool reference is stale relative to the registered tool set.\n"
         "Regenerate with: uv run python scripts/generate_mcp_tool_reference.py\n"
@@ -251,28 +137,174 @@ def test_mcp_tool_reference_is_current() -> None:
     )
 
 
-def test_documented_env_vars_exist() -> None:
-    """Every env var the CLI reference tabulates is reachable in the package.
+# ---------------------------------------------------------------------------
+# The environment-variable collector
+# ---------------------------------------------------------------------------
 
-    This is the gate that the five invented variables would have failed.
-    """
-    reachable, dynamic = _collect_env_names()
-    documented = _documented_env_vars()
 
-    assert documented, (
-        "Parsed no environment variables out of the CLI reference's tables. The "
-        "column heading probably changed; fix the parser rather than the assertion, "
-        "because an empty documented set makes this test vacuous."
+def _env_module():
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import generate_env_var_reference
+    finally:
+        sys.path.remove(str(SCRIPTS))
+    return generate_env_var_reference
+
+
+def _plant(root: Path, files: dict[str, str]) -> Path:
+    for rel, text in files.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(textwrap.dedent(text).lstrip("\n"), encoding="utf-8")
+    return root
+
+
+def test_read_env_names_finds_every_read_shape(tmp_path: Path) -> None:
+    """Each kind of read is found, on a tree whose every read is known."""
+    tree = _plant(
+        tmp_path,
+        {
+            "automated_security_helper/__init__.py": "",
+            "automated_security_helper/names.py": 'IMPORTED_ENV = "PLANT_IMPORTED"\n',
+            "automated_security_helper/reads.py": """
+                import os
+                from os import environ, getenv
+                from automated_security_helper.names import IMPORTED_ENV
+
+                LOCAL_ENV = "PLANT_CONSTANT"
+                CI_NAMES = ("PLANT_LOOP_A", "PLANT_LOOP_B")
+                PAIRS = (("PLANT_PAIR", None),)
+
+                a = os.environ["PLANT_SUBSCRIPT"]
+                b = os.environ.get("PLANT_GET", "fallback")
+                c = environ.setdefault("PLANT_SETDEFAULT", "x")
+                d = "PLANT_IN" in os.environ
+                e = getenv("PLANT_GETENV")
+                f = os.environ.get(LOCAL_ENV)
+                g = os.environ.get(IMPORTED_ENV)
+                h = any(n in os.environ for n in CI_NAMES)
+
+
+                def flag(name):
+                    return os.environ.get(name, "")
+
+
+                flag("PLANT_PARAM")
+
+                for key, _default in PAIRS:
+                    os.environ.get(key)
+
+
+                def option(**kw):
+                    return kw
+
+
+                option(envvar="PLANT_ENVVAR")
+                option(envvar=["PLANT_ENVVAR_LIST"])
+                os.environ.get(f"PLANT_{a}")
+            """,
+            "ash": """
+                #!/bin/bash
+                LOCAL_ONLY="x"
+                echo "$LOCAL_ONLY"
+                RUNNER="${PLANT_SHELL_DEFAULT:-docker}"
+                echo "$PLANT_SHELL_BARE"
+            """,
+            "utils/helper.ps1": """
+                $runner = $env:PLANT_PS_READ
+                $env:PLANT_PS_WRITE_ONLY = "x"
+            """,
+            "Dockerfile": "FROM scratch AS final\nENV PLANT_GET=from-image\n",
+        },
+    )
+    names, dynamic = _env_module().read_env_names(tree)
+
+    expected = {
+        "PLANT_SUBSCRIPT",
+        "PLANT_GET",
+        "PLANT_SETDEFAULT",
+        "PLANT_IN",
+        "PLANT_GETENV",
+        "PLANT_CONSTANT",
+        "PLANT_IMPORTED",
+        "PLANT_LOOP_A",
+        "PLANT_LOOP_B",
+        "PLANT_PARAM",
+        "PLANT_PAIR",
+        "PLANT_ENVVAR",
+        "PLANT_ENVVAR_LIST",
+        "PLANT_SHELL_DEFAULT",
+        "PLANT_SHELL_BARE",
+        "PLANT_PS_READ",
+    }
+    assert expected <= names, f"not found: {sorted(expected - names)}"
+    assert [d for d in dynamic if "reads.py" in d and "PLANT_{a}" in d], (
+        f"the f-string key was not reported as a dynamic site: {dynamic}"
     )
 
-    missing = sorted(documented - reachable)
-    if missing:
-        pytest.fail(
-            "docs/content/docs/cli-reference.md documents environment variables that "
-            f"no code in automated_security_helper/ reads: {missing}.\n"
-            "Either the name is wrong (ASH_OCI_RUNNER was such a case; the CLI reads "
-            "OCI_RUNNER) or the variable does not exist and the row should go.\n"
-            "Before deleting a row, check these non-literal lookup sites, which this "
-            "test cannot resolve to a name and which could assemble one at runtime:\n  "
-            + "\n  ".join(dynamic)
-        )
+    scan = _env_module().collect_env_reads(tree)
+    assert scan.image_env["PLANT_GET"] == [("final", "from-image", 2)]
+    defaults = {r.name: r.default for r in scan.reads}
+    assert defaults["PLANT_GET"] == "fallback"
+    assert defaults["PLANT_SHELL_DEFAULT"] == "docker"
+
+
+def test_read_env_names_refuses_what_is_not_a_read(tmp_path: Path) -> None:
+    """Writes, comments, shell locals and help text do not count as reads."""
+    tree = _plant(
+        tmp_path,
+        {
+            "automated_security_helper/__init__.py": "",
+            "automated_security_helper/writes.py": """
+                import os
+
+                # PLANT_COMMENT is mentioned here and never read.
+                os.environ["PLANT_WRITE"] = "1"
+                del os.environ["PLANT_WRITE"]
+                text = "PLANT_STRING is only a string"
+            """,
+            "ash": """
+                #!/bin/bash
+                # Set $PLANT_SH_COMMENT before running.
+                SCRIPT_SET="x"
+                echo "${SCRIPT_SET}"
+                SCRIPT_SET_FIRST="a"
+                echo "${SCRIPT_SET_FIRST:-unused}"
+                lower_local="y"
+                echo "$lower_local $undefined_lower"
+            """,
+            "utils/helper.ps1": """
+                <#
+                .DESCRIPTION
+                Defaults to $env:PLANT_PS_HELP when set.
+                #>
+                # $env:PLANT_PS_COMMENT
+                $env:PLANT_PS_WRITE = "x"
+            """,
+            "Dockerfile": "FROM scratch\nENV PLANT_IMAGE_ONLY=1\n",
+        },
+    )
+    names, _dynamic = _env_module().read_env_names(tree)
+    planted = {n for n in names if n.startswith(("PLANT_", "SCRIPT_"))}
+    assert planted == set(), f"counted as reads: {sorted(planted)}"
+    assert "lower_local" not in names and "undefined_lower" not in names
+    assert _env_module().collect_env_reads(tree).image_env == {}
+
+
+def test_read_env_names_covers_this_tree() -> None:
+    """On the real checkout the walk reaches the package and the entry scripts.
+
+    One name per source: a CLI ``envvar`` (ASH_CONFIG), a direct
+    ``os.environ.get`` (ASH_DEFAULT_SEVERITY_LEVEL), the ``ash`` shell script
+    (OCI_RUNNER_WRAPPER) and the PowerShell helper (ASH_OCI_RUNNER, which only
+    that helper reads).
+    """
+    names, dynamic = _env_module().read_env_names()
+    for name in (
+        "ASH_CONFIG",
+        "ASH_DEFAULT_SEVERITY_LEVEL",
+        "OCI_RUNNER_WRAPPER",
+        "ASH_OCI_RUNNER",
+    ):
+        assert name in names, f"{name} not found; dynamic sites: {dynamic}"
+    assert all(isinstance(site, str) and ":" in site for site in dynamic)

@@ -106,12 +106,17 @@ ZERO_SHA = "0" * 40
 # * automated_security_helper/schemas/*.json: the published config and results JSON
 #   schemas. Written whole by `python -m automated_security_helper.schemas.generate_schemas`;
 #   the lint job regenerates them and fails on any difference.
-# * docs/content/docs/cli-reference-generated.md: written whole by
-#   scripts/generate_cli_docs.py; tests/unit/test_generated_docs_freshness.py regenerates
-#   and diffs it.
+# * docs/content/docs/cli-reference-generated.md: the CLI reference's previous location.
+#   scripts/generate_cli_docs.py now writes docs/content/reference/cli.md instead and
+#   nothing regenerates this file; it stays listed until the docs rewrite deletes it, so
+#   the deletion carries a trailer like any other golden change.
 # * ash-agent-plugins/.../transpiler/_base/references/tool-reference.md: written whole by
 #   scripts/generate_mcp_tool_reference.py (its editorial notes live in that script, not
 #   in the file); the same freshness test runs its --check.
+# * docs/content/reference/<page>.md for each generated reference page: written whole by
+#   the scripts/generate_*.py named in the page's banner; the same freshness test runs
+#   each one's --check. Listed by name rather than as reference/*.md, because a
+#   hand-written page added to that directory later is not golden.
 #
 # Out, deliberately:
 # * The per-backend copies of tool-reference.md under ash-agent-plugins/.../plugins/ and
@@ -133,6 +138,11 @@ GOLDEN: tuple[tuple[str, str], ...] = (
     (
         "ash-agent-plugins/agentic-coding/transpiler/_base/references/tool-reference.md",
         "generated MCP tool reference",
+    ),
+    ("docs/content/reference/cli.md", "generated CLI reference"),
+    (
+        "docs/content/reference/environment-variables.md",
+        "generated environment variable reference",
     ),
 )
 
