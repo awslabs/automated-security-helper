@@ -15,8 +15,8 @@ install and verification are ``utils/rules_bundles.py``.
 The default rule set, and why
 -----------------------------
 ``wa-Security-Pillar``: the registry's mapping of the AWS Well-Architected Framework
-Security Pillar, 44 rules. The registry's other candidate for a default,
-``guard-rules-registry-all-rules`` (66 rules), is a superset that adds 22 reliability
+Security Pillar, 45 rules. The registry's other candidate for a default,
+``guard-rules-registry-all-rules`` (67 rules), is a superset that adds 22 reliability
 and operations rules -- backup plans, Multi-AZ, deletion protection, S3 replication and
 object lock, Lambda concurrency and DLQ, EBS optimization, detailed monitoring. Those
 are not security findings, and in a security scan they would fail templates for
@@ -332,7 +332,15 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             if entry.path.is_dir():
                 rules.extend(self._rules_in_directory(entry.path))
             else:
-                rules.append(self._read_rule(entry.path, entry.path.parent))
+                try:
+                    rules.append(self._read_rule(entry.path, entry.path.parent))
+                except TreeInputRefused as unusable:
+                    # Named directly, so no other rule to fall back on: the
+                    # operator asked for this file and it cannot be used.
+                    raise RulesBundleUnavailable(
+                        f"scanners.cfn-guard.options.rules_paths names {entry.path}, "
+                        f"which cannot be used: {unusable.reason}"
+                    ) from unusable
         return rules, bool(refused)
 
     def _rules_in_directory(self, directory: Path) -> List[_RuleFile]:
@@ -456,9 +464,8 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         if find_executable(_COMMAND) is None:
             self._record_unavailable(
                 "cfn-guard is not on PATH. Run `ash dependencies install --tool "
-                "cfn-guard`, or use the ASH container image, which ships it. "
-                "nixpkgs has no cfn-guard package, so `--mode nix` does not supply "
-                "it either."
+                "cfn-guard`, or use the ASH container image or `--mode nix`, which "
+                "ship it."
             )
             return False
         try:

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import collections
 import json
+import os
 import shutil
 from pathlib import Path
 from unittest.mock import patch
@@ -379,6 +380,21 @@ class TestRuleSelection:
             RulesBundleUnavailable, match="no cfn-guard rules are selected"
         ):
             _scanner(repo, rule_sets=[]).rule_files()
+
+    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs a FIFO")
+    def test_a_named_rules_file_that_is_not_a_regular_file_is_missing(
+        self, repo, rules_root, ash_temp_path
+    ):
+        """A FIFO would hang cfn-guard; the scanner is MISSING with the reason
+        instead of raising out of the dependency check."""
+        fifo = ash_temp_path / "operator" / "rules.guard"
+        fifo.parent.mkdir()
+        os.mkfifo(fifo)
+        scanner = _scanner(repo, rule_sets=[], rules_paths=[str(fifo)])
+        with pytest.raises(RulesBundleUnavailable, match="not a regular file"):
+            scanner.rule_files()
+        assert scanner.validate_plugin_dependencies() is False
+        assert "cannot be used" in scanner.dependency_unavailable_reason
 
     def test_an_operator_directory_with_no_rules_selects_nothing(
         self, repo, rules_root, ash_temp_path
