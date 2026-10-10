@@ -206,7 +206,12 @@
   `scripts/check_pinned_tool_versions.py`, which compares every pin in
   `tool_downloads.py` (these three, the release binaries in `TOOL_VERSIONS`, the
   license files and the cfn-nag gem) with its upstream's latest release and fails
-  when one is behind, listing what the bump has to change.
+  when one is behind, listing what the bump has to change. It sends the job's
+  `GITHUB_TOKEN` to the GitHub API only to lift the anonymous rate limit: a lookup
+  refused with 403 is retried once without the token, with GitHub's error message in
+  the job log, and the token goes with a redirect only when the redirect stays on the
+  same scheme, host and port. A redirect to plain http, or to a host outside the
+  script's allowlist, is refused.
 
 - **npm-audit reports ERROR, and the scan exits 1, when the audit itself fails.** A
   scan whose `npm audit` could not get advisories (registry unreachable, a 5xx or 404

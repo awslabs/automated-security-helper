@@ -280,6 +280,25 @@ Dependencies are managed in `pyproject.toml`. Key groups:
 
 Scanner tools (Bandit, Checkov, Semgrep) are managed via UV tool isolation at runtime — they're not project dependencies.
 
+### Pinned tool versions
+
+`automated_security_helper/utils/tool_downloads.py` pins every tool ASH provisions
+itself. The weekly ASH - Pinned Tool Versions workflow compares those pins with each
+upstream's latest release; to run the same check locally:
+
+```bash
+uv run python scripts/check_pinned_tool_versions.py
+uv run python scripts/check_pinned_tool_versions.py --fail-on-outdated --markdown
+```
+
+It exits 0 when nothing is behind (or without `--fail-on-outdated`), 1 when a pin is
+behind with `--fail-on-outdated` or a Dockerfile apt pin is no longer installable, and
+2 when a lookup failed or the pins could not be read. GitHub allows 60 anonymous API
+requests an hour per address; set `GITHUB_TOKEN` or `GH_TOKEN` to lift that. A lookup
+GitHub refuses with 403 while the token is set is retried once without it, and GitHub's
+error message goes to stderr. The token is never printed, and it is sent across a
+redirect only to the same scheme, host and port.
+
 ## Troubleshooting
 
 If you encounter any issues:
