@@ -261,14 +261,11 @@ _SKIP_DIRS = frozenset(
 # Files allowed to name a version other than the packaged one, each with the
 # reason. Keep this list short and justified: an entry here is a file the walk
 # stops protecting. Prefer making prose version-free over adding to it.
-_ALLOWED_STALE = {
-    # Documents the regex shapes the version templating script detects. The
-    # version in it is illustrative -- it sits in a bullet list beside
-    # `--branch v3.0.1` and `version 3.0.1`, which are pattern examples and not
-    # runnable commands -- so pinning it to the release would imply a currency
-    # it does not have.
-    "docs/VERSION_MANAGEMENT.md": "illustrates the pattern shape, not an install command",
-}
+#
+# Empty since docs/VERSION_MANAGEMENT.md, its one entry, was folded into
+# docs/content/contributing/releases.md, which writes the pattern shape as
+# `@v<version>` and so needs no exemption.
+_ALLOWED_STALE: dict[str, str] = {}
 
 # The four transpiler sources of truth. Named here only to assert they are under
 # `cz bump`; the walk above is what checks their values, so adding a fifth file
