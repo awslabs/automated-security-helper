@@ -104,15 +104,40 @@
   server's is accepted, so an `ash config init` file scans; `sandbox` and
   `ash_plugin_modules` keep their existing restrict-only limits. A file that
   changes a denied field is refused with the field named
-  (`error_type: config_field_denied`), and `validate_config` reports it. A
-  delivered tree's own suppressions and ignore paths apply, marked
-  `client_supplied` in the results, unless the profile's own `denied_paths`
-  lists them. Files under a client-supplied ignore path are still converted and
-  scanned, and each finding there is kept as a marked, suppressed result. The policy comes from the registered profile, never from the
-  session's patched copy, and `/global_settings/mcp` joins the default
-  `denied_paths`. Delivering source while a scan of the session runs is refused.
-  See
+  (`error_type: config_field_denied`), and `validate_config` reports it. When
+  the policy cannot be established, a config with a delivered file is refused
+  with `error_type: config_policy_unreadable`. A delivered tree's own
+  suppressions and ignore paths apply, marked `client_supplied` in the results,
+  unless the profile's own `denied_paths` lists them. Files under a
+  client-supplied ignore path are still converted and scanned, and each finding
+  there is kept as a marked, suppressed result. The policy comes from the
+  registered profile, never from the session's patched copy, and
+  `/global_settings/mcp` joins the default `denied_paths`. Delivering source
+  while a scan of the session runs is refused. See
   [Config files in delivered source](docs/content/docs/mcp/streamable-http.md#config-files-in-delivered-source).
+
+- **A delivered config's exclusions in a scanner's own options are reported,
+  not applied.** An entry it adds to bandit's `excluded_paths`, checkov's
+  `skip_path`, opengrep's or semgrep's `exclude`, syft's `exclude` or
+  ferret-scan's `exclude_patterns` is removed from the option before the scanner
+  runs, and each finding of that scanner the entry would have left out is
+  reported suppressed and marked client-supplied, like a finding under a
+  client-supplied ignore path. syft lists every component and marks the ones an
+  entry would have dropped. A `scanners.trivy-repo.options.ignore_file` from a
+  delivered config is not passed to trivy; the IDs in it are applied the same
+  way when the file is a regular file inside the scanned tree, read without
+  following a link. The operator's own entries apply as before. The scanner
+  options that drop findings by rule ID, by a baseline or by category join the
+  default `denied_paths`, so a delivered config that changes one is refused:
+  bandit's `confidence_level`, cdk-nag's `AwsSolutionsChecks` pack, checkov's
+  `frameworks` and
+  `skip_frameworks`, detect-secrets' `baseline_file` and `scan_settings`,
+  ferret-scan's `checks`, `confidence_levels`, `disable_ip_types`,
+  `enable_preprocessors`, `finding_limit`, `profile`, `recursive`,
+  `respect_gitignore`, `use_default_config` and `validator_budget`, opengrep's
+  `config`, `exclude_rule`, `patterns` and `severity`, semgrep's `config`,
+  `exclude_rule` and `severity`, and trivy-repo's `license_full` and `scanners`.
+  Left at its default, each still scans.
 
 - **A config file inside the scanned tree can no longer choose what ASH installs,
   imports or hands a scanner as its own configuration.** It applies to a discovered

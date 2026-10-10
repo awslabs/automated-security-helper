@@ -479,6 +479,71 @@ system paths the sandbox already reads also has to be listed in
 `sandbox.extra_read_paths`, or the tool cannot open it and the scanner reports an
 error.
 
+### Configs an MCP client delivered
+
+ASH's configuration can come from three places, and how far it is trusted depends
+on which:
+
+- **The operator**: ASH's defaults, a config file outside the scanned tree (named
+  by `--config` or `ASH_CONFIG`), `--config-overrides`, `--ash-plugin-modules`, and, under the MCP
+  server, the profiles the server registers. Everything applies.
+- **The repository being scanned**: a config file inside the scanned tree. The
+  table above applies.
+- **An MCP client**: a file the client delivered, such as an upload named as
+  `config_path`, a delivered tree's own `.ash/.ash.yaml`, or a project config in
+  a delivered workspace. The table above applies, and so does the session's
+  runtime-override policy, `global_settings.mcp.runtime_overrides`:
+
+  - The file may not change a field that `denied_paths` or
+    `denied_value_patterns` denies. Entries match either `-` or `_`, every
+    spelling of a plugin's section, and globs such as
+    `/scanners/trivy-*/options/ignore_file`. A value equal to the server's is
+    accepted, so a file `ash config init` wrote scans. A file that changes a
+    denied field is refused with `error_type: config_field_denied`, naming each
+    field. When the policy cannot be established, a scan that reads such a file is
+    refused with `error_type: config_policy_unreadable`.
+  - Its own `global_settings.suppressions` and `global_settings.ignore_paths`
+    apply. Each entry the operator did not supply is marked `client_supplied: true`,
+    the files under a client-supplied ignore path are still scanned, and a finding
+    either one hides is reported suppressed and marked rather than dropped. See
+    [Suppressions an MCP client's config supplied](suppressions.md#suppressions-an-mcp-clients-config-supplied).
+  - An exclusion it adds to one of the scanner options below is not passed to
+    the scanner. Each finding of that scanner the entry would have left out is
+    reported suppressed and marked in the same way. The operator's own entries
+    apply as before.
+
+    | Option | Matched as |
+    |---|---|
+    | `scanners.bandit.options.excluded_paths` | The `**/<path>/**` glob ASH passes bandit, against the file's absolute path |
+    | `scanners.checkov.options.skip_path` | As checkov's own filter reads it: a regular expression found in, or a substring of, the absolute path of the file or of a directory above it |
+    | `scanners.opengrep.options.exclude`, `scanners.semgrep.options.exclude`, `scanners.ferret-scan.options.exclude_patterns` | A glob matching the file's path or any directory in it |
+    | `scanners.syft.options.exclude` | The same glob; each SBOM component it would have dropped carries an `ash:clientSuppliedExclusion` property |
+    | `scanners.trivy-repo.options.ignore_file` | Each unexpired ID in the file, against the trivy finding's rule ID, when the file is a regular file inside the scanned tree (not a link); any other file is not read |
+
+  - The scanner options below drop findings by rule ID, by a baseline, or by a
+    whole category (a framework, a severity, a rule set, a detector, a confidence
+    level, a cap on how many are reported) rather than by path. They are in the
+    default `denied_paths`, so a delivered file that changes one is refused, and
+    one that leaves it at its default scans. All are under `scanners.<name>.options`:
+
+    | Scanner | Options |
+    |---|---|
+    | bandit | `confidence_level` |
+    | cdk-nag | `nag_packs.AwsSolutionsChecks` (turning on another pack reports more, and is allowed) |
+    | checkov | `frameworks`, `skip_frameworks` |
+    | detect-secrets | `baseline_file`, `scan_settings` |
+    | ferret-scan | `checks`, `confidence_levels`, `disable_ip_types`, `enable_preprocessors`, `finding_limit`, `profile`, `recursive`, `respect_gitignore`, `use_default_config`, `validator_budget` |
+    | opengrep | `config`, `exclude_rule`, `patterns`, `severity` |
+    | semgrep | `config`, `exclude_rule`, `severity` |
+    | trivy-repo | `license_full`, `scanners` |
+
+    Options that only tune output or performance, or whose default already
+    reports the least they can (trivy-repo's `ignore_unfixed`, bandit's
+    `ignore_nosec`, detect-secrets' `skip_generated_lockfiles`), are not listed.
+
+See [Config files in delivered source](mcp/streamable-http.md#config-files-in-delivered-source)
+for the details, including which profile the policy comes from.
+
 ## Validating Configuration
 
 To validate your configuration file:

@@ -267,6 +267,7 @@ def resolve_config(
         trusted_config_path=trusted_config_path,
         source_dir=source_dir,
         permit_base=permit_base,
+        scanned_root=scanned_root,
     )
     if scanned_root is None:
         scanned_root = source_dir if source_dir is not None else Path.cwd()

@@ -4,7 +4,7 @@ import math
 import os
 import random
 from contextlib import suppress
-from typing import List
+from typing import Any, Callable, List
 import uuid
 from pathlib import Path, PurePosixPath
 from automated_security_helper.base.plugin_context import PluginContext
@@ -721,6 +721,78 @@ def _suppress_transitive_of_suppressed_roots(
             ]
 
 
+def _add_client_suppression(result: Any, justification: str) -> None:
+    """Suppress ``result`` for a client-supplied entry, marked ``clientSupplied``.
+
+    Once: suppressions are applied to each scanner's report and again to the
+    aggregated one, and the second pass must not add the same suppression again.
+    """
+    existing = list(result.suppressions or [])
+    if any(getattr(item, "justification", None) == justification for item in existing):
+        return
+    result.suppressions = [
+        *existing,
+        Suppression(
+            kind=Kind1.external,
+            justification=justification,
+            properties=PropertyBag(clientSupplied=True),
+        ),
+    ]
+
+
+def _result_scanner_name(result: Any, run: Any) -> str | None:
+    """The scanner that reported ``result``: its ``scanner_name``, else the run's tool."""
+    name = (
+        getattr(result.properties, "scanner_name", None) if result.properties else None
+    )
+    if isinstance(name, str) and name:
+        return name
+    driver = run.tool.driver if run.tool else None
+    return driver.name if driver is not None else None
+
+
+def _client_exclusion_for(
+    result: Any,
+    run: Any,
+    exclusions: List[Any],
+    normalize: Callable[[str], str],
+    source_dir: Path,
+) -> Any:
+    """The client-supplied scanner exclusion that would have kept ``result`` out, if any."""
+    from automated_security_helper.config.client_scanner_exclusions import (
+        matching_exclusion,
+    )
+
+    scanner_name = _result_scanner_name(result, run)
+    if not any(exclusion.applies_to(scanner_name) for exclusion in exclusions):
+        return None
+    for location in result.locations or []:
+        if not (
+            location.physicalLocation
+            and location.physicalLocation.root.artifactLocation
+        ):
+            continue
+        raw_uri = location.physicalLocation.root.artifactLocation.uri
+        if not raw_uri:
+            continue
+        uri = normalize(raw_uri)
+        absolute = (
+            Path(uri).as_posix()
+            if Path(uri).is_absolute()
+            else (source_dir / uri).as_posix()
+        )
+        found = matching_exclusion(
+            exclusions,
+            scanner_name=scanner_name,
+            relative=uri,
+            absolute=absolute,
+            rule_id=result.ruleId,
+        )
+        if found is not None:
+            return found
+    return None
+
+
 def apply_suppressions_to_sarif(
     sarif_report: SarifReport,
     plugin_context: PluginContext,
@@ -738,6 +810,14 @@ def apply_suppressions_to_sarif(
     ]
 
     suppressions = plugin_context.config.global_settings.suppressions or []
+
+    # Exclusions a delivered config gave one scanner in its options, moved out of
+    # them before the scan so the files were scanned. Each finding of that scanner
+    # one would have kept out is suppressed and marked here, like a finding under a
+    # client-supplied ignore path (config/client_scanner_exclusions.py).
+    client_exclusions = list(
+        getattr(plugin_context.config, "_client_scanner_exclusions", None) or []
+    )
 
     ignore_suppressions = (
         hasattr(plugin_context, "ignore_suppressions")
@@ -912,20 +992,33 @@ def apply_suppressions_to_sarif(
                 continue
 
             if client_ignored is not None:
-                result.suppressions = [
-                    *(result.suppressions or []),
-                    Suppression(
-                        kind=Kind1.external,
-                        justification=(
-                            "(ASH, client-supplied config) Ignoring finding under "
-                            f"ignore path '{client_ignored.path}' with reason: "
-                            f"{client_ignored.reason}"
-                        ),
-                        properties=PropertyBag(clientSupplied=True),
-                    ),
-                ]
+                _add_client_suppression(
+                    result,
+                    "(ASH, client-supplied config) Ignoring finding under "
+                    f"ignore path '{client_ignored.path}' with reason: "
+                    f"{client_ignored.reason}",
+                )
                 updated_results.append(result)
                 continue
+
+            if client_exclusions:
+                excluded_by = _client_exclusion_for(
+                    result,
+                    run,
+                    client_exclusions,
+                    lambda raw: _normalize_sarif_uri(
+                        raw,
+                        _source_dir_prefix,
+                        _source_dir_prefix_with_slash,
+                        _source_dir_prefix_no_drive,
+                        _source_dir_basename,
+                    ),
+                    _resolved_source,
+                )
+                if excluded_by is not None:
+                    _add_client_suppression(result, excluded_by.justification())
+                    updated_results.append(result)
+                    continue
 
             ASH_LOGGER.debug(
                 f"Suppression check: is_in_ignorable_path={is_in_ignorable_path}, suppressions={bool(suppressions)}, ignore_suppressions={ignore_suppressions}"

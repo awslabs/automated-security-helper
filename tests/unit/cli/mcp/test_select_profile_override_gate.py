@@ -342,6 +342,34 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
             }
         },
     ),
+    "/scanners/opengrep/options/exclude_rule": (
+        {
+            "op": "replace",
+            "path": "/scanners/opengrep/options/exclude_rule",
+            "value": ["some.rule.id"],
+        },
+        {"scanners": {"opengrep": {"options": {"exclude_rule": ["some.rule.id"]}}}},
+    ),
+    "/scanners/semgrep/options/exclude_rule": (
+        {
+            "op": "replace",
+            "path": "/scanners/semgrep/options/exclude_rule",
+            "value": ["some.rule.id"],
+        },
+        {"scanners": {"semgrep": {"options": {"exclude_rule": ["some.rule.id"]}}}},
+    ),
+    "/scanners/detect-secrets/options/baseline_file": (
+        {
+            "op": "replace",
+            "path": "/scanners/detect-secrets/options/baseline_file",
+            "value": ".secrets.baseline",
+        },
+        {
+            "scanners": {
+                "detect-secrets": {"options": {"baseline_file": ".secrets.baseline"}}
+            }
+        },
+    ),
     "/reporters/bedrock-summary-reporter/options/aws_*": (
         {
             "op": "add",
@@ -376,6 +404,44 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
         },
     ),
 }
+
+
+#: Scanner options that drop findings by category, each with a value other than
+#: its default. Each is a case like those above, written at the option itself.
+_CATEGORY_DENIALS: Dict[str, Any] = {
+    "/scanners/bandit/options/confidence_level": "high",
+    "/scanners/checkov/options/frameworks": ["terraform"],
+    "/scanners/checkov/options/skip_frameworks": ["terraform"],
+    "/scanners/opengrep/options/config": "p/default",
+    "/scanners/opengrep/options/patterns": ["$X == $X"],
+    "/scanners/opengrep/options/severity": ["ERROR"],
+    "/scanners/semgrep/options/config": "p/default",
+    "/scanners/semgrep/options/severity": ["ERROR"],
+    "/scanners/detect-secrets/options/scan_settings": {
+        "plugins_used": [{"name": "AWSKeyDetector"}]
+    },
+    "/scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks": False,
+    "/scanners/ferret-scan/options/checks": "CREDIT_CARD",
+    "/scanners/ferret-scan/options/confidence_levels": "high",
+    "/scanners/ferret-scan/options/disable_ip_types": "private",
+    "/scanners/ferret-scan/options/enable_preprocessors": False,
+    "/scanners/ferret-scan/options/finding_limit": 5,
+    "/scanners/ferret-scan/options/profile": "quick",
+    "/scanners/ferret-scan/options/recursive": False,
+    "/scanners/ferret-scan/options/respect_gitignore": True,
+    "/scanners/ferret-scan/options/use_default_config": False,
+    "/scanners/ferret-scan/options/validator_budget": "all=1ms",
+    "/scanners/trivy-repo/options/license_full": False,
+    "/scanners/trivy-repo/options/scanners": ["vuln"],
+}
+for _pointer, _value in _CATEGORY_DENIALS.items():
+    _nested: Any = _value
+    for _segment in reversed(_pointer.split("/")[2:]):
+        _nested = {_segment: _nested}
+    _DENIED_CASES[_pointer] = (
+        {"op": "add", "path": _pointer, "value": _value},
+        {"scanners": _nested},
+    )
 
 
 def test_every_shipped_denied_path_has_a_case() -> None:
@@ -435,8 +501,22 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
         ),
         entry,
     )
-    for result in (patched, overridden):
-        assert f"entry {covering!r}" in result["error"], result["error"]
+    # The override restates the profile, which configures no ferret-scan or
+    # trivy-repo section, so its patch adds that whole section and the first
+    # denied entry under it is the one named.
+    section = "/".join(entry.split("/")[:3]) + "/"
+    plugin_section = section in ("/scanners/ferret-scan/", "/scanners/trivy-repo/")
+    covering_override = (
+        next(
+            denied
+            for denied in RuntimeOverridesConfig().denied_paths
+            if denied.startswith(section)
+        )
+        if plugin_section
+        else covering
+    )
+    assert f"entry {covering!r}" in patched["error"], patched["error"]
+    assert f"entry {covering_override!r}" in overridden["error"], overridden["error"]
     _assert_unbound("patch")
     _assert_unbound("override")
 

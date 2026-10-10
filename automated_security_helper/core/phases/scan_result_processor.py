@@ -154,6 +154,18 @@ class ScanResultProcessor:
 
         elif isinstance(results.raw_results, CycloneDXReport):
             ASH_LOGGER.verbose(f"{scanner_name}: Processing as CycloneDX report")
+            # A delivered config's syft exclusions were moved out of syft's options,
+            # so the SBOM lists every component; those they would have dropped are
+            # marked instead (config/client_scanner_exclusions.py).
+            exclusions = getattr(
+                self.plugin_context.config, "_client_scanner_exclusions", None
+            )
+            if exclusions:
+                from automated_security_helper.config.client_scanner_exclusions import (
+                    mark_sbom_components,
+                )
+
+                mark_sbom_components(results.raw_results, exclusions)
             aggregated_results.cyclonedx = results.raw_results
             target_report = aggregated_results.additional_reports[scanner_name][
                 results.target_type

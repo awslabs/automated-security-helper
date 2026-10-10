@@ -30,6 +30,31 @@ global_settings:
       - /global_settings/suppressions
       - /global_settings/mcp
       - /global_settings/mcp/**
+      - /scanners/opengrep/options/exclude_rule
+      - /scanners/semgrep/options/exclude_rule
+      - /scanners/detect-secrets/options/baseline_file
+      - /scanners/bandit/options/confidence_level
+      - /scanners/checkov/options/frameworks
+      - /scanners/checkov/options/skip_frameworks
+      - /scanners/opengrep/options/config
+      - /scanners/opengrep/options/patterns
+      - /scanners/opengrep/options/severity
+      - /scanners/semgrep/options/config
+      - /scanners/semgrep/options/severity
+      - /scanners/detect-secrets/options/scan_settings
+      - /scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks
+      - /scanners/ferret-scan/options/checks
+      - /scanners/ferret-scan/options/confidence_levels
+      - /scanners/ferret-scan/options/disable_ip_types
+      - /scanners/ferret-scan/options/enable_preprocessors
+      - /scanners/ferret-scan/options/finding_limit
+      - /scanners/ferret-scan/options/profile
+      - /scanners/ferret-scan/options/recursive
+      - /scanners/ferret-scan/options/respect_gitignore
+      - /scanners/ferret-scan/options/use_default_config
+      - /scanners/ferret-scan/options/validator_budget
+      - /scanners/trivy-repo/options/license_full
+      - /scanners/trivy-repo/options/scanners
       - /reporters/bedrock-summary-reporter/options/aws_*
       - /reporters/cloudwatch-logs/**
       denied_value_patterns: {}

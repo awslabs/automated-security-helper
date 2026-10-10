@@ -22,6 +22,10 @@ A reporter takes the aggregated SARIF findings and produces output in a specific
 
 A suppression is a rule that hides a known-accepted finding from results. Suppressions can be config-based (defined in `.ash-config.yml` by rule ID, file path, or pattern) or inline (a code comment like `# ash-ignore:rule-id` placed next to the flagged line). Suppressed findings are still recorded but marked as suppressed in the output.
 
+## Configuration trust
+
+ASH's configuration can come from the operator who runs it, from the repository being scanned, or, under the MCP server, from a client. Everything the operator sets applies: the defaults, a config file outside the scanned tree, `--config-overrides`, `--ash-plugin-modules`, and the profiles the MCP server registers. A config file inside the scanned tree cannot choose what ASH installs or imports, a scanner's own config files, the sandbox's grants, where reporters send findings or the credentials they use, or a plugin package that sends data off the host; those come from the operator. A config file an MCP client delivered is limited the same way, and may not change a field the session's runtime-override policy (`denied_paths`) denies either. Its suppressions and ignore paths apply, and its scanner exclusions are applied as suppressions, but every finding any of them hides is kept in the results, suppressed and marked client-supplied. See [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose) and [Config files in delivered source](mcp/streamable-http.md#config-files-in-delivered-source).
+
 ## Phases
 
 ASH processes code in four sequential phases:

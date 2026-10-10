@@ -690,6 +690,40 @@ class RuntimeOverridesConfig(BaseModel):
         # through patch_ops could then lift every other entry here.
         "/global_settings/mcp",
         "/global_settings/mcp/**",
+        # Scanner options that drop findings by rule ID, by a baseline, or by a
+        # whole category (a framework, a severity, a rule set, a detector, a
+        # confidence level, a cap on the number reported) rather than by path. A
+        # delivered config's path exclusions are re-applied to the results as
+        # marked suppressions (config/client_scanner_exclusions.py); these have
+        # no file to scan instead, so a client may not change them. Options that
+        # only tune output or performance, or whose default already reports the
+        # least they can, are not listed. Of cdk-nag's packs only the one on by
+        # default is listed: turning another on reports more.
+        "/scanners/opengrep/options/exclude_rule",
+        "/scanners/semgrep/options/exclude_rule",
+        "/scanners/detect-secrets/options/baseline_file",
+        "/scanners/bandit/options/confidence_level",
+        "/scanners/checkov/options/frameworks",
+        "/scanners/checkov/options/skip_frameworks",
+        "/scanners/opengrep/options/config",
+        "/scanners/opengrep/options/patterns",
+        "/scanners/opengrep/options/severity",
+        "/scanners/semgrep/options/config",
+        "/scanners/semgrep/options/severity",
+        "/scanners/detect-secrets/options/scan_settings",
+        "/scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks",
+        "/scanners/ferret-scan/options/checks",
+        "/scanners/ferret-scan/options/confidence_levels",
+        "/scanners/ferret-scan/options/disable_ip_types",
+        "/scanners/ferret-scan/options/enable_preprocessors",
+        "/scanners/ferret-scan/options/finding_limit",
+        "/scanners/ferret-scan/options/profile",
+        "/scanners/ferret-scan/options/recursive",
+        "/scanners/ferret-scan/options/respect_gitignore",
+        "/scanners/ferret-scan/options/use_default_config",
+        "/scanners/ferret-scan/options/validator_budget",
+        "/scanners/trivy-repo/options/license_full",
+        "/scanners/trivy-repo/options/scanners",
         # AWS-credential-bearing reporter options (plugin-provided, hyphenated names).
         "/reporters/bedrock-summary-reporter/options/aws_*",
         "/reporters/cloudwatch-logs/**",
@@ -1074,6 +1108,11 @@ class AshConfig(BaseModel):
     # directory: workspace mode sets the workspace root. config/path_trust.py
     # refuses tool config files inside it. None means the source directory's tree.
     _scanned_root: Optional[Path] = PrivateAttr(default=None)
+
+    # Scanner exclusions a config an MCP client delivered supplied, moved out of the
+    # scanners' options and applied to their results as marked suppressions
+    # instead (config/client_scanner_exclusions.py). Set by resolve_config.
+    _client_scanner_exclusions: List[Any] = PrivateAttr(default_factory=list)
 
     # Project information
     project_name: Annotated[

@@ -366,6 +366,13 @@ class TestDefaults:
         are NOT present on a default `AshConfig`; we materialize them here via
         model_validate so the schema check covers extras that real plugins add.
         """
+        from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+            FerretScannerConfig,
+        )
+        from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+            TrivyRepoScannerConfig,
+        )
+
         cfg = AshConfig.model_validate(
             {
                 "reporters": {
@@ -373,7 +380,13 @@ class TestDefaults:
                         "options": {"aws_region": "us-east-1"}
                     },
                     "cloudwatch-logs": {"options": {"aws_region": "us-east-1"}},
-                }
+                },
+                # Plugin scanners' sections, from their own models, so an entry
+                # under them has to name an option the plugin really has.
+                "scanners": {
+                    "ferret-scan": FerretScannerConfig().model_dump(by_alias=True),
+                    "trivy-repo": TrivyRepoScannerConfig().model_dump(by_alias=True),
+                },
             }
         )
         dumped = cfg.model_dump(by_alias=True)

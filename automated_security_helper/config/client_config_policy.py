@@ -206,8 +206,72 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/reporters/bedrock-summary-reporter/options/aws_*",
             "/reporters/cloudwatch-logs/**",
         ),
+        (
+            "/fail_on_findings",
+            "/fail_on_incomplete_scanners",
+            "/content_db_staleness",
+            "/content_db_staleness_overrides",
+            "/sandbox",
+            "/sandbox/**",
+            "/ash_plugin_modules",
+            "/ash_plugin_modules/**",
+            "/global_settings/ignore_paths",
+            "/global_settings/suppressions",
+            "/global_settings/mcp",
+            "/global_settings/mcp/**",
+            "/scanners/opengrep/options/exclude_rule",
+            "/scanners/semgrep/options/exclude_rule",
+            "/scanners/detect-secrets/options/baseline_file",
+            "/scanners/bandit/options/confidence_level",
+            "/scanners/checkov/options/frameworks",
+            "/scanners/checkov/options/skip_frameworks",
+            "/scanners/opengrep/options/config",
+            "/scanners/opengrep/options/patterns",
+            "/scanners/opengrep/options/severity",
+            "/scanners/semgrep/options/config",
+            "/scanners/semgrep/options/severity",
+            "/scanners/detect-secrets/options/scan_settings",
+            "/scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks",
+            "/scanners/ferret-scan/options/checks",
+            "/scanners/ferret-scan/options/confidence_levels",
+            "/scanners/ferret-scan/options/disable_ip_types",
+            "/scanners/ferret-scan/options/enable_preprocessors",
+            "/scanners/ferret-scan/options/finding_limit",
+            "/scanners/ferret-scan/options/profile",
+            "/scanners/ferret-scan/options/recursive",
+            "/scanners/ferret-scan/options/respect_gitignore",
+            "/scanners/ferret-scan/options/use_default_config",
+            "/scanners/ferret-scan/options/validator_budget",
+            "/scanners/trivy-repo/options/license_full",
+            "/scanners/trivy-repo/options/scanners",
+            "/reporters/bedrock-summary-reporter/options/aws_*",
+            "/reporters/cloudwatch-logs/**",
+        ),
     )
 )
+
+
+#: Defaults of the denied options of scanners that come from a plugin package
+#: (ferret-scan, trivy-repo). The trusted config carries a built-in scanner's
+#: defaults, so a delivered value equal to one is accepted as no change; it need
+#: not carry a plugin's section at all, so without this a delivered file that
+#: wrote such a default would be refused. Used only where the trusted config has
+#: no value of its own. ``test_the_plugin_option_defaults_are_the_plugins``
+#: checks each against the plugin's own model.
+PLUGIN_OPTION_DEFAULTS: Mapping[Tuple[str, str], Any] = {
+    ("ferret-scan", "checks"): "all",
+    ("ferret-scan", "confidence_levels"): "all",
+    ("ferret-scan", "disable_ip_types"): None,
+    ("ferret-scan", "enable_preprocessors"): True,
+    ("ferret-scan", "finding_limit"): 0,
+    ("ferret-scan", "profile"): None,
+    ("ferret-scan", "recursive"): True,
+    ("ferret-scan", "respect_gitignore"): False,
+    ("ferret-scan", "use_default_config"): True,
+    ("ferret-scan", "validator_budget"): None,
+    ("trivy-repo", "license_full"): True,
+    ("trivy-repo", "scanners"): ["vuln", "secret", "misconfig", "license"],
+}
 
 
 class ClientConfigRules(BaseModel):
@@ -313,16 +377,51 @@ def client_file_denials(
     for path, document in documents.items():
         if not config_is_client_supplied(path):
             continue
-        denials = config_document_denials(
-            document,
-            allowlist=rules.policy,
-            config=rules.base,
-            exempt=exempt_paths(rules.policy),
-            inert=INERT_PATHS,
-        )
+        denials = [
+            denial
+            for denial in config_document_denials(
+                document,
+                allowlist=rules.policy,
+                config=rules.base,
+                exempt=exempt_paths(rules.policy),
+                inert=INERT_PATHS,
+            )
+            if not _writes_plugin_default(document, denial, rules.base)
+        ]
         if denials:
             found.append((path, denials))
     return found
+
+
+def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
+    """Whether ``denial`` is a plugin option ``document`` sets to its default.
+
+    Only for an option in ``PLUGIN_OPTION_DEFAULTS`` that the trusted ``base``
+    has no value for; where it has one, the denial already compared against it.
+    """
+    from automated_security_helper.config.ash_config import (
+        plugin_key_lookup_names,
+        reduced_plugin_name,
+    )
+    from automated_security_helper.config.runtime_patch import _path_segments, _walk
+
+    if denial.from_patch:
+        return False
+    segments = _path_segments(denial.pointer)
+    if len(segments) != 4 or segments[0] != "scanners" or segments[2] != "options":
+        return False
+    option = segments[3].replace("-", "_")
+    names = plugin_key_lookup_names(segments[1])
+    for (scanner, name), default in PLUGIN_OPTION_DEFAULTS.items():
+        if name != option or reduced_plugin_name(scanner) not in names:
+            continue
+        trusted = base.get_plugin_config("scanner", scanner)
+        options = (trusted or {}).get("options") or {}
+        if option in options:
+            return False
+        present, value = _walk(document, segments)
+        return present and value == default
+    return False
 
 
 def apply_client_config_rules(
@@ -333,12 +432,20 @@ def apply_client_config_rules(
     trusted_config_path: Path | str | None,
     source_dir: Path | str | None,
     permit_base: Optional[Callable[[Path], bool]],
+    scanned_root: Path | str | None = None,
 ) -> AshConfig:
     """``config``, checked for denied fields its client-delivered files set.
 
     Refuses or drops them according to ``DENIED_FIELD_HANDLING``. ``rules`` None
-    takes the trusted base's.
+    takes the trusted base's. The suppressions and ignore paths the operator did
+    not supply are marked ``client_supplied``, and the scanner exclusions the
+    operator did not supply are moved out of the scanners' options to be applied
+    to their results instead (``config/client_scanner_exclusions.py``).
+    ``scanned_root`` is the tree being scanned (the source directory when None).
     """
+    from automated_security_helper.config.client_scanner_exclusions import (
+        strip_client_scanner_exclusions,
+    )
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
 
     if not any(config_is_client_supplied(path) for path in documents):
@@ -356,17 +463,22 @@ def apply_client_config_rules(
             f"A config an MCP client delivered cannot be checked: {rules.unreadable}"
         )
     found = client_file_denials(documents, rules)
-    if not found:
-        return _mark_client_supplied(config, documents, rules.base)
-    if DENIED_FIELD_HANDLING == "refuse":
+    if found and DENIED_FIELD_HANDLING == "refuse":
         from automated_security_helper.core.exceptions import (
             ASHConfigFieldDeniedError,
         )
 
         path, denials = found[0]
         raise ASHConfigFieldDeniedError(denied_fields_message(path, denials))
-    return _mark_client_supplied(
-        _drop_denied_fields(config, found, rules.base), documents, rules.base
+    if found:
+        config = _drop_denied_fields(config, found, rules.base)
+    config = _mark_client_supplied(config, documents, rules.base)
+    return strip_client_scanner_exclusions(
+        config,
+        documents,
+        rules.base,
+        source_dir=source_dir,
+        scanned_root=scanned_root,
     )
 
 

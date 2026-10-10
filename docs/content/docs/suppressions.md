@@ -309,6 +309,40 @@ suppressions:
     expiration: '2025-06-30'
 ```
 
+## Suppressions an MCP client's config supplied
+
+Under the MCP server, a config file a client delivered may set its own
+`suppressions` and `ignore_paths`, as a repository's config may on the CLI (see
+[Configs an MCP client delivered](configuration-guide.md#configs-an-mcp-client-delivered)).
+ASH applies them, and marks what came from the client so the results show what
+the client's config hid:
+
+- In the results' config, each suppression and ignore path the operator did not
+  supply has `client_supplied: true`.
+- A file under a client-supplied ignore path is still converted and scanned, and a
+  finding there is kept as a suppressed result rather than dropped. An exclusion
+  the client's config added to a scanner's own options is handled the same way.
+- In SARIF, the suppression on such a finding has a `justification` that starts
+  with `(ASH, client-supplied config)` and names the entry, and
+  `properties.clientSupplied: true`. Its `kind` is `inSource` for a suppression
+  entry and `external` for an ignore path or a scanner exclusion:
+
+  ```json
+  "suppressions": [
+    {
+      "kind": "external",
+      "justification": "(ASH, client-supplied config) Ignoring finding under ignore path 'vendor/**' with reason: third-party code",
+      "properties": {"clientSupplied": true}
+    }
+  ]
+  ```
+
+- The flat-json and CSV reports show the finding with `is_suppressed: true` and
+  that justification in `suppression_justification`, and the GitLab SAST report
+  includes it in the finding's solution.
+- Like any suppressed finding, it does not count toward `fail_on_findings`, and
+  `--ignore-suppressions` turns it back into an ordinary finding.
+
 ## Temporarily Disabling Suppressions
 
 To temporarily ignore all suppressions and see all findings, use the `--ignore-suppressions` flag:
