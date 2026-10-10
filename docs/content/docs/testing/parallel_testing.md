@@ -73,6 +73,19 @@ def test_with_isolated_config():
         # Test code here
 ```
 
+Some state lives in the process no matter what a test does: the uv tool runner that
+`get_uv_tool_runner()` returns, the answers it memoizes (whether uv is available, a
+tool's version, where an executable is), and the plugin manager's registrations. An
+autouse fixture in `tests/conftest.py`, `_restore_process_wide_tool_state`, puts all
+of it back after every test, except successful answers from uv (a tool's version,
+the uv command), which are kept because the probes are slow. Two habits keep a test from relying on that:
+
+- Build the object under test before patching `subprocess.run`. Construction can
+  probe uv, and a probe that reaches a stand-in records a made-up answer.
+- Patch the module's own name for what it calls, not the standard library's, and to
+  fake a tool version, patch `UVToolRunner.get_tool_version` itself rather than the
+  subprocess call under it.
+
 ### 4. Use Test-Specific Environment Variables
 
 When tests need environment variables, use isolated names:
@@ -100,6 +113,25 @@ def isolated_config_file(ash_temp_path):
 def test_with_config(isolated_config_file):
     # Use isolated_config_file in your test
 ```
+
+### 6. Do Not Walk the Repository Tree
+
+`tests/pytest-temp` is the tests' scratch area, inside the checkout, and other
+workers create and remove directories there throughout a parallel run. A walk that
+descends into it, such as `REPO_ROOT.rglob("*.md")` or `os.walk(REPO_ROOT)`, races
+them: on Python 3.10 to 3.12 `rglob` raises `FileNotFoundError` when a directory goes
+away mid-walk, and on every version it returns whatever the other workers wrote.
+
+To list files in the checkout, ask git (`git ls-files`), or walk with
+`tests.utils.helpers.iter_repo_files(root)`, which skips the scratch tree before it
+descends. Walking a subtree no per-run directory is under, such as
+`automated_security_helper/` or `.github/`, or a test's own `tmp_path`, is fine.
+
+`tests/unit/test_repo_walkers_skip_scratch.py` enforces this. It evaluates every walk
+in `tests/`, and in the script functions a test loads, imports or runs, and fails on
+one that can enter `tests/pytest-temp`, `.ash/ash_output`, `.venv` or a `node_modules`,
+or whose directory it cannot work out from the code. A walk of a directory that only
+exists at run time, and is safe, is listed in that file's `_EXEMPT` with the reason.
 
 ## Marking Tests as Non-Parallel
 
