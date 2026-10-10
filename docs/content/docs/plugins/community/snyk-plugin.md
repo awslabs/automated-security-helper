@@ -1,317 +1,53 @@
-# ASH Snyk Code Plugin
+# Snyk Code plugin (`snyk-code`)
 
-This plugin integrates [Snyk Code](https://snyk.io/product/snyk-code/) CLI tool with the Automated Security Helper (ASH) to provide comprehensive static application security testing (SAST) for source code vulnerabilities.
+The `snyk-code` scanner runs `snyk code test`, the static analysis of [Snyk Code](https://snyk.io/product/snyk-code/), on the source directory and reads its SARIF. Snyk Code analyzes the code on Snyk's servers, so the scan uploads the scanned source to Snyk. It is a [community plugin](index.md): it ships with ASH and runs only when its module is loaded, and only the operator can load it.
 
-## Overview
+## Before you start
 
-The Snyk Code plugin enables ASH to leverage Snyk's powerful static analysis capabilities for:
+- Install the Snyk CLI so that `snyk` is on `PATH`, for example with `npm install -g snyk` ([Snyk CLI](https://github.com/snyk/cli)). ASH does not install it, and the ASH container image does not include it.
+- Authenticate it, either with a `SNYK_TOKEN` environment variable or with `snyk auth`, which stores the credential in `~/.config/configstore/snyk.json`. If ASH finds neither, it logs a warning and runs the Snyk CLI anyway.
+- Make sure you may send this source code to Snyk under your organization's rules and your Snyk plan.
 
-- **Static Application Security Testing (SAST)**: Identifies security vulnerabilities in source code
-- **Real-time Analysis**: Fast scanning with minimal false positives
-- **Multi-language Support**: Supports JavaScript, TypeScript, Python, Java, C#, PHP, Go, Ruby, Scala, Swift, and mor. See a full list [here](https://docs.snyk.io/supported-languages-package-managers-and-frameworks#supported-languages)
-- **Developer-friendly Results**: Provides actionable remediation guidance with code examples
+## Load the plugin
 
-## Prerequisites
+The scanner sends source off the host with your Snyk credentials, so a config file that the scanned repository could have written cannot load it. ASH ignores, with a warning, an `ash_plugin_modules` entry for `ash_snyk_plugins` in a config file inside a git checkout or the scanned directory, or in one an MCP client delivered ([Who may load a module](../../../plugins/index.md#who-may-load-a-module)). Load it from an operator source instead. With `SNYK_TOKEN` set, or after `snyk auth`:
 
-### Install Snyk CLI
-
-The plugin requires Snyk CLI to be installed and available in your system PATH.
-
-**npm (Recommended)**:
+<!-- doctest: illustrative reason="needs the Snyk CLI and a Snyk account" -->
 ```bash
-npm install -g snyk
+ash scan \
+  --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins \
+  --scanners snyk-code
 ```
 
-**Homebrew (macOS)**:
-```bash
-brew install snyk/tap/snyk
-```
-
-**Manual Installation**:
-```bash
-# Download and install latest release
-curl -Lo snyk https://github.com/snyk/cli/releases/latest/download/snyk-linux
-chmod +x snyk
-sudo mv snyk /usr/local/bin/
-```
-
-**Other platforms**: See [Snyk CLI Installation Guide](https://docs.snyk.io/cli-ide-and-ci-cd-integrations/snyk-cli/getting-started-with-the-snyk-cli)
-
-### Authentication
-
-Snyk Code requires authentication to access the scanning service:
-
-**Option 1: Environment Variable**
-```bash
-export SNYK_TOKEN=your-snyk-token
-```
-
-**Option 2: CLI Authentication**
-```bash
-snyk auth
-```
-
-**Option 3: Configuration File**
-The plugin will automatically check for credentials at `~/.config/configstore/snyk.json`
-
-### Verify Installation
-
-```bash
-snyk --version
-snyk code test --help
-```
-
-## Quick Start
-
-### Basic Configuration
-
-Snyk code plugin is not included by default with ASH since it requires authentication.
-Include Snyk plugin module in your `.ash/.ash.yaml` configuration file
+The `ASH_PLUGIN_MODULES` environment variable, `--config-overrides 'ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_snyk_plugins]'`, or a config file outside every git checkout and the scanned directory, passed with `--config`, work too:
 
 ```yaml
-ash_plugin_modules:
-  - automated_security_helper.plugin_modules.ash_snyk_plugins
-```
-
-Add to your `.ash/.ash.yaml`:
-
-```yaml
+project_name: my-service
+ash_plugin_modules: [automated_security_helper.plugin_modules.ash_snyk_plugins]
 scanners:
   snyk-code:
-    enabled: true
-    severity_threshold: "MEDIUM"
-```
-
-### Run Snyk Code Scan
-
-```bash
-# Scan current directory
-uv run ash --scanners snyk-code
-
-# Scan specific directory
-uv run ash --scanners snyk-code /path/to/project
-```
-
-### Run Snyk Code Scan without an ASH configuration file
-
-If you want to run Snyk code scan without saving a configuration file for ASH, use the following
-command to enable the plugin
-
-```bash
-# Scan current directory only with snyk-code
-uv run ash --scanners snyk-code --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
-
-# SCan current directory with all available scanners (including snyk-code)
-uv run ash  --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
-
-```
-
-## Configuration Options
-
-### Severity Filtering
-
-Configure the minimum severity level for reported vulnerabilities:
-
-```yaml
-scanners:
-  snyk-code:
-    enabled: true
-    severity_threshold: "HIGH"  # Options: LOW, MEDIUM, HIGH, CRITICAL
-```
-
-### Advanced Options
-
-```yaml
-scanners:
-  snyk-code:
-    enabled: true
-    severity_threshold: "MEDIUM"
     options:
-      # Additional scanner-specific options can be added here
+      severity_threshold: HIGH
 ```
 
-## Usage Examples
+Snyk's SARIF is in `.ash/ash_output/scanners/snyk-code/source/results_sarif.sarif`, and its findings are in every ASH report.
 
-### High Severity Issues Only
+## Options
 
-```yaml
-scanners:
-  snyk-code:
-    enabled: true
-    severity_threshold: "HIGH"
-```
+`snyk-code` has the two options every scanner has, `severity_threshold` and `scan_timeout` ([scanner reference](../../../reference/scanners.md#snyk-code)). ASH also passes `severity_threshold` to Snyk as `snyk code test --severity-threshold`, so Snyk does not report findings below it at all; `CRITICAL` is sent as `high`, Snyk Code's highest level.
 
-### All Severity Levels
+## What is sent to Snyk
 
-```yaml
-scanners:
-  snyk-code:
-    enabled: true
-    severity_threshold: "LOW"
-```
+`snyk code test` uploads the source files it supports from the source directory. ASH applies `global_settings.ignore_paths` to Snyk's results after the scan and does not pass them to the Snyk CLI, so ignored directories are uploaded too.
 
-### Combined with Other Scanners
+## Known defect
 
-```bash
-# Use Snyk Code alongside other ASH scanners
-uv run ash --scanners snyk-code,bandit,semgrep
-```
+When Snyk Code reports any issue, `snyk` exits with code 1. In this release ASH treats that exit code as a failure: snyk-code is recorded as ERROR with no findings, and the scan exits with code 1. A Snyk Code run that finds nothing is recorded as PASSED.
 
-### CI/CD Integration
+## Offline, container and sandboxed scans
 
-```bash
-# Run in container mode for CI/CD
-uv run ash --mode container --scanners snyk-code
-```
+- Offline mode (`--offline` or `ASH_OFFLINE`): the scanner is reported MISSING, which fails the scan, so do not load the module in offline scans.
+- Container mode (`--mode container`): the image has no Snyk CLI, and ASH does not pass `SNYK_TOKEN` into the container.
+- Under `--sandbox`, the scanner gets network access, the `SNYK_*` environment variables and read access to `~/.config/configstore/snyk.json`, beyond the sandbox's defaults ([scanner sandbox](../../scanner-sandbox.md)).
 
-## Output Integration
-
-Snyk Code results are integrated into ASH's unified reporting system:
-
-- **SARIF Format**: Machine-readable results for CI/CD integration
-- **HTML Reports**: Visual security dashboard with remediation guidance
-- **JSON/CSV**: Structured data for analysis and tracking
-- **Markdown**: Human-readable summaries for pull requests
-
-## Performance Considerations
-
-- **First Run**: May require initial authentication and setup
-- **Network Dependency**: Requires internet connection for cloud-based analysis
-- **Large Codebases**: Scanning time scales with codebase size
-- **Rate Limits**: Snyk may apply rate limits based on your subscription tier
-
-## Troubleshooting
-
-### Common Issues
-
-**Snyk CLI not found**:
-```bash
-# Check if Snyk is in PATH
-which snyk
-
-# Install if missing
-npm install -g snyk
-```
-
-**Authentication errors**:
-```bash
-# Check authentication status
-snyk auth
-
-# Set token via environment variable
-export SNYK_TOKEN=your-token-here
-```
-
-**Network connectivity issues**:
-```bash
-# Test connectivity to Snyk services
-snyk test --dry-run
-```
-
-**Empty directory warnings**:
-The plugin will skip scanning if the target directory is empty or doesn't exist, logging an appropriate warning message.
-
-### Debug Mode
-
-Enable verbose logging to troubleshoot issues:
-
-```bash
-uv run ash --scanners snyk-code --log-level DEBUG
-```
-
-### Offline Mode
-
-**Note**: Snyk Code requires internet connectivity and will be automatically disabled in offline mode:
-
-```bash
-# Snyk Code will be skipped in offline mode
-uv run ash --offline --scanners snyk-code
-```
-
-## Integration Examples
-
-### Pre-commit Hook
-
-```yaml
-# .pre-commit-config.yaml
-repos:
-  - repo: local
-    hooks:
-      - id: ash-snyk-code
-        name: ASH Snyk Code Security Scan
-        entry: uv run ash --scanners snyk-code --mode precommit
-        language: system
-        pass_filenames: false
-```
-
-### GitHub Actions
-
-```yaml
-# .github/workflows/security.yml
-name: Security Scan
-on: [push, pull_request]
-
-jobs:
-  security:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Snyk CLI
-        run: npm install -g snyk
-      - name: Run ASH with Snyk Code
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: |
-          uv run ash --scanners snyk-code --output-format sarif
-      - name: Upload SARIF results
-        uses: github/codeql-action/upload-sarif@v2
-        with:
-          sarif_file: .ash/ash_output/reports/ash.sarif
-```
-
-### GitLab CI
-
-```yaml
-# .gitlab-ci.yml
-snyk-security-scan:
-  stage: test
-  image: node:18
-  before_script:
-    - npm install -g snyk
-  script:
-    - uv run ash --scanners snyk-code
-  variables:
-    SNYK_TOKEN: $SNYK_TOKEN
-  artifacts:
-    reports:
-      sast: .ash/ash_output/reports/ash.sarif
-```
-
-## Supported Languages
-
-Snyk Code supports static analysis for:
-
-- **JavaScript/TypeScript**: Node.js, React, Angular, Vue.js
-- **Python**: Django, Flask, FastAPI
-- **Java**: Spring, Maven, Gradle projects
-- **C#/.NET**: .NET Framework, .NET Core
-- **PHP**: Laravel, Symfony, WordPress
-- **Go**: Standard library and popular frameworks
-- **Ruby**: Rails, Sinatra
-- **Scala**: Play Framework, Akka
-- **Swift**: iOS/macOS applications
-
-Full list of supported languages is available at the [Snyk Website](https://docs.snyk.io/supported-languages-package-managers-and-frameworks#supported-languages)
-
-## Documentation
-
-For comprehensive documentation and advanced configuration options, see:
-- [ASH Community Plugins Documentation](index.md)
-- [Snyk CLI Documentation](https://docs.snyk.io/cli-ide-and-ci-cd-integrations/snyk-cli)
-- [Snyk Code Documentation](https://docs.snyk.io/products/snyk-code)
-
-## Support
-
-- **ASH Issues**: [GitHub Issues](https://github.com/awslabs/automated-security-helper/issues)
-- **Snyk Issues**: [Snyk Support](https://support.snyk.io/)
-- **Community**: [ASH Discussions](https://github.com/awslabs/automated-security-helper/discussions)
+[Snyk plugin in ASH's CI](snyk-plugin-setup.md) describes how the ASH repository's own CI handles the plugin.

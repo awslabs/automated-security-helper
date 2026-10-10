@@ -1,102 +1,22 @@
-# Snyk Plugin CI/CD Setup Guide
+# Snyk plugin in ASH's CI
 
-This guide provides detailed instructions for setting up the Snyk plugin in CI/CD environments, specifically for the GitHub Actions workflow in the automated-security-helper repository.
+This page is for maintainers of the ASH repository. It describes how ASH's own CI handles the [Snyk Code plugin](snyk-plugin.md). To use the plugin in your own scans, see that page.
 
-## GitHub Secret Configuration
+## What the CI runs
 
-The Snyk plugin requires a `SNYK_TOKEN` to authenticate with Snyk's services. This token must be configured as a GitHub repository secret.
+The workflow `.github/workflows/ash-unified-ci.yml` has four "Community Plugins" scan legs, all with `method: python-local` and `config-file: community`, on `ubuntu-latest`, `ubuntu-24.04-arm`, `macos-latest` and `windows-latest`. Each calls the composite action [`.github/actions/run-scan-test`](https://github.com/awslabs/automated-security-helper/blob/main/.github/actions/run-scan-test/action.yml) with `snyk-token: ${{ secrets.SNYK_TOKEN }}`. For these legs the action:
 
-### Setting up SNYK_TOKEN Secret
+1. installs the community tools: the Snyk CLI with `npm install -g snyk` (up to three attempts), ferret-scan with `pip install` against the version range its plugin declares, and trivy, hadolint and, except on Windows, GuardDog with `ash dependencies install --config .ash/.ash_community_plugins.yaml`;
+2. scans with `--config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins`, with `SNYK_TOKEN` set from the input.
 
-1. **Obtain a Snyk API Token**:
-   - Log in to your [Snyk account](https://app.snyk.io/)
-   - Navigate to **Account Settings** → **API Token**
-   - Generate a new token or copy your existing one
-   - The token format will look like: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
+`.ash/.ash_community_plugins.yaml` is inside the scanned tree, so it cannot load `ash_snyk_plugins` itself; that is why the legs name it on the command line. The file lists the other four community modules, and it disables snyk-code (`scanners.snyk-code.enabled: false`).
 
-2. **Add Secret to GitHub Repository**:
-   - Navigate to your GitHub repository
-   - Go to **Settings** → **Secrets and variables** → **Actions**
-   - Click **New repository secret**
-   - Name: `SNYK_TOKEN`
-   - Value: Your Snyk API token from step 1
-   - Click **Add secret**
+So the community legs install the Snyk CLI and load the plugin, but never run a Snyk Code scan, and no source is sent to Snyk. They check that the plugin imports and that its config section is accepted; they do not exercise its scan, including the [known defect](snyk-plugin.md#known-defect) in how it reads Snyk's exit code.
 
-### Verification
+## The `SNYK_TOKEN` secret
 
-The GitHub Actions workflow will automatically use the `SNYK_TOKEN` secret when running community plugin tests. You can verify the setup by:
+The token is a GitHub Actions repository secret named `SNYK_TOKEN`, holding a Snyk API token. To set or rotate it, create a token in your Snyk account settings, then in the GitHub repository open **Settings**, **Secrets and variables**, **Actions**, and add or update the repository secret `SNYK_TOKEN`.
 
-1. Checking that the secret appears in your repository's Actions secrets list
-2. Running the workflow and ensuring Snyk CLI authentication succeeds
-3. Reviewing the workflow logs for successful Snyk plugin execution
+Because no leg runs a Snyk Code scan, the legs pass whether or not the secret is set. GitHub does not give secrets to workflows that a pull request from a fork triggers, so on those the input is empty.
 
-## Local Development Setup
-
-For local development and testing, you can set up Snyk authentication using one of these methods:
-
-### Option 1: Environment Variable
-```bash
-export SNYK_TOKEN=your-snyk-token-here
-```
-
-### Option 2: CLI Authentication
-```bash
-snyk auth
-```
-This will open a browser window for authentication and store credentials locally.
-
-### Option 3: Configuration File
-Snyk CLI will automatically check for credentials at `~/.config/configstore/snyk.json`.
-
-## Troubleshooting
-
-### Common Issues
-
-**Authentication Failed**:
-- Verify the `SNYK_TOKEN` secret is correctly set in GitHub
-- Ensure the token is valid and hasn't expired
-- Check that the token has appropriate permissions for Snyk Code
-
-**Workflow Fails on Community Plugin Tests**:
-- The workflow will skip Snyk tests gracefully if `SNYK_TOKEN` is not available
-- Check the workflow logs for specific error messages
-- Ensure npm is available for Snyk CLI installation
-
-**Rate Limiting**:
-- Snyk may apply rate limits based on your subscription tier
-- Consider upgrading your Snyk plan for higher rate limits
-- Implement retry logic if needed
-
-### Debug Mode
-
-To troubleshoot issues in the workflow, you can:
-
-1. Check the "Install Community Plugin Tools" step logs
-2. Look for Snyk CLI version and authentication status
-3. Review the scan execution logs for detailed error messages
-
-## Security Considerations
-
-- **Token Security**: Never commit Snyk tokens to version control
-- **Token Rotation**: Regularly rotate your Snyk API tokens
-- **Access Control**: Limit repository access to trusted contributors
-- **Monitoring**: Monitor token usage in your Snyk dashboard
-
-## Integration Testing
-
-The GitHub Actions workflow tests both Snyk and Trivy plugins together to ensure:
-
-- Both tools install correctly on all supported platforms
-- Plugins don't conflict with each other
-- Scan results are properly generated and formatted
-- All output formats (SARIF, JSON, HTML, etc.) work correctly
-
-## Platform Support
-
-The Snyk plugin is tested on:
-
-- **Linux**: Ubuntu (x86_64 and ARM64)
-- **macOS**: Latest version (x86_64)
-- **Windows**: Latest version (x86_64)
-
-All platforms use npm for cross-platform Snyk CLI installation, ensuring consistent behavior across environments.
+If snyk-code is ever enabled in `.ash/.ash_community_plugins.yaml`, the legs will upload the repository's source to Snyk with this token, a pull request's changes included, and with the defect above any Snyk finding will fail the leg with exit code 1.

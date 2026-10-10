@@ -7,7 +7,7 @@ ASH's converters, scanners and reporters are plugins, and so are event subscribe
 | Source | Loaded | What it provides |
 |---|---|---|
 | Built in: `automated_security_helper.plugin_modules.ash_builtin` | on every run | the default scanners, reporters, converters and two event subscribers, listed in the [scanner](../reference/scanners.md), [reporter](../reference/reporters.md) and [converter](../reference/converters.md) references |
-| Plugin modules that ship with ASH, under `automated_security_helper.plugin_modules` | only when named | the [community scanners](community.md) (ferret-scan, snyk-code, trivy-repo, hadolint and GuardDog) and the [AWS reporters](aws.md) |
+| Plugin modules that ship with ASH, under `automated_security_helper.plugin_modules` | only when named | the [community scanners](../docs/plugins/community/index.md) (ferret-scan, snyk-code, trivy-repo, hadolint and GuardDog) and the [AWS reporters](aws.md) |
 | Third-party packages | only when named | anything you or someone else writes, installed in the same Python environment as ASH |
 
 ASH has no automatic discovery. Installing a package does nothing until a module list names it, and `ash scan` imports none of the optional modules that ship with ASH unless a module list names them.
