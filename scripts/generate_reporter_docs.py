@@ -58,7 +58,8 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-REFERENCE_PAGE = REPO_ROOT / "docs" / "content" / "reference" / "reporters.md"
+#: The reference page, relative to the docs tree (``--docs-root``), as REGIONS are.
+REFERENCE_PAGE = Path("docs/content/reference/reporters.md")
 GENERATOR = "scripts/generate_reporter_docs.py"
 
 BEGIN = "<!-- BEGIN GENERATED: {name} -->"
@@ -413,10 +414,13 @@ def render_reference_page(rows: list[dict]) -> tuple[str, list[str]]:
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from _plugin_reference import (
+        ENV_NOTE_SLOT,
         discover,
         instantiate,
         options_table,
         package_note,
+        package_short,
+        place_env_note,
         yes_no,
     )
     from _reference_docs import banner, code, generated_note, md_prose
@@ -453,6 +457,8 @@ def render_reference_page(rows: list[dict]) -> tuple[str, list[str]]:
         "",
         render_output_formats_defaults(rows),
         "",
+        ENV_NOTE_SLOT,
+        "",
     ]
     others = [p for p in plugins if not p.builtin]
     if others:
@@ -477,7 +483,7 @@ def render_reference_page(rows: list[dict]) -> tuple[str, list[str]]:
             lines.append(
                 f"| [{code(p.name)}](#{p.name}) | "
                 f"{code('.' + extension) if extension else 'none'} | "
-                f"{yes_no(p.enabled)} | {package_note(p)} |"
+                f"{yes_no(p.enabled)} | {package_short(p)} |"
             )
         lines.append("")
 
@@ -515,7 +521,7 @@ def render_reference_page(rows: list[dict]) -> tuple[str, list[str]]:
 
     while lines and lines[-1] == "":
         lines.pop()
-    return "\n".join(lines) + "\n", missing
+    return "\n".join(place_env_note(lines)) + "\n", missing
 
 
 REGIONS: list[tuple[str, str, object]] = [
@@ -568,13 +574,17 @@ def _replacement(name: str, body: str) -> str:
     return "\n".join([BEGIN.format(name=name), REGEN_NOTE, body, END.format(name=name)])
 
 
-def apply_regions(check: bool, missing_descriptions_path: str | None = None) -> int:
+def apply_regions(
+    check: bool,
+    missing_descriptions_path: str | None = None,
+    docs_root: Path = REPO_ROOT,
+) -> int:
     rows = registered_reporters()
     _check_editorial_coverage(rows)
 
     stale = []
     for rel_path, name, renderer in REGIONS:
-        path = REPO_ROOT / rel_path
+        path = docs_root / rel_path
         original = path.read_text(encoding="utf-8")
         pattern = _region_pattern(name)
         if not pattern.search(original):
@@ -597,16 +607,18 @@ def apply_regions(check: bool, missing_descriptions_path: str | None = None) -> 
             print(f"updated {rel_path} [{name}]", file=sys.stderr)
 
     page, missing = render_reference_page(rows)
+    reference_page = docs_root / REFERENCE_PAGE
     on_disk = (
-        REFERENCE_PAGE.read_text(encoding="utf-8") if REFERENCE_PAGE.exists() else ""
+        reference_page.read_text(encoding="utf-8") if reference_page.exists() else ""
     )
-    page_rel = REFERENCE_PAGE.relative_to(REPO_ROOT).as_posix()
+    page_rel = REFERENCE_PAGE.as_posix()
     if page != on_disk:
         if check:
             stale.append((page_rel, "whole page", on_disk, page))
         else:
-            REFERENCE_PAGE.parent.mkdir(parents=True, exist_ok=True)
-            REFERENCE_PAGE.write_text(page, encoding="utf-8")
+            reference_page.parent.mkdir(parents=True, exist_ok=True)
+            with open(reference_page, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(page)
             print(f"updated {page_rel}", file=sys.stderr)
     if missing_descriptions_path:
         Path(missing_descriptions_path).write_text(
@@ -654,13 +666,39 @@ def main() -> int:
         default=None,
         help="Also write the reporter options that have no description to this path.",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--output",
+        default=None,
+        help=(
+            "Write only the reference page, to this path ('-' for stdout), and leave "
+            "the marker regions alone. For measuring another tree's reporters."
+        ),
+    )
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from _reference_docs import scrub_import_time_environment
+    from _reference_docs import add_docs_root_argument, prepare_environment
 
-    scrub_import_time_environment()
+    add_docs_root_argument(parser)
+    args = parser.parse_args()
+    docs_root = Path(args.docs_root).resolve()
+    prepare_environment(docs_root)
+    if args.output:
+        rows = registered_reporters()
+        _check_editorial_coverage(rows)
+        page, missing = render_reference_page(rows)
+        if args.missing_descriptions:
+            Path(args.missing_descriptions).write_text(
+                "\n".join(missing) + "\n", encoding="utf-8"
+            )
+        if args.output == "-":
+            sys.stdout.write(page)
+        else:
+            with open(args.output, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(page)
+        return 0
     return apply_regions(
-        check=args.check, missing_descriptions_path=args.missing_descriptions
+        check=args.check,
+        missing_descriptions_path=args.missing_descriptions,
+        docs_root=docs_root,
     )
 
 

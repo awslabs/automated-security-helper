@@ -35,23 +35,25 @@ This page is generated from the reporter plugins in the ASH source code by `scri
 
 Of the 15 built-in reporters, 13 are enabled by default: `csv`, `cyclonedx`, `flat-json`, `github-ghas`, `gitlab-cyclonedx`, `gitlab-sast`, `html`, `junitxml`, `markdown`, `ocsf`, `sarif`, `text`, and `unused-suppressions`. `spdx` and `yaml` are available but disabled by default.
 
+A default written as from `NAME`, else `value` is read from that environment variable when ASH starts; `value` applies when the variable is not set.
+
 ## Reporters in plugin modules
 
 These are loaded only when the configuration's `ash_plugin_modules` names their module.
 
 | Reporter | File extension | Enabled by default | Provided by |
 |----------|----------------|--------------------|-------------|
-| [`aws-security-hub`](#aws-security-hub) | `.aws-security-hub.asff.json` | yes | add `automated_security_helper.plugin_modules.ash_aws_plugins` to `ash_plugin_modules` |
-| [`bedrock-summary-reporter`](#bedrock-summary-reporter) | `.bedrock.summary.md` | yes | add `automated_security_helper.plugin_modules.ash_aws_plugins` to `ash_plugin_modules` |
-| [`cloudwatch-logs`](#cloudwatch-logs) | `.cwlog.json` | yes | add `automated_security_helper.plugin_modules.ash_aws_plugins` to `ash_plugin_modules` |
-| [`s3`](#s3) | `.s3.json` | yes | add `automated_security_helper.plugin_modules.ash_aws_plugins` to `ash_plugin_modules` |
+| [`aws-security-hub`](#aws-security-hub) | `.aws-security-hub.asff.json` | yes | plugin module `ash_aws_plugins` |
+| [`bedrock-summary-reporter`](#bedrock-summary-reporter) | `.bedrock.summary.md` | yes | plugin module `ash_aws_plugins` |
+| [`cloudwatch-logs`](#cloudwatch-logs) | `.cwlog.json` | yes | plugin module `ash_aws_plugins` |
+| [`s3`](#s3) | `.s3.json` | yes | plugin module `ash_aws_plugins` |
 
 ## `csv`
 
 Formats results as CSV.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter.CsvReporter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - File extension: `.csv`
 - Runs with `--python-only`: yes
@@ -63,7 +65,7 @@ This plugin has no options.
 Formats results as CycloneDX.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.cyclonedx_reporter.CycloneDXReporter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - File extension: `.cdx.json`
 - Runs with `--python-only`: yes
@@ -75,13 +77,14 @@ This plugin has no options.
 Formats results as a flattened JSON array of findings.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.flatjson_reporter.FlatJSONReporter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - File extension: `.flat.json`
 - Runs with `--python-only`: yes
 
 Options, under `reporters.flat-json.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=reporters.flat-json -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="reporters.flat-json.options.include_scanner_metrics"></a>`include_scanner_metrics` | boolean | `true` | No description in the code. |
@@ -93,13 +96,14 @@ Options, under `reporters.flat-json.options`. A key not listed here is accepted 
 Produces a SARIF report optimized for GitHub Advanced Security Code Scanning.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_reporter.GHASReporter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - File extension: `.ghas.sarif`
 - Runs with `--python-only`: yes
 
 Options, under `reporters.github-ghas.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=reporters.github-ghas -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="reporters.github-ghas.options.exclude_suppressed"></a>`exclude_suppressed` | boolean | `true` | When true (default), suppressed findings are excluded from the GHAS report. GitHub has its own dismissal workflow so suppressed findings are typically not needed. |
@@ -109,13 +113,14 @@ Options, under `reporters.github-ghas.options`. A key not listed here is accepte
 Enriches CycloneDX SBOM with GitLab dependency scanning properties.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_cyclonedx_reporter.GitLabCycloneDXReporter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - File extension: `.gl-dependency-scanning-report.cdx.json`
 - Runs with `--python-only`: yes
 
 Options, under `reporters.gitlab-cyclonedx.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=reporters.gitlab-cyclonedx -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="reporters.gitlab-cyclonedx.options.category"></a>`category` | string | `production` | Default dependency category injected as gitlab:dependency_scanning:category. Typically 'production' or 'development'. |
@@ -128,13 +133,14 @@ Options, under `reporters.gitlab-cyclonedx.options`. A key not listed here is ac
 Formats vulnerability findings report as GitLab SAST format.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_reporter.GitLabSASTReporter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - File extension: `.gl-sast-report.json`
 - Runs with `--python-only`: yes
 
 Options, under `reporters.gitlab-sast.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=reporters.gitlab-sast -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="reporters.gitlab-sast.options.exclude_suppressed"></a>`exclude_suppressed` | boolean | `false` | When true, suppressed findings are excluded entirely from the GitLab SAST report. When false (default), suppressed findings are included with Info severity and the suppression reason in the solution field. |
@@ -144,7 +150,7 @@ Options, under `reporters.gitlab-sast.options`. A key not listed here is accepte
 Formats results as HTML.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter.HtmlReporter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - File extension: `.html`
 - Runs with `--python-only`: yes
@@ -156,13 +162,14 @@ This plugin has no options.
 Formats results as JUnitXML.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.junitxml_reporter.JunitXmlReporter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - File extension: `.junit.xml`
 - Runs with `--python-only`: yes
 
 Options, under `reporters.junitxml.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=reporters.junitxml -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="reporters.junitxml.options.respect_severity_threshold"></a>`respect_severity_threshold` | boolean | `true` | No description in the code. |
@@ -172,13 +179,14 @@ Options, under `reporters.junitxml.options`. A key not listed here is accepted a
 Formats results as a human-readable Markdown document.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter.MarkdownReporter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - File extension: `.summary.md`
 - Runs with `--python-only`: yes
 
 Options, under `reporters.markdown.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=reporters.markdown -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="reporters.markdown.options.include_summary"></a>`include_summary` | boolean | `true` | No description in the code. |
@@ -194,7 +202,7 @@ Options, under `reporters.markdown.options`. A key not listed here is accepted a
 Formats results as an array of Open Cybersecurity Schema Framework (OCSF) VulnerabilityFinding objects.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter.OcsfReporter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - File extension: `.ocsf.json`
 - Runs with `--python-only`: yes
@@ -206,7 +214,7 @@ This plugin has no options.
 Formats results as SARIF.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.sarif_reporter.SarifReporter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - File extension: `.sarif`
 - Runs with `--python-only`: yes
@@ -218,7 +226,7 @@ This plugin has no options.
 Formats results as an SPDX 2.3 JSON document.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.spdx_reporter.SpdxReporter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: no
 - File extension: `.spdx.json`
 - Runs with `--python-only`: yes
@@ -230,13 +238,14 @@ This plugin has no options.
 Formats results as a human-readable plain text document.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporter.TextReporter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - File extension: `.summary.txt`
 - Runs with `--python-only`: yes
 
 Options, under `reporters.text.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=reporters.text -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="reporters.text.options.include_summary"></a>`include_summary` | boolean | `true` | No description in the code. |
@@ -250,13 +259,14 @@ Options, under `reporters.text.options`. A key not listed here is accepted and k
 Identifies and reports suppressions that were not applied to any findings.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter.UnusedSuppressionsReporter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - File extension: `.unused-suppressions.json`
 - Runs with `--python-only`: yes
 
 Options, under `reporters.unused-suppressions.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=reporters.unused-suppressions -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="reporters.unused-suppressions.options.output_format"></a>`output_format` | string | `both` | No description in the code. |
@@ -266,7 +276,7 @@ Options, under `reporters.unused-suppressions.options`. A key not listed here is
 Formats results as YAML.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.reporters.yaml_reporter.YamlReporter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: no
 - File extension: `.yaml`
 - Runs with `--python-only`: yes
@@ -278,17 +288,18 @@ This plugin has no options.
 Sends security findings to AWS Security Hub in ASFF format.
 
 - Class: `automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter.SecurityHubReporter`
-- Provided by: add `automated_security_helper.plugin_modules.ash_aws_plugins` to `ash_plugin_modules`
+- Provided by: plugin module `ash_aws_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_aws_plugins`
 - Enabled by default: yes
 - File extension: `.aws-security-hub.asff.json`
 - Runs with `--python-only`: yes
 
 Options, under `reporters.aws-security-hub.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=reporters.aws-security-hub -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| <a id="reporters.aws-security-hub.options.aws_region"></a>`aws_region` | string or null | depends on the platform | AWS Region for Security Hub integration |
-| <a id="reporters.aws-security-hub.options.aws_profile"></a>`aws_profile` | string or null | depends on the platform | AWS Profile to use for authentication |
+| <a id="reporters.aws-security-hub.options.aws_region"></a>`aws_region` | string or null | from `AWS_REGION`, else from `AWS_DEFAULT_REGION`, else `null` | AWS Region for Security Hub integration |
+| <a id="reporters.aws-security-hub.options.aws_profile"></a>`aws_profile` | string or null | from `AWS_PROFILE`, else `null` | AWS Profile to use for authentication |
 | <a id="reporters.aws-security-hub.options.account_id"></a>`account_id` | string or null | `null` | AWS Account ID (will be auto-detected if not provided) |
 
 ## `bedrock-summary-reporter`
@@ -296,20 +307,21 @@ Options, under `reporters.aws-security-hub.options`. A key not listed here is ac
 Generates a summary of security findings using Amazon Bedrock.
 
 - Class: `automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter.BedrockSummaryReporter`
-- Provided by: add `automated_security_helper.plugin_modules.ash_aws_plugins` to `ash_plugin_modules`
+- Provided by: plugin module `ash_aws_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_aws_plugins`
 - Enabled by default: yes
 - File extension: `.bedrock.summary.md`
 - Runs with `--python-only`: yes
 
 Options, under `reporters.bedrock-summary-reporter.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=reporters.bedrock-summary-reporter -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| <a id="reporters.bedrock-summary-reporter.options.aws_region"></a>`aws_region` | string or null, matches `(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}` | depends on the platform | AWS region to use for Bedrock. If not specified, the default region will be used. If specified, the region will be used for all Bedrock requests. |
-| <a id="reporters.bedrock-summary-reporter.options.aws_profile"></a>`aws_profile` | string or null | depends on the platform | AWS profile to use for Bedrock. If not specified, the default profile will be used. |
-| <a id="reporters.bedrock-summary-reporter.options.model_id"></a>`model_id` | string | depends on the platform | Bedrock model ID to use for generating summaries. |
-| <a id="reporters.bedrock-summary-reporter.options.temperature"></a>`temperature` | number | depends on the platform | Temperature parameter for the Bedrock model. Higher values make output more random. |
-| <a id="reporters.bedrock-summary-reporter.options.max_tokens"></a>`max_tokens` | integer | depends on the platform | Maximum number of tokens to generate in the response. |
+| <a id="reporters.bedrock-summary-reporter.options.aws_region"></a>`aws_region` | string or null, matches `(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}` | from `AWS_REGION`, else from `AWS_DEFAULT_REGION`, else `us-east-1` | AWS region to use for Bedrock. If not specified, the default region will be used. If specified, the region will be used for all Bedrock requests. |
+| <a id="reporters.bedrock-summary-reporter.options.aws_profile"></a>`aws_profile` | string or null | from `AWS_PROFILE`, else `null` | AWS profile to use for Bedrock. If not specified, the default profile will be used. |
+| <a id="reporters.bedrock-summary-reporter.options.model_id"></a>`model_id` | string | from `ASH_BEDROCK_MODEL_ID`, else `us.anthropic.claude-3-7-sonnet-20250219-v1:0` | Bedrock model ID to use for generating summaries. |
+| <a id="reporters.bedrock-summary-reporter.options.temperature"></a>`temperature` | number | from `ASH_BEDROCK_TEMPERATURE`, else `0.5` | Temperature parameter for the Bedrock model. Higher values make output more random. |
+| <a id="reporters.bedrock-summary-reporter.options.max_tokens"></a>`max_tokens` | integer | from `ASH_BEDROCK_MAX_TOKENS`, else `4000` | Maximum number of tokens to generate in the response. |
 | <a id="reporters.bedrock-summary-reporter.options.top_p"></a>`top_p` | number | `0.9` | Top-p parameter for the Bedrock model. Controls diversity of generated text. |
 | <a id="reporters.bedrock-summary-reporter.options.max_findings_to_analyze"></a>`max_findings_to_analyze` | integer | `10` | Maximum number of findings to include in the analysis. |
 | <a id="reporters.bedrock-summary-reporter.options.max_findings_per_severity"></a>`max_findings_per_severity` | integer | `5` | Maximum number of findings to include per severity level when grouping by severity. |
@@ -343,17 +355,18 @@ Options, under `reporters.bedrock-summary-reporter.options`. A key not listed he
 Formats results and publishes to CloudWatch Logs.
 
 - Class: `automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_reporter.CloudWatchLogsReporter`
-- Provided by: add `automated_security_helper.plugin_modules.ash_aws_plugins` to `ash_plugin_modules`
+- Provided by: plugin module `ash_aws_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_aws_plugins`
 - Enabled by default: yes
 - File extension: `.cwlog.json`
 - Runs with `--python-only`: yes
 
 Options, under `reporters.cloudwatch-logs.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=reporters.cloudwatch-logs -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| <a id="reporters.cloudwatch-logs.options.aws_region"></a>`aws_region` | string or null, matches `(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}` | `us-west-2` | AWS region for CloudWatch Logs |
-| <a id="reporters.cloudwatch-logs.options.log_group_name"></a>`log_group_name` | string or null | `null` | CloudWatch Logs group name to publish results to |
+| <a id="reporters.cloudwatch-logs.options.aws_region"></a>`aws_region` | string or null, matches `(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}` | from `AWS_REGION`, else from `AWS_DEFAULT_REGION`, else `null` | AWS region for CloudWatch Logs |
+| <a id="reporters.cloudwatch-logs.options.log_group_name"></a>`log_group_name` | string or null | from `ASH_CLOUDWATCH_LOG_GROUP_NAME`, else `null` | CloudWatch Logs group name to publish results to |
 | <a id="reporters.cloudwatch-logs.options.log_stream_name"></a>`log_stream_name` | string | `ASHScanResults` | CloudWatch Logs stream name to publish results to |
 | <a id="reporters.cloudwatch-logs.options.max_retries"></a>`max_retries` | integer | `3` | Maximum number of retry attempts for CloudWatch API calls |
 | <a id="reporters.cloudwatch-logs.options.base_delay"></a>`base_delay` | number | `1.0` | Base delay in seconds between retry attempts |
@@ -364,18 +377,19 @@ Options, under `reporters.cloudwatch-logs.options`. A key not listed here is acc
 Formats results and uploads to an S3 bucket.
 
 - Class: `automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.S3Reporter`
-- Provided by: add `automated_security_helper.plugin_modules.ash_aws_plugins` to `ash_plugin_modules`
+- Provided by: plugin module `ash_aws_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_aws_plugins`
 - Enabled by default: yes
 - File extension: `.s3.json`
 - Runs with `--python-only`: yes
 
 Options, under `reporters.s3.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=reporters.s3 -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| <a id="reporters.s3.options.aws_region"></a>`aws_region` | string or null, matches `(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}` | `us-west-2` | AWS region to use for S3 operations |
-| <a id="reporters.s3.options.aws_profile"></a>`aws_profile` | string or null | `null` | AWS profile to use for authentication |
-| <a id="reporters.s3.options.bucket_name"></a>`bucket_name` | string or null | `null` | Name of the S3 bucket to store reports |
+| <a id="reporters.s3.options.aws_region"></a>`aws_region` | string or null, matches `(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}` | from `AWS_REGION`, else from `AWS_DEFAULT_REGION`, else `null` | AWS region to use for S3 operations |
+| <a id="reporters.s3.options.aws_profile"></a>`aws_profile` | string or null | from `AWS_PROFILE`, else `null` | AWS profile to use for authentication |
+| <a id="reporters.s3.options.bucket_name"></a>`bucket_name` | string or null | from `ASH_S3_BUCKET_NAME`, else `null` | Name of the S3 bucket to store reports |
 | <a id="reporters.s3.options.key_prefix"></a>`key_prefix` | string | `ash-reports/` | Prefix for S3 object keys |
 | <a id="reporters.s3.options.file_format"></a>`file_format` | one of `json`, `yaml` | `json` | Format to use for the report file |
 | <a id="reporters.s3.options.max_retries"></a>`max_retries` | integer | `3` | Maximum number of retry attempts for S3 operations |

@@ -13,8 +13,10 @@ Every scanner class declared by a package under ``plugin_modules/`` is listed (s
 gives, from the code:
 
 * its config name, whether it is enabled by default, and which package provides
-  it (``ash_builtin`` is always loaded; others are loaded through
+  it (``ash_builtin`` is always loaded; the community modules are loaded through
   ``ash_plugin_modules``);
+* a link to its own page in the docs tree, when that tree has one (see
+  :func:`scanner_page`);
 * its tool type (``ScannerToolType``), the command it runs, how ASH installs that
   command, whether ``--python-only`` keeps it, and its offline strategy;
 * what it needs from the sandbox: network, and the environment prefixes it is
@@ -30,22 +32,59 @@ npm-audit's and syft's say "IaC"), so they are not published. A scanner that set
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _reference_docs import (  # noqa: E402
-    REFERENCE_DIR,
+    add_docs_root_argument,
     banner,
     code,
     generated_note,
     md_prose,
-    scrub_import_time_environment,
+    prepare_environment,
+    reference_dir,
     write_or_check,
 )
 
 GENERATOR = "scripts/generate_scanner_reference.py"
-OUTPUT = REFERENCE_DIR / "scanners.md"
+PAGE = "scanners.md"
+#: Where a docs tree keeps one page per scanner, relative to its root.
+BUILTIN_PAGES = Path("docs/content/docs/plugins/builtin")
+COMMUNITY_PAGES = Path("docs/content/docs/plugins/community")
+
+
+def scanner_page(plugin, docs_root: Path) -> Optional[Path]:
+    """The docs tree's own page for ``plugin``, if it has one.
+
+    A built-in scanner's page is ``BUILTIN_PAGES/<name>.md``, or a page that covers
+    several scanners and names them in its file name joined by ``-and-``
+    (``cfn-lint-and-cfn-guard.md``). A community scanner's page is
+    ``COMMUNITY_PAGES/<name>-plugin.md``, or ``<module>-plugin.md`` after the
+    module name's ``ash_`` and ``_plugins`` (``ash_snyk_plugins`` is
+    ``snyk-plugin.md``). Read from the files present, so a link appears in the
+    same change that adds the page.
+    """
+    from _plugin_reference import module_name
+
+    if plugin.builtin:
+        folder = Path(docs_root) / BUILTIN_PAGES
+        candidates = [folder / f"{plugin.name}.md"]
+        candidates += sorted(
+            page
+            for page in folder.glob("*-and-*.md")
+            if plugin.name in page.stem.split("-and-")
+        )
+    else:
+        folder = Path(docs_root) / COMMUNITY_PAGES
+        module = module_name(plugin).removeprefix("ash_").removesuffix("_plugins")
+        candidates = [
+            folder / f"{plugin.name}-plugin.md",
+            folder / f"{module.replace('_', '-')}-plugin.md",
+        ]
+    return next((page for page in candidates if page.is_file()), None)
 
 
 def _value(instance, attr: str):
@@ -103,13 +142,16 @@ def _baseline_environment() -> list[str]:
     ]
 
 
-def generate() -> tuple[str, dict]:
+def generate(docs_root: Path) -> tuple[str, dict]:
     from _plugin_reference import (
+        ENV_NOTE_SLOT,
         discover,
         install_text,
         instantiate,
         options_table,
         package_note,
+        package_short,
+        place_env_note,
         yes_no,
     )
 
@@ -133,8 +175,9 @@ def generate() -> tuple[str, dict]:
         "",
         (
             f"ASH ships {len(plugins)} scanners. The built-in ones are loaded on every "
-            "scan. The others are in plugin modules, loaded only when the configuration's "
-            "`ash_plugin_modules` (or `--ash-plugin-modules`) names the module."
+            "scan. The others are community scanners, each in a plugin module that is "
+            "loaded only when the configuration's `ash_plugin_modules` (or "
+            "`--ash-plugin-modules`) names the module."
         ),
         "",
         "| Scanner | Tool type | Enabled by default | Provided by | Command | Runs with `--python-only` |",
@@ -151,7 +194,7 @@ def generate() -> tuple[str, dict]:
         command = _value(inst, "command") if inst is not None else None
         lines.append(
             f"| [{code(p.name)}](#{p.name}) | {_value(inst, 'tool_type') or 'not determined'} | "
-            f"{yes_no(p.enabled)} | {package_note(p)} | "
+            f"{yes_no(p.enabled)} | {package_short(p)} | "
             f"{code(command) if command else 'not determined'} | {yes_no(python_only)} |"
         )
     lines += [
@@ -162,6 +205,8 @@ def generate() -> tuple[str, dict]:
             "and only pip dependencies. That is a statement about what ASH installs, not "
             "about what the command needs at run time."
         ),
+        "",
+        ENV_NOTE_SLOT,
         "",
         *_baseline_environment(),
     ]
@@ -175,7 +220,12 @@ def generate() -> tuple[str, dict]:
         if description:
             lines += [md_prose(description), ""]
         network, env, env_set = _sandbox(p)
-        facts = [
+        facts = []
+        page = scanner_page(p, docs_root)
+        if page is not None:
+            link = Path(os.path.relpath(page, reference_dir(docs_root))).as_posix()
+            facts.append(("Scanner page", f"[{code(p.name)} scanner page]({link})"))
+        facts += [
             ("Class", code(f"{p.cls.__module__}.{p.cls.__name__}")),
             ("Provided by", package_note(p)),
             ("Enabled by default", yes_no(p.enabled)),
@@ -208,7 +258,7 @@ def generate() -> tuple[str, dict]:
     while lines and lines[-1] == "":
         lines.pop()
     stats = {"plugins": len(plugins), "missing": missing}
-    return "\n".join(lines) + "\n", stats
+    return "\n".join(place_env_note(lines)) + "\n", stats
 
 
 def main() -> int:
@@ -217,17 +267,22 @@ def main() -> int:
         "--check", action="store_true", help="Exit 1 with a diff if stale."
     )
     parser.add_argument(
-        "--output", default=str(OUTPUT), help="Output path, or '-' for stdout."
+        "--output",
+        default=None,
+        help=f"Output path, or '-' for stdout. Default: <docs root>/docs/content/reference/{PAGE}",
     )
     parser.add_argument(
         "--missing-descriptions",
         default=None,
         help="Also write the options that have no description to this path.",
     )
+    add_docs_root_argument(parser)
     args = parser.parse_args()
 
-    scrub_import_time_environment()
-    content, stats = generate()
+    docs_root = Path(args.docs_root).resolve()
+    prepare_environment(docs_root)
+    output = Path(args.output) if args.output else reference_dir(docs_root) / PAGE
+    content, stats = generate(docs_root)
     summary = (
         f"{stats['plugins']} scanners, {len(stats['missing'])} options with no "
         "description in the model."
@@ -240,7 +295,7 @@ def main() -> int:
         sys.stdout.write(content)
         print(summary, file=sys.stderr)
         return 0
-    return write_or_check(Path(args.output), content, args.check, GENERATOR, summary)
+    return write_or_check(output, content, args.check, GENERATOR, summary)
 
 
 if __name__ == "__main__":

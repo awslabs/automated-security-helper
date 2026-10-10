@@ -24,7 +24,7 @@ ASH ships 2 converters. Converters run in the `convert` phase, before the `scan`
 Converter implementation for Archive file extraction.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter.ArchiveConverter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Command: none (runs in the ASH process)
 - Install: none declared
@@ -36,14 +36,15 @@ This plugin has no options.
 Converter implementation for Jupyter notebooks security scanning.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter.JupyterConverter`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Command: `jupyter-nbconvert`
 - Install: `uv tool install` on first use (`nbconvert>=7.16.0,<8.0.0`)
 
 Options, under `converters.jupyter.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=converters.jupyter -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| <a id="converters.jupyter.options.tool_version"></a>`tool_version` | string or null | `>=7.16.0,<8.0.0` | Version constraint for nbconvert tool installation (e.g., '&gt;=7.16.0'). If not specified, the latest version will be installed. |
+| <a id="converters.jupyter.options.tool_version"></a>`tool_version` | string or null | `">=7.16.0,<8.0.0"` | Version constraint for nbconvert tool installation (e.g., '&gt;=7.16.0'). If not specified, the latest version will be installed. |
 | <a id="converters.jupyter.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation (default: 300) |

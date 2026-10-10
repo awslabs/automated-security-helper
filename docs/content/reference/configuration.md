@@ -12,7 +12,7 @@
 
 This page is generated from the configuration models in the ASH source code by `scripts/generate_config_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-Every key is listed with its type, default and the description the model carries. A key whose model has no description says so. Keys inside a list are written `key[].field`: `global_settings.suppressions[].rule_id` is the `rule_id` of one entry in the `suppressions` list.
+Every key is listed with its type, default and the description the model carries. A key whose model has no description says so. Keys inside a list are written `key[].field`: `global_settings.suppressions[].rule_id` is the `rule_id` of one entry in the `suppressions` list. A default written as from `NAME`, else `value` is read from that environment variable when ASH starts; `value` applies when the variable is not set.
 
 ## Where ASH finds its configuration
 
@@ -54,7 +54,7 @@ A key not listed here is ignored, without an error, when the configuration is lo
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| <a id="project_name"></a>`project_name` | string | depends on the platform | Name of the project being scanned. The default is read from `ASH_PROJECT_NAME` when ASH starts, if that variable is set. |
+| <a id="project_name"></a>`project_name` | string | from `ASH_PROJECT_NAME`, else `ash-scan` | Name of the project being scanned |
 | <a id="global_settings"></a>`global_settings` | [section](#section-global_settings) | see the section | Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence. |
 | <a id="fail_on_findings"></a>`fail_on_findings` | boolean | `true` | Whether to exit with non-zero code if findings are detected |
 | <a id="fail_on_incomplete_scanners"></a>`fail_on_incomplete_scanners` | boolean | `true` | Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). SKIPPED scanners are not selected and never trip this. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured. |
@@ -80,7 +80,7 @@ A key not listed here is an error when the configuration is loaded.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| <a id="global_settings.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` | `MEDIUM` | Global minimum severity level to consider findings as failures across all scanners. The default is read from `ASH_DEFAULT_SEVERITY_LEVEL` when ASH starts, if that variable is set. |
+| <a id="global_settings.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` | from `ASH_DEFAULT_SEVERITY_LEVEL`, else `MEDIUM` | Global minimum severity level to consider findings as failures across all scanners |
 | <a id="global_settings.ignore_paths"></a>`ignore_paths` | list of [section](#section-global_settings-ignore_paths) | `[]` | Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'. |
 | <a id="global_settings.suppressions"></a>`suppressions` | list of [section](#section-global_settings-suppressions) | `[]` | Global list of suppression rules. Each rule specifies findings to suppress based on rule ID, file path, and optional line numbers. |
 | <a id="global_settings.mcp"></a>`mcp` | [section](#section-global_settings-mcp) | see the section | MCP-server-specific configuration (runtime override allowlist, etc.). |
@@ -151,7 +151,7 @@ A key not listed here is an error when the configuration is loaded.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| <a id="sandbox.mode"></a>`mode` | one of `off`, `auto`, `bwrap`, `firejail`, `landlock`, `sandbox-exec` | `off` | How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. Ignored in container mode, where the container is the boundary. |
+| <a id="sandbox.mode"></a>`mode` | one of `off`, `auto`, `bwrap`, `firejail`, `landlock`, `sandbox-exec` | `"off"` | How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. Ignored in container mode, where the container is the boundary. |
 | <a id="sandbox.network_scanners"></a>`network_scanners` | list of string or null | `null` | Scanners allowed a network when the scan is online. Null (the default) uses each scanner's declared need: semgrep, opengrep, grype, trivy, npm-audit and snyk-code fetch rules, databases or audit data. A list replaces those defaults. Under --offline no scanner gets a network. Honored only from --config-overrides or a config file outside the scanned tree; set inside the tree, a list can only remove network. |
 | <a id="sandbox.extra_read_paths"></a>`extra_read_paths` | list of string | `[]` | Additional host paths every sandboxed scanner may read, for example a corporate CA bundle or a shared rule directory. '~' and $VARS expand. Ignored when set by a config file inside the scanned tree. |
 

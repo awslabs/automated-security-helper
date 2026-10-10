@@ -12,7 +12,7 @@
 
 This page is generated from the scanner plugins in the ASH source code by `scripts/generate_scanner_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 13 scanners. The built-in ones are loaded on every scan. The others are in plugin modules, loaded only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module.
+ASH ships 13 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that is loaded only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module.
 
 | Scanner | Tool type | Enabled by default | Provided by | Command | Runs with `--python-only` |
 |---------|-----------|--------------------|-------------|---------|---------------------------|
@@ -26,9 +26,9 @@ ASH ships 13 scanners. The built-in ones are loaded on every scan. The others ar
 | [`opengrep`](#opengrep) | SAST | yes on Linux and macOS; no on Windows | built in | `opengrep` | no |
 | [`semgrep`](#semgrep) | SAST | yes on Linux and macOS; no on Windows | built in | `semgrep` | yes |
 | [`syft`](#syft) | SBOM | yes | built in | `syft` | no |
-| [`ferret-scan`](#ferret-scan) | SECRETS | yes | add `automated_security_helper.plugin_modules.ash_ferret_plugins` to `ash_plugin_modules` | `ferret-scan` | yes |
-| [`snyk-code`](#snyk-code) | SAST | yes | add `automated_security_helper.plugin_modules.ash_snyk_plugins` to `ash_plugin_modules` | `snyk` | yes |
-| [`trivy-repo`](#trivy-repo) | SAST | yes | add `automated_security_helper.plugin_modules.ash_trivy_plugins` to `ash_plugin_modules` | `trivy` | no |
+| [`ferret-scan`](#ferret-scan) | SECRETS | yes | community module `ash_ferret_plugins` | `ferret-scan` | yes |
+| [`snyk-code`](#snyk-code) | SAST | yes | community module `ash_snyk_plugins` | `snyk` | yes |
+| [`trivy-repo`](#trivy-repo) | SAST | yes | community module `ash_trivy_plugins` | `trivy` | no |
 
 Tool type is the scanner's own `ScannerToolType`. `--python-only` keeps a scanner when its `is_python_only()` is true: it declares no install commands and only pip dependencies. That is a statement about what ASH installs, not about what the command needs at run time.
 
@@ -41,7 +41,7 @@ When `sandbox.mode` confines scanners, a scanner process receives only an allowl
 Bandit is a Python source code security analyzer.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner.BanditScanner`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: SAST
 - Command: `bandit`
@@ -53,6 +53,7 @@ Bandit is a Python source code security analyzer.
 
 Options, under `scanners.bandit.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=scanners.bandit -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.bandit.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
@@ -62,7 +63,7 @@ Options, under `scanners.bandit.options`. A key not listed here is accepted and 
 | <a id="scanners.bandit.options.ignore_nosec"></a>`ignore_nosec` | boolean | `false` | If True, do not skip lines with # nosec comments. Defaults to False. |
 | <a id="scanners.bandit.options.excluded_paths"></a>`excluded_paths` | list of `IgnorePathWithReason` | `[]` | List of excluded paths and their corresponding reason to exclude from scanning |
 | <a id="scanners.bandit.options.additional_formats"></a>`additional_formats` | list of one of `csv`, `custom`, `html`, `json`, `sarif`, `txt`, `xml`, `yaml` | `[]` | List of additional formats to output |
-| <a id="scanners.bandit.options.tool_version"></a>`tool_version` | string or null | `>=1.7.0,<2.0.0` | Version constraint for bandit installation, in pip requirement syntax. The default below is the constraint the scanner enforces. |
+| <a id="scanners.bandit.options.tool_version"></a>`tool_version` | string or null | `">=1.7.0,<2.0.0"` | Version constraint for bandit installation, in pip requirement syntax. The default below is the constraint the scanner enforces. |
 | <a id="scanners.bandit.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation |
 
 ## `cdk-nag`
@@ -70,7 +71,7 @@ Options, under `scanners.bandit.options`. A key not listed here is accepted and 
 CDK Nag is a security scanner for AWS CloudFormation templates that applies industry standard checks against AWS infrastructure-as-code.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner.CdkNagScanner`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `python`
@@ -82,6 +83,7 @@ CDK Nag is a security scanner for AWS CloudFormation templates that applies indu
 
 Options, under `scanners.cdk-nag.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=scanners.cdk-nag -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.cdk-nag.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
@@ -92,7 +94,7 @@ Options, under `scanners.cdk-nag.options`. A key not listed here is accepted and
 ## `cfn-nag`
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner.CfnNagScanner`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `cfn_nag_scan`
@@ -104,6 +106,7 @@ Options, under `scanners.cdk-nag.options`. A key not listed here is accepted and
 
 Options, under `scanners.cfn-nag.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=scanners.cfn-nag -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.cfn-nag.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
@@ -112,7 +115,7 @@ Options, under `scanners.cfn-nag.options`. A key not listed here is accepted and
 ## `checkov`
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner.CheckovScanner`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `checkov`
@@ -124,6 +127,7 @@ Options, under `scanners.cfn-nag.options`. A key not listed here is accepted and
 
 Options, under `scanners.checkov.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=scanners.checkov -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.checkov.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
@@ -141,7 +145,7 @@ Options, under `scanners.checkov.options`. A key not listed here is accepted and
 ## `detect-secrets`
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner.DetectSecretsScanner`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: SECRETS
 - Command: `detect-secrets`
@@ -153,6 +157,7 @@ Options, under `scanners.checkov.options`. A key not listed here is accepted and
 
 Options, under `scanners.detect-secrets.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=scanners.detect-secrets -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.detect-secrets.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
@@ -164,7 +169,7 @@ Options, under `scanners.detect-secrets.options`. A key not listed here is accep
 ## `grype`
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner.GrypeScanner`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: SCA
 - Command: `grype`
@@ -176,6 +181,7 @@ Options, under `scanners.detect-secrets.options`. A key not listed here is accep
 
 Options, under `scanners.grype.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=scanners.grype -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.grype.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | No description in the code. |
@@ -186,7 +192,7 @@ Options, under `scanners.grype.options`. A key not listed here is accepted and k
 ## `npm-audit`
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner.NpmAuditScanner`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: SCA
 - Command: `npm`
@@ -198,6 +204,7 @@ Options, under `scanners.grype.options`. A key not listed here is accepted and k
 
 Options, under `scanners.npm-audit.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=scanners.npm-audit -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.npm-audit.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
@@ -207,7 +214,7 @@ Options, under `scanners.npm-audit.options`. A key not listed here is accepted a
 ## `opengrep`
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner.OpengrepScanner`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes on Linux and macOS; no on Windows
 - Tool type: SAST
 - Command: `opengrep`
@@ -219,6 +226,7 @@ Options, under `scanners.npm-audit.options`. A key not listed here is accepted a
 
 Options, under `scanners.opengrep.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=scanners.opengrep -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.opengrep.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
@@ -236,7 +244,7 @@ Options, under `scanners.opengrep.options`. A key not listed here is accepted an
 ## `semgrep`
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner.SemgrepScanner`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes on Linux and macOS; no on Windows
 - Tool type: SAST
 - Command: `semgrep`
@@ -248,6 +256,7 @@ Options, under `scanners.opengrep.options`. A key not listed here is accepted an
 
 Options, under `scanners.semgrep.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=scanners.semgrep -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.semgrep.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
@@ -264,7 +273,7 @@ Options, under `scanners.semgrep.options`. A key not listed here is accepted and
 ## `syft`
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner.SyftScanner`
-- Provided by: built in
+- Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: SBOM
 - Command: `syft`
@@ -276,6 +285,7 @@ Options, under `scanners.semgrep.options`. A key not listed here is accepted and
 
 Options, under `scanners.syft.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=scanners.syft -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.syft.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
@@ -289,8 +299,9 @@ Options, under `scanners.syft.options`. A key not listed here is accepted and ke
 
 Ferret Scan is a sensitive data detection tool that scans files for potential sensitive information such as credit card numbers, passport numbers, SSNs, API keys, and other secrets.
 
+- Scanner page: [`ferret-scan` scanner page](../docs/plugins/community/ferret-scan-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.FerretScanScanner`
-- Provided by: add `automated_security_helper.plugin_modules.ash_ferret_plugins` to `ash_plugin_modules`
+- Provided by: community module `ash_ferret_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_ferret_plugins`
 - Enabled by default: yes
 - Tool type: SECRETS
 - Command: `ferret-scan`
@@ -302,6 +313,7 @@ Ferret Scan is a sensitive data detection tool that scans files for potential se
 
 Options, under `scanners.ferret-scan.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=scanners.ferret-scan -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.ferret-scan.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
@@ -329,8 +341,9 @@ Options, under `scanners.ferret-scan.options`. A key not listed here is accepted
 
 ## `snyk-code`
 
+- Scanner page: [`snyk-code` scanner page](../docs/plugins/community/snyk-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner.SnykCodeScanner`
-- Provided by: add `automated_security_helper.plugin_modules.ash_snyk_plugins` to `ash_plugin_modules`
+- Provided by: community module `ash_snyk_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_snyk_plugins`
 - Enabled by default: yes
 - Tool type: SAST
 - Command: `snyk`
@@ -342,6 +355,7 @@ Options, under `scanners.ferret-scan.options`. A key not listed here is accepted
 
 Options, under `scanners.snyk-code.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=scanners.snyk-code -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.snyk-code.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
@@ -349,8 +363,9 @@ Options, under `scanners.snyk-code.options`. A key not listed here is accepted a
 
 ## `trivy-repo`
 
+- Scanner page: [`trivy-repo` scanner page](../docs/plugins/community/trivy-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.TrivyRepoScanner`
-- Provided by: add `automated_security_helper.plugin_modules.ash_trivy_plugins` to `ash_plugin_modules`
+- Provided by: community module `ash_trivy_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_trivy_plugins`
 - Enabled by default: yes
 - Tool type: SAST
 - Command: `trivy`
@@ -362,6 +377,7 @@ Options, under `scanners.snyk-code.options`. A key not listed here is accepted a
 
 Options, under `scanners.trivy-repo.options`. A key not listed here is accepted and kept, without validation.
 
+<!-- doctest: options of=scanners.trivy-repo -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="scanners.trivy-repo.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |

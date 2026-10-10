@@ -74,12 +74,11 @@ import inspect
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-TARGET = (
-    REPO_ROOT
-    / "ash-agent-plugins/agentic-coding/transpiler/_base/references/tool-reference.md"
+#: The two files this script writes, relative to the docs tree (``--docs-root``).
+TARGET = Path(
+    "ash-agent-plugins/agentic-coding/transpiler/_base/references/tool-reference.md"
 )
-REFERENCE_PAGE = REPO_ROOT / "docs" / "content" / "reference" / "mcp-tools.md"
+REFERENCE_PAGE = Path("docs/content/reference/mcp-tools.md")
 GENERATOR = "scripts/generate_mcp_tool_reference.py"
 
 NUMBER_WORDS = {
@@ -670,31 +669,51 @@ def main() -> int:
         action="store_true",
         help="Do not write. Exit non-zero with a diff if either file is stale.",
     )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help=(
+            "Write only the docs-site page, to this path ('-' for stdout), and leave "
+            "the agent-facing file alone. For measuring another tree's MCP surface."
+        ),
+    )
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _reference_docs import add_docs_root_argument, prepare_environment
+
+    add_docs_root_argument(parser)
     args = parser.parse_args()
 
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from _reference_docs import scrub_import_time_environment
-
-    scrub_import_time_environment()
+    docs_root = Path(args.docs_root).resolve()
+    prepare_environment(docs_root)
+    if args.output:
+        page = render_reference_page()
+        if args.output == "-":
+            sys.stdout.write(page)
+        else:
+            with open(args.output, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(page)
+        return 0
     status = 0
     for target, expected, after in (
         (
-            TARGET,
+            docs_root / TARGET,
             render(),
             (
                 "Then propagate: uv run --project "
                 "ash-agent-plugins/agentic-coding/transpiler agentic-plugins build"
             ),
         ),
-        (REFERENCE_PAGE, render_reference_page(), ""),
+        (docs_root / REFERENCE_PAGE, render_reference_page(), ""),
     ):
-        status |= _write_or_check(target, expected, args.check, after)
+        status |= _write_or_check(target, expected, args.check, after, docs_root)
     return status
 
 
-def _write_or_check(target: Path, expected: str, check: bool, after: str) -> int:
+def _write_or_check(
+    target: Path, expected: str, check: bool, after: str, docs_root: Path
+) -> int:
     actual = target.read_text(encoding="utf-8") if target.exists() else ""
-    rel = target.relative_to(REPO_ROOT)
+    rel = target.relative_to(docs_root)
 
     if expected == actual:
         if check:

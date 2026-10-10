@@ -28,6 +28,22 @@ The command a scanner runs, its tool type and how ASH installs it are set in
 directory, the way ``core/scanner_inventory.py`` builds them for ``ash plugin
 list``; nothing reads the working tree and no scan runs. A plugin that cannot be
 built is still listed, with the instance-only columns marked as not determined.
+
+Built-in and community
+----------------------
+``ash_builtin`` is the built-in package. A scanner from any other package under
+``plugin_modules/`` is a community scanner, which is how
+``core/community_scanners.py`` decides which module to suggest for a scanner
+that was not loaded. Reporters and converters outside ``ash_builtin`` (the AWS
+reporters) are not called community plugins; the pages name their module.
+
+Options tables
+--------------
+Each options table is preceded by ``<!-- doctest: options of=<section>.<name> -->``
+on the line directly above its header row. The docs checks read the marked
+tables as the reference for prose tables that restate a plugin's options, so the
+marker names exactly which plugin the table belongs to, and the Default column
+keeps to the forms listed in ``generate_config_reference.py`` ("Default cells").
 """
 
 from __future__ import annotations
@@ -43,8 +59,10 @@ from typing import Any, Optional
 
 from _reference_docs import NO_DESCRIPTION, code, md_prose
 from generate_config_reference import (
+    ENV_DEFAULT_NOTE,
     constraints_text,
-    default_text,
+    default_cell,
+    env_defaults,
     per_platform_text,
     platform_defaults,
     type_text,
@@ -183,10 +201,35 @@ def instantiate(plugins: list[Plugin]) -> None:
                     plugin.instance_error = f"{type(exc).__name__}: {exc}"
 
 
-def package_note(plugin: Plugin) -> str:
+def module_name(plugin: Plugin) -> str:
+    """The package's own name: ``ash_snyk_plugins`` for ``...plugin_modules.ash_snyk_plugins``."""
+    return plugin.package.rsplit(".", 1)[-1]
+
+
+def _origin(plugin: Plugin) -> str:
+    return "community module" if plugin.kind == "scanner" else "plugin module"
+
+
+def package_short(plugin: Plugin) -> str:
+    """Where a plugin comes from, for a table cell."""
     if plugin.builtin:
         return "built in"
-    return f"add {code(plugin.package)} to `ash_plugin_modules`"
+    return f"{_origin(plugin)} {code(module_name(plugin))}"
+
+
+def package_note(plugin: Plugin) -> str:
+    """Where a plugin comes from and how to load it."""
+    if plugin.builtin:
+        return "built in, loaded on every scan"
+    return (
+        f"{_origin(plugin)} {code(module_name(plugin))}, loaded when "
+        f"`ash_plugin_modules` names {code(plugin.package)}"
+    )
+
+
+def options_marker(section: str, plugin: Plugin) -> str:
+    """The doctest marker that names the plugin an options table belongs to."""
+    return f"<!-- doctest: options of={section}.{plugin.name} -->"
 
 
 def install_text(instance: Any) -> str:
@@ -262,6 +305,8 @@ def options_table(plugin: Plugin, config_prefix: str, missing: list[str]) -> lis
     if model is None:
         return ["This plugin declares no options model.", ""]
     rows = []
+    by_platform = platform_defaults(model)
+    from_env = env_defaults(model)
     for name, info in model.model_fields.items():
         key = info.alias or name
         full = f"{config_prefix}.{plugin.name}.options.{key}"
@@ -276,7 +321,8 @@ def options_table(plugin: Plugin, config_prefix: str, missing: list[str]) -> lis
             description = f"{description} Also accepted as {code(name)}."
         rows.append(
             f'| <a id="{full}"></a>{code(key)} | {kind} | '
-            f"{default_text(info, platform_defaults(model).get(name))} | {description} |"
+            f"{default_cell(info, by_platform.get(name), from_env.get(name))} | "
+            f"{description} |"
         )
     if not rows:
         return ["This plugin has no options.", ""]
@@ -284,11 +330,40 @@ def options_table(plugin: Plugin, config_prefix: str, missing: list[str]) -> lis
         f"Options, under {code(f'{config_prefix}.{plugin.name}.options')}. "
         + unknown_keys_text(model),
         "",
+        options_marker(config_prefix, plugin),
         "| Option | Type | Default | Description |",
         "|--------|------|---------|-------------|",
         *rows,
         "",
     ]
+
+
+#: Where a page wants :data:`ENV_DEFAULT_NOTE`; see :func:`place_env_note`.
+ENV_NOTE_SLOT = "\0env-default-note\0"
+
+
+def place_env_note(lines: list[str]) -> list[str]:
+    """Put the note explaining "from NAME, else value" at its slot, if the page needs it.
+
+    A page none of whose Default cells is read from a variable gets no note, and
+    the blank line after the slot goes with it.
+    """
+    used = any("| from `" in line for line in lines)
+    out: list[str] = []
+    drop_blank = False
+    for line in lines:
+        if line == ENV_NOTE_SLOT:
+            if used:
+                out.append(ENV_DEFAULT_NOTE)
+            else:
+                drop_blank = True
+            continue
+        if drop_blank and line == "":
+            drop_blank = False
+            continue
+        drop_blank = False
+        out.append(line)
+    return out
 
 
 def yes_no(value: Any) -> str:

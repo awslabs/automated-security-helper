@@ -70,18 +70,22 @@ from typing import Any, Iterator
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _reference_docs import (  # noqa: E402
     NO_DESCRIPTION,
-    REFERENCE_DIR,
+    add_docs_root_argument,
     banner,
     code,
     generated_note,
     md_prose,
     normalize_paths,
-    scrub_import_time_environment,
+    prepare_environment,
+    reference_dir,
     write_or_check,
 )
 
 GENERATOR = "scripts/generate_cli_docs.py"
-OUTPUT = REFERENCE_DIR / "cli.md"
+PAGE = "cli.md"
+#: The width click wraps usage lines to. Fixed, because click otherwise takes it
+#: from the terminal the generator runs in (78 is what it uses with no terminal).
+USAGE_WIDTH = 78
 SOURCE = "the `ash` click command tree (`typer.main.get_command`)"
 
 
@@ -98,7 +102,9 @@ def iter_commands(root: Any) -> Iterator[tuple[list[str], Any, Any]]:
 
     def walk(cmd: Any, path: list[str], parent_ctx: Any):
         info_name = path[-1] if path else "ash"
-        ctx = cmd.context_class(cmd, info_name=info_name, parent=parent_ctx)
+        ctx = cmd.context_class(
+            cmd, info_name=info_name, parent=parent_ctx, terminal_width=USAGE_WIDTH
+        )
         yield path, cmd, ctx
         if _is_group(cmd):
             for name in sorted(cmd.commands):
@@ -475,12 +481,14 @@ def main() -> int:
     )
     parser.add_argument(
         "--output",
-        default=str(OUTPUT),
-        help=f"Output path, or '-' for stdout. Default: {OUTPUT.relative_to(OUTPUT.parents[3])}",
+        default=None,
+        help=f"Output path, or '-' for stdout. Default: <docs root>/docs/content/reference/{PAGE}",
     )
+    add_docs_root_argument(parser)
     args = parser.parse_args()
 
-    scrub_import_time_environment()
+    prepare_environment(Path(args.docs_root))
+    output = Path(args.output) if args.output else reference_dir(args.docs_root) / PAGE
     content, stats = generate(load_root_command())
     summary = (
         f"{stats['commands']} commands, {stats['parameters']} parameters, "
@@ -490,7 +498,7 @@ def main() -> int:
         sys.stdout.write(content)
         print(summary, file=sys.stderr)
         return 0
-    return write_or_check(Path(args.output), content, args.check, GENERATOR, summary)
+    return write_or_check(output, content, args.check, GENERATOR, summary)
 
 
 if __name__ == "__main__":

@@ -75,19 +75,20 @@ from typing import Iterable, Iterator, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _reference_docs import (  # noqa: E402
-    REFERENCE_DIR,
+    add_docs_root_argument,
     banner,
     code,
     generated_note,
     md_prose,
-    scrub_import_time_environment,
+    prepare_environment,
+    reference_dir,
     write_or_check,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = "automated_security_helper"
 GENERATOR = "scripts/generate_env_var_reference.py"
-OUTPUT = REFERENCE_DIR / "environment-variables.md"
+PAGE = "environment-variables.md"
 
 #: Shell scripts the repository ships to users, besides ``*.sh`` inside the package.
 SHELL_SCRIPT_GLOBS = ("ash", "utils/*.sh")
@@ -1455,18 +1456,23 @@ def main() -> int:
         "--check", action="store_true", help="Exit 1 with a diff if stale."
     )
     parser.add_argument(
-        "--output", default=str(OUTPUT), help="Output path, or '-' for stdout."
+        "--output",
+        default=None,
+        help=f"Output path, or '-' for stdout. Default: <docs root>/docs/content/reference/{PAGE}",
     )
     parser.add_argument(
         "--repo-root",
         default=None,
-        help="Tree to scan for reads (default: this checkout). The CLI options are "
-        "read from whichever automated_security_helper is importable.",
+        help="Code tree to scan for reads (default: the source tree of the "
+        "automated_security_helper this interpreter imports, which is also where "
+        "the CLI options are read from).",
     )
+    add_docs_root_argument(parser)
     args = parser.parse_args()
 
-    scrub_import_time_environment()
-    content, stats = generate(Path(args.repo_root) if args.repo_root else None)
+    code_root = prepare_environment(Path(args.docs_root))
+    output = Path(args.output) if args.output else reference_dir(args.docs_root) / PAGE
+    content, stats = generate(Path(args.repo_root) if args.repo_root else code_root)
     summary = (
         f"{stats['variables']} variables, {len(stats['undocumented'])} with no purpose "
         f"in the code, {stats['dynamic']} unresolved lookup sites."
@@ -1475,7 +1481,7 @@ def main() -> int:
         sys.stdout.write(content)
         print(summary, file=sys.stderr)
         return 0
-    return write_or_check(Path(args.output), content, args.check, GENERATOR, summary)
+    return write_or_check(output, content, args.check, GENERATOR, summary)
 
 
 if __name__ == "__main__":

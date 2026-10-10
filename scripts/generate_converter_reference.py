@@ -25,26 +25,30 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _reference_docs import (  # noqa: E402
-    REFERENCE_DIR,
+    add_docs_root_argument,
     banner,
     code,
     generated_note,
     md_prose,
-    scrub_import_time_environment,
+    prepare_environment,
+    reference_dir,
     write_or_check,
 )
 
 GENERATOR = "scripts/generate_converter_reference.py"
-OUTPUT = REFERENCE_DIR / "converters.md"
+PAGE = "converters.md"
 
 
 def generate() -> tuple[str, dict]:
     from _plugin_reference import (
+        ENV_NOTE_SLOT,
         discover,
         install_text,
         instantiate,
         options_table,
         package_note,
+        package_short,
+        place_env_note,
         yes_no,
     )
 
@@ -87,11 +91,11 @@ def generate() -> tuple[str, dict]:
                 python_only = None
         command = getattr(inst, "command", None)
         lines.append(
-            f"| [{code(p.name)}](#{p.name}) | {yes_no(p.enabled)} | {package_note(p)} | "
+            f"| [{code(p.name)}](#{p.name}) | {yes_no(p.enabled)} | {package_short(p)} | "
             f"{code(command) if command else 'none (runs in the ASH process)'} | "
             f"{yes_no(python_only)} |"
         )
-    lines.append("")
+    lines += ["", ENV_NOTE_SLOT, ""]
 
     for p in plugins:
         inst = p.instance
@@ -117,6 +121,7 @@ def generate() -> tuple[str, dict]:
 
     while lines and lines[-1] == "":
         lines.pop()
+    lines = place_env_note(lines)
     return "\n".join(lines) + "\n", {"plugins": len(plugins), "missing": missing}
 
 
@@ -126,16 +131,20 @@ def main() -> int:
         "--check", action="store_true", help="Exit 1 with a diff if stale."
     )
     parser.add_argument(
-        "--output", default=str(OUTPUT), help="Output path, or '-' for stdout."
+        "--output",
+        default=None,
+        help=f"Output path, or '-' for stdout. Default: <docs root>/docs/content/reference/{PAGE}",
     )
     parser.add_argument(
         "--missing-descriptions",
         default=None,
         help="Also write the options that have no description to this path.",
     )
+    add_docs_root_argument(parser)
     args = parser.parse_args()
 
-    scrub_import_time_environment()
+    prepare_environment(Path(args.docs_root))
+    output = Path(args.output) if args.output else reference_dir(args.docs_root) / PAGE
     content, stats = generate()
     summary = (
         f"{stats['plugins']} converters, {len(stats['missing'])} options with no "
@@ -149,7 +158,7 @@ def main() -> int:
         sys.stdout.write(content)
         print(summary, file=sys.stderr)
         return 0
-    return write_or_check(Path(args.output), content, args.check, GENERATOR, summary)
+    return write_or_check(output, content, args.check, GENERATOR, summary)
 
 
 if __name__ == "__main__":

@@ -7,67 +7,192 @@ Why a shared module
 -------------------
 Each reference page (CLI, configuration, environment variables, scanners,
 converters, reporters, MCP tools) is written whole by one generator, and every
-generator needs the same four things: a banner naming itself, a ``--check`` mode
-that prints a diff instead of writing, markdown-cell escaping, and an environment
-that cannot leak into the output. Written five times, those drift apart, and a
-generator whose ``--check`` compares differently from its writer is the failure
-this whole set of scripts exists to remove.
+generator needs the same things: a banner naming itself, a ``--check`` mode that
+prints a diff instead of writing, markdown-cell escaping, the two trees it works
+between, and an environment that cannot leak into the output. Written seven
+times, those drift apart, and a generator whose ``--check`` compares differently
+from its writer is the failure this whole set of scripts exists to remove.
+
+Two trees: the code and the docs
+--------------------------------
+A generator documents the ``automated_security_helper`` its interpreter imports,
+and writes (or checks) pages under ``--docs-root``, which defaults to the
+checkout the script is in. The two are usually one tree. They differ when one
+tree's docs are generated from another tree's code::
+
+    <code-tree>/.venv/bin/python <docs-tree>/scripts/generate_cli_docs.py \\
+        --docs-root <docs-tree> --check
+
+:func:`prepare_environment` finds the code tree from the import system without
+importing ASH (``importlib.util.find_spec``) and prints which package it
+documents, so a log always says which code a page was compared against. The code
+tree must be a source checkout (a ``pyproject.toml`` beside the package), because
+the environment-variable page also reads the shipped ``ash`` and ``utils/``
+scripts, which a wheel does not carry.
 
 Why the environment is scrubbed before ASH is imported
 ------------------------------------------------------
 Several defaults are read from the environment at import time:
 ``AshConfig.project_name`` is ``os.environ.get("ASH_PROJECT_NAME", "ash-scan")``,
-``ASH_DEFAULT_SEVERITY_LEVEL`` sets the default severity threshold and is
-interpolated into a scanner option's description, and ``ASH_BIN_PATH`` sets the
-directory install commands name. A generator run in a shell that had any of them
-set would publish that shell's values as ASH's defaults, and ``--check`` would
-then fail on every other machine. :func:`scrub_import_time_environment` removes
-every ``ASH_``-prefixed variable before the package is imported, so the pages
-document the defaults a user gets with nothing set. Values derived from the home
-directory or the checkout path are replaced by :func:`normalize_paths`.
+``ASH_DEFAULT_SEVERITY_LEVEL`` sets the default severity threshold, and the AWS
+reporters' ``region`` options are ``os.environ.get("AWS_REGION", ...)``. A
+generator run in a shell that had any of them set would publish that shell's
+values as ASH's defaults (a host's ``AWS_REGION`` once reached the AWS reporter
+defaults this way), and ``--check`` would then fail on every other machine.
 
-This module never imports ASH itself, so importing it is cheap and safe from any
-test.
+:func:`prepare_environment` removes, before the package is imported:
+
+* every ``ASH_*`` and ``AWS_*`` variable;
+* every other name the code tree reads, from
+  ``generate_env_var_reference.read_env_names`` over that tree (``CI``,
+  ``XDG_CACHE_HOME``, ``UV_TOOL_DIR``, ...);
+* ``COLUMNS`` and ``LINES``, which click reads to size the usage lines.
+
+It keeps the few names a process cannot run without (:data:`KEEP_ENVIRONMENT`),
+whose values reach a page only as paths that :func:`normalize_paths` replaces.
+The pages document the defaults a user gets with nothing set; where a default
+comes from a variable, the page says so ("from ``ASH_PROJECT_NAME``, else
+``ash-scan``"), which the generators find in the model source, not in the
+environment.
+
+This module never imports ASH at module level, so importing it is cheap and safe
+from any test.
 """
 
 from __future__ import annotations
 
+import argparse
 import difflib
+import importlib.util
 import os
 import re
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-REFERENCE_DIR = REPO_ROOT / "docs" / "content" / "reference"
+PACKAGE = "automated_security_helper"
+#: The reference pages' directory, relative to a docs tree.
+REFERENCE_SUBDIR = Path("docs") / "content" / "reference"
 
 #: Marker rendered wherever the code carries no description for something the page
 #: documents. Kept visible, and counted by each generator's ``--check``, because a
 #: blank cell reads as "nothing to say" and an invented one is worse.
 NO_DESCRIPTION = "No description in the code."
 
+#: Prefixes removed from the environment whether or not the code reads them.
+SCRUB_PREFIXES = ("ASH_", "AWS_")
+#: Names that libraries the generators use read to shape their output.
+DEPENDENCY_ENVIRONMENT = frozenset({"COLUMNS", "LINES"})
+#: Names kept even when the code reads them: without them a process cannot find
+#: programs (PATH), a home or temp directory, or on Windows run at all (SystemRoot).
+KEEP_ENVIRONMENT = frozenset(
+    {"PATH", "HOME", "USERPROFILE", "SystemRoot", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR"}
+)
 
-def scrub_import_time_environment() -> list[str]:
-    """Remove ``ASH_*`` variables from this process, before ASH is imported.
+#: Trees whose absolute paths :func:`normalize_paths` replaces, longest first.
+_ROOTS: list[Path] = [REPO_ROOT]
 
-    Returns the names removed so a caller can say what it ignored. Has no effect on
-    a module that was already imported, which is why every generator calls it from
-    ``main()`` before its first ASH import.
+
+def add_docs_root_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--docs-root",
+        default=str(REPO_ROOT),
+        help=(
+            "Tree whose pages are written or checked (default: the checkout this "
+            "script is in). The code documented is the automated_security_helper "
+            "this interpreter imports."
+        ),
+    )
+
+
+def reference_dir(docs_root: Path) -> Path:
+    return Path(docs_root) / REFERENCE_SUBDIR
+
+
+def find_code_root() -> Path:
+    """The source tree of the ``automated_security_helper`` this interpreter imports.
+
+    Found without importing it, so nothing in the package has read the
+    environment yet.
     """
-    removed = sorted(name for name in os.environ if name.startswith("ASH_"))
+    spec = importlib.util.find_spec(PACKAGE)
+    if spec is None or not spec.origin:
+        raise SystemExit(
+            f"ERROR: this interpreter ({sys.executable}) cannot import {PACKAGE}. "
+            "Run the generator with the Python of the tree whose code it documents."
+        )
+    package_dir = Path(spec.origin).resolve().parent
+    root = package_dir.parent
+    if not (root / "pyproject.toml").is_file():
+        raise SystemExit(
+            f"ERROR: {PACKAGE} is imported from {package_dir}, which is not in a "
+            "source checkout (no pyproject.toml beside it). The reference pages also "
+            "read the checkout's shipped scripts; use the Python of a checkout's "
+            "environment (uv sync), or put the checkout first on PYTHONPATH."
+        )
+    return root
+
+
+def scrub_environment(code_root: Path) -> list[str]:
+    """Remove every variable that could reach a page from this process; return the names."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from generate_env_var_reference import read_env_names
+
+    read, _dynamic = read_env_names(code_root)
+    removed = sorted(
+        name
+        for name in os.environ
+        if name not in KEEP_ENVIRONMENT
+        and (
+            name.startswith(SCRUB_PREFIXES)
+            or name in read
+            or name in DEPENDENCY_ENVIRONMENT
+        )
+    )
     for name in removed:
         del os.environ[name]
     return removed
 
 
+def prepare_environment(docs_root: Path | None = None) -> Path:
+    """Find the code tree, scrub the environment, import ASH; return the code tree.
+
+    Call it from ``main()`` before anything imports ASH: a module that was already
+    imported has already read its defaults. Prints the package documented and the
+    names removed (never their values) to stderr.
+    """
+    code_root = find_code_root()
+    removed = scrub_environment(code_root)
+    docs = Path(docs_root or REPO_ROOT).resolve()
+    roots = {code_root, docs, REPO_ROOT}
+    _ROOTS[:] = sorted(roots, key=lambda p: len(str(p)), reverse=True)
+
+    import automated_security_helper
+
+    imported = Path(automated_security_helper.__file__).resolve().parent
+    if imported != code_root / PACKAGE:
+        raise SystemExit(
+            f"ERROR: {PACKAGE} was expected from {code_root / PACKAGE} but imported "
+            f"from {imported}."
+        )
+    print(
+        f"Documenting {PACKAGE} from {imported}; pages under {docs}. "
+        f"Removed {len(removed)} environment variables before importing it"
+        + (f": {', '.join(removed)}." if removed else "."),
+        file=sys.stderr,
+    )
+    return code_root
+
+
 def normalize_paths(text: str) -> str:
     """Replace machine-specific absolute paths with stable placeholders.
 
-    The checkout path is replaced before the home directory because the checkout
-    is usually inside it.
+    The code and docs trees are replaced before the home directory because a
+    checkout is usually inside it.
     """
-    for repo in (str(REPO_ROOT), REPO_ROOT.as_posix()):
-        text = text.replace(repo, "<repository>")
+    for root in _ROOTS:
+        for spelling in (str(root), root.as_posix()):
+            text = text.replace(spelling, "<repository>")
     home = Path.home()
     # Both spellings: on Windows a default rendered with as_posix() carries
     # C:/Users/x while str() is C:\\Users\\x.
@@ -157,6 +282,17 @@ def generated_note(generator: str, source: str) -> str:
     )
 
 
+def display_path(path: Path) -> str:
+    """``path`` relative to whichever known tree holds it, else as given."""
+    resolved = Path(path).resolve()
+    for root in _ROOTS:
+        try:
+            return resolved.relative_to(root).as_posix()
+        except ValueError:
+            continue
+    return str(path)
+
+
 def write_or_check(
     path: Path, content: str, check: bool, generator: str, summary: str = ""
 ) -> int:
@@ -166,10 +302,7 @@ def write_or_check(
     difference (the diff is printed to stderr). ``summary`` is printed on success so
     a CI log shows what was compared, not only that something passed.
     """
-    try:
-        rel = path.resolve().relative_to(REPO_ROOT).as_posix()
-    except ValueError:
-        rel = str(path)
+    rel = display_path(path)
     actual = path.read_text(encoding="utf-8") if path.exists() else None
 
     if check:

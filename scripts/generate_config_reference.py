@@ -21,8 +21,9 @@ What is derived, and from where
 * A default read from the environment at import time (``project_name`` from
   ``ASH_PROJECT_NAME``, ``global_settings.severity_threshold`` from
   ``ASH_DEFAULT_SEVERITY_LEVEL``) is found by parsing the model's own source, not
-  assumed, and named in the row. The page shows the default with no ``ASH_*``
-  variable set; the generator removes them before importing ASH.
+  assumed, and its Default cell reads "from ``ASH_PROJECT_NAME``, else
+  ``ash-scan``". The value after "else" is the default with nothing set; the
+  generator removes every variable the code reads before importing ASH.
 * Where config files are found: by running
   ``config_sources.discover_config_source`` on a scratch directory holding every
   candidate file, so the order printed is the order the code applies, not a
@@ -33,6 +34,22 @@ The plugin sections (``scanners``, ``reporters``, ``converters``) are listed her
 by name with the keys every plugin has; each plugin's ``options`` are on the
 scanners, reporters and converters reference pages, generated from the same
 models, so they are written once.
+
+Default cells
+-------------
+The Default column of every key and option table on the reference pages has one
+of these forms, and nothing else, because the docs checks compare prose tables
+against these ones (see :func:`default_cell`):
+
+* ``VALUE``: one code span whose content, read with ``yaml.safe_load``, is the
+  default. A string is written plain when it reads back as the same string, and
+  JSON-quoted otherwise (``"true"``, ``""``); lists and mappings are JSON.
+* ``from `NAME`, else VALUE``, with one ``else from `NAME``` per fallback
+  variable: the default is read from the first of those variables that is set.
+* ``VALUE on Linux and macOS; VALUE on Windows``: computed from the platform.
+* A bare phrase: ``required``, ``computed at run time``, ``see the section``,
+  ``depends on the platform``; and, in the table of keys every plugin has,
+  ``the plugin's own name`` and ``the plugin's defaults``.
 
 Missing descriptions
 --------------------
@@ -62,18 +79,26 @@ from typing import Any, Iterator, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _reference_docs import (  # noqa: E402
     NO_DESCRIPTION,
-    REFERENCE_DIR,
+    add_docs_root_argument,
     banner,
     code,
     generated_note,
     md_prose,
     normalize_paths,
-    scrub_import_time_environment,
+    prepare_environment,
+    reference_dir,
     write_or_check,
 )
 
 GENERATOR = "scripts/generate_config_reference.py"
-OUTPUT = REFERENCE_DIR / "configuration.md"
+PAGE = "configuration.md"
+
+#: The sentence that explains the "from ..., else ..." Default form, on every page
+#: that can show it.
+ENV_DEFAULT_NOTE = (
+    "A default written as from `NAME`, else `value` is read from that environment "
+    "variable when ASH starts; `value` applies when the variable is not set."
+)
 
 #: The page each plugin kind's options are documented on, and the config segment.
 PLUGIN_SECTIONS = (
@@ -232,15 +257,20 @@ def platform_defaults(model: type) -> dict[str, list[tuple[str, Any]]]:
             seen.add(name)
             if stmt.value is None:
                 continue
-            names = {n.id for n in ast.walk(stmt.value) if isinstance(n, ast.Name)}
-            if not names & {"platform", "sys", "os"}:
+            if not _reads_platform(stmt.value):
                 continue
             values = []
             for label, system, sys_platform, os_name in PLATFORMS:
                 namespace = {
                     "platform": _types.SimpleNamespace(system=lambda s=system: s),
                     "sys": _types.SimpleNamespace(platform=sys_platform),
-                    "os": _types.SimpleNamespace(name=os_name),
+                    # An environment read in the same expression sees nothing set,
+                    # as everywhere else on these pages.
+                    "os": _types.SimpleNamespace(
+                        name=os_name,
+                        environ={},
+                        getenv=lambda _key, default=None: default,
+                    ),
                 }
                 try:
                     value = eval(  # noqa: S307 - the model's own default expression
@@ -256,6 +286,18 @@ def platform_defaults(model: type) -> dict[str, list[tuple[str, Any]]]:
             ):
                 found[name] = values
     return found
+
+
+#: Attribute chains that read the platform. ``os.environ`` is not one: a default
+#: read from the environment is the same expression on every platform.
+_PLATFORM_READS = {"platform.system", "platform.machine", "sys.platform", "os.name"}
+
+
+def _reads_platform(expr: ast.AST) -> bool:
+    return any(
+        isinstance(node, ast.Attribute) and ast.unparse(node) in _PLATFORM_READS
+        for node in ast.walk(expr)
+    )
 
 
 def per_platform_text(values: list[tuple[str, Any]], render) -> str:
@@ -276,20 +318,43 @@ def per_platform_text(values: list[tuple[str, Any]], render) -> str:
     return "; ".join(parts)
 
 
+def yaml_value(value: Any) -> str:
+    """``value`` as the code-span content of a Default cell (see "Default cells").
+
+    ``yaml.safe_load`` of the result gives ``value`` back: a string that YAML would
+    read as something else (``true``, ``5``, ``~``, ``""``) is JSON-quoted.
+    """
+    import yaml
+
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return json.dumps(value)
+    if isinstance(value, str):
+        try:
+            plain = yaml.safe_load(value) == value and value == value.strip()
+        except yaml.YAMLError:
+            plain = False
+        return value if plain and value else json.dumps(value)
+    return json.dumps(value, sort_keys=isinstance(value, dict))
+
+
 def default_text(field, per_platform: Optional[list] = None) -> str:
     """The default as it would be written in a YAML config."""
     from pydantic import BaseModel
     from pydantic_core import PydanticUndefined
 
     if per_platform:
-        return per_platform_text(per_platform, lambda v: code(_scalar(v)))
+        return per_platform_text(per_platform, lambda v: code(yaml_value(v)))
     if field.is_required():
         return "required"
     if field.default_factory is not None:
         try:
             value = field.default_factory()
         except TypeError:
-            return "computed"
+            return "computed at run time"
     else:
         value = field.default
     if value is PydanticUndefined:
@@ -298,22 +363,34 @@ def default_text(field, per_platform: Optional[list] = None) -> str:
         return "see the section"
     if isinstance(value, enum.Enum):
         value = value.value
-    if value is None:
-        return code("null")
-    if isinstance(value, bool):
-        return code(_scalar(value))
-    if isinstance(value, (int, float)):
-        return code(value)
     if isinstance(value, Path):
-        return code(normalize_paths(value.as_posix()))
+        value = value.as_posix()
+    if isinstance(value, (list, tuple, set, frozenset, dict)):
+        value = _jsonable(value)
+    elif not isinstance(value, (str, int, float, bool, type(None))):
+        value = repr(value)
+    return code(yaml_value(_normalized(value)))
+
+
+def _normalized(value: Any) -> Any:
+    """``value`` with :func:`normalize_paths` applied to every string in it."""
     if isinstance(value, str):
-        return code(normalize_paths(value)) if value else code('""')
-    if isinstance(value, (list, tuple, set, dict)):
-        if not value:
-            return code("{}" if isinstance(value, dict) else "[]")
-        dumped = json.dumps(_jsonable(value), sort_keys=isinstance(value, dict))
-        return code(normalize_paths(dumped))
-    return code(normalize_paths(repr(value)))
+        return normalize_paths(value)
+    if isinstance(value, dict):
+        return {k: _normalized(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_normalized(v) for v in value]
+    return value
+
+
+def default_cell(
+    field, per_platform: Optional[list] = None, env_chain: Optional[list] = None
+) -> str:
+    """The Default cell: :func:`default_text`, after the variables it is read from."""
+    shown = default_text(field, per_platform)
+    if not env_chain:
+        return shown
+    return "".join(f"from {code(n)}, else " for n in env_chain) + shown
 
 
 def _jsonable(value: Any) -> Any:
@@ -323,7 +400,10 @@ def _jsonable(value: Any) -> Any:
         return value.model_dump(mode="json")
     if isinstance(value, dict):
         return {str(k): _jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, (set, frozenset)):
+        # A set's iteration order changes between interpreter runs.
+        return sorted((_jsonable(v) for v in value), key=repr)
+    if isinstance(value, (list, tuple)):
         return [_jsonable(v) for v in value]
     if isinstance(value, enum.Enum):
         return value.value
@@ -358,7 +438,54 @@ def _env_key(call: ast.AST) -> Optional[str]:
     return None
 
 
-def _module_env_constants(module) -> dict[str, str]:
+def _env_chain(expr: ast.AST) -> list[str]:
+    """The variables an expression's default is read from, first one first.
+
+    ``os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "x"))`` is
+    ``["AWS_REGION", "AWS_DEFAULT_REGION"]``: the outermost read in the expression
+    (``Field(default_factory=lambda: ...)`` included), then each read in its
+    fallback argument.
+    """
+    call = next((n for n in ast.walk(expr) if _env_key(n)), None)
+    chain: list[str] = []
+    while call is not None and _env_key(call):
+        chain.append(_env_key(call))
+        fallback = call.args[1] if len(call.args) > 1 else None
+        call = fallback if fallback is not None and _env_key(fallback) else None
+    return chain
+
+
+def _default_expressions(stmt: ast.AnnAssign) -> list[ast.AST]:
+    """The expressions a field's default comes from, in the class body's syntax.
+
+    The assigned value, or the ``default``/``default_factory`` of a ``Field(...)``
+    that is assigned or sits in an ``Annotated[...]`` annotation. Nothing else in
+    a ``Field`` call (a description that mentions a variable) counts.
+    """
+    found: list[ast.AST] = []
+    for part in (stmt.value, stmt.annotation):
+        if part is None:
+            continue
+        for node in ast.walk(part):
+            if not isinstance(node, ast.Call) or not ast.unparse(node.func).endswith(
+                "Field"
+            ):
+                continue
+            found += node.args[:1]
+            found += [
+                kw.value
+                for kw in node.keywords
+                if kw.arg in ("default", "default_factory")
+            ]
+    value = stmt.value
+    if value is not None and not (
+        isinstance(value, ast.Call) and ast.unparse(value.func).endswith("Field")
+    ):
+        found.append(value)
+    return found
+
+
+def _module_env_constants(module) -> dict[str, list[str]]:
     """Module-level names whose value is computed from an environment read."""
     try:
         tree = ast.parse(inspect.getsource(module))
@@ -366,42 +493,51 @@ def _module_env_constants(module) -> dict[str, str]:
         return {}
     found = {}
     for stmt in tree.body:
-        if isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+        if isinstance(stmt, (ast.Assign, ast.AnnAssign)) and stmt.value is not None:
             targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
-            keys = [_env_key(n) for n in ast.walk(stmt.value)] if stmt.value else []
-            keys = [k for k in keys if k]
+            chain = _env_chain(stmt.value)
             for target in targets:
-                if isinstance(target, ast.Name) and keys:
-                    found[target.id] = keys[0]
+                if isinstance(target, ast.Name) and chain:
+                    found[target.id] = chain
     return found
 
 
-def env_defaults(cls: type) -> dict[str, str]:
-    """Field name -> environment variable its default is read from, for ``cls``."""
-    try:
-        source = textwrap.dedent(inspect.getsource(cls))
-        tree = ast.parse(source)
-    except (OSError, TypeError, SyntaxError):
-        return {}
-    module = sys.modules.get(cls.__module__)
-    class_def = tree.body[0]
-    found: dict[str, str] = {}
-    for stmt in getattr(class_def, "body", []):
-        if not isinstance(stmt, ast.AnnAssign) or stmt.value is None:
+def env_defaults(model: type) -> dict[str, list[str]]:
+    """Field name -> the variables its default is read from, for ``model`` and its bases.
+
+    The nearest class that assigns a field decides, as in pydantic.
+    """
+    found: dict[str, list[str]] = {}
+    seen: set[str] = set()
+    for cls in model.__mro__:
+        if cls is object or "model_fields" not in dir(cls):
             continue
-        if not isinstance(stmt.target, ast.Name):
+        try:
+            tree = ast.parse(textwrap.dedent(inspect.getsource(cls)))
+        except (OSError, TypeError, SyntaxError):
             continue
-        name = stmt.target.id
-        direct = [_env_key(n) for n in ast.walk(stmt.value)]
-        direct = [k for k in direct if k]
-        if direct:
-            found[name] = direct[0]
-            continue
-        if isinstance(stmt.value, ast.Name) and module is not None:
-            origin = _defining_module(module, stmt.value.id)
-            mapping = _module_env_constants(origin) if origin is not None else {}
-            if stmt.value.id in mapping:
-                found[name] = mapping[stmt.value.id]
+        module = sys.modules.get(cls.__module__)
+        class_def = tree.body[0]
+        for stmt in getattr(class_def, "body", []):
+            if not isinstance(stmt, ast.AnnAssign) or not isinstance(
+                stmt.target, ast.Name
+            ):
+                continue
+            name = stmt.target.id
+            if name in seen:
+                continue
+            seen.add(name)
+            chain: list[str] = []
+            for expr in _default_expressions(stmt):
+                chain = _env_chain(expr)
+                if not chain and isinstance(expr, ast.Name) and module is not None:
+                    origin = _defining_module(module, expr.id)
+                    mapping = _module_env_constants(origin) if origin else {}
+                    chain = mapping.get(expr.id, [])
+                if chain:
+                    break
+            if chain:
+                found[name] = chain
     return found
 
 
@@ -665,11 +801,6 @@ def _row(row: dict, link) -> str:
     notes = []
     if row["name"] != row["key"]:
         notes.append(f"Also accepted as {code(row['name'])}.")
-    if row["env_default"]:
-        notes.append(
-            f"The default is read from {code(row['env_default'])} when ASH starts, "
-            "if that variable is set."
-        )
     if row["excluded_on_dump"]:
         notes.append(
             "Read when the file is loaded and not written back when a config is saved."
@@ -681,7 +812,7 @@ def _row(row: dict, link) -> str:
     anchor = anchor_for(row["full"])
     return (
         f'| <a id="{anchor}"></a>{code(row["key"])} | {kind} | '
-        f"{default_text(field, row.get('platform'))} | {description} |"
+        f"{default_cell(field, row.get('platform'), row['env_default'])} | {description} |"
     )
 
 
@@ -768,7 +899,7 @@ def generate() -> tuple[str, dict]:
             "Every key is listed with its type, default and the description the model "
             "carries. A key whose model has no description says so. Keys inside a list "
             "are written `key[].field`: `global_settings.suppressions[].rule_id` is the "
-            "`rule_id` of one entry in the `suppressions` list."
+            "`rule_id` of one entry in the `suppressions` list. " + ENV_DEFAULT_NOTE
         ),
         "",
         "## Where ASH finds its configuration",
@@ -969,16 +1100,20 @@ def main() -> int:
         "--check", action="store_true", help="Exit 1 with a diff if stale."
     )
     parser.add_argument(
-        "--output", default=str(OUTPUT), help="Output path, or '-' for stdout."
+        "--output",
+        default=None,
+        help=f"Output path, or '-' for stdout. Default: <docs root>/docs/content/reference/{PAGE}",
     )
     parser.add_argument(
         "--missing-descriptions",
         default=None,
         help="Also write the fields that have no description to this path.",
     )
+    add_docs_root_argument(parser)
     args = parser.parse_args()
 
-    scrub_import_time_environment()
+    prepare_environment(Path(args.docs_root))
+    output = Path(args.output) if args.output else reference_dir(args.docs_root) / PAGE
     content, stats = generate()
     summary = f"{stats['keys']} keys, {len(stats['missing'])} with no description in the model."
     if args.missing_descriptions:
@@ -989,7 +1124,7 @@ def main() -> int:
         sys.stdout.write(content)
         print(summary, file=sys.stderr)
         return 0
-    return write_or_check(Path(args.output), content, args.check, GENERATOR, summary)
+    return write_or_check(output, content, args.check, GENERATOR, summary)
 
 
 if __name__ == "__main__":
