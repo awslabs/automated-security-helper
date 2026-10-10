@@ -60,9 +60,10 @@ it needs.
 - grype and trivy cannot update their databases from inside a sandbox, so before a
   sandboxed online scan ASH updates them itself, outside the sandbox: `grype db
   update`, and `trivy image --download-db-only` plus, for a misconfiguration scan,
-  trivy's checks bundle. Nothing from the scanned repository reaches these: they run
-  from a directory outside the scanned tree, with an empty config file ASH ships,
-  against the cache directory the scan reads. A lock in that cache directory makes
+  trivy's checks bundle. Nothing from the scanned repository reaches these, or ASH's
+  check of the database's age after the scan: they run from a directory outside the
+  scanned tree, with an empty config file ASH ships, against the cache directory the
+  scan reads. A lock in that cache directory makes
   concurrent scans take turns, and each tool is updated once per scan. The scanners
   then run with their own update turned off (`--skip-db-update`,
   `GRYPE_DB_AUTO_UPDATE=false`). Offline nothing is updated, and in both cases ASH's
@@ -79,7 +80,8 @@ it needs.
   The sandbox does not pass `XDG_CACHE_HOME`, so ASH names the directory to the scan
   (`--cache-dir`, `GRYPE_DB_CACHE_DIR`), to the update and to the staleness check, and
   all three read the same database. A `cache.dir` in a `trivy.yaml` or a `db.cache-dir`
-  in a grype config does not move it; set the variable instead.
+  in a grype config does not move it; set the variable instead. ASH logs a warning
+  naming the grype config when it sets `db.cache-dir`.
 - System directories (`/usr`, `/etc`, `/opt`, `/nix`) and the directories on `PATH`
   are read-only. Inside `$HOME` only `PATH` entries named `bin`, `sbin` or `Scripts`
   are mounted, and a tool's install prefix only when it is deeper than a directory
@@ -181,6 +183,12 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
         # The tool unpacks itself where this variable says and runs what it
         # unpacked; sandbox-exec points it at a private directory per spawn.
         unpack_dir_env="XDG_CACHE_HOME",
+        # True when read_paths come from the scanner's options, which the
+        # scanned repository can write: they are then mounted only for scanners
+        # named in sandbox.read_path_scanners, and cache_paths are not mounted.
+        read_paths_require_grant=False,
+        # The same for env_prefixes and env_names, with sandbox.env_scanners.
+        env_requires_grant=False,
     )
 ```
 
@@ -238,17 +246,20 @@ ops or dotfiles repository: its grants are dropped with the same warning. Pass t
 with `--config-overrides` instead, for example
 `--config-overrides 'sandbox.network_scanners=[grype,trivy]'`.
 
-Some scanners ask for access through their options, such as a rules file or
-baseline outside the source tree, or a token for an online check. The repository
-can write those options, so the scanner declares them with `read_paths_require_grant`
-or `env_requires_grant`, and the sandbox grants them only to the scanners named in
-`sandbox.read_path_scanners` or `sandbox.env_scanners`. Those two follow the same rule
-as `network_scanners`, and ASH logs a warning when it withholds such a need. Even
-when granted, a path a scanner's options name is mounted only if it resolves inside
-the source tree or one of the operator's `extra_read_paths` entries, and only if it
-is a regular file or directory, never a socket or device. To let a scanner read a
+A plugin scanner can take its read paths or environment variables from its options,
+such as a rules file outside the source tree, or a token for an online check. The
+repository can write those options, so such a scanner declares it with
+`read_paths_require_grant` or `env_requires_grant`, and the sandbox grants those
+needs only to the scanners named in `sandbox.read_path_scanners` or
+`sandbox.env_scanners`. None of the scanners ASH ships declares either;
+detect-secrets' baseline, below, is gated by `read_path_scanners` directly. The two
+settings follow the same rule as `network_scanners`, and ASH logs a warning when it
+withholds such a need. Even when granted, a path a scanner's options name is
+mounted only if it resolves inside the source tree or one of the operator's
+`extra_read_paths` entries, and only if it is a regular file or directory, never a
+socket or device. To let a scanner read a
 rules file elsewhere on the host, put its directory in `sandbox.extra_read_paths`. A
-cache path a scanner's options name is never mounted writable.
+cache path a scanner's options name is never mounted.
 
 ASH itself reads some files that scanner options name, outside the sandbox, and
 passes their contents on. detect-secrets' `baseline_file` is one. Under a sandbox,
@@ -258,7 +269,9 @@ warning, and the candidates the baseline would have marked are reported.
 
 A config file is judged by the name it was found under as well as by the file it
 resolves to, so a `.ash/.ash.yaml` that is a symlink out of the scanned directory
-still counts as inside it.
+still counts as inside it. Tool config files that scanner options name, and plugin
+modules, are judged by the same rule; see
+[Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose).
 
 Sandbox grants follow a scanner's own name, the one its code gives it. If a config
 file renames a scanner's section, for example by setting `name: grype` on a plugin's

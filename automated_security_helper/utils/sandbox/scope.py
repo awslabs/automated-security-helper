@@ -212,7 +212,7 @@ def scanner_sandbox_scope(
             f"{name}'s settings ask for a network, and those settings can come from "
             "the scanned repository, so the sandbox does not grant it. To allow it, "
             f"add {name} to sandbox.network_scanners with --config-overrides or a "
-            "config file outside every git checkout."
+            "config file outside every git checkout and the scanned directory."
         )
     read_path_scanners = list(getattr(settings, "read_path_scanners", []) or [])
     env_scanners = list(getattr(settings, "env_scanners", []) or [])
@@ -237,7 +237,8 @@ def scanner_sandbox_scope(
                 " the default policy does not allow, and those settings can come "
                 "from the scanned repository, so the sandbox does not grant them. "
                 f"To allow them, add {name} to sandbox.{key} with "
-                "--config-overrides or a config file outside every git checkout."
+                "--config-overrides or a config file outside every git checkout "
+                "and the scanned directory."
             )
     return SandboxScope(
         backend=backend,

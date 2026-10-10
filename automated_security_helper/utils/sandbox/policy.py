@@ -85,8 +85,10 @@ class SandboxRequirements:
             directory and do not restrict exec, and leave the variable alone.
         read_paths_require_grant: ``read_paths`` and ``cache_paths`` follow the
             scanner's options, which the scanned repository can write (a rules
-            file or baseline path, for example). They are mounted only when
-            ``sandbox.read_path_scanners`` names the scanner.
+            file or baseline path, for example). ``read_paths`` are mounted only
+            when ``sandbox.read_path_scanners`` names the scanner, and then only
+            inside the source tree or an ``extra_read_paths`` entry;
+            ``cache_paths`` are never mounted.
         env_requires_grant: ``env_prefixes`` and ``env_names`` follow the
             scanner's options (a token for an online check, for example). They are
             passed only when ``sandbox.env_scanners`` names the scanner.

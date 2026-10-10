@@ -722,6 +722,9 @@ class SandboxConfig(BaseModel):
                 "then firejail, then landlock; macOS: sandbox-exec). Any other value "
                 "requires that backend. A scanner that cannot be sandboxed as requested "
                 "is recorded MISSING with the reason; it is never run unsandboxed. "
+                "A mode that --sandbox, ASH_CONFIG or the operator's config file sets "
+                "is a floor: a config file inside a git checkout or the scanned "
+                "directory cannot turn it off or switch backends. "
                 "Ignored in container mode, where the container is the boundary."
             )
         ),
@@ -736,8 +739,8 @@ class SandboxConfig(BaseModel):
                 "npm-audit and snyk-code fetch rules, databases or audit data. A list "
                 "replaces those defaults. Under --offline no scanner gets a network. "
                 "Honored only from --config-overrides or a config file outside every "
-                "git checkout; set by any other config file, a list can only remove "
-                "network."
+                "git checkout and the scanned directory; set by any other config file, "
+                "a list can only remove network."
             )
         ),
     ] = None
@@ -748,7 +751,8 @@ class SandboxConfig(BaseModel):
             description=(
                 "Additional host paths every sandboxed scanner may read, for example a "
                 "corporate CA bundle or a shared rule directory. '~' and $VARS expand. "
-                "Ignored when set by a config file inside a git checkout."
+                "Honored only from --config-overrides or a config file outside every "
+                "git checkout and the scanned directory."
             )
         ),
     ] = []
@@ -760,8 +764,11 @@ class SandboxConfig(BaseModel):
                 "Scanners allowed the extra host paths their own options ask for "
                 "(a rules file or baseline outside the source tree, for example). "
                 "Without this, a scanner whose read paths come from its options gets "
-                "only the default policy. Honored only from --config-overrides or a "
-                "config file outside every git checkout."
+                "only the default policy, and ASH does not read a detect-secrets "
+                "baseline_file outside the source tree. A granted path is mounted only "
+                "when it resolves inside the source tree or an extra_read_paths entry. "
+                "Honored only from --config-overrides or a config file outside every "
+                "git checkout and the scanned directory."
             )
         ),
     ] = []
@@ -773,7 +780,7 @@ class SandboxConfig(BaseModel):
                 "Scanners allowed the environment variables their own options ask "
                 "for (a token for an online check, for example). Without this, such "
                 "variables are not passed. Honored only from --config-overrides or a "
-                "config file outside every git checkout."
+                "config file outside every git checkout and the scanned directory."
             )
         ),
     ] = []

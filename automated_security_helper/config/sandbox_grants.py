@@ -284,5 +284,5 @@ def confine_sandbox_grants(
             "else turns the sandbox on. To grant access, pass the setting with "
             "--config-overrides (for example "
             "'sandbox.network_scanners=[grype]') or put it in a config file "
-            "outside every git checkout."
+            "outside every git checkout and the scanned directory."
         )

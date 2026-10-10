@@ -164,11 +164,11 @@ Any of these triggers an immediate failure. Out-of-order sequences, checksum mis
 
 A delivered tree can carry its own `.ash.yaml`, and a client can name any file in its session workspace as `run_ash_scan`'s `config_path`. Such a file was written by the client, not the operator, so its sandbox settings are restrict-only, the same as a config file inside the scanned repository, wherever the scan target is:
 
-- `sandbox.network_scanners` and `sandbox.extra_read_paths` come from the server instead: the profile this session bound with `select_profile`, or else `ASH_CONFIG` and the defaults.
+- `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners` and `sandbox.env_scanners` come from the server instead: the profile this session bound with `select_profile`, or else `ASH_CONFIG` and the defaults. A server config file inside a git checkout grants nothing either, so `ASH_CONFIG` has to name a file outside every checkout for its grants to apply.
 - The file's `network_scanners` list still applies as a limit, so it can take network away from a scanner but never give it one.
 - `sandbox.mode` can turn the sandbox on, but cannot turn it off or move it to another backend when the server's config sets a mode.
 
-Everything else in the file applies as usual. The config the server materializes for `select_profile`, under the session's `config/` directory, is the operator's and keeps its grants, as does a file under `ASH_MCP_ALLOWED_CONFIG_ROOTS`.
+Everything else in the file applies as usual. The config the server materializes for `select_profile`, under the session's `config/` directory, is the operator's and keeps its grants, as does a file under `ASH_MCP_ALLOWED_CONFIG_ROOTS`, as long as the file is outside every git checkout and outside the scanned directory.
 
 `get_config` shows the sandbox section the same way, as a scan of the session's delivered source (or, with none delivered, the working directory) would apply it.
 

@@ -167,5 +167,6 @@ def confine_plugin_modules(
         "MCP client, so it may only import installed modules outside every git "
         "checkout and the scanned directory. A virtualenv inside a git checkout "
         "counts as inside it. Name other modules with --ash-plugin-modules, "
-        "--config-overrides or a config file outside every checkout."
+        "--config-overrides or a config file outside every checkout and the "
+        "scanned directory."
     )

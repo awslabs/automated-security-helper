@@ -453,7 +453,10 @@ its resolved path, or inside the source directory when the source directory is
 outside a checkout. A checkout is something other people can push to, so this
 includes a config file, tool config or plugin kept in a checkout of your own, such
 as an ops or dotfiles repository; pass those settings with `--config-overrides`, or
-keep the files outside every checkout.
+keep the files outside every checkout. A file a setting below names is judged by the
+path as written, relative to the source directory, as well as by the file it
+resolves to, so a symlink the scanned repository planted counts as inside the tree
+wherever it points.
 
 Under the MCP server, a config file a client delivered (an upload or a file in a
 delivered tree, named as `config_path`) is limited the same way, wherever it is. A
@@ -466,11 +469,12 @@ and module checks below: everything under the MCP workspace root
 |---|---|
 | `scanners.<name>.options.tool_version`, `converters.jupyter.options.tool_version` | Must be a PEP 440 version specifier set such as `>=1.2,<2` or `==1.4.1`. This applies from every source, including `--config-overrides`. Any other value is replaced by the scanner's default constraint. |
 | `scanners.opengrep.options.version` | Must be a release tag such as `v1.15.1`, from every source. Any other value is replaced by the pinned version. |
-| `ash_plugin_modules` | An entry is imported only if it names an installed module that Python finds outside the scanned tree. An entry that is not importable, or that would be imported from a file in the tree, is skipped. |
+| `ash_plugin_modules` | An entry is imported only if it names an installed module that Python finds outside the scanned tree. An entry that is not importable, or that would be imported from a file in the tree, is skipped. A virtualenv inside a git checkout counts as inside it, so a module installed there is skipped too; the warning gives the module's location and the checkout. |
 | `scanners.checkov.options.config_file`, `scanners.ferret-scan.options.config_file` | Passed to the tool only when the file is outside the scanned tree. The same applies to the `.checkov.yaml` and `ferret.yaml` files these scanners look for by name. ferret-scan then uses its bundled config. checkov and ferret-scan also read such a file from their working directory on their own, so ASH runs both from the filesystem root and always passes ferret-scan a `--config`; finding paths are unchanged. |
 | `scanners.detect-secrets.options.scan_settings` plugins and filters | An entry that names a file (`file://...`) is kept only when the file is outside the scanned tree. This includes entries read from a baseline file. detect-secrets' built-in plugins and filters are unaffected. |
 | trivy-repo's ignore file and secret config | trivy-repo always gets `--ignorefile` and `--secret-config`, so trivy does not read a `.trivyignore` or `trivy-secret.yaml` from the scanned repository. `scanners.trivy-repo.options.ignore_file` and `secret_config_file`, or `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`, name the files to use; each is passed only when it is outside the scanned tree, and a file that sets nothing is passed otherwise. |
-| `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.mode` | See [Scanner sandbox](scanner-sandbox.md). |
+| `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`, `sandbox.env_scanners` | Not used: these grant sandbox access. A `network_scanners` list still removes network from the scanners it does not name. See [Scanner sandbox](scanner-sandbox.md). |
+| `sandbox.mode` | Applies only when nothing the operator set turns the sandbox on. When `--sandbox`, `ASH_CONFIG` or the operator's config file turns it on, this cannot turn it off or switch backends. |
 
 Each setting that is not honored is logged once, as a warning that names it.
 
@@ -694,7 +698,7 @@ scanners:
 
 If you have been using Grype separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory, the ```.ash``` directory, and the ```.grype``` directory for a file named ```.grype.yaml```. The current directory will also be searched for a ```grype.yaml``` file. If any of these files are found, ASH will use the settings found in the file. For more details on using a Grype configuration file, refer to the Grype [documentation](https://github.com/anchore/grype?tab=readme-ov-file#configuration).
 
-One setting is not used: `db.cache-dir`. ASH reads grype's database from the directory grype uses by default (`$XDG_CACHE_HOME/grype/db`, else `~/.cache/grype/db`, or `~/Library/Caches/grype/db` on macOS), passed to the scan as `GRYPE_DB_CACHE_DIR`, so that the scan, the database update and ASH's check of the database's age all read the same one. To keep the database somewhere else, set `GRYPE_DB_CACHE_DIR`; ASH logs a warning when a config file sets `db.cache-dir`.
+One setting is not used: `db.cache-dir`. ASH reads grype's database from the directory grype uses by default (`$XDG_CACHE_HOME/grype/db` when `XDG_CACHE_HOME` is an absolute path, else `~/.cache/grype/db` on Linux, `~/Library/Caches/grype/db` on macOS and `%LOCALAPPDATA%\cache\grype\db` on Windows), passed to the scan as `GRYPE_DB_CACHE_DIR`, so that the scan, the database update and ASH's check of the database's age all read the same one. To keep the database somewhere else, set `GRYPE_DB_CACHE_DIR`; ASH logs a warning naming the file when a grype config sets `db.cache-dir`.
 
 ### Syft
 

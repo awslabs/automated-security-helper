@@ -83,6 +83,16 @@
   and a scanner whose config section is renamed to another scanner's name is not run
   sandboxed.
 
+  A sandboxed scan whose output directory is a symlink, or is reached through one
+  below the source directory, stops with an error before ASH writes anything there.
+  Whether the sandbox is on is decided the way the scan decides it, so a config file
+  the scanned repository or an MCP client wrote cannot set `sandbox.mode: off` to
+  skip this check while the scan itself still runs sandboxed. Under sandbox-exec,
+  no program runs from the source tree, the output directory or the results
+  directory, apart from a tool path inside one (the virtualenv ASH runs from, say)
+  and the spawn's own private uv cache. That holds for checkov and ferret-scan too,
+  which run from the filesystem root.
+
   If a sandbox was requested and cannot be provided, the scanner is recorded
   `MISSING` with the reason and the scan exits 1. ASH never falls back to running it
   unsandboxed. `auto` picks bubblewrap, then firejail, then Landlock on Linux, and
@@ -139,7 +149,11 @@
   these checks and the sandbox grants alike, a file counts as inside the scanned
   tree when it is inside any git checkout, by its own path or its resolved path, or
   inside the source directory when that is outside a checkout. A tool config file
-  or plugin module kept in a checkout of your own is therefore not used either. The
+  or plugin module kept in a checkout of your own is therefore not used either, and
+  a virtualenv inside a git checkout counts as inside it: the warning names the
+  module's location and the checkout. A file a setting names is judged by the path
+  as written as well as by the file it resolves to, so a symlink the scanned
+  repository planted counts as inside the tree wherever it points. The
   workspace tools' `config_overrides` are checked against the session config's
   `runtime_overrides` allowlist, as `select_profile`'s `patch_ops` and
   `override_yaml` are, and are refused while runtime overrides are off (the
@@ -635,6 +649,22 @@
   (descriptor `ASH-CONTENT-DB-STALE`) on the scanner's invocation in `ash.sarif`, and
   the `content_databases` list in `ash.flat.json`. The CLI flag wins over the config in
   both directions; an MCP runtime patch cannot change it.
+
+  **Which database is checked.** ASH resolves each tool's cache directory the way the
+  tool does on the host: `GRYPE_DB_CACHE_DIR` or `TRIVY_CACHE_DIR`, else
+  `$XDG_CACHE_HOME` (which trivy ignores on macOS), else `~/.cache` on Linux and
+  `~/Library/Caches` on macOS. It names that one directory to the scan, to the age
+  check and to the database update it runs before a sandboxed online scan, so all
+  three read the same database. The age check and the update run from a directory
+  outside the scanned tree with an empty config file ASH ships, so a `trivy.yaml` or
+  grype config in the scanned repository cannot point them at another database. The
+  scan gets the directory as `GRYPE_DB_CACHE_DIR` or `--cache-dir`, which beat a
+  config file, so a `db.cache-dir` in a grype config is not used, and ASH logs a
+  warning naming the file; set `GRYPE_DB_CACHE_DIR` to move the database.
+  trivy-repo keeps its scan cache in memory (`--cache-backend=memory`) in every run,
+  so a scan that does not update the database itself (offline, or sandboxed) also
+  works from a cache it may only read, such as one shared between jobs or baked into
+  an image.
 
 - **A rule's CVSS base score is now authoritative over a scanner's SARIF `level`,
   for every scanner, and this changes gate outcomes with nothing to opt into.**
