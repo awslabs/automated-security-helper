@@ -10,7 +10,8 @@ There are three layers:
 
 - Static checks, in the `lint` job. They read every markdown file in the repository
   and compare it with the code: the CLI, the config models, the environment variables
-  ASH reads, the navigation and the link targets. They run in about ten seconds.
+  ASH reads, the navigation and the link targets. They also check the docs URLs and
+  paths that ASH's own source names. They run in about ten seconds.
 - The docs-example runner, in the `integration-test` job. It runs every runnable
   shell and Python block, page by page, and fails when a block exits with the wrong
   code.
@@ -134,6 +135,11 @@ Every `ASH_*` name anywhere on a page must be a variable ASH reads. So must ever
 in the first column of a table headed "Variable" or "Environment variable". Write a
 family as `ASH_MCP_*`; at least one variable ASH reads must start with the prefix.
 
+One kind of read is not in the read set: a config value written as `${NAME}`, which
+ASH's config loader resolves for any name its rule allows (every `ASH_*` name, and a few
+AWS ones). A name that one of the page's ASH config blocks references that way counts as
+read everywhere on the page, so the page can set the variable its own config uses.
+
 ### Links and pages
 
 - A relative link must reach an existing file, and its `#anchor` an existing heading
@@ -147,7 +153,27 @@ family as `ASH_MCP_*`; at least one variable ASH reads must start with the prefi
   `mkdocs.yml` with a comment saying why.
 - When you move or rename a page, add the old path to
   [`docs/redirects.yml`](https://github.com/awslabs/automated-security-helper/blob/main/docs/redirects.yml).
-  The site build writes a page at the old URL that forwards readers to the new one.
+  The site build writes a page at the old URL that forwards readers to the new one,
+  keeping the `#anchor` they followed, so that anchor must exist on the new page.
+
+### Docs links in the ASH source
+
+ASH itself names docs pages: help text and error messages point at the site, `ash
+get-genai-guide` fetches a docs file from GitHub by path, and some messages name a
+heading. The static checks read every string in the package source (docstrings
+excepted) and require that:
+
+- a URL on the site reaches a page, directly or through a redirect, and its `#anchor`
+  exists on the page it ends at;
+- a raw or blob GitHub URL to a docs file names a file that exists. A redirect does not
+  help here, because fetching the file does not follow it; when a page moves, the code
+  must change too;
+- a GitHub URL to any other repository file names a file that exists;
+- a docs path (`docs/content/...md`) exists, and a heading the text quotes beside it
+  (`'Some heading' in docs/content/page.md`) is a heading on that page.
+
+An f-string is read with each placeholder replaced by the constant it names. A URL
+whose path depends on anything else cannot be checked, and is reported as such.
 
 ## Running the checks locally
 
@@ -166,14 +192,37 @@ uv run mkdocs build --clean --strict
 ```
 
 The expression in `pytest -k getting-started` selects pages by path, so it runs every
-page whose path contains `getting-started`. To check that the runner and the checks themselves still
-catch what they should:
+page whose path contains `getting-started`. To check that the runner and the checks
+themselves still catch what they should:
 
 <!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```bash
 uv run pytest tests/unit/test_docs_checks_can_fail.py tests/unit/test_docs_freshness_gate_can_fail.py
 uv run pytest tests/integration/docs/test_docs_runner_can_fail.py --run-integration -n 0
 ```
+
+### Checking docs against another checkout's code
+
+Docs written for code that is not on main yet are checked against a checkout that has
+it, while the pages stay in their own checkout. Run the checks with the code
+checkout's interpreter and name the docs checkout. Every ASH import, the CLI, the
+config models and the environment variables come from the interpreter's ASH; every
+page, the nav, `mkdocs.yml`, the redirect map and the fixtures come from the docs
+checkout. Both commands print which package and which docs root they used.
+
+<!-- doctest: illustrative reason="needs two checkouts of this repository" -->
+```bash
+CODE=../code-checkout
+DOCS=$PWD
+
+"$CODE/.venv/bin/python" "$DOCS/scripts/verify_docs_freshness.py" --docs-root "$DOCS"
+
+"$CODE/.venv/bin/pytest" "$DOCS/tests/integration/docs" --run-integration -n 0 --docs-root "$DOCS"
+```
+
+Use the code checkout's `pytest` rather than `python -m pytest` from the docs
+checkout: `python -m` puts the current directory first on the import path, and the
+docs checkout's copy of the package would then be the one imported.
 
 ## What a failure means
 
@@ -231,6 +280,17 @@ lookups could not be resolved; make the lookup a literal or a module constant.
 `does not parse` gives the line of the syntax error. `no such module` and `has no
 name` mean an import does not resolve in the project's environment: the module was
 renamed or removed, or the block needs an extra that is not installed.
+
+### code-links
+
+| Message contains | Fix |
+|------------------|-----|
+| no page on the site serves this URL | a page the code links to moved; add a redirect, or change the URL in the code |
+| has no anchor | the heading the URL points at was renamed; restore the heading or change the URL |
+| does not exist in the docs | the docs file the code names moved or was removed; change the code |
+| a fetch of the file does not follow it | the code fetches a docs file that moved; change the path in the code |
+| that page has no such heading | the code quotes a heading that was renamed |
+| is built at runtime | the URL's path is not a constant; write it as a literal so it can be checked |
 
 ### links, nav, redirects and site
 
