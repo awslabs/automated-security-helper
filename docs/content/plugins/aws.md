@@ -1,0 +1,192 @@
+# AWS reporters
+
+The `ash_aws_plugins` package that ships with ASH has four reporters that send scan data
+to AWS services. They are off until an operator loads the package, and only an operator
+can choose where they send data and which credentials they use.
+
+| Reporter | Sends to | What leaves the machine |
+|---|---|---|
+| `s3` | An S3 bucket | The scan summary and the resolved ASH configuration |
+| `cloudwatch-logs` | A CloudWatch Logs log group | The same summary and configuration |
+| `bedrock-summary-reporter` | Amazon Bedrock | Finding messages, rule IDs, file paths and line numbers, and severity counts |
+| `aws-security-hub` | Nothing in this version | Nothing; see [aws-security-hub](#aws-security-hub) |
+
+The S3 and CloudWatch Logs reporters do not send individual findings. To collect findings
+centrally, copy a findings file such as `reports/ash.ocsf.json` or `reports/ash.sarif` to
+your storage yourself ([Export reports](../how-to/export-reports.md)).
+
+## Load the package {#enable}
+
+Loading the package turns on all four reporters. Name it in one of these places, all of
+which belong to the operator:
+
+- `--ash-plugin-modules automated_security_helper.plugin_modules.ash_aws_plugins`
+- `ASH_PLUGIN_MODULES=automated_security_helper.plugin_modules.ash_aws_plugins`
+- `--config-overrides 'ash_plugin_modules=[automated_security_helper.plugin_modules.ash_aws_plugins]'`
+- `ash_plugin_modules` in a config file outside every git checkout and outside the
+  directory you scan
+
+When a config file inside the scanned repository, or one an MCP client delivered, names
+the package, ASH drops that entry, logs a warning that says why, and runs the scan
+without it.
+
+Turn off the reporters you do not use in the same operator config. This one sends to S3
+and CloudWatch Logs only:
+
+<!-- doctest: config kind=ash -->
+```yaml
+ash_plugin_modules:
+  - automated_security_helper.plugin_modules.ash_aws_plugins
+reporters:
+  s3:
+    options:
+      aws_region: us-west-2
+      bucket_name: example-security-scan-results
+      key_prefix: ash-reports/
+  cloudwatch-logs:
+    options:
+      aws_region: us-west-2
+      log_group_name: /security/ash
+  bedrock-summary-reporter:
+    enabled: false
+  aws-security-hub:
+    enabled: false
+```
+
+A repository's own config file can also set `enabled: false` for these reporters when a
+scan reads it. If you load the package with `--ash-plugin-modules` and let ASH read the
+repository's config, the repository can turn your reporters off. Pass your config with
+`--config` to prevent that; ASH then does not read the repository's config file.
+
+A reporter that is missing its destination or credentials, or fails its pre-flight call,
+is dropped from the run without changing the exit code. S3 and CloudWatch Logs skip
+silently when the bucket or log group is not set, so check the log for each run.
+
+## Destinations and credentials {#destinations}
+
+These options choose where data goes and with which identity. ASH takes them only from
+operator sources: the defaults below, an operator config file, or `--config-overrides`.
+
+| Reporter | Operator-only options | Defaults |
+|---|---|---|
+| `s3` | `aws_region`, `aws_profile`, `bucket_name`, `key_prefix` | `AWS_REGION`, then `AWS_DEFAULT_REGION`; `AWS_PROFILE`; `ASH_S3_BUCKET_NAME`; `ash-reports/` |
+| `cloudwatch-logs` | `aws_region`, `log_group_name`, `log_stream_name` | `AWS_REGION`, then `AWS_DEFAULT_REGION`; `ASH_CLOUDWATCH_LOG_GROUP_NAME`; `ASHScanResults` |
+| `bedrock-summary-reporter` | `aws_region`, `aws_profile`, `model_id`, `output_file`, `output_executive_file`, `output_technical_file` | `AWS_REGION`, then `AWS_DEFAULT_REGION`, then `us-east-1`; `AWS_PROFILE`; `ASH_BEDROCK_MODEL_ID`, then `us.anthropic.claude-3-7-sonnet-20250219-v1:0` |
+| `aws-security-hub` | `aws_region`, `aws_profile`, `account_id` | `AWS_REGION`, then `AWS_DEFAULT_REGION`; `AWS_PROFILE`; the caller's account |
+
+When a config file inside the scanned repository sets one of these options, ASH ignores
+it, logs a warning that names the option, and uses the operator's value. Under an MCP
+server's default policy, a delivered config that sets a `cloudwatch-logs` option or a
+Bedrock `aws_*` option is refused, and S3 and Security Hub destinations in it are
+replaced by the operator's values.
+
+Credentials come from the AWS SDK's default chain: environment variables, the shared
+config and credentials files (with `aws_profile` where the reporter has it), and the
+container or instance role. `cloudwatch-logs` has no profile option. Bedrock's region
+falls back to `us-east-1`, so with only ambient credentials and no region set, the
+Bedrock reporter still sends data.
+
+In container mode, the scan runs inside the container and the host's AWS environment
+variables and credential files are not passed in ([Run ASH in a container](../how-to/run-in-a-container.md#mounts)).
+
+## What each reporter sends {#what-is-sent}
+
+Every reporter first calls `sts:GetCallerIdentity`, which needs no IAM permission.
+
+### s3 {#s3}
+
+Uploads one object per scan to `<key_prefix>ash-report-<generated_at>.json` (in workspace
+mode `<key_prefix><project>/ash-report-<generated_at>.json`), or `.yaml` with
+`file_format: yaml`. The object holds the scan summary: the report metadata and summary
+counts, each scanner's and converter's status and finding counts, and the resolved ASH
+configuration, which includes your suppressions and ignore paths. It holds no individual
+findings.
+
+Before the upload it calls `HeadBucket`. Locally it writes the uploaded content to
+`reports/s3-report.json` and a receipt with the object URL to `reports/ash.s3.json`.
+
+IAM: `s3:PutObject` on `arn:aws:s3:::<bucket>/<key_prefix>*`, and `s3:ListBucket` on the
+bucket, which `HeadBucket` requires.
+
+### cloudwatch-logs {#cloudwatch-logs}
+
+Sends one log event per scan with the same summary and configuration as the S3 object,
+to the stream `log_stream_name` in `log_group_name`. It creates the stream if needed;
+the log group must already exist. Locally it writes the event and the API response to
+`reports/ash.cwlog.json`.
+
+IAM: `logs:CreateLogStream` and `logs:PutLogEvents` on the log group.
+
+### bedrock-summary-reporter {#bedrock}
+
+Asks a Bedrock model, through the Converse API, for an executive summary, a risk
+assessment, recommendations and a technical analysis, and writes them to
+`reports/ash.bedrock.summary.md`, `reports/bedrock-executive.md` and
+`reports/bedrock-technical.md`. A scan of the sample project made six Converse calls.
+
+The prompts contain the names of the scanners that ran, severity counts, and, for each
+finding sent, its rule ID, level, message text and file paths with line numbers. With
+`actionable_only` (default `true`) it leaves out suppressed findings; findings below the
+severity threshold are still sent. It sends a sample of the rest: up to `max_findings_to_analyze` (default 10) per request and up to
+`max_findings_per_severity` (default 5) per severity. With `batch_processing: true` it sends
+every actionable finding, in batches. Source code is sent only with
+`include_code_snippets: true`. `custom_prompt`, `custom_context`, `industry_context` and
+`compliance_frameworks` are added to the prompts.
+
+`exclude_scanner_types` (default `["SECRET"]`) has no effect in this version: findings
+from secret scanners are sent with the others. Finding messages describe the match and
+do not normally contain the secret value, but they name the file and line.
+
+When a call fails, the reporter retries with another model from a built-in list for the
+same model family, unless `enable_fallback_models` is `false`.
+
+IAM: `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles`, which it calls
+to check the model, and `bedrock:InvokeModel`, which the Converse API requires. The
+default model is a cross-Region inference profile, so allow `bedrock:InvokeModel` on the
+inference profile and on the foundation model in each Region the profile routes to, as
+the [Bedrock inference profile prerequisites](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-prereq.html)
+describe. Add the fallback models too, or turn fallback off.
+
+### aws-security-hub {#aws-security-hub}
+
+This version does not send findings to Security Hub. The reporter calls `DescribeHub` to
+check that Security Hub is enabled, then logs a warning that findings have not been sent
+and writes `reports/ash.aws-security-hub.asff.json` with a placeholder message and the
+finding count. It needs `securityhub:DescribeHub`.
+
+## Rendering a reporter from saved results {#ash-report}
+
+`ash report --format s3`, or the name of any of the other three, runs that reporter
+against the results of a previous scan, which sends the data again. It skips the
+reporter's pre-flight call and uses the destinations of the configuration it resolves.
+
+## Example IAM policy {#iam}
+
+A policy for the configuration above (S3 and CloudWatch Logs only), with your account,
+bucket and log group:
+
+<!-- doctest: config kind=other reason="IAM policy document, not an ASH config" -->
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::example-security-scan-results/ash-reports/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::example-security-scan-results"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:us-west-2:111122223333:log-group:/security/ash:*"
+    }
+  ]
+}
+```
+
+Each reporter's full option list is in the [reporters reference](../reference/reporters.md#s3).
