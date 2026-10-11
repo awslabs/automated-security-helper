@@ -59,17 +59,25 @@ def docs_root_of(config) -> Path:
     return Path(value).resolve() if value else REPO_ROOT
 
 
-def pages_with_examples(docs_root: Path) -> list:
-    if docs_root != gate.REPO_ROOT:
-        gate._use_trees(docs_root)
+def pages_to_run(paths, docs_root: Path) -> list:
+    """The pages with a block a session handles: one to run, or one to save.
+
+    Templates (.md.template) are left out; the page each one renders is run instead.
+    """
     pages = []
-    for path in gate.collect_md_files():
+    for path in paths:
         if path.suffix != ".md":
             continue
         page = checks.parse_page(path, docs_root)
-        if runner.runnable_blocks(page):
+        if runner.session_blocks(page):
             pages.append(page)
     return pages
+
+
+def pages_with_examples(docs_root: Path) -> list:
+    if docs_root != gate.REPO_ROOT:
+        gate._use_trees(docs_root)
+    return pages_to_run(gate.collect_md_files(), docs_root)
 
 
 def pytest_generate_tests(metafunc):
@@ -89,6 +97,6 @@ def test_doc_examples_run(page, tmp_path, request):
     results = runner.PageRunner(
         page, tmp_path, docs_root=docs_root_of(request.config)
     ).run()
-    assert results, f"{page.rel} was selected for a runnable block but none ran"
+    assert results, f"{page.rel} was selected for a block to run or save but none did"
     if not all(result.ok for result in results):
         pytest.fail(runner.failure_report(results), pytrace=False)

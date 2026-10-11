@@ -359,12 +359,16 @@ DOCS=$PWD
 
 "$CODE/.venv/bin/python" "$DOCS/scripts/verify_docs_freshness.py" --docs-root "$DOCS"
 
-"$CODE/.venv/bin/pytest" "$DOCS/tests/integration/docs" --run-integration --no-cov -n 0 --docs-root "$DOCS"
+"$CODE/.venv/bin/pytest" "$DOCS/tests/integration/docs" --run-integration --no-cov -n 0 --docs-root="$DOCS"
 ```
 
 Use the code checkout's `pytest` rather than `python -m pytest` from the docs
 checkout: `python -m` puts the current directory first on the import path, and the
-docs checkout's copy of the package would then be the one imported.
+docs checkout's copy of the package would then be the one imported. Pass the option to
+pytest as one word, `pytest --docs-root=<checkout>`: pytest reads a separate value as
+a test path before the option is registered, and when the tests and the docs come from
+different checkouts it then loads both checkouts' `tests/conftest.py` and stops with
+"option names {'--run-slow'} already added".
 
 ## Versioned docs
 

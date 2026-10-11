@@ -2899,6 +2899,21 @@ def test_use_trees_rebases_docs_paths_onto_the_docs_root(tmp_path):
     assert gate.PYPROJECT_TOML == package.parent / "pyproject.toml"
 
 
+def test_use_trees_can_be_called_again_for_another_docs_root(tmp_path):
+    """Each call rebases from the current paths, so the code paths must not be
+    computed relative to the previous docs root."""
+    gate = _load("_ash_docs_gate_rebased_twice", GATE_PATH)
+    package = dc.installed_package_dir()
+    gate._use_trees(tmp_path / "first")
+    gate._use_trees(tmp_path / "second")
+    assert gate.REPO_ROOT == (tmp_path / "second").resolve()
+    assert (
+        gate.INSTALL_MD
+        == (tmp_path / "second").resolve() / "docs/content/how-to/install.md"
+    )
+    assert gate.MCP_SERVER_PY == package / "cli" / "mcp_server.py"
+
+
 def test_the_gate_checks_the_docs_root_it_is_given(tmp_path):
     """--docs-root: markdown from that tree, and the header says which trees were used."""
     import subprocess

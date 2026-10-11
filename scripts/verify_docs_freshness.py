@@ -892,10 +892,14 @@ def _docs_checks():
     annotations through the module's entry there.
     """
     global _docs_checks_module
+    name = "_ash_docs_checks"
+    if _docs_checks_module is None and name in sys.modules:
+        # The docs runner loads the same file under the same name; one module per
+        # process, so a patch or a cache in one is seen by the other.
+        _docs_checks_module = sys.modules[name]
     if _docs_checks_module is None:
         import importlib.util
 
-        name = "_ash_docs_checks"
         spec = importlib.util.spec_from_file_location(name, DOCS_CHECKS)
         if spec is None or spec.loader is None:
             raise RuntimeError(f"cannot load {DOCS_CHECKS}")
@@ -988,7 +992,9 @@ _DOCS_PATHS = (
     "MCP_TOOLS_REFERENCE_MD",
     "INSTALL_MD",
 )
-_CODE_PATHS = ("MCP_SERVER_PY",)
+#: Code files, by their path inside the package, so a rebase never depends on where
+#: the previous one put them.
+_CODE_PATHS = {"MCP_SERVER_PY": Path("cli") / "mcp_server.py"}
 
 
 def _use_trees(docs_root: Path) -> None:
@@ -1000,8 +1006,8 @@ def _use_trees(docs_root: Path) -> None:
     code = _docs_checks().code_root(docs_root)
     for name in _DOCS_PATHS:
         names[name] = docs_root / names[name].relative_to(old_root)
-    for name in _CODE_PATHS:
-        names[name] = package / names[name].relative_to(old_root / package.name)
+    for name, inside in _CODE_PATHS.items():
+        names[name] = package / inside
     names["PYPROJECT_TOML"] = code / "pyproject.toml"
     names["REPO_ROOT"] = docs_root
 

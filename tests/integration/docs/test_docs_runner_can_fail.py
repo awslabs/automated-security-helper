@@ -423,7 +423,9 @@ def test_the_save_backstop_refuses_an_escape_the_path_check_misses(
 ):
     """The runner resolves the target and refuses it outside the project even when
     save_as_problem lets the path through, so one missed case cannot write outside."""
-    monkeypatch.setattr(checks, "save_as_problem", lambda value: None)
+    monkeypatch.setattr(
+        runner.load_docs_checks(), "save_as_problem", lambda value: None
+    )
     results = _run(
         tmp_path,
         f"""<!-- doctest: save-as=../outside.py -->
@@ -436,3 +438,18 @@ x = 1
         "save-as refused: ../outside.py leaves the page's project"
     ], runner.failure_report(results)
     assert not any(tmp_path.rglob("outside.py"))
+
+
+def test_a_page_with_only_saved_blocks_is_run(tmp_path):
+    """The examples test selects pages by the blocks a session handles, so a page that
+    only saves files is run too, and a save the runner refuses is reported."""
+    examples = _load("_ash_docs_examples", HERE / "test_docs_examples.py")
+    saved_only = tmp_path / "saved.md"
+    saved_only.write_text(
+        f"<!-- doctest: save-as=settings.yaml -->\n{FENCE}yaml\nproject_name: x\n{FENCE}\n",
+        encoding="utf-8",
+    )
+    nothing = tmp_path / "prose.md"
+    nothing.write_text(f"# Prose\n\n{FENCE}text\nhello\n{FENCE}\n", encoding="utf-8")
+    selected = examples.pages_to_run([saved_only, nothing], tmp_path)
+    assert [page.rel for page in selected] == ["saved.md"]

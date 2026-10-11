@@ -7,7 +7,11 @@ Registered here, beside the tests that read it, so it exists when this directory
 named on the command line, which is how it is meant to be run:
 
     <code-tree>/.venv/bin/pytest <docs-tree>/tests/integration/docs \
-        --run-integration --docs-root <docs-tree>
+        --run-integration --docs-root=<docs-tree>
+
+As one word: before this option is registered, pytest reads a separate value as a test
+path, and loads that tree's tests/conftest.py too, which fails on a duplicate option
+when it is not the tree the tests come from.
 
 The pages and fixtures come from <docs-tree>; ``ash`` and every python block run with
 the ASH installed in the interpreter's environment.
