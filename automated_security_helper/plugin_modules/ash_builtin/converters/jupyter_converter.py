@@ -522,8 +522,14 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             str(output_dir),
         ]
 
+        # Under a sandbox, nbconvert's own entry point, run directly: the executable
+        # the dependency check found. `uv tool run` writes uv's tools directory, which
+        # the sandbox mounts read-only (measured with uv 0.12: "Could not create
+        # temporary file"), and `uv tool install nbconvert` installs no `jupyter`
+        # launcher.
+        sandboxed = sandbox_requested(self.context)
         # Execute using UV tool runner if available, otherwise direct execution
-        if self.use_uv_tool:
+        if not sandboxed and self.use_uv_tool:
             if self._execute_nbconvert_via_uv(cmd, timeout=60, cwd=run_dir):
                 return
             ASH_LOGGER.warning(
@@ -532,9 +538,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         nbconvert = self._nbconvert_for_direct_run()
         if nbconvert is None:
             refusal = self._direct_nbconvert[1] if self._direct_nbconvert else None
+            reason = refusal or "no jupyter-nbconvert executable was found on PATH"
             raise FileNotFoundError(
-                "uv could not run nbconvert, and "
-                + (refusal or "no jupyter-nbconvert executable was found on PATH")
+                reason if sandboxed else f"uv could not run nbconvert, and {reason}"
             )
         direct = [nbconvert, *cmd[2:]]
         result = spawn_run(  # nosec B603 — list args, absolute path from find_executable_for_scan

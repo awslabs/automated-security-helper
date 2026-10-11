@@ -276,3 +276,83 @@ def test_without_a_sandbox_nbconvert_runs_on_the_host(tmp_path):
 
     assert host in namespaces, f"the probe did not record the host: {namespaces}"
     assert converted
+
+
+# Loaded by every Python process started with the probe directory on PYTHONPATH,
+# including nbconvert inside the sandbox: PYTHON* variables pass the environment
+# filter, and a directory on ASH's own sys.path outside $HOME is mounted read-only.
+# It acts only in nbconvert, and writes where nbconvert may write.
+SITECUSTOMIZE = """\
+import os, sys
+if os.path.basename(sys.argv[0] if sys.argv else "") == "jupyter-nbconvert":
+    target = os.environ.get("PYTHONASHPROBE")
+    if target:
+        try:
+            namespace = os.readlink("/proc/self/ns/net")
+        except OSError as error:
+            namespace = "unreadable:" + type(error).__name__
+        token = "present" if "NOTEBOOK_PROBE_TOKEN" in os.environ else "absent"
+        with open(target, "a", encoding="utf-8") as fh:
+            fh.write(namespace + " " + token + "\\n")
+"""
+
+
+@pytest.mark.parametrize("sandbox", ["bwrap", "off"])
+def test_the_converter_runs_nbconvert_in_its_own_namespace(
+    tmp_path, monkeypatch, sandbox
+):
+    """The jupyter converter itself, with the real backend: where nbconvert ran.
+
+    The probe above relies on ``JUPYTER_CONFIG_DIR``, which the sandbox's environment
+    filter drops, so under bwrap it records nothing either way. This probe reaches
+    nbconvert inside the sandbox and records its network namespace and whether a
+    credential-shaped variable reached it. ``off`` is the control: the host's
+    namespace and the variable.
+    """
+    _require("jupyter-nbconvert")
+    if sandbox != "off":
+        _require_bwrap()
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.ash_config import AshConfig, SandboxConfig
+    from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
+        JupyterConverter,
+    )
+
+    AshConfig.model_rebuild()
+    probe_dir = tmp_path / "probe"
+    probe_dir.mkdir()
+    (probe_dir / "sitecustomize.py").write_text(SITECUSTOMIZE, encoding="utf-8")
+    source = _source(tmp_path)
+    (source / "analysis.ipynb").write_text(NOTEBOOK)
+    output = tmp_path / "out"
+    results_dir = output / "converted" / "jupyter"
+    results_dir.mkdir(parents=True)
+    marker = results_dir / "namespace.txt"
+    monkeypatch.syspath_prepend(str(probe_dir))
+    monkeypatch.setenv("PYTHONPATH", str(probe_dir))
+    monkeypatch.setenv("PYTHONASHPROBE", str(marker))
+    monkeypatch.setenv("NOTEBOOK_PROBE_TOKEN", "token-value")
+    clear_backend_cache()
+    context = PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=output / "converted",
+        config=AshConfig(project_name="nb", sandbox=SandboxConfig(mode=sandbox)),
+    )
+
+    converted = JupyterConverter(context=context).convert()
+
+    assert converted, "the notebook was not converted"
+    lines = marker.read_text(encoding="utf-8").split("\n") if marker.exists() else []
+    recorded = [line.split() for line in lines if line.strip()]
+    assert recorded, "the probe recorded nothing, so nothing was measured"
+    host = os.readlink("/proc/self/ns/net")
+    if sandbox == "off":
+        assert [host, "present"] in recorded, recorded
+    else:
+        assert all(namespace != host for namespace, _token in recorded), (
+            f"nbconvert ran in the host's network namespace {host}: {recorded}"
+        )
+        assert all(token == "absent" for _namespace, token in recorded), (
+            f"a credential-shaped variable reached nbconvert: {recorded}"
+        )

@@ -345,7 +345,9 @@ notebooks, so under a sandbox nbconvert runs with the confinement a scanner gets
 network unless `sandbox.network_scanners` names `jupyter`, the environment allowlist,
 read access to a staged copy of the notebook and the tool, and the converter's own
 `<output>/converted/jupyter/` directory as the only writable place. Its version probe
-and dependency check run sandboxed as well. The convert phase applies the same scope
+and dependency check run sandboxed as well. Under a sandbox the converter runs
+nbconvert's own `jupyter-nbconvert` executable rather than `uv tool run`, which writes
+uv's tools directory and so cannot run there. The convert phase applies the same scope
 to every converter, so a third-party converter's tool is confined the same way.
 
 If no sandbox backend can be used, nbconvert is not run on any notebook: each one is

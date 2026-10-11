@@ -495,3 +495,60 @@ class TestAnUnconfinableNotebookFailsTheScan:
         results = _run_convert_phase(_context(tree, "bwrap"))
 
         assert incomplete_converters(results) == []
+
+
+class TestASandboxedConversionRunsNbconvertItself:
+    """Under a sandbox nbconvert's own entry point runs, not uv or the jupyter launcher.
+
+    Measured with uv 0.12 under bwrap: ``uv tool run`` exits 2 ("Could not create
+    temporary file ... Read-only file system" in uv's tools directory, which the sandbox
+    mounts read-only), and the fallback ran ``jupyter nbconvert``, whose launcher is not
+    installed alongside nbconvert by ``uv tool install nbconvert``. Both failed, so no
+    notebook was converted. ``jupyter-nbconvert`` is the executable the dependency check
+    finds, and it ran under the same sandbox.
+
+    The stand-ins here are the same as above, except that ``jupyter`` is absent and
+    ``uv tool run`` fails the way it does in the sandbox.
+    """
+
+    def test_the_notebook_is_converted_without_uv_or_the_launcher(
+        self, tmp_path, tree, backend, monkeypatch
+    ):
+        tools = _Tools(tmp_path, installed=True)
+        (tools.bin / "jupyter").unlink()
+        failing_uv = tools.bin / "uv"
+        source = failing_uv.read_text(encoding="utf-8").replace(
+            '    if args[:2] == ["tool", "run"]:\n',
+            '    if args[:2] == ["tool", "run"]:\n        sys.exit(2)\n',
+        )
+        assert source != failing_uv.read_text(encoding="utf-8")
+        failing_uv.write_text(source, encoding="utf-8")
+        _isolate_tool_lookup(monkeypatch, tools, tree[2], online=True)
+        converter = _converter(_context(tree, "bwrap"))
+
+        converted = converter.convert()
+
+        assert len(converted) == 1, (
+            f"no notebook was converted under the sandbox; calls: {tools.calls()}"
+        )
+        planned = [argv for argv, _policy, _env in backend.spawns if "--to" in argv]
+        assert planned and all(
+            Path(argv[0]).name == "jupyter-nbconvert" for argv in planned
+        ), f"nbconvert ran as {planned}"
+        # nbconvert's own arguments follow the executable unchanged.
+        assert all(
+            argv[1:5] == ["--log-level", "WARN", "--to", "python"] for argv in planned
+        ), f"nbconvert ran as {planned}"
+
+    def test_without_a_sandbox_uv_still_runs_it(
+        self, tmp_path, tree, backend, monkeypatch
+    ):
+        """Control: sandbox mode off keeps running nbconvert through uv."""
+        tools = _Tools(tmp_path, installed=True)
+        _isolate_tool_lookup(monkeypatch, tools, tree[2], online=True)
+        converter = _converter(_context(tree, "off"))
+
+        converted = converter.convert()
+
+        assert len(converted) == 1
+        assert [c[:3] for c in tools.conversions()] == [["uv", "tool", "run"]]
