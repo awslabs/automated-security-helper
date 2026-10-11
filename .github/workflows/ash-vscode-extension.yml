@@ -84,6 +84,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     defaults:
       run:
         working-directory: editors/vscode
@@ -193,11 +195,16 @@ jobs:
           print("OK: independent reader agrees -- no bundled modules, entry point present")
           PY
 
+      # run_attempt in the name because artifact names are immutable within a run:
+      # with a fixed name, re-running this job after it uploaded failed the upload. The
+      # integration-real job takes this upload's artifact-id through needs rather than
+      # recomputing the name.
       - name: Upload the .vsix
         if: always()
+        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ash-vscode-extension
+          name: ash-vscode-extension-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: editors/vscode/ash-vscode.vsix
           retention-days: 7
           # `error` and not `warn`: this job's whole output is the archive, so a run
@@ -321,10 +328,23 @@ jobs:
           done
           echo "dir=$WORK/venv/bin" >> "$GITHUB_OUTPUT"
 
+      # download-artifact reads an empty artifact-ids as no filter and downloads every
+      # artifact of the run, so the ID the package job handed over is held to a number first.
+      - name: Check the .vsix artifact ID
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ needs.package.outputs.artifact-id }}
+        run: |
+          if [[ ! "$ARTIFACT_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::the package job's artifact-id output is '${ARTIFACT_ID}', not an artifact ID. Without one, download-artifact would fetch every artifact in the run."
+            exit 1
+          fi
+          echo ".vsix artifact: ${ARTIFACT_ID}"
+
       - name: Download the .vsix the package job built and inspected
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ash-vscode-extension
+          artifact-ids: ${{ needs.package.outputs.artifact-id }}
           path: ${{ runner.temp }}/ash-e2e-vscode/vsix
 
       - name: Install dependencies

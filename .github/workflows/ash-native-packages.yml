@@ -130,6 +130,14 @@ on:
         type: string
         required: false
         default: ""
+    # IDs, not names, for the reason ash-package.yml's workflow_call outputs give.
+    outputs:
+      deb-artifact-id:
+        description: The artifact holding the verified .deb
+        value: ${{ jobs.package.outputs.deb-artifact-id }}
+      rpm-artifact-id:
+        description: The artifact holding the verified .rpm
+        value: ${{ jobs.package.outputs.rpm-artifact-id }}
 
 permissions:
   contents: read
@@ -254,6 +262,12 @@ jobs:
     needs: self-tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # One name per family: a matrix job's outputs are combined from every leg, and only
+    # the deb asset leg writes deb-artifact-id and the rpm one rpm-artifact-id, so
+    # neither is overwritten by a leg that uploaded nothing.
+    outputs:
+      deb-artifact-id: ${{ steps.artifact-id.outputs.deb-artifact-id }}
+      rpm-artifact-id: ${{ steps.artifact-id.outputs.rpm-artifact-id }}
     container:
       # Pinned by digest: every one of these tags is rebuilt on point releases, so a
       # tag pins the suite and not the image. `label` carries the readable name.
@@ -366,12 +380,27 @@ jobs:
       # other legs.
       - name: Upload the verified package for the release assets
         if: matrix.asset
+        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ash-${{ matrix.family }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: build/native-packages/*.${{ matrix.family }}
           if-no-files-found: error
           retention-days: 14
+
+      - name: Hand the uploaded package's artifact ID to the release
+        if: matrix.asset
+        id: artifact-id
+        env:
+          FAMILY: ${{ matrix.family }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: |
+          set -eu
+          case "$FAMILY" in
+            deb) echo "deb-artifact-id=${ARTIFACT_ID}" >> "$GITHUB_OUTPUT" ;;
+            rpm) echo "rpm-artifact-id=${ARTIFACT_ID}" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::no artifact-id output for package family '${FAMILY}'"; exit 1 ;;
+          esac
 
   # The one check name this workflow reports regardless of the matrix. `if: always()`
   # so it reports a verdict when a job it needs failed or was skipped, rather than

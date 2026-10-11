@@ -238,28 +238,73 @@ def test_the_assemble_job_gates_then_runs_both_negative_controls():
     assert any("assert-no-image-publish.py --self-test" in run for run in runs)
 
 
-def test_every_download_in_assemble_names_an_upload_in_the_call_tree():
-    uploads = set()
-    for path in (PACKAGE, NATIVE, RELEASE_ASSETS):
-        for job in _workflow(path)["jobs"].values():
-            for step in job.get("steps") or []:
-                if str(step.get("uses", "")).startswith("actions/upload-artifact@"):
-                    name = step["with"]["name"]
-                    if "matrix.family" in name:
-                        uploads.update(
-                            name.replace("${{ matrix.family }}", f)
-                            for f in ("deb", "rpm")
-                        )
-                    else:
-                        uploads.add(name)
-    downloads = [
-        step["with"]["name"]
-        for step in _steps(_workflow(RELEASE_ASSETS), "assemble")
-        if str(step.get("uses", "")).startswith("actions/download-artifact@")
-    ]
-    assert len(downloads) == 8
-    for name in downloads:
-        assert name in uploads, name
+_REF = re.compile(r"^\$\{\{\s*(needs|jobs|steps)\.([\w-]+)\.outputs\.([\w-]+)\s*\}\}$")
+
+
+def _ref(expr: str) -> tuple:
+    match = _REF.match(str(expr).strip())
+    assert match, f"{expr!r} is not one needs/jobs/steps output"
+    return match.groups()
+
+
+def _upload_behind(doc: dict, job: str, output: str) -> dict:
+    """The upload-artifact step whose artifact-id ``jobs.<job>.outputs.<output>`` is."""
+    kind, step_id, name = _ref(doc["jobs"][job]["outputs"][output])
+    assert kind == "steps", (job, output)
+    step = next(s for s in doc["jobs"][job]["steps"] if s.get("id") == step_id)
+    if str(step.get("uses", "")).startswith("actions/upload-artifact@"):
+        assert name == "artifact-id", (job, output, name)
+        return step
+    # A run step that hands an upload's ID on under a per-family name, as the native
+    # package matrix does: it writes <name>= from its ARTIFACT_ID.
+    assert f"{name}=${{ARTIFACT_ID}}" in step["run"], (job, step_id, name)
+    kind, upload_id, upload_output = _ref(step["env"]["ARTIFACT_ID"])
+    assert (kind, upload_output) == ("steps", "artifact-id"), (job, step_id)
+    upload = next(s for s in doc["jobs"][job]["steps"] if s.get("id") == upload_id)
+    assert str(upload.get("uses", "")).startswith("actions/upload-artifact@")
+    return upload
+
+
+def test_every_download_in_assemble_takes_an_upload_id_from_the_call_tree():
+    # By ID, traced back to the upload step that produced it, so a rename on either
+    # side cannot leave the download asking for something nothing uploaded.
+    release = _workflow(RELEASE_ASSETS)
+    callees = {"package": _workflow(PACKAGE), "native": _workflow(NATIVE)}
+    uploads, refs = [], []
+    for step in _steps(release, "assemble"):
+        if not str(step.get("uses", "")).startswith("actions/download-artifact@"):
+            continue
+        assert "name" not in step["with"], step["name"]
+        kind, job, output = _ref(step["with"]["artifact-ids"])
+        assert kind == "needs" and job in release["jobs"]["assemble"]["needs"]
+        refs.append((job, output))
+        if job in callees:
+            callee = callees[job]
+            value = callee["on"]["workflow_call"]["outputs"][output]["value"]
+            kind, inner_job, inner_output = _ref(value)
+            assert kind == "jobs", value
+            uploads.append(_upload_behind(callee, inner_job, inner_output))
+        else:
+            uploads.append(_upload_behind(release, job, output))
+    names = [u["with"]["name"] for u in uploads]
+    assert len(names) == 8
+    assert len(set(refs)) == 8, refs
+    for prefix in (
+        "ash-package-",
+        "ash-msix-",
+        "ash-nupkg-",
+        "ash-flatpak-",
+        "ash-release-vsix-",
+        "ash-release-jetbrains-",
+    ):
+        assert sum(n.startswith(prefix) for n in names) == 1, (prefix, names)
+    # The deb and the rpm come from the one matrix upload, once per family.
+    assert (
+        names.count(
+            "ash-${{ matrix.family }}-${{ github.sha }}-attempt-${{ github.run_attempt }}"
+        )
+        == 2
+    )
 
 
 def test_the_asset_legs_are_exactly_one_deb_and_one_rpm():
@@ -576,6 +621,29 @@ def test_the_release_refuses_a_download_with_no_artifact_id(tmp_path: Path, valu
     assert (proc.returncode == 0) is ok, proc.stdout + proc.stderr
     if not ok:
         assert "not an artifact ID" in proc.stdout
+
+
+HAND_OVER = "Hand the uploaded package's artifact ID to the release"
+
+
+@needs_bash
+@pytest.mark.parametrize("family, ok", [("deb", True), ("rpm", True), ("apk", False)])
+def test_each_asset_leg_hands_over_its_upload_id_under_its_family(
+    tmp_path: Path, family, ok
+):
+    # Each asset leg writes only its own family's output, so the matrix's combined
+    # outputs carry one ID per family and no leg overwrites another's.
+    proc = _run_step(
+        _step_run(NATIVE, "package", _named(HAND_OVER)),
+        tmp_path,
+        {"FAMILY": family, "ARTIFACT_ID": "4242424242"},
+        _shim_dir(tmp_path),
+    )
+    assert (proc.returncode == 0) is ok, proc.stdout + proc.stderr
+    if ok:
+        output = tmp_path / "_runner_temp" / "github_output"
+        written = output.read_text(encoding="utf-8")
+        assert written == f"{family}-artifact-id=4242424242\n", written
 
 
 def _git(repo: Path, *args: str) -> str:

@@ -599,7 +599,10 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/workflows/ash-vscode-extension.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,
-        publishes="name=ash-vscode-extension path=editors/vscode/ash-vscode.vsix",
+        publishes=(
+            "name=ash-vscode-extension-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=editors/vscode/ash-vscode.vsix"
+        ),
         reason=(
             "BUILT BYTES: the VS Code extension archive packaged from editors/vscode. "
             "The step before it reads the archive with an independent zip reader and "

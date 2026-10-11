@@ -322,9 +322,16 @@ def test_the_winget_client_job_installs_the_msix_job_artifact() -> None:
     assert "msix" in job["needs"]
     assert "continue-on-error" not in job
     downloads = [s for s in job["steps"] if "download-artifact" in str(s.get("uses"))]
-    assert [d["with"]["name"] for d in downloads] == [
-        "ash-msix-${{ github.sha }}-attempt-${{ github.run_attempt }}"
+    # By the ID the msix job's upload handed over: a name with run_attempt in it
+    # would be recomputed by a re-run of this job and miss the msix job's upload.
+    assert [d["with"]["artifact-ids"] for d in downloads] == [
+        "${{ needs.msix.outputs.artifact-id }}"
     ]
+    assert jobs["msix"]["outputs"]["artifact-id"] == (
+        "${{ steps.upload.outputs.artifact-id }}"
+    )
+    upload = next(s for s in jobs["msix"]["steps"] if s.get("id") == "upload")
+    assert upload["with"]["name"].startswith("ash-msix-")
     runs = [s["run"] for s in job["steps"] if "run" in s]
     assert any("packaging/winget/verify-on-windows.ps1" in r for r in runs)
     # The schema job stays.

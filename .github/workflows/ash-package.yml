@@ -114,6 +114,23 @@ on:
         required: false
       MSIX_SIGNING_PFX_PASSWORD:
         required: false
+    # The ID of each artifact a caller downloads, for actions/download-artifact's
+    # artifact-ids. IDs, not names: a name carries the run_attempt of the attempt that
+    # uploaded it, which a caller job re-run by "Re-run failed jobs" in a later attempt
+    # cannot recompute (tests/unit/test_artifact_downloads_take_the_producers_id.py).
+    outputs:
+      package-artifact-id:
+        description: The artifact holding the gated wheel and sdist
+        value: ${{ jobs.build.outputs.artifact-id }}
+      flatpak-artifact-id:
+        description: The artifact holding the N Flatpak bundle
+        value: ${{ jobs.flatpak.outputs.artifact-id }}
+      msix-artifact-id:
+        description: The artifact holding the built .msix
+        value: ${{ jobs.msix.outputs.artifact-id }}
+      nupkg-artifact-id:
+        description: The artifact holding the gated .nupkg
+        value: ${{ jobs.chocolatey.outputs.artifact-id }}
 
 permissions:
   contents: read
@@ -136,6 +153,10 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+    # upload-artifact's artifact-id, so the jobs below download this attempt's upload
+    # whichever attempt they themselves run in.
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       # Default fetch-depth (1) on purpose. hatch_build.py stamps
       # automated_security_helper/assets/ASH_INSTALLED_REVISION during the build,
@@ -321,6 +342,7 @@ jobs:
           PATH="${venv}/bin:${PATH}" bash .github/actions/validate-install/assert-deprecated-alias.sh
 
       - name: Upload wheel and sdist
+        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # run_attempt is in the name because artifact names are immutable within a
@@ -402,6 +424,8 @@ jobs:
     name: "native: flatpak (org.freedesktop.Sdk 24.08)"
     needs: build
     runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     # Longer than the 25 minutes the .deb and .rpm jobs get: this one downloads a 633 MB
     # runtime before it can build, builds two bundles (N and N-1), and each first `ashx`
     # run after an install or update resolves ASH's runtime dependencies from a Python
@@ -416,10 +440,23 @@ jobs:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
 
+      # download-artifact reads an empty artifact-ids as no filter and downloads every
+      # artifact of the run, so the ID the build job handed over is held to a number first.
+      - name: Check the wheel artifact ID
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ needs.build.outputs.artifact-id }}
+        run: |
+          if [[ ! "$ARTIFACT_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::the build job's artifact-id output is '${ARTIFACT_ID}', not an artifact ID. Without one, download-artifact would fetch every artifact in the run."
+            exit 1
+          fi
+          echo "wheel artifact: ${ARTIFACT_ID}"
+
       - name: Download the wheel built and gated by the build job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
           path: dist
 
       # The upgrade leg's N-1 wheel: this tree with its version lowered (3.7.0 -> 3.6.0),
@@ -453,6 +490,7 @@ jobs:
       # (this tree under a version it is not) stays. ash-release-assets.yml unpacks it
       # and runs the tree gate build.sh ran, on these bytes, before a release attaches it.
       - name: Upload the N Flatpak bundle
+        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ash-flatpak-${{ github.sha }}-attempt-${{ github.run_attempt }}
@@ -493,6 +531,8 @@ jobs:
     name: "native: msix (windows-latest)"
     needs: build
     runs-on: windows-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     # Longer than the 25 the deb and rpm jobs get. This one additionally downloads a managed
     # CPython for uv, searches the SDK for two tools, compiles three launchers twice (N and
     # the N-1 package the upgrade leg starts from), and does a full pip install of ASH's
@@ -531,10 +571,23 @@ jobs:
         with:
           python-version: "3.13"
 
+      # download-artifact reads an empty artifact-ids as no filter and downloads every
+      # artifact of the run, so the ID the build job handed over is held to a number first.
+      - name: Check the wheel artifact ID
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ needs.build.outputs.artifact-id }}
+        run: |
+          if [[ ! "$ARTIFACT_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::the build job's artifact-id output is '${ARTIFACT_ID}', not an artifact ID. Without one, download-artifact would fetch every artifact in the run."
+            exit 1
+          fi
+          echo "wheel artifact: ${ARTIFACT_ID}"
+
       - name: Download the wheel built and gated by the build job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
           path: dist
 
       # One script, the same one a developer runs. The alternative was reimplementing the
@@ -591,6 +644,7 @@ jobs:
       # jobs" on a run that already uploaded would otherwise fail the upload and redden a
       # tree that was green.
       - name: Upload the built .msix
+        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ash-msix-${{ github.sha }}-attempt-${{ github.run_attempt }}
@@ -673,6 +727,8 @@ jobs:
     name: "native: chocolatey (windows-latest)"
     needs: build
     runs-on: windows-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     # The e2e leg installs three times and upgrades once, and every install builds a venv
     # and resolves ASH's runtime dependencies from a Python index. It also builds an N-1
     # wheel.
@@ -693,10 +749,23 @@ jobs:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
 
+      # download-artifact reads an empty artifact-ids as no filter and downloads every
+      # artifact of the run, so the ID the build job handed over is held to a number first.
+      - name: Check the wheel artifact ID
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ needs.build.outputs.artifact-id }}
+        run: |
+          if [[ ! "$ARTIFACT_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::the build job's artifact-id output is '${ARTIFACT_ID}', not an artifact ID. Without one, download-artifact would fetch every artifact in the run."
+            exit 1
+          fi
+          echo "wheel artifact: ${ARTIFACT_ID}"
+
       - name: Download the wheel built and gated by the build job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
           path: dist
 
       # uv runs the e2e harness (scripts/e2e) and builds the N-1 wheel. No cache: an e2e
@@ -738,6 +807,7 @@ jobs:
       # which gates it again on these bytes before a release attaches it. Same
       # run_attempt suffix as the other uploads here, for the same reason.
       - name: Upload the gated .nupkg
+        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ash-nupkg-${{ github.sha }}-attempt-${{ github.run_attempt }}
@@ -845,10 +915,23 @@ jobs:
         with:
           python-version: "3.13"
 
+      # download-artifact reads an empty artifact-ids as no filter and downloads every
+      # artifact of the run, so the ID the msix job handed over is held to a number first.
+      - name: Check the .msix artifact ID
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ needs.msix.outputs.artifact-id }}
+        run: |
+          if [[ ! "$ARTIFACT_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::the msix job's artifact-id output is '${ARTIFACT_ID}', not an artifact ID. Without one, download-artifact would fetch every artifact in the run."
+            exit 1
+          fi
+          echo ".msix artifact: ${ARTIFACT_ID}"
+
       - name: Download the .msix built and installed by the msix job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ash-msix-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.msix.outputs.artifact-id }}
           path: build/msix-artifact
 
       - name: Install, scan, upgrade and uninstall ASH through the winget client

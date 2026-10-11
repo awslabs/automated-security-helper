@@ -46,6 +46,7 @@ on:
       - "packaging/release-assets.py"
       - "tests/unit/test_release_assets.py"
       - "tests/unit/test_release_workflow_references.py"
+      - "tests/unit/test_artifact_downloads_take_the_producers_id.py"
       - "tests/unit/fixtures/pinned_action_interfaces.json"
   workflow_dispatch: {}
   workflow_call:
@@ -113,6 +114,7 @@ jobs:
           uv run pytest -o addopts= -p no:cacheprovider
           tests/unit/test_release_assets.py
           tests/unit/test_release_workflow_references.py
+          tests/unit/test_artifact_downloads_take_the_producers_id.py
           tests/unit/test_release_notes_workflow.py
           tests/unit/test_floating_major_tag_workflow.py
           tests/unit/test_e2e_n1_fetch.py
@@ -150,6 +152,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     defaults:
       run:
         working-directory: editors/vscode
@@ -197,6 +201,7 @@ jobs:
           ls -l "$GITHUB_WORKSPACE/build/vsix"
 
       - name: Upload the gated .vsix
+        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ash-release-vsix-${{ github.sha }}-attempt-${{ github.run_attempt }}
@@ -214,6 +219,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     container:
       image: gradle:jdk21@sha256:d5c815d1281e3edc7e986ca573b1b309639747fa0d91a2199adadf327cfdf634
       options: --init
@@ -244,6 +251,7 @@ jobs:
             --dist-dir build/distributions --own-jar-prefix ash-jetbrains
 
       - name: Upload the gated plugin zip
+        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ash-release-jetbrains-${{ github.sha }}-attempt-${{ github.run_attempt }}
@@ -305,52 +313,83 @@ jobs:
           ostree --version | head -2
           (cd editors/vscode && npm ci && npm run compile)
 
+      # Each download is by the ID its producer handed over, not by a name recomputed
+      # here: after "Re-run failed jobs" a producer that passed is not run again, and
+      # its artifact keeps the run_attempt it was uploaded under (run 37993713568,
+      # attempt 2, failed on exactly that). download-artifact reads an empty
+      # artifact-ids as no filter and downloads every artifact of the run, so each ID is
+      # held to a number first.
+      - name: Check the artifact IDs the build jobs handed over
+        env:
+          PACKAGE_ARTIFACT_ID: ${{ needs.package.outputs.package-artifact-id }}
+          MSIX_ARTIFACT_ID: ${{ needs.package.outputs.msix-artifact-id }}
+          NUPKG_ARTIFACT_ID: ${{ needs.package.outputs.nupkg-artifact-id }}
+          FLATPAK_ARTIFACT_ID: ${{ needs.package.outputs.flatpak-artifact-id }}
+          DEB_ARTIFACT_ID: ${{ needs.native.outputs.deb-artifact-id }}
+          RPM_ARTIFACT_ID: ${{ needs.native.outputs.rpm-artifact-id }}
+          VSIX_ARTIFACT_ID: ${{ needs.vsix.outputs.artifact-id }}
+          JETBRAINS_ARTIFACT_ID: ${{ needs.jetbrains.outputs.artifact-id }}
+        run: |
+          set -euo pipefail
+          bad=0
+          for var in PACKAGE_ARTIFACT_ID MSIX_ARTIFACT_ID NUPKG_ARTIFACT_ID FLATPAK_ARTIFACT_ID \
+                     DEB_ARTIFACT_ID RPM_ARTIFACT_ID VSIX_ARTIFACT_ID JETBRAINS_ARTIFACT_ID; do
+            value="${!var}"
+            if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+              echo "::error::${var} is '${value}', not an artifact ID. Without one, download-artifact would fetch every artifact in the run."
+              bad=1
+            else
+              echo "${var}: ${value}"
+            fi
+          done
+          [ "$bad" -eq 0 ]
+
       - name: Download the wheel and sdist
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.package.outputs.package-artifact-id }}
           path: release-assets
 
       - name: Download the .msix
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ash-msix-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.package.outputs.msix-artifact-id }}
           path: release-assets
 
       - name: Download the .nupkg
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ash-nupkg-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.package.outputs.nupkg-artifact-id }}
           path: release-assets
 
       - name: Download the Flatpak bundle
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ash-flatpak-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.package.outputs.flatpak-artifact-id }}
           path: release-assets
 
       - name: Download the .deb
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ash-deb-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.native.outputs.deb-artifact-id }}
           path: release-assets
 
       - name: Download the .rpm
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ash-rpm-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.native.outputs.rpm-artifact-id }}
           path: release-assets
 
       - name: Download the .vsix
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ash-release-vsix-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.vsix.outputs.artifact-id }}
           path: release-assets
 
       - name: Download the JetBrains plugin zip
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ash-release-jetbrains-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.jetbrains.outputs.artifact-id }}
           path: release-assets
 
       # The drift check is what makes the committed archive trustworthy: release
