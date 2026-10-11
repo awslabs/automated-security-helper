@@ -46,7 +46,9 @@ behavior tests).
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 import textwrap
 from pathlib import Path
 
@@ -61,10 +63,21 @@ from tests.utils.helpers import iter_repo_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-#: Directories walked in full, relative to the repository root.
-SCANNED_DIRS = ("automated_security_helper", "docs")
-#: Single files scanned in addition.
-SCANNED_FILES = ("README.md", "README.md.template")
+#: Directories read in full, relative to the repository root.
+SCANNED_DIRS = (
+    "automated_security_helper",
+    "docs",
+    "ash-agent-plugins",
+    "skills",
+    ".github",
+    "examples",
+    "deploy",
+)
+#: Single files read in addition.
+SCANNED_FILES = ("README.md", "README.md.template", "CONTRIBUTING.md", "DEVELOPMENT.md")
+#: Directories never read: build caches and vendored dependency trees, which a
+#: checkout's index does not hold either.
+_SKIPPED_DIRS = frozenset({"__pycache__", "node_modules"})
 
 GIT_URL = "https://github.com/awslabs/automated-security-helper.git"
 
@@ -78,19 +91,65 @@ _VERSION_CONSTRAINT_DEPENDENCY = re.compile(
 )
 
 
-def _scanned_files(root: Path) -> list[Path]:
+def _tracked_files(root: Path) -> list[Path] | None:
+    """The files git tracks under the scanned roots, or None without a checkout.
+
+    None when ``root`` is not the top of a git work tree (an unpacked sdist, a
+    planted tree in a test), or git cannot run there.
+    """
+    try:
+        top = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        if not top or Path(top).resolve() != root.resolve():
+            return None
+        listed = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "ls-files",
+                "-z",
+                "--",
+                *SCANNED_DIRS,
+                *SCANNED_FILES,
+            ],
+            capture_output=True,
+            check=True,
+        ).stdout.decode("utf-8")
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return [root / name for name in listed.split("\0") if name]
+
+
+def _walked_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for name in SCANNED_DIRS:
         if (root / name).is_dir():
-            files.extend(
-                p
-                for p in iter_repo_files(
-                    root / name, skip_dirs=frozenset({"__pycache__"})
-                )
-                if p.suffix.lower() not in BINARY_SUFFIXES
-            )
-    files.extend(root / name for name in SCANNED_FILES if (root / name).is_file())
-    return sorted(files)
+            files.extend(iter_repo_files(root / name, skip_dirs=_SKIPPED_DIRS))
+    files.extend(root / name for name in SCANNED_FILES)
+    return files
+
+
+def _scanned_files(root: Path) -> list[Path]:
+    """Every file the gate reads: what git tracks, else everything on disk.
+
+    Reading the index rather than the disk keeps an untracked editor swap file
+    or build output from failing the gate on one machine.
+    """
+    candidates = _tracked_files(root)
+    if candidates is None:
+        candidates = _walked_files(root)
+    return sorted(
+        path
+        for path in candidates
+        if path.is_file()
+        and path.suffix.lower() not in BINARY_SUFFIXES
+        and not _SKIPPED_DIRS.intersection(path.relative_to(root).parts)
+    )
 
 
 def _offenders(root: Path) -> list[str]:
@@ -126,8 +185,19 @@ def test_the_gate_reads_the_files_that_carried_bare_name_hints():
         "docs/content/docs/building-your-own-image.md",
         "docs/content/docs/installation-guide.md.template",
         "docs/content/docs/suppressions.md",
+        # The roots added after the gate first shipped: plugin bundles, skills,
+        # CI workflows, examples and the deploy packages, and the contributor
+        # guides.
+        "ash-agent-plugins/agentic-coding/transpiler/_base/mcp.json",
+        "skills/ash-mcp/SKILL.md",
+        ".github/workflows/run-ash-security-scan.yml",
+        "examples/ash_plugins_example/pyproject.toml",
+        "deploy/cdk-constructs/README.md",
+        "CONTRIBUTING.md",
+        "DEVELOPMENT.md",
     }
     assert expected <= scanned, sorted(expected - scanned)
+    assert not any("/node_modules/" in f"/{name}" for name in scanned)
     assert sum(name.endswith(".py") for name in scanned) > 150
     assert sum(name.endswith(".md") for name in scanned) > 50
 
@@ -491,6 +561,53 @@ def test_a_planted_tree_is_reported_line_by_line(tmp_path):
         "docs/content/docs/guide.md:4",
         "docs/content/docs/guide.md:10",
     }
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(root), *args],
+        check=True,
+        capture_output=True,
+        env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"},
+    )
+
+
+def test_in_a_checkout_only_tracked_files_are_read(tmp_path):
+    """An editor's swap file or a build output is not a file the repository ships.
+
+    Before, the gate walked the filesystem, so an untracked ``.swp`` under
+    ``docs/`` (not UTF-8) failed it on a developer's machine and nowhere else.
+    """
+    guide = tmp_path / "docs" / "guide.md"
+    guide.parent.mkdir(parents=True)
+    guide.write_text("pip install automated-security-helper\n", encoding="utf-8")
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", "docs/guide.md")
+    (tmp_path / "docs" / ".guide.md.swp").write_bytes(b"b0VIM \xff\xfe\x00")
+    untracked = tmp_path / "docs" / "notes.md"
+    untracked.write_text("uvx ash\n", encoding="utf-8")
+
+    assert _offenders(tmp_path) == [
+        "docs/guide.md:1: pip install automated-security-helper"
+    ]
+
+
+def test_without_a_checkout_the_walk_skips_dependency_trees(tmp_path):
+    """No git (an unpacked sdist, say): every file is read, node_modules excepted."""
+    readme = tmp_path / "deploy" / "README.md"
+    vendored = tmp_path / "deploy" / "node_modules" / "pkg" / "README.md"
+    vendored.parent.mkdir(parents=True)
+    readme.write_text("pip install automated-security-helper\n", encoding="utf-8")
+    vendored.write_text("pip install automated-security-helper\n", encoding="utf-8")
+    bundle = tmp_path / "ash-agent-plugins" / "plugins" / "mcpb" / "ash.mcpb"
+    bundle.parent.mkdir(parents=True)
+    bundle.write_bytes(b"PK\x03\x04\xff\xfe")
+    (tmp_path / "CONTRIBUTING.md").write_text("uvx ash mcp\n", encoding="utf-8")
+
+    assert _offenders(tmp_path) == [
+        "CONTRIBUTING.md:1: uvx ash mcp",
+        "deploy/README.md:1: pip install automated-security-helper",
+    ]
 
 
 def test_a_file_the_gate_cannot_read_fails_it(tmp_path):
