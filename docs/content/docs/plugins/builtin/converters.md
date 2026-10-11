@@ -99,6 +99,12 @@ of more than 1 MiB while parsing headers is refused, and the header pass may rea
 an archive that cannot be read is (see below). Real headers are a few hundred bytes; GNU tar's pax format, which
 writes an extended header for every member, reads about 1.5 KiB per member.
 
+A zip's entries are counted against `max_members` before zipfile opens it, because
+zipfile builds a record for every entry of the central directory as it opens an
+archive. The count is taken by walking the entries' fixed headers, not from the
+count the end record declares, and a zip with more entries than the limit is
+refused before zipfile reads them.
+
 While copying, no member is written past the size it declares. For a sparse tar
 member, whose map tarfile writes before it truncates the file to its declared size,
 a map that places data past that size, or whose entries overlap or are out of order,

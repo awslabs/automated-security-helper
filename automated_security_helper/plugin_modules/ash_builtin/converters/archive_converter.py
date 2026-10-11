@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import stat
+import struct
 from pathlib import Path, PurePosixPath
 import tarfile
 from typing import (
@@ -212,6 +213,88 @@ class _UnreadableArchive(Exception):
         self.reason = reason
 
 
+def _too_many_members(max_members: int) -> "_ExtractionLimitExceeded":
+    return _ExtractionLimitExceeded(
+        "max_members",
+        f"it has more than {max_members} members, the max_members extraction limit",
+    )
+
+
+_ZIP_END_RECORD = b"PK\x05\x06"
+_ZIP_END_RECORD_BYTES = 22
+_ZIP_COMMENT_MAX_BYTES = 65535
+_ZIP64_LOCATOR = b"PK\x06\x07"
+_ZIP64_LOCATOR_BYTES = 20
+_ZIP64_END_RECORD = b"PK\x06\x06"
+_ZIP64_END_RECORD_BYTES = 56
+_ZIP_DIRECTORY_ENTRY = b"PK\x01\x02"
+_ZIP_DIRECTORY_ENTRY_BYTES = 46
+
+
+def _zip_has_more_entries_than(handle: BinaryIO, size: int, limit: int) -> bool:
+    """Whether a zip's central directory holds more than ``limit`` entries.
+
+    ``zipfile.ZipFile()`` builds a ZipInfo for every entry as it opens the archive,
+    so the entries are counted first, holding none of them: the end record (or the
+    zip64 end record it points to) locates the directory, which ends where that
+    record starts, and each entry's fixed 46-byte header gives the lengths of the
+    name, extra field and comment that follow it. The count the end record declares
+    is checked, then the entries themselves, since zipfile reads the whole
+    directory whatever that count says. False where the directory cannot be found
+    or walked: zipfile then opens the archive and refuses it if it is damaged.
+    """
+    tail_bytes = min(size, _ZIP_END_RECORD_BYTES + _ZIP_COMMENT_MAX_BYTES)
+    handle.seek(size - tail_bytes)
+    tail = handle.read(tail_bytes)
+    # The end record whose comment runs exactly to the end of the file, as zipfile
+    # requires, so a signature inside the comment is not taken for it.
+    at = tail.rfind(_ZIP_END_RECORD)
+    while at >= 0 and (
+        len(tail) - at < _ZIP_END_RECORD_BYTES
+        or struct.unpack_from("<H", tail, at + 20)[0]
+        != len(tail) - at - _ZIP_END_RECORD_BYTES
+    ):
+        at = tail.rfind(_ZIP_END_RECORD, 0, at)
+    if at < 0:
+        return False
+    directory_end = size - tail_bytes + at
+    (declared, directory_bytes) = struct.unpack_from("<HI", tail, at + 10)
+    if declared == 0xFFFF or directory_bytes == 0xFFFFFFFF:
+        # zip64: the counts are in the zip64 end record, which with its locator
+        # sits just before the end record, where zipfile also reads it.
+        record_at = directory_end - _ZIP64_LOCATOR_BYTES - _ZIP64_END_RECORD_BYTES
+        if record_at < 0:
+            return False
+        handle.seek(record_at)
+        record = handle.read(_ZIP64_END_RECORD_BYTES + _ZIP64_LOCATOR_BYTES)
+        if (
+            record[:4] != _ZIP64_END_RECORD
+            or record[_ZIP64_END_RECORD_BYTES:][:4] != _ZIP64_LOCATOR
+        ):
+            return False
+        (declared, directory_bytes) = struct.unpack_from("<QQ", record, 32)
+        directory_end = record_at
+    if declared > limit:
+        return True
+    start = directory_end - directory_bytes
+    if start < 0:
+        return False
+    handle.seek(start)
+    counted = 0
+    walked = 0
+    while walked + _ZIP_DIRECTORY_ENTRY_BYTES <= directory_bytes:
+        header = handle.read(_ZIP_DIRECTORY_ENTRY_BYTES)
+        if header[:4] != _ZIP_DIRECTORY_ENTRY:
+            break
+        (name, extra, comment) = struct.unpack_from("<HHH", header, 28)
+        handle.seek(name + extra + comment, io.SEEK_CUR)
+        walked += _ZIP_DIRECTORY_ENTRY_BYTES + name + extra + comment
+        counted += 1
+        if counted > limit:
+            return True
+    return False
+
+
 class _ExtractionBudget:
     """Admits an archive's members one at a time against the extraction limits.
 
@@ -263,11 +346,7 @@ class _ExtractionBudget:
         options = self.options
         self.members += 1
         if self.members > options.max_members:
-            raise _ExtractionLimitExceeded(
-                "max_members",
-                f"it has more than {options.max_members} members, the max_members "
-                "extraction limit",
-            )
+            raise _too_many_members(options.max_members)
         if size < 0 or size > options.max_member_bytes:
             raise _ExtractionLimitExceeded(
                 "max_member_bytes",
@@ -1055,6 +1134,13 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     ) and zipfile.is_zipfile(archive_handle)
                     archive_handle.seek(0)
                     if is_zip:
+                        # Counted before zipfile builds a ZipInfo for every entry.
+                        max_members = budget.options.max_members
+                        if _zip_has_more_entries_than(
+                            archive_handle, archive_size, max_members
+                        ):
+                            raise _too_many_members(max_members)
+                        archive_handle.seek(0)
                         with zipfile.ZipFile(archive_handle, "r") as zip_ref:
                             zip_members = zip_ref.infolist()
                             for info in zip_members:
