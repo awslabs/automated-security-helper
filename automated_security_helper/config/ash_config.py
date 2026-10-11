@@ -729,11 +729,14 @@ class RuntimeOverridesConfig(BaseModel):
         List[str],
         Field(
             description=(
-                "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). "
-                "Defaults block the most dangerous fields on the real AshConfig schema. "
-                "Each entry starts with '/'. A list that is not one of ASH's defaults "
-                "is added to the current defaults, unless replace_default_denied_paths "
-                "is true."
+                "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). "
+                "Each entry starts with '/'. The defaults block the fields that decide "
+                "whether a scan fails, what it runs and reports, and where findings "
+                "are sent. A list equal to a default ASH has shipped counts as the "
+                "current default list. Any other list is added to the current "
+                "defaults, unless replace_default_denied_paths is true; a list that "
+                "holds some default entries and leaves others out still gets them, "
+                "and a warning names the ones it leaves out."
             )
         ),
     ] = [
@@ -867,10 +870,12 @@ class RuntimeOverridesConfig(BaseModel):
         bool,
         Field(
             description=(
-                "When true, denied_paths replaces ASH's default list instead of "
-                "adding to it, and each default entry it leaves out is named in a "
-                "warning. When false (the default), the entries listed are denied "
-                "as well as the defaults."
+                "When true, denied_paths is used as written instead of being added "
+                "to ASH's default list, and each default entry it leaves out is "
+                "named in a warning. When false (the default), the entries listed "
+                "are denied as well as the defaults. Either way, an unset list, or "
+                "one equal to a default ASH has shipped, gets the current default "
+                "list."
             )
         ),
     ] = False
