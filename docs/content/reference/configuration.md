@@ -101,6 +101,7 @@ A key not listed here is ignored, without an error, when the configuration is lo
 | <a id="global_settings.ignore_paths.path"></a>`path` | string | required | Path or pattern to exclude |
 | <a id="global_settings.ignore_paths.reason"></a>`reason` | string | required | Reason for exclusion |
 | <a id="global_settings.ignore_paths.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD) |
+| <a id="global_settings.ignore_paths.client_supplied"></a>`client_supplied` | boolean | `false` | Set by the server: True when the config of a tree an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client's own config. |
 
 ### <a id="section-global_settings-suppressions"></a>`global_settings.suppressions[]`
 
@@ -116,6 +117,7 @@ A key not listed here is ignored, without an error, when the configuration is lo
 | <a id="global_settings.suppressions.path"></a>`path` | string | required | Path or pattern to exclude |
 | <a id="global_settings.suppressions.reason"></a>`reason` | string | required | Reason for exclusion |
 | <a id="global_settings.suppressions.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD) |
+| <a id="global_settings.suppressions.client_supplied"></a>`client_supplied` | boolean | `false` | Set by the server: True when the config of a tree an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client's own config. |
 | <a id="global_settings.suppressions.rule_id"></a>`rule_id` | string or null | `null` | Rule ID to suppress |
 | <a id="global_settings.suppressions.line_start"></a>`line_start` | integer or null | `null` | (Optional) Starting line number |
 | <a id="global_settings.suppressions.line_end"></a>`line_end` | integer or null | `null` | (Optional) Ending line number |
@@ -146,7 +148,7 @@ A key not listed here is an error when the configuration is loaded.
 |-----|------|---------|-------------|
 | <a id="global_settings.mcp.runtime_overrides.enabled"></a>`enabled` | boolean | `false` | Master switch — runtime patches are rejected unless True. |
 | <a id="global_settings.mcp.runtime_overrides.allowed_paths"></a>`allowed_paths` | list of string | `[]` | JSON-Pointer glob patterns the client may target. `*` matches one segment, `**` matches any subtree. Example: '/scanners/\*/options/severity_threshold'. |
-| <a id="global_settings.mcp.runtime_overrides.denied_paths"></a>`denied_paths` | list of string | `["/fail_on_findings", "/fail_on_incomplete_scanners", "/content_db_staleness", "/content_db_staleness_overrides", "/sandbox", "/sandbox/**", "/ash_plugin_modules", "/ash_plugin_modules/**", "/global_settings/ignore_paths", "/global_settings/suppressions", "/reporters/bedrock-summary-reporter/options/aws_*", "/reporters/cloudwatch-logs/**"]` | JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). Defaults block the most dangerous fields on the real AshConfig schema. |
+| <a id="global_settings.mcp.runtime_overrides.denied_paths"></a>`denied_paths` | list of string | `["/fail_on_findings", "/fail_on_incomplete_scanners", "/content_db_staleness", "/content_db_staleness_overrides", "/sandbox", "/sandbox/**", "/ash_plugin_modules", "/ash_plugin_modules/**", "/global_settings/ignore_paths", "/global_settings/suppressions", "/global_settings/mcp", "/global_settings/mcp/**", "/scanners/opengrep/options/exclude_rule", "/scanners/semgrep/options/exclude_rule", "/scanners/detect-secrets/options/baseline_file", "/reporters/bedrock-summary-reporter/options/aws_*", "/reporters/cloudwatch-logs/**"]` | JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). Defaults block the most dangerous fields on the real AshConfig schema. |
 | <a id="global_settings.mcp.runtime_overrides.denied_value_patterns"></a>`denied_value_patterns` | mapping of string to string | `{}` | Map of JSON-Pointer pattern → regex. add/replace ops are rejected when any string leaf reachable from the op's value matches the regex; lists and dicts are walked recursively so a forbidden token cannot be hidden inside a nested structure. The `test` op is exempt because it is read-only. |
 
 ### <a id="section-sandbox"></a>`sandbox`
@@ -158,9 +160,11 @@ A key not listed here is an error when the configuration is loaded.
 <!-- doctest: options of=sandbox -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| <a id="sandbox.mode"></a>`mode` | one of `off`, `auto`, `bwrap`, `firejail`, `landlock`, `sandbox-exec` | `"off"` | How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. Ignored in container mode, where the container is the boundary. |
-| <a id="sandbox.network_scanners"></a>`network_scanners` | list of string or null | `null` | Scanners allowed a network when the scan is online. Null (the default) uses each scanner's declared need: semgrep, opengrep, grype, trivy, npm-audit and snyk-code fetch rules, databases or audit data. A list replaces those defaults. Under --offline no scanner gets a network. Honored only from --config-overrides or a config file outside the scanned tree; set inside the tree, a list can only remove network. |
-| <a id="sandbox.extra_read_paths"></a>`extra_read_paths` | list of string | `[]` | Additional host paths every sandboxed scanner may read, for example a corporate CA bundle or a shared rule directory. '~' and $VARS expand. Ignored when set by a config file inside the scanned tree. |
+| <a id="sandbox.mode"></a>`mode` | one of `off`, `auto`, `bwrap`, `firejail`, `landlock`, `sandbox-exec` | `"off"` | How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Ignored in container mode, where the container is the boundary. |
+| <a id="sandbox.network_scanners"></a>`network_scanners` | list of string or null | `null` | Scanners allowed a network when the scan is online. Null (the default) uses each scanner's declared need: semgrep, opengrep, grype, trivy, npm-audit and snyk-code fetch rules, databases or audit data. A list replaces those defaults. Under --offline no scanner gets a network. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory; set by any other config file, a list can only remove network. |
+| <a id="sandbox.extra_read_paths"></a>`extra_read_paths` | list of string | `[]` | Additional host paths every sandboxed scanner may read, for example a corporate CA bundle or a shared rule directory. '~' and $VARS expand. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory. |
+| <a id="sandbox.read_path_scanners"></a>`read_path_scanners` | list of string | `[]` | Scanners allowed the extra host paths their own options ask for (a rules file or baseline outside the source tree, for example). Without this, a scanner whose read paths come from its options gets only the default policy, and ASH does not read a detect-secrets baseline_file outside the source tree. A granted path is mounted only when it resolves inside the source tree or an extra_read_paths entry. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory. |
+| <a id="sandbox.env_scanners"></a>`env_scanners` | list of string | `[]` | Scanners allowed the environment variables their own options ask for (a token for an online check, for example). Without this, such variables are not passed. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory. |
 
 ### <a id="section-content_db_staleness_overrides"></a>`content_db_staleness_overrides[]`
 
@@ -247,16 +251,22 @@ The scanners ASH declares a configuration for. Other scanner names are accepted 
 <!-- doctest: options of=scanners -->
 | Key | Enabled by default | Scanner options |
 |-----|--------------------|---------------|
+| <a id="scanners.actionlint"></a>`actionlint` | yes | [`actionlint` options](scanners.md#actionlint) |
 | <a id="scanners.bandit"></a>`bandit` | yes | [`bandit` options](scanners.md#bandit) |
 | <a id="scanners.cdk-nag"></a>`cdk-nag` | yes | [`cdk-nag` options](scanners.md#cdk-nag) |
+| <a id="scanners.cfn-guard"></a>`cfn-guard` | yes | [`cfn-guard` options](scanners.md#cfn-guard) |
+| <a id="scanners.cfn-lint"></a>`cfn-lint` | yes | [`cfn-lint` options](scanners.md#cfn-lint) |
 | <a id="scanners.cfn-nag"></a>`cfn-nag` | yes | [`cfn-nag` options](scanners.md#cfn-nag) |
 | <a id="scanners.checkov"></a>`checkov` | yes | [`checkov` options](scanners.md#checkov) |
 | <a id="scanners.detect-secrets"></a>`detect-secrets` | yes | [`detect-secrets` options](scanners.md#detect-secrets) |
+| <a id="scanners.gitleaks"></a>`gitleaks` | yes | [`gitleaks` options](scanners.md#gitleaks) |
 | <a id="scanners.grype"></a>`grype` | yes | [`grype` options](scanners.md#grype) |
 | <a id="scanners.npm-audit"></a>`npm-audit` | yes | [`npm-audit` options](scanners.md#npm-audit) |
 | <a id="scanners.opengrep"></a>`opengrep` | yes on Linux and macOS; no on Windows | [`opengrep` options](scanners.md#opengrep) |
 | <a id="scanners.semgrep"></a>`semgrep` | yes on Linux and macOS; no on Windows | [`semgrep` options](scanners.md#semgrep) |
 | <a id="scanners.syft"></a>`syft` | yes | [`syft` options](scanners.md#syft) |
+| <a id="scanners.trivy"></a>`trivy` | yes | [`trivy` options](scanners.md#trivy) |
+| <a id="scanners.zizmor"></a>`zizmor` | yes | [`zizmor` options](scanners.md#zizmor) |
 
 ### <a id="section-reporters"></a>`reporters`
 
@@ -337,6 +347,7 @@ A key not listed here is ignored, without an error, when the configuration is lo
 | <a id="workspace-policy.workspace.suppressions.path"></a>`path` | string | required | Path or pattern to exclude |
 | <a id="workspace-policy.workspace.suppressions.reason"></a>`reason` | string | required | Reason for exclusion |
 | <a id="workspace-policy.workspace.suppressions.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD) |
+| <a id="workspace-policy.workspace.suppressions.client_supplied"></a>`client_supplied` | boolean | `false` | Set by the server: True when the config of a tree an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client's own config. |
 | <a id="workspace-policy.workspace.suppressions.rule_id"></a>`rule_id` | string or null | `null` | Rule ID to suppress |
 | <a id="workspace-policy.workspace.suppressions.line_start"></a>`line_start` | integer or null | `null` | (Optional) Starting line number |
 | <a id="workspace-policy.workspace.suppressions.line_end"></a>`line_end` | integer or null | `null` | (Optional) Ending line number |
@@ -359,3 +370,4 @@ A key not listed here is ignored, without an error, when the configuration is lo
 | <a id="workspace-policy.workspace.ignore_paths.path"></a>`path` | string | required | Path or pattern to exclude |
 | <a id="workspace-policy.workspace.ignore_paths.reason"></a>`reason` | string | required | Reason for exclusion |
 | <a id="workspace-policy.workspace.ignore_paths.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD) |
+| <a id="workspace-policy.workspace.ignore_paths.client_supplied"></a>`client_supplied` | boolean | `false` | Set by the server: True when the config of a tree an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client's own config. |

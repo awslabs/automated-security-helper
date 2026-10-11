@@ -12,21 +12,29 @@
 
 This page is generated from the scanner plugins in the ASH source code by `scripts/generate_scanner_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 13 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that is loaded only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module.
+ASH ships 21 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that is loaded only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module.
 
 | Scanner | Tool type | Enabled by default | Provided by | Command | Runs with `--python-only` |
 |---------|-----------|--------------------|-------------|---------|---------------------------|
+| [`actionlint`](#actionlint) | IAC | yes | built in | `actionlint` | no |
 | [`bandit`](#bandit) | SAST | yes | built in | `bandit` | yes |
 | [`cdk-nag`](#cdk-nag) | IAC | yes | built in | `python` | yes |
+| [`cfn-guard`](#cfn-guard) | IAC | yes | built in | `cfn-guard` | no |
+| [`cfn-lint`](#cfn-lint) | IAC | yes | built in | `cfn-lint` | yes |
 | [`cfn-nag`](#cfn-nag) | IAC | yes | built in | `cfn_nag_scan` | no |
 | [`checkov`](#checkov) | IAC | yes | built in | `checkov` | yes |
 | [`detect-secrets`](#detect-secrets) | SECRETS | yes | built in | `detect-secrets` | yes |
+| [`gitleaks`](#gitleaks) | SECRETS | yes | built in | `gitleaks` | no |
 | [`grype`](#grype) | SCA | yes | built in | `grype` | no |
 | [`npm-audit`](#npm-audit) | SCA | yes | built in | `npm` | no |
 | [`opengrep`](#opengrep) | SAST | yes on Linux and macOS; no on Windows | built in | `opengrep` | no |
 | [`semgrep`](#semgrep) | SAST | yes on Linux and macOS; no on Windows | built in | `semgrep` | yes |
 | [`syft`](#syft) | SBOM | yes | built in | `syft` | no |
+| [`trivy`](#trivy) | SCA | yes | built in | `trivy` | no |
+| [`zizmor`](#zizmor) | SAST | yes | built in | `zizmor` | yes |
 | [`ferret-scan`](#ferret-scan) | SECRETS | yes | community module `ash_ferret_plugins` | `ferret-scan` | yes |
+| [`guarddog`](#guarddog) | SCA | yes | community module `ash_guarddog_plugins` | `guarddog` | yes |
+| [`hadolint`](#hadolint) | IAC | yes | community module `ash_hadolint_plugins` | `hadolint` | no |
 | [`snyk-code`](#snyk-code) | SAST | yes | community module `ash_snyk_plugins` | `snyk` | yes |
 | [`trivy-repo`](#trivy-repo) | SAST | yes | community module `ash_trivy_plugins` | `trivy` | no |
 
@@ -37,6 +45,30 @@ Tool type is the scanner's own `ScannerToolType`. `--python-only` keeps a scanne
 When `sandbox.mode` confines scanners, a scanner process receives only an allowlist of the environment ASH was started with. Every sandboxed scanner gets these names: `COLUMNS`, `CURL_CA_BUNDLE`, `FORCE_COLOR`, `GEM_HOME`, `GEM_PATH`, `JAVA_HOME`, `LANG`, `LANGUAGE`, `NODE_EXTRA_CA_CERTS`, `NO_COLOR`, `PATH`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_DIR`, `SSL_CERT_FILE`, `SYSTEMROOT`, `TERM`, `TZ`, `VIRTUAL_ENV`; and names starting with `LC_`, `ASH_`, `UV_`, `PYTHON`. A scanner's own prefixes and names, listed with each scanner below, are added to that. A name containing `TOKEN`, `PASSWORD`, `PASSWD`, `SECRET`, `CREDENTIAL`, `AUTH`, `APIKEY`, `API_KEY`, `PRIVATE_KEY`, `SESSION` is dropped even under an allowed prefix, unless the scanner names it exactly. The proxy variables `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `http_proxy`, `https_proxy`, `no_proxy` are passed only to a scanner that has a network. The lists are in `automated_security_helper/utils/sandbox/policy.py`.
 
 The network entry of each scanner below is its default. `sandbox.network_scanners`, when it is set, replaces every scanner's declared need: only the scanners it names get a network. A config file in the scanned tree can only take network away, and an offline scan gives no scanner a network.
+
+## `actionlint`
+
+- Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner.ActionlintScanner`
+- Provided by: built in, loaded on every scan
+- Enabled by default: yes
+- Tool type: IAC
+- Command: `actionlint`
+- Install: pinned, checksum-verified release of `actionlint` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.actionlint.options`. A key not listed here is accepted and kept, without validation.
+
+<!-- doctest: options of=scanners.actionlint -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.actionlint.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.actionlint.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.actionlint.options.config_file"></a>`config_file` | string or null | `null` | Path to an actionlint config file, relative to the source directory. Honored only when set by --config-overrides or a config file outside the scanned tree; otherwise actionlint runs with an empty config, and a .github/actionlint.yaml in the scanned repository is not read. A path set here that does not exist fails the scan. |
+| <a id="scanners.actionlint.options.shellcheck"></a>`shellcheck` | string or null | `null` | Command name or path of shellcheck, which actionlint runs on every run: script. Unset (the default) disables the integration so results do not depend on what is installed on the host. A config file in the scanned tree may set only 'shellcheck', looked up on PATH; another program, or a path that resolves outside the scanned tree, needs --config-overrides or a config file outside the tree. Anything else is ignored with a warning. When set and not found, the scanner reports MISSING. |
+| <a id="scanners.actionlint.options.pyflakes"></a>`pyflakes` | string or null | `null` | Command name or path of pyflakes, which actionlint runs on 'shell: python' steps. Unset (the default) disables the integration. Accepted as for shellcheck: from the scanned tree only 'pyflakes'. When set and not found, the scanner reports MISSING. |
 
 ## `bandit`
 
@@ -92,6 +124,56 @@ Options, under `scanners.cdk-nag.options`. A key not listed here is accepted and
 | <a id="scanners.cdk-nag.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
 | <a id="scanners.cdk-nag.options.nag_packs"></a>`nag_packs` | mapping | see the section | CDK Nag packs to enable |
 | <a id="scanners.cdk-nag.options.include_compliant_checks"></a>`include_compliant_checks` | boolean | `false` | Include INFO-level findings for compliant resources in the report. |
+
+## `cfn-guard`
+
+- Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner.CfnGuardScanner`
+- Provided by: built in, loaded on every scan
+- Enabled by default: yes
+- Tool type: IAC
+- Command: `cfn-guard`
+- Install: pinned, checksum-verified release of `cfn-guard`; custom command by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.cfn-guard.options`. A key not listed here is accepted and kept, without validation.
+
+<!-- doctest: options of=scanners.cfn-guard -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.cfn-guard.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.cfn-guard.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.cfn-guard.options.rule_sets"></a>`rule_sets` | list of string | `["wa-Security-Pillar"]` | Rule sets from the bundled AWS Guard Rules Registry to evaluate, by file name without the .guard extension, e.g. ['wa-Security-Pillar', 'cis-aws-benchmark-level-1']. Defaults to the Well-Architected Security Pillar set. Set to [] to evaluate only rules_paths. |
+| <a id="scanners.cfn-guard.options.rules_paths"></a>`rules_paths` | list of string | `[]` | Your own cfn-guard rules: .guard files or directories of them, relative to the source directory. Evaluated in addition to rule_sets. Honored only when set by --config-overrides or a config file outside the scanned tree: cfn-guard prints a rules file it cannot parse, so a path the scanned repository chose could put any file the scan can read into the report. Set elsewhere, it is ignored with a warning, and an empty rule_sets falls back to wa-Security-Pillar. In a directory, the .guard and .ruleset files are read, recursively; one that resolves outside the directory, through a symlink, is refused. |
+
+## `cfn-lint`
+
+- Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner.CfnLintScanner`
+- Provided by: built in, loaded on every scan
+- Enabled by default: yes
+- Tool type: IAC
+- Command: `cfn-lint`
+- Install: `uv tool install` on first use (`cfn-lint[sarif]>=1.43.3,<2.0.0`)
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.cfn-lint.options`. A key not listed here is accepted and kept, without validation.
+
+<!-- doctest: options of=scanners.cfn-lint -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.cfn-lint.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.cfn-lint.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.cfn-lint.options.config_file"></a>`config_file` | path or string or null | `null` | Path to a cfn-lint configuration file (.cfnlintrc). When unset, ASH gives cfn-lint an empty configuration, so a .cfnlintrc in the scanned repository or the home directory is NOT read: such a file can load Python rules (append_rules) and switch checks off. Honored only when set by --config-overrides or a config file outside the scanned tree, and only for a file outside the scanned tree; otherwise it is ignored with a warning. |
+| <a id="scanners.cfn-lint.options.regions"></a>`regions` | list of string | `[]` | AWS regions to validate templates against, e.g. ['us-east-1', 'eu-west-1'], or ['ALL_REGIONS']. Empty uses cfn-lint's default (us-east-1). |
+| <a id="scanners.cfn-lint.options.ignore_checks"></a>`ignore_checks` | list of string | `[]` | cfn-lint rule ids or prefixes to skip, e.g. ['W2001', 'W3']. Prefer ASH suppressions for individual findings; this removes the rule from every template. |
+| <a id="scanners.cfn-lint.options.include_checks"></a>`include_checks` | list of string | `[]` | cfn-lint rule ids or prefixes to enable in addition to the defaults, e.g. ['I'] for informational rules. |
+| <a id="scanners.cfn-lint.options.tool_version"></a>`tool_version` | string or null | `">=1.43.3,<2.0.0"` | Version constraint for the cfn-lint installation, in pip requirement syntax. The default is the range the scanner's SARIF handling was verified against. |
+| <a id="scanners.cfn-lint.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation |
 
 ## `cfn-nag`
 
@@ -167,6 +249,30 @@ Options, under `scanners.detect-secrets.options`. A key not listed here is accep
 | <a id="scanners.detect-secrets.options.baseline_file"></a>`baseline_file` | path or string or null | `null` | Path to detect-secrets baseline file, relative to current source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided. |
 | <a id="scanners.detect-secrets.options.scan_settings"></a>`scan_settings` | mapping | see the section | Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file |
 | <a id="scanners.detect-secrets.options.skip_generated_lockfiles"></a>`skip_generated_lockfiles` | boolean | `true` | Skip machine-generated dependency lockfiles (package-lock.json, yarn.lock, poetry.lock, and similar) before scanning. These are dense with integrity hashes and are regenerated rather than hand-edited, so findings in them are usually noise. Hand-authored dependency declarations such as requirements.txt, Pipfile and environment.yml are always scanned and are not affected by this option. Set to false to scan generated lockfiles as well. |
+
+## `gitleaks`
+
+- Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner.GitleaksScanner`
+- Provided by: built in, loaded on every scan
+- Enabled by default: yes
+- Tool type: SECRETS
+- Command: `gitleaks`
+- Install: pinned, checksum-verified release of `gitleaks` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.gitleaks.options`. A key not listed here is accepted and kept, without validation.
+
+<!-- doctest: options of=scanners.gitleaks -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.gitleaks.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.gitleaks.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.gitleaks.options.config_file"></a>`config_file` | path or string or null | `null` | Path to a gitleaks TOML config, relative to the source directory. Its rules and [[allowlists]] apply on top of ASH suppressions. Honored only when set by --config-overrides or a config file outside the scanned tree. Unset, gitleaks uses GITLEAKS_CONFIG or GITLEAKS_CONFIG_TOML from the environment if one is set, else its default rules; a .gitleaks.toml in the scanned repository is not read. A path that does not exist fails the scan. |
+| <a id="scanners.gitleaks.options.baseline_path"></a>`baseline_path` | path or string or null | `null` | Path to a gitleaks JSON report, relative to the source directory, whose findings gitleaks ignores (gitleaks --baseline-path). Honored only when set by --config-overrides or a config file outside the scanned tree. A path that does not exist fails the scan. |
+| <a id="scanners.gitleaks.options.max_target_megabytes"></a>`max_target_megabytes` | integer or null, at least 1 | `null` | Skip files larger than this many megabytes (gitleaks --max-target-megabytes). Unset scans every file. |
 
 ## `grype`
 
@@ -297,6 +403,63 @@ Options, under `scanners.syft.options`. A key not listed here is accepted and ke
 | <a id="scanners.syft.options.additional_outputs"></a>`additional_outputs` | list of one of `cyclonedx-json`, `cyclonedx-xml`, `github-json`, `spdx-json`, `spdx-tag-value`, `syft-json`, `syft-table`, `syft-text` | `["syft-table"]` | List of additional formats to output. Defaults to syft-table. |
 | <a id="scanners.syft.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, disabling update checks. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 
+## `trivy`
+
+- Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner.TrivyScanner`
+- Provided by: built in, loaded on every scan
+- Enabled by default: yes
+- Tool type: SCA
+- Command: `trivy`
+- Install: pinned, checksum-verified release of `trivy` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
+- Offline strategy: `cache_flags`
+- Network in the sandbox, by default: yes, unless the scan is offline
+- Environment passed into the sandbox: `TRIVY_*`
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.trivy.options`. A key not listed here is accepted and kept, without validation.
+
+<!-- doctest: options of=scanners.trivy -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.trivy.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.trivy.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.trivy.options.scanners"></a>`scanners` | list of one of `vuln`, `misconfig`, `secret`, `license`, length at least 1 | `["vuln"]` | Which trivy scanners to run. Defaults to vuln only: ASH's default scanners already cover secrets (detect-secrets) and IaC misconfigurations (checkov, cfn-nag, cdk-nag), and license findings are a compliance question. Add secret, misconfig or license to run trivy's checks for them as well. |
+| <a id="scanners.trivy.options.license_full"></a>`license_full` | boolean | `false` | Look for licenses in source file headers and license files too (trivy --license-full). Only used when scanners includes license. |
+| <a id="scanners.trivy.options.ignore_unfixed"></a>`ignore_unfixed` | boolean | `false` | Report only vulnerabilities that have a fixed version (trivy --ignore-unfixed). Off by default: an unfixed vulnerability is still one, and turning this on withholds it from the report. |
+| <a id="scanners.trivy.options.disable_telemetry"></a>`disable_telemetry` | boolean | `true` | Disable sending anonymous usage data to Aqua |
+| <a id="scanners.trivy.options.config_file"></a>`config_file` | path or string or null | `null` | A trivy config file (trivy.yaml), passed as --config. Unset, ASH passes an empty one, so a trivy.yaml in the scanned repository is not read: its settings (severity, scan.skip-files, db.repository, ...) can drop findings with nothing in the report saying so, and module.dir can load WASM modules. Honored only when set by --config-overrides or a config file outside the scanned tree, for a file outside that tree; otherwise ignored with a warning. A path that does not exist fails the scan. |
+| <a id="scanners.trivy.options.ignore_file"></a>`ignore_file` | path or string or null | `null` | A trivy ignore file, passed as --ignorefile. Honored only when set by --config-overrides or a config file outside the scanned tree, for a file outside that tree; a relative path is taken from the source directory. Otherwise TRIVY_IGNOREFILE is used, for a file outside the tree, and failing that trivy gets an empty one, so a .trivyignore in the scanned repository does not remove findings. As for trivy-repo. |
+| <a id="scanners.trivy.options.secret_config_file"></a>`secret_config_file` | path or string or null | `null` | A trivy secret scanning config (trivy-secret.yaml), passed as --secret-config. Only read when scanners includes secret. Honored only under the same rule as ignore_file, and otherwise TRIVY_SECRET_CONFIG is used, for a file outside the tree, and failing that trivy gets an empty one, so a trivy-secret.yaml in the scanned repository does not disable secret rules. As for trivy-repo. |
+| <a id="scanners.trivy.options.offline"></a>`offline` | boolean | `false` | Run in offline mode: skip database and check updates and use the vulnerability database already in trivy's cache. ASH still fails the scan when that database is past its 24h bound. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
+
+## `zizmor`
+
+zizmor finds security issues in GitHub Actions workflows and composite actions.
+
+- Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner.ZizmorScanner`
+- Provided by: built in, loaded on every scan
+- Enabled by default: yes
+- Tool type: SAST
+- Command: `zizmor`
+- Install: `uv tool install` on first use (`zizmor>=1.29.0,<2.0.0`)
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.zizmor.options`. A key not listed here is accepted and kept, without validation.
+
+<!-- doctest: options of=scanners.zizmor -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.zizmor.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.zizmor.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.zizmor.options.config_file"></a>`config_file` | path or string or null | `null` | Path to a zizmor configuration file, passed as `--config`. Relative paths are resolved against the source directory; absolute paths are used as given. Honored only when set by --config-overrides or a config file outside the scanned tree; otherwise zizmor runs with `--no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned repository is not read. |
+| <a id="scanners.zizmor.options.persona"></a>`persona` | one of `regular`, `pedantic`, `auditor` | `regular` | zizmor persona. `regular` reports the fewest false positives; `pedantic` adds code-smell findings; `auditor` reports everything, false positives included. |
+| <a id="scanners.zizmor.options.online_audits"></a>`online_audits` | boolean | `false` | Allow zizmor's online audits. Off by default: zizmor runs with `--offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, `--offline` is not passed, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Honored only when set by --config-overrides or a config file outside the scanned tree, and ignored, with a warning, when ASH runs in offline mode. |
+| <a id="scanners.zizmor.options.tool_version"></a>`tool_version` | string or null | `">=1.29.0,<2.0.0"` | Version constraint for zizmor installation, in pip requirement syntax. The default below is the constraint the scanner enforces. |
+| <a id="scanners.zizmor.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation |
+
 ## `ferret-scan`
 
 Ferret Scan is a sensitive data detection tool that scans files for potential sensitive information such as credit card numbers, passport numbers, SSNs, API keys, and other secrets.
@@ -340,6 +503,62 @@ Options, under `scanners.ferret-scan.options`. A key not listed here is accepted
 | <a id="scanners.ferret-scan.options.ferret_verbose"></a>`ferret_verbose` | boolean | `false` | Enable ferret-scan's verbose output (detailed finding info). This controls ferret-scan's own output, not ASH logging. |
 | <a id="scanners.ferret-scan.options.tool_version"></a>`tool_version` | string or null | `null` | Version constraint for ferret-scan installation (e.g., '&gt;=1.0.0,&lt;2.0.0', '==1.2.0'). If not specified, uses the plugin's default compatible version range: &gt;=2.4.5,&lt;2.6.0. Supported versions: 2.4.5 to 2.6.0 (exclusive). |
 | <a id="scanners.ferret-scan.options.skip_version_check"></a>`skip_version_check` | boolean | `false` | Skip version compatibility check. Use with caution - incompatible versions may cause unexpected behavior or errors. |
+
+## `guarddog`
+
+GuardDog detects malicious-package heuristics in PyPI, npm, Go, GitHub Action, RubyGems and crates packages.
+
+- Class: `automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner.GuardDogScanner`
+- Provided by: community module `ash_guarddog_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_guarddog_plugins`
+- Enabled by default: yes
+- Tool type: SCA
+- Command: `guarddog`
+- Install: `uv tool install` on first use (`guarddog==3.2.0` with Python `>=3.10,<3.14`)
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.guarddog.options`. A key not listed here is accepted and kept, without validation.
+
+<!-- doctest: options of=scanners.guarddog -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.guarddog.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.guarddog.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.guarddog.options.ecosystems"></a>`ecosystems` | list of one of `pypi`, `npm`, `go`, `github_action`, `rubygems`, `crates` | `["pypi", "npm", "go", "github_action", "rubygems", "crates"]` | GuardDog ecosystems to scan. ASH scans every package root of each ecosystem it finds: pypi (setup.py, setup.cfg, pyproject.toml), npm (package.json), go (go.mod), github_action (action.yml, action.yaml), rubygems (\*.gemspec) and crates (Cargo.toml). |
+| <a id="scanners.guarddog.options.verify"></a>`verify` | boolean | `false` | Also run `guarddog <ecosystem> verify` on dependency manifests (requirements.txt, package.json, go.mod, Gemfile.lock, Cargo.lock, GitHub workflow files). This downloads every dependency from its registry and needs network access; with ASH_OFFLINE set the scanner reports ERROR instead of attempting it. |
+| <a id="scanners.guarddog.options.verify_timeout"></a>`verify_timeout` | integer, at least 1 | `600` | Seconds to allow one `guarddog verify` invocation (one manifest) before it is killed and reported as a failed target. |
+| <a id="scanners.guarddog.options.verify_parallelism"></a>`verify_parallelism` | integer, at least 1, at most 64 | `8` | Dependencies `guarddog verify` downloads concurrently (GUARDDOG_PARALLELISM). GuardDog's own default is the CPU count. |
+| <a id="scanners.guarddog.options.sandbox"></a>`sandbox` | one of `auto`, `required`, `disabled` | `auto` | GuardDog's kernel sandbox for `scan` (nono: Landlock on Linux, Seatbelt on macOS), which blocks network access and limits reads to the scanned directory. `auto` uses it where the platform supports it and otherwise scans without it, logging a warning; `required` reports ERROR where it is unavailable; `disabled` never uses it. |
+| <a id="scanners.guarddog.options.rules"></a>`rules` | list of string | `[]` | Run only these GuardDog rules (`--rules`). Cannot be combined with exclude_rules. Empty runs every rule. |
+| <a id="scanners.guarddog.options.exclude_rules"></a>`exclude_rules` | list of string | `[]` | GuardDog rules to skip (`--exclude-rules`). |
+| <a id="scanners.guarddog.options.include_capabilities"></a>`include_capabilities` | boolean | `false` | Also report every GuardDog capability match (capability-\* rules, e.g. 'spawns a process') at INFO severity, including one a risk also used: GuardDog's JSON names the capability rule a risk used, not which match. They are context rather than findings: ordinary code matches them. |
+| <a id="scanners.guarddog.options.excluded_paths"></a>`excluded_paths` | list of mapping | `[]` | Paths (globs relative to the source directory) to leave out of the files GuardDog is given. |
+| <a id="scanners.guarddog.options.tool_version"></a>`tool_version` | string or null | `null` | Version constraint for guarddog installation, in pip requirement syntax. Leave unset to use the scanner's own default constraint, which is the GuardDog release the result parser is tested against. |
+| <a id="scanners.guarddog.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation |
+
+## `hadolint`
+
+- Class: `automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner.HadolintScanner`
+- Provided by: community module `ash_hadolint_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_hadolint_plugins`
+- Enabled by default: yes
+- Tool type: IAC
+- Command: `hadolint`
+- Install: pinned, checksum-verified release of `hadolint` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.hadolint.options`. A key not listed here is accepted and kept, without validation.
+
+<!-- doctest: options of=scanners.hadolint -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.hadolint.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.hadolint.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.hadolint.options.config_file"></a>`config_file` | path or string or null | `null` | Path to a hadolint configuration file; a relative path is taken from the source directory. Honored only when set by --config-overrides or a config file outside the scanned tree, for a file outside that tree; otherwise ignored with a warning. When it is not used, hadolint gets an empty config, so a .hadolint.yaml in the scanned repository is not read. A path that is honored and does not exist fails the scan rather than running with hadolint's defaults. |
 
 ## `snyk-code`
 
@@ -389,5 +608,7 @@ Options, under `scanners.trivy-repo.options`. A key not listed here is accepted 
 | <a id="scanners.trivy-repo.options.ignore_unfixed"></a>`ignore_unfixed` | boolean | `true` | Display only fixed vulnerabilities |
 | <a id="scanners.trivy-repo.options.disable_telemetry"></a>`disable_telemetry` | boolean | `true` | Disable sending anonymous usage data to Aqua |
 | <a id="scanners.trivy-repo.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, skipping DB updates and check-update calls. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
-| <a id="scanners.trivy-repo.options.ignore_file"></a>`ignore_file` | string or null | `null` | A trivy ignore file, passed as --ignorefile. Used only when it is outside the scanned tree; a relative path is taken from the source directory. Unset, TRIVY_IGNOREFILE is used the same way, and otherwise trivy gets an empty one, so a .trivyignore in the scanned repository does not remove findings. |
-| <a id="scanners.trivy-repo.options.secret_config_file"></a>`secret_config_file` | string or null | `null` | A trivy secret scanning config (trivy-secret.yaml), passed as --secret-config. Used only when it is outside the scanned tree; a relative path is taken from the source directory. Unset, TRIVY_SECRET_CONFIG is used the same way, and otherwise trivy gets an empty one, so a trivy-secret.yaml in the scanned repository does not disable secret rules. |
+| <a id="scanners.trivy-repo.options.config_file"></a>`config_file` | path or string or null | `null` | A trivy config file (trivy.yaml), passed as --config. Unset, ASH passes an empty one, so trivy does not load a trivy.yaml from the directory it runs in. Honored only when set by --config-overrides or a config file outside the scanned tree, for a file outside that tree; otherwise ignored with a warning. A path that does not exist fails the scan. |
+| <a id="scanners.trivy-repo.options.module_dir"></a>`module_dir` | path or string or null | `null` | A directory of trivy modules, passed as --module-dir. Unset, ASH passes an empty directory of its own. Honored under the same rule as config_file. A path that is not a directory fails the scan. |
+| <a id="scanners.trivy-repo.options.ignore_file"></a>`ignore_file` | string or null | `null` | A trivy ignore file, passed as --ignorefile. Honored only when set by --config-overrides or a config file outside the scanned tree, for a file outside that tree; a relative path is taken from the source directory. Otherwise TRIVY_IGNOREFILE is used, for a file outside the tree, and failing that trivy gets an empty one, so a .trivyignore in the scanned repository does not remove findings. |
+| <a id="scanners.trivy-repo.options.secret_config_file"></a>`secret_config_file` | string or null | `null` | A trivy secret scanning config (trivy-secret.yaml), passed as --secret-config. Honored only under the same rule as ignore_file, and otherwise TRIVY_SECRET_CONFIG is used, for a file outside the tree, and failing that trivy gets an empty one, so a trivy-secret.yaml in the scanned repository does not disable secret rules. |
