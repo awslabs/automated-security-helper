@@ -1668,7 +1668,11 @@ class TestUvToolPins:
 class TestAssertRootOnly:
     """`--assert-root-only`: nobody but the owner can change the path or move it.
 
-    The tests trust their own uid, since they cannot create files owned by root.
+    The tests cannot create files owned by root, so they trust the uid that owns
+    their own tmp_path. root_only_problems also walks every ancestor up to "/", and
+    those belong to the host: under a user namespace they show as the overflow uid,
+    and an image may make one group-writable. So the tests count only the problems
+    that name tmp_path or a path below it, which are the ones they set up.
     """
 
     def _tree(self, tmp_path, parent_mode):
@@ -1682,36 +1686,49 @@ class TestAssertRootOnly:
         parent.chmod(parent_mode)
         return rules.parent
 
-    def _problems(self, path):
-        return installer.root_only_problems([path], (0, os.getuid()))
+    @staticmethod
+    def _local(problems, tmp_path):
+        """The problems naming tmp_path or a path below it."""
+        kept = []
+        for problem in problems:
+            named = Path(problem.split(": ", 1)[0])
+            if named == tmp_path or tmp_path in named.parents:
+                kept.append(problem)
+        return kept
+
+    def _problems(self, path, tmp_path, trusted=None):
+        owner = os.stat(tmp_path).st_uid
+        problems = installer.root_only_problems([path], trusted or (owner,))
+        return self._local(problems, tmp_path)
 
     def test_a_root_only_tree_passes(self, tmp_path):
-        assert self._problems(self._tree(tmp_path, 0o755)) == []
+        assert self._problems(self._tree(tmp_path, 0o755), tmp_path) == []
 
     def test_a_world_writable_parent_without_the_sticky_bit_fails(self, tmp_path):
         """In a directory anyone can write, the rules directory could be renamed."""
         target = self._tree(tmp_path, 0o777)
-        problems = self._problems(target)
+        problems = self._problems(target, tmp_path)
         assert any(str(target.parent) in p and "write" in p for p in problems)
 
     def test_a_sticky_world_writable_parent_passes(self, tmp_path):
-        assert self._problems(self._tree(tmp_path, 0o1777)) == []
+        assert self._problems(self._tree(tmp_path, 0o1777), tmp_path) == []
 
     def test_a_writable_file_inside_fails(self, tmp_path):
         target = self._tree(tmp_path, 0o755)
         (target / "bundle" / "a.guard").chmod(0o666)
-        assert any("a.guard" in p for p in self._problems(target))
+        assert any("a.guard" in p for p in self._problems(target, tmp_path))
 
     def test_a_sticky_directory_inside_still_fails(self, tmp_path):
         """Inside the target, sticky is no excuse: the content itself must be root's."""
         target = self._tree(tmp_path, 0o755)
         (target / "bundle").chmod(0o1777)
-        assert any("bundle" in p for p in self._problems(target))
+        assert any("bundle" in p for p in self._problems(target, tmp_path))
 
     def test_an_owner_that_is_not_trusted_fails(self, tmp_path):
         target = self._tree(tmp_path, 0o755)
-        problems = installer.root_only_problems([target], (0,))
-        assert any(f"owned by uid {os.getuid()}" in p for p in problems)
+        owner = os.stat(tmp_path).st_uid
+        problems = self._problems(target, tmp_path, trusted=(owner + 1,))
+        assert any(f"owned by uid {owner}" in p for p in problems)
 
     def test_the_mode_exits_nonzero_and_names_the_path(self, tmp_path):
         target = self._tree(tmp_path, 0o777)
