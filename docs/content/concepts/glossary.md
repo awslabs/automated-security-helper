@@ -24,7 +24,7 @@ The mark ASH puts on a suppression or ignore path that came from a config file a
 
 ## Community plugin
 
-A plugin package that ships with ASH but is not built in, such as the trivy-repo, snyk-code and ferret-scan scanners. It loads only when a plugin module list names it. See [Community plugins](../plugins/community.md).
+A plugin package that ships with ASH but is not built in, such as the trivy-repo, snyk-code and ferret-scan scanners. It loads only when a plugin module list names it. See [Community plugins](../docs/plugins/community/index.md).
 
 ## Content database
 

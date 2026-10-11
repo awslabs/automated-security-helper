@@ -65,7 +65,7 @@ scanners:
     enabled: true
 ```
 
-You can also load a module for one run with `--ash-plugin-modules` or the `ASH_PLUGIN_MODULES` environment variable. The modules and their scanners are listed in [Community plugins](../plugins/community.md). Two modules send data off the host, `ash_snyk_plugins` (the scanned source) and `ash_aws_plugins` (findings), and ASH loads them only from operator configuration: `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`, `--config-overrides`, or a config file outside every git checkout and outside the scanned directory. From a repository's config they are ignored with a warning.
+You can also load a module for one run with `--ash-plugin-modules` or the `ASH_PLUGIN_MODULES` environment variable. The modules and their scanners are listed in [Community plugins](../docs/plugins/community/index.md). Two modules send data off the host, `ash_snyk_plugins` (the scanned source) and `ash_aws_plugins` (findings), and ASH loads them only from operator configuration: `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`, `--config-overrides`, or a config file outside every git checkout and outside the scanned directory. From a repository's config they are ignored with a warning.
 
 ## Set a scanner's options
 

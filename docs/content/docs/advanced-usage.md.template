@@ -26,7 +26,7 @@ sharding and workspaces, see [Scale to large repositories](../how-to/scale-large
 The `jupyter` converter, which turns notebooks into Python files for the scanners,
 uses `nbconvert`, installed with `uv tool` like bandit. The opt-in community scanners
 (ferret-scan, GuardDog, hadolint, snyk-code, trivy-repo) are covered in
-[Community plugins](../plugins/community.md).
+[Community plugins](plugins/community/index.md).
 
 ## Where ASH looks for a tool
 

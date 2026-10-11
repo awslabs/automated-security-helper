@@ -36,7 +36,7 @@ ASH ships 16 built-in scanners, all enabled by default. For each scanner it know
 3. Does it support this platform? A scanner without a build for the operating system (semgrep and opengrep on Windows) is recorded SKIPPED.
 4. Are its dependencies there? A scanner whose tool cannot be found, or is found only inside the scanned directory, is recorded MISSING with the reason.
 
-Scanners outside the built-in set, such as the [community scanners](../plugins/community.md), are only considered when their plugin module is loaded. The [scanner reference](../reference/scanners.md) lists every scanner, its tool and its defaults; [Choose scanners](../how-to/choose-scanners.md) covers turning them on and off.
+Scanners outside the built-in set, such as the [community scanners](../docs/plugins/community/index.md), are only considered when their plugin module is loaded. The [scanner reference](../reference/scanners.md) lists every scanner, its tool and its defaults; [Choose scanners](../how-to/choose-scanners.md) covers turning them on and off.
 
 ## How scanners run
 
