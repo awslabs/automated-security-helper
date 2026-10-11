@@ -1265,17 +1265,20 @@ jobs:
           install-ash: "false"
       - name: Install dependencies
         run: uv sync --extra cdk --extra symbols
-      # The integration suite runs actionlint, cfn-lint and cfn-guard for real, and
-      # nothing else in this job installs them. This is the installer users run, so it
-      # also exercises the pinned downloads and the cfn-guard rules-bundle install.
-      # ASH_REQUIRE_ACTIONLINT and ASH_REQUIRE_CFN_TOOLS below make a missing tool fail
-      # those tests instead of skipping them.
+      # The integration suite runs actionlint, cfn-lint, cfn-guard and gitleaks for
+      # real, and nothing else in this job installs them. This is the installer users
+      # run, so it also exercises the pinned downloads and the cfn-guard rules-bundle
+      # install. ASH_REQUIRE_ACTIONLINT, ASH_REQUIRE_CFN_TOOLS and ASH_REQUIRE_GITLEAKS
+      # below make a missing tool fail those tests instead of skipping them. Without
+      # gitleaks here, both tests in test_repo_tool_configs_are_not_read.py skipped.
+      # tests/unit/test_integration_job_installs_required_tools.py holds this list.
       - name: Install the scanners the integration suite runs for real
-        run: uv run ash dependencies install --tool actionlint --tool cfn-lint --tool cfn-guard
+        run: uv run ash dependencies install --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
       # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan,
-      # and ASH_REQUIRE_ACTIONLINT for the actionlint tests.
+      # ASH_REQUIRE_ACTIONLINT for the actionlint tests, and ASH_REQUIRE_GITLEAKS for the
+      # tests that run gitleaks from PATH.
       #
       # The installs above put the pinned binaries in ~/.ash/bin and the uv tools in
       # ~/.local/bin. PATH gains both for this step only, not through GITHUB_PATH, so no
@@ -1285,6 +1288,7 @@ jobs:
           ASH_REQUIRE_ACTIONLINT: "1"
           ASH_REQUIRE_CDK_EXTRA: "1"
           ASH_REQUIRE_CFN_TOOLS: "1"
+          ASH_REQUIRE_GITLEAKS: "1"
           ASH_REQUIRE_SYMBOLS_EXTRA: "1"
         run: |
           export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"

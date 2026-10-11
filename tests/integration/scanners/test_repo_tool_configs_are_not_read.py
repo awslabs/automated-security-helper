@@ -19,9 +19,10 @@ then hand the same configs over as the operator's and assert they do apply, whic
 is also the proof that the planted configs would have hidden everything.
 
 The binaries are required, not assumed: actionlint and gitleaks must be on PATH
-or in ASH's bin directory (the integration job installs them, and
-``ASH_REQUIRE_ACTIONLINT`` turns a missing actionlint into a failure), and zizmor
-is resolved by its scanner the way ``ash dependencies install`` would.
+or in ASH's bin directory (the integration job installs both, and
+``ASH_REQUIRE_ACTIONLINT`` and ``ASH_REQUIRE_GITLEAKS`` turn a missing one into a
+failure), and zizmor is resolved by its scanner the way ``ash dependencies install``
+would.
 """
 
 from __future__ import annotations
@@ -85,15 +86,21 @@ _ZIZMOR_DISABLE_ALL = "rules:\n" + "".join(
 )
 
 
+#: The variable that turns each tool's absence into a failure; CI sets both.
+_REQUIRE_FLAGS = {
+    "actionlint": "ASH_REQUIRE_ACTIONLINT",
+    "gitleaks": "ASH_REQUIRE_GITLEAKS",
+}
+
+
 def _require(tool: str) -> None:
     if find_executable(tool):
         return
-    if tool == "actionlint" and os.environ.get(
-        "ASH_REQUIRE_ACTIONLINT", ""
-    ).strip().upper() in ("1", "YES", "TRUE"):
+    flag = _REQUIRE_FLAGS.get(tool)
+    if flag and os.environ.get(flag, "").strip().upper() in ("1", "YES", "TRUE"):
         pytest.fail(
-            "ASH_REQUIRE_ACTIONLINT is set but actionlint is not installed. This "
-            "test must run in CI, not skip."
+            f"{flag} is set but {tool} is not installed. This test must run in CI, "
+            "not skip."
         )
     pytest.skip(f"{tool} is not installed")
 
