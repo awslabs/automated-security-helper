@@ -13,7 +13,7 @@ not be imported there either: importing a package runs its ``__init__``.
 
 A refused name is also an error in the configuration, not a hint. Naming one, from
 any source ASH reads ``ash_plugin_modules`` from, refuses the scan with the
-invalid-configuration exit code, 3, rather than warning and scanning on.
+invalid-configuration exit code, 3, before anything is scanned.
 
 How "imported" is observed
 --------------------------

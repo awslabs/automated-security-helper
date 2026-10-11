@@ -5,11 +5,9 @@
 
 ``config/plugin_module_trust.py`` limits what a config file inside the scanned tree
 may add to ``ash_plugin_modules``: only modules installed outside the tree. It runs
-before the scan's namespace refusal, so a name it dropped never reached that
-refusal: a name outside the plugin namespace that could not be imported, or that
-resolved inside the tree, was dropped with a warning and the scan ran, while the
-same name installed outside the tree refused the scan with exit code 3. A name
-outside the namespace is now passed on, unimported, to the refusal, wherever it is.
+before the scan's namespace refusal and keeps every name outside the plugin
+namespace, unimported, so the scan refuses it with exit code 3 whether the name
+cannot be imported, resolves inside the tree, or is installed outside it.
 
 These run ASH the way ``test_refused_plugin_modules.py`` does, with its harness: a
 fresh interpreter, a marker file written by the package's ``__init__``, and every

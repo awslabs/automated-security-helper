@@ -6,9 +6,7 @@
 Listing scanners and building scan tasks probe, and when a tool is missing install,
 each uv-managed scanner, even for scanners a scan excludes; checkov keeps an update
 cache; and HOME alone does not move uv's directories when the XDG variables are set.
-A harness that replaced HOME but pointed XDG_DATA_HOME and XDG_BIN_HOME at the real
-home installed bandit, checkov, semgrep and nbconvert into the developer's
-``~/.local``. So a subprocess built with these helpers gets:
+So a subprocess built with these helpers gets:
 
 * every directory a tool or installer writes to (XDG cache, data, config and bin
   directories, ``UV_TOOL_DIR``, ``UV_TOOL_BIN_DIR``, ``ASH_BIN_PATH``) under *root*;

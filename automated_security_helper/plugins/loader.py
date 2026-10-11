@@ -123,16 +123,10 @@ _ALLOWED_MODULE_PREFIXES = (
 #: which starts with none of the prefixes above -- so ``load_additional_plugin_modules``
 #: skipped it with a warning and every plugin in it went unregistered.
 #:
-#: That divergence was survivable in one path and not in the others.
-#: ``execution_engine`` also calls ``discover_plugins``, which matched a top-level
-#: package by name (then by walking ``pkgutil.iter_modules()``, now by
-#: ``importlib.util.find_spec``) and imported the package without this check -- so
-#: the single-project scan path loaded it anyway. The consumers with
-#: no such fallback (``workspace.execution``, ``core.scanner_inventory``,
-#: ``load_plugins`` itself) did not, so the documented arrangement worked in a
-#: single-project scan and silently dropped every custom plugin in a workspace run.
-#: ``discover_plugins`` now applies this check as well, and a scan refuses a name
-#: outside the namespace (``refuse_plugin_modules_outside_namespace``).
+#: Every loader applies the same rule: ``load_additional_plugin_modules``,
+#: ``discover_plugins`` (which ``execution_engine`` and ``workspace.execution`` call
+#: after it) and ``load_plugins``. A scan refuses a name outside the namespace before
+#: any of them runs (``refuse_plugin_modules_outside_namespace``).
 #:
 #: A suffix rather than removing the check. The check's purpose is to keep a config
 #: file from naming an arbitrary importable module, and that purpose survives:
@@ -155,13 +149,12 @@ def _module_path_refusal(module_path: str) -> Optional[str]:
     The top-level package is what the namespace rule tests, so
     ``my_ash_plugins.scanners`` is accepted on the strength of ``my_ash_plugins``
     rather than needing its own rule. A name has to be a dotted path of ASCII
-    identifiers, the only spelling that can import the module it names; anything
-    else (a stray space, an empty segment, a comma, a fullwidth letter) would fail
-    to import and was skipped with a warning. ASH's plugin root and the package
-    above it are refused although they are in the namespace: the root holds every
-    plugin package ASH ships, so naming it names none of them, and selecting
-    everything below it would select whatever the process happened to have
-    imported (see :func:`scan_plugin_filter`).
+    identifiers, the only spelling that imports the module it names, so a stray
+    space, an empty segment, a comma or a fullwidth letter is refused. ASH's plugin
+    root and the package above it are refused although they are in the namespace:
+    the root holds every plugin package ASH ships and names none of them, and a name
+    that holds other plugin packages selects nothing below it (see
+    :func:`scan_plugin_filter`).
     """
     parts = module_path.split(".")
     if not module_path.isascii() or not all(part.isidentifier() for part in parts):
@@ -254,10 +247,9 @@ def _module_within(module: str, package: str) -> bool:
 def _is_builtin_plugin_module(module: str) -> bool:
     """Whether *module* is in ``ash_builtin``, whose plugins every scan uses.
 
-    Only ``ash_builtin``. The other packages under ``plugin_modules`` ship with ASH
+    Only ``ash_builtin``: the other packages under ``plugin_modules`` ship with ASH
     but take part in a scan only when that scan names them, and no ASH module outside
-    ``plugin_modules`` defines a plugin; admitting the rest of the
-    ``automated_security_helper`` package would admit any module installed into it.
+    ``plugin_modules`` defines a plugin.
     """
     return _module_within(module, BUILTIN_PLUGIN_PACKAGE)
 

@@ -1,29 +1,22 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Concurrent plugin resolution: a registration from another thread cannot break it.
+"""Concurrent plugin resolution: a registration from another thread does not disturb it.
 
-The defect this file was written for
-------------------------------------
-``AshPluginManager.plugin_modules`` used to iterate ``plugin_library.scanners``
-itself and do ``importlib.import_module`` work *inside* the loop. Another project's
-thread calling ``register_plugin_module`` wrote a new key into that same dict
-mid-iteration, and CPython raised ``RuntimeError: dictionary changed size during
-iteration``. ``plugin_modules`` catches only ``ImportError``, so the
-``RuntimeError`` escaped into ``_scan_one_project``'s broad ``except Exception``
-and became a project reported FAILED for a reason that had nothing to do with
-that project.
-
-What closes it now
-------------------
+What the manager guarantees
+---------------------------
+Workspace mode runs several projects' scans in one process, so one project's thread
+can call ``register_plugin_module`` while another is in ``plugin_modules``.
 ``plugin_modules`` copies the registrations under the manager's registry lock,
-which ``register_plugin_module`` also takes, and iterates the copy. A registration
-landing mid-resolve changes the dict, not the copy. The resolved list is cached
-with the registrations it came from, so a resolve with nothing new registered
-does no import work at all (which is what ``prewarm_plugin_registry`` relies on
-to keep the workers out of the import loop), and the first resolve after a new
-registration reads the registry again, so a plugin module a later scan imports
-is part of that scan.
+which ``register_plugin_module`` also takes, and does its
+``importlib.import_module`` work over the copy. A registration landing mid-resolve
+changes the dict, not the copy, so nothing reaches ``_scan_one_project``'s broad
+``except Exception`` and no project is recorded FAILED for it. The resolved list is
+cached with the registrations it came from, so a resolve with nothing new
+registered does no import work at all (which is what ``prewarm_plugin_registry``
+relies on to keep the workers out of the import loop), and the first resolve after
+a new registration reads the registry again, so a plugin module a later scan
+imports is part of that scan.
 
 Why the reproduction is deterministic and not a timing loop
 -----------------------------------------------------------
@@ -133,7 +126,7 @@ def _resolve_while_registering(manager: AshPluginManager) -> Optional[BaseExcept
 
 
 class TestARegistrationDuringAResolve:
-    """The forced mutation that used to escape, on a cold cache."""
+    """A registration forced into a resolve on a cold cache."""
 
     def test_a_registration_inside_a_cold_resolve_does_not_escape(self):
         manager = _manager()

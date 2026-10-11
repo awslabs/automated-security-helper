@@ -206,7 +206,7 @@ class ScanExecutionEngine:
             )
 
             # Before importing any of them: a name outside the plugin namespace
-            # refuses the scan (exit 3) rather than being skipped with a warning.
+            # refuses the scan with exit 3, and nothing is imported.
             refuse_plugin_modules_outside_namespace(combined_plugin_modules)
             load_additional_plugin_modules(combined_plugin_modules)
 
@@ -272,11 +272,9 @@ class ScanExecutionEngine:
         self._initialized = False
 
         # This scan's plugins: ASH's built-in ones plus those of the modules this
-        # scan names. The registry is process-wide and keeps every module any scan
-        # or `list_scanners` imported, so taking everything registered would run a
-        # scanner this scan never asked for (the community scanners after
-        # `list_scanners`, or a module an earlier scan in the same process named).
-        # The same filter decides which event handlers this scan notifies.
+        # scan names. The registry is process-wide and holds every module any scan
+        # or `list_scanners` in this process imported; the filter selects this
+        # scan's share of it, and also decides which event handlers it notifies.
         from automated_security_helper.plugins.loader import scan_plugin_filter
 
         self._plugin_filter = scan_plugin_filter(combined_plugin_modules)

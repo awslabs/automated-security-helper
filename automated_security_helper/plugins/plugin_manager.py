@@ -71,12 +71,11 @@ class AshPluginManager(BaseModel):
     plugin_library: Annotated[AshPluginLibrary, Field()] = AshPluginLibrary()
     context: Any = None
     #: Resolved plugin classes per plugin type, each stored with the registrations
-    #: it was resolved from. A stored list is reused only while the registrations
-    #: are unchanged: a module imported after the first resolve (a later scan's
-    #: ``ash_plugin_modules``, or ``list_scanners`` loading the community packages)
-    #: adds registrations, and the next resolve has to include them, or a scanner
-    #: that scan selected would get no row in its results and the completeness gate
-    #: could not report it.
+    #: it was resolved from. A stored list is reused while the registrations are
+    #: unchanged and resolved again after a new registration, so a module imported
+    #: after the first resolve (a later scan's ``ash_plugin_modules``, or
+    #: ``list_scanners`` loading the community packages) is in the next resolve, and
+    #: each scanner a scan selects gets a row in its results.
     _resolved_plugins: dict = PrivateAttr(default_factory=dict)
     #: Guards the registration dicts while they are changed or copied. Imports run
     #: outside it: an import registers plugins, which takes this lock.

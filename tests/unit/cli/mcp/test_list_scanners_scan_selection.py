@@ -9,10 +9,9 @@ The behavior these tests hold
 scanners in ``plugin_modules/ash_*_plugins`` that ``load_internal_plugins()`` does
 not load. Reporting them must not make them part of a later scan. A scan's
 scanners are the built-in set plus the modules that scan's own resolved
-``ash_plugin_modules`` names, so an MCP client that asks which scanners exist
-cannot thereby turn on one the operator never listed. ``snyk-code`` is the one
-that matters most: it runs ``snyk code test`` on the scanned tree, which sends the
-source to Snyk.
+``ash_plugin_modules`` names, so asking which scanners exist turns none of them on
+for a scan. ``snyk-code``, for example, runs ``snyk code test`` on the scanned tree
+only in a scan whose modules name ``ash_snyk_plugins``.
 
 Why every case runs in a fresh interpreter
 ------------------------------------------

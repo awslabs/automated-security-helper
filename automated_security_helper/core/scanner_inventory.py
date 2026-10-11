@@ -99,13 +99,9 @@ def _loaded_scanner_classes() -> list:
 
     Why this does not call ``ash_plugin_manager.plugin_modules("scanner")``
     ---------------------------------------------------------------------
-    That method used to memoise its first resolve for the life of the process,
-    which is how a caller asking an ASH server which scanners it has got an answer
-    three short, with nothing logged and no error raised (measured: the registry
-    held all 13 scanners while the memo kept serving the 10 it was created with).
-    It now re-resolves after a new registration, but the registry also holds
-    whatever else the process imported, so it answers "what is registered here",
-    not "what this build contains". Reading ``plugin_library`` directly instead
+    That method answers "what is registered in this process", which depends on
+    what the process imported before the call, not "what this build contains".
+    Reading ``plugin_library`` directly instead
     fails the sweep in ``tests/unit/workspace/test_project_isolation.py``, which
     forbids reaching into the manager's registry from outside the class that owns
     it, because that is the shape the original defect arrived in.

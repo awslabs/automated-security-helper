@@ -431,14 +431,11 @@ def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) 
     ``ScanExecutionEngine.__init__`` imports a project's ``ash_plugin_modules``,
     which registers their plugins into the module-level ``plugin_library``, and
     then resolves the registry through ``ash_plugin_manager.plugin_modules()``.
-    Before this existed, the first project to build its engine froze the resolved
-    scanner list for the whole run (measured on two real projects where only one
-    declared an external plugin: either order gave one project the wrong set).
-    Each engine now selects only the built-in plugins and its own modules'
-    (``plugins.loader.scan_plugin_filter``), and a resolve re-reads the registry
-    after a new registration, so the order no longer decides the set. Importing
-    and resolving once before the pool still means no worker does import work or
-    resolves a registry another worker is registering into.
+    Each engine selects only the built-in plugins and its own modules'
+    (``plugins.loader.scan_plugin_filter``), and a resolve reads the registry again
+    after a new registration, so the order in which projects start does not decide
+    the set. Importing and resolving once before the pool means no worker does
+    import work or resolves a registry another worker is registering into.
 
     Resolution has already refused any workspace whose projects ask for different
     module sets (see ``resolver._validate_plugin_modules``), so there is exactly

@@ -411,8 +411,8 @@ class TestWhatAScanLeavesOutIsLogged:
 class TestThePluginRootNamesNoPlugin:
     """ASH's plugin root holds every package ASH ships; naming it refuses the scan.
 
-    Selecting everything below it would select whatever the process had imported:
-    after ``list_scanners`` that is ferret-scan, snyk-code and trivy-repo.
+    The scans here run after ``list_scanners`` has imported the ferret-scan,
+    snyk-code and trivy-repo packages, and none of their scanners gets a row.
     """
 
     def test_an_in_tree_config_naming_it_after_list_scanners_refuses(self, tmp_path):
@@ -520,13 +520,13 @@ class TestReportersFollowTheScansModules:
             "control: the reporter of the module the first scan named wrote no "
             "report for that scan"
         )
-        leaked = sorted(
+        unexpected = sorted(
             p.relative_to(tmp_path).as_posix()
             for p in (tmp_path / "out2").rglob("*.zzmark")
         )
-        assert leaked == [], (
+        assert unexpected == [], (
             "a reporter from a module only the first scan named ran in the "
-            f"workspace scan: {leaked}"
+            f"workspace scan: {unexpected}"
         )
 
 

@@ -5,15 +5,10 @@
 
 The mechanism these guard
 -------------------------
-``ash_plugin_manager.plugin_modules()`` used to memoise its first resolved class
-list for the life of the process. ``mcp_list_scanners()`` has to account for the
-vendored ferret/snyk/trivy scanners, which ``load_internal_plugins()`` does not
-load; when it read them back through that memo, and anything had resolved
-earlier, those three were absent from what it returned. A caller asking a
-security scanner which scanners it has got an answer three short, with nothing
-logged and no error raised. The memo now re-resolves after a new registration,
-and ``mcp_list_scanners()`` still reads the loaders' return values rather than
-the registry, which these tests keep order-independent either way.
+``mcp_list_scanners()`` reports the vendored ferret/snyk/trivy scanners, which
+``load_internal_plugins()`` does not load, by reading the loaders' return values
+rather than the process-wide registry. Its answer is the same whatever resolved
+the registry before it and whatever the process has already imported.
 
 Why these tests provoke the memo through the public API only
 -----------------------------------------------------------

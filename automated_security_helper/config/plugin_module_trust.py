@@ -153,8 +153,8 @@ def confine_plugin_modules(
     kept: List[str] = []
     refused: List[str] = []
     for name in split_plugin_modules(getattr(config, "ash_plugin_modules", [])):
-        # Left for the scan's refusal (exit 3) rather than dropped here: the
-        # refusal imports nothing, and dropping it would let the scan run.
+        # Kept for the scan's namespace refusal, which imports nothing and
+        # refuses the scan with exit 3.
         if not _is_allowed_module_path(name):
             kept.append(name)
             continue
