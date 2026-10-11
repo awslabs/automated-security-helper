@@ -556,6 +556,54 @@ class TestRuleSelection:
         assert rule.path == (repo / "policy" / "real.guard").resolve()
         assert rule.content == "rule real { }\n"
 
+    def test_a_named_operator_file_outside_the_tree_may_link_anywhere(
+        self, repo, rules_root, tmp_path
+    ):
+        """Outside the scanned tree the operator controls the path, so a named
+        file is read where its link leads, even out of its own directory."""
+        target = tmp_path / "shared" / "team.guard"
+        target.parent.mkdir()
+        target.write_text("rule team { }\n")
+        link = tmp_path / "operator" / "rules.guard"
+        link.parent.mkdir()
+        _symlink_or_skip(link, target)
+        scanner = _scanner(repo, rule_sets=[], rules_paths=[str(link)])
+        (rule,) = scanner._selected_rules()
+        assert rule.path == target.resolve()
+        assert rule.content == "rule team { }\n"
+
+    def test_a_symlinked_subdirectory_is_not_walked(
+        self, repo, rules_root, ash_temp_path
+    ):
+        """As cfn-guard walks a rules directory: a linked subdirectory is not
+        entered, even one that stays inside, so no rule is read twice."""
+        mine = ash_temp_path / "operator-rules"
+        (mine / "real").mkdir(parents=True)
+        (mine / "real" / "a.guard").write_text("rule a { }\n")
+        _symlink_or_skip(mine / "alias", Path("real"))
+        scanner = _scanner(repo, rule_sets=[], rules_paths=[str(mine)])
+        assert scanner.rule_files() == [mine.resolve() / "real" / "a.guard"]
+
+    @pytest.mark.skipif(
+        os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        reason="needs a directory this user cannot list",
+    )
+    def test_a_subdirectory_that_cannot_be_listed_fails_closed(
+        self, repo, rules_root, ash_temp_path
+    ):
+        """Its rules would otherwise be dropped without a word."""
+        mine = ash_temp_path / "operator-rules"
+        (mine / "locked").mkdir(parents=True)
+        (mine / "a.guard").write_text("rule a { }\n")
+        (mine / "locked" / "b.guard").write_text("rule b { }\n")
+        (mine / "locked").chmod(0)
+        try:
+            scanner = _scanner(repo, rule_sets=[], rules_paths=[str(mine)])
+            with pytest.raises(RulesBundleUnavailable, match="could not be read"):
+                scanner.rule_files()
+        finally:
+            (mine / "locked").chmod(0o755)
+
     def test_own_rules_paths_that_do_not_exist_are_refused(self, repo, rules_root):
         with pytest.raises(RulesBundleUnavailable, match="does not exist"):
             _scanner(repo, rule_sets=[], rules_paths=["policy"]).rule_files()
@@ -578,7 +626,9 @@ class TestRuleSelection:
         scanner = _scanner(repo, rule_sets=[], rules_paths=[str(fifo)])
         with pytest.raises(RulesBundleUnavailable, match="not a regular file"):
             scanner.rule_files()
-        assert scanner.validate_plugin_dependencies() is False
+        # The binary is found whatever the host has, so the check reaches the rules.
+        with _cfn_guard_on_path():
+            assert scanner.validate_plugin_dependencies() is False
         assert "cannot be used" in scanner.dependency_unavailable_reason
 
     def test_an_operator_directory_with_no_rules_selects_nothing(
