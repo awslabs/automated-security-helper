@@ -425,3 +425,27 @@ class TestRubyIsNotChosenByTheCheckout:
                 f"step {step.get('name')!r} resolves its version files in "
                 f"{working_directory or 'the checkout'!r}, not under RUNNER_TEMP"
             )
+
+
+class TestOnlyTheAshStepsSeeTheConfig:
+    """ASH_CONFIG is set on the scan and report steps and nowhere else.
+
+    It used to be workflow-level, so every helper step saw the caller's config path,
+    which with config-ref is the checkout's copy, not the one the scan uses. None of
+    them reads it today; a later helper that did would read the wrong file.
+    """
+
+    @pytest.mark.parametrize(
+        "step_name", sorted(set(PYTHON_STEPS) | set(INSTALL_STEPS))
+    )
+    def test_a_helper_step_runs_without_ash_config(self, tmp_path, step_name):
+        sandbox = _sandbox(tmp_path)
+        run = _run(sandbox, _step(step_name), ".ash/.ash.yaml")
+        calls = [
+            c for c in run.calls if c["tool"] in ("uv", "uvx", "python", "python3")
+        ]
+        assert calls, f"step {step_name!r} started nothing:\n" + run.describe()
+        with_config = [c for c in calls if c["env"].get("ASH_CONFIG") not in (None, "")]
+        assert not with_config, (
+            f"step {step_name!r} runs with ASH_CONFIG set:\n" + run.describe()
+        )

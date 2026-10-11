@@ -207,7 +207,9 @@ env:
   # `@` to uvx as the command to run.
   ASH_UVX_SOURCE: automated-security-helper[cdk] @ git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}
   ASH_OUTPUT_DIR: ${{ inputs.output-dir }}
-  ASH_CONFIG: ${{ inputs.config }}
+  # No ASH_CONFIG here. The Run ASH and Show ASH Summary Report steps set it to the
+  # config the scan uses (from config-ref, or the `config` input), and no other
+  # step should see a config path at all.
 
 jobs:
   ash:
