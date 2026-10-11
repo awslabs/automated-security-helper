@@ -551,23 +551,70 @@ def test_a_global_ignore_path_removes_the_findings(tmp_path):
     assert state == {("github-pat", "docs/example.md"): False}
 
 
+def _with_copies_at(raw: dict, *uris: str) -> dict:
+    """``raw`` plus a copy of its first result at each of ``uris``."""
+    for uri in uris:
+        moved = copy.deepcopy(raw["runs"][0]["results"][0])
+        moved["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] = uri
+        raw["runs"][0]["results"].append(moved)
+    return raw
+
+
+#: Where the source run finds copies of a secret under ASH's default output
+#: directory: the converted copy of an archive's file (in work_dir, which ASH's
+#: suppression pass keeps, because the converted run's findings live there), a
+#: report from an earlier run, and the same converted file spelled with "./".
+OUTPUT_DIR_COPIES = (
+    ".ash/ash_output/converted/archive/bundle_zip/conf/settings.py",
+    ".ash/ash_output/reports/copied.py",
+    "./.ash/ash_output/converted/archive/bundle_zip/conf/other.py",
+)
+
+
 def test_findings_under_the_output_dir_are_dropped(tmp_path):
-    """The tool is not told to skip ASH's output dir; this pass removes them."""
-    raw = _raw_report()
-    moved = copy.deepcopy(raw["runs"][0]["results"][0])
-    moved["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] = (
-        ".ash/ash_output/reports/copied.py"
-    )
-    raw["runs"][0]["results"].append(moved)
+    """The source run reads ASH's output directory, gitleaks having no flag to skip
+    it. The converted target's run already reports the converted files, so a copy
+    found there is the same secret a second time: the scanner drops every source-run
+    finding under the output directory, work_dir included."""
+    raw = _with_copies_at(_raw_report(), *OUTPUT_DIR_COPIES)
     context = _context(tmp_path)
     scanner = GitleaksScanner(context=context, config=GitleaksScannerConfig())
-    report = apply_suppressions_to_sarif(_parse(scanner, raw), context)
-    uris = [
+    parsed = _parse(scanner, raw)
+    _assert_expected_findings(parsed)
+    # And nothing comes back through ASH's own suppression pass.
+    _assert_expected_findings(apply_suppressions_to_sarif(parsed, context))
+
+
+def test_the_converted_runs_findings_under_work_dir_are_kept(tmp_path):
+    """The converted target is work_dir itself, under the output directory: its
+    findings are the converted files' only report."""
+    context = _context(tmp_path)
+    scanner = GitleaksScanner(context=context, config=GitleaksScannerConfig())
+    work = Path(context.work_dir)
+    work.mkdir(parents=True)
+    uri = (work / "archive" / "bundle_zip" / "conf" / "settings.py").as_posix()
+    report = SarifReport.model_validate(_report(_result(uri, "github-pat", 1)))
+    kept = scanner._post_process_sarif(report, [], work)
+    assert [
         r.locations[0].physicalLocation.root.artifactLocation.uri
-        for r in report.get_all_results()
-    ]
-    assert len(uris) == len(EXPECTED)
-    assert not any(u.startswith(".ash/") for u in uris)
+        for r in kept.get_all_results()
+    ] == [uri]
+
+
+def test_nothing_is_dropped_when_the_output_dir_is_outside_the_source(tmp_path):
+    """A path that only looks like ASH's default output directory is the tree's."""
+    source = tmp_path / "src"
+    source.mkdir()
+    context = PluginContext(
+        source_dir=source,
+        output_dir=tmp_path / "out",
+        work_dir=tmp_path / "out" / "converted",
+        config=AshConfig(),
+    )
+    scanner = GitleaksScanner(context=context, config=GitleaksScannerConfig())
+    raw = _with_copies_at(_raw_report(), *OUTPUT_DIR_COPIES)
+    parsed = scanner._post_process_sarif(SarifReport.model_validate(raw), [], source)
+    assert len(parsed.get_all_results()) == len(EXPECTED) + len(OUTPUT_DIR_COPIES)
 
 
 def test_gitleaks_config_variables_are_left_to_gitleaks_outside_a_sandbox(

@@ -70,9 +70,14 @@ scanner receives it.
 
 ASH's output directory is not excluded at the tool. gitleaks has no exclude
 flag, and the only route -- a generated config that extends the user's -- would
-take over the config precedence above. ``apply_suppressions_to_sarif`` drops
-every finding under the output directory for every scanner, which is what keeps
-ASH's previous reports out of this one too.
+take over the config precedence above. So when the output directory is inside
+the source target (the default ``.ash/ash_output``), gitleaks reads it, and
+``_post_process_sarif`` drops every source-run finding under it, as
+detect-secrets, zizmor and actionlint leave it out of the files they scan.
+``apply_suppressions_to_sarif`` is not enough on its own: it keeps findings under
+``work_dir`` (``<output>/converted``), where the converted target's findings
+live, and the source run reads the same converted copies of archives and
+notebooks that the converted run reports, so one secret would be two findings.
 
 Severity
 --------
@@ -535,13 +540,58 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             level=logging.INFO,
         )
 
+    def _drop_results_under_output_dir(
+        self, sarif_report: SarifReport, target: Path
+    ) -> None:
+        """Remove the results located under ASH's output directory inside ``target``.
+
+        See "Paths" in the module docstring. Nothing is removed when the output
+        directory is not inside ``target`` (``_output_dir_inside``): when it is
+        outside, and for the converted target, which lives under it. A location
+        is joined to the target and normalized lexically, without resolving
+        symlinks, as ``_output_dir_inside`` compares the two directories.
+        """
+        if self.context is None or self._output_dir_inside(target) is None:
+            return
+        output_abs = Path(os.path.normpath(Path(self.context.output_dir).absolute()))
+        target_abs = Path(target).absolute()
+
+        def under_output_dir(result: Any) -> bool:
+            for location in result.locations or []:
+                physical = location.physicalLocation
+                artifact = physical.root.artifactLocation if physical else None
+                uri = artifact.uri if artifact else None
+                if not uri:
+                    continue
+                path = Path(os.path.normpath(target_abs / uri.replace("\\", "/")))
+                if path.is_relative_to(output_abs):
+                    return True
+            return False
+
+        dropped = 0
+        for run in sarif_report.runs or []:
+            if not run.results:
+                continue
+            kept = [result for result in run.results if not under_output_dir(result)]
+            dropped += len(run.results) - len(kept)
+            run.results = kept
+        if dropped:
+            self._plugin_log(
+                f"Dropped {dropped} finding(s) under ASH's output directory: copies "
+                "of the files ASH converted, which the converted target's run "
+                "reports, or files ASH wrote.",
+                level=logging.DEBUG,
+            )
+
     def _post_process_sarif(
         self,
         sarif_report: SarifReport,
         final_args: List[str],
         target: Path,
     ) -> SarifReport:
-        """Rate every result, drop empty fingerprints, and keep snippets redacted."""
+        """Drop ASH's own files, rate every result, drop empty fingerprints, and
+        keep snippets redacted."""
+        self._drop_results_under_output_dir(sarif_report, target)
         for result in sarif_report.get_all_results():
             # See "Severity" in the module docstring.
             result.level = Level.error

@@ -442,6 +442,45 @@ def test_ash_scan_reports_critical_findings_and_writes_no_secret(
     assert leaked == {}, leaked
 
 
+def test_ash_scan_reports_a_secret_in_an_archive_once(tmp_path, gitleaks_bin_dir):
+    """One token in a zip is one finding.
+
+    ASH extracts the archive under ``<output>/converted`` and gitleaks scans that
+    directory as the converted target. With the output directory inside the source
+    tree (the default), the source run walks the same copy, and it used to be
+    reported a second time.
+    """
+    import zipfile
+
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "main.py").write_text("x = 1\n", encoding="utf-8")
+    token = fabricated_tokens()["settings_github_pat"]
+    with zipfile.ZipFile(source / "bundle.zip", "w") as archive:
+        archive.writestr("conf/settings.py", f'TOKEN = "{token}"\n')
+    output = source / ".ash" / "ash_output"
+
+    proc, log = _run_ash(
+        source,
+        output,
+        {"project_name": "gitleaks-archive", "fail_on_findings": True},
+        _env(gitleaks_bin_dir),
+    )
+    assert proc.returncode == 2, log
+
+    sarif = json.loads((output / "reports" / "ash.sarif").read_text(encoding="utf-8"))
+    uris = [
+        r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        for run in sarif["runs"]
+        for r in run.get("results", [])
+        if r.get("ruleId") == "github-pat"
+    ]
+    assert len(uris) == 1, (uris, log)
+    assert uris[0].endswith("conf/settings.py"), uris
+    assert "/converted/" in f"/{uris[0]}", uris
+    assert _gitleaks_row(output).get("severity_counts", {}).get("critical") == 1, log
+
+
 def test_ash_suppressions_apply_to_gitleaks_findings(tmp_path, gitleaks_bin_dir):
     source = _copy_fixture(tmp_path)
     output = tmp_path / "out"

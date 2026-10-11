@@ -81,7 +81,7 @@ global_settings:
       reason: Fabricated token used by the test suite
 ```
 
-Rule, path and line suppressions apply. A `symbol` suppression (the enclosing function or class) applies to a finding in a source language ASH can parse. Package-scoped suppressions do not apply: a gitleaks finding is about a file, not a dependency. `global_settings.ignore_paths` removes gitleaks findings under those paths, and findings inside ASH's own output directory are always removed.
+Rule, path and line suppressions apply. A `symbol` suppression (the enclosing function or class) applies to a finding in a source language ASH can parse. Package-scoped suppressions do not apply: a gitleaks finding is about a file, not a dependency. `global_settings.ignore_paths` removes gitleaks findings under those paths, and findings inside ASH's own output directory are always removed, except in the files ASH extracted from archives and notebooks.
 
 ## Exit codes
 
@@ -90,5 +90,5 @@ ASH runs `gitleaks --exit-code=2`, because gitleaks otherwise exits 1 both when 
 ## Known limitations
 
 - Working tree only. Secrets that were committed and later removed are not reported; run `gitleaks git` separately if you need history.
-- gitleaks reads ASH's output directory when it sits inside the source tree (the default `.ash/ash_output`). Findings there are discarded by ASH, but the files are still read.
+- gitleaks reads ASH's output directory when it sits inside the source tree (the default `.ash/ash_output`), because it has no option to skip a directory. ASH discards the findings there, but the files are still read. That directory holds the files ASH extracts from archives and notebooks; gitleaks scans those copies separately, so a secret in an archive is reported once, at its extracted path.
 - The SARIF `semanticVersion` that gitleaks 8.30.1 writes is wrong (`v8.0.0`), so ASH removes it; the real version comes from `gitleaks --version`.
