@@ -2630,11 +2630,11 @@ def test_use_trees_rebases_docs_paths_onto_the_docs_root(tmp_path):
     package = dc.installed_package_dir()
     assert gate.REPO_ROOT == tmp_path.resolve()
     assert (
-        gate.CLI_REFERENCE_MD
-        == tmp_path.resolve() / "docs/content/docs/cli-reference.md"
+        gate.SCANNERS_REFERENCE_MD
+        == tmp_path.resolve() / "docs/content/reference/scanners.md"
     )
-    assert gate.README_TEMPLATE_MD == tmp_path.resolve() / "README.md.template"
-    assert gate.CLI_SCAN_PY == package / "cli" / "scan.py"
+    assert gate.INSTALL_MD == tmp_path.resolve() / "docs/content/how-to/install.md"
+    assert gate.MCP_SERVER_PY == package / "cli" / "mcp_server.py"
     assert gate.PYPROJECT_TOML == package.parent / "pyproject.toml"
 
 

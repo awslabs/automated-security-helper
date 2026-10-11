@@ -71,7 +71,6 @@ def gate():
 
 # Registered check name -> the test here that proves it can fail.
 NON_VACUITY_COVERAGE = {
-    "CLI flags in docs match source": "test_cli_flags_check_can_fail",
     "Reporter list in docs matches code": "test_reporter_check_can_fail_in_both_directions",
     "Scanner list in docs matches code": "test_scanner_check_can_fail",
     "MCP tool names in docs match code": "test_mcp_tool_check_can_fail",
@@ -209,7 +208,7 @@ def _generator():
 def test_reporter_check_passes_on_the_generated_table():
     """The gate must accept the table the generator writes.
 
-    The reporter-quick-reference block in output-formats.md is written by
+    The built-in reporters table in reference/reporters.md is written by
     scripts/generate_reporter_docs.py from the plugin registry. The gate used to
     build its reporter list from the fields declared on ReporterConfigSegment
     instead, a different source, and the two disagree about any reporter that
@@ -264,11 +263,11 @@ def test_reporter_check_can_fail_in_both_directions(gate, tmp_path, monkeypatch)
     names = sorted(gate.reporter_names())
 
     def publish(rows):
-        doc = tmp_path / "output-formats.md"
-        lines = ["| Format | File extension |", "|--------|----------------|"]
+        doc = tmp_path / "reporters.md"
+        lines = ["| Reporter | File extension |", "|----------|----------------|"]
         lines += [f"| {r} | `.x` |" for r in rows]
         doc.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        monkeypatch.setattr(gate, "OUTPUT_FORMATS_MD", doc)
+        monkeypatch.setattr(gate, "REPORTERS_REFERENCE_MD", doc)
         return gate.check_reporters()
 
     assert publish(names) == [], "the complete reporter table was rejected"
@@ -291,11 +290,11 @@ def test_reporter_check_fails_when_a_real_row_is_deleted(gate, tmp_path, monkeyp
     reads, so on its own it cannot tell a working comparison from a list compared
     with itself. Here the doc side is the committed page with one row removed.
     """
-    real = gate.OUTPUT_FORMATS_MD.read_text(encoding="utf-8")
+    real = gate.REPORTERS_REFERENCE_MD.read_text(encoding="utf-8")
     row = next(line for line in real.splitlines() if "(`unused-suppressions`)" in line)
-    doc = tmp_path / "output-formats.md"
+    doc = tmp_path / "reporters.md"
     doc.write_text(real.replace(row + "\n", ""), encoding="utf-8")
-    monkeypatch.setattr(gate, "OUTPUT_FORMATS_MD", doc)
+    monkeypatch.setattr(gate, "REPORTERS_REFERENCE_MD", doc)
 
     failures = gate.check_reporters()
     assert any("'unused-suppressions'" in f and "no row" in f for f in failures), (
@@ -398,17 +397,14 @@ def test_declared_reporter_fields_match_the_builtin_registry(gate):
 
 
 def test_scanner_check_can_fail(gate, tmp_path, monkeypatch):
-    """Also pins that the check reads the TEMPLATE, not the generated README."""
-    from automated_security_helper.config.ash_config import ScannerConfigSegment
-
-    names = sorted(gate._segment_names(ScannerConfigSegment))
-    doc = tmp_path / "README.md.template"
+    names = sorted(gate.scanner_names())
+    doc = tmp_path / "scanners.md"
 
     def publish(rows):
-        lines = ["| Scanner | Type |", "|---------|------|"]
-        lines += [f"| {r} | SAST |" for r in rows]
+        lines = ["| Scanner | Tool type |", "|---------|-----------|"]
+        lines += [f"| `{r}` | SAST |" for r in rows]
         doc.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        monkeypatch.setattr(gate, "README_TEMPLATE_MD", doc)
+        monkeypatch.setattr(gate, "SCANNERS_REFERENCE_MD", doc)
         return gate.check_scanners()
 
     assert publish(names) == [], "the complete scanner table was rejected"
@@ -416,18 +412,25 @@ def test_scanner_check_can_fail(gate, tmp_path, monkeypatch):
     assert publish(names + ["gosec"]), "a row naming a nonexistent scanner was accepted"
 
 
-def test_scanner_check_reads_the_editable_file_not_the_generated_one(gate):
-    """README.md is generated from README.md.template; the gate must name the source.
+def test_scanner_check_passes_on_the_generated_page_and_fails_without_a_real_row(
+    gate, tmp_path, monkeypatch
+):
+    """Against the committed page. The community scanners are rows there and are not
+    fields of ScannerConfigSegment, so the code side must include them: deleting
+    trivy-repo's row must fail, and the page as generated must pass."""
+    assert gate.check_scanners() == []
+    names = gate.scanner_names()
+    assert {"bandit", "trivy-repo"} <= set(names), sorted(names)
 
-    Sending a contributor to README.md means their fix is discarded the next time
-    a release renders the template over it. This asserts the path constant the
-    name checks use, so a change back to the generated file is caught here rather
-    than by someone's edit going missing after a release.
-    """
-    assert gate.README_TEMPLATE_MD.name == "README.md.template"
-    assert gate.README_TEMPLATE_MD.is_file()
-    # The version check is the one legitimate reader of the generated file.
-    assert gate.README_MD.name == "README.md"
+    real = gate.SCANNERS_REFERENCE_MD.read_text(encoding="utf-8")
+    row = next(
+        line for line in real.splitlines() if line.startswith("| [`trivy-repo`]")
+    )
+    doc = tmp_path / "scanners.md"
+    doc.write_text(real.replace(row + "\n", ""), encoding="utf-8")
+    monkeypatch.setattr(gate, "SCANNERS_REFERENCE_MD", doc)
+    failures = gate.check_scanners()
+    assert any("'trivy-repo'" in f and "no row" in f for f in failures), failures
 
 
 def test_mcp_tool_check_can_fail(gate, tmp_path, monkeypatch):
@@ -456,23 +459,37 @@ def test_mcp_tool_check_can_fail(gate, tmp_path, monkeypatch):
         "tool is exactly what the regex this replaced could not see"
     )
 
-    doc = tmp_path / "README.md.template"
+    doc = tmp_path / "mcp-tools.md"
 
-    def publish(rows):
-        lines = ["| Tool | Description |", "|------|-------------|"]
-        lines += [f"| `{r}` | does a thing |" for r in rows]
-        doc.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        monkeypatch.setattr(gate, "README_TEMPLATE_MD", doc)
+    def publish(sections):
+        body = "# MCP tools reference\n\n"
+        body += "".join(f"## {name}\n\nDoes a thing.\n\n" for name in sections)
+        body += "## Resources\n\n## Severity levels\n"
+        doc.write_text(body, encoding="utf-8")
+        monkeypatch.setattr(gate, "MCP_TOOLS_REFERENCE_MD", doc)
         return gate.check_mcp_tools()
 
-    assert publish(sorted(found)) == [], "the complete tool table was rejected"
+    assert publish(sorted(found)) == [], (
+        "the complete set of tool sections was rejected"
+    )
     # The plain-def tool specifically: undocumenting it must now be caught.
-    assert publish(["async_tool", "bare_decorator_tool"]), (
-        "a plain `def` tool missing from the table was accepted"
-    )
-    assert publish(sorted(found) + ["deleted_tool"]), (
-        "a table row naming a nonexistent tool was accepted"
-    )
+    missing = publish(["async_tool", "bare_decorator_tool"])
+    assert any("'plain_tool'" in f for f in missing), missing
+    ghost = publish(sorted(found) + ["deleted_tool"])
+    assert any("## deleted_tool" in f and "left behind" in f for f in ghost), ghost
+
+
+def test_mcp_tool_check_passes_on_the_generated_page_and_fails_without_a_section(
+    gate, tmp_path, monkeypatch
+):
+    assert gate.check_mcp_tools() == []
+    real = gate.MCP_TOOLS_REFERENCE_MD.read_text(encoding="utf-8")
+    assert "\n## validate_config\n" in real
+    doc = tmp_path / "mcp-tools.md"
+    doc.write_text(real.replace("\n## validate_config\n", "\n### validate_config\n"))
+    monkeypatch.setattr(gate, "MCP_TOOLS_REFERENCE_MD", doc)
+    failures = gate.check_mcp_tools()
+    assert any("'validate_config'" in f and "has no" in f for f in failures), failures
 
 
 def test_a_missing_table_fails_closed(gate, tmp_path, monkeypatch):
@@ -485,47 +502,27 @@ def test_a_missing_table_fails_closed(gate, tmp_path, monkeypatch):
     """
     assert gate.table_first_column("no tables here at all", "Format") is None
 
-    doc = tmp_path / "output-formats.md"
-    doc.write_text("# Output formats\n\nProse, no table.\n", encoding="utf-8")
-    monkeypatch.setattr(gate, "OUTPUT_FORMATS_MD", doc)
+    doc = tmp_path / "reporters.md"
+    doc.write_text("# Reporters\n\nProse, no table.\n", encoding="utf-8")
+    monkeypatch.setattr(gate, "REPORTERS_REFERENCE_MD", doc)
     failures = gate.check_reporters()
     assert failures, "a document with no table at all was accepted"
     assert "has no table" in failures[0]
 
     # A header row with no data rows is the same hazard.
     doc.write_text(
-        "| Format | File extension |\n|--------|----------------|\n", encoding="utf-8"
+        "| Reporter | File extension |\n|----------|----------------|\n",
+        encoding="utf-8",
     )
     empty = gate.check_reporters()
     assert empty, "a table with no data rows was accepted"
 
-
-def test_cli_flags_check_can_fail(gate, tmp_path, monkeypatch):
-    """Including a flag declared only inside typer's combined `--on/--off` form.
-
-    The pattern this replaced required the flag to be the entire quoted string,
-    so neither half of `"--python-only/--full"` was ever extracted. That is also
-    why skip_flags was dead: it listed `--no-progress`, which the old pattern
-    could not produce, so the entry could never match anything.
-    """
-    source = tmp_path / "scan.py"
-    source.write_text('opt = typer.Option("--python-only/--full-scan")\n', "utf-8")
-    monkeypatch.setattr(gate, "CLI_SCAN_PY", source)
-
-    docs = tmp_path / "cli-reference.md"
-    docs.write_text("| `--python-only` | does a thing |\n", encoding="utf-8")
-    monkeypatch.setattr(gate, "CLI_REFERENCE_MD", docs)
-
-    failures = gate.check_cli_flags()
-    assert any("--full-scan" in f for f in failures), (
-        f"a flag declared only in combined form was not extracted: {failures}"
-    )
-
-    docs.write_text(
-        "| `--python-only` | does a thing |\n| `--full-scan` | the other half |\n",
-        encoding="utf-8",
-    )
-    assert gate.check_cli_flags() == [], "documenting both halves still failed"
+    # And an MCP tools page with no tool sections.
+    page = tmp_path / "mcp-tools.md"
+    page.write_text("# MCP tools reference\n\n## Resources\n", encoding="utf-8")
+    monkeypatch.setattr(gate, "MCP_TOOLS_REFERENCE_MD", page)
+    no_sections = gate.check_mcp_tools()
+    assert no_sections and "has no '## <tool>' sections" in no_sections[0]
 
 
 def test_suppression_check_can_fail(gate, tmp_path, monkeypatch):
@@ -557,10 +554,14 @@ def test_plugin_options_check_can_fail(gate, tmp_path, monkeypatch):
 
 
 def test_version_check_can_fail(gate, tmp_path, monkeypatch):
-    doc = tmp_path / "index.md"
-    doc.write_text("Install ASH at `@v0.0.1-not-the-version`\n", encoding="utf-8")
-    monkeypatch.setattr(gate, "DOCS_INDEX_MD", doc)
-    assert gate.check_version_consistency(), "an outdated version tag was accepted"
+    assert gate.check_version_consistency() == [], "the committed pins were rejected"
+    doc = tmp_path / "install.md"
+    doc.write_text("Install ASH at `@v0.0.1`\n", encoding="utf-8")
+    monkeypatch.setattr(gate, "INSTALL_MD", doc)
+    failures = gate.check_version_consistency()
+    assert any("install.md" in f and "@v0.0.1" in f for f in failures), failures
+    doc.write_text("Install ASH from the main branch.\n", encoding="utf-8")
+    assert any("does not reference" in f for f in gate.check_version_consistency())
 
 
 # ---------------------------------------------------------------------------
@@ -595,7 +596,7 @@ def test_the_md_corpus_reaches_past_the_docs_directory(gate):
 
 
 def test_the_md_corpus_includes_the_templates_docs_are_generated_from(gate):
-    """Ten docs are rendered from a sibling .template; that is the editable file.
+    """Docs rendered from a sibling .template are edited in the template.
 
     Checking only the rendered doc reports drift against a path where a fix does
     not survive. This is the same defect as the name checks reading README.md
@@ -604,18 +605,34 @@ def test_the_md_corpus_includes_the_templates_docs_are_generated_from(gate):
     Not hypothetical: the change that widened this corpus initially edited
     docs/content/faq.md and left docs/content/faq.md.template stale, and
     tests/unit/test_version_template_round_trip.py is what caught it.
+
+    The expected templates come from scripts/version_template_manager.py's own
+    target list, so a page that gains or loses a template changes this test's
+    expectation without an edit here.
     """
+    spec = importlib.util.spec_from_file_location(
+        "_ash_version_template_manager",
+        REPO_ROOT / "scripts" / "version_template_manager.py",
+    )
+    assert spec and spec.loader
+    manager_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(manager_module)
+    targets = manager_module.VersionTemplateManager(REPO_ROOT).target_files
+    expected = {
+        f"{target}.template"
+        for target in targets
+        if (REPO_ROOT / f"{target}.template").is_file()
+    }
+    assert "README.md.template" in expected, sorted(expected)
+    assert len(expected) > 1, sorted(expected)
+
     files = {
         path.relative_to(gate.REPO_ROOT).as_posix() for path in gate.collect_md_files()
     }
-
     templates = {f for f in files if f.endswith(".md.template")}
-    assert templates, (
-        "no .md.template file was collected, so a stale list in a template is "
-        "invisible to every check that walks this corpus"
+    assert expected <= templates, (
+        f"templates the release renders but no check reads: {sorted(expected - templates)}"
     )
-    assert "docs/content/faq.md.template" in templates
-    assert "README.md.template" in templates
 
     # Each collected template's rendered sibling must be collected too, so the
     # two are never checked in isolation from one another.
