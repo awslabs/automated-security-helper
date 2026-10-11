@@ -120,17 +120,18 @@ Use mocks to isolate the code being tested from external dependencies. This make
 
 **Good Example:**
 ```python
-def test_scanner_with_mock_subprocess(mocker):
-    # Mock subprocess.run to return a predefined result
-    mock_run = mocker.patch("subprocess.run")
-    mock_run.return_value = subprocess.CompletedProcess(
-        args=["bandit", "-r", "test.py"],
-        returncode=0,
-        stdout="No issues found.",
-        stderr="",
+def test_scanner_with_mocked_tool_run(mocker):
+    # Build the object under test first: construction can probe tools, and a probe
+    # that reaches a stand-in records a made-up answer for the whole worker.
+    scanner = BanditScanner()
+    # Patch the scanner's own seam for running a tool, not the standard library's
+    # subprocess.run, which every caller in the process shares.
+    mock_run = mocker.patch.object(
+        scanner,
+        "_run_subprocess",
+        return_value={"stdout": "No issues found.", "stderr": ""},
     )
 
-    scanner = BanditScanner()
     result = scanner.scan_file(Path("test.py"))
 
     assert len(result.findings) == 0
@@ -241,32 +242,32 @@ class TestBanditScanner:
         assert scanner.is_enabled()
 
     def test_scan_python_file(self, temp_python_file, mocker):
-        # Mock subprocess.run to return a predefined result
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["bandit", "-r", "test.py"],
-            returncode=0,
-            stdout=json.dumps(
-                {
-                    "results": [
-                        {
-                            "filename": "test.py",
-                            "line": 1,
-                            "issue_text": "Unsafe pickle usage",
-                            "issue_severity": "HIGH",
-                            "issue_confidence": "HIGH",
-                            "issue_cwe": "CWE-502",
-                            "test_id": "B301",
-                        }
-                    ]
-                }
-            ),
-            stderr="",
-        )
-
-        # Arrange
+        # Arrange: build the scanner before patching, then patch its own seam for
+        # running a tool rather than the standard library's subprocess.run.
         temp_python_file.write_text("import pickle\npickle.loads(b'')")
         scanner = BanditScanner()
+        mocker.patch.object(
+            scanner,
+            "_run_subprocess",
+            return_value={
+                "stdout": json.dumps(
+                    {
+                        "results": [
+                            {
+                                "filename": "test.py",
+                                "line": 1,
+                                "issue_text": "Unsafe pickle usage",
+                                "issue_severity": "HIGH",
+                                "issue_confidence": "HIGH",
+                                "issue_cwe": "CWE-502",
+                                "test_id": "B301",
+                            }
+                        ]
+                    }
+                ),
+                "stderr": "",
+            },
+        )
 
         # Act
         result = scanner.scan_file(temp_python_file)
