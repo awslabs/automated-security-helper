@@ -185,8 +185,9 @@
   removed; and with `fail_on_incomplete_scanners` on the scan exits 1 naming it.
 
 - **An archive inside an archive is recorded as not scanned.** Extraction is one level
-  deep, as before, but a member with a `.zip`, `.tar` or `.gz` suffix used to be left
-  out without a trace. It is now a refused member of its archive, with a warning, and
+  deep, as before, but a member named as an archive or compressed file (`.zip`,
+  `.tar`, `.gz`, `.tgz`, `.tar.bz2`, `.tar.xz`, `.jar`, `.whl`, `.7z`, `.rar` and the
+  like, in any case) used to be left out without a trace. It is now a refused member of its archive, with a warning, and
   does not change the exit code.
 
 - **Every input a converter did not read is in the reports.** The console summary,

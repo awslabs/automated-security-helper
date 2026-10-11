@@ -48,10 +48,32 @@ def _is_plain_gzip(name: str, head: bytes) -> bool:
     )
 
 
-#: The suffixes the converter selects archives on, and treats an archive member as a
-#: nested archive by. Compared lowercased against the last one only, so ``.tar.gz``
-#: is ``gz`` and ``.tgz`` is not an archive.
+#: The suffixes the converter selects archives in the tree on. Compared lowercased
+#: against the last one only, so ``.tar.gz`` is ``gz`` and ``.tgz`` is not selected.
 ARCHIVE_SUFFIXES = ("zip", "tar", "gz")
+
+#: The suffixes that mark an archive member as an archive or compressed file of its
+#: own. Kept apart from ARCHIVE_SUFFIXES, which decides what is extracted: any of
+#: these inside an archive is recorded as not scanned, because extraction is one
+#: level deep. Compared lowercased against the member's last suffix.
+NESTED_ARCHIVE_SUFFIXES = (
+    *ARCHIVE_SUFFIXES,
+    "tgz",
+    "bz2",
+    "tbz",
+    "tbz2",
+    "xz",
+    "txz",
+    "zst",
+    "lzma",
+    "7z",
+    "rar",
+    "jar",
+    "war",
+    "ear",
+    "whl",
+    "egg",
+)
 
 #: The options of ArchiveConverterConfigOptions that bound what extracting an archive
 #: can write. A config file inside the scanned tree can lower them but not raise
@@ -203,9 +225,9 @@ def _tar_members_within(
 
 
 def _is_archive_name(name: str) -> bool:
-    """Whether a member's name marks it as an archive, by the suffix convert() selects on."""
+    """Whether a member's name marks it as an archive or compressed file of its own."""
     base = name.replace("\\", "/").rsplit("/", 1)[-1]
-    return "." in base and base.rsplit(".", 1)[-1].lower() in ARCHIVE_SUFFIXES
+    return "." in base and base.rsplit(".", 1)[-1].lower() in NESTED_ARCHIVE_SUFFIXES
 
 
 # tarfile's "data" extraction filter refuses links that leave the destination, device
@@ -223,8 +245,9 @@ _MEMBER_SPARSE_BEYOND_SIZE = (
     "it is a sparse file whose map places data beyond the size it declares"
 )
 _MEMBER_NESTED_ARCHIVE = (
-    "it is named as an archive (.zip, .tar or .gz), and an archive inside an "
-    "archive is not extracted, so its contents are not scanned"
+    "it is named as an archive or compressed file (such as .zip, .tar.gz, .jar or "
+    ".7z), and an archive inside an archive is not extracted, so its contents are "
+    "not scanned"
 )
 
 _COPY_CHUNK = 1024 * 1024
@@ -386,9 +409,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         symlink or hard link, or a zip entry whose mode marks it a symlink), is not a
         regular file, is a sparse tar member whose map reaches past its declared
         size, or has a name that is absolute, contains ``..`` or would land outside
-        ``target_path``. A member named as an archive (a ``.zip``, ``.tar`` or ``.gz``
-        suffix, in any case) is refused as well: extraction is one level deep, and
-        the refusal is what reports its contents as not scanned. Members without a
+        ``target_path``. A member named as an archive or compressed file (a suffix in
+        ``NESTED_ARCHIVE_SUFFIXES``, in any case) is refused as well: extraction is
+        one level deep, and the refusal is what reports its contents as not scanned. Members without a
         scannable extension are left out silently, as before, so a refusal is only
         reported for a member that would otherwise have been extracted.
 

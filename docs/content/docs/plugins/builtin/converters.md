@@ -35,8 +35,10 @@ converters:
 ```
 
 **Key Features**:
-- One level of extraction. A member that is itself an archive (a `.zip`, `.tar` or
-  `.gz` suffix, in any case) is not extracted; it is recorded as not scanned.
+- One level of extraction. A member that is itself an archive or compressed file is
+  not extracted; it is recorded as not scanned. That is a last suffix, in any case,
+  of `.zip`, `.tar`, `.gz`, `.tgz`, `.bz2`, `.tbz`, `.tbz2`, `.xz`, `.txz`, `.zst`,
+  `.lzma`, `.7z`, `.rar`, `.jar`, `.war`, `.ear`, `.whl` or `.egg`.
 - Extraction limits, described below
 - Only members with a scannable extension are written, as regular files
 - Automatic cleanup after scanning
@@ -227,7 +229,7 @@ tree, the archive member's name where there is one, and the reason:
 "refused_inputs": [
   {"path": "notebooks/report.ipynb", "member": null, "reason": "it is a symbolic link"},
   {"path": "dist/app.tar", "member": "../setup.py", "reason": "its path contains a '..' component"},
-  {"path": "dist/app.zip", "member": "vendor/lib.tar.gz", "reason": "it is named as an archive (.zip, .tar or .gz), and an archive inside an archive is not extracted, so its contents are not scanned"},
+  {"path": "dist/app.zip", "member": "vendor/lib.tar.gz", "reason": "it is named as an archive or compressed file (such as .zip, .tar.gz, .jar or .7z), and an archive inside an archive is not extracted, so its contents are not scanned"},
   {"path": "data/dump.zip", "member": null, "reason": "its members declare more than 1073741824 bytes, the max_total_bytes extraction limit", "limit": "max_total_bytes", "scan_incomplete": true},
   {"path": "dist/old.tar", "member": null, "reason": "it could not be read as an archive (ReadError: unexpected end of data)", "scan_incomplete": true}
 ]
