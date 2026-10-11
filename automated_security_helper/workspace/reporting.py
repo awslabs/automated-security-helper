@@ -82,7 +82,9 @@ Failure modes and known limitations
   (:func:`refuse_linked_workspace_report_paths`). One that appears while the
   projects are scanned is refused when the report step starts, before anything is
   written; the results file has been written by then, with the exit code the
-  projects gave. See utils/report_path_links.py.
+  projects gave. A selected reporter's file name that is not a file name, for a
+  per-project reporter too, refuses the run before any project is scanned
+  (``ReportPathRefused``). See utils/report_path_links.py.
 * The per-project artefact paths in the manifest are derived from each reporter's
   configured ``extension``, which is how ``ReportPhase`` derives the filename it
   writes. A reporter that writes extra files under its own steam -- as
@@ -427,21 +429,27 @@ def _workspace_report_file_names(selection) -> List[str]:
     return names
 
 
-def _workspace_report_main_names(selection) -> List[str]:
-    """The report file (``ash.<extension>``) of each reporter that will emit one."""
+def _workspace_report_main_names(selection, every_behaviour: bool = False) -> List[str]:
+    """The report file (``ash.<extension>``) of each reporter that will emit one.
+
+    With ``every_behaviour``, of every selected reporter, including those that
+    write only in each project's own ``reports/``.
+    """
     return [
         reporter_file_name(instance)
         for instance, behaviour, skipped in selection
-        if skipped is None and behaviour in _EMITTING_BEHAVIOURS
+        if skipped is None and (every_behaviour or behaviour in _EMITTING_BEHAVIOURS)
     ]
 
 
-def _workspace_report_companion_names(selection) -> List[Tuple[str, str]]:
-    """``(reporter, name)`` for each file a reporter that will emit writes beside its report."""
+def _workspace_report_companion_names(
+    selection, every_behaviour: bool = False
+) -> List[Tuple[str, str]]:
+    """``(reporter, name)`` for each file such a reporter writes beside its report."""
     return [
         (_reporter_name(instance), name)
         for instance, behaviour, skipped in selection
-        if skipped is None and behaviour in _EMITTING_BEHAVIOURS
+        if skipped is None and (every_behaviour or behaviour in _EMITTING_BEHAVIOURS)
         for name in reporter_companion_file_names(instance)
     ]
 
@@ -461,10 +469,19 @@ def refuse_linked_workspace_report_paths(
     results file and the exit status cannot disagree. Nothing clears the
     workspace's ``reports/`` before the report step, so a link there now is a link
     there then. :func:`emit_workspace_reports` checks again before it writes. No
-    dependency validation, for the same reason as there, so the names checked are
-    those of every enabled reporter that writes a workspace-level file.
+    dependency validation, for the same reason as there, so the links checked are
+    at the files of every enabled reporter that writes a workspace-level file.
+
+    The file names of every selected reporter are checked as well, those that
+    write only in each project's ``reports/`` included: a name that is not a file
+    in a reports directory would otherwise be refused by each project's report
+    phase after that project was scanned. Like the rest of this step, the names
+    come from ASH's default config and ``--output-format``, not from a project's
+    config (see "Reporter enablement" above), so narrowing ``--output-format`` is
+    how to leave such a reporter out.
 
     Raises:
+        ReportPathRefused: A selected reporter's file name is not a file name.
         ReportPathLinkRefused: ``reports/``, one of those reporters' files or the
             manifest is a symlink or a directory junction.
     """
@@ -481,8 +498,8 @@ def refuse_linked_workspace_report_paths(
     )
     refuse_report_names_outside(
         Path(output_dir) / REPORTS_DIR_NAME,
-        _workspace_report_main_names(selection),
-        _workspace_report_companion_names(selection),
+        _workspace_report_main_names(selection, every_behaviour=True),
+        _workspace_report_companion_names(selection, every_behaviour=True),
     )
     refuse_linked_report_paths(
         Path(output_dir) / REPORTS_DIR_NAME, _workspace_report_file_names(selection)

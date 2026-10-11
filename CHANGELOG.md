@@ -789,7 +789,8 @@
   `/`, `\` or `..` that its config did not replace, as a third-party reporter's
   config may not) stops the run with exit 1 the same way, rather than leaving that
   report unwritten, and so does such a name among the files a reporter declares it
-  writes beside its report. A dangling link at `reports/` is refused the same way rather
+  writes beside its report. A workspace run refuses such a name before any project
+  is scanned, for a reporter that writes only per-project reports too. A dangling link at `reports/` is refused the same way rather
   than failing with `FileExistsError`, each write checks again that `reports/` is
   not a link, and the exit code is not read through a `reports/ash.sarif` link
   even when `fail_on_findings` is off.

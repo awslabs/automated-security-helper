@@ -20,12 +20,17 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Literal, Optional
 
 import pytest
+from pydantic import ConfigDict
 
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.base.reporter_plugin import ReporterWorkspaceBehaviour
+from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
+    ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
+)
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import ASHValidationError
 from automated_security_helper.plugin_modules.ash_builtin import ASH_REPORTERS
@@ -128,16 +133,17 @@ def _plan(tmp_path: Path) -> WorkspacePlan:
     )
 
 
-def _run(tmp_path: Path):
+def _run(tmp_path: Path, extra_reporters=(), output_formats=()):
     return execute_workspace(
         _plan(tmp_path),
         ProjectScanSettings(
             output_dir=tmp_path / "out",
             phases=("scan", "report"),
             max_parallel_projects=1,
+            output_formats=tuple(output_formats),
         ),
         orchestrator_factory=_Orchestrator.create,
-        reporter_classes=list(ASH_REPORTERS),
+        reporter_classes=[*ASH_REPORTERS, *extra_reporters],
     )
 
 
@@ -224,3 +230,49 @@ def test_a_link_at_a_per_project_reporters_name_is_not_examined(tmp_path):
     assert result.report_outcome.manifest_path is not None
     assert (_reports(tmp_path) / name).is_symlink()
     assert outside.read_text(encoding="utf-8") == MARKER
+
+
+class _EscapingNameConfig(ReporterPluginConfigBase):
+    """A default is not validated, so this reaches the name check unchanged."""
+
+    model_config = ConfigDict(validate_default=False)
+
+    name: Literal["escaping-per-project"] = "escaping-per-project"
+    extension: str = "../escaping-per-project.txt"
+    enabled: bool = True
+
+
+class _EscapingPerProject(ReporterPluginBase[_EscapingNameConfig]):
+    """A per-project reporter, so it writes only in each project's own reports/."""
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _EscapingNameConfig()
+        return super().model_post_init(context)
+
+    def report(self, model) -> str:  # pragma: no cover - refused before it runs
+        raise AssertionError("refused before any project is scanned")
+
+
+def test_a_per_project_reporters_name_outside_reports_refuses_before_any_project(
+    tmp_path,
+):
+    """Each project's report phase would refuse it, after that project's whole scan."""
+    with pytest.raises(
+        ASHValidationError, match=re.escape("'ash.../escaping-per-project.txt'")
+    ):
+        _run(tmp_path, extra_reporters=[_EscapingPerProject])
+
+    assert _Orchestrator.built == []
+
+
+def test_a_per_project_reporter_not_requested_is_not_examined(tmp_path):
+    """Narrowing --output-format past it lets the run go ahead."""
+    result = _run(
+        tmp_path, extra_reporters=[_EscapingPerProject], output_formats=["sarif"]
+    )
+
+    assert len(_Orchestrator.built) == 2
+    assert result.report_outcome is not None
