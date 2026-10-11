@@ -221,7 +221,12 @@ too, and so is a config file ASH cannot read itself. A config outside `--source-
 whose `extends` chain includes a file inside it is refused with exit 3 as well: a
 chain is read whole through `/src`, for a config inside `--source-dir`, or mounted
 whole from outside it. A file of the chain inside the scanned checkout may extend only
-files inside that checkout. A config the scanned
+files inside that checkout. Inside the container an `extends` entry is followed as
+written, from where the extending file is mounted, so an entry whose written path
+leaves the config's directory (`../cfg/base.yaml` from `cfg/ash.yaml`), or that climbs
+out with `..` after a link to a directory at another depth, would place its base outside
+`/ash-config`: the run is refused with exit 3 before anything is built, naming the
+entry. A config the scanned
 repository wrote keeps the limits a local scan gives it (see
 [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)):
 when the config or a file it extends is inside a git checkout, the one holding

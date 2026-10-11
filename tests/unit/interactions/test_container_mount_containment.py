@@ -353,6 +353,25 @@ CHAIN_LAYOUTS = [
     pytest.param("extends: deep/one-up.yaml\n", id="one-up-from-a-linked-dir"),
 ]
 
+#: Entries of ``operator/ash.yaml`` whose chain the host resolves inside the config's
+#: directory but whose container path, the entry followed as written from the
+#: extending file's mount, is outside /ash-config: (entry, the entry in the chain
+#: that leaves it).
+ESCAPING_CHAINS = [
+    # deep -> x/y/z, and climbs.yaml says ../../../top.yaml: /top.yaml inside.
+    pytest.param(
+        "deep/climbs.yaml", "../../../top.yaml", id="climbs-out-of-a-linked-dir"
+    ),
+    # The same climb onto a file that would sit inside the read-only /src mount.
+    pytest.param("deep/into-src.yaml", "../../../src/app.py", id="climbs-into-src"),
+    # Out of the config's directory and back in by its name: /operator/top.yaml.
+    pytest.param(
+        "../operator/top.yaml",
+        "../operator/top.yaml",
+        id="leaves-the-directory-and-comes-back-by-name",
+    ),
+]
+
 
 @pytest.fixture
 def tree(tmp_path) -> Dict[str, Path]:
@@ -426,6 +445,61 @@ class TestEachChainFileSitsWhereTheScanInsideReadsIt:
             "/" + posixpath.relpath(path.as_posix(), real_root) for path in inside.chain
         }
         assert read_inside == set(_mounts(cmd)) - {"/src", "/out"}
+
+
+class TestAChainThatWouldLeaveItsMountRootIsRefused:
+    """The container path of a base is the lexical join of the extending file's
+    container path and the entry, and the host confines the chain by real paths. A
+    chain where the two disagree about how far ``..`` climbs cannot be mounted where
+    the scan inside reads it, so it is refused with exit 3 before anything is
+    built, naming the entry."""
+
+    @pytest.mark.parametrize(("entry", "leaving"), ESCAPING_CHAINS)
+    def test_it_is_refused_before_anything_is_mounted(self, entry, leaving, tree):
+        ops = tree["operator"]
+        _operator_tree(ops)
+        config = ops / "ash.yaml"
+        config.write_text(f"extends: {entry}\n", encoding="utf-8")
+
+        refusal = rac.container_input_refusal(
+            tree["source"], tree["output"], str(config)
+        )
+
+        assert refusal is not None
+        assert f"extends: {leaving}" in refusal
+        assert CONFIG_ROOT in refusal
+        with pytest.raises(rac.ContainerInputError):
+            _assemble(tree["source"], tree["output"], config=str(config))
+
+    @pytest.mark.parametrize(("entry", "leaving"), ESCAPING_CHAINS)
+    def test_the_run_exits_3_without_building(self, entry, leaving, tree, commands):
+        ops = tree["operator"]
+        _operator_tree(ops)
+        config = ops / "ash.yaml"
+        config.write_text(f"extends: {entry}\n", encoding="utf-8")
+
+        result = rac.run_ash_container(
+            source_dir=str(tree["source"]),
+            output_dir=str(tree["output"]),
+            config=str(config),
+        )
+
+        assert result.returncode == 3, result.stderr
+        assert commands == []
+
+    def test_a_chain_inside_its_directory_is_mounted(self, tree):
+        """Control: one level down and back up stays under /ash-config."""
+        ops = tree["operator"]
+        _operator_tree(ops)
+        config = ops / "ash.yaml"
+        config.write_text("extends: x/y/z/one-up.yaml\n", encoding="utf-8")
+
+        cmd = _assemble(tree["source"], tree["output"], config=str(config))
+
+        assert _mounts(cmd)["/ash-config/x/y/near.yaml"]["source"] == str(
+            ops / "x" / "y" / "near.yaml"
+        )
+        _assert_documented_mounts(cmd, tree["source"], tree["output"])
 
 
 class TestChainFilesCannotCollide:

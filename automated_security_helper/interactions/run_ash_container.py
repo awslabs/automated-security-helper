@@ -1133,7 +1133,9 @@ def _extends_refs_of(path: Path) -> List[str]:
     return [ref.strip() for ref in refs if isinstance(ref, str) and ref.strip()]
 
 
-def _chain_placements(resolved: Path, destination: str) -> List[Tuple[Path, str]]:
+def _chain_placements(
+    resolved: Path, destination: str, mount_root: str
+) -> List[Tuple[Path, str]]:
     """Each file of a config's chain, with the container path the scan there reads it at.
 
     The scan inside resolves a base from the extending file's own path in the
@@ -1142,12 +1144,34 @@ def _chain_placements(resolved: Path, destination: str) -> List[Tuple[Path, str]
     while its content comes from where the host resolves the same entry: the
     real path of the extending file plus the entry, links followed. A base the
     host reaches through a link therefore still sits where the scan inside looks.
+
+    Every container path has to stay under *mount_root*, where the scan inside
+    confines the chain. The host confines it by real paths and the container path
+    is the entry as written, so the two can disagree: an entry that leaves the
+    config's directory and comes back by name, or a ``..`` after a link to a
+    directory at another depth. Such a chain is refused with ContainerInputError
+    naming the entry, before anything is mounted.
     """
+    from automated_security_helper.config.config_sources import EXTENDS_KEY
+
     placements: List[Tuple[Path, str]] = []
     placed: dict = {}
-    pending = [(resolved, destination)]
+    # (host file, its container path, the (extending file, entry) that named it)
+    pending: List[Tuple[Path, str, Tuple[Path, str] | None]] = [
+        (resolved, destination, None)
+    ]
     while pending:
-        host_file, inner = pending.pop()
+        host_file, inner, named_by = pending.pop()
+        if not inner.startswith(mount_root.rstrip("/") + "/"):
+            extending, ref = named_by if named_by is not None else (host_file, inner)
+            raise ContainerInputError(
+                f"'{EXTENDS_KEY}: {ref}' in {extending} names {host_file}, which "
+                f"would be mounted at {inner}, outside {mount_root}: inside the "
+                "container the entry is followed as written, from where the "
+                "extending file is mounted. Name the base by a path below the "
+                "config's own directory that does not go through a link to a "
+                "directory at another depth."
+            )
         if inner in placed:
             if placed[inner] != host_file:
                 raise ContainerInputError(
@@ -1163,6 +1187,7 @@ def _chain_placements(resolved: Path, destination: str) -> List[Tuple[Path, str]
                 (
                     (host_file.parent / ref).resolve(),
                     posixpath.normpath(posixpath.join(posixpath.dirname(inner), ref)),
+                    (host_file, ref),
                 )
             )
     return placements
@@ -1239,8 +1264,9 @@ def _host_file_in_container(
     those files are mounted, not the directory they are in. A chain that does not
     resolve on the host mounts the file alone: the scan inside reaches the same
     error and reports it with its own exit code. A chain with a base inside the
-    source directory, or with a file of the scanned checkout that extends a file
-    outside it, is refused with ContainerInputError.
+    source directory, with a file of the scanned checkout that extends a file
+    outside it, or with a file whose container path would be outside *mount_root*,
+    is refused with ContainerInputError.
 
     The path is resolved first, so a symlink is judged, and mounted, by its target.
     """
@@ -1262,7 +1288,7 @@ def _host_file_in_container(
             # Validated as the scan will validate it (confinement, bounds, cycles)
             # before anything is placed.
             resolve_config_document(resolved, confine_to=root)
-            placements = _chain_placements(resolved, inner_config)
+            placements = _chain_placements(resolved, inner_config, mount_root)
             _refuse_bases_inside_the_source(resolved, placements[1:], source)
             _refuse_repository_bases_reaching_out(placements, source)
         except ContainerInputError:
