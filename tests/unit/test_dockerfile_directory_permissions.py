@@ -262,3 +262,24 @@ def test_the_non_root_stage_ends_as_its_user(instructions):
     ]
 
     assert users[-1] == "${UID}:${GID}"
+
+
+def test_an_offline_image_keeps_its_database_root_owned(instructions):
+    """The non-root user gets the grype cache only in an image that updates it.
+
+    An offline image downloads the database at build time and never updates it at
+    scan time, so there is nothing for the scan user to write; the database a scan
+    trusts stays root's. The hand-over has to be skipped for OFFLINE=YES.
+    """
+    guarded = re.compile(
+        r'if \[ "\$\{OFFLINE\}" != "YES" \]; then\s+'
+        r"chown -R \$\{UID\}:\$\{GID\} \$\{GRYPE_DB_CACHE_DIR\}"
+    )
+    runs = [
+        instruction.text
+        for instruction in _non_root_instructions(instructions)
+        if instruction.keyword == "RUN" and "GRYPE_DB_CACHE_DIR" in instruction.text
+    ]
+
+    assert runs, "the non-root stage no longer hands over the grype cache"
+    assert all(guarded.search(text) for text in runs), runs

@@ -559,12 +559,17 @@ RUN adduser --disabled-password --disabled-login \
 #
 # GRYPE_DB_CACHE_DIR is handed to this user because grype's database update writes
 # it at scan time (utils/content_db_refresh.py); one owner, not writable by others.
+# Not in an offline image: its database was downloaded at build time and is never
+# updated at scan time, so it stays root's and the scan user can only read it.
 # ASH_BIN_PATH is handed over only for this stage's own `ash dependencies install`
 # below, which puts this user's cfn-nag binstub and its own copy of the pinned tools
 # there, and is given back to root right after it.
 RUN chown -R ${UID}:${GID} ${ASHUSER_HOME} /src /out && \
     chmod 750 -R ${ASHUSER_HOME} /src /out && \
-    chown -R ${UID}:${GID} ${GRYPE_DB_CACHE_DIR} ${ASH_BIN_PATH}
+    chown -R ${UID}:${GID} ${ASH_BIN_PATH} && \
+    if [ "${OFFLINE}" != "YES" ]; then \
+        chown -R ${UID}:${GID} ${GRYPE_DB_CACHE_DIR}; \
+    fi
 
 USER ${UID}:${GID}
 

@@ -77,12 +77,18 @@ The image keeps what a scan trusts out of reach of other users in the container:
 | Directory | Owner | Why |
 |---|---|---|
 | `/deps`, `/deps/.semgrep`, `/deps/.opengrep` (offline rules), `/ash`, `/.ash/bin` (bundled tools, first on `PATH`) | root, not writable by others | Nothing writes there at scan time |
-| `/deps/.grype` (grype's database) | the user the image runs as: root in `ci`, the unprivileged user in `non-root` | grype's database update writes it at scan time |
+| `/deps/.grype` (grype's database) | the user the image runs as: root in `ci`, the unprivileged user in `non-root`; root in an offline image | grype's database update writes it at scan time; an offline image never updates it |
 | `/src`, `/out` | writable by every user, with the sticky bit (`ci`); the unprivileged user (`non-root`) | A run mounts the source and the output here; without those mounts, the `ci` image may be started under any UID |
 
 Earlier images made `/deps`, its caches and `/.ash/bin` writable by every user. An image
 you extend with `--custom-containerfile` keeps these modes unless your Dockerfile
 changes them.
+
+Because only its own user may write the grype database cache, a `non-root` image started
+under a different UID than the one it was built with (`--container-uid`, or the host's)
+cannot update the database: grype then reports ERROR and the scan fails, rather than
+scanning against a database it could not refresh. Build the image with the UID it will
+run as, or use `ci`.
 
 ## Which Dockerfile ASH builds
 

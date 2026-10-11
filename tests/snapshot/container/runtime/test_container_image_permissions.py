@@ -21,7 +21,7 @@ The rule, per directory:
 - The grype database cache (and trivy's, where the image has one): written by the
   database update at scan time, so owned by the user the image runs as -- root in
   the ``ci`` stage, the unprivileged user in ``non-root`` -- and not writable by
-  others.
+  others. An offline image never updates it, so there it stays root's.
 - /src and /out may be writable by every user only with the sticky bit.
 """
 
@@ -56,6 +56,7 @@ ROOT_OWNED = (
 _PROBE = r"""
 set -eu
 echo "uid $(id -u)"
+echo "offline ${OFFLINE:-NO}"
 for d in /deps /deps/.grype /deps/.semgrep /deps/.opengrep /ash /.ash /.ash/bin \
          ${TRIVY_CACHE_DIR:-}; do
   if [ -e "$d" ]; then stat -c 'dir %n %u %a' "$d"; fi
@@ -78,7 +79,13 @@ def probe() -> Dict[str, List[str]]:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    lines: Dict[str, List[str]] = {"uid": [], "dir": [], "open": [], "owner": []}
+    lines: Dict[str, List[str]] = {
+        "uid": [],
+        "offline": [],
+        "dir": [],
+        "open": [],
+        "owner": [],
+    }
     for line in result.stdout.splitlines():
         kind, _, rest = line.partition(" ")
         if kind in lines:
@@ -111,7 +118,8 @@ def test_the_root_owned_directories_are_roots_and_closed(probe):
 
 
 def test_the_database_caches_belong_to_the_user_the_image_runs_as(probe):
-    run_as = int(probe["uid"][0])
+    """Or to root in an offline image, whose database is never updated at scan time."""
+    run_as = 0 if probe["offline"] == ["YES"] else int(probe["uid"][0])
     caches = {
         path: owner_mode
         for path, owner_mode in _dirs(probe).items()

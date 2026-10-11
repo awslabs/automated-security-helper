@@ -181,7 +181,10 @@
   the container could replace a bundled tool, the rules or the vulnerability database
   a later scan used. They are root-owned and writable by root only. The grype database
   cache is owned by the user the image runs as (root in `ci`, the unprivileged user in
-  `non-root`), because its update writes it at scan time. `/src` and `/out` stay
+  `non-root`), because its update writes it at scan time; in an offline image, which never
+  updates it, it stays root's. A `non-root` image started under another UID than it
+  was built with can therefore no longer update grype's database, and grype reports
+  ERROR, failing the scan, where it used to write the shared cache. `/src` and `/out` stay
   writable by every user in the `ci` stage, now with the sticky bit. See
   [Who can write to the image's directories](docs/content/docs/building-your-own-image.md#who-can-write-to-the-images-directories).
 - **`--log-level` is passed to the scan inside the container.** It was dropped; only
