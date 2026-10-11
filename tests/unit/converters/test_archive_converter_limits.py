@@ -53,6 +53,7 @@ from tests.utils.archive_builders import (
     incompressible,
     ordinary_source_files,
     sparse_tar_bytes,
+    sparse_tar_with_data_bytes,
     zip_bytes,
 )
 
@@ -489,6 +490,49 @@ class TestDeclaredSizes:
         converter.convert()
 
         self.assert_within_limits(converter)
+
+    @pytest.mark.parametrize(
+        "without_data_filter", [False, True], ids=["filter", "copy"]
+    )
+    @pytest.mark.parametrize("gz", TAR_KINDS)
+    def test_a_sparse_member_whose_map_passes_its_size_is_refused_before_any_copy(
+        self, gz, without_data_filter, tree, test_plugin_context, monkeypatch
+    ):
+        """The mapped data is in the stream, so only the refusal keeps it unwritten.
+
+        tarfile truncates the file to its declared size after copying the map, so the
+        bytes copied are counted at tarfile.copyfileobj, which copies every entry.
+        """
+        archive = tree / ("sparse.tar.gz" if gz else "sparse.tar")
+        archive.write_bytes(
+            sparse_tar_with_data_bytes(
+                "big.py", declared_size=1, map_length=2 * MEBIBYTE, gz=gz
+            )
+        )
+        copied = []
+        real_copy = tarfile.copyfileobj
+
+        def counting_copy(src, dst, length=None, *args, **kwargs):
+            copied.append(length)
+            return real_copy(src, dst, length, *args, **kwargs)
+
+        monkeypatch.setattr(tarfile, "copyfileobj", counting_copy, raising=True)
+        converter = converter_for(
+            test_plugin_context,
+            monkeypatch,
+            [archive],
+            without_data_filter=without_data_filter,
+            limits=self.LIMITS,
+        )
+
+        converter.convert()
+
+        assert [(r.member, r.limit) for r in converter.refused_inputs] == [
+            ("big.py", None)
+        ]
+        assert "sparse" in converter.refused_inputs[0].reason
+        assert copied == [], f"tarfile copied {copied} bytes for a refused member"
+        assert files_written(converter) == {}
 
     @pytest.mark.parametrize("gz", TAR_KINDS)
     def test_without_the_data_filter_a_sparse_member_writes_no_more_than_the_limits_allow(

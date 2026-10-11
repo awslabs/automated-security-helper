@@ -133,6 +133,30 @@ def sparse_tar_bytes(
     return gzip.compress(body, mtime=0) if gz else body
 
 
+def sparse_tar_with_data_bytes(
+    name: str, declared_size: int, map_length: int, gz: bool = False
+) -> bytes:
+    """A tar whose one sparse member maps and stores ``map_length`` zero bytes.
+
+    Unlike ``sparse_tar_bytes``, the data the map points at is in the stream, so
+    tarfile's ``extractall`` copies all ``map_length`` bytes without an error and
+    only then truncates the file to ``declared_size``: the final file size cannot
+    show the copy, and a check that refuses the member before extraction is the
+    only thing that prevents it. Zeros keep the gzip-compressed form small.
+    """
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        info = tarfile.TarInfo(name)
+        info.size = map_length
+        info.pax_headers = {
+            "GNU.sparse.map": f"0,{map_length}",
+            "GNU.sparse.size": str(declared_size),
+        }
+        archive.addfile(info, io.BytesIO(bytes(map_length)))
+    body = raw.getvalue()
+    return gzip.compress(body, mtime=0) if gz else body
+
+
 def incompressible(size: int, seed: int = 0) -> bytes:
     """``size`` bytes that deflate and gzip cannot shrink."""
     return random.Random(seed).randbytes(size)
