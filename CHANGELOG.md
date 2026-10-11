@@ -839,7 +839,8 @@
   holding only the refusal, so the host reports it with its message rather than as
   a missing results file. A record an earlier run
   left in a file read back with `--use-existing` is ignored, and is dropped when
-  the file is loaded, so reports do not repeat it. The inner run takes the ID out
+  the file is loaded, so reports do not repeat it; `ash merge` drops each shard's
+  records the same way. The inner run takes the ID out
   of its environment when it starts, and the scanner sandbox drops it, so the
   processes the inner run starts do not see it; a value that is not such an ID is
   reported and not used. The marker says whether the file is a complete account of

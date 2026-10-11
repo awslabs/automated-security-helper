@@ -177,6 +177,7 @@ from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.log import ASH_LOGGER, escape_markup, get_logger
+from automated_security_helper.utils.inner_run_outcome import without_run_records
 from automated_security_helper.utils.report_path_links import ReportPathRefused
 
 #: The filename every ASH scan writes its aggregated results to. A ``--results``
@@ -873,6 +874,10 @@ def merge_shard_results(
         _verify_shard_contributions(shards)
 
     merged = shards[0][1].model_copy(deep=True)
+    # Without each shard's records about its own run: its completion marker, a
+    # refusal and the reports it wrote describe that run, not this merge. See
+    # utils/inner_run_outcome.py.
+    merged.validation_checkpoints = without_run_records(merged.validation_checkpoints)
 
     for _, shard, _ in shards[1:]:
         if merged.sarif is None:
@@ -881,7 +886,9 @@ def merge_shard_results(
             merged.sarif.merge_sarif_report(shard.sarif)
             _merge_tool_extensions(merged, shard)
 
-        merged.validation_checkpoints.extend(shard.validation_checkpoints)
+        merged.validation_checkpoints.extend(
+            without_run_records(shard.validation_checkpoints)
+        )
         merged.used_suppressions.update(shard.used_suppressions)
 
         for name, converter_result in shard.converter_results.items():

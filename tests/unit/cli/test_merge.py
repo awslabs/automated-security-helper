@@ -451,6 +451,25 @@ class TestShardedEqualsUnsharded:
             name for name, entry in merged.scanner_results.items() if entry.excluded
         ] == []
 
+    def test_the_shards_run_records_are_not_merged(self):
+        """Each shard's completion marker, refusal record and report list is its own."""
+        shards = build_shards(3)
+        for index, shard in enumerate(shards):
+            shard.validation_checkpoints.extend(
+                [
+                    {"type": "run_completed", "metadata": {"run_id": f"{index}" * 32}},
+                    {"type": "report_path_refused", "message": f"shard {index}"},
+                    {"type": "reports_written", "metadata": {"files": ["ash.sarif"]}},
+                    {"type": "config_warning", "message": f"kept {index}"},
+                ]
+            )
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert [cp["type"] for cp in merged.validation_checkpoints] == [
+            "config_warning"
+        ] * 3
+
     def test_one_collapsed_sarif_run(self):
         # Shards share a single root, so one run is the honest shape. N runs would
         # describe a workspace that does not exist.
