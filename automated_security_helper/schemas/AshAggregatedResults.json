@@ -925,7 +925,7 @@
       "properties": {
         "max_compression_ratio": {
           "default": 100,
-          "description": "The most times its own size on disk that an archive's members may declare added up. An archive that declares more is not extracted.",
+          "description": "The most times its own size on disk that an archive's members may declare added up. An archive that declares more is not extracted. Checked only once the members declare more than 512 KiB in all.",
           "exclusiveMinimum": 0,
           "title": "Max Compression Ratio",
           "type": "integer"

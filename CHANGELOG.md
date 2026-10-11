@@ -153,8 +153,9 @@
 - **The archive converter enforces extraction limits, and an archive over one makes
   the scan incomplete.** `converters.archive.options` gains `max_members` (100000),
   `max_member_bytes` (256 MiB), `max_total_bytes` (1 GiB) and
-  `max_compression_ratio` (100), inclusive maximums checked against what every member
-  of an archive declares before anything is written. An archive over any of them is
+  `max_compression_ratio` (100, checked once the members declare more than 512 KiB
+  in all), inclusive maximums checked against what every member of an archive
+  declares before anything is written. An archive over any of them is
   not extracted at all, is recorded in `converter_results.archive.refused_inputs`
   with the limit named in `limit`, and counts as incomplete conversion: with
   `fail_on_incomplete_scanners` on (the default) the scan exits 1 and names the

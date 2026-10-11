@@ -31,7 +31,7 @@ converters:
       max_members: 100000             # members, directories included
       max_member_bytes: 268435456     # 256 MiB, one member's declared size
       max_total_bytes: 1073741824     # 1 GiB, all members' declared sizes added up
-      max_compression_ratio: 100      # that total over the archive's size on disk
+      max_compression_ratio: 100      # that total over the archive's size, above 512 KiB
 ```
 
 **Key Features**:
@@ -51,7 +51,7 @@ limits. Each is an inclusive maximum on what the archive declares:
 | `max_members`           | 100000              | the number of members, directories included             |
 | `max_member_bytes`      | 268435456 (256 MiB) | the size one member declares                            |
 | `max_total_bytes`       | 1073741824 (1 GiB)  | the sizes all members declare, added up                 |
-| `max_compression_ratio` | 100                 | that total divided by the archive's size on disk        |
+| `max_compression_ratio` | 100                 | that total divided by the archive's size on disk, once the total is over 512 KiB |
 
 Every member counts, including members that would not be extracted, because reading
 a compressed tar means decompressing every member to reach the next header. An
@@ -74,7 +74,11 @@ code compresses by a few times (2 MiB of ASH's own Python sources: 3.1 times as 
 zip, 3.7 as a tar.gz), while a file of zeros compresses by about 1000. Apache POI
 refuses a zip part that compresses better than 1%, a ratio of 100, by default; the
 ratio here is taken over the whole archive, so one very compressible member among
-ordinary ones does not reach it.
+ordinary ones does not reach it. The ratio is not checked until the members declare
+more than 512 KiB in all: below that an archive can write no more than 512 KiB
+whatever it compresses to, and a small fixture archive of indented JSON can compress
+140 times. POI likewise skips its ratio check for an entry of 100 KiB or less; the
+floor here is higher because it applies to a whole archive rather than one entry.
 
 **Who can raise a limit**: an operator, with `--config-overrides` (for example
 `--config-overrides converters.archive.options.max_total_bytes=4294967296`) or a

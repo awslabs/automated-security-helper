@@ -106,10 +106,21 @@ class ArchiveConverterConfigOptions(ConverterOptionsBase):
         Field(
             description=(
                 "The most times its own size on disk that an archive's members may "
-                "declare added up. An archive that declares more is not extracted."
+                "declare added up. An archive that declares more is not extracted. "
+                "Checked only once the members declare more than 512 KiB in all."
             )
         ),
     ] = 100
+
+
+#: The compression ratio is checked only once an archive's members declare more
+#: than this many bytes added up. Below it an archive writes at most this much,
+#: whatever it compresses to, and small archives of repetitive text (a fixtures
+#: directory of indented JSON) routinely compress better than 100 to 1: 313 KiB of
+#: JSON in a 2.3 KB zip is 139. Apache POI's ZipSecureFile skips its inflate-ratio
+#: check for an entry of 100 KiB or less; the ratio here is over a whole archive, a
+#: sum of entries, so the floor is higher.
+RATIO_FLOOR_BYTES = 512 * 1024
 
 
 class _ExtractionLimitExceeded(Exception):
@@ -159,7 +170,10 @@ class _ExtractionBudget:
                 f"its members declare more than {options.max_total_bytes} bytes, the "
                 "max_total_bytes extraction limit",
             )
-        if self.total > options.max_compression_ratio * self.archive_size:
+        if (
+            self.total > RATIO_FLOOR_BYTES
+            and self.total > options.max_compression_ratio * self.archive_size
+        ):
             raise _ExtractionLimitExceeded(
                 "max_compression_ratio",
                 f"its members declare more than {options.max_compression_ratio} times "
