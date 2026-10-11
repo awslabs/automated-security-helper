@@ -20,6 +20,7 @@ from automated_security_helper.utils.inner_run_outcome import record_reports_wri
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_path_links import (
     ensure_reports_dir,
+    refuse_colliding_report_names,
     refuse_linked_report_paths,
     refuse_report_names_outside,
 )
@@ -354,6 +355,19 @@ class ReportPhase(EnginePhase):
                 )
                 for plugin_instance in enabled_reporters
                 for name in reporter_companion_file_names(plugin_instance)
+            ],
+        )
+        # Nor two reporters writing one file, where the one that runs last would
+        # replace the other's report: an extension naming another reporter's file,
+        # such as a CycloneDX report written to ash.sarif, which the exit code reads.
+        refuse_colliding_report_names(
+            report_dir,
+            [
+                (
+                    f"the {reporter_format_name(plugin_instance) or type(plugin_instance).__name__} reporter",
+                    reporter_file_names(plugin_instance),
+                )
+                for plugin_instance in enabled_reporters
             ],
         )
         refuse_linked_report_paths(

@@ -884,6 +884,18 @@
   such a name before any project is scanned, for a reporter that writes only
   per-project reports too.
 
+- **Two reporters that would write the same file stop the run with exit 1, before
+  either writes.** A config whose `extension` named another reporter's file, such as
+  `reporters.cyclonedx.extension: sarif`, used to let the reporter that ran last
+  replace the other's report, so `reports/ash.sarif` could hold a CycloneDX document
+  and `reports/ash.ghas.sarif` could be emptied. The error names both reporters and
+  the file. A file a reporter writes beside its report counts too, and names are
+  compared ignoring case and trailing dots and spaces, as case-insensitive file
+  systems and Windows compare them. A reporter that writes one of its own files
+  itself, as the Bedrock summary reporter does, is not refused. A workspace run is
+  refused before any project is scanned, including for a name that collides with
+  `reports/workspace-reports.json`.
+
 - **The exit code counts `reports/ash.sarif` only when the run wrote it.**
   `--use-existing` keeps `reports/`, so when no SARIF reporter is selected the
   `ash.sarif` there is an earlier run's, and its findings, or its lack of them,

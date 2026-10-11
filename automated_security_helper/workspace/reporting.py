@@ -119,6 +119,7 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_path_links import (
     ensure_reports_dir,
+    refuse_colliding_report_names,
     refuse_linked_report_paths,
     refuse_report_names_outside,
 )
@@ -454,6 +455,25 @@ def _workspace_report_companion_names(
     ]
 
 
+def _workspace_report_writers(
+    selection, every_behaviour: bool = False
+) -> List[Tuple[str, Tuple[str, ...]]]:
+    """``(who, names)`` for each reporter that will write, as ``refuse_colliding_report_names`` takes them.
+
+    Of the reporters that emit a workspace-level file, with the manifest the step
+    writes beside them; with ``every_behaviour``, of every selected reporter, as
+    each project's report phase runs them, and without the manifest.
+    """
+    writers: List[Tuple[str, Tuple[str, ...]]] = [
+        (f"the {_reporter_name(instance)} reporter", reporter_file_names(instance))
+        for instance, behaviour, skipped in selection
+        if skipped is None and (every_behaviour or behaviour in _EMITTING_BEHAVIOURS)
+    ]
+    if not every_behaviour:
+        writers.append(("the workspace report step", (MANIFEST_FILENAME,)))
+    return writers
+
+
 def refuse_linked_workspace_report_paths(
     plan: WorkspacePlan,
     output_dir: Path,
@@ -482,6 +502,8 @@ def refuse_linked_workspace_report_paths(
 
     Raises:
         ReportPathRefused: A selected reporter's file name is not a file name.
+        ReportNameCollision: Two selected reporters would write the same file, or
+            a workspace-level reporter would write the manifest's.
         ReportPathLinkRefused: ``reports/``, one of those reporters' files or the
             manifest is a symlink or a directory junction.
     """
@@ -500,6 +522,15 @@ def refuse_linked_workspace_report_paths(
         Path(output_dir) / REPORTS_DIR_NAME,
         _workspace_report_main_names(selection, every_behaviour=True),
         _workspace_report_companion_names(selection, every_behaviour=True),
+    )
+    # Two reporters writing one file: in each project's reports/, where every
+    # selected reporter writes, and in the workspace's, beside the manifest.
+    refuse_colliding_report_names(
+        Path(output_dir) / REPORTS_DIR_NAME,
+        _workspace_report_writers(selection, every_behaviour=True),
+    )
+    refuse_colliding_report_names(
+        Path(output_dir) / REPORTS_DIR_NAME, _workspace_report_writers(selection)
     )
     refuse_linked_report_paths(
         Path(output_dir) / REPORTS_DIR_NAME, _workspace_report_file_names(selection)
@@ -603,6 +634,8 @@ def emit_workspace_reports(
     Raises:
         ReportPathRefused: A file name a reporter here would write is not a file
             name. Nothing is written.
+        ReportNameCollision: Two reporters here, or a reporter and the manifest,
+            would write the same file. Nothing is written.
         ReportPathLinkRefused: ``reports/``, a file a reporter here would write or
             the manifest is a link. Nothing is written.
     """
@@ -640,6 +673,7 @@ def emit_workspace_reports(
         _workspace_report_main_names(selection),
         _workspace_report_companion_names(selection),
     )
+    refuse_colliding_report_names(reports_dir, _workspace_report_writers(selection))
     refuse_linked_report_paths(reports_dir, _workspace_report_file_names(selection))
 
     for instance, behaviour, skipped in selection:

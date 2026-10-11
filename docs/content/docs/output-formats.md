@@ -67,6 +67,14 @@ process reads the inner run's results back only when they carry a `run_completed
 checkpoint with the ID it gave that run (`ASH_OUTER_RUN_ID`); otherwise it exits 1,
 saying the inner run did not complete.
 
+Each reporter writes files of its own. When two enabled reporters would write the
+same file, for example because `reporters.cyclonedx.extension: sarif` gives the
+CycloneDX report the SARIF report's name, the run exits 1 before either writes, and
+the error names both reporters and the file. Names are compared ignoring case and
+trailing dots and spaces, as case-insensitive file systems and Windows compare them.
+In workspace mode that covers `reports/workspace-reports.json` too, and the run is
+refused before any project is scanned.
+
 ---
 
 ## Flat JSON

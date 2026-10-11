@@ -41,6 +41,12 @@ suffix, and the Bedrock summary reporter's file name options are replaced the sa
 way (``base/options.py:report_file_name``); a config that skips that validation,
 or a reporter that declares a fixed name of its own, does. Links above the reports
 directory are not examined here.
+
+Two reporters that would write the same file refuse the run as well
+(``refuse_colliding_report_names``, ``ReportNameCollision``), since the one that
+runs last would replace the other's report: an ``extension`` naming another
+reporter's file, for example, would put a CycloneDX document at
+``reports/ash.sarif``, which the exit code reads.
 """
 
 from __future__ import annotations
@@ -48,7 +54,7 @@ from __future__ import annotations
 import os
 import stat
 from pathlib import Path
-from typing import Iterable, Optional, Tuple, Union
+from typing import Dict, Iterable, Optional, Tuple, Union
 
 from automated_security_helper.core.exceptions import ASHValidationError
 
@@ -80,6 +86,13 @@ COMPANION_NAME_REMEDY = (
 )
 
 
+#: Ends a refusal of two reporters that would write the same file.
+COLLISION_REMEDY = (
+    "ASH does not let one reporter's file replace another's. Give one of them a "
+    "different extension or file name in its configuration, or disable one of them."
+)
+
+
 class ReportPathRefused(ASHValidationError):
     """ASH would write a report somewhere other than a file in the reports directory.
 
@@ -95,6 +108,13 @@ class ReportPathLinkRefused(ReportPathRefused):
     """A path ASH would write a report to is a link."""
 
     def __init__(self, found: str, remedy: str = REMEDY):
+        super().__init__(found, remedy)
+
+
+class ReportNameCollision(ReportPathRefused):
+    """Two reporters would write the same file in the reports directory."""
+
+    def __init__(self, found: str, remedy: str = COLLISION_REMEDY):
         super().__init__(found, remedy)
 
 
@@ -229,3 +249,41 @@ def refuse_report_names_outside(
                 f"its report is not a file in {directory}",
                 COMPANION_NAME_REMEDY,
             )
+
+
+def _same_file_key(name: str) -> str:
+    """``name`` as a case-insensitive file system, or Windows, compares it."""
+    return name.rstrip(". ").casefold()
+
+
+def refuse_colliding_report_names(
+    report_dir: PathLike, writers: Iterable[Tuple[str, Iterable[str]]]
+) -> None:
+    """Raise ReportNameCollision if two writers would write the same file.
+
+    ``writers`` are ``(who, names)`` pairs, such as ``("the sarif reporter",
+    reporter_file_names(instance))``: the files each writer puts in the reports
+    directory. The writer that runs last would replace the other's file, so the run
+    is refused before either writes. Names are compared case-folded and without
+    trailing dots and spaces, since case-insensitive file systems and Windows open
+    the same file for both. One writer naming a file twice is not a collision.
+    """
+    directory = Path(report_dir).as_posix()
+    seen: Dict[str, Tuple[int, str, str]] = {}
+    for index, (who, names) in enumerate(writers):
+        for name in names:
+            first = seen.setdefault(_same_file_key(name), (index, who, name))
+            if first[0] == index:
+                continue
+            _, first_who, first_name = first
+            if first_name == name:
+                found = (
+                    f"{first_who} and {who} would both write {name!r} in {directory}"
+                )
+            else:
+                found = (
+                    f"{first_who} would write {first_name!r} and {who} {name!r} in "
+                    f"{directory}, which name one file where file names ignore case "
+                    "and trailing dots and spaces"
+                )
+            raise ReportNameCollision(found)
