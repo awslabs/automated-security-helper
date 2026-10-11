@@ -29,9 +29,11 @@ configuration turns it on: `enabled: true` in its section of a config file you p
 with `--config` or `ASH_CONFIG`, or `--config-overrides
 reporters.<name>.enabled=true`.
 
-- A scan checks a reporter's dependencies (STS, Security Hub's `DescribeHub`,
-  Bedrock's model list) only when it will run that reporter: an enabled reporter
-  that the requested `--output-formats` leave out is neither checked nor run.
+- An enabled AWS reporter runs in a scan that passes no `--output-formats`.
+  `--output-formats` (`-f`) takes only the formats `ash scan --help` lists, and
+  none of them is an AWS reporter, so a scan that passes it neither checks nor
+  runs any AWS reporter. A reporter's dependency check (STS, Security Hub's
+  `DescribeHub`, Bedrock's model list) runs only for a reporter the scan will run.
 - `ash report --format <name>` refuses an AWS reporter that is not enabled, and
   exits 1 with the setting to change.
 
@@ -61,9 +63,10 @@ reporters.<name>.enabled=true`.
          aws_region: "us-east-1"
    ```
 
-3. **Run scan with AWS reporters**:
+3. **Run scan with AWS reporters** (no `--output-formats`, so every enabled
+   reporter runs):
    ```bash
-   ash /path/to/code --reporters aws-security-hub,s3-reporter
+   ash scan --source-dir /path/to/code --config ash-config.yml
    ```
 
 ### Enterprise Setup

@@ -532,3 +532,22 @@ class TestWorkspaceReporting:
             assert skipped == [SKIP_NOT_REQUESTED]
         assert requests == []
         assert sessions == []
+
+
+def test_no_output_format_names_an_aws_reporter():
+    """docs/content/docs/plugins/aws/index.md says `-f` never selects an AWS reporter.
+
+    If an ExportFormat ever names one, `ash scan -f <it>` would run it, and that
+    page, and the CHANGELOG entry for the default-off change, need rewriting.
+    """
+    from automated_security_helper.core.enums import ExportFormat
+
+    aws_names = {config_class().name for config_class in _aws_reporter_configs()}
+
+    assert aws_names == {
+        "aws-security-hub",
+        "bedrock-summary-reporter",
+        "cloudwatch-logs",
+        "s3",
+    }
+    assert aws_names.isdisjoint(member.value for member in ExportFormat)
