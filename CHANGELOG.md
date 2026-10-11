@@ -1268,7 +1268,16 @@
   completeness gate lets through. The consolidated row now says
   `dependencies_satisfied: false` for a MISSING scanner, in
   `ash_aggregated_results.json` and the S3 and CloudWatch payloads, and `ash.flat.json`
-  says `dependencies_missing: true`. Rows of other scanners are unchanged.
+  says `dependencies_missing: true`.
+
+- **An excluded scanner's results row says it was excluded.** Consolidating the
+  results rebuilt each `scanner_results` row from the unified metrics alone, so every
+  field they do not compute was dropped: a scanner left out by `--exclude-scanners`,
+  `--scanners` or a disabled config was reported `excluded: false`, the same as a
+  scanner that ran with nothing to scan, and `exit_code` and any extra field were
+  lost. The row is now built from the existing one with only the status, counts and
+  duration replaced, so an excluded scanner says `excluded: true` in
+  `ash_aggregated_results.json` and the S3 and CloudWatch payloads.
 
 - **Offline mode turns off the scanner tools' own update, version and telemetry
   checks.** Measured with a refusing proxy and empty tool caches, an `--offline` scan

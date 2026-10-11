@@ -41,7 +41,7 @@
       "threshold_source": "global",
       "actionable": 0,
       "status": "SKIPPED",
-      "excluded": false,
+      "excluded": true,
       "dependencies_missing": false,
       "duration": 0.0,
       "targets_attempted": null,

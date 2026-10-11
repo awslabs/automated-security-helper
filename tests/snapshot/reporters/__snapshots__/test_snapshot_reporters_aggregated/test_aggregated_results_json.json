@@ -452,7 +452,7 @@
     "cdk-nag": {
       "status": "SKIPPED",
       "dependencies_satisfied": true,
-      "excluded": false,
+      "excluded": true,
       "severity_counts": {
         "suppressed": 0,
         "critical": 0,

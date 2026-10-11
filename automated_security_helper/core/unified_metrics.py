@@ -507,6 +507,35 @@ def _populate_summary_stats_from_unified_metrics(
     return aggregated_results
 
 
+#: Fields of the legacy two-target row (ScannerStatusInfo) that consolidation replaces
+#: rather than carries: the per-target children are what the metrics combine.
+_PER_TARGET_ROW_FIELDS = frozenset({"source", "converted"})
+
+
+def _row_fields(row: object) -> dict:
+    """The fields a scanner_results row was given, extras included.
+
+    Only the fields that were set, so a field the row never had keeps its default and
+    stays out of dumps that exclude unset fields. A dict arrives from JSON, a legacy
+    ScannerStatusInfo from a writer that assigned the old shape; both are read the
+    same way, without their per-target children.
+    """
+    if row is None:
+        return {}
+    if isinstance(row, dict):
+        fields = dict(row)
+    else:
+        names = set(getattr(row, "model_fields_set", ())) | set(
+            getattr(row, "model_extra", None) or {}
+        )
+        fields = {name: getattr(row, name) for name in names}
+    return {
+        name: value
+        for name, value in fields.items()
+        if name not in _PER_TARGET_ROW_FIELDS
+    }
+
+
 def _populate_scanner_results_from_unified_metrics(
     aggregated_results: AshAggregatedResults, unified_metrics: List[ScannerMetrics]
 ) -> AshAggregatedResults:
@@ -548,13 +577,13 @@ def _populate_scanner_results_from_unified_metrics(
         else:
             status = ScannerStatus.PASSED  # Default fallback
 
-        # The scan phase's reason for a MISSING row survives the replacement below:
-        # the metrics know the status, not why.
-        previous = aggregated_results.scanner_results.get(scanner_name)
-        missing_reason = getattr(previous, "missing_reason", None)
-
-        # Create consolidated target status info (combines source + converted)
-        consolidated_target_info = ScannerTargetStatusInfo(
+        # Built from the scanner's existing row, with only the fields the metrics
+        # compute replaced. Building it from the metrics alone dropped everything
+        # else: an excluded scanner's ``excluded: true`` came back false, the same as
+        # a scanner that ran and had nothing to scan, and exit_code and any extra
+        # field were lost too.
+        fields = _row_fields(aggregated_results.scanner_results.get(scanner_name))
+        fields.update(
             severity_counts=consolidated_severity_counts,
             finding_count=metrics.total,
             actionable_finding_count=metrics.actionable,
@@ -562,20 +591,28 @@ def _populate_scanner_results_from_unified_metrics(
             duration=total_duration,
             status=status,
         )
-        if status == ScannerStatus.MISSING and isinstance(missing_reason, str):
-            # Assigned rather than passed, so the field is set only when it has a
-            # value and an exclude_unset dump of every other row is unchanged.
-            consolidated_target_info.missing_reason = missing_reason
-        # Carried because every later reader of this scanner -- the report phase,
-        # and the exit-code gate through get_unified_scanner_metrics -- takes it from
-        # this row before the per-target reports. Left at its default of True, a
-        # scanner recorded MISSING during its scan (scan() returned False) read as
-        # having its dependencies, and one target that evaluated nothing then graded
-        # it SKIPPED, which the completeness gate lets through. Assigned only when
-        # missing, so every other row keeps its serialized shape (dumps that exclude
-        # unset fields, such as the S3 and CloudWatch payloads, leave it out).
+        # The scan phase's reason for a MISSING row comes with the row's other fields:
+        # the metrics know the status, not why. It stays only while the row is MISSING.
+        if status != ScannerStatus.MISSING or not isinstance(
+            fields.get("missing_reason"), str
+        ):
+            fields.pop("missing_reason", None)
+        # The two flags say why the status is what it is, so they follow the
+        # metrics when the metrics found the scanner missing or excluded. Every
+        # later reader of this scanner -- the report phase, and the exit-code gate
+        # through get_unified_scanner_metrics -- reads this row before the
+        # per-target reports, and a scanner recorded MISSING during its scan
+        # (scan() returned False) has no earlier row to carry the flag: left at its
+        # default of True it read as having its dependencies, and one target that
+        # evaluated nothing then graded it SKIPPED, which the completeness gate lets
+        # through. Set only in those cases, so a row that had no flag keeps its
+        # serialized shape (dumps that exclude unset fields, such as the S3 and
+        # CloudWatch payloads, leave the defaults out).
         if metrics.dependencies_missing:
-            consolidated_target_info.dependencies_satisfied = False
+            fields["dependencies_satisfied"] = False
+        if metrics.excluded:
+            fields["excluded"] = True
+        consolidated_target_info = ScannerTargetStatusInfo(**fields)
 
         # Update scanner_results with consolidated information.
         #

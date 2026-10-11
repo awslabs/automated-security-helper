@@ -2041,7 +2041,7 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: true
     duration: 0.0
-    excluded: false
+    excluded: true
     exit_code: 0
     finding_count: 0
     missing_reason: null

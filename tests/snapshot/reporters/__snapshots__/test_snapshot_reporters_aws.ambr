@@ -1339,7 +1339,9 @@
                 }),
                 'cdk-nag': dict({
                   'actionable_finding_count': 0,
+                  'dependencies_satisfied': True,
                   'duration': 0.0,
+                  'excluded': True,
                   'finding_count': 0,
                   'severity_counts': dict({
                     'critical': 0,
@@ -1416,6 +1418,7 @@
                   'actionable_finding_count': 0,
                   'dependencies_satisfied': False,
                   'duration': 0.0,
+                  'excluded': False,
                   'finding_count': 0,
                   'severity_counts': dict({
                     'critical': 0,
@@ -1693,7 +1696,9 @@
             }),
             'cdk-nag': dict({
               'actionable_finding_count': 0,
+              'dependencies_satisfied': True,
               'duration': 0.0,
+              'excluded': True,
               'finding_count': 0,
               'severity_counts': dict({
                 'critical': 0,
@@ -1770,6 +1775,7 @@
               'actionable_finding_count': 0,
               'dependencies_satisfied': False,
               'duration': 0.0,
+              'excluded': False,
               'finding_count': 0,
               'severity_counts': dict({
                 'critical': 0,
