@@ -109,8 +109,10 @@ it needs.
   that restricts which files may be executed, no program runs from it; bwrap,
   firejail and Landlock restrict writes and reads, not exec, there. Only the
   variable in ASH's own environment grants it, never a path in the scanner's options;
-  an empty variable grants nothing, and one naming `/`, `$HOME` or a directory above
-  `$HOME` is not mounted, with a warning.
+  an empty or relative value grants nothing, and one naming a file, `/`, `$HOME` or a
+  directory above `$HOME` is not mounted, with a warning. A directory directly under
+  `$HOME`, such as `~/rules`, is mounted as named, so point the variable at the rules
+  directory itself.
 - The environment is filtered to an allowlist: locale, `PATH`, TLS and proxy settings,
   ASH's and uv's own variables, and the prefixes the scanner declares (`GRYPE_`,
   `SEMGREP_`, ...). Within those, a name containing `TOKEN`, `PASSWORD`, `SECRET`,

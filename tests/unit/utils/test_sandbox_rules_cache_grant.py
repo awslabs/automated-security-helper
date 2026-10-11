@@ -262,3 +262,35 @@ def test_sandbox_exec_runs_no_program_from_the_rule_cache(layout, backend, monke
 
     denied = [line for line in rules_text.splitlines() if line.startswith("(deny")]
     assert denied and _sbpl_string(_real(rules)) in denied[0], rules_text
+
+
+def test_a_variable_naming_a_file_grants_nothing(layout, backend, monkeypatch):
+    """The variable names a rules directory; a file (a credentials file, say) is not one.
+
+    Online, so the scanner does not read that path as its rule cache first.
+    """
+    tmp, home, _source, _output = layout
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    named = home / ".aws" / "credentials"
+    named.parent.mkdir(parents=True)
+    named.write_text("[default]\n")
+    monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(named))
+
+    policy = _policy(layout, backend, "semgrep")
+
+    assert not _covers(_readable(policy), named), (
+        f"a file named by the variable was mounted: {named}"
+    )
+
+
+def test_a_relative_value_grants_nothing(layout, backend, monkeypatch):
+    """A relative path would be resolved against whatever the working directory is."""
+    tmp, _home, _source, _output = layout
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    rules = _rules_dir(tmp / "working" / "rules")
+    monkeypatch.chdir(tmp / "working")
+    monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", "rules")
+
+    policy = _policy(layout, backend, "semgrep")
+
+    assert not _covers(_readable(policy), rules)

@@ -97,8 +97,10 @@ class SandboxRequirements:
             ``SEMGREP_RULES_CACHE_DIR``. Read from ASH's process environment when
             the policy is built, never from the scanner's options, which the
             scanned repository can write, so no grant is needed. An unset or empty
-            variable, a relative path, and a directory as broad as a filesystem
-            root, ``$HOME`` or a directory holding ``$HOME`` grant nothing.
+            variable, a relative path, anything but a directory, and a directory
+            as broad as a filesystem root, ``$HOME`` or a directory holding
+            ``$HOME`` grant nothing. A directory directly under ``$HOME`` (``~/rules``)
+            is mounted as named: the operator chose it.
     """
 
     network: bool = False
@@ -462,6 +464,17 @@ def _env_named_read_paths(names: Sequence[str]) -> List[Path]:
     for name in names:
         value = os.environ.get(name, "")
         if not value or not os.path.isabs(value):
+            continue
+        if not os.path.isdir(value):
+            # A rules directory, not a file such as a credentials file, and not
+            # a path that does not exist.
+            if os.path.lexists(value):
+                from automated_security_helper.utils.log import ASH_LOGGER
+
+                ASH_LOGGER.warning(
+                    f"${name}={value} is not mounted in the scanner sandbox: it is "
+                    "not a directory."
+                )
             continue
         real = Path(os.path.realpath(value))
         if real == Path(real.anchor) or real == real_home or real in real_home.parents:
