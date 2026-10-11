@@ -1571,6 +1571,10 @@ def merge_command(
         trusted_config = resolve_config(config_path=config)
         loaded = load_shard_results(results)
         apply_operator_overrides(loaded, overrides)
+        # Before the completion gate below, which reads one shard's
+        # fail_on_incomplete_scanners: shards that disagree on it, or on any other
+        # verdict setting, are refused the same way whichever shard that is.
+        verify_verdict_settings_agree(loaded, cli_verdict)
         # Resolved before merging, because the contribution refusal has to happen
         # before a merged report exists on disk. Read from the shard results' own
         # config for the same reason the verdict is: a collector job need not have
@@ -1584,7 +1588,6 @@ def merge_command(
         merged = merge_shard_results(
             loaded, require_scanner_completion=require_completion
         )
-        verify_verdict_settings_agree(loaded, cli_verdict)
         if merged.ash_config is None:
             merged.ash_config = apply_config_overrides(AshConfig(), overrides)
         warn_on_ignored_operator_verdict_settings(
@@ -1757,8 +1760,8 @@ def _resolve_require_scanner_completion(
     Called before coverage has been verified, with the shards in index order
     (:func:`_in_index_order`), so the first that carries a config is the
     lowest-indexed shard's, whose config the merged report keeps. Shards that
-    disagree on this setting are refused once coverage is verified
-    (:func:`verify_verdict_settings_agree`).
+    disagree on this setting are refused before this is called
+    (:func:`verify_verdict_settings_agree`), unless the flag decides it.
     """
     if cli_value is not None:
         return cli_value

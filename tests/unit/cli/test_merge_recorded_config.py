@@ -1089,6 +1089,34 @@ class TestVerdictSettings:
         assert result.exit_code == exit_code, (result.output, result.exception)
         assert (harness.output_dir / RESULTS_FILE_NAME).is_file()
 
+    @pytest.mark.parametrize("shard_zero", [True, False])
+    def test_a_disagreement_is_refused_before_the_completion_gate(
+        self, harness, shard_zero
+    ):
+        """Exit 3 whichever value shard 0 records, though a shard completed nothing.
+
+        The completion gate reads shard 0's ``fail_on_incomplete_scanners``. If it
+        ran first, shard 0's value would choose between the gate's exit 1 and the
+        disagreement's exit 3.
+        """
+        shards = build_shards(3)
+        _make_shard_contribute_nothing(shards[1])
+        paths = _write_each(
+            harness,
+            shards,
+            [
+                {"fail_on_incomplete_scanners": shard_zero},
+                {"fail_on_incomplete_scanners": not shard_zero},
+                {"fail_on_incomplete_scanners": not shard_zero},
+            ],
+        )
+
+        result = harness.merge(paths)
+
+        assert result.exit_code == 3, (result.output, result.exception)
+        console = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", result.output).split())
+        assert "fail_on_incomplete_scanners" in console, console
+
     def test_the_incomplete_scanners_flag_settles_a_disagreement(self, harness):
         paths = _write_each(
             harness,
