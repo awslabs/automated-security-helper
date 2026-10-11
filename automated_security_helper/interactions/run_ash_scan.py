@@ -77,6 +77,7 @@ from automated_security_helper.utils.content_db_staleness import (
     ContentDbAgeRecord,
     stale_content_databases,
 )
+from automated_security_helper.utils.converter_refusals import inert_text
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, escape_markup
 from automated_security_helper.utils.output_dir_links import (
     OUTPUT_RESULT_FILES,
@@ -610,12 +611,18 @@ def incomplete_scanners(
 
 
 def _failed_inputs_reason(failed_inputs: Sequence[Any], shown: int = 5) -> str:
-    """``could not convert 2 inputs: a.ipynb, b.ipynb``, naming at most ``shown``."""
+    """``could not convert 2 inputs: a.ipynb, b.ipynb``, naming at most ``shown``.
+
+    The names are the scanned tree's, and this reason is printed and logged, so
+    each is shown as inert text.
+    """
     paths = [
-        str(
-            getattr(item, "path", None)
-            or (item.get("path") if isinstance(item, dict) else None)
-            or "?"
+        inert_text(
+            str(
+                getattr(item, "path", None)
+                or (item.get("path") if isinstance(item, dict) else None)
+                or "?"
+            )
         )
         for item in failed_inputs
     ]
@@ -627,9 +634,12 @@ def _failed_inputs_reason(failed_inputs: Sequence[Any], shown: int = 5) -> str:
 
 
 def _limit_refusals_reason(refused_inputs: Sequence[Any], shown: int = 5) -> str:
-    """``refused 1 input over an extraction limit: a.zip (max_total_bytes)``."""
+    """``refused 1 input over an extraction limit: a.zip (max_total_bytes)``.
+
+    Each archive's name is shown as inert text, as in _failed_inputs_reason.
+    """
     named = [
-        f"{getattr(item, 'path', '?')} ({getattr(item, 'limit', '?')})"
+        f"{inert_text(str(getattr(item, 'path', '?')))} ({getattr(item, 'limit', '?')})"
         for item in refused_inputs
     ]
     listed = ", ".join(named[:shown])
