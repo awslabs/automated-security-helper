@@ -29,6 +29,27 @@
 │                                                                            scan's own            │
 │                                                                            configuration asks    │
 │                                                                            for.                  │
+│    --config              -c                          <str>                 The operator's config │
+│                                                                            file. Reporter        │
+│                                                                            destinations and      │
+│                                                                            credentials, and      │
+│                                                                            whether plugin        │
+│                                                                            packages that send    │
+│                                                                            findings off the host │
+│                                                                            are loaded, come from │
+│                                                                            it, the defaults and  │
+│                                                                            --config-overrides,   │
+│                                                                            not from the shards'  │
+│                                                                            recorded config.      │
+│                                                                            [env var: ASH_CONFIG] │
+│    --config-overrides                                <str>                 Configuration         │
+│                                                                            overrides as          │
+│                                                                            key-value pairs       │
+│                                                                            (e.g.,                │
+│                                                                            'reporters.s3.enable… │
+│                                                                            applied over the      │
+│                                                                            shards' recorded      │
+│                                                                            config.               │
 │    --min-severity                                    <str>                 Minimum severity that │
 │                                                                            counts as actionable  │
 │                                                                            for the exit code.    │

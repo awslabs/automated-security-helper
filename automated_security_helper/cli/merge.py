@@ -107,6 +107,37 @@ shard's assignment through would make the merged file look like shard 0 of n, so
 a second ``ash merge`` over an output directory would accept it and report a
 whole scan as one fifth of itself.
 
+The recorded configuration is the repository's
+-----------------------------------------------
+Each shard's results carry the configuration its scan resolved, and the merge
+builds its reporters from the lowest-indexed shard's copy. That copy was built
+from whatever config the shard's scan read, a file inside the scanned tree
+included, and it reaches the merge as data in an artifact. So the settings a
+config file inside the scanned tree may not choose are not taken from it here
+either. :func:`confine_recorded_config` calls the entry points ``resolve_config``
+calls for such a file, ``confine_plugin_modules`` and
+``confine_reporter_destinations``, and ``confine_declared_reporter_destinations``
+runs once the plugin modules are loaded, all against the operator's trusted base
+at merge time: the defaults, ``--config`` (itself confined when it is inside the
+working directory's checkout, as for ``ash report``), and ``--config-overrides``.
+A value the recorded configuration sets that the base does not is replaced by
+the base's, with the same warning a scan gives, naming the shard's results file.
+Later additions to those modules' tables apply here without a change to this one.
+
+Only those two apply because only they reach anything the merge does:
+``ash_plugin_modules`` decides which reporter classes and event handlers are
+imported, and the reporter options decide where findings are sent and with which
+credentials. The sandbox grants and the scanners' own config files govern
+scanners, and no scanner or converter runs here, so they are left as recorded and
+the merged results still say how the shards scanned.
+
+``--config-overrides`` are applied to every shard's recorded configuration as it
+is loaded (:func:`apply_operator_overrides`), so the completion gate, the verdict
+and the reporters all see them, and they are replayed onto the trusted base, as
+in a scan. ``--config`` supplies only the trusted values and does not replace the
+recorded configuration: a reporter or plugin module the shards did not configure
+is added with ``--config-overrides``.
+
 Known limitations
 -----------------
 A directory passed to ``--results`` must resolve to exactly one results file.
@@ -157,12 +188,26 @@ from automated_security_helper.base.plugin_context import PluginContext
 # rebuild by side effect of importing resolve_config; relying on an import made
 # for another purpose is what makes this fragile, so the dependency is named here.
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.plugin_module_trust import (
+    confine_plugin_modules,
+)
+from automated_security_helper.config.reporter_trust import (
+    confine_declared_reporter_destinations,
+    confine_reporter_destinations,
+)
+from automated_security_helper.config.resolve_config import (
+    apply_config_overrides,
+    resolve_config,
+)
 from automated_security_helper.core.enums import (
     AshLogLevel,
     ExportFormat,
     ScannerStatus,
 )
-from automated_security_helper.core.exceptions import ShardCoverageError
+from automated_security_helper.core.exceptions import (
+    ASHConfigValidationError,
+    ShardCoverageError,
+)
 from automated_security_helper.core.phases.report_phase import ReportPhase
 from automated_security_helper.core.progress import LiveProgressDisplay
 from automated_security_helper.core.sharding import (
@@ -1087,6 +1132,73 @@ def apply_aggregated_suppressions(
 
 
 # ---------------------------------------------------------------------------
+# The recorded configuration
+# ---------------------------------------------------------------------------
+
+
+def apply_operator_overrides(
+    loaded: Sequence[Tuple[Path, AshAggregatedResults]],
+    config_overrides: Sequence[str],
+) -> None:
+    """Apply ``--config-overrides`` to each shard's recorded config, in place.
+
+    Called before anything reads those configs, so the completion gate, the
+    verdict and the reporters all see the operator's values. A shard that
+    recorded no config is left without one, so
+    :func:`_resolve_require_scanner_completion` still passes over it.
+
+    Raises:
+        ASHConfigValidationError: If an override cannot be applied.
+    """
+    if not config_overrides:
+        return
+    for _, results in loaded:
+        if results.ash_config is not None:
+            results.ash_config = apply_config_overrides(
+                results.ash_config, list(config_overrides)
+            )
+
+
+def confine_recorded_config(
+    config: AshConfig,
+    trusted_config: AshConfig,
+    config_overrides: Sequence[str],
+    results_file: Path,
+) -> None:
+    """Hold a shard's recorded config to the rules for a config file in the scanned tree.
+
+    Calls the entry points ``resolve_config`` calls for such a file, with their
+    warnings, which name ``results_file``; see the module docstring for why these
+    two. ``confine_reporter_destinations`` also records the trusted base on
+    ``config`` for ``confine_declared_reporter_destinations``, which the caller
+    runs once the plugin modules are loaded.
+
+    Args:
+        config: The merged report's config, changed in place.
+        trusted_config: The operator's config, without ``config_overrides``.
+        config_overrides: ``--config-overrides``, replayed onto ``trusted_config``.
+        results_file: The results file ``config`` was recorded in.
+    """
+    in_tree = [results_file]
+    confine_plugin_modules(
+        config, trusted_config, list(config_overrides), Path.cwd(), in_tree
+    )
+    confine_reporter_destinations(
+        config, trusted_config, list(config_overrides), in_tree
+    )
+
+
+def _base_results_file(loaded: Sequence[Tuple[Path, AshAggregatedResults]]) -> Path:
+    """The results file of the lowest-indexed shard, which supplies the merged config."""
+    stamped = [
+        (assignment.shard_index, path)
+        for path, results in loaded
+        if (assignment := read_shard_assignment(results)) is not None
+    ]
+    return min(stamped, key=lambda entry: entry[0])[1]
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1140,6 +1252,31 @@ def merge_command(
             help=(
                 "Comma-separated report formats to generate. Defaults to the "
                 "formats the scan's own configuration asks for."
+            ),
+        ),
+    ] = None,
+    config: Annotated[
+        Optional[str],
+        typer.Option(
+            "--config",
+            "-c",
+            help=(
+                "The operator's config file. Reporter destinations and credentials, "
+                "and whether plugin packages that send findings off the host are "
+                "loaded, come from it, the defaults and --config-overrides, not "
+                "from the shards' recorded config."
+            ),
+            envvar="ASH_CONFIG",
+        ),
+    ] = None,
+    config_overrides: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--config-overrides",
+            help=(
+                "Configuration overrides as key-value pairs (e.g., "
+                "'reporters.s3.enabled=true'), applied over the shards' recorded "
+                "config."
             ),
         ),
     ] = None,
@@ -1229,9 +1366,16 @@ def merge_command(
     )
 
     parsed_formats = _parse_output_formats(output_formats)
+    overrides = list(config_overrides or [])
 
     try:
+        # The operator's trusted base, resolved the way ``ash report`` resolves
+        # its config. The overrides are not applied to it here: the confinement
+        # below replays them onto it, as resolve_config does for a scan, and
+        # applying them twice would repeat an appending override.
+        trusted_config = resolve_config(config_path=config)
         loaded = load_shard_results(results)
+        apply_operator_overrides(loaded, overrides)
         # Resolved before merging, because the contribution refusal has to happen
         # before a merged report exists on disk. Read from the shard results' own
         # config for the same reason the verdict is: a collector job need not have
@@ -1245,6 +1389,16 @@ def merge_command(
         merged = merge_shard_results(
             loaded, require_scanner_completion=require_completion
         )
+        if merged.ash_config is None:
+            merged.ash_config = apply_config_overrides(AshConfig(), overrides)
+        # What a config inside the scanned tree may not choose comes from the
+        # operator's base instead; see the module docstring.
+        confine_recorded_config(
+            merged.ash_config, trusted_config, overrides, _base_results_file(loaded)
+        )
+    except ASHConfigValidationError as exc:
+        print(f"[red]Invalid configuration: {escape_markup(str(exc))}[/red]")
+        raise typer.Exit(3)
     except ShardCoverageError as exc:
         # Printed rather than raised as a traceback: every one of these is an
         # operator-actionable statement about their CI matrix or artifacts, and
@@ -1261,14 +1415,23 @@ def merge_command(
     # than a config file resolved on this host. The collector job need not have
     # the source tree checked out at all, and a config file found here could
     # disagree with the one the shards actually scanned under -- which would move
-    # the verdict without moving the findings.
+    # the verdict without moving the findings. It was confined above, and the
+    # merged results record it as confined.
     plugin_context = PluginContext(
         source_dir=Path.cwd(),
         output_dir=output_dir_path,
         work_dir=output_dir_path.joinpath("work"),
-        config=merged.ash_config or AshConfig(),
+        config=merged.ash_config,
         ignore_suppressions=ignore_suppressions,
     )
+
+    ash_plugin_manager.set_context(plugin_context)
+    load_plugins(plugin_context=plugin_context)
+    reporter_plugins = ash_plugin_manager.plugin_modules(plugin_type="reporter")
+    # The plugin modules are loaded, so the destination options each reporter
+    # declares are known. Before the merged results are written, so they record
+    # these as confined too.
+    confine_declared_reporter_destinations(merged.ash_config, reporter_plugins)
 
     merged = apply_aggregated_suppressions(merged, plugin_context)
 
@@ -1281,14 +1444,11 @@ def merge_command(
     write_text_atomically(merged_file, merged.model_dump_json(indent=2))
     logger.info(f"Wrote merged results to {merged_file}")
 
-    ash_plugin_manager.set_context(plugin_context)
-    load_plugins(plugin_context=plugin_context)
-
     # ReportPhase writes reports/ash.<extension> for every enabled reporter, and
     # its progress display is used unconditionally, so a display is supplied with
     # output turned off rather than None.
     report_phase = ReportPhase(
-        plugins=ash_plugin_manager.plugin_modules(plugin_type="reporter"),
+        plugins=reporter_plugins,
         plugin_context=plugin_context,
         progress_display=LiveProgressDisplay(show_progress=False),
         asharp_model=merged,
