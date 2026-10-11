@@ -247,11 +247,9 @@ class TestResolveWorkspaceExecutionConfig:
         assert config.max_parallel_projects == 2
 
     def test_an_unparseable_config_refuses_the_scan(self, tmp_path):
-        """The same file refuses a single-directory scan, so it refuses this one.
-
-        It used to be replaced by the defaults with a warning, and the workspace
-        was scanned without the settings the file was there to apply.
-        """
+        """The same file refuses a single-directory scan, so it refuses this one,
+        rather than scanning the workspace without the settings it is there to
+        apply."""
         (tmp_path / ".ash.yaml").write_text(
             "workspace: [this: is: not: valid\n", encoding="utf-8"
         )

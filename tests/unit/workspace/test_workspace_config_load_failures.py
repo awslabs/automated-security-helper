@@ -7,8 +7,8 @@ A workspace reads configs in two places: the resolver, for each project's own
 config and for the default config (``--config`` / an MCP profile) a project without
 one falls back to, and the executor, which resolves each project's config again at
 scan time. Both must refuse a config file that is named but missing, or present but
-unparseable, the way they already refuse a schema-invalid one. Resolving it to the
-built-in defaults planned and scanned the project with its suppressions off.
+unparseable, the way they refuse a schema-invalid one, so no project is planned
+or scanned with the built-in defaults in place of its config.
 """
 
 from __future__ import annotations

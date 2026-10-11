@@ -4,12 +4,12 @@
 """``ash report``, ``ash plugin`` and ``ash dependencies install`` refuse a config
 file they cannot load, with exit 3 and a message that names the file.
 
-Each resolves its config through ``resolve_config``, which used to answer a named
-file that was missing, or a file that did not parse, with the built-in defaults:
-the report was rendered, the plugins listed and the dependencies installed for a
-configuration other than the one named. Now resolution raises, and each command
-reports it the way ``ash scan`` does. Nothing is installed: the refusal comes
-before any plugin is loaded.
+Each resolves its config through ``resolve_config``, which raises for a named file
+that is missing and for a file that does not parse, rather than answering with the
+built-in defaults; each command reports that the way ``ash scan`` does, so no
+report is rendered, no plugin listed and no dependency installed for a
+configuration other than the one named. The refusal comes before any plugin is
+loaded.
 """
 
 from __future__ import annotations
@@ -108,7 +108,7 @@ def test_control_a_config_that_loads_is_used(tmp_path):
 def test_discovery_that_cannot_read_the_only_source_exits_three(tmp_path, command):
     """Discovery itself refuses: the only source is a pyproject.toml it cannot read.
 
-    It used to reach the user as an uncaught exception and exit 1.
+    Reported as an invalid configuration, not as an uncaught exception.
     """
     (tmp_path / "pyproject.toml").symlink_to(tmp_path / "absent.toml")
 

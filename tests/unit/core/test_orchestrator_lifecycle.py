@@ -137,11 +137,8 @@ class TestInitialize:
     """initialize() resolves config, cleans stale output, and builds the engine."""
 
     def test_unparseable_config_file_refuses_initialize(self, tmp_path):
-        """A config file that does not parse stops initialize() with a config error.
-
-        It used to be replaced by the defaults, with a logged warning, and the scan
-        went ahead with the file's suppressions and settings switched off.
-        """
+        """A config file that does not parse stops initialize() with a config error,
+        rather than the scan going ahead with the defaults in its place."""
         src = tmp_path / "src"
         src.mkdir()
         out = tmp_path / "out"
@@ -395,11 +392,8 @@ class TestExecuteScan:
             orch.execute_scan(phases=["report"])
 
     def test_missing_config_file_never_reaches_the_engine(self, tmp_path):
-        """A named config file that does not exist refuses the scan before any phase.
-
-        It used to resolve to the defaults, so the scan ran every phase and recorded
-        "config file ignored" as a warning checkpoint in otherwise normal results.
-        """
+        """A named config file that does not exist refuses the scan before any phase,
+        so no phase runs with the defaults in its place."""
         src = tmp_path / "src"
         src.mkdir()
         out = tmp_path / "out"

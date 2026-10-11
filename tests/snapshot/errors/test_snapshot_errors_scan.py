@@ -232,9 +232,8 @@ class TestScanFailures:
         self, run_cli, snapshot, in_tmp, monkeypatch, name, content
     ):
         # Exit 3 before any scanner, as for the schema-invalid file above. The scan
-        # used to go ahead with the default configuration; it is replaced by a probe
-        # so that reaching it fails the exit-code assertion instead of running every
-        # scanner.
+        # is replaced by a probe, so that reaching it fails the exit-code assertion
+        # instead of running every scanner.
         if content is not None:
             _write(in_tmp / name, content)
         monkeypatch.setattr(

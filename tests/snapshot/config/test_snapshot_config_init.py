@@ -117,6 +117,6 @@ def test_config_get_renders_resolved_yaml(
 def test_config_get_missing_file(project_dir, text_snapshot):
     run = run_cli(["config", "get", "does-not-exist.yaml"])
 
-    # 3, the code for a config that cannot be used, as `ash scan` exits; it was 1.
+    # 3, the code for a config that cannot be used, as `ash scan` exits.
     assert run.exit_code == 3
     assert text_snapshot("txt") == run.document

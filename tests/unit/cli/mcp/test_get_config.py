@@ -74,9 +74,9 @@ class TestGetConfigMissingFile:
     def test_missing_explicit_path_is_refused(self, tmp_path):
         """A named file that does not exist is an error, not ASH's default config.
 
-        Answering with the defaults told the client the file it named resolved to a
-        config with no suppressions, which is what a scan named with it used to run.
-        Either a config error or a refusal response satisfies this; a config does not.
+        The defaults would say the file it named resolves to a config with no
+        suppressions. Either a config error or a refusal response satisfies this; a
+        config does not.
         """
         try:
             result = mcp_get_config(config_path=str(tmp_path / "nonexistent.yaml"))

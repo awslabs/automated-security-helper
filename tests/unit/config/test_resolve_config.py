@@ -152,8 +152,8 @@ class TestResolveConfig:
     def test_config_path_not_found_is_refused_with_fallback(self, tmp_path):
         """fallback_to_default covers "no config file", not "the named file is gone".
 
-        Returning the defaults here scanned with the named file's suppressions and
-        settings switched off.
+        The defaults in its place would have none of the named file's suppressions
+        and settings.
         """
         with pytest.raises(ASHConfigValidationError, match="nonexistent.yaml"):
             resolve_config(
@@ -161,7 +161,7 @@ class TestResolveConfig:
             )
 
     def test_config_path_not_found_is_refused_without_fallback(self, tmp_path):
-        """Without a fallback the result was None, which no caller checks for."""
+        """Without a fallback it raises too, rather than returning None."""
         with pytest.raises(ASHConfigValidationError, match="nonexistent.yaml"):
             resolve_config(
                 config_path=tmp_path / "nonexistent.yaml", fallback_to_default=False

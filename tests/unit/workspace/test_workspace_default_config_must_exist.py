@@ -4,10 +4,10 @@
 """A workspace's default config (``--config``, an MCP profile) must exist when named.
 
 It is the config of a project that declares none, and the trusted base the sandbox
-grants of every project's in-tree config come from. A missing one used to be
-skipped when every project had its own config, and ``ash scan --workspace``
-never passed ``--config`` to planning at all, so ``--dry-run`` printed a plan
-for the built-in defaults. Both now refuse with exit 3 at planning.
+grants of every project's in-tree config come from, so a missing one is refused
+even when every project has its own config. ``ash scan --workspace`` passes
+``--config`` to planning, so the refusal is exit 3 at planning, ``--dry-run``
+included.
 """
 
 from __future__ import annotations

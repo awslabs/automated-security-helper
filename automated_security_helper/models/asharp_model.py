@@ -733,10 +733,10 @@ class AshAggregatedResults(BaseModel):
     def validate_ash_config(cls, v: Any):
         from automated_security_helper.config.ash_config import AshConfig
 
-        # No configuration recorded stays None. It used to become
-        # get_default_config() -- the defaults, or the file ASH_CONFIG names in
-        # the process re-rendering the results -- presented as the scan's own.
-        # A value that is not a valid configuration raises.
+        # No configuration recorded stays None, so the results never carry a
+        # configuration the scan did not record (the defaults, or the file
+        # ASH_CONFIG names in the process reading them). A value that is not a
+        # valid configuration raises.
         if v is None:
             return None
         return AshConfig.model_validate(v)

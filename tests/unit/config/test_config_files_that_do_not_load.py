@@ -38,8 +38,8 @@ class TestOtherConfigInputs:
     def test_a_named_trusted_config_that_does_not_exist_is_refused(self, tmp_path):
         """The operator's file the sandbox grants come from must exist when named.
 
-        It used to be skipped when missing, so an in-tree config's grants were
-        decided against the built-in defaults instead of the file named.
+        Refused like any named config, so the grants of an in-tree config are
+        always decided against the file the operator named.
         """
         (tmp_path / ".ash").mkdir()
         (tmp_path / ".ash" / ".ash.yaml").write_text(

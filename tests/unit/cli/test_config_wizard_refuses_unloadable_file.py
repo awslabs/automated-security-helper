@@ -4,12 +4,11 @@
 """``ash config wizard`` refuses a config file it cannot load instead of replacing it.
 
 The wizard reads the file, asks its questions starting from the file's values, and
-writes the result back to the same path. A file that did not load used to be
-replaced by the defaults ("Starting from defaults") and then overwritten, so every
-setting in it the wizard does not ask about was lost. A name that exists but is
-not a regular file (a link to nothing) was taken for "no file" and written
-through. Both now exit 3, the code for a configuration that cannot be used, and
-leave the path as it was.
+writes the result back to the same path. Starting from the defaults instead and
+writing them back would lose every setting the wizard does not ask about. So a file
+that does not load, and a name that exists but is not a regular file (a link to
+nothing), exit 3, the code for a configuration that cannot be used, and the path
+is left as it was.
 """
 
 from __future__ import annotations

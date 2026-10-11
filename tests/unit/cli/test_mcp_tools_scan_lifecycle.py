@@ -141,10 +141,8 @@ class TestScanDirectoryValidation:
     def test_an_empty_config_path_is_rejected_before_a_scan_is_registered(
         self, allowed_root, registry
     ):
-        """An empty config_path is a config input, not "no config"; refused up front.
-
-        It used to skip the checks, register a scan, and fail that scan with exit 3.
-        """
+        """An empty config_path is a config input, not "no config"; refused up front,
+        before a scan is registered."""
         registry.register_scan.return_value = "scan-1"
 
         with (
@@ -185,10 +183,7 @@ class TestScanDirectoryValidation:
     def test_config_file_that_cannot_be_parsed_is_rejected(
         self, allowed_root, registry, name, content
     ):
-        """Refused before a scan is registered, as a missing config file is.
-
-        Accepting it started a scan that then ran with the default config.
-        """
+        """Refused before a scan is registered, as a missing config file is."""
         config = allowed_root / name
         if isinstance(content, bytes):
             config.write_bytes(content)

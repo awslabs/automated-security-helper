@@ -508,9 +508,8 @@ class TestTheSchedulingKnobsComeFromTheWorkspaceRoot:
     def test_a_config_that_does_not_load_is_refused_as_a_config_error(self, tmp_path):
         """A bad config refuses the run, as the same file refuses a single scan.
 
-        ``_resolve_workspace_execution_config`` used to warn and use the defaults,
-        which ran the workspace without the settings the file was there to
-        apply. The builder now raises ``ASHConfigValidationError``, and the MCP
+        The builder raises ``ASHConfigValidationError`` rather than running the
+        workspace without the settings the file is there to apply, and the MCP
         path maps that class to exit code 3, an invalid configuration, not to an
         internal error.
         """
