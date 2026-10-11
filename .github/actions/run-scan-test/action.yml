@@ -839,7 +839,8 @@ runs:
 
     # Snapshots of what ASH prints when a real runtime runs its image: `ash --version` and
     # `ash build-image --help` inside it, `ash --mode container` and both wrappers scanning
-    # the snapshot fixture, and the exit status each one ends with. The unit-test legs have
+    # the snapshot fixture, and the exit status each one ends with; and, read from inside
+    # the same image, who owns and can write its directories. The unit-test legs have
     # no runtime, so tests/conftest.py deselects these there; the image the scan above just
     # built is what makes them runnable here, which is why this is a step and not a job.
     #
@@ -860,4 +861,5 @@ runs:
         uv run --extra cdk pytest \
           tests/snapshot/container/runtime/test_snapshot_container_runtime.py \
           tests/snapshot/container/runtime/test_snapshot_container_bash_wrapper.py \
+          tests/snapshot/container/runtime/test_container_image_permissions.py \
           --run-container-snapshots --no-cov -n 0

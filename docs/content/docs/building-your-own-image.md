@@ -69,6 +69,20 @@ Tag with the ASH version you built rather than only `latest`, so a scan result c
 traced back to a specific image. A moving `latest` makes two scans that disagree
 impossible to explain.
 
+## Who can write to the image's directories
+
+The image keeps what a scan trusts out of reach of other users in the container:
+
+| Directory | Owner | Why |
+|---|---|---|
+| `/deps`, `/deps/.semgrep`, `/deps/.opengrep` (offline rules), `/ash`, `/.ash/bin` (bundled tools, first on `PATH`) | root, not writable by others | Nothing writes there at scan time |
+| `/deps/.grype` (grype's database) | the user the image runs as: root in `ci`, the unprivileged user in `non-root` | grype's database update writes it at scan time |
+| `/src`, `/out` | writable by every user, with the sticky bit (`ci`); the unprivileged user (`non-root`) | A run mounts the source and the output here; without those mounts, the `ci` image may be started under any UID |
+
+Earlier images made `/deps`, its caches and `/.ash/bin` writable by every user. An image
+you extend with `--custom-containerfile` keeps these modes unless your Dockerfile
+changes them.
+
 ## Which Dockerfile ASH builds
 
 `ash build-image` and `ash --mode container` build ASH's own Dockerfile. They never

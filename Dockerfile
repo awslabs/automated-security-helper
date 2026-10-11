@@ -280,11 +280,16 @@ RUN with-retry 'corepack enable && corepack prepare yarn@stable --activate && co
 #
 # Grype/Syft/Semgrep - Also sets default location env vars for root user for CI compat
 #
+# Owned by root and writable by root only: a scan trusts the database and the rules
+# in these caches, so no other user may replace them. The offline build below
+# writes them as root. At scan time only grype's database update writes here,
+# which the ci stage runs as root and for which the non-root stage hands
+# GRYPE_DB_CACHE_DIR to its own user.
 ENV GRYPE_DB_CACHE_DIR="/deps/.grype"
 ENV SEMGREP_RULES_CACHE_DIR="/deps/.semgrep"
 ENV OPENGREP_RULES_CACHE_DIR="/deps/.opengrep"
 RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
-    chmod 777 /deps ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
+    chmod 755 /deps ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
 ENV PATH="/usr/local/bin:$PATH"
 
 #
@@ -385,7 +390,7 @@ RUN set -uex; if [ "${OFFLINE}" = "YES" ]; then \
     fetched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" && \
     printf '%s\n' "${fetched_at}" > "${SEMGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at" && \
     printf '%s\n' "${fetched_at}" > "${OPENGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at" && \
-    chmod -R 777 ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
+    chmod -R u=rwX,go=rX ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
     fi
 
 # Assert the block above actually provisioned something, so a repeat of the defect
@@ -453,7 +458,14 @@ RUN uv pip install --system "$(ls *.whl)[cdk,symbols]" && rm -rf *.whl
 #
 # Make sure the ash script is executable
 #
-RUN chmod -R 755 /ash && chmod -R 777 /src /out ${ASH_BIN_PATH}
+# /ash and ASH_BIN_PATH, which is first on PATH, belong to root: nothing writes to
+# them at scan time, and a tool there has to stay the one installed here. /src and
+# /out are where a run mounts the source and the output, so their modes matter only
+# when the image is started without those mounts. They stay writable by every user,
+# because the ci stage is for platforms that start the container under a UID they
+# choose, and they carry the sticky bit so that one user cannot remove or replace
+# another's files there.
+RUN chmod -R 755 /ash ${ASH_BIN_PATH} && chmod 1777 /src /out
 
 #
 # Flag ASH as local execution mode since we are running in a container already
@@ -544,8 +556,15 @@ RUN adduser --disabled-password --disabled-login \
 
 # Change ownership and permissions now that we are running with a non-root
 # user by default.
+#
+# GRYPE_DB_CACHE_DIR is handed to this user because grype's database update writes
+# it at scan time (utils/content_db_refresh.py); one owner, not writable by others.
+# ASH_BIN_PATH is handed over only for this stage's own `ash dependencies install`
+# below, which puts this user's cfn-nag binstub and its own copy of the pinned tools
+# there, and is given back to root right after it.
 RUN chown -R ${UID}:${GID} ${ASHUSER_HOME} /src /out && \
-    chmod 750 -R ${ASHUSER_HOME} /src /out
+    chmod 750 -R ${ASHUSER_HOME} /src /out && \
+    chown -R ${UID}:${GID} ${GRYPE_DB_CACHE_DIR} ${ASH_BIN_PATH}
 
 USER ${UID}:${GID}
 
@@ -562,6 +581,12 @@ ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # Python tools are installed again here and would otherwise float.
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}
+
+# ASH_BIN_PATH back to root, readable and executable by this user but not writable:
+# nothing writes there at scan time.
+USER root
+RUN chown -R root:root ${ASH_BIN_PATH} && chmod -R u=rwX,go=rX ${ASH_BIN_PATH}
+USER ${UID}:${GID}
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD ["/bin/sh", "-c", "command -v ash || exit 1"]

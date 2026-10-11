@@ -30,8 +30,9 @@ from automated_security_helper.core.exceptions import (
 
 # Name of the directory holding install receipts. See receipt_root() for why it is
 # NOT under the bin directory a tool is installed into: a receipt records the digest
-# an installed binary is checked against, so it is a trust anchor, and the bin
-# directory is world-writable in ASH's own image.
+# an installed binary is checked against, so it is a trust anchor, and a bin
+# directory can be writable by other users (ASH's own image left ASH_BIN_PATH that way
+# until it was made root-owned).
 RECEIPT_DIR_NAME = "install-receipts"
 
 # Read the download in chunks rather than into one buffer. syft's linux asset is
@@ -296,14 +297,14 @@ def _download_verified(
 def _open_staging(target: Path) -> "tuple[int, Path]":
     """Create an unpredictably-named staging file beside ``target``.
 
-    The name has to be unpredictable, not merely exclusive. An earlier version staged
-    at ``<target>.ash-partial`` with O_CREAT|O_EXCL|O_NOFOLLOW, which stops a symlink
-    being *planted* at that path but does nothing about ``rename``: in a 0777
-    directory with no sticky bit -- which is what ASH's image leaves ASH_BIN_PATH as
-    (Dockerfile:243) -- rename permission comes from the directory's write bit, not
-    the file's. So anyone with write access to the directory could rename their own
-    file over the staging path between the open and the ``os.replace``, and the
-    replace would then install their bytes.
+    The name has to be unpredictable, not merely exclusive. An earlier version staged at
+    ``<target>.ash-partial`` with O_CREAT|O_EXCL|O_NOFOLLOW, which stops a symlink being
+    *planted* at that path but does nothing about ``rename``: in a 0777 directory with
+    no sticky bit -- which is what ASH's image left ASH_BIN_PATH as until it was made
+    root-owned -- rename permission comes from the directory's write bit, not the
+    file's. So anyone with write access to the directory could rename their own file
+    over the staging path between the open and the ``os.replace``, and the replace would
+    then install their bytes.
 
     ``mkstemp`` closes that by construction: O_EXCL against a name the attacker cannot
     guess, created 0600, in the directory the final rename has to happen in so that
@@ -342,14 +343,15 @@ def _finalize_staged(staging: Path, target: Path, expected_sha256: str) -> str:
     the install receipt, and re-deriving it from the target afterwards hands back
     exactly what this check exists to reject: ``make_executable`` runs between here and
     the receipt write, on macOS ``unquarantine_macos_binary`` spawns ``xattr`` as a
-    subprocess as well, and ASH's own image leaves the install directory
-    ``chmod -R 777`` with no sticky bit (Dockerfile:243) under a threat model where ASH
-    executes repository code during a scan -- cdk-nag synthesizes CDK apps, npm-audit
-    runs a package manager. A receipt built from a fresh hash of the target records
-    whatever is there by then, and ``_already_installed`` re-hashes, agrees, and skips
-    the download on every later run: the persistent-trust outcome that moving receipts
-    out of the bin directory was meant to close, reached through a different door. The
-    digest verified here is the only one worth writing down.
+    subprocess as well, and an install directory can be writable by others (ASH's own
+    image left it ``chmod -R 777`` with no sticky bit until it was made root-owned)
+    under a threat model where ASH executes repository code during a scan -- cdk-nag
+    synthesizes CDK apps, npm-audit runs a package manager. A receipt built from a fresh
+    hash of the target records whatever is there by then, and ``_already_installed``
+    re-hashes, agrees, and skips the download on every later run: the persistent-trust
+    outcome that moving receipts out of the bin directory was meant to close, reached
+    through a different door. The digest verified here is the only one worth writing
+    down.
 
     On mismatch after the rename the target is removed. Leaving unverified bytes at an
     install path is worse than leaving nothing there.
@@ -473,8 +475,8 @@ def receipt_root() -> Path:
 
     Receipts used to live in ``<bin dir>/.ash-install-receipts``, and that made the
     whole re-hash check worthless. A receipt records the digest an installed binary
-    is compared against, so it is a trust anchor -- and ASH's own image runs
-    ``chmod -R 777 ${ASH_BIN_PATH}`` (Dockerfile:243) with no sticky bit. Anything
+    is compared against, so it is a trust anchor -- and ASH's own image used to run
+    ``chmod -R 777 ${ASH_BIN_PATH}`` with no sticky bit. Anything
     able to replace the binary could equally unlink the receipts directory, recreate
     it, and write a receipt naming its substitute's digest. ``_already_installed``
     would then agree with itself and skip forever, exactly as it did before the
@@ -678,15 +680,14 @@ def _already_installed(
        not the extracted executable, so comparing it proves nothing about the file
        that will actually run.
 
-    Why (5) is not paranoia. ASH's own image does ``chmod -R 777 ${ASH_BIN_PATH}``
-    (Dockerfile:243), puts that directory first on PATH (:254), and runs
-    ``ash dependencies install`` into it twice (:253 and :328). Before idempotence
-    existed every install re-downloaded, so the second run overwrote anything
-    substituted in between -- the redundant download was accidentally a self-healing
-    property. Skipping on a receipt alone would have converted that into a persistent
-    one, in the one directory the image makes world-writable, in a tool whose output
-    is used to make security decisions. Re-hashing costs well under a second on a
-    30-100MB binary.
+    Why (5) is not paranoia. ASH's own image used to run
+    ``chmod -R 777 ${ASH_BIN_PATH}``; it puts that directory first on PATH and runs
+    ``ash dependencies install`` into it twice. Before idempotence existed every
+    install re-downloaded, so the second run overwrote anything substituted in between
+    -- the redundant download was accidentally a self-healing property. Skipping on a
+    receipt alone would have converted that into a persistent one, in what was the one
+    directory the image made world-writable, in a tool whose output is used to make
+    security decisions. Re-hashing costs well under a second on a 30-100MB binary.
     """
     target = destination.joinpath(installed_as)
     if not target.is_file():
