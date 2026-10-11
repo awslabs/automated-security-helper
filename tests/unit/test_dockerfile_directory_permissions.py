@@ -416,3 +416,34 @@ def test_each_stage_ends_by_clearing_what_installers_left_writable(stage, instru
     assert sweeps[-1] > installs[-1]
     for path in ("/proc", "/sys", "/dev", "/tmp", "/var/tmp", "/run/lock"):
         assert f"-path {path} " in runs[sweeps[-1]]
+
+
+def test_the_bin_path_is_root_owned_0755_and_first_on_path(instructions, env):
+    """ASH_BIN_PATH (/.ash/bin) is first on PATH, so it is root's, mode 0755."""
+    bin_path = env["ASH_BIN_PATH"]
+    core_modes = [
+        chmod.mode
+        for chmod in _chmods(instructions, env)
+        if chmod.stage == "core" and bin_path in chmod.paths
+    ]
+    path_envs = [
+        i.text
+        for i in instructions
+        if i.stage == "core" and i.keyword == "ENV" and i.text.startswith("PATH=")
+    ]
+
+    assert bin_path == "/.ash/bin"
+    assert core_modes, "the core stage never sets ASH_BIN_PATH's mode"
+    assert core_modes[-1] == "755", core_modes
+    assert any(text.startswith('PATH="${ASH_BIN_PATH}:') for text in path_envs)
+    # The core stage runs as root and hands the directory to no one.
+    core_chowns = [
+        words
+        for i in instructions
+        if i.stage == "core" and i.keyword == "RUN"
+        for words in _commands(i.text)
+        if words[0] == "chown"
+    ]
+    assert not any(
+        bin_path in [_expand(w, env) for w in words] for words in core_chowns
+    )
