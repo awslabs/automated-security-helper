@@ -615,11 +615,12 @@ ASH's plugin root `automated_security_helper.plugin_modules` holds every plugin 
 ASH ships and names none of them, so name the package below it (for example
 `automated_security_helper.plugin_modules.ash_trivy_plugins`). A namespace package (a
 directory with no `__init__.py`, which can gather packages from several distributions)
-declares no plugins either, so name the packages it holds. Any other entry, such as
-`another_plugin_module`, the plugin root, a namespace package, or a name with a space or
-a comma in it, refuses the scan with exit code 3 (invalid configuration) before any module is
-imported, whether it comes from a config file, `--config-overrides`,
-`--ash-plugin-modules` or `ASH_PLUGIN_MODULES`. The same name refuses `ash plugin list`, `ash dependencies
+declares no plugins either, so name the packages it holds. One entry may name several
+modules separated by commas, and spaces around each name are ignored, whether the entry
+comes from a config file, `--config-overrides`, `--ash-plugin-modules` or
+`ASH_PLUGIN_MODULES`. Any other entry, such as `another_plugin_module`, the plugin root,
+a namespace package, or a name with a space inside it, refuses the scan with exit code 3
+(invalid configuration) before any module is imported, from any of those sources. The same name refuses `ash plugin list`, `ash dependencies
 install`, `ash report` and `ash merge` with exit code 3. When the list comes from
 a config file inside the scanned tree, only installed modules are imported; see
 [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose).

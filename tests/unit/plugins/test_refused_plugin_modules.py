@@ -64,6 +64,8 @@ REFUSED_SPELLINGS = [REFUSED, "ash_plugins_extra", "automated_security_helper_ex
 
 #: Accepted by the loader: a top-level package whose name ends in ``ash_plugins``.
 ACCEPTED = "zzctl_ash_plugins"
+#: A second accepted package, for entries that name two.
+ACCEPTED_TOO = "zzctl2_ash_plugins"
 
 EXIT_INVALID_CONFIG = 3
 
@@ -264,7 +266,7 @@ class _Run:
 
     def __init__(self, tmp_path: Path):
         self.root = tmp_path
-        self.site = _site(tmp_path, REFUSED_SPELLINGS + [ACCEPTED])
+        self.site = _site(tmp_path, REFUSED_SPELLINGS + [ACCEPTED, ACCEPTED_TOO])
         self.markers = tmp_path / "markers"
         self.markers.mkdir()
         self.home = tmp_path / "home"
@@ -494,3 +496,93 @@ class TestARefusedModuleRefusesTheScan:
 
         assert ACCEPTED in run.imported(), _tail(completed)
         assert completed.returncode == 0, _tail(completed)
+
+
+#: Two accepted names in one entry, with spaces around each.
+JOINED = f" {ACCEPTED} , {ACCEPTED_TOO} "
+
+
+def _assert_both_imported(run: _Run, completed: subprocess.CompletedProcess) -> None:
+    assert run.imported() == sorted([ACCEPTED, ACCEPTED_TOO]), (
+        f"an entry naming {ACCEPTED} and {ACCEPTED_TOO} joined by a comma was not "
+        "split into both names\n" + _tail(completed)
+    )
+    assert completed.returncode == 0, _tail(completed)
+
+
+class TestEveryEntryPointSplitsCommaJoinedNames:
+    """Each source splits an entry on commas and strips spaces, as a config file does."""
+
+    def test_the_ash_plugin_modules_flag(self, tmp_path):
+        run = _Run(tmp_path)
+        completed = run.run(
+            "cli", {"args": run.scan_args("--ash-plugin-modules", JOINED)}
+        )
+        _assert_both_imported(run, completed)
+
+    def test_the_ash_plugin_modules_environment_variable(self, tmp_path):
+        run = _Run(tmp_path)
+        completed = run.run(
+            "cli",
+            {"args": run.scan_args()},
+            {"ASH_PLUGIN_MODULES": f"{ACCEPTED},{ACCEPTED_TOO}"},
+        )
+        _assert_both_imported(run, completed)
+
+    def test_the_python_api(self, tmp_path):
+        run = _Run(tmp_path)
+        completed = run.run(
+            "api",
+            {
+                "source_dir": str(run.tree),
+                "output_dir": str(tmp_path / "out"),
+                "modules": [JOINED],
+            },
+        )
+        _assert_both_imported(run, completed)
+
+    def test_a_config_override(self, tmp_path):
+        run = _Run(tmp_path)
+        completed = run.run(
+            "cli",
+            {
+                "args": run.scan_args(
+                    "--config-overrides", f'ash_plugin_modules+=["{JOINED}"]'
+                )
+            },
+        )
+        _assert_both_imported(run, completed)
+
+    def test_the_flag_in_workspace_mode(self, tmp_path):
+        run = _Run(tmp_path)
+        workspace = tmp_path / "ws"
+        for key in ("api", "web"):
+            (workspace / key / ".ash").mkdir(parents=True)
+            (workspace / key / "app.py").write_text("x = 1\n", encoding="utf-8")
+            (workspace / key / ".ash" / ".ash.yaml").write_text(
+                f"project_name: {key}\n", encoding="utf-8"
+            )
+        workspace_file = workspace / "dev.code-workspace"
+        workspace_file.write_text(
+            json.dumps({"folders": [{"path": "api"}, {"path": "web"}]}),
+            encoding="utf-8",
+        )
+        completed = run.run(
+            "cli",
+            {
+                "args": [
+                    "--workspace",
+                    str(workspace_file),
+                    "--output-dir",
+                    str(tmp_path / "out"),
+                    "--mode",
+                    "local",
+                    "--scanners",
+                    "detect-secrets",
+                    "--no-progress",
+                    "--ash-plugin-modules",
+                    JOINED,
+                ]
+            },
+        )
+        _assert_both_imported(run, completed)

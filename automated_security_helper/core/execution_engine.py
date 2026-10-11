@@ -186,15 +186,17 @@ class ScanExecutionEngine:
             else []
         )
 
-        # CLI parameters take precedence over config
-        # evaluate ash_plugin_modules, split any entries with commas into separate items and trim surrounding whitespace
-        config_plugin_modules = [
-            subitem.strip()
-            for item in config_plugin_modules
-            if item is not None
-            for subitem in item.split(",")
-        ]
-        combined_plugin_modules = list(set(ash_plugin_modules + config_plugin_modules))
+        # Every entry, from the CLI, the Python API, ASH_PLUGIN_MODULES or the
+        # config, is split on commas and stripped, and the names are de-duplicated
+        # in order, so the refusal, the imports and the scan filter all see the
+        # same names whatever source gave them.
+        from automated_security_helper.config.plugin_module_trust import (
+            split_plugin_modules,
+        )
+
+        combined_plugin_modules = split_plugin_modules(
+            list(ash_plugin_modules) + list(config_plugin_modules or [])
+        )
 
         if len(combined_plugin_modules) > 0:
             ASH_LOGGER.info(f"Loading plugin modules: {combined_plugin_modules}")

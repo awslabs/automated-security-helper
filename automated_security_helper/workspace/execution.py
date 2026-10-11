@@ -416,11 +416,16 @@ def workspace_plugin_modules(
     """The plugin modules the workspace's scans name, sorted.
 
     Every active project has the same list by now, so the projects speak for all
-    of them; settings may add more from the CLI.
+    of them; settings may add more from the CLI. Each entry is split on commas and
+    stripped, the way a scan reads its own list.
     """
-    declared: Set[str] = set(settings.ash_plugin_modules)
+    from automated_security_helper.config.plugin_module_trust import (
+        split_plugin_modules,
+    )
+
+    declared: Set[str] = set(split_plugin_modules(settings.ash_plugin_modules))
     for project in plan.active_projects:
-        declared.update(project.ash_plugin_modules)
+        declared.update(split_plugin_modules(project.ash_plugin_modules))
     return sorted(declared)
 
 
