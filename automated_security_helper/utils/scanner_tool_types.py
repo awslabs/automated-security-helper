@@ -14,7 +14,7 @@ the scanner formats the enum. So the type is read from both:
 * each ``tool_type::`` tag, normalized (``normalize_tool_type``), and
 * the scanner's type looked up by its name (``scanner_tool_type``): the type
   declared for every scanner ASH ships (``utils/scanner_names.SCANNER_TOOL_TYPES``),
-  else the ``tool_type`` a registered scanner class declares at class level.
+  else the ``tool_type`` a loaded scanner class declares at class level.
 
 A result for which neither yields a type has an unknown scanner type, which the
 callers treat as their safe case requires.
@@ -26,8 +26,7 @@ Declaring ``tool_type`` on the class, or tagging results, makes it known.
 
 from __future__ import annotations
 
-import sys
-from typing import Any, Dict, Iterable, Optional, Set, Tuple
+from typing import Any, Iterable, Optional, Set
 
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
 
@@ -54,45 +53,32 @@ def normalize_tool_type(value: Any) -> Optional[str]:
     return text
 
 
-def _registered_class_tool_type(scanner_name: str) -> Optional[str]:
-    """The class-level ``tool_type`` of the registered scanner named ``scanner_name``.
+def _loaded_class_tool_type(scanner_name: str) -> Optional[str]:
+    """The class-level ``tool_type`` of a loaded scanner class named ``scanner_name``.
 
-    Reads classes already imported; imports nothing and instantiates nothing.
+    Found among the subclasses of ``ScannerPluginBase`` already imported, not
+    through the plugin registry: the registry's state is the plugin manager's
+    own (tests/unit/workspace/test_project_isolation.py). Imports nothing else
+    and instantiates nothing.
     """
     try:
-        from automated_security_helper.plugins import ash_plugin_manager
-    except Exception:  # noqa: BLE001 -- a lookup must not fail the caller
+        from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+    except ImportError:
         return None
-    registrations = getattr(ash_plugin_manager.plugin_library, "scanners", {}) or {}
-    # Keyed on the registry's size too, so a scanner registered later is found.
-    key = (scanner_name, len(registrations))
-    if key not in _REGISTRY_LOOKUPS:
-        _REGISTRY_LOOKUPS[key] = _search_registrations(scanner_name, registrations)
-    return _REGISTRY_LOOKUPS[key]
-
-
-#: (scanner name, number of registered scanners) -> the type found, or None.
-_REGISTRY_LOOKUPS: Dict[Tuple[str, int], Optional[str]] = {}
-
-
-def _search_registrations(
-    scanner_name: str, registrations: Dict[str, Any]
-) -> Optional[str]:
-    for registration in list(registrations.values()):
-        module = sys.modules.get(getattr(registration, "plugin_module_path", "") or "")
-        if module is None:
+    pending = list(ScannerPluginBase.__subclasses__())
+    seen: Set[type] = set()
+    while pending:
+        cls = pending.pop()
+        if cls in seen:
             continue
-        for attr in list(vars(module).values()):
-            if not isinstance(attr, type) or (
-                getattr(attr, "ash_plugin_type", None) != "scanner"
-            ):
-                continue
-            if _class_config_name(attr) != scanner_name:
-                continue
-            field = (getattr(attr, "model_fields", None) or {}).get("tool_type")
-            found = normalize_tool_type(getattr(field, "default", None))
-            if found:
-                return found
+        seen.add(cls)
+        pending.extend(cls.__subclasses__())
+        if _class_config_name(cls) != scanner_name:
+            continue
+        field = (getattr(cls, "model_fields", None) or {}).get("tool_type")
+        found = normalize_tool_type(getattr(field, "default", None))
+        if found:
+            return found
     return None
 
 
@@ -117,7 +103,7 @@ def scanner_tool_type(scanner_name: Any) -> Optional[str]:
     declared = SCANNER_TOOL_TYPES.get(scanner_name)
     if declared:
         return declared
-    return _registered_class_tool_type(scanner_name)
+    return _loaded_class_tool_type(scanner_name)
 
 
 def _properties(result: Any) -> Any:

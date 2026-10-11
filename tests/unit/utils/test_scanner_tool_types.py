@@ -109,21 +109,13 @@ def test_a_result_with_neither_has_no_type():
     assert result_tool_types({}) == set()
 
 
-def test_a_registered_scanner_that_declares_its_type_on_the_class_is_found(
-    monkeypatch,
-):
-    """A third-party scanner known only through the plugin registry."""
-    import sys
-    import types
+def test_a_loaded_scanner_that_declares_its_type_on_the_class_is_found():
+    """A third-party scanner ASH does not ship, known only by its class."""
     from typing import Literal
 
     from automated_security_helper.base.scanner_plugin import (
         ScannerPluginBase,
         ScannerPluginConfigBase,
-    )
-    from automated_security_helper.plugins import ash_plugin_manager
-    from automated_security_helper.plugins.plugin_manager import (
-        AshPluginRegistration,
     )
 
     class AcmeKeysScannerConfig(ScannerPluginConfigBase):
@@ -139,16 +131,5 @@ def test_a_registered_scanner_that_declares_its_type_on_the_class_is_found(
         def scan(self, *args, **kwargs):
             return None
 
-    AcmeKeysScanner.ash_plugin_type = "scanner"
-    module = types.ModuleType("acme_keys_plugin_for_test")
-    module.AcmeKeysScanner = AcmeKeysScanner
-    monkeypatch.setitem(sys.modules, module.__name__, module)
-    monkeypatch.setitem(
-        ash_plugin_manager.plugin_library.scanners,
-        "AcmeKeysScanner",
-        AshPluginRegistration(
-            name="AcmeKeysScanner", plugin_module_path=module.__name__, enabled=True
-        ),
-    )
-
     assert scanner_tool_type("acme-keys") == "SECRETS"
+    assert AcmeKeysScanner.model_fields["tool_type"].default == "SECRETS"
