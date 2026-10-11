@@ -110,8 +110,8 @@ class Ash < Formula
   end
 
   resource "boto3" do
-    url "https://files.pythonhosted.org/packages/49/01/97aaee4d3e94467983a0c1b986ed4f4da48960d7ebc948e7d739c818cb59/boto3-1.43.106.tar.gz"
-    sha256 "c11ad4c429a983493ba10014c7af9831a455c2c0eea91c1cefff74530e480277" # pragma: allowlist secret
+    url "https://files.pythonhosted.org/packages/2a/c4/c68d22d91482898f1294dab7541ad83f8bcf9df83107e6d8436d6e9dbf01/boto3-1.43.107.tar.gz"
+    sha256 "c4e0f1a0295cbb7103f2950128cf88463c076d220080a7d0f127cf834969fc3a" # pragma: allowlist secret
   end
 
   resource "botocore" do
@@ -307,6 +307,11 @@ class Ash < Formula
   resource "orjson" do
     url "https://files.pythonhosted.org/packages/0f/f3/742fb1f62b825f2c010697eaf4e828004bc2a81e7e806666989c132c7c42/orjson-3.12.0.tar.gz"
     sha256 "d14203fb1aae2ad9b3d52f8a0e82aeb10197ef1c9bc61da7f358bd70b00123d5" # pragma: allowlist secret
+  end
+
+  resource "packaging" do
+    url "https://files.pythonhosted.org/packages/d7/f1/e7a6dd94a8d4a5626c03e4e99c87f241ba9e350cd9e6d75123f992427270/packaging-26.2.tar.gz"
+    sha256 "ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661" # pragma: allowlist secret
   end
 
   resource "platformdirs" do

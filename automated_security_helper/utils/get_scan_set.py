@@ -2,6 +2,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import io
 import re
 import subprocess  # nosec B404
 import sys
@@ -13,6 +14,10 @@ import os
 
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.scanned_tree import (
+    TreeInputRefused,
+    open_in_scanned_tree,
+)
 
 ASH_INCLUSIONS = [
     ".git",
@@ -207,9 +212,25 @@ def _collect_ignorefiles_and_all_files(
     root_ignore_parser = IgnoreParser()
     root_path = Path(path)
     root_gitignore = root_path / ".gitignore"
+    # Read under the same scanned-tree rule get_ash_ignorespec_lines uses, and parsed
+    # from the text that was checked rather than reopened by name, so a link is not
+    # used here either. That function is the one that warns about a refused file.
+    # add_rule per line is what parse_rule_file does with each line it reads.
+    # Parsed into a parser of its own and adopted only once every line has parsed,
+    # so a file that fails part way prunes nothing rather than some directories.
     if root_gitignore.is_file():
         try:
-            root_ignore_parser.parse_rule_file(root_gitignore, base_dir=root_path)
+            candidate_parser = IgnoreParser()
+            with io.TextIOWrapper(
+                open_in_scanned_tree(root_gitignore, root_path)
+            ) as rule_lines:
+                for rule_line in rule_lines:
+                    candidate_parser.add_rule(
+                        rule_line.rstrip("\n"), base_path=root_path
+                    )
+            root_ignore_parser = candidate_parser
+        except TreeInputRefused:
+            pass
         except (OSError, ValueError, TypeError, IndexError, re.error):
             # If the root .gitignore can't be parsed (malformed patterns,
             # encoding issues, etc.), proceed without directory pruning.
@@ -279,16 +300,47 @@ def get_ash_ignorespec_lines(
     # sub/.gitignore on some runs of the same scan and lose on others.
     all_ignores = sorted(set(all_ignores), key=lambda p: (len(Path(p).parts), p))
 
+    # Ignore files named by the caller are the operator's choice and are read as
+    # named. Every other one was found in the tree, and its text is copied into
+    # ash-ignore-report.txt, so it is read under the scanned-tree rule: a link would
+    # otherwise copy whatever it points at into the report. Git itself stopped
+    # following a symlinked .gitignore in 2.32.
+    named_by_caller = {os.path.join(path, extra) for extra in ignorefiles}
+
     lines = []
     for ignorefile in all_ignores:
-        if os.path.isfile(ignorefile):
-            clean = _source_dir_marker(path, ignorefile)
-            debug_echo(f"Found .ignore file: {clean}", debug=debug)
-            lines.append(f"######### START CONTENTS: {clean} #########")
+        clean = _source_dir_marker(path, ignorefile)
+        if ignorefile in named_by_caller:
+            if not os.path.isfile(ignorefile):
+                continue
             with open(ignorefile) as f:
-                lines.extend(f.readlines())
-            lines.append(f"######### END CONTENTS: {clean} #########")
-            lines.append("")
+                content = f.readlines()
+        else:
+            try:
+                handle = open_in_scanned_tree(ignorefile, path)
+            except TreeInputRefused as refused:
+                ASH_LOGGER.warning(
+                    f"Skipped ignore file '{refused.path}': {refused.reason}, so its "
+                    "rules were not applied"
+                )
+                # Recorded in the report as a comment, which every reader of the
+                # report already skips, so the skip is visible next to the rules
+                # that were applied.
+                lines.append(f"######### SKIPPED: {clean}: {refused.reason} #########")
+                lines.append("")
+                continue
+            except FileNotFoundError:
+                # Gone since the walk: what the isfile() check here used to skip. Any
+                # other OSError propagates, as it did from the open() this replaced.
+                continue
+            # TextIOWrapper with no encoding decodes exactly as open() does.
+            with io.TextIOWrapper(handle) as f:
+                content = f.readlines()
+        debug_echo(f"Found .ignore file: {clean}", debug=debug)
+        lines.append(f"######### START CONTENTS: {clean} #########")
+        lines.extend(content)
+        lines.append(f"######### END CONTENTS: {clean} #########")
+        lines.append("")
     lines = [line.strip() for line in lines]
     lines.append("######### START CONTENTS: ASH_INCLUSIONS #########")
     lines.extend(ASH_INCLUSIONS)

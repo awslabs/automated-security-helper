@@ -93,9 +93,11 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # This rev must ship the same ruff the project resolves, or the hook produces
     # diffs CI cannot reproduce. ruff-pre-commit pins `ruff==<tag>` in its own
-    # pyproject.toml, so the tag IS the ruff version: v0.16.8 ships ruff 0.16.8,
-    # which is what uv.lock resolves for the "ruff>=0.16.8,<1.0.0" line in the dev
-    # dependency group. (Moved from v0.16.7 when #683 raised that floor.)
+    # pyproject.toml, so the tag IS the ruff version: v0.16.10 ships ruff 0.16.10,
+    # which is what uv.lock resolves for the "ruff>=0.16.10,<1.0.0" line in the dev
+    # dependency group. (Moved from v0.16.7 when #683 raised that floor, and from
+    # v0.16.8 when the engine-minor bump in #788 raised it to 0.16.10; the 0.16.9
+    # bump in #702 had left this rev a patch release behind the lock.)
     #
     # It was v0.11.8, five minor versions under that floor, and the two ruffs do not
     # agree about what an error is, because ruff's DEFAULT rule set widened enormously
@@ -142,7 +144,7 @@ repos:
     # step back out of step with each other, which is the defect above in miniature.
     # If markdown should be out of scope, the place for that is [tool.ruff] in
     # pyproject.toml, which the hook and the gate both read.
-    rev: v0.16.8
+    rev: v0.16.10
     hooks:
       # `ruff-check` is the current id. `ruff` still resolves -- upstream keeps it as
       # a documented legacy alias -- but the alias hides which ruff subcommand runs.

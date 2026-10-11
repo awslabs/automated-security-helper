@@ -585,6 +585,17 @@ class UVToolMixin:
         tool_spec = (
             f"{base_spec}{version_constraint}" if version_constraint else base_spec
         )
+        from automated_security_helper.utils.uv_tool_runner import (
+            UVToolRunnerError,
+            checked_requirement,
+        )
+
+        try:
+            checked_requirement(tool_spec)
+        except UVToolRunnerError as error:
+            self.uv_tool_install_commands = []
+            self._plugin_log(str(error), level=logging.WARNING)
+            return
 
         install_cmd_parts = ["uv", "tool", "install"]
         install_cmd_parts.append(tool_spec)

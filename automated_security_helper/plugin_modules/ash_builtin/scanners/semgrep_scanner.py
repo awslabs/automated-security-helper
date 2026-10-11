@@ -16,7 +16,10 @@ from typing import Annotated, List, Literal, ClassVar
 from pydantic import Field
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.options import (
+    ScannerOptionsBase,
+    tool_version_constraint,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.core import ToolArgs
@@ -71,6 +74,7 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
 
     tool_version: Annotated[
         str | None,
+        tool_version_constraint("scanners.semgrep.options.tool_version"),
         Field(
             description=(
                 "Version constraint for semgrep installation, in pip requirement "
@@ -101,7 +105,13 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
         cache_paths=("~/.semgrep",),
+        # semgrep writes its settings, log and rule files to $XDG_CONFIG_HOME/.semgrep
+        # when that is set; where ~/.semgrep is read-only, that is a private one.
+        cache_env=("XDG_CONFIG_HOME",),
         env_prefixes=("SEMGREP_",),
+        # semgrep-core loads root certificates through OCaml's ca-certs, which on
+        # macOS runs /usr/bin/security against the system keychains.
+        system_trust_roots=True,
     )
 
     def model_post_init(self, context):

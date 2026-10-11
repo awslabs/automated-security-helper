@@ -3,7 +3,8 @@
 Each backend answers two questions. ``probe()`` says whether it can actually start a
 sandbox on this machine, by starting one, because "the binary is on PATH" is not the
 same thing: Ubuntu 24.04 ships a bwrap that AppArmor stops from creating a user
-namespace unless it is the packaged one, and a kernel can be built without Landlock.
+namespace unless it is the packaged one, a kernel can be built without Landlock, and
+inside a container firejail can exit 0 having run its command with no sandbox at all.
 ``plan()`` returns the argv to run, the environment to pass, and anything to clean up
 when the process has exited.
 
@@ -30,6 +31,66 @@ from automated_security_helper.utils.sandbox.policy import (
 )
 
 PROBE_TIMEOUT_SECONDS = 20
+
+#: The Landlock wrapper, which bwrap and firejail also run inside their sandbox for
+#: its seccomp socket filter alone (``--socket-filter``).
+LANDLOCK_EXEC = Path(__file__).with_name("landlock_exec.py")
+
+
+def _with_socket_filter(argv: Sequence[str]) -> List[str]:
+    """``argv`` started through landlock_exec.py's Unix-socket filter.
+
+    For bwrap and firejail, whose namespaces and mounts leave Unix sockets
+    reachable: one in any directory they mount (the Nix daemon's socket is under
+    /nix, and firejail shows nearly everything outside $HOME, /run included), a
+    datagram socket by path from a socketpair, and, when the scanner has a
+    network, every abstract socket in the host's network namespace (X11, some
+    session buses). The filter refuses socket(AF_UNIX), datagram socketpairs and
+    io_uring, as it does under Landlock. It does not refuse IP sockets even
+    without a network: the private network namespace already confines those, so
+    a tool may keep using its own loopback.
+
+    Runs ASH's interpreter, which every policy mounts, with -I so nothing in the
+    working directory (the scanned tree) or the environment is imported.
+    """
+    return [
+        sys.executable,
+        "-I",
+        str(LANDLOCK_EXEC),
+        "--socket-filter",
+        "unix",
+        "--",
+        *argv,
+    ]
+
+
+def _private_caches(
+    policy: SandboxPolicy, child_env: Dict[str, str]
+) -> List[Callable[[], None]]:
+    """Give the tools that must write a cache a private one; returns the cleanup.
+
+    Only bwrap's throwaway overlay lets a scanner write a host cache without the
+    write reaching the host. Every other backend mounts ``policy.cache`` read-only
+    and calls this, which points each variable in ``policy.cache_env``
+    (``UV_CACHE_DIR``, and what the scanner declares) at its own empty directory:
+    a fresh directory under the results directory, the one place the scanner may
+    write, removed once the process has exited. A tool redirected this way starts
+    from an empty cache, so online it fetches what it needs and offline it has
+    nothing cached. A cache that is only read, such as a vulnerability database,
+    is not redirected and stays read-only.
+    """
+    if not policy.cache_env:
+        return []
+    root = Path(tempfile.mkdtemp(prefix=".sandbox-cache-", dir=policy.results_dir))
+    for name in policy.cache_env:
+        # npm reads npm_config_* without regard to case, so a NPM_CONFIG_CACHE
+        # passed through from the parent would compete with the redirect.
+        for key in [k for k in child_env if k.lower() == name.lower() and k != name]:
+            del child_env[key]
+        private = root / name.lower()
+        private.mkdir()
+        child_env[name] = private.as_posix()
+    return [lambda: shutil.rmtree(root, ignore_errors=True)]
 
 
 @dataclass
@@ -74,11 +135,11 @@ class SandboxBackend:
         raise NotImplementedError
 
 
-def _probe_run(
+def _probe_process(
     argv: Sequence[str], env: Optional[Mapping[str, str]] = None
-) -> Optional[str]:
-    """Run ``argv``; None if it exited 0, otherwise its stderr as the reason."""
-    result = subprocess.run(  # nosec B603 - fixed argv built in this module
+) -> "subprocess.CompletedProcess[str]":
+    """Run ``argv`` with its output captured, as a probe."""
+    return subprocess.run(  # nosec B603 - fixed argv built in this module
         list(argv),
         capture_output=True,
         text=True,
@@ -86,10 +147,25 @@ def _probe_run(
         env=dict(env) if env is not None else {"PATH": os.environ.get("PATH", "")},
         check=False,
     )
+
+
+def _exit_failure(result: "subprocess.CompletedProcess[str]") -> Optional[str]:
+    """None if ``result`` exited 0, otherwise its last line of output as the reason."""
     if result.returncode == 0:
         return None
     detail = (result.stderr or result.stdout or "").strip().splitlines()
     return f"exit {result.returncode}: {detail[-1] if detail else 'no output'}"
+
+
+def _probe_run(
+    argv: Sequence[str], env: Optional[Mapping[str, str]] = None
+) -> Optional[str]:
+    """Run ``argv``; None if it exited 0, otherwise its stderr as the reason."""
+    return _exit_failure(_probe_process(argv, env))
+
+
+def _true() -> str:
+    return shutil.which("true") or "/bin/true"
 
 
 def _real(path: Path) -> Path:
@@ -160,6 +236,11 @@ class BwrapBackend(SandboxBackend):
                 "namespaces may be disabled; on Ubuntu 23.10+ use the packaged bwrap, "
                 "whose AppArmor profile allows them"
             )
+        failure = _probe_run(base + _with_socket_filter([_true()]))
+        if failure:
+            return (
+                f"bwrap cannot apply the Unix-socket filter in its sandbox ({failure})"
+            )
         with tempfile.TemporaryDirectory(prefix="ash-bwrap-probe-") as tmp:
             overlay_failure = _probe_run(
                 base + ["--overlay-src", tmp, "--tmp-overlay", tmp, "true"]
@@ -168,8 +249,8 @@ class BwrapBackend(SandboxBackend):
         if not self._overlay:
             ASH_LOGGER.warning(
                 "bwrap cannot mount a throwaway overlay here (needs bubblewrap 0.8+ "
-                "and Linux 5.11+): scanner caches will be mounted read-write, so a "
-                "scanner can change what a later scan reads from them."
+                "and Linux 5.11+): scanner caches will be mounted read-only, and uv "
+                "and any tool that has to write its cache get an empty private one."
             )
         return None
 
@@ -187,7 +268,7 @@ class BwrapBackend(SandboxBackend):
         for p in policy.read_only:
             add(p, _RO)
         for p in policy.cache:
-            add(p, _CACHE if self._overlay else _RW)
+            add(p, _CACHE if self._overlay else _RO)
         for p in policy.writable:
             add(p, _RW)
 
@@ -257,13 +338,41 @@ class BwrapBackend(SandboxBackend):
         if policy.cwd:
             cmd.extend(["--chdir", _real(policy.cwd).as_posix()])
         cmd.append("--")
-        cmd.extend(argv)
-        return SpawnPlan(argv=cmd, env=policy.filter_env(env))
+        cmd.extend(_with_socket_filter(argv))
+        child_env = policy.filter_env(env)
+        cleanup: List[Callable[[], None]] = []
+        if not self._overlay:
+            cleanup = _private_caches(policy, child_env)
+        return SpawnPlan(argv=cmd, env=child_env, cleanup=cleanup)
 
 
 # ---------------------------------------------------------------------------
 # firejail
 # ---------------------------------------------------------------------------
+
+
+#: The confinement options every firejail spawn gets, ahead of the policy's paths.
+#: The probe runs its command under them too, so a firejail that rejects one (an old
+#: release, a feature turned off in firejail.config) is unavailable before any scan.
+_FIREJAIL_CONFINEMENT: Tuple[str, ...] = (
+    "--noprofile",
+    "--private-dev",
+    "--nonewprivs",
+    "--caps.drop=all",
+    "--seccomp",
+    "--nogroups",
+    "--dbus-user=none",
+    "--dbus-system=none",
+    "--read-only=/",
+)
+
+#: Tried before PATH for the probe's command, because --private hides $HOME: a
+#: readlink found first in ~/bin or a Nix profile would fail to start inside the
+#: sandbox, and firejail would be refused for that.
+_SYSTEM_READLINK: Tuple[str, ...] = ("/usr/bin/readlink", "/bin/readlink")
+
+#: Printed by firejail, unless --quiet, when it runs a command without a sandbox.
+_FIREJAIL_NO_SANDBOX = "existing sandbox"
 
 
 class FirejailBackend(SandboxBackend):
@@ -277,8 +386,80 @@ class FirejailBackend(SandboxBackend):
         found = shutil.which("firejail")
         if not found:
             return "firejail is not installed"
+        readlink = next(
+            (path for path in _SYSTEM_READLINK if os.access(path, os.X_OK)), None
+        ) or shutil.which("readlink")
+        if not readlink:
+            return (
+                "readlink is not installed, so ASH cannot check that firejail "
+                "confines what it runs"
+            )
+        # Exiting 0 proves nothing: when firejail finds no kernel threads among PIDs
+        # 1-10, as in a container with its own PID namespace (unless a container=
+        # variable names LXC, Docker or nspawn), it decides it is already inside a
+        # sandbox and runs the command with none of its options.
+        # Every sandbox it does build has its own mount namespace, which is where
+        # the read-only root, the private home and the whitelists are, so a command
+        # that reports ASH's mount namespace ran unconfined. Without --quiet here,
+        # firejail's own warning, when it prints one, goes into the reason.
+        own_namespace = os.readlink("/proc/self/ns/mnt")
+        result = _probe_process(
+            [
+                found,
+                *_FIREJAIL_CONFINEMENT,
+                "--net=none",
+                "--private",
+                "--private-tmp",
+                "--",
+                readlink,
+                "/proc/self/ns/mnt",
+            ]
+        )
+        failure = _exit_failure(result)
+        if failure:
+            return f"firejail cannot create a sandbox here ({failure})"
+        namespaces = [
+            line.strip()
+            for line in result.stdout.splitlines()
+            if line.strip().startswith("mnt:[")
+        ]
+        warnings = [
+            line.strip()
+            for line in f"{result.stderr}\n{result.stdout}".splitlines()
+            if _FIREJAIL_NO_SANDBOX in line
+        ]
+        evidence: List[str] = []
+        if namespaces and namespaces[-1] == own_namespace:
+            evidence.append("the command ran in ASH's own mount namespace")
+        if warnings:
+            evidence.append(f"firejail said: {warnings[0]}")
+        if evidence:
+            return (
+                "firejail ran a test command without a sandbox ("
+                + "; ".join(evidence)
+                + "), so it would run scanners unconfined. firejail does this when "
+                "it decides it is already inside a sandbox, as in a container that "
+                "does not share the host's PID namespace. Use --sandbox bwrap or "
+                "--sandbox landlock here"
+            )
+        if not namespaces:
+            output = result.stdout.strip().splitlines()
+            return (
+                "ASH could not confirm that firejail confines what it runs: its test "
+                "command printed no mount namespace ("
+                + (repr(output[-1]) if output else "no output")
+                + ")"
+            )
+        # A separate run, without --private: the filter runs ASH's own interpreter,
+        # which may live under $HOME, and every real spawn whitelists it.
+        failure = _probe_run(
+            [found, "--quiet", "--noprofile", "--net=none", "--"]
+            + _with_socket_filter([_true()])
+        )
+        if failure:
+            return f"firejail cannot start a sandbox with the Unix-socket filter ({failure})"
         self._executable = found
-        return _probe_run([found, "--quiet", "--noprofile", "--net=none", "true"])
+        return None
 
     def plan(
         self, argv: Sequence[str], env: Mapping[str, str], policy: SandboxPolicy
@@ -287,19 +468,7 @@ class FirejailBackend(SandboxBackend):
             raise RuntimeError(f"{self.name}: probe() must succeed before plan()")
         home = _real(policy.home)
         tmp_root = _real(Path("/tmp"))  # nosec B108 - compared against, never written
-        cmd = [
-            self._executable,
-            "--quiet",
-            "--noprofile",
-            "--private-dev",
-            "--nonewprivs",
-            "--caps.drop=all",
-            "--seccomp",
-            "--nogroups",
-            "--dbus-user=none",
-            "--dbus-system=none",
-            "--read-only=/",
-        ]
+        cmd = [self._executable, "--quiet", *_FIREJAIL_CONFINEMENT]
         if not policy.network:
             cmd.append("--net=none")
         # firejail leaves everything outside $HOME visible, including the local IPC
@@ -319,10 +488,12 @@ class FirejailBackend(SandboxBackend):
             if path and os.path.lexists(path):
                 cmd.append(f"--blacklist={path}")
 
-        readable = [_real(p) for p in policy.read_only]
-        writable = [_real(p) for p in policy.writable] + [
+        # firejail has no throwaway overlay, so a cache is read-only like the rest;
+        # _private_caches gives the tools that write one a private directory.
+        readable = [_real(p) for p in policy.read_only] + [
             _real(p) for p in policy.cache
         ]
+        writable = [_real(p) for p in policy.writable]
         # Whitelisting any path inside $HOME (or /tmp) makes everything else there
         # invisible, which is how firejail hides the home directory.
         whitelisted = [
@@ -342,22 +513,22 @@ class FirejailBackend(SandboxBackend):
         # often the source tree) opened back up. Without this, CI measured the
         # source tree and the output directory writable whenever they sat in /tmp.
         for p in readable:
-            # A readable path inside a writable one (a cache, the results dir) is
-            # left to the --read-write below rather than made read-only first.
+            # A readable path inside a writable one (the results dir) is left to
+            # the --read-write below rather than made read-only first.
             if not any(p == w or _is_within(p, w) for w in writable):
                 cmd.append(f"--read-only={p.as_posix()}")
         for p in writable:
             cmd.append(f"--read-write={p.as_posix()}")
         cmd.append("--")
-        cmd.extend(argv)
-        return SpawnPlan(argv=cmd, env=policy.filter_env(env))
+        cmd.extend(_with_socket_filter(argv))
+        child_env = policy.filter_env(env)
+        cleanup = _private_caches(policy, child_env)
+        return SpawnPlan(argv=cmd, env=child_env, cleanup=cleanup)
 
 
 # ---------------------------------------------------------------------------
 # Landlock
 # ---------------------------------------------------------------------------
-
-LANDLOCK_EXEC = Path(__file__).with_name("landlock_exec.py")
 
 
 class LandlockBackend(SandboxBackend):
@@ -391,7 +562,7 @@ class LandlockBackend(SandboxBackend):
                 "--policy",
                 policy,
                 "--",
-                shutil.which("true") or "/bin/true",
+                _true(),
             ]
         )
         if failure:
@@ -416,10 +587,12 @@ class LandlockBackend(SandboxBackend):
             argv[0] if os.path.isabs(argv[0]) else (shutil.which(argv[0]) or argv[0])
         )
         document = {
+            # Caches are read-only: Landlock cannot discard a write, so one in place
+            # would change what later runs read. See _private_caches.
             "read_only": [_real(p).as_posix() for p in policy.read_only]
+            + [_real(p).as_posix() for p in policy.cache]
             + ["/proc", "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full"],
             "writable": [_real(p).as_posix() for p in policy.writable]
-            + [_real(p).as_posix() for p in policy.cache]
             # /dev/shm because POSIX semaphores live there and multiprocessing needs
             # them (detect-secrets scans files in a process pool). Landlock cannot
             # make it private, so this is the host's: a documented gap of this
@@ -441,10 +614,12 @@ class LandlockBackend(SandboxBackend):
         child_env = policy.filter_env(env)
         child_env["TMPDIR"] = private_tmp.as_posix()
         child_env["HOME"] = private_home.as_posix()
+        private_cleanup = _private_caches(policy, child_env)
         return SpawnPlan(
             argv=cmd,
             env=child_env,
-            cleanup=[lambda: shutil.rmtree(private_root, ignore_errors=True)],
+            cleanup=[lambda: shutil.rmtree(private_root, ignore_errors=True)]
+            + private_cleanup,
         )
 
 
@@ -492,15 +667,157 @@ def _sbpl_string(path: Path) -> str:
     into \\uXXXX, which SBPL does not decode, so a deny on a home directory with a
     non-ASCII name would silently match nothing.
     """
-    text = path.as_posix()
+    return _sbpl_literal(path.as_posix())
+
+
+def _sbpl_literal(text: str) -> str:
     if any(ord(ch) < 0x20 for ch in text):
         raise SandboxUnavailable(f"cannot express {text!r} in a sandbox-exec profile")
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 #: Starts a new session, so there is no controlling terminal to inject keystrokes
-#: into through TIOCSTI, then execs the rest of argv. macOS ships no setsid(1).
-_SETSID_EXEC = "import os,sys;os.setsid();os.execv(sys.argv[1],sys.argv[1:])"
+#: into through TIOCSTI, changes to the directory in argv[1] when it is not empty,
+#: then execs the rest of argv. macOS ships no setsid(1).
+_SETSID_EXEC = (
+    "import os,sys;os.setsid();sys.argv[1] and os.chdir(sys.argv[1]);"
+    "os.execv(sys.argv[2],sys.argv[2:])"
+)
+
+#: The Mach services every sandboxed scanner may look up. Measured: the ten builtin
+#: scanners were run through the scanner parity fixture on the macOS 14.8, 15.7 and
+#: 26.6 CI runners with every lookup reported, and they looked up the same thirteen
+#: services on all three. Nine are allowed, here and in the network list. Not
+#: allowed: LaunchServices (denied below), which node looks up on start and does
+#: without, and the two that /usr/bin/security looks up, com.apple.SecurityServer
+#: (the keychain daemon, denied below) and com.apple.analyticsd. semgrep-core runs
+#: security only to read the system root certificates, and gets them from a file
+#: instead (see ``system_trust_roots``). See docs/content/docs/scanner-sandbox.md
+#: for finding a service that is missing.
+MACH_SERVICES: Tuple[str, ...] = (
+    # CFPreferences, which CoreFoundation reads on start (Python, Go, node, ruby).
+    "com.apple.cfprefsd.agent",
+    "com.apple.cfprefsd.daemon",
+    # os_log and notify(3), both used by libSystem in every process.
+    "com.apple.logd",
+    "com.apple.system.notification_center",
+    # User and group lookups: getpwuid(3) and friends, and group membership (ruby).
+    "com.apple.system.opendirectoryd.libinfo",
+    "com.apple.system.opendirectoryd.membership",
+)
+
+#: Allowed only to a scanner with a network: name resolution, network and proxy
+#: configuration, and certificate trust for TLS.
+MACH_SERVICES_WITH_NETWORK: Tuple[str, ...] = (
+    "com.apple.SystemConfiguration.DNSConfiguration",
+    "com.apple.SystemConfiguration.configd",
+    "com.apple.trustd.agent",
+)
+
+#: Denied after every allow, so no allowlist entry can ever reach them: in SBPL the
+#: last matching rule wins. LaunchServices asks launchd to start an app, and launchd
+#: starts it outside the sandbox, so a scanner that can reach it can run code that is
+#: not sandboxed (a .command file opened in Terminal). The pasteboard holds whatever
+#: the user last copied. node looks up launchservicesd and com.apple.lsd.modifydb on
+#: start and carries on without them. SecurityServer is the keychain daemon.
+_DENIED_MACH_SERVICES = (
+    '(global-name "com.apple.coreservices.launchservicesd")'
+    ' (global-name "com.apple.CoreServices.coreservicesd")'
+    ' (global-name-prefix "com.apple.lsd.")'
+    ' (global-name-prefix "com.apple.pasteboard.")'
+    ' (global-name "com.apple.SecurityServer")'
+)
+
+#: The keychains that hold root certificates, in the order and form OCaml's ca-certs
+#: reads them on macOS when SSL_CERT_FILE is not set: Apple's roots, then the ones an
+#: administrator added (a corporate proxy's, for example).
+_TRUST_ROOT_KEYCHAINS = (
+    "/System/Library/Keychains/SystemRootCertificates.keychain",
+    "/Library/Keychains/System.keychain",
+)
+
+_trust_roots_cache: List[Optional[str]] = []
+
+
+def _system_trust_roots() -> Optional[str]:
+    """The system's root certificates as PEM, exported once per process.
+
+    Runs outside the sandbox, as ASH, with the same command ca-certs runs. None when
+    neither keychain gave a certificate, in which case the tool is left to find its
+    own and fails the way it would have without the export.
+    """
+    if _trust_roots_cache:
+        return _trust_roots_cache[0]
+    exported = []
+    for keychain in _TRUST_ROOT_KEYCHAINS:
+        if not Path(keychain).exists():
+            continue
+        try:
+            result = subprocess.run(  # nosec B603 - fixed argv, run by ASH itself
+                ["/usr/bin/security", "find-certificate", "-a", "-p", keychain],
+                capture_output=True,
+                text=True,
+                timeout=PROBE_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            ASH_LOGGER.debug(f"Exporting root certificates from {keychain}: {e}")
+            continue
+        if result.returncode == 0 and "BEGIN CERTIFICATE" in result.stdout:
+            exported.append(result.stdout)
+    pem = "\n".join(exported) if exported else None
+    if pem is None:
+        ASH_LOGGER.warning(
+            "Could not export the system root certificates; a sandboxed scanner "
+            "that reads them itself (semgrep) may fail to verify TLS."
+        )
+    _trust_roots_cache.append(pem)
+    return pem
+
+
+def _sbpl_subpaths(paths: Sequence[Path]) -> str:
+    return " ".join(f"(subpath {_sbpl_string(path)})" for path in paths)
+
+
+def _mach_rule(names: Sequence[str]) -> str:
+    filters = " ".join(f"(global-name {_sbpl_literal(name)})" for name in names)
+    return f"(allow mach-lookup {filters})"
+
+
+def _exec_rules(
+    policy: SandboxPolicy, private_tmp: Path, spawn_executable: Sequence[Path] = ()
+) -> List[str]:
+    """Programs run from the policy's executable paths, and from nowhere else.
+
+    Then exec is denied again in the scan's own data, which the scanned repository
+    wrote, and everywhere else the scanner can write (the results directory, its
+    caches, the private TMPDIR), even where a tool path contains one of them: a
+    checkout under /opt is not executable because /opt is. A path inside one of
+    those that has to be executable is given back last: a tool path (a virtualenv
+    in the scanned project that ASH itself runs from), and ``spawn_executable``,
+    the directories made for this spawn alone that a tool runs programs from (its
+    private uv cache, a self-unpacking tool's unpack directory). In SBPL the last
+    matching rule wins.
+    """
+    executable = sorted(
+        {_real(p) for p in policy.executable} | {_real(p) for p in spawn_executable}
+    )
+    denied = sorted(
+        {
+            _real(p)
+            for p in [*policy.scan_data, *policy.writable, *policy.cache, private_tmp]
+        }
+        - set(executable)
+    )
+    nested = [path for path in executable if any(_is_within(path, d) for d in denied)]
+    # An empty filter list is a syntax error, so each rule is written only when it
+    # names something. Never empty in practice: /usr is executable, and the private
+    # TMPDIR is always denied.
+    rules = []
+    for verdict, paths in (("allow", executable), ("deny", denied), ("allow", nested)):
+        if paths:
+            rules.append(f"({verdict} process-exec {_sbpl_subpaths(paths)})")
+    return rules
 
 
 class SandboxExecBackend(SandboxBackend):
@@ -515,24 +832,47 @@ class SandboxExecBackend(SandboxBackend):
             [self.executable, "-p", "(version 1)(allow default)", "/usr/bin/true"]
         )
 
-    def profile(self, policy: SandboxPolicy, private_tmp: Path) -> str:
+    def profile(
+        self,
+        policy: SandboxPolicy,
+        private_tmp: Path,
+        trust_roots: Optional[Path] = None,
+        unpack_dir: Optional[Path] = None,
+        private_uv_cache: Optional[Path] = None,
+    ) -> str:
         home = _real(policy.home)
+        # Caches are read-only here too; see _private_caches.
         readable = " ".join(
-            f"(subpath {_sbpl_string(_real(p))})" for p in policy.read_only
+            f"(subpath {_sbpl_string(_real(p))})"
+            for p in list(policy.read_only) + list(policy.cache)
         )
         writable = " ".join(
-            f"(subpath {_sbpl_string(_real(p))})"
-            for p in list(policy.writable) + list(policy.cache) + [private_tmp]
+            [
+                f"(subpath {_sbpl_string(_real(p))})"
+                for p in list(policy.writable)
+                + [private_tmp]
+                + ([unpack_dir] if unpack_dir is not None else [])
+            ]
+            + [f"(literal {_sbpl_string(_real(p))})" for p in policy.uv_tool_locks]
         )
         lines = [
             "(version 1)",
             "(deny default)",
             "(allow process-fork)",
-            "(allow process-exec)",
+            *_exec_rules(
+                policy,
+                private_tmp,
+                [p for p in (unpack_dir, private_uv_cache) if p is not None],
+            ),
             "(allow signal (target same-sandbox))",
             "(allow process-info* (target same-sandbox))",
             "(allow sysctl-read)",
-            "(allow mach-lookup)",
+            _mach_rule(MACH_SERVICES),
+        ]
+        if policy.network:
+            lines.append(_mach_rule(MACH_SERVICES_WITH_NETWORK))
+        lines += [
+            f"(deny mach-lookup {_DENIED_MACH_SERVICES})",
             "(allow ipc-posix-shm)",
             "(allow ipc-posix-sem)",
             "(allow file-ioctl)",
@@ -551,6 +891,16 @@ class SandboxExecBackend(SandboxBackend):
             '(allow file-read* file-write* (literal "/dev/null") (literal "/dev/zero")'
             ' (literal "/dev/dtracehelper") (regex #"^/dev/fd/"))'
         )
+        if trust_roots is not None:
+            lines.append(
+                f"(allow file-read* (literal {_sbpl_string(_real(trust_roots))}))"
+            )
+        # Last of the file rules, so no path the policy grants can reopen them: the
+        # system and login keychains, whatever the keychain daemon would allow.
+        lines.append(
+            '(deny file-read* file-write* (subpath "/Library/Keychains")'
+            f" (subpath {_sbpl_string(home / 'Library' / 'Keychains')}))"
+        )
         if policy.network:
             # IP only. Unix-domain sockets stay denied (Docker Desktop's socket, the
             # launchd SSH agent) except the resolver's, which name lookup needs.
@@ -568,23 +918,59 @@ class SandboxExecBackend(SandboxBackend):
         self, argv: Sequence[str], env: Mapping[str, str], policy: SandboxPolicy
     ) -> SpawnPlan:
         private_tmp = Path(tempfile.mkdtemp(prefix="ash-sandbox-tmp-"))
+        cleanup: List[Callable[[], None]] = [
+            lambda: shutil.rmtree(private_tmp, ignore_errors=True)
+        ]
+        child_env = policy.filter_env(env)
+        child_env["TMPDIR"] = private_tmp.as_posix()
+        # Caches are read-only here; see _private_caches. uv's private cache is
+        # also where `uv tool run` builds the environment of a tool it was not asked
+        # to install and runs it from, so the profile lets that one run programs.
+        cleanup += _private_caches(policy, child_env)
+        private_uv_cache = (
+            Path(child_env["UV_CACHE_DIR"])
+            if "UV_CACHE_DIR" in policy.cache_env and child_env.get("UV_CACHE_DIR")
+            else None
+        )
+        trust_roots = None
+        # An SSL_CERT_FILE the operator set is passed through and wins, as it
+        # would unsandboxed.
+        if policy.system_trust_roots and "SSL_CERT_FILE" not in child_env:
+            pem = _system_trust_roots()
+            if pem is not None:
+                # A directory of its own, outside the writable private TMPDIR, so
+                # the profile can grant it read-only.
+                roots_dir = Path(tempfile.mkdtemp(prefix="ash-sandbox-roots-"))
+                cleanup.append(lambda: shutil.rmtree(roots_dir, ignore_errors=True))
+                trust_roots = roots_dir / "roots.pem"
+                trust_roots.write_text(pem, encoding="ascii", errors="replace")
+                child_env["SSL_CERT_FILE"] = trust_roots.as_posix()
+        unpack_dir = None
+        if policy.unpack_dir_env:
+            unpack_dir = Path(tempfile.mkdtemp(prefix="ash-sandbox-unpack-"))
+            cleanup.append(lambda: shutil.rmtree(unpack_dir, ignore_errors=True))
+            child_env[policy.unpack_dir_env] = unpack_dir.as_posix()
+        # Last, so the scanner's own setting cannot ask for the write the profile
+        # will refuse (a grype database update into its read-only cache).
+        child_env.update(policy.sandbox_exec_env)
         cmd = [
             sys.executable,
             "-I",
             "-c",
             _SETSID_EXEC,
+            # A spawn with no working directory of its own (a version probe) would
+            # otherwise start in ASH's, which is often under $HOME and unreadable
+            # here, and uv fails on its config lookup there. bwrap moves such a
+            # process to its private home for the same reason.
+            "" if policy.cwd else private_tmp.as_posix(),
             self.executable,
             "-p",
-            self.profile(policy, private_tmp),
+            self.profile(
+                policy, private_tmp, trust_roots, unpack_dir, private_uv_cache
+            ),
             *argv,
         ]
-        child_env = policy.filter_env(env)
-        child_env["TMPDIR"] = private_tmp.as_posix()
-        return SpawnPlan(
-            argv=cmd,
-            env=child_env,
-            cleanup=[lambda: shutil.rmtree(private_tmp, ignore_errors=True)],
-        )
+        return SpawnPlan(argv=cmd, env=child_env, cleanup=cleanup)
 
 
 BACKENDS: Dict[str, type] = {

@@ -91,6 +91,50 @@ def main() -> int:
         finally:
             s.close()
 
+    def unix_abstract_connect():
+        # An abstract Unix socket has no path, so no mount or filesystem rule can
+        # hide it; it lives in the network namespace. X11 and some session buses
+        # listen on one. A scanner sharing the host's network namespace reaches
+        # every one of them unless creating the socket is refused.
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.settimeout(5)
+            s.connect("\0" + spec["unix_abstract"])
+            s.sendall(spec["secret"].encode())
+            if s.recv(16) != b"ack":
+                raise RuntimeError("connected, but not to the test's listener")
+        finally:
+            s.close()
+
+    def unix_datagram_from_socketpair():
+        # Without socket(AF_UNIX): a datagram socket from socketpair() can still
+        # sendto() any datagram socket by path, such as the journal's /dev/log.
+        a, b = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+        try:
+            a.sendto(spec["secret"].encode(), spec["unix_datagram_socket"])
+        finally:
+            a.close()
+            b.close()
+
+    def ipc_environment():
+        # Variables that name a local IPC endpoint. The values the test sets point
+        # at nothing; what must not happen is the variables arriving at all.
+        leaked = [
+            name
+            for name, value in spec["ipc_env"].items()
+            if os.environ.get(name) == value
+        ]
+        if not leaked:
+            raise RuntimeError("no IPC endpoint variable in the environment")
+
+    def write_host_cache():
+        # uv's cache on the host, which a later unsandboxed `uv run` or `uv tool
+        # install` reads. Writable only where the write cannot reach the host.
+        with open(os.path.join(spec["host_cache"], "seed.txt"), "a") as f:
+            f.write("pwned\n")
+        with open(os.path.join(spec["host_cache"], "pwned.txt"), "w") as f:
+            f.write("pwned")
+
     def write_dev_shm():
         with open(spec["shm_file"], "w") as f:
             f.write("pwned")
@@ -132,15 +176,49 @@ def main() -> int:
         "tcp_connect_host_address": tcp_connect_host_address,
         "udp_send": udp_send,
         "env_credentials": env_credentials,
+        "ipc_environment": ipc_environment,
         "unix_socket_connect": unix_socket_connect,
         "plant_symlinks": plant_symlinks,
+        "write_host_cache": write_host_cache,
     }
     if os.path.isdir("/proc") and sys.platform.startswith("linux"):
         checks["parent_environ"] = parent_environ
+    if sys.platform.startswith("linux"):
+        # Abstract sockets, and a datagram socketpair reaching a path, are Linux.
+        checks["unix_abstract_connect"] = unix_abstract_connect
+        checks["unix_datagram_from_socketpair"] = unix_datagram_from_socketpair
     if spec.get("shm_file"):
         checks["write_dev_shm"] = write_dev_shm
     for name, fn in checks.items():
         outcomes[name] = attempt(fn)
+
+    def socketpair_round_trip():
+        # Not an escape: what tools use for pipes (multiprocessing, asyncio, libuv)
+        # has to keep working under every sandbox that refuses the rest.
+        for kind in (socket.SOCK_STREAM, socket.SOCK_SEQPACKET):
+            a, b = socket.socketpair(socket.AF_UNIX, kind)
+            try:
+                a.sendall(b"ping")
+                if b.recv(16) != b"ping":
+                    raise RuntimeError("the pair did not carry the data")
+            finally:
+                a.close()
+                b.close()
+
+    def uv_cache_is_writable():
+        # Wherever UV_CACHE_DIR points (the host cache through bwrap's overlay, a
+        # private directory elsewhere), uv has to be able to write it.
+        with open(os.path.join(os.environ["UV_CACHE_DIR"], "probe.txt"), "w") as f:
+            f.write("ok")
+
+    # What must still work, recorded apart from the attempts: "works" or why not.
+    works = {}
+    result = attempt(uv_cache_is_writable)
+    works["uv_cache"] = "works" if result == "succeeded" else result
+    if sys.platform.startswith("linux"):
+        result = attempt(socketpair_round_trip)
+        works["socketpair"] = "works" if result == "succeeded" else result
+    outcomes["works"] = works
 
     with open(spec["outcome"], "w", encoding="utf-8") as f:
         json.dump(outcomes, f, indent=2)

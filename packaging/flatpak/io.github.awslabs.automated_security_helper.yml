@@ -25,9 +25,10 @@
 # The interpreter is identical, so nothing is gained by the smaller runtime on the
 # axis that would normally decide this. The two absences both matter:
 #
-#   git. ASH shells out to it in automated_security_helper/utils/get_scan_set.py:677
-#   (`git rev-parse --show-toplevel`) and :718 (`git diff --name-only`). The first
-#   catches FileNotFoundError and returns None, and its own docstring says None means
+#   git. ASH shells out to it in automated_security_helper/utils/get_scan_set.py, in
+#   git_repository_root (`git rev-parse --show-toplevel`) and get_changed_files
+#   (`git diff --name-only`). The first catches FileNotFoundError and returns None,
+#   and its own docstring says None means
 #   "not a repository, or git is not on PATH, or timed out". So on a runtime without
 #   git, a diff-scoped or precommit scan does not fail -- it silently widens to
 #   scanning everything. A scan whose scope quietly changed is worse than one that

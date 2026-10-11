@@ -425,8 +425,15 @@ def _resolve_project_config(
     candidate: _Candidate,
     config_overrides: Tuple[str, ...] = (),
     default_config: Optional[Path] = None,
+    workspace_root: Optional[Path] = None,
 ) -> Tuple[AshConfig, Optional[Path]]:
     """Load one project's config through ASH's ordinary resolution path.
+
+    ``workspace_root`` and ``default_config`` are passed on as ``scanned_root``
+    and ``trusted_config_path``, as ``execution._project_config_with_policy`` does,
+    so what an in-tree config may set (sandbox grants, ``ash_plugin_modules``) is
+    decided against the whole workspace here too. The plan's plugin list is what
+    the registry is pre-warmed from, before any project's scan resolves its config.
 
     The config file is located once and passed back in, rather than letting
     resolution search again, so the file the plan reports is definitionally the
@@ -482,6 +489,8 @@ def _resolve_project_config(
             source_dir=candidate.resolved,
             fallback_to_default=True,
             config_overrides=list(config_overrides),
+            scanned_root=workspace_root,
+            trusted_config_path=default_config,
         )
         return config, config_path
     except ASHConfigValidationError as exc:
@@ -779,6 +788,7 @@ def resolve_workspace(
             candidate,
             config_overrides,
             default_config=Path(default_config) if default_config else None,
+            workspace_root=definition.root,
         )
         scanners, pins = _scanner_state(config)
         label = _project_label(config, candidate.key)

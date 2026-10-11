@@ -34,7 +34,7 @@ diagnostics with what the scan found. `ASH: Clear findings` empties them.
 |---|---|---|
 | `ash.executablePath` | empty | Empty runs `ashx` from PATH, and `ash` when no `ashx` is installed. Anything else is run exactly as given, with no fallback. Machine-scoped, so a cloned repository cannot set it. |
 | `ash.outputDirectory` | `.ash/ash_output` | Where the scan writes, relative to the workspace folder. It must resolve, symlinks included, to a folder inside the workspace: ASH clears directories under it before scanning, so an absolute path or an escape is refused and nothing runs. A symlink at `reports/`, `reports/ash.sarif` or `ash_aggregated_results.json` below it is refused too, before the previous report is deleted. |
-| `ash.extraArguments` | `[]` | Appended to `ashx scan`, for example `--scanners detect-secrets` or `--offline`. `--output-dir` and `--source-dir` are refused, because the extension sets both. |
+| `ash.extraArguments` | `[]` | Appended to `ashx scan`, for example `--scanners detect-secrets` or `--offline`. `--output-dir` and `--source-dir` are refused, because the extension sets both. Machine-scoped, so a cloned repository cannot set it; see Restricted Mode below. |
 | `ash.scanTimeoutSeconds` | `1800` | Seconds before a scan is stopped, with every process it started. `0` waits indefinitely. |
 
 The scan runs as a child process without blocking the editor, under a progress
@@ -57,15 +57,24 @@ one-minute limit, since a cold Python start can take seconds. A second
 ## Restricted Mode
 
 The extension does not run in an untrusted workspace (`capabilities.untrustedWorkspaces`
-is `supported: false`). A scan runs ASH over the workspace, and ASH reads the
-workspace's own ASH config, whose `ash_plugin_modules` imports Python modules.
-That config can be `.ash/.ash.yaml`, an `.ashrc.*` file, or a `[tool.ash]` table
-in `pyproject.toml`, all discovered under the folder passed as `--source-dir`.
-Opening a repository and scanning it can therefore run code that repository
-supplies. `limited` support with `restrictedConfigurations` was considered and
-rejected: it would only stop the repository's `.vscode/settings.json` from
-changing this extension's settings, and the code path above goes through none of
-them. Trust the workspace to scan it.
+is `supported: false`). A scan runs ASH and its scanners over the workspace, and
+ASH reads the workspace's own ASH config: `.ash/.ash.yaml`, an `.ashrc.*` file, or
+a `[tool.ash]` table in `pyproject.toml`, all discovered under the folder passed as
+`--source-dir`. ASH treats that config as the repository's, not yours: it cannot
+import plugin modules from the workspace, swap the tool packages ASH installs for
+others, hand a scanner a config file from the workspace, or widen the scanner
+sandbox (see "Settings a repository's config cannot choose" in ASH's configuration
+guide). It still chooses which scanners run and which findings are suppressed, so
+the result is only as trustworthy as the repository. Trust the workspace to scan
+it.
+
+`ash.executablePath` and `ash.extraArguments` are machine-scoped, so a
+repository's own `.vscode/settings.json` cannot set either. The first names the
+program that runs. The second reaches `ashx scan` as command-line options, which
+ASH takes as yours and lets do what the workspace's config cannot: `--sandbox off`,
+`--config-overrides sandbox.extra_read_paths=[...]` or `--ash-plugin-modules` from
+a cloned repository would undo every limit above. To choose scanners for one
+repository, put them in its `.ash/.ash.yaml`.
 
 ## Which executable runs
 

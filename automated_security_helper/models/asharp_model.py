@@ -298,6 +298,30 @@ class ScannerStatusInfo(BaseModel):
         return _non_default(self.source) and _non_default(self.converted)
 
 
+class RefusedInputInfo(BaseModel):
+    """One input a converter declined to read, and why."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="allow")
+
+    path: Annotated[
+        str,
+        Field(
+            description=(
+                "The input's path relative to the scanned tree, with '/' separators. "
+                "For an archive member, the archive's path."
+            )
+        ),
+    ]
+    member: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="The archive member's name, when the refusal was of a member.",
+        ),
+    ] = None
+    reason: Annotated[str, Field(description="Why the input was not read.")]
+
+
 class ConverterStatusInfo(BaseModel):
     """Information about converter status."""
 
@@ -361,6 +385,22 @@ class ConverterStatusInfo(BaseModel):
             ),
         ),
     ] = None
+
+    # Declared for the same reason as the two fields above. A converter input that ASH
+    # declined to read used to have no representation at all, so a skipped notebook
+    # left the same row as one that was never there. ConvertPhase leaves it unset when
+    # nothing was refused: a full dump then carries an empty list, and an
+    # ``exclude_unset`` dump (``to_simple_dict``) carries nothing, as before.
+    refused_inputs: List[RefusedInputInfo] = Field(
+        default_factory=list,
+        description=(
+            "Inputs this converter did not read because they failed the "
+            "scanned-tree check: a symlink, a path outside the scanned tree, a "
+            "file that is not a regular file or has more than one hard link, or "
+            "an archive member that is a link or would be extracted outside its "
+            "destination."
+        ),
+    )
 
     converted_paths: List[str] = []
 

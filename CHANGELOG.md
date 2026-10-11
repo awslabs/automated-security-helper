@@ -67,12 +67,19 @@
   `ASH_CONFIG`) cannot set them; they come from `--config-overrides` or a config
   file outside the tree. Such a file's `network_scanners` can still remove network,
   and its `sandbox.mode` applies only when nothing trusted turned the sandbox on.
-  The tree is the enclosing checkout, not only the scanned directory.
+  The tree is the outermost enclosing checkout, not only the scanned directory, and
+  when nothing outside the tree sets a sandbox mode, the operator's mode holds even
+  when the operator's own file is in the tree. In workspace mode, an operator
+  `--config` that does not validate is now refused (exit 3) even for projects that
+  have their own config file, because the sandbox mode is read from it.
 
   If a sandbox was requested and cannot be provided, the scanner is recorded
   `MISSING` with the reason and the scan exits 1. ASH never falls back to running it
   unsandboxed. `auto` picks bubblewrap, then firejail, then Landlock on Linux, and
   sandbox-exec on macOS. There is no Windows backend: use WSL2 or container mode.
+  firejail counts as available only when a test command it runs lands in a sandbox:
+  inside a container with its own PID namespace firejail runs commands without one,
+  so there it is unavailable and `auto` moves on to Landlock.
   Container mode ignores the setting, because the container is the boundary.
 
   Two timeout behaviors change with the worker move, sandbox or not. cdk-nag now
@@ -87,6 +94,84 @@
   findings are unchanged.
 
 ### Behavior changes
+
+- **A config file inside the scanned tree can no longer choose what ASH installs,
+  imports or hands a scanner as its own configuration.** It applies to a discovered
+  `.ash/.ash.yaml`, a `--config` inside the tree, an `extends` base, or `ASH_CONFIG`:
+  - `tool_version` (bandit, checkov, semgrep, ferret-scan, the jupyter converter)
+    must be a PEP 440 version specifier set such as `>=1.2,<2`, from any source.
+    Any other value is replaced by the default, with a warning naming the key.
+    `scanners.opengrep.options.version` likewise has to be a release tag.
+  - `ash_plugin_modules` entries such a file adds are imported only when they name
+    an installed module outside the tree. `--ash-plugin-modules`,
+    `--config-overrides` and a config file outside the tree are unaffected.
+  - checkov's and ferret-scan's `config_file`, the `.checkov.yaml` and `ferret.yaml`
+    files they find by name, and detect-secrets plugins and filters that name a
+    file are passed to the tool only when the file is outside the scanned tree.
+    checkov and ferret-scan now run from the filesystem root, because each reads
+    its config file from its working directory itself, and ferret-scan always
+    gets a `--config`; the paths in their findings are unchanged.
+  - trivy-repo no longer reads a `.trivyignore` or `trivy-secret.yaml` from the
+    scanned repository, either of which could remove findings from the report. It
+    gets an explicit `--ignorefile` and `--secret-config`: the
+    `scanners.trivy-repo.options.ignore_file` / `secret_config_file` options, or
+    `TRIVY_IGNOREFILE` / `TRIVY_SECRET_CONFIG`, when that file is outside the scanned
+    tree, otherwise one that sets nothing. A repository that relied on either file
+    now sees those findings, with a warning naming the file. Under `--sandbox`, an
+    operator file outside the system paths also has to be listed in
+    `sandbox.extra_read_paths`.
+  - ferret-scan's `tool_version` no longer accepts a bare version or `latest`;
+    write `==1.2.3`, or leave it unset for the supported range.
+
+  Under the MCP server, a config a client delivered is limited the same way, and a
+  file any MCP client delivered (under the MCP workspace root, except each session's
+  `config/` directory) counts as inside the scanned tree for these checks. The
+  workspace tools' `config_overrides` are checked against the session config's
+  `runtime_overrides` allowlist, as `select_profile`'s `patch_ops` and
+  `override_yaml` are, and are refused while runtime overrides are off (the
+  default). Each override is checked by the key it names, so one whose value the
+  session config already holds is checked too. A workspace policy file a client
+  delivered, named or found beside the definition, is refused.
+  `/ash_plugin_modules` joins the default `denied_paths`, and `denied_paths` and
+  `denied_value_patterns` now match a key spelled with either `-` or `_`, and a
+  plugin's section under every spelling ASH reads as that plugin's config.
+
+  Each value that is not honored is logged once as a warning naming the key. See
+  [Settings a repository's config cannot choose](docs/content/docs/configuration-guide.md#settings-a-repositorys-config-cannot-choose).
+
+- **ASH no longer follows symlinks out of the scanned tree when it reads tree files
+  into its own output.** This covers converter inputs (archives and notebooks), the
+  JSON and YAML files cfn-nag and cdk-nag read to decide whether they are
+  CloudFormation, the `.gitignore` and `.ignore` files copied into
+  `ash-ignore-report.txt`, the files read for inline `ash-ignore` comments, and the
+  `package-lock.json` files read for package identity. Each is read only when it is a
+  regular file inside the scanned tree: not a symlink, not under a symlinked
+  directory, not outside the tree, and with a single hard link. The inline-suppression
+  and lockfile lookups, which read a file a scanner already reported, follow a symlink
+  whose target is inside the tree. Anything else is skipped with one warning naming
+  it. A converter records each skipped input under
+  `converter_results.<name>.refused_inputs` in `ash_aggregated_results.json`, cfn-nag
+  and cdk-nag record it in the scanner's error output, and a skipped ignore file is
+  noted in `ash-ignore-report.txt`. Archive members that are symlinks, hard links or
+  special files, or whose names are absolute or contain `..`, are skipped and
+  recorded the same way, with the member's name. A tree that relied on a symlinked
+  notebook, archive or ignore file loses that coverage or those ignore rules until
+  the link is replaced with the file. cfn-nag and cdk-nag also stop quoting template
+  content in their log messages: a parse or validation error is reported by file,
+  error type and, where the parser knows it, line. `cfn_nag_scan` and cdk-nag's
+  `CfnInclude` read a copy of the template text ASH checked, and findings keep the
+  template's own path.
+
+- **The Jupyter converter runs nbconvert outside the scanned tree, with an exporter
+  ASH chooses.** nbconvert runs in a directory that holds only a copy of the
+  notebook, so files in the scanned tree are not on its import path and its
+  `jupyter_nbconvert_config` files are not read from there. The exporter is
+  `python` for a Python notebook (or one that names no language) and `script`
+  otherwise, and `language_info.nbconvert_exporter` is removed from the copy, so the
+  notebook's metadata does not choose the exporter class. A Python notebook whose
+  metadata named no exporter used to go through nbconvert's generic script template;
+  it now goes through the Python exporter, which adds `# In[ ]:` cell markers to the
+  converted file.
 
 - **`ash dependencies install --tool` selects the archive converter as `archive`.**
   Every plugin is now listed and selected by its config key. The archive converter

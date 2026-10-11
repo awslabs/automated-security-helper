@@ -649,9 +649,10 @@ describe('extra arguments', () => {
     expect(invocations[1].args.slice(-3)).toEqual(['--no-progress', '--scanners', 'detect-secrets']);
   });
 
-  // ash.extraArguments is workspace-scoped like ash.outputDirectory, and click
-  // takes the LAST occurrence of an option, so an appended --output-dir would
-  // replace the confined one and --source-dir would scan somewhere else.
+  // ash.extraArguments is machine-scoped, but a user can still put either option
+  // in it, and click takes the LAST occurrence of an option, so an appended
+  // --output-dir would replace the confined one and --source-dir would scan
+  // somewhere else.
   it.each([
     ['--output-dir', '/home/user'],
     ['--output-dir=/home/user'],

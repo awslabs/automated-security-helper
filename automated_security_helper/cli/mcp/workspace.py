@@ -367,6 +367,32 @@ def _refuse_config_inputs_outside_the_permitted_roots(
     return None
 
 
+def _refuse_a_client_delivered_policy(
+    plan: WorkspacePlan,
+) -> Optional[MCPResourceError]:
+    """Refuse a plan whose workspace policy an MCP client delivered.
+
+    A policy sets suppressions and ignore paths for every project, the fields
+    the runtime-override denylist keeps from a client. Checked on the file the
+    resolver applied (``workspace_config_source``, already resolved) rather than
+    on a path worked out beforehand: discovery runs beside the resolved
+    definition, so a symlinked definition, or a file added between a check and
+    the resolution, would make a separate lookup check a different file.
+    """
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+
+    source = plan.workspace_config_source
+    if source is None or not config_is_client_supplied(Path(source)):
+        return None
+    return MCPResourceError(
+        "Workspace scan refused: the workspace policy file "
+        f"{Path(source).as_posix()} was delivered by an MCP client. A policy sets "
+        "suppressions and ignore paths for every project, so only an operator's "
+        "policy file is used.",
+        context={"config_input": "workspace policy"},
+    )
+
+
 def _refuse_projects_outside_the_permitted_roots(
     plan: WorkspacePlan,
     session_id: Optional[str] = None,
@@ -443,6 +469,108 @@ class ProfileNotRegisteredError(ValueError):
     client asked for a profile that does not exist, and reporting exit 4 would
     send somebody to inspect a correct definition.
     """
+
+
+def _gate_client_overrides(
+    config_overrides: Optional[Sequence[str]], session_config: Optional[str]
+) -> None:
+    """Refuse ``config_overrides`` the session's runtime-override allowlist does not allow.
+
+    A workspace scan hands its ``config_overrides`` to ``resolve_config`` as
+    ``--config-overrides``, which the trust checks count as the operator's: they
+    are replayed onto the trusted base for the sandbox settings and add to the
+    trusted ``ash_plugin_modules``. Over MCP the caller is a client, so the same
+    gate ``select_profile``'s ``patch_ops`` and ``override_yaml`` go through
+    applies: the overrides are applied to the session's config (its bound or
+    per-call profile, else the defaults), and the change is checked with
+    ``apply_runtime_override`` against that config's
+    ``global_settings.mcp.runtime_overrides``. Runtime overrides are off by
+    default, so without a profile that enables them no override is accepted.
+
+    Each override is checked twice: by the key it names (``check_runtime_ops``
+    on an ``add`` at the pointer it resolves to in the session config), and by
+    the change it makes to the session config (``apply_runtime_override``).
+
+    Raises:
+        RuntimePatchDeniedError: An override is not allowed.
+        ASHConfigValidationError: An override cannot be applied.
+    """
+    if not config_overrides:
+        return
+    from automated_security_helper.config.ash_config import (
+        AshConfig,
+        RuntimeOverridesConfig,
+    )
+    from automated_security_helper.config.resolve_config import (
+        _parse_config_value,
+        apply_config_overrides,
+    )
+    from automated_security_helper.config.runtime_patch import (
+        RuntimePatchDeniedError,
+        apply_runtime_override,
+        check_runtime_ops,
+    )
+
+    base = (
+        AshConfig.from_file(config_path=Path(session_config))
+        if session_config
+        else AshConfig()
+    )
+    mcp_cfg = getattr(base.global_settings, "mcp", None)
+    allowlist = (
+        mcp_cfg.runtime_overrides if mcp_cfg is not None else RuntimeOverridesConfig()
+    )
+    # Each override is checked by the key it names, whatever it changes. A diff
+    # against the session config alone misses one whose value the session config
+    # already holds: it changes nothing there, but still overwrites each
+    # project's own value. The key is resolved against the session config the
+    # way --config-overrides resolves it ('-' and '_' match per segment, see
+    # config_sources._resolve_dict_key); the denials match either spelling on
+    # their own (runtime_patch._denial_spellings).
+    base_dump = base.model_dump()
+    for override in config_overrides:
+        key, separator, raw = str(override).partition("=")
+        if not separator or not key.strip():
+            raise RuntimePatchDeniedError(None, f"invalid config override {override!r}")
+        append = key.endswith("+")
+        resolved = _resolve_override_key(
+            base_dump, (key[:-1] if append else key).split(".")
+        )
+        pointer = "/" + "/".join(
+            segment.replace("~", "~0").replace("/", "~1") for segment in resolved
+        )
+        check_runtime_ops(
+            [
+                {
+                    "op": "add",
+                    "path": pointer + ("/-" if append else ""),
+                    "value": _parse_config_value(raw),
+                }
+            ],
+            allowlist=allowlist,
+        )
+    after = apply_config_overrides(base, list(config_overrides))
+    apply_runtime_override(base, after, allowlist=allowlist)
+
+
+def _resolve_override_key(
+    config_dict: Dict[str, Any], parts: Sequence[str]
+) -> List[str]:
+    """The keys ``apply_config_overrides`` writes ``parts`` to in ``config_dict``.
+
+    The same walk as ``resolve_config._apply_config_override``: each segment
+    takes the spelling the dict already uses, and a segment under a missing or
+    non-dict value is kept as typed.
+    """
+    from automated_security_helper.config.config_sources import _resolve_dict_key
+
+    resolved: List[str] = []
+    current: Any = config_dict
+    for part in parts:
+        key = _resolve_dict_key(current, part) if isinstance(current, dict) else part
+        resolved.append(key)
+        current = current.get(key) if isinstance(current, dict) else None
+    return resolved
 
 
 def _resolve_session_config(
@@ -916,6 +1044,15 @@ async def mcp_resolve_workspace(
         )
 
     try:
+        _gate_client_overrides(config_overrides, session_config)
+    except Exception as exc:  # noqa: BLE001 -- a refusal, reported not raised
+        return _error_response(
+            exc,
+            "resolve_workspace",
+            exit_code=int(WorkspaceExitCode.INVALID_PROJECT_CONFIG),
+        )
+
+    try:
         plan = _resolve(
             workspace_file,
             workspace_config,
@@ -925,6 +1062,14 @@ async def mcp_resolve_workspace(
         )
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "resolve_workspace")
+
+    policy_refusal = _refuse_a_client_delivered_policy(plan)
+    if policy_refusal is not None:
+        return _error_response(
+            policy_refusal,
+            "resolve_workspace",
+            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
+        )
 
     return {
         "success": True,
@@ -1050,6 +1195,15 @@ async def mcp_scan_workspace(
         )
 
     try:
+        _gate_client_overrides(config_overrides, session_config)
+    except Exception as exc:  # noqa: BLE001 -- a refusal, reported not raised
+        return _error_response(
+            exc,
+            "scan_workspace",
+            exit_code=int(WorkspaceExitCode.INVALID_PROJECT_CONFIG),
+        )
+
+    try:
         plan = _resolve(
             workspace_file,
             workspace_config,
@@ -1061,6 +1215,14 @@ async def mcp_scan_workspace(
         )
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "scan_workspace")
+
+    policy_refusal = _refuse_a_client_delivered_policy(plan)
+    if policy_refusal is not None:
+        return _error_response(
+            policy_refusal,
+            "scan_workspace",
+            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
+        )
 
     refusal = _refuse_projects_outside_the_permitted_roots(plan, session_id)
     if refusal is not None:

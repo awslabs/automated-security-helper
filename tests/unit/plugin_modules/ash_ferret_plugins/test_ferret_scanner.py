@@ -520,24 +520,29 @@ class TestFerretScanScannerASHConventions:
 class TestFerretScannerConfigFileDiscovery:
     """Test configuration file discovery."""
 
-    def test_find_config_file_explicit(
-        self, mock_plugin_context, mock_ferret_config_file
-    ):
-        """Test finding explicitly specified config file."""
+    def test_find_config_file_explicit(self, mock_plugin_context, tmp_path):
+        """An explicitly specified config file outside the source tree is used."""
+        explicit = tmp_path / "operator" / "ferret.yaml"
+        explicit.parent.mkdir()
+        explicit.write_text("defaults:\n  format: sarif\n")
         scanner = FerretScanScanner(context=mock_plugin_context)
 
-        result = scanner._find_config_file(mock_ferret_config_file)
-        assert result == mock_ferret_config_file
+        result = scanner._find_config_file(explicit)
+        assert result == explicit.resolve()
 
-    def test_find_config_file_auto_discovery(
+    def test_find_config_file_in_source_tree_is_not_used(
         self, mock_plugin_context, mock_ferret_config_file
     ):
-        """Test auto-discovery of config file."""
+        """A config file inside the scanned tree, named or found by name, is not used.
+
+        The bundled default is used instead; see config/path_trust.py.
+        """
         scanner = FerretScanScanner(context=mock_plugin_context)
 
-        # Should find ferret.yaml in source directory
-        result = scanner._find_config_file(None)
-        assert result == mock_ferret_config_file
+        for requested in (mock_ferret_config_file, None):
+            result = scanner._find_config_file(requested)
+            assert result != mock_ferret_config_file
+            assert result is not None and "ferret-config.yaml" in str(result)
 
     def test_find_config_file_not_found(self, mock_plugin_context):
         """Test when no config file is found in source dir, falls back to default."""

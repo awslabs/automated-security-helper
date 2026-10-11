@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from pydantic import ValidationError
 import yaml
@@ -17,10 +17,13 @@ from automated_security_helper.config.default_config import (
     default_config_chain,
     get_default_config,
 )
+from automated_security_helper.config.plugin_module_trust import (
+    confine_plugin_modules,
+)
 from automated_security_helper.config.sandbox_grants import (
     confine_sandbox_grants,
     files_inside,
-    scanned_tree,
+    scanned_trees,
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -196,6 +199,7 @@ def resolve_config(
     permit_base: Optional[Callable[[Path], bool]] = None,
     scanned_root: Path | str | None = None,
     trusted_config_path: Path | str | None = None,
+    untrusted_config: bool = False,
 ) -> AshConfig:
     """
     Load configuration from file or return default configuration.
@@ -219,6 +223,14 @@ def resolve_config(
             which a project's own config file replaces). Used in place of the
             defaults as the trusted base the grants come from, unless it is
             inside the scanned tree as well.
+        untrusted_config: The selected config file was written by the caller,
+            not the operator: an MCP client's upload named as ``config_path``.
+            Every file of its chain is then treated as a file inside the scanned
+            tree is, wherever it is: its sandbox grants come from the trusted
+            base instead, its ``network_scanners`` list only removes network,
+            and its ``sandbox.mode`` cannot turn off or replace a mode the
+            trusted base sets. Its ``ash_plugin_modules`` are limited the same way
+            as an in-tree file's (``config/plugin_module_trust.py``).
 
     Returns:
         The resolved AshConfig object
@@ -236,21 +248,32 @@ def resolve_config(
         return config
     if scanned_root is None:
         scanned_root = source_dir if source_dir is not None else Path.cwd()
-    root = scanned_tree(Path(scanned_root))
+    trees = scanned_trees(Path(scanned_root))
     if chain:
-        in_tree = files_inside(chain, root)
+        in_tree = list(chain) if untrusted_config else files_inside(chain, trees)
         if not in_tree:
             return config
-        default_in_tree = files_inside(default_config_chain(), root)
+        default_in_tree = files_inside(default_config_chain(), trees)
     else:
         # With no config file, the config is get_default_config(): ASH_CONFIG's
         # file when that variable names one, which can be inside the tree too.
-        in_tree = default_in_tree = files_inside(default_config_chain(), root)
+        in_tree = default_in_tree = files_inside(default_config_chain(), trees)
         if not in_tree:
             return config
-    trusted = _trusted_base(
-        root, default_in_tree, trusted_config_path, source_dir, permit_base
-    )
+    operator = _load_operator_config(trusted_config_path, source_dir, permit_base)
+    if operator is not None and not files_inside(operator[1], trees):
+        trusted = operator[0]
+    else:
+        trusted = AshConfig() if default_in_tree else get_default_config()
+    # The operator's mode is a floor wherever its file lives: a mode other than off
+    # grants nothing, so an operator file in the tree may still turn the sandbox on.
+    # Before the overrides, so `--sandbox off` still turns it off.
+    if trusted.sandbox.mode == "off":
+        trusted.sandbox.mode = (
+            operator[0].sandbox.mode
+            if operator is not None
+            else get_default_config().sandbox.mode
+        )
     # Only an override under `sandbox` can change the sandbox section, and replaying
     # the rest onto the defaults could fail where the config file supplied the
     # section they write into.
@@ -262,27 +285,38 @@ def resolve_config(
     if sandbox_overrides:
         trusted = apply_config_overrides(trusted, sandbox_overrides)
     confine_sandbox_grants(config.sandbox, trusted.sandbox, in_tree)
+    confine_plugin_modules(
+        config, trusted, config_overrides, Path(scanned_root), in_tree
+    )
     return config
 
 
-def _trusted_base(
-    root: Path,
-    default_in_tree: List[Path],
+def _load_operator_config(
     trusted_config_path: Path | str | None,
     source_dir: Path | str | None,
     permit_base: Optional[Callable[[Path], bool]],
-) -> AshConfig:
-    """The config the sandbox settings are taken from when the selected one is in the tree."""
-    if trusted_config_path is not None and Path(trusted_config_path).is_file():
-        path = Path(trusted_config_path)
-        document = resolve_config_document(
-            path,
-            confine_to=default_confinement_root(path, source_dir),
-            permit_base=permit_base,
-        )
-        if not files_inside(document.chain, root):
-            return AshConfig.model_validate(document.data, strict=True)
-    return AshConfig() if default_in_tree else get_default_config()
+) -> Optional[Tuple[AshConfig, List[Path]]]:
+    """The operator's config file and the files it was built from, or None.
+
+    Loaded the way _resolve_config loads a config file, and refused the same way
+    when it does not validate.
+    """
+    if trusted_config_path is None or not Path(trusted_config_path).is_file():
+        return None
+    path = Path(trusted_config_path)
+    document = resolve_config_document(
+        path,
+        confine_to=default_confinement_root(path, source_dir),
+        permit_base=permit_base,
+    )
+    try:
+        config = AshConfig.model_validate(document.data, strict=True)
+    except ValidationError as e:
+        raise ASHConfigValidationError(
+            f"Configuration validation failed for '{describe_config_path(path)}': "
+            f"{str(e)}. Run 'ashx config lint' to identify and fix issues."
+        ) from e
+    return config, list(document.chain)
 
 
 def _resolve_config(

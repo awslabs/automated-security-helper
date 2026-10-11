@@ -6,6 +6,7 @@
 import json
 import shlex
 import logging
+import os
 import re
 import subprocess  # nosec B404 — ferret-scan is an external CLI tool invoked via subprocess
 import sys
@@ -13,11 +14,21 @@ from pathlib import Path
 from typing import Annotated, Any, ClassVar, List, Literal, Optional, Tuple
 from urllib.parse import urljoin
 
-from pydantic import Field, model_validator
+from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.config.path_trust import (
+    cwd_outside_scanned_tree,
+    honored_path,
+    resolved_path,
+)
+from automated_security_helper.base.options import (
+    ScannerOptionsBase,
+    tool_version_constraint,
+)
 from automated_security_helper.base.plugin_base import pep440_requirement
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+from automated_security_helper.utils.uv_tool_runner import checked_requirement
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs, ToolExtraArg
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
@@ -441,6 +452,7 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
     # Version control options
     tool_version: Annotated[
         str | None,
+        tool_version_constraint("scanners.ferret-scan.options.tool_version"),
         Field(
             description=f"Version constraint for ferret-scan installation "
             f"(e.g., '>=1.0.0,<2.0.0', '==1.2.0'). If not specified, uses the plugin's "
@@ -535,6 +547,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
+    # The absolute target of the scan in progress, set by scan() and read by
+    # _subprocess_cwd.
+    _ferret_target: Optional[Path] = PrivateAttr(default=None)
+
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         env_prefixes=("FERRET_",)
     )
@@ -619,8 +635,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 "-m",
                 "pip",
                 "install",
-                pep440_requirement(
-                    "ferret-scan", self._get_tool_version_constraint() or "latest"
+                checked_requirement(
+                    pep440_requirement(
+                        "ferret-scan", self._get_tool_version_constraint() or "latest"
+                    )
                 ),
             ]
         )
@@ -786,12 +804,16 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         if options.recursive:
             self.args.extra_args.append(ToolExtraArg(key="--recursive", value=None))
 
-        # Config file
-        config_file_path = self._find_config_file(options.config_file)
-        if config_file_path:
-            self.args.extra_args.append(
-                ToolExtraArg(key="--config", value=str(config_file_path))
-            )
+        # Config file. Always passed: without --config, ferret-scan loads a
+        # ferret.yaml from its working directory, the source directory (measured
+        # with ferret-scan 2.5.3), so a run with no config of its own gets an
+        # empty one ASH writes, which ferret-scan treats as its defaults.
+        config_file_path = (
+            self._find_config_file(options.config_file) or self._empty_config_file()
+        )
+        self.args.extra_args.append(
+            ToolExtraArg(key="--config", value=str(config_file_path))
+        )
 
         # Profile
         if options.profile:
@@ -889,36 +911,35 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         Returns:
             Path to config file if found, None otherwise
         """
+        # A config file inside the scanned tree is not passed to ferret-scan,
+        # whether the option names it or it is found by name below; see
+        # config/path_trust.py. The bundled default is used instead. The path
+        # returned is the one honored_path checked, never one rebuilt from the
+        # option's value.
+        source_dir = self.context.source_dir
+
         # 1. Check explicitly specified config file
         if config_file:
-            path = Path(config_file)
-            if path.is_absolute():
-                if path.exists():
-                    self._plugin_log(
-                        f"Using explicitly specified config file: {path}",
-                        level=logging.DEBUG,
-                    )
-                    return path
-                else:
-                    self._plugin_log(
-                        f"Specified config file not found: {path}",
-                        level=logging.WARNING,
-                    )
-                    return None
-            # Relative to source directory
-            full_path = self.context.source_dir / path
-            if full_path.exists():
+            if not resolved_path(config_file, source_dir).exists():
                 self._plugin_log(
-                    f"Using config file relative to source: {full_path}",
-                    level=logging.DEBUG,
-                )
-                return full_path
-            else:
-                self._plugin_log(
-                    f"Specified config file not found: {full_path}",
+                    f"Specified config file not found: "
+                    f"{resolved_path(config_file, source_dir)}",
                     level=logging.WARNING,
                 )
                 return None
+            path = honored_path(
+                config_file,
+                source_dir=source_dir,
+                config=getattr(self.context, "config", None),
+                key="scanners.ferret-scan.options.config_file",
+            )
+            if path is None:
+                return self._bundled_config()
+            self._plugin_log(
+                f"Using explicitly specified config file: {path}",
+                level=logging.DEBUG,
+            )
+            return path
 
         # 2. Search for config files in source directory
         possible_paths = [
@@ -930,8 +951,17 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             self.context.source_dir / ".ash" / "ferret-scan.yaml",
         ]
 
-        for path in possible_paths:
-            if path.exists():
+        for candidate in possible_paths:
+            if not resolved_path(candidate, source_dir).exists():
+                continue
+            path = honored_path(
+                candidate,
+                source_dir=source_dir,
+                config=getattr(self.context, "config", None),
+                key="ferret-scan config file "
+                + candidate.relative_to(source_dir).as_posix(),
+            )
+            if path is not None:
                 self._plugin_log(
                     f"Found Ferret config file in source directory: {path}",
                     level=logging.DEBUG,
@@ -939,6 +969,36 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 return path
 
         # 3. Use default config bundled with this plugin
+        return self._bundled_config()
+
+    def _subprocess_cwd(self, results_dir: Path) -> Path | None:
+        """Run ferret-scan from the filesystem root, outside the scanned tree.
+
+        ferret-scan loads a ferret.yaml from its working directory when no
+        --config is given, and ASH always gives one; running it outside the tree
+        as well means a config in the tree is not read either way. Its SARIF
+        paths are relative to the scanned path, not the working directory
+        (measured with ferret-scan 2.5.3), so they do not change. The sandbox
+        does not turn a root working directory into a read grant
+        (``sandbox.policy._readable_cwd``).
+        """
+        return cwd_outside_scanned_tree(
+            self._ferret_target or Path(os.path.abspath(self.context.source_dir)),
+            results_dir=results_dir,
+            source_dir=self.context.source_dir,
+            config=getattr(self.context, "config", None),
+        )
+
+    def _empty_config_file(self) -> Path:
+        """An empty ferret-scan config in this scanner's results directory."""
+        path = Path(self.results_dir) / "ferret-empty-config.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open_for_write(path) as handle:
+            handle.write("{}\n")
+        return path.resolve()
+
+    def _bundled_config(self) -> Path | None:
+        """The config bundled with this plugin, when use_default_config allows it."""
         if self.config.options.use_default_config and DEFAULT_FERRET_CONFIG.exists():
             self._plugin_log(
                 f"Using default Ferret config bundled with plugin: {DEFAULT_FERRET_CONFIG}",
@@ -1057,7 +1117,13 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             return False
 
         try:
-            target_results_dir = self.results_dir.joinpath(target_type)
+            # Absolute, because ferret-scan runs from outside the source directory
+            # (_subprocess_cwd), where a relative path names something else.
+            target = Path(os.path.abspath(target))
+            self._ferret_target = target
+            target_results_dir = Path(
+                os.path.abspath(self.results_dir.joinpath(target_type))
+            )
             results_file = target_results_dir.joinpath("ferret-scan.sarif")
             target_results_dir.mkdir(exist_ok=True, parents=True)
 
@@ -1091,6 +1157,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 results_dir=target_results_dir,
                 stdout_preference="write",
                 stderr_preference="write",
+                cwd=self._subprocess_cwd(target_results_dir),
                 env={**snapshot_environ(), **FERRET_SUBPROCESS_ENV_OVERRIDES},
                 timeout=self._effective_scan_timeout(),
             )

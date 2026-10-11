@@ -718,9 +718,11 @@ fails rather than skips when no interpreter is found.
 
 The templates synthesize with no AWS credentials and no `cdk.context.json`: nothing
 uses `fromLookup`, so `npx cdk synth --all --no-lookups` works offline. The pinned
-`aws-cdk` CLI (2.1139.0) matches the cloud-assembly schema `aws-cdk-lib` 2.267.0
-emits (54.0.0); an older CLI fails synth with a schema mismatch that does not look
-like a template problem.
+`aws-cdk` CLI (2.1144.0) is the `minimumCliVersion` that `manifest.json` records for
+the locked `aws-cdk-lib` 2.273.0 and `@aws-cdk/cloud-assembly-schema` 54.26.0
+(manifest schema 54.0.0). The CLI only rejects a newer schema major, so a CLI below
+that minimum still synthesizes, but one built against an older major fails synth
+with a schema mismatch that does not look like a template problem.
 
 ## Layout
 

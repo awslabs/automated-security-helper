@@ -59,16 +59,14 @@
   dict({
     'client_messages': list([
       list([
-        'info',
-        "Profile 'strict' bound to session __default__ (override)",
+        'error',
+        'override denied: Patch op None denied by rule: runtime overrides disabled (allowlist.enabled is False)',
       ]),
     ]),
     'result': dict({
-      'config_path': '<TMP>/workspaces/__default__/config/ash.yaml',
-      'mode': 'override',
-      'profile_name': 'strict',
+      'error': 'override denied: Patch op None denied by rule: runtime overrides disabled (allowlist.enabled is False)',
       'session_id': '__default__',
-      'success': True,
+      'success': False,
     }),
     'tool': 'select_profile',
   })

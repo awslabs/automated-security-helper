@@ -320,8 +320,10 @@ def test_collect_proceeds_without_pruning_when_the_root_gitignore_will_not_parse
     """A malformed root .gitignore disables pruning but must not abort the walk."""
     _tree(tmp_path)
 
+    # add_rule is what reads each line of the root .gitignore for pruning; the file
+    # is read through the scanned-tree check and its lines are added one at a time.
     with patch.object(
-        IgnoreParser, "parse_rule_file", side_effect=ValueError("malformed pattern")
+        IgnoreParser, "add_rule", side_effect=ValueError("malformed pattern")
     ):
         ignore_files, all_files = _collect_ignorefiles_and_all_files(str(tmp_path))
 

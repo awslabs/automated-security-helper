@@ -906,7 +906,7 @@ exports[`what the manifest and activation present package.json contributions and
   "activationEvents": [],
   "capabilities": {
     "untrustedWorkspaces": {
-      "description": "A scan runs ASH over the workspace, and ASH reads the workspace's own ASH config (.ash/.ash.yaml, an .ashrc file, or [tool.ash] in pyproject.toml), which can load Python plugin modules and so run code the repository supplies. Trust the workspace to scan it.",
+      "description": "A scan runs ASH and its scanners over the workspace, and ASH reads the workspace's own ASH config (.ash/.ash.yaml, an .ashrc file, or [tool.ash] in pyproject.toml), which chooses the scanners that run and the findings that are suppressed. Trust the workspace to scan it.",
       "supported": false,
     },
   },
@@ -941,7 +941,10 @@ Machine-scoped: this names a program that gets executed, so a cloned repository 
           "items": {
             "type": "string",
           },
-          "markdownDescription": "Extra arguments appended to \`ashx scan\`, for example \`--scanners detect-secrets\` or \`--offline\`. \`--output-dir\` and \`--source-dir\` are refused, in either form: the extension sets both, and \`ash.outputDirectory\` chooses where the scan writes.",
+          "markdownDescription": "Extra arguments appended to \`ashx scan\`, for example \`--scanners detect-secrets\` or \`--offline\`. \`--output-dir\` and \`--source-dir\` are refused, in either form: the extension sets both, and \`ash.outputDirectory\` chooses where the scan writes.
+
+Machine-scoped: ASH takes command-line options as the operator's and lets them do what a config file in the scanned tree cannot, such as \`--sandbox off\`, \`--config-overrides sandbox.extra_read_paths=[...]\` or \`--ash-plugin-modules\`, so a cloned repository cannot set this from its own \`.vscode/settings.json\`. To choose scanners for one repository, put them in its \`.ash/.ash.yaml\`.",
+          "scope": "machine",
           "type": "array",
         },
         "ash.outputDirectory": {

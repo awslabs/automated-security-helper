@@ -279,10 +279,11 @@ export function resolveOutputDirectory(
 /**
  * Options `ash.extraArguments` may not carry, because the extension sets them.
  *
- * The setting is workspace-scoped, and click keeps the LAST occurrence of an
- * option, so an appended `--output-dir` would replace the confined one checked by
- * resolveOutputDirectory, and `--source-dir` would scan a directory other than the
- * one whose findings are published. Neither has a short alias in `ash scan`.
+ * The setting is machine-scoped, so a repository cannot set it, but click keeps the
+ * LAST occurrence of an option, so an appended `--output-dir` would replace the
+ * confined one checked by resolveOutputDirectory, and `--source-dir` would scan a
+ * directory other than the one whose findings are published. Neither has a short
+ * alias in `ashx scan`.
  */
 export const RESERVED_SCAN_OPTIONS: readonly string[] = ['--output-dir', '--source-dir'];
 

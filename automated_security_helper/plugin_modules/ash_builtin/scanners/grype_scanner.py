@@ -39,6 +39,13 @@ from automated_security_helper.utils.package_identity import (
 )
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.content_db_refresh import (
+    GRYPE_PREPARED_ENV,
+    default_cache_dir,
+    prepare_content_db,
+    sandboxed_online,
+    scan_id_for,
+)
 
 #: grype configuration keys that remove matches from the report.
 #:
@@ -145,6 +152,10 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
         cache_paths=("~/.cache/grype", "$GRYPE_DB_CACHE_DIR"),
+        # grype's default database location on macOS, read-only like the cache
+        # above: the database is updated outside the sandbox before an online
+        # scan (utils/content_db_refresh.py), and grype only reads it.
+        read_paths=("~/Library/Caches/grype",),
         env_prefixes=("GRYPE_",),
     )
 
@@ -385,6 +396,18 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         subprocess_env = (
             {**snapshot_environ(), **self.extra_env} if self.extra_env else None
         )
+        if sandboxed_online(self._scanner_offline()):
+            # The sandbox mounts grype's cache read-only, so its database is updated
+            # first, outside the sandbox, and grype only reads it. See
+            # utils/content_db_refresh.py.
+            scan_env = subprocess_env or snapshot_environ()
+            prepare_content_db(
+                "grype",
+                default_cache_dir("grype", scan_env),
+                offline=False,
+                scan_id=scan_id_for(self.context),
+            )
+            subprocess_env = {**scan_env, **GRYPE_PREPARED_ENV}
         return final_args, results_file, subprocess_env
 
     def _ensure_runs(self, sarif_report: SarifReport) -> None:

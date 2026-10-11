@@ -21,11 +21,10 @@ tell" is a real outcome that must not be collapsed into either verdict.
 
 Why not use ``packaging``
 -------------------------
-``packaging.specifiers.SpecifierSet`` would parse these strings correctly, and it
-is present in the environment as a transitive dependency. It is not a declared
-dependency of ASH and nothing in ASH imports it today, so depending on it here
-would make ASH's behaviour hostage to another package's dependency tree. It also
-would not finish the job: ``SpecifierSet`` can test whether a *given* version
+``packaging.specifiers.SpecifierSet`` parses these strings correctly, and ASH
+declares ``packaging`` because ``utils/pre_installed_tool.validate_version_constraint``
+uses it to refuse any ``tool_version`` that is not a specifier set. It does not
+finish this module's job: ``SpecifierSet`` can test whether a *given* version
 satisfies a set, but exposes no intersection-emptiness operation, which is the
 question actually being asked. The subset modelled below is small enough to
 implement against the standard library and to test exhaustively.

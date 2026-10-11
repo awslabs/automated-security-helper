@@ -680,6 +680,9 @@ class RuntimeOverridesConfig(BaseModel):
         # scanner a network, or widen what it can read.
         "/sandbox",
         "/sandbox/**",
+        # Plugin modules are imported into ASH's own process, unsandboxed.
+        "/ash_plugin_modules",
+        "/ash_plugin_modules/**",
         # Suppressions and ignore paths can hide findings outright.
         "/global_settings/ignore_paths",
         "/global_settings/suppressions",
@@ -1063,6 +1066,11 @@ class AshConfig(BaseModel):
     # Internal field to track config resolution warnings (not serialized)
     _resolution_warnings: List[str] = PrivateAttr(default_factory=list)
 
+    # The tree a scan with this config covers, when it is wider than the source
+    # directory: workspace mode sets the workspace root. config/path_trust.py
+    # refuses tool config files inside it. None means the source directory's tree.
+    _scanned_root: Optional[Path] = PrivateAttr(default=None)
+
     # Project information
     project_name: Annotated[
         str,
@@ -1306,17 +1314,7 @@ class AshConfig(BaseModel):
         # scanner_statistics_calculator passes the registered scanner name, so this
         # is the spelling real callers use, not a hypothetical one.
         og_plugin_name = plugin_name
-        plugin_name = re.sub(
-            r"[^a-z0-9+]+",
-            "",
-            re.sub(
-                r"(Converter|Scanner|Reporter)(Config)?",
-                "",
-                plugin_name,
-                flags=re.IGNORECASE,
-            ),
-            flags=re.IGNORECASE,
-        ).lower()
+        plugin_name = reduced_plugin_name(plugin_name)
         match plugin_type:
             case "scanner":
                 item_dict = self.scanners.model_dump(by_alias=True)
@@ -1337,7 +1335,7 @@ class AshConfig(BaseModel):
             for possible in sorted(
                 {
                     item_name,
-                    re.sub(r"[^a-z0-9+]+", "", item_name, flags=re.IGNORECASE).lower(),
+                    _PLUGIN_NAME_PUNCTUATION.sub("", item_name).lower(),
                 }
             ):
                 key_map[possible] = item_name
@@ -1356,17 +1354,7 @@ class AshConfig(BaseModel):
         # the second one's stripped form collides with the first, and adding a
         # plugin should not repoint another plugin's config.
         for item_name in item_dict:
-            stripped = re.sub(
-                r"[^a-z0-9+]+",
-                "",
-                re.sub(
-                    r"(Converter|Scanner|Reporter)(Config)?",
-                    "",
-                    item_name,
-                    flags=re.IGNORECASE,
-                ),
-                flags=re.IGNORECASE,
-            ).lower()
+            stripped = reduced_plugin_name(item_name)
             if stripped:
                 key_map.setdefault(stripped, item_name)
         # The caller's spelling, before any reduction, wins. This is checked
@@ -1397,6 +1385,37 @@ class AshConfig(BaseModel):
             )
 
         return found
+
+
+_PLUGIN_TYPE_WORD = re.compile(r"(Converter|Scanner|Reporter)(Config)?", re.IGNORECASE)
+_PLUGIN_NAME_PUNCTUATION = re.compile(r"[^a-z0-9+]+", re.IGNORECASE)
+
+
+def reduced_plugin_name(name: str) -> str:
+    """``name`` as ``AshConfig.get_plugin_config`` compares it.
+
+    The Converter/Scanner/Reporter word (and a following "Config") and every
+    character outside ``[a-z0-9+]`` are removed, then the rest is lowercased, so
+    ``BedrockSummaryReporter`` and ``bedrock-summary-reporter`` both become
+    ``bedrocksummary``.
+    """
+    return _PLUGIN_NAME_PUNCTUATION.sub("", _PLUGIN_TYPE_WORD.sub("", name)).lower()
+
+
+def plugin_key_lookup_names(key: str) -> set[str]:
+    """Every reduced plugin name under which ``get_plugin_config`` finds section ``key``.
+
+    The key as written, the key with punctuation removed and lowercased, and the
+    key reduced the way a plugin name is. A plugin whose
+    ``reduced_plugin_name`` is in this set reads ``key`` as its config when no
+    section uses its exact name. ``runtime_patch`` uses the same set so a denial
+    on a plugin's section holds for each of these spellings.
+    """
+    names = {key, _PLUGIN_NAME_PUNCTUATION.sub("", key).lower()}
+    reduced = reduced_plugin_name(key)
+    if reduced:
+        names.add(reduced)
+    return names
 
 
 def add_suppression_to_config(config_path: Path, suppression: AshSuppression) -> None:

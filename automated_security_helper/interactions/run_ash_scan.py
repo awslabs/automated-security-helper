@@ -126,6 +126,11 @@ class ScanOptions(BaseModel):
     config_base_gate: Optional[Callable[[Path], bool]] = Field(
         default=None, exclude=True
     )
+    # The config was written by the caller (an MCP client's upload), so its sandbox
+    # settings are restrict-only; trusted_config_path is the operator's config the
+    # grants come from instead. Both go to resolve_config, in local mode only.
+    untrusted_config: bool = False
+    trusted_config_path: Optional[str] = None
     offline: bool = False
     strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL
     scanners: Optional[List[str]] = Field(default_factory=list)
@@ -1336,6 +1341,56 @@ def _live_progress_enabled(opts: ScanOptions) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# _refuse_symlinked_output_dir
+# ---------------------------------------------------------------------------
+
+
+def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
+    """Exit before a sandboxed scan writes through a symlinked output directory.
+
+    The logger opens ash.log in the output directory and the orchestrator clears
+    its subdirectories, both unsandboxed, so this has to run before either: the
+    per-scanner check in utils/sandbox/policy.py would only mark each scanner
+    MISSING after ASH had already written through the link. The check is cheap
+    and runs first; the config is resolved only for an output directory it
+    refuses, to learn whether the sandbox is on. With the sandbox off the output
+    goes where the operator sent it, as before. A config that does not resolve
+    counts as on, since that scan fails anyway. Container mode is left alone: the
+    container is the boundary there and runs its inner scan unsandboxed.
+    """
+    if opts.mode == RunMode.container:
+        return
+    from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.core.enums import SandboxMode
+    from automated_security_helper.utils.sandbox.policy import (
+        SandboxUnavailable,
+        refuse_symlinked_output_dir,
+    )
+
+    try:
+        refuse_symlinked_output_dir(opts.source_dir, opts.output_dir)
+        return
+    except SandboxUnavailable as refusal:
+        reason = str(refusal)
+    try:
+        config = resolve_config(
+            config_path=opts.config or _discovered_config_path(opts.source_dir),
+            source_dir=opts.source_dir,
+            config_overrides=list(opts.config_overrides or []),
+            permit_base=opts.config_base_gate,
+        )
+        if SandboxMode(config.sandbox.mode) == SandboxMode.off:
+            return
+    except Exception:  # noqa: BLE001 - an unresolvable config is reported by the scan
+        pass
+    print(
+        f"[bold red]ERROR (1) The scanner sandbox is on, and {escape_markup(reason)}. "
+        "Choose an output directory that is not reached through a symlink.[/bold red]"
+    )
+    sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # _setup_logger
 # ---------------------------------------------------------------------------
 
@@ -1877,6 +1932,8 @@ def _run_local_mode(
             config_path=config,
             config_overrides=opts.config_overrides or [],
             config_base_gate=opts.config_base_gate,
+            untrusted_config=opts.untrusted_config,
+            trusted_config_path=opts.trusted_config_path,
             verbose=opts.verbose or opts.debug,
             debug=opts.debug,
             strategy=(
@@ -2860,6 +2917,8 @@ def run_ash_scan(
     workspace_plan: "WorkspacePlan | None" = None,
     allow_missing_projects: bool = False,
     config_base_gate: Optional[Callable[[Path], bool]] = None,
+    untrusted_config: bool = False,
+    trusted_config_path: Optional[str] = None,
     *args,
     **kwargs,
 ):
@@ -2929,9 +2988,25 @@ def run_ash_scan(
         workspace_plan=workspace_plan,
         allow_missing_projects=allow_missing_projects,
         config_base_gate=config_base_gate,
+        untrusted_config=untrusted_config,
+        trusted_config_path=trusted_config_path,
     )
 
+    # Only the local orchestrator resolves with these. Container and nix mode run
+    # a separate ASH that is handed the config path alone, and workspace mode
+    # resolves each project's own config, so in any of them the restriction would
+    # be dropped without a word.
+    if opts.untrusted_config and (
+        opts.mode in (RunMode.container, RunMode.nix) or opts.workspace_plan is not None
+    ):
+        raise ValueError(
+            "untrusted_config is applied only to a single-directory scan in local "
+            f"mode, not to mode={opts.mode.value!r}"
+            + (" with a workspace plan" if opts.workspace_plan is not None else "")
+        )
+
     _apply_log_level_env(opts)
+    _refuse_symlinked_output_dir(opts)
     logger = _setup_logger(opts)
 
     if opts.workspace_plan is not None and opts.mode != RunMode.container:
