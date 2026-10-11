@@ -175,13 +175,27 @@ deploy/terraform/tests/validate-inputs.sh
 
 Variable validation is evaluated *before* Terraform initializes the provider or
 needs credentials, so a plan carrying a deliberately invalid value fails on the
-rule's own `error_message` and never reaches AWS. The script exercises 19 cases
-across all five modules in **both** directions — an invalid value must produce the
+rule's own `error_message` and never reaches AWS. The script exercises every
+validation rule across all five modules in **both** directions — an invalid value must produce the
 message, and a valid one must not — because a check that only ever feeds in the
 failing value cannot tell "the rule fired" apart from "plan failed for an unrelated
 reason and the grep happened to match". In the passing direction the plan still
 fails, on credentials, and that later failure is the evidence that validation was
 passed rather than skipped.
+
+What a plan would configure is checked by `terraform test`, from each module
+directory that has a `tests/` directory, after the same `terraform init
+-backend=false`:
+
+```console
+terraform -chdir=deploy/terraform/modules/codecommit-gate test
+```
+
+Every provider in those tests is a `mock_provider` (Terraform >= 1.11), so they also
+need no account. They assert that the gate's image build pushes only to its own
+repository, that no executor shard can write another shard's results or the merged
+output, and which MCP trust settings the agentcore and fargate modules pass to the
+launcher. The IaC drift workflow runs both checks.
 
 No module or example has been applied, and nothing here has been run against a real
 account.

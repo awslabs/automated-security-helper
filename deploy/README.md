@@ -227,7 +227,8 @@ means an incorrect reason is public — write it for a reviewer, not to silence 
   whether the input contracts work.
 
   That gap is covered separately, by `terraform/tests/validate-inputs.sh`, which
-  the gate runs after the per-module init. It works without credentials because
+  the gate runs after the per-module init, followed by each module's
+  `terraform test` suite against mocked providers. It works without credentials because
   Terraform evaluates input variable validation before it initializes the
   provider: a plan carrying a deliberately invalid value fails on the rule's own
   `error_message` and never reaches AWS. Measured with every `AWS_*` variable
