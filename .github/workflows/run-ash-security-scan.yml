@@ -216,6 +216,24 @@ jobs:
     timeout-minutes: 30
     env:
       COLUMNS: 140
+      # NO CACHE IS RESTORED ON A PULL REQUEST OR IN THE MERGE QUEUE
+      #
+      # There, actions/cache searches the run's own scope (refs/pull/<n>/merge, or
+      # the queue branch) before the base branch's. This job never saves on those
+      # events, but another job that runs the pull request's code in the same scope
+      # can: the cache-writing token is held by the runner process, and on a hosted
+      # runner a step can read it. A uv cache entry written in that scope replaces
+      # the ASH that judges the pull request (uv trusts its cache for a pinned
+      # commit), a grype database written there replaces the data grype matches
+      # against, and any archive restored from there can write files outside its
+      # cache path, because @actions/cache extracts with `tar -P`. Hashing the
+      # restored OpenGrep binary checks that one file and nothing else the archive
+      # held.
+      #
+      # So the uv cache, the grype database and the OpenGrep binary are restored
+      # only on other events. On these two each is downloaded and verified as on a
+      # miss; the saves are unchanged (push to the default branch only).
+      RESTORE_CACHES: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -308,7 +326,8 @@ jobs:
           # this uv installs the ASH that scans that checkout. `latest` is what it
           # installs for a checkout that asks for nothing.
           version: latest
-          enable-cache: true
+          # Off on pull_request and merge_group; see RESTORE_CACHES above.
+          enable-cache: ${{ env.RESTORE_CACHES }}
           # Save only from a push; a pull request restores its base branch's entry.
           # The same unpruned key as the lint job in ash-unified-ci.yml, which
           # carries the measurement: one ~254 MB copy per open pull request,
@@ -386,7 +405,7 @@ jobs:
 
       - name: Restore the grype vulnerability database
         id: grype-db-restore
-        if: inputs.install-grype && steps.cachekeys.outputs.grype-db != ''
+        if: inputs.install-grype && steps.cachekeys.outputs.grype-db != '' && env.RESTORE_CACHES == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           # grype's db.cache-dir default; equivalently GRYPE_DB_CACHE_DIR.
@@ -415,7 +434,7 @@ jobs:
       # 10 GB quota. Neither step needs a permission, so no caller has to grant one.
       - name: Restore the OpenGrep binary
         id: opengrep-cache
-        if: inputs.install-opengrep
+        if: inputs.install-opengrep && env.RESTORE_CACHES == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.opengrep/cli/latest
