@@ -71,9 +71,10 @@ With `output_markdown` on (the default), the reporter writes its summary to
 `output_file` (default `ash.bedrock.summary.md`), and the executive summary and
 technical analysis to `output_executive_file` and `output_technical_file` (defaults
 `bedrock-executive.md` and `bedrock-technical.md`), in the reports directory. Each must
-be a plain file name. A value with a directory in it, or one that resolves outside the
-reports directory, such as `../summary.md`, is refused with a warning naming it, and
-that file is not written.
+be a plain file name, from any source, `--config-overrides` included. A value with a
+`/`, `\` or NUL in it, or one that is `.` or `..`, such as `../summary.md`, is replaced
+by the option's default, with a warning naming the key. ASH also writes these files
+only when the resolved file is directly inside the reports directory.
 
 ### Where these options can be set
 

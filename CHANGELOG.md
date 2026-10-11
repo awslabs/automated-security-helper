@@ -338,8 +338,9 @@
     the reporter's main report or the other reporters; the S3 reporter's receipt
     then has `local_copy: null`. The Bedrock summary
     reporter's `output_file`, `output_executive_file` and `output_technical_file`
-    are file names in the reports directory: a path there is refused with a
-    warning, and that file is not written.
+    are file names in the reports directory, from any source: a value with `/`,
+    `\` or NUL, or one that is `.` or `..`, is replaced by the option's default,
+    with a warning naming the key.
 
   Under the MCP server, a config a client delivered is limited the same way, and a
   file any MCP client delivered (under the MCP workspace root, except each session's
@@ -787,7 +788,8 @@
   report file name is not a file in the reports directory (an `extension` with a
   `/`, `\` or `..` that its config did not replace, as a third-party reporter's
   config may not) stops the run with exit 1 the same way, rather than leaving that
-  report unwritten. A dangling link at `reports/` is refused the same way rather
+  report unwritten, and so does such a name among the files a reporter declares it
+  writes beside its report. A dangling link at `reports/` is refused the same way rather
   than failing with `FileExistsError`, each write checks again that `reports/` is
   not a link, and the exit code is not read through a `reports/ash.sarif` link
   even when `fail_on_findings` is off.

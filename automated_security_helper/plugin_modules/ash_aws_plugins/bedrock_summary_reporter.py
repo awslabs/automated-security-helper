@@ -10,7 +10,10 @@ import boto3
 import botocore.exceptions
 from pydantic import Field
 
-from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.base.options import (
+    ReporterOptionsBase,
+    report_file_name,
+)
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
@@ -117,8 +120,9 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     output_file: Annotated[
         str,
         Field(
-            description="Filename for the main output markdown report.",
+            description="Filename for the main output markdown report, a file name in the reports directory.",
         ),
+        report_file_name("reporters.bedrock-summary-reporter.options.output_file"),
     ] = "ash.bedrock.summary.md"
     # Retry configuration
     max_retries: Annotated[
@@ -150,13 +154,19 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     output_executive_file: Annotated[
         str,
         Field(
-            description="Filename for the executive summary markdown report.",
+            description="Filename for the executive summary markdown report, a file name in the reports directory.",
+        ),
+        report_file_name(
+            "reporters.bedrock-summary-reporter.options.output_executive_file"
         ),
     ] = "bedrock-executive.md"
     output_technical_file: Annotated[
         str,
         Field(
-            description="Filename for the technical analysis markdown report.",
+            description="Filename for the technical analysis markdown report, a file name in the reports directory.",
+        ),
+        report_file_name(
+            "reporters.bedrock-summary-reporter.options.output_technical_file"
         ),
     ] = "bedrock-technical.md"
 

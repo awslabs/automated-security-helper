@@ -108,6 +108,7 @@ from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterWorkspaceBehaviour,
+    reporter_companion_file_names,
     reporter_file_name,
     reporter_file_names,
     reporter_matches_requested_formats,
@@ -435,6 +436,16 @@ def _workspace_report_main_names(selection) -> List[str]:
     ]
 
 
+def _workspace_report_companion_names(selection) -> List[Tuple[str, str]]:
+    """``(reporter, name)`` for each file a reporter that will emit writes beside its report."""
+    return [
+        (_reporter_name(instance), name)
+        for instance, behaviour, skipped in selection
+        if skipped is None and behaviour in _EMITTING_BEHAVIOURS
+        for name in reporter_companion_file_names(instance)
+    ]
+
+
 def refuse_linked_workspace_report_paths(
     plan: WorkspacePlan,
     output_dir: Path,
@@ -469,7 +480,9 @@ def refuse_linked_workspace_report_paths(
         )
     )
     refuse_report_names_outside(
-        Path(output_dir) / REPORTS_DIR_NAME, _workspace_report_main_names(selection)
+        Path(output_dir) / REPORTS_DIR_NAME,
+        _workspace_report_main_names(selection),
+        _workspace_report_companion_names(selection),
     )
     refuse_linked_report_paths(
         Path(output_dir) / REPORTS_DIR_NAME, _workspace_report_file_names(selection)
@@ -603,7 +616,11 @@ def emit_workspace_reports(
     # Before any reporter runs and before the manifest: a link that appeared
     # after refuse_linked_workspace_report_paths ran is refused here, with
     # nothing written.
-    refuse_report_names_outside(reports_dir, _workspace_report_main_names(selection))
+    refuse_report_names_outside(
+        reports_dir,
+        _workspace_report_main_names(selection),
+        _workspace_report_companion_names(selection),
+    )
     refuse_linked_report_paths(reports_dir, _workspace_report_file_names(selection))
 
     for instance, behaviour, skipped in selection:

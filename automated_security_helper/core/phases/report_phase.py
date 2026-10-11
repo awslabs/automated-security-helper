@@ -7,6 +7,7 @@ from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.reporter_plugin import (
     confined_report_path,
+    reporter_companion_file_names,
     reporter_file_name,
     reporter_file_names,
     reporter_format_name,
@@ -335,13 +336,23 @@ class ReportPhase(EnginePhase):
         # the run with ReportPathLinkRefused: the write through it would be refused
         # and the link left for the next reader. See utils/report_path_links.py.
         # A report file name that is not a file in the reports directory (an
-        # extension that skipped its config's validation) refuses the run as
-        # well, rather than leaving that reporter's report unwritten.
+        # extension that skipped its config's validation), or such a name among
+        # the files a reporter writes beside its report, refuses the run as well,
+        # rather than leaving that file unwritten.
         refuse_report_names_outside(
             report_dir,
             [
                 reporter_file_name(plugin_instance)
                 for plugin_instance in enabled_reporters
+            ],
+            [
+                (
+                    reporter_format_name(plugin_instance)
+                    or type(plugin_instance).__name__,
+                    name,
+                )
+                for plugin_instance in enabled_reporters
+                for name in reporter_companion_file_names(plugin_instance)
             ],
         )
         refuse_linked_report_paths(

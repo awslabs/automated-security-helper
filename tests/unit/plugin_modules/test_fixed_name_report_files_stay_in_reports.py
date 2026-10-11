@@ -24,6 +24,33 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 AWS = "automated_security_helper.plugin_modules.ash_aws_plugins"
 
 
+@pytest.fixture
+def caplog_ash():
+    """Warnings ASH_LOGGER emits during the test, as messages."""
+    import logging
+
+    from automated_security_helper.base.options import (
+        reset_refused_tool_version_warnings,
+    )
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    messages = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.WARNING:
+                messages.append(record.getMessage())
+
+    reset_refused_tool_version_warnings()
+    handler = _Collect(level=logging.DEBUG)
+    ASH_LOGGER.addHandler(handler)
+    try:
+        yield messages
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+        reset_refused_tool_version_warnings()
+
+
 def _context(tmp_path: Path) -> PluginContext:
     return PluginContext(
         source_dir=tmp_path / "src",
@@ -179,30 +206,95 @@ def test_the_bedrock_files_are_still_written(tmp_path):
 
 
 def test_a_bedrock_file_name_with_a_path_writes_nothing_outside(tmp_path):
-    """The output file options are file names; the operator sets them, but a path is refused."""
+    """The writer refuses a path too, for a value that skipped the options' validation."""
     from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
         BedrockSummaryReporter,
         BedrockSummaryReporterConfig,
         BedrockSummaryReporterConfigOptions,
     )
 
+    options = BedrockSummaryReporterConfigOptions(
+        aws_region="us-west-2",
+        model_id="test-vendor.test-model-v1:0",
+        enable_caching=False,
+    )
+    # Assigned after construction, which is not validated, so the writer's own check
+    # is what this exercises (the options replace such a value; see below).
+    options.output_file = "../escaped-summary.md"
     with patch(f"{AWS}.bedrock_summary_reporter.boto3"):
         reporter = BedrockSummaryReporter(
             context=_context(tmp_path),
-            config=BedrockSummaryReporterConfig(
-                options=BedrockSummaryReporterConfigOptions(
-                    aws_region="us-west-2",
-                    model_id="test-vendor.test-model-v1:0",
-                    enable_caching=False,
-                    output_file="../escaped-summary.md",
-                )
-            ),
+            config=BedrockSummaryReporterConfig(options=options),
         )
         reporter._write_markdown_files(
             _RuntimeDouble(), AshAggregatedResults(), [], [], "summary"
         )
 
     assert not (tmp_path / "out" / "escaped-summary.md").exists()
+
+
+BEDROCK_FILE_OPTIONS = ("output_file", "output_executive_file", "output_technical_file")
+
+
+@pytest.mark.parametrize("option", BEDROCK_FILE_OPTIONS)
+@pytest.mark.parametrize(
+    "value", ["../escaped.md", "sub/summary.md", "/abs/summary.md", "..", "a\\b.md"]
+)
+def test_a_bedrock_file_name_that_is_not_a_file_name_is_replaced_by_the_default(
+    option, value, caplog_ash
+):
+    from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
+        BedrockSummaryReporterConfigOptions,
+    )
+
+    default = BedrockSummaryReporterConfigOptions.model_fields[option].default
+
+    options = BedrockSummaryReporterConfigOptions(**{option: value})
+
+    assert getattr(options, option) == default
+    assert any(
+        f"reporters.bedrock-summary-reporter.options.{option}" in message
+        and repr(value) in message
+        for message in caplog_ash
+    ), caplog_ash
+
+
+@pytest.mark.parametrize("option", BEDROCK_FILE_OPTIONS)
+def test_a_bedrock_file_name_is_kept(option, caplog_ash):
+    from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
+        BedrockSummaryReporterConfigOptions,
+    )
+
+    options = BedrockSummaryReporterConfigOptions(**{option: "team-summary.md"})
+
+    assert getattr(options, option) == "team-summary.md"
+    assert not any(option in message for message in caplog_ash), caplog_ash
+
+
+def test_a_bedrock_file_name_from_config_overrides_is_validated(tmp_path, caplog_ash):
+    """``--config-overrides`` reaches the same validation, when the reporter is built."""
+    from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
+        BedrockSummaryReporter,
+    )
+
+    source = tmp_path / "repo"
+    source.mkdir()
+    config = resolve_config(
+        source_dir=source,
+        config_overrides=[
+            "reporters.bedrock-summary-reporter.options.output_file=../escaped.md"
+        ],
+    )
+
+    with patch(f"{AWS}.bedrock_summary_reporter.boto3"):
+        reporter = BedrockSummaryReporter(
+            context=_context(tmp_path),
+            config=config.get_plugin_config("reporter", "bedrock-summary-reporter"),
+        )
+
+    assert reporter.companion_file_names()[0] == "ash.bedrock.summary.md"
+    assert any("../escaped.md" in message for message in caplog_ash), caplog_ash
 
 
 def test_a_directory_at_the_name_does_not_lose_the_report(tmp_path):

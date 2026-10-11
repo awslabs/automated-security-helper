@@ -30,11 +30,15 @@ A report file name (``ash.<extension>``) that is not a single path component,
 such as one built from an ``extension`` with a ``/`` or ``..`` in it, refuses the
 run too (``refuse_report_names_outside``, ``ReportPathRefused``):
 ``confined_report_path`` would not write it, and a report the operator asked for
-and did not get is a failed run, not a log line.
+and did not get is a failed run, not a log line. So does such a name among the
+files a reporter declares it writes beside its report, which ``write_report_file``
+would not write either.
 A reporter config built from ``ReporterPluginConfigBase`` never gets there,
 because its ``extension`` is replaced by the default when it is not a file name
-suffix; one that skips that validation does. Links above the reports directory
-are not examined here.
+suffix, and the Bedrock summary reporter's file name options are replaced the same
+way (``base/options.py:report_file_name``); a config that skips that validation,
+or a reporter that declares a fixed name of its own, does. Links above the reports
+directory are not examined here.
 """
 
 from __future__ import annotations
@@ -42,7 +46,7 @@ from __future__ import annotations
 import os
 import stat
 from pathlib import Path
-from typing import Iterable, Optional, Union
+from typing import Iterable, Optional, Tuple, Union
 
 from automated_security_helper.core.exceptions import ASHValidationError
 
@@ -63,6 +67,14 @@ _IO_REPARSE_TAG_MOUNT_POINT = getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA000
 NAME_REMEDY = (
     "ASH writes a report only as a file directly inside the reports directory. "
     "Give the reporter an extension that is a file name suffix, such as json."
+)
+
+#: Ends a refusal of a file a reporter writes beside its report that is not a file
+#: in the reports directory.
+COMPANION_NAME_REMEDY = (
+    "ASH writes a reporter's files only directly inside the reports directory. "
+    "Give that file a plain file name, such as summary.md, in the reporter's "
+    "configuration, or disable the reporter."
 )
 
 
@@ -189,17 +201,29 @@ def ensure_reports_dir(report_dir: PathLike) -> Path:
     return directory
 
 
-def refuse_report_names_outside(report_dir: PathLike, names: Iterable[str]) -> None:
-    """Raise ReportPathRefused if a reporter's report file name is not a file name.
+def refuse_report_names_outside(
+    report_dir: PathLike,
+    names: Iterable[str],
+    companions: Iterable[Tuple[str, str]] = (),
+) -> None:
+    """Raise ReportPathRefused if a file a reporter would write is not a file name.
 
     ``names`` are the reporters' report files (``reporter_file_name``), which
-    ``ReportPhase`` writes. A reporter's own files beside its report are left to
-    the reporter, which refuses such a name itself with a warning
-    (``write_report_file``).
+    ``ReportPhase`` writes. ``companions`` are ``(reporter, name)`` pairs for the
+    files each reporter declares it writes itself beside its report
+    (``reporter_companion_file_names``), which ``write_report_file`` would refuse
+    to write. Either kind refuses the run, before any reporter writes.
     """
+    directory = Path(report_dir).as_posix()
     for name in names:
         if not is_report_file_name(name):
             raise ReportPathRefused(
-                f"the report file name {name!r} is not a file in "
-                f"{Path(report_dir).as_posix()}"
+                f"the report file name {name!r} is not a file in {directory}"
+            )
+    for reporter, name in companions:
+        if not is_report_file_name(name):
+            raise ReportPathRefused(
+                f"the file name {name!r} that the {reporter} reporter writes beside "
+                f"its report is not a file in {directory}",
+                COMPANION_NAME_REMEDY,
             )

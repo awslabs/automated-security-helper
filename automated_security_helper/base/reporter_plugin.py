@@ -182,7 +182,8 @@ def write_report_file(report_dir: Path, filename: str, content: str) -> Optional
     has to pass ``confined_report_path``, and the write replaces the file rather
     than writing through it, so a symlink at that name is not followed. A reporter
     that calls this declares the names in ``companion_file_names``, so that a link
-    already at one of them refuses the run before any reporter writes.
+    already at one of them, or a name that is not a file in ``report_dir``, refuses
+    the run before any reporter writes.
     """
     from automated_security_helper.utils.atomic_write import write_text_atomically
 

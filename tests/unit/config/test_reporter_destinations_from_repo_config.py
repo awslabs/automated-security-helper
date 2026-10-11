@@ -34,9 +34,11 @@ from automated_security_helper.utils.log import ASH_LOGGER
 _EXAMPLE_VALUES: Dict[str, str] = {
     "aws_region": "repo-region-1",
     "account_id": "000000000001",
-    "output_file": "/elsewhere/summary.md",
-    "output_executive_file": "../executive.md",
-    "output_technical_file": "../../technical.md",
+    # Plain file names: a path is replaced by the options' own validation from
+    # any source, which would satisfy these tests without the destination check.
+    "output_file": "repo-summary.md",
+    "output_executive_file": "repo-executive.md",
+    "output_technical_file": "repo-technical.md",
 }
 
 # Every option listed in config/reporter_trust.py, with a value no default has.

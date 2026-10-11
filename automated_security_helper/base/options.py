@@ -89,6 +89,36 @@ def tool_version_constraint(key: str) -> WrapValidator:
     return WrapValidator(_validate)
 
 
+def report_file_name(key: str) -> WrapValidator:
+    """Validator for an option that names a file in the reports directory, named ``key``.
+
+    A reporter writes such a file directly inside the reports directory, so only a
+    single path component is accepted, from any source: a value with ``/``, ``\\``
+    or NUL, or one that is ``.`` or ``..``, is replaced by the option's default,
+    with one warning naming ``key``.
+    """
+
+    def _validate(value: Any, handler: ValidatorFunctionWrapHandler, _info: Any) -> Any:
+        from automated_security_helper.utils.report_path_links import (
+            is_report_file_name,
+        )
+
+        value = handler(value)
+        if is_report_file_name(value):
+            return value
+        _warn_once(
+            key,
+            str(value),
+            f"Ignoring {key}: {value!r} is not a file name such as 'summary.md'. "
+            "The file is written directly inside the reports directory, so the name "
+            "cannot contain '/', '\\' or NUL, or be '.' or '..'. Using the default "
+            "instead.",
+        )
+        raise PydanticUseDefault from None
+
+    return WrapValidator(_validate)
+
+
 class BuilderOptionsBase(BaseModel):
     """Base class for builder options."""
 
