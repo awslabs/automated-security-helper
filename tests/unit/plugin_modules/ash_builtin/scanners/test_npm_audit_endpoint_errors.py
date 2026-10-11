@@ -409,7 +409,8 @@ def test_one_failed_lockfile_fails_the_scan_but_every_lockfile_is_audited(
 
 def test_offline_audits_nothing_and_records_the_lockfile(plugin_context, caplog):
     """Offline, npm audit cannot reach the advisory service, so no audit runs: the
-    lockfile is recorded as not audited and a warning names it."""
+    lockfile is recorded as not audited, a warning names it, and scan() returns False,
+    which the executor records MISSING."""
     scanner = _scanner(plugin_context, offline=True)
     _project(plugin_context.work_dir)
 
@@ -428,11 +429,10 @@ def test_offline_audits_nothing_and_records_the_lockfile(plugin_context, caplog)
         call.kwargs.get("command") or call.args[1] for call in run.call_args_list
     ]
     assert [command for command in started if "audit" in command] == [], started
-    assert report.runs[0].results == []
+    assert report is False
     assert [entry["path"] for entry in scanner.inputs_not_scanned] == [
         "package-lock.json"
     ]
-    assert scanner.targets_attempted == 0
     assert any(
         "Offline, npm-audit audits nothing" in r.message for r in caplog.records
     ), [r.message for r in caplog.records]

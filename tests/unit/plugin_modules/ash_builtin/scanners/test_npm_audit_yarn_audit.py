@@ -325,7 +325,8 @@ def test_a_version_yarn_cannot_report_is_a_failure(plugin_context):
 class TestOffline:
     """Offline no yarn runs: yarn 1's `yarn audit --offline` refuses to ask the
     registry ("Can't make a request in offline mode") and `yarn npm audit` has no
-    offline mode, so the lockfile is recorded as not audited, with a warning."""
+    offline mode, so the lockfile is recorded as not audited, with a warning, and
+    scan() returns False, which the executor records MISSING."""
 
     @pytest.mark.parametrize("capture_name", ["classic-offline", "berry-clean"])
     def test_offline_yarn_is_not_run_and_the_lockfile_is_recorded(
@@ -350,7 +351,7 @@ class TestOffline:
             )
 
         assert [c for c in commands if "--version" not in c] == [], commands
-        assert report.runs[0].results == []
+        assert report is False
         assert [entry["path"] for entry in scanner.inputs_not_scanned] == ["yarn.lock"]
         assert any(
             "Offline, npm-audit audits nothing" in r.message for r in caplog.records

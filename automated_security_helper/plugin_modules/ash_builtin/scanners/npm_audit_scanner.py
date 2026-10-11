@@ -975,16 +975,18 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     def _skip_offline(
         self, package_files: List[str], target: Path, target_type: str
     ) -> None:
-        """Record every lockfile as not audited, and that nothing was evaluated.
+        """Record every lockfile as not audited.
 
         ``npm audit`` asks the registry which dependencies are vulnerable, and
         nothing is cached for it: offline, ``npm audit --json --offline`` on a
         lockfile pinning a version with known advisories exited 0 with none
         (npm 10.9.4), ``pnpm audit --offline`` sent the dependency list to the
         registry anyway (pnpm 12.6.0), and ``yarn npm audit`` has no offline mode.
-        So no audit runs. ``targets_attempted = 0`` makes the scanner SKIPPED rather
-        than PASSED, and ``inputs_not_scanned`` names each lockfile in the results
-        and the summaries.
+        So no audit runs, and ``inputs_not_scanned`` names each lockfile in the
+        results and the summaries. ``scan`` then returns False, which records the
+        scanner MISSING (see there); no target count is claimed for that, as for any
+        scanner that did not run. With no lockfile there was nothing the network
+        would have audited, so ``targets_attempted = 0`` grades that target SKIPPED.
         """
         base = Path(
             self.context.work_dir
@@ -1003,12 +1005,14 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         shown = lock_file.as_posix()
                     skipped.append({"path": shown, "reason": self._OFFLINE_REASON})
                     break
-        self.targets_attempted = 0
         self.inputs_not_scanned = skipped
-        if skipped:
+        if not skipped:
+            self.targets_attempted = 0
+        else:
             self._plugin_log(
                 f"Offline, npm-audit audits nothing: {self._OFFLINE_REASON}. Not "
-                f"audited: {', '.join(entry['path'] for entry in skipped)}",
+                f"audited: {', '.join(entry['path'] for entry in skipped)}. "
+                "Recorded MISSING; --exclude-scanners npm-audit leaves it out.",
                 target_type=target_type,
                 level=logging.WARNING,
             )
@@ -1147,6 +1151,14 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     target=target,
                     target_type=target_type,
                 )
+                # MISSING, as snyk-code is offline: what the audit depends on is
+                # unavailable, so the completeness gate fails the scan rather than
+                # let these dependencies read as checked. False is how scan()
+                # reports that (scanner_executor records the container MISSING).
+                # Per target, so the plugin's own dependencies_satisfied is left
+                # alone and a target without lockfiles is graded on its own.
+                if self.inputs_not_scanned:
+                    return False
                 return sarif_report
 
             # Run npm audit for each package.json file. all_results is the

@@ -223,8 +223,10 @@ scanners:
 - Fix recommendations
 
 In offline mode npm-audit runs no audit, since npm, pnpm and yarn audit only against
-the registry's advisory service. It is SKIPPED, and each lockfile is listed as not
-scanned in the results and the summaries. See
+the registry's advisory service. Each lockfile is listed as not scanned in the results
+and the summaries, and with a lockfile to audit npm-audit is MISSING, so the scan fails
+under the default completeness gate. `--exclude-scanners npm-audit` leaves it out of an
+offline scan. See
 [What offline mode turns off](../../advanced-usage.md#what-offline-mode-turns-off).
 
 **Dependencies**: Node.js, npm

@@ -163,7 +163,7 @@
   are turned off by `TRIVY_SKIP_VERSION_CHECK` and `TRIVY_DISABLE_TELEMETRY`, which an
   older trivy ignores, rather than by flags it would refuse.
 
-- **Offline, npm-audit audits nothing, says so, and is SKIPPED instead of PASSED.**
+- **Offline, npm-audit audits nothing, says so, and is MISSING instead of PASSED.**
   npm, pnpm and yarn audit only against the registry's advisory service: offline,
   `npm audit --json --offline` on a lockfile pinning a version with known advisories
   exited 0 with none, `pnpm audit --offline` sent the dependency list to the registry
@@ -173,8 +173,11 @@
   audited is recorded as not scanned, with the reason, in the scanner's
   `inputs_not_scanned` in `ash_aggregated_results.json`, on the console after the
   summary table, and in a new "Inputs not scanned" section of `ash.summary.md` and
-  `ash.summary.txt`; and the scanner is SKIPPED, which the completeness gate
-  tolerates, as for other checks that cannot run offline.
+  `ash.summary.txt`. When there was a lockfile to audit, the scanner is MISSING, as
+  snyk-code is offline, so an offline scan of a Node.js project now fails under the
+  default completeness gate (`fail_on_incomplete_scanners`) with exit code 1. Pass
+  `--exclude-scanners npm-audit` to scan offline without it. A project with no
+  lockfile has nothing to audit and is SKIPPED.
 
 - **Offline, trivy-repo does not run trivy's Terraform checks.** trivy downloads the
   source of every `module` block in the scanned Terraform, from the registry, with the

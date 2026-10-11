@@ -50,8 +50,10 @@ def _scanner(context, *, offline: bool):
     return scanner
 
 
-def _run_scan(scanner, tmp_path):
+def _run_scan(scanner, tmp_path, returned=None):
     """Drive scan() over one npm project and return the recorded kwargs.
+
+    ``returned``, when given, is a list that receives scan()'s return value.
 
     An npm project. Online npm-audit runs npm from the lockfile's directory;
     offline it runs nothing (see npm_audit_scanner._skip_offline).
@@ -87,7 +89,9 @@ def _run_scan(scanner, tmp_path):
         patch.object(scanner, "_post_scan"),
         patch.object(scanner, "_run_subprocess", side_effect=fake_run),
     ):
-        scanner.scan(target=root, target_type="source")
+        result = scanner.scan(target=root, target_type="source")
+    if returned is not None:
+        returned.append(result)
 
     return captured
 
@@ -116,13 +120,15 @@ def test_offline_mode_records_the_lockfile_as_not_audited(
     assert all(entry["reason"] for entry in scanner.inputs_not_scanned)
 
 
-def test_offline_mode_claims_it_evaluated_nothing(test_plugin_context, tmp_path):
-    """targets_attempted 0 is what grades the scanner SKIPPED rather than PASSED."""
+def test_offline_mode_with_a_lockfile_is_missing(test_plugin_context, tmp_path):
+    """scan() returns False, which the executor records MISSING, as snyk-code is
+    offline: what the audit depends on, the registry's advisory service, is absent."""
     scanner = _scanner(test_plugin_context, offline=True)
+    returned = []
 
-    _run_scan(scanner, tmp_path)
+    _run_scan(scanner, tmp_path, returned)
 
-    assert scanner.targets_attempted == 0
+    assert returned == [False]
 
 
 @pytest.mark.parametrize("offline", [False])

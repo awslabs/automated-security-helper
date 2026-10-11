@@ -8,8 +8,10 @@ lockfile pinning lodash 4.17.20 (known advisories) exited 0 with no advisories,
 findings, and the only trace was a log line.
 
 Offline, npm-audit now runs no audit. Every lockfile it would have audited is recorded
-as not scanned, with the reason, in the scanner's results and in the summary, and the
-scanner is SKIPPED, as other scanners that cannot run their check offline are.
+as not scanned, with the reason, in the scanner's results and in the summary. When there
+is a lockfile the scanner is MISSING, as snyk-code is offline, so the scan fails under the
+default completeness gate; ``--exclude-scanners npm-audit`` is the opt-out. A project
+with no lockfile has nothing the network would have audited, and is not MISSING.
 """
 
 import json
@@ -122,14 +124,32 @@ def test_offline_npm_audit_starts_no_audit_and_records_every_lockfile(
     scanner = _scanner(tmp_path)
     expected = _projects(scanner.context.source_dir)
 
-    scanner.scan(target=scanner.context.source_dir, target_type="source")
+    result = scanner.scan(target=scanner.context.source_dir, target_type="source")
 
     audits = [command for command in spawns if "audit" in command]
     assert audits == [], f"offline npm-audit ran an audit that audits nothing: {audits}"
     recorded = getattr(scanner, "inputs_not_scanned", None) or []
     assert sorted(entry["path"] for entry in recorded) == expected, recorded
     assert all(entry["reason"] for entry in recorded), recorded
-    assert scanner.targets_attempted == 0
+    # False is what the executor records MISSING (scanner_executor, "plugin is
+    # missing dependencies"): the dependency is the registry's advisory service.
+    assert result is False, f"offline npm-audit with lockfiles returned {result!r}"
+
+
+def test_offline_npm_audit_without_a_lockfile_is_not_missing(offline, spawns, tmp_path):
+    """No lockfile, nothing the network would have audited: online audits nothing
+    here too. MISSING for it would fail every offline scan of such a repository."""
+    scanner = _scanner(tmp_path)
+    project = scanner.context.source_dir / "web"
+    project.mkdir()
+    (project / "package.json").write_text(json.dumps({"name": "web"}))
+
+    result = scanner.scan(target=scanner.context.source_dir, target_type="source")
+
+    assert result is not False
+    assert not getattr(scanner, "inputs_not_scanned", None)
+    assert [c for c in spawns if "audit" in c] == []
+    assert scanner.targets_attempted == 0  # evaluated nothing: SKIPPED
 
 
 def test_control_online_npm_audit_audits_the_lockfile(online, spawns, tmp_path):
@@ -142,41 +162,46 @@ def test_control_online_npm_audit_audits_the_lockfile(online, spawns, tmp_path):
     assert not getattr(scanner, "inputs_not_scanned", None)
 
 
-def test_an_offline_scan_grades_npm_audit_skipped_and_reports_the_lockfiles(
-    offline, spawns, tmp_path, monkeypatch
-):
-    """The whole scan: results, the markdown and text summaries."""
+def _offline_scan(tmp_path, monkeypatch, **options) -> int:
+    """Run the whole offline scan with the default gates; return its exit code."""
     from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 
-    source = tmp_path / "repo"
-    expected = _projects(source)
-    output = tmp_path / "out"
     cwd = tmp_path / "cwd"
     cwd.mkdir()
     monkeypatch.chdir(cwd)
-
     try:
         run_ash_scan(
-            source_dir=str(source),
-            output_dir=str(output),
+            source_dir=str(tmp_path / "repo"),
+            output_dir=str(tmp_path / "out"),
             offline=True,
-            scanners=["npm-audit"],
             strategy=ExecutionStrategy.SEQUENTIAL,
             progress=False,
             fail_on_findings=False,
-            fail_on_incomplete_scanners=False,
             show_summary=False,
             quiet=True,
             color=False,
+            **options,
         )
-    except SystemExit:
-        pass
+    except SystemExit as exit_:
+        return int(exit_.code or 0)
+    return 0
+
+
+def test_an_offline_scan_grades_npm_audit_missing_and_reports_the_lockfiles(
+    offline, spawns, tmp_path, monkeypatch
+):
+    """The whole scan, default completeness gate: exit code, results, summaries."""
+    expected = _projects(tmp_path / "repo")
+    output = tmp_path / "out"
+
+    code = _offline_scan(tmp_path, monkeypatch, scanners=["npm-audit"])
 
     results = json.loads(
         (output / "ash_aggregated_results.json").read_text(encoding="utf-8")
     )
     row = results["scanner_results"]["npm-audit"]
-    assert row["status"] == "SKIPPED", row
+    assert row["status"] == "MISSING", row
+    assert code == 1, f"offline scan with an unaudited lockfile exited {code}"
     reports = results["additional_reports"]["npm-audit"]
     recorded = [
         entry["path"]
@@ -188,3 +213,26 @@ def test_an_offline_scan_grades_npm_audit_skipped_and_reports_the_lockfiles(
         text = (output / "reports" / summary).read_text(encoding="utf-8")
         for lockfile in expected:
             assert lockfile in text, f"{summary} does not name {lockfile}"
+
+
+def test_excluding_npm_audit_is_the_offline_opt_out(
+    offline, spawns, tmp_path, monkeypatch
+):
+    """The documented opt-out: ``--exclude-scanners npm-audit`` passes the gate."""
+    _projects(tmp_path / "repo")
+    output = tmp_path / "out"
+
+    code = _offline_scan(
+        tmp_path,
+        monkeypatch,
+        scanners=["npm-audit", "detect-secrets"],
+        exclude_scanners=["npm-audit"],
+    )
+
+    results = json.loads(
+        (output / "ash_aggregated_results.json").read_text(encoding="utf-8")
+    )
+    statuses = {name: row["status"] for name, row in results["scanner_results"].items()}
+    assert statuses["npm-audit"] == "SKIPPED", statuses
+    assert statuses["detect-secrets"] == "PASSED", statuses
+    assert code == 0, f"offline scan excluding npm-audit exited {code}: {statuses}"

@@ -459,8 +459,8 @@ def test_offline_mode_runs_no_audit_and_records_the_lockfile(
     plugin_context, npm_on_path, node_project, subprocess_double, monkeypatch
 ):
     """Offline npm audit cannot reach the advisory service and reports nothing, so
-    it is not run (so corepack cannot reach out for a package manager either), and
-    the lockfile is recorded as not audited."""
+    it is not run (so corepack cannot reach out for a package manager either), the
+    lockfile is recorded as not audited, and scan() returns False (MISSING)."""
     scanner = NpmAuditScanner(
         context=plugin_context,
         config=NpmAuditScannerConfig(
@@ -470,13 +470,13 @@ def test_offline_mode_runs_no_audit_and_records_the_lockfile(
     node_project()
     subprocess_double.side_effect = emits(audit_json())
 
-    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+    result = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert audit_calls(subprocess_double) == []
     assert [entry["path"] for entry in scanner.inputs_not_scanned] == [
         "package-lock.json"
     ]
-    assert scanner.targets_attempted == 0
+    assert result is False
 
 
 def test_offline_mode_set_after_config_built_still_skips_the_audit(
@@ -496,10 +496,10 @@ def test_offline_mode_set_after_config_built_still_skips_the_audit(
     node_project()
     subprocess_double.side_effect = emits(audit_json())
 
-    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+    result = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert audit_calls(subprocess_double) == []
-    assert scanner.targets_attempted == 0
+    assert result is False
 
 
 def test_online_mode_passes_no_env_override(
@@ -522,7 +522,7 @@ def test_offline_mode_warns_which_lockfile_was_not_audited(
     plugin_context, npm_on_path, node_project, subprocess_double, monkeypatch, caplog
 ):
     """Offline the scan goes on without the audit, and the warning names what was
-    not audited."""
+    not audited and how to leave npm-audit out."""
     scanner = NpmAuditScanner(
         context=plugin_context,
         config=NpmAuditScannerConfig(
@@ -538,10 +538,11 @@ def test_offline_mode_warns_which_lockfile_was_not_audited(
     assert any(
         "Offline, npm-audit audits nothing" in record.message
         and "package-lock.json" in record.message
+        and "--exclude-scanners npm-audit" in record.message
         for record in caplog.records
     ), [record.message for record in caplog.records]
     assert audit_calls(subprocess_double) == []
-    assert report.runs[0].results == []
+    assert report is False
 
 
 # ---------------------------------------------------------------------------
