@@ -392,8 +392,10 @@ def _symlink(link: Path, target: Path) -> None:
 
 
 def test_a_delivered_symlink_to_a_host_file_is_refused(_server):
-    host = _server["tmp"] / "host" / "ash.yaml"
-    host.parent.mkdir()
+    # In a directory the operator set aside, so the scan reads it: a link to a
+    # file anywhere else is refused before it is read
+    # (test_delivered_config_links.py). The link still makes it the client's.
+    host = _server["operator"] / "ash.yaml"
     host.write_text(TAGGED, encoding="utf-8")
     source = _upload({"app.py": "x = 1\n"})
     # A zip upload refuses symlinks; a git clone keeps them, so a delivered tree

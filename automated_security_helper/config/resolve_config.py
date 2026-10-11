@@ -16,6 +16,7 @@ from automated_security_helper.config.config_sources import (
     ResolvedConfigDocument,
     _resolve_dict_key,
     by_every_name,
+    check_discovered_source,
     deep_merge,
     default_confinement_root,
     describe_config_path,
@@ -677,6 +678,9 @@ def _resolve_config(
             log_config_discovery(discovery)
             if discovery.selected is not None:
                 config_path = discovery.selected.path
+                # A caller's gate covers the file found too: it may be a link
+                # out of source_dir (config_sources, "Base paths").
+                check_discovered_source(config_path, permit_base)
                 confine_to = source_dir
                 ASH_LOGGER.verbose(
                     f"Found configuration file at: {config_path.as_posix()}"

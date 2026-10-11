@@ -1299,7 +1299,9 @@ def _severity_filters_finding(result, min_sev_rank: int) -> bool:
 
 
 def _discovered_config_path(
-    source_dir: Path, log_selection: bool = False
+    source_dir: Path,
+    log_selection: bool = False,
+    permit_base: Optional[Callable[[Path], bool]] = None,
 ) -> Optional[str]:
     """The config source a scan of *source_dir* uses, by the one discovery rule.
 
@@ -1307,9 +1309,12 @@ def _discovered_config_path(
     ``config_sources.discover_config_source``, so the exit-code fields, the
     workspace knobs and the orchestrator all read the same file -- including a
     pyproject.toml [tool.ash] table or an ashrc file. Discovery errors are left
-    to the caller.
+    to the caller, and so is the refusal of a file that resolves to one
+    ``permit_base`` (the MCP session's gate) does not permit
+    (``config_sources.check_discovered_source``), so that no reader here opens it.
     """
     from automated_security_helper.config.config_sources import (
+        check_discovered_source,
         discover_config_source,
         log_config_discovery,
     )
@@ -1319,6 +1324,7 @@ def _discovered_config_path(
         log_config_discovery(discovery, announce_selected=False)
     if discovery.selected is None:
         return None
+    check_discovered_source(discovery.selected.path, permit_base)
     return discovery.selected.path.as_posix()
 
 
@@ -1366,7 +1372,9 @@ def _load_config_file(opts: ScanOptions):
     config_path_str = opts.config
     if config_path_str is None:
         try:
-            config_path_str = _discovered_config_path(opts.source_dir)
+            config_path_str = _discovered_config_path(
+                opts.source_dir, permit_base=opts.config_base_gate
+            )
         except Exception:
             # Surfaces again, with its message, when the orchestrator resolves.
             return None
@@ -1529,7 +1537,10 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
         reason = str(refusal)
     try:
         config = resolve_config(
-            config_path=opts.config or _discovered_config_path(opts.source_dir),
+            config_path=opts.config
+            or _discovered_config_path(
+                opts.source_dir, permit_base=opts.config_base_gate
+            ),
             source_dir=opts.source_dir,
             config_overrides=list(opts.config_overrides or []),
             permit_base=opts.config_base_gate,
@@ -2083,7 +2094,11 @@ def _run_local_mode(
 
         config = opts.config
         if config is None:
-            config = _discovered_config_path(opts.source_dir, log_selection=True)
+            config = _discovered_config_path(
+                opts.source_dir,
+                log_selection=True,
+                permit_base=opts.config_base_gate,
+            )
             if config is not None:
                 logger.info(f"Using config file found at: {config}")
         else:
@@ -2295,7 +2310,9 @@ def _resolve_workspace_execution_config(opts: ScanOptions):
     config_path_str = opts.config
     if config_path_str is None:
         try:
-            config_path_str = _discovered_config_path(opts.source_dir)
+            config_path_str = _discovered_config_path(
+                opts.source_dir, permit_base=opts.config_base_gate
+            )
         except Exception as exc:  # noqa: BLE001 -- scheduling knobs, not policy
             logging.getLogger(__name__).warning(
                 f"Could not locate the workspace config ({exc}); using the default "

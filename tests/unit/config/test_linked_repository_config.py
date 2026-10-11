@@ -89,3 +89,61 @@ def test_positive_control_the_same_file_named_by_the_operator_grants(
     config = resolve_config(config_path=host, source_dir=repo)
 
     assert config.sandbox.extra_read_paths == ["/data"]
+
+
+def test_a_callers_gate_refuses_a_discovered_link_out(tmp_path: Path) -> None:
+    """With a ``permit_base`` gate, the file discovery selects is checked as well."""
+    from automated_security_helper.core.exceptions import (
+        ASHConfigInputNotPermittedError,
+    )
+
+    host = _host_file(tmp_path, {"project_name": "linked"})
+    repo = _repo(tmp_path)
+    _symlink(repo / ".ash" / ".ash.yaml", host)
+    outside_host = host.parent.resolve()
+
+    def permit(path: Path) -> bool:
+        return not path.resolve().is_relative_to(outside_host)
+
+    with pytest.raises(ASHConfigInputNotPermittedError) as refused:
+        resolve_config(source_dir=repo, permit_base=permit)
+
+    assert (repo / ".ash" / ".ash.yaml").as_posix() in str(refused.value)
+    assert str(outside_host) not in str(refused.value)
+    # Positive control: without a gate the link is followed, as on the CLI.
+    assert resolve_config(source_dir=repo).project_name == "linked"
+
+
+def test_an_operator_overlay_does_not_make_a_refused_link_acceptable(
+    tmp_path: Path,
+) -> None:
+    """The gate is checked before the operator's overlay is merged in."""
+    from automated_security_helper.core.exceptions import (
+        ASHConfigInputNotPermittedError,
+    )
+
+    host = _host_file(tmp_path, {"project_name": "linked"})
+    repo = _repo(tmp_path)
+    _symlink(repo / ".ash" / ".ash.yaml", host)
+    outside_host = host.parent.resolve()
+    overlay = tmp_path / "operator" / "ash.yaml"
+    overlay.parent.mkdir()
+    overlay.write_text(yaml.safe_dump({"fail_on_findings": True}), encoding="utf-8")
+
+    def permit(path: Path) -> bool:
+        return not path.resolve().is_relative_to(outside_host)
+
+    with pytest.raises(ASHConfigInputNotPermittedError) as refused:
+        resolve_config(source_dir=repo, permit_base=permit, overlay_config_path=overlay)
+
+    assert str(outside_host) not in str(refused.value)
+    # Positive control: the overlay applies over a config the gate permits.
+    (repo / ".ash" / ".ash.yaml").unlink()
+    (repo / ".ash" / ".ash.yaml").write_text(
+        yaml.safe_dump({"project_name": "in-tree"}), encoding="utf-8"
+    )
+    config = resolve_config(
+        source_dir=repo, permit_base=permit, overlay_config_path=overlay
+    )
+    assert config.project_name == "in-tree"
+    assert config.fail_on_findings is True

@@ -86,6 +86,15 @@ consulted before the confinement root, and its refusal,
 ``ASHConfigInputNotPermittedError``, names the ``extends`` entry as written and
 not the path it resolved to. Without a predicate the rules above are unchanged.
 
+The same predicate is applied to the file discovery selects, when a caller
+passes one (``check_discovered_source``). The directory searched is one the
+caller may read, but a file found there may be a symlink to a file elsewhere,
+and reading that file would let the caller choose a file on the host. The
+MCP server's ``get_config`` already checks a file it finds this way. The refusal
+names the file as found, not the file it resolves to. Discovery itself still
+checks whether each candidate exists, and reads a ``pyproject.toml`` to see
+whether it has a ``[tool.ash]`` table, before the check.
+
 Bounds
 ------
 A file that appears twice on its own chain is a cycle and fails with the chain
@@ -401,6 +410,21 @@ def discover_config_source(search_dir: Path) -> ConfigDiscovery:
     if not found:
         return ConfigDiscovery()
     return ConfigDiscovery(selected=found[0], ignored=found[1:])
+
+
+def check_discovered_source(path: Path, permit_base: Optional[PermitBase]) -> None:
+    """Refuse a discovered config file that resolves to one ``permit_base`` does not permit.
+
+    See "Base paths". Nothing is checked without ``permit_base``. Raises
+    ``ASHConfigInputNotPermittedError`` naming ``path`` as it was found, never the
+    file it resolves to.
+    """
+    if permit_base is None or permit_base(Path(path).resolve()):
+        return
+    raise ASHConfigInputNotPermittedError(
+        f"{Path(path).as_posix()}, the config file found in the scanned directory, "
+        "reaches a file outside the directories this caller may read config from."
+    )
 
 
 def log_config_discovery(

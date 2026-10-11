@@ -881,6 +881,17 @@
   does (it used to fail with a traceback). Point `--output-dir` at a real directory,
   or remove the link.
 
+- **An MCP scan refuses a config file it finds that links outside the directories
+  the caller may read config from.** `run_ash_scan` with no `config_path`, and the
+  scan itself, check the file discovery selects in the scanned directory the way
+  `get_config` already checks a file it finds: a `.ash/.ash.yaml` that is a symlink
+  to a file outside the session's own sandbox, `ASH_MCP_ALLOWED_ROOTS` and
+  `ASH_MCP_ALLOWED_CONFIG_ROOTS` is refused before it is read, with
+  `error_type: config_input_not_permitted` and the file named by its path in the
+  scanned directory. Over stdio only the system-directory check applies, as for any
+  other config input. A remote scan of a tree whose config links to a shared file
+  now needs that file's directory in `ASH_MCP_ALLOWED_CONFIG_ROOTS`.
+
 - **MCP scans can now end in a new terminal status, `incomplete`.** Clients
   should treat it as terminal with partial coverage: the run finished and its
   results are readable, but at least one selected scanner did not complete

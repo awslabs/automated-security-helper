@@ -142,6 +142,32 @@ def _delivered_config_env_error(
     return None
 
 
+def _discovered_config_refusal(
+    target: Path, session_id: Optional[str]
+) -> Optional[MCPResourceError]:
+    """The refusal for the config file a scan of ``target`` would find, or None.
+
+    ``target`` is a directory this session may scan, but the file discovery
+    selects there may be a symlink to a file elsewhere. It is checked as
+    ``get_config`` checks a file it finds (``validate_config_input``), before
+    anything reads it, and the refusal names it as found. The scan's own
+    resolution refuses it the same way (``config_sources.check_discovered_source``).
+    """
+    from automated_security_helper.cli.mcp.sandbox import validate_config_input
+    from automated_security_helper.config.config_sources import (
+        discover_config_source,
+    )
+
+    try:
+        selected = discover_config_source(target).selected
+    except Exception as exc:  # noqa: BLE001 -- reported by the scan's own read
+        _logger.debug(f"Config not discovered before the scan ({exc})")
+        return None
+    if selected is None:
+        return None
+    return validate_config_input(selected.path, session_id=session_id)
+
+
 def _session_client_rules(session_id: Optional[str]) -> Any:
     """The ClientConfigRules a config this session's client delivers is checked against.
 
@@ -377,6 +403,11 @@ async def mcp_scan_directory(
                     "Ensure the file has a valid extension (.yaml, .yml, or .json)",
                 ],
             )
+
+    if not config_path:
+        link_out = _discovered_config_refusal(resolved_target, session_id)
+        if link_out is not None:
+            return _config_refusal(link_out, "scan_directory")
 
     env_error = _delivered_config_env_error(config_path, resolved_target, session_id)
     if env_error is not None:

@@ -10,6 +10,13 @@ by, by each symlink followed on the way to it, and by the file it resolves to. A
 file is a client's when any of those names is, and the repository's when any of
 them is inside the scanned tree.
 
+An MCP scan reads the config file it discovers only when the file it resolves to
+is one the caller may read config from, as ``get_config`` already checks a file
+it finds (``validate_config_input``). So for a remote caller the linked file is
+reached only when the operator set its directory aside
+(``ASH_MCP_ALLOWED_CONFIG_ROOTS``); the tests of the checks above set it aside
+(``host_set_aside``), and the last section covers the refusal.
+
 The trees here are delivered through the real ``set_source_git``, cloning a
 local repository that holds the link. The scans go through the real
 ``_run_scan_async``, ``run_ash_scan`` and orchestrator, stopped after the config
@@ -23,7 +30,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -95,6 +102,13 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     clear_session_state()
 
 
+@pytest.fixture
+def host_set_aside(_server, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The operator sets the host directory aside, so a scan may reach it."""
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(_server["host"]))
+    return _server["host"]
+
+
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -156,7 +170,7 @@ def _linked_tree(server: Dict[str, Path], text: str) -> Path:
     return _clone(server["tmp"], {"app.py": "x = 1\n"}, {".ash/.ash.yaml": host_file})
 
 
-def _scan_resolution(target: Path) -> Any:
+def _scan_resolution(target: Path, session_id: Optional[str] = SESSION) -> Any:
     """Start an MCP scan; return the config it resolved, or the error resolution raised."""
     from automated_security_helper.cli import mcp_tools
     from automated_security_helper.config import resolve_config as rc
@@ -193,20 +207,20 @@ def _scan_resolution(target: Path) -> Any:
                 directory_path=str(target),
                 output_dir=str(output),
                 severity_threshold="MEDIUM",
-                session_id=SESSION,
+                session_id=session_id,
             )
         )
     assert outcomes, "the scan never reached config resolution"
     return outcomes[-1]
 
 
-def _start_scan(target: Path) -> Dict[str, Any]:
+def _start_scan(target: Path, session_id: Optional[str] = SESSION) -> Dict[str, Any]:
     """Call the scan tool; the background scan itself is not started."""
     from automated_security_helper.cli import mcp_tools
 
     with patch.object(mcp_tools, "_run_scan_async", AsyncMock()) as started:
         result = asyncio.run(
-            mcp_tools.mcp_scan_directory(str(target), session_id=SESSION)
+            mcp_tools.mcp_scan_directory(str(target), session_id=session_id)
         )
     if result.get("success") is False:
         started.assert_not_called()
@@ -218,6 +232,7 @@ def _start_scan(target: Path) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("host_set_aside")
 def test_a_linked_config_setting_a_denied_field_is_refused(_server) -> None:
     from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
@@ -229,6 +244,7 @@ def test_a_linked_config_setting_a_denied_field_is_refused(_server) -> None:
     assert "fail_on_findings" in str(outcome)
 
 
+@pytest.mark.usefixtures("host_set_aside")
 def test_the_scan_tool_refuses_a_linked_config_up_front(_server) -> None:
     source = _linked_tree(_server, DENIED)
 
@@ -239,6 +255,7 @@ def test_the_scan_tool_refuses_a_linked_config_up_front(_server) -> None:
     assert "fail_on_findings" in result.get("error", ""), result
 
 
+@pytest.mark.usefixtures("host_set_aside")
 def test_a_linked_config_widening_the_sandbox_is_refused(_server) -> None:
     from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
@@ -278,6 +295,7 @@ def test_positive_control_the_same_file_named_by_the_operator_is_not_refused(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("host_set_aside")
 def test_a_linked_configs_suppressions_and_ignore_paths_are_marked(_server) -> None:
     source = _linked_tree(_server, SUPPRESSIONS)
 
@@ -292,6 +310,7 @@ def test_a_linked_configs_suppressions_and_ignore_paths_are_marked(_server) -> N
     assert [entry.client_supplied for entry in ignore_paths] == [True]
 
 
+@pytest.mark.usefixtures("host_set_aside")
 def test_a_linked_configs_scanner_exclusion_is_moved_out_of_the_options(
     _server,
 ) -> None:
@@ -371,6 +390,7 @@ def test_a_file_reached_through_a_delivered_link_is_the_clients(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("host_set_aside")
 def test_a_linked_file_that_is_not_a_config_is_not_quoted(_server) -> None:
     from automated_security_helper.core.exceptions import ASHConfigValidationError
 
@@ -384,6 +404,7 @@ def test_a_linked_file_that_is_not_a_config_is_not_quoted(_server) -> None:
     assert CANARY not in repr(outcome.args)
 
 
+@pytest.mark.usefixtures("host_set_aside")
 def test_a_linked_file_that_does_not_parse_is_not_quoted(_server) -> None:
     """The parser's message quotes the line it stopped at; the warning does not."""
     source = _linked_tree(_server, NOT_YAML)
@@ -397,6 +418,7 @@ def test_a_linked_file_that_does_not_parse_is_not_quoted(_server) -> None:
     assert YAML_CANARY not in warnings
 
 
+@pytest.mark.usefixtures("host_set_aside")
 def test_the_scan_tool_does_not_quote_it_either(_server) -> None:
     source = _linked_tree(_server, NOT_A_CONFIG)
 
@@ -420,3 +442,133 @@ def test_positive_control_an_operator_file_keeps_the_detailed_error(
         resolve_config(config_path=host_file, source_dir=elsewhere)
 
     assert CANARY in str(raised.value)
+
+
+# ---------------------------------------------------------------------------
+# A discovered config that links out of what the caller may read
+# ---------------------------------------------------------------------------
+
+#: A host config whose text must not reach the client.
+LINK_OUT = f"# {CANARY}\nproject_name: linked\n"
+
+
+def _reads(during: Callable[[], Any]) -> List[Path]:
+    """The config files read while ``during`` runs, resolved."""
+    from automated_security_helper.config import config_sources
+
+    read: List[Path] = []
+    real = config_sources.read_config_file
+
+    def recording(path: Path, *args: Any, **kwargs: Any) -> Any:
+        read.append(Path(path).resolve())
+        return real(path, *args, **kwargs)
+
+    with patch.object(config_sources, "read_config_file", recording):
+        during()
+    return read
+
+
+def test_a_remote_scan_refuses_a_discovered_config_linking_out(_server) -> None:
+    source = _linked_tree(_server, LINK_OUT)
+    host_file = _server["host"] / "ash.yaml"
+
+    reads: List[Any] = []
+    read = _reads(lambda: reads.append(_start_scan(source)))
+    (result,) = reads
+
+    assert result.get("success") is False, result
+    assert result.get("error_type") == "config_input_not_permitted", result
+    assert (source / ".ash" / ".ash.yaml").as_posix() in result["error"], result
+    assert str(_server["host"]) not in repr(result)
+    assert CANARY not in repr(result)
+    assert host_file.resolve() not in read
+
+
+def test_the_scan_itself_refuses_it_without_reading_it(_server) -> None:
+    """The scan's own resolution refuses it too, should the file change after the check."""
+    from automated_security_helper.cli import mcp_tools
+    from automated_security_helper.core.resource_management.scan_registry import (
+        ScanRegistry,
+    )
+    from automated_security_helper.interactions import run_ash_scan as ras
+
+    source = _linked_tree(_server, LINK_OUT)
+    output = source / ".ash" / "ash_output"
+    output.mkdir(parents=True, exist_ok=True)
+    registry = ScanRegistry()
+    scan_id = registry.register_scan(
+        directory_path=str(source), output_directory=str(output)
+    )
+
+    def run() -> None:
+        with (
+            patch.object(ras, "_setup_logger", lambda opts: _QuietLogger()),
+            patch.object(mcp_tools, "get_scan_registry", return_value=registry),
+        ):
+            asyncio.run(
+                mcp_tools._run_scan_async(
+                    scan_id=scan_id,
+                    directory_path=str(source),
+                    output_dir=str(output),
+                    severity_threshold="MEDIUM",
+                    session_id=SESSION,
+                )
+            )
+
+    read = _reads(run)
+    entry = registry.get_scan(scan_id)
+
+    assert entry.error_message == "ASH exited with code 3", entry.to_dict()
+    assert (_server["host"] / "ash.yaml").resolve() not in read
+    assert CANARY not in repr(entry.to_dict())
+
+
+def test_get_config_refuses_the_same_layout_as_before(_server) -> None:
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+    source = _linked_tree(_server, LINK_OUT)
+
+    result = mcp_get_config(search_dir=str(source), session_id=SESSION)
+
+    assert result.get("error_type") == "config_input_not_permitted", result
+    assert CANARY not in repr(result)
+
+
+def test_stdio_keeps_a_local_repositorys_linked_config(_server) -> None:
+    """Over stdio only the system-directory net applies, as before."""
+    host_file = _write(_server["host"] / "ash.yaml", LINK_OUT)
+    repo = _server["tmp"] / "home" / "repo"
+    _write(repo / "app.py", "x = 1\n")
+    _symlink(repo / ".ash" / ".ash.yaml", host_file)
+
+    started = _start_scan(repo, session_id=None)
+    config = _scan_resolution(repo, session_id=None)
+
+    assert started.get("success") is True, started
+    assert isinstance(config, AshConfig), config
+    assert config.project_name == "linked"
+
+
+@pytest.mark.parametrize("where", ["in the delivered tree", "in a config root"])
+def test_a_link_that_stays_inside_the_allowed_roots_is_followed(
+    _server, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    if where == "in a config root":
+        monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(_server["host"]))
+        target = _write(_server["host"] / "ash.yaml", "project_name: linked\n")
+        source = _clone(
+            _server["tmp"], {"app.py": "x = 1\n"}, {".ash/.ash.yaml": target}
+        )
+    else:
+        source = _clone(
+            _server["tmp"],
+            {"app.py": "x = 1\n", "conf/real.yaml": "project_name: linked\n"},
+            {".ash/.ash.yaml": Path("../conf/real.yaml")},
+        )
+
+    started = _start_scan(source)
+    config = _scan_resolution(source)
+
+    assert started.get("success") is True, started
+    assert isinstance(config, AshConfig), config
+    assert config.project_name == "linked"
