@@ -236,6 +236,24 @@ BARE_NAME_INSTALLS = {
     "uvx-from-bare-name": "uvx --from automated-security-helper ash",
     "pipx-run-spec-bare-name": "pipx run --spec automated-security-helper ash",
     "requirements-line": "automated-security-helper==3.7.0",
+    "pipenv-install-ash": "pipenv install ash",
+    "pipenv-install-distribution-name": "pipenv install automated-security-helper",
+    "pipenv-install-extra": "pipenv install 'automated-security-helper[symbols]'",
+    "pipenv-install-dev": "pipenv install --dev automated-security-helper",
+    "pipenv-run-pip-install": "pipenv run pip install automated-security-helper",
+    "uv-add-dev": "uv add --dev ash",
+    "uv-add-extra": 'uv add "automated-security-helper[cdk]"',
+    "uv-add-optional-group": "uv add --optional scan automated-security-helper",
+    "rye-add": "rye add automated-security-helper",
+    "rye-add-ash-dev": "rye add --dev ash",
+    "rye-add-features": "rye add automated-security-helper --features symbols",
+    "rye-install": "rye install automated-security-helper",
+    "rye-tools-install": "rye tools install ash",
+    "conda-install": "conda install -c conda-forge ash",
+    "mamba-install": "mamba install automated-security-helper",
+    "micromamba-install": "micromamba install ash",
+    "pip-download": "pip download ash",
+    "pip-wheel": "pip wheel automated-security-helper",
     "prose-without-install": "Add automated-security-helper[symbols] to your environment",
     "html-code": "<code>pip install automated-security-helper</code>",
     "html-pre": "<pre>pip install automated-security-helper</pre>",
@@ -360,6 +378,21 @@ RESOLVING_OR_UNRELATED = {
         '{"command": "uvx", "env": {}, "args": '
         '["--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0", "ash", "mcp"]}'
     ),
+    "pipenv-run-project-script": "pipenv run ash scan",
+    "pipenv-install-editable-git": f"pipenv install -e git+{GIT_URL}@v3.7.0#egg=automated-security-helper",
+    "pipenv-install-direct-reference": f'pipenv install "automated-security-helper[symbols] @ git+{GIT_URL}@v3.7.0"',
+    "pipenv-install-local-checkout": "pipenv install -e .",
+    "pipenv-install-requirements-file": "pipenv install -r requirements.txt",
+    "uv-add-direct-reference": f'uv add "automated-security-helper @ git+{GIT_URL}@v3.7.0"',
+    "uv-add-git-url": f"uv add git+{GIT_URL} --tag v3.7.0",
+    "uv-add-requirements-file": "uv add -r requirements.txt",
+    "rye-add-git": f"rye add automated-security-helper --git {GIT_URL} --tag v3.7.0",
+    "rye-add-git-equals": f"rye add automated-security-helper --git={GIT_URL}",
+    "rye-add-path": "rye add automated-security-helper --path ../automated-security-helper",
+    "rye-install-url": "rye install ash --url https://example.invalid/ash-3.7.0.tar.gz",
+    "rye-run-script": "rye run ash scan",
+    "conda-install-other": "conda install -c conda-forge python=3.12 nodejs",
+    "pip-download-git": f"pip download git+{GIT_URL}@v3.7.0",
     "mcp-json-uv-run-project": '{"command": "uv", "args": ["run", "--project=/src/ash", "ash", "mcp"]}',
     "mcp-json-from-git": textwrap.dedent(
         """\
@@ -560,6 +593,38 @@ def test_a_planted_tree_is_reported_line_by_line(tmp_path):
         "automated_security_helper/hint.py:11",
         "docs/content/docs/guide.md:4",
         "docs/content/docs/guide.md:10",
+    }
+
+
+def test_planted_lines_for_other_installers_are_reported(tmp_path):
+    """pipenv, rye, conda and uv add lines are reported through the gate's own walk."""
+    page = tmp_path / "docs" / "content" / "docs" / "installers.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        textwrap.dedent(
+            f"""\
+            ```bash
+            pipenv install ash
+            pipenv run ash scan
+            pipenv install -e git+{GIT_URL}@v3.7.0#egg=automated-security-helper
+            rye add automated-security-helper
+            rye add automated-security-helper --git {GIT_URL} --tag v3.7.0
+            uv add --dev ash
+            uv add "automated-security-helper @ git+{GIT_URL}@v3.7.0"
+            conda install -c conda-forge ash
+            ```
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    reported = {entry.split(": ", 1)[0] for entry in _offenders(tmp_path)}
+
+    assert reported == {
+        "docs/content/docs/installers.md:2",
+        "docs/content/docs/installers.md:5",
+        "docs/content/docs/installers.md:7",
+        "docs/content/docs/installers.md:9",
     }
 
 

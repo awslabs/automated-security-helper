@@ -19,10 +19,13 @@ runtime hint each (the symbols-extra hints in
 What is reported
 ----------------
 1. An install or run command whose target is a bare name. The commands are
-   ``pip install`` (any ``pip``/``pip3``, ``python -m pip``, ``uv pip``),
-   ``pipx install``, ``pipx run``, ``pipx inject``, ``uv add``,
-   ``uv tool install``, ``uv tool run``, ``uvx``, ``poetry add`` and
-   ``pdm add``, plus the value of any ``--with``/``-w``, ``--from`` or
+   ``pip install``, ``pip download`` and ``pip wheel`` (any ``pip``/``pip3``,
+   ``python -m pip``, ``uv pip``), ``pipx install``, ``pipx run``,
+   ``pipx inject``, ``uv add``, ``uv tool install``, ``uv tool run``, ``uvx``,
+   ``poetry add``, ``pdm add``, ``pipenv install``, ``rye add``,
+   ``rye install`` (and ``rye tools install``) unless ``--git``, ``--url`` or
+   ``--path`` names the source, and ``conda``/``mamba``/``micromamba install``,
+   plus the value of any ``--with``/``-w``, ``--from`` or
    ``--spec`` option on a uv, uvx, pipx or pip command line. For ``uvx``,
    ``uv tool run`` and ``pipx run`` the first positional word is the package
    unless ``--from``/``--spec`` names one, so ``uvx --with=. ash mcp`` runs the
@@ -70,7 +73,8 @@ index like any other name.
 What is not reported
 --------------------
 ``pipx upgrade``, which reuses the requirement recorded at install time, and
-``uv run``'s command word, which names a script in the current project. The
+the command word of ``uv run``, ``pipenv run`` and ``rye run``, which names a
+script in the current project's environment. The
 name alone in a Python literal (``"automated-security-helper"``), which is how
 code refers to the distribution without installing it; it is reported once it
 becomes a command or a requirement spelling. Prose that follows an install
@@ -202,7 +206,23 @@ _REQUIREMENT_OPTIONS = frozenset({"--with", "-w", "--from", "--spec"})
 #: Of those, the ones that name the package a runner runs.
 _SOURCE_OPTIONS = frozenset({"--from", "--spec"})
 #: Executables whose presence makes a segment worth parsing as a command.
-_INSTALLERS = frozenset({"uv", "uvx", "pipx", "poetry", "pdm"})
+_INSTALLERS = frozenset(
+    {
+        "uv",
+        "uvx",
+        "pipx",
+        "poetry",
+        "pdm",
+        "pipenv",
+        "rye",
+        "conda",
+        "mamba",
+        "micromamba",
+    }
+)
+#: rye add / rye install options that name where the requirement comes from, so
+#: the name in front of them is not looked up on an index.
+_RYE_SOURCE_OPTIONS = frozenset({"--git", "--url", "--path"})
 
 _ASH = r"automated[-_.]security[-_.]helper"
 _ASH_REQUIREMENT_SPELLING = re.compile(
@@ -292,10 +312,16 @@ def _commands(words: list[str]) -> Iterator[tuple[str, int]]:
     exes = [_executable(w) for w in words] + ["", ""]
     for i, exe in enumerate(exes[:-2]):
         nxt, nxt2 = exes[i + 1], exes[i + 2]
-        if _PIP.fullmatch(exe) and nxt == "install":
+        if _PIP.fullmatch(exe) and nxt in ("install", "download", "wheel"):
             yield "install", i + 2
         elif exe in ("uv", "poetry", "pdm") and nxt == "add":
             yield "install", i + 2
+        elif exe in ("pipenv", "conda", "mamba", "micromamba") and nxt == "install":
+            yield "install", i + 2
+        elif exe == "rye" and nxt in ("add", "install"):
+            yield "rye", i + 2
+        elif exe == "rye" and nxt == "tools" and nxt2 == "install":
+            yield "rye", i + 3
         elif exe == "uv" and nxt == "tool" and nxt2 == "install":
             yield "install", i + 3
         elif exe == "uv" and nxt == "tool" and nxt2 == "run":
@@ -390,6 +416,12 @@ def command_is_bare_install(segment: str) -> bool:
         if kind == "run":
             if _run_command_is_bare(words, start):
                 return True
+            continue
+        if kind == "rye" and any(
+            words[i].strip("\"'").partition("=")[0] in _RYE_SOURCE_OPTIONS
+            for i in range(start, len(words))
+        ):
+            # rye add NAME --git URL: the name is taken from the git source.
             continue
         if kind == "inject":
             # pipx inject <venv> <packages>: the first word names a venv, which
