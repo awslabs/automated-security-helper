@@ -3,12 +3,28 @@
 
 """Module containing the ArchiveConverter implementation."""
 
+import bz2
+import contextlib
+import gzip
+import importlib
+import io
+import lzma
 import os
 import shutil
 import stat
 from pathlib import Path, PurePosixPath
 import tarfile
-from typing import Annotated, BinaryIO, Dict, List, Literal, Optional, Tuple
+from typing import (
+    Annotated,
+    Any,
+    BinaryIO,
+    Dict,
+    Iterator,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+)
 import zipfile
 
 from pydantic import Field, PositiveInt
@@ -270,14 +286,123 @@ class _ExtractionBudget:
             )
 
 
+#: The most bytes tarfile may ask for in one read while it parses headers. tarfile
+#: reads an extended (pax) header, a GNU long name or long link name whole, so this
+#: bounds what one header can make it hold. Far above any real header.
+_TAR_READ_CAP = 1024 * 1024
+
+#: What the header pass may read in all: this much, plus _TAR_HEADER_BYTES_PER_MEMBER
+#: for every member read so far. A member costs 512 bytes of header, and with a pax
+#: header (GNU tar's pax format writes one per member) about 1.5 KiB; a GNU sparse
+#: 1.0 map is read from the archive here too.
+_TAR_HEADER_BYTES_BASE = 4 * 1024 * 1024
+_TAR_HEADER_BYTES_PER_MEMBER = 2048
+
+
+def _zstd_file_class() -> Any:
+    """``compression.zstd.ZstdFile`` where this Python has it (3.14 on), else None."""
+    try:
+        return importlib.import_module("compression.zstd").ZstdFile
+    except ImportError:
+        return None
+
+
+class _BoundedTarStream(io.RawIOBase):
+    """A tar stream that bounds what tarfile reads while it parses the headers.
+
+    During the header pass a single read over _TAR_READ_CAP is refused, and so is a
+    read that takes the pass over its allowance: _TAR_HEADER_BYTES_BASE plus
+    _TAR_HEADER_BYTES_PER_MEMBER per member admitted. Member data is skipped by
+    seeking, which reads nothing here, and its size is what the extraction limits
+    bound. Once the header pass ends, reads go through unbounded: extraction reads
+    in chunks tarfile and _copy_tar_members choose, at most the admitted sizes.
+    """
+
+    def __init__(self, raw: Any):
+        super().__init__()
+        self._raw = raw
+        self._allowance: Optional[int] = (
+            _TAR_HEADER_BYTES_BASE + _TAR_HEADER_BYTES_PER_MEMBER
+        )
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def tell(self) -> int:
+        return self._raw.tell()
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        return self._raw.seek(offset, whence)
+
+    def allow_another_member(self) -> None:
+        if self._allowance is not None:
+            self._allowance += _TAR_HEADER_BYTES_PER_MEMBER
+
+    def end_header_pass(self) -> None:
+        self._allowance = None
+
+    def read(self, size: Optional[int] = -1) -> bytes:
+        if self._allowance is None:
+            return self._raw.read(size)
+        if size is None or size < 0 or size > _TAR_READ_CAP:
+            raise _UnreadableArchive(
+                f"its headers ask for a read of {size} bytes, more than the "
+                f"{_TAR_READ_CAP} ASH reads at once for an archive header"
+            )
+        data = self._raw.read(size)
+        self._allowance -= len(data)
+        if self._allowance < 0:
+            raise _UnreadableArchive(
+                "its headers take more than ASH reads for an archive's headers: "
+                f"{_TAR_HEADER_BYTES_BASE} bytes plus "
+                f"{_TAR_HEADER_BYTES_PER_MEMBER} per member"
+            )
+        return data
+
+
+@contextlib.contextmanager
+def _tar_stream(handle: BinaryIO) -> Iterator[_BoundedTarStream]:
+    """The archive's tar stream, decompressed by its leading bytes, and bounded.
+
+    Chosen from the magic bytes rather than by letting tarfile try each
+    decompressor in turn: gzip, bzip2, xz, and zstd where this Python has it. Any
+    other content is read as an uncompressed tar.
+    """
+    head = handle.read(6)
+    handle.seek(0)
+    with contextlib.ExitStack() as stack:
+        inner: Any = handle
+        if head[:2] == b"\x1f\x8b":
+            inner = stack.enter_context(gzip.GzipFile(fileobj=handle, mode="rb"))
+        elif head[:3] == b"BZh":
+            inner = stack.enter_context(bz2.BZ2File(handle))
+        elif head == b"\xfd7zXZ\x00":
+            inner = stack.enter_context(lzma.LZMAFile(handle))
+        elif head[:4] == b"\x28\xb5\x2f\xfd" and _zstd_file_class() is not None:
+            inner = stack.enter_context(_zstd_file_class()(handle))
+        yield _BoundedTarStream(inner)
+
+
 def _tar_members_within(
-    tar_ref: tarfile.TarFile, budget: _ExtractionBudget
+    tar_ref: Any,
+    budget: _ExtractionBudget,
+    stream: Optional[_BoundedTarStream] = None,
 ) -> List[tarfile.TarInfo]:
-    """Every member of ``tar_ref``, each admitted to ``budget`` as its header is read."""
+    """Every member of ``tar_ref``, each admitted to ``budget`` as its header is read.
+
+    A member's extended header has been applied to it by the time it is returned,
+    so it is dropped rather than kept for every member until extraction.
+    """
     members = []
     for member in tar_ref:
         budget.admit(member.name, member.size)
+        member.pax_headers = {}
         members.append(member)
+        if stream is not None:
+            stream.allow_another_member()
     return members
 
 
@@ -299,7 +424,8 @@ _MEMBER_ESCAPES = "it would be extracted outside the destination directory"
 _MEMBER_LINK = "it is a symbolic or hard link"
 _MEMBER_NOT_REGULAR = "it is not a regular file"
 _MEMBER_SPARSE_BEYOND_SIZE = (
-    "it is a sparse file whose map places data beyond the size it declares"
+    "it is a sparse file whose map places data beyond the size it declares, or "
+    "writes the same bytes twice"
 )
 _MEMBER_NESTED_ARCHIVE = (
     "it is named as an archive or compressed file (such as .zip, .tar.gz, .jar or "
@@ -323,15 +449,20 @@ def _sparse_map_problem(member: tarfile.TarInfo) -> Optional[str]:
     tarfile ties the map to that size. An entry past the size leaves a file larger
     than the member declares, which is what the size limits were checked against,
     and when the copy stops with ReadError the truncation never happens at all.
-    With every entry inside the size, the file never grows past it.
+    With every entry inside the size, the file never grows past it. Entries must
+    also come in order without overlapping: each one is copied from the archive,
+    so entries that overlap copy more data than the member's size, writing the
+    same bytes again.
     """
     # Read with getattr: typeshed declares TarInfo.sparse as an int, while tarfile
     # sets it to a list of (offset, length) pairs, or None for a member that is not
     # sparse.
     entries: List[Tuple[int, int]] = getattr(member, "sparse", None) or []
+    end = 0
     for offset, length in entries:
-        if offset < 0 or length < 0 or offset + length > member.size:
+        if offset < end or length < 0 or offset + length > member.size:
             return _MEMBER_SPARSE_BEYOND_SIZE
+        end = offset + length
     return None
 
 
@@ -411,6 +542,20 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         if self.config is None:
             self.config = ArchiveConverterConfig()
         return super().model_post_init(context)
+
+    @staticmethod
+    def _open_tar(
+        handle: BinaryIO, stack: contextlib.ExitStack
+    ) -> Tuple[tarfile.TarFile, _BoundedTarStream]:
+        """``handle`` opened as a tar through a bounded stream, or _UnreadableArchive."""
+        stream = stack.enter_context(_tar_stream(handle))
+        try:
+            tar_ref = tarfile.open(fileobj=stream, mode="r:", encoding="utf-8")
+        except tarfile.ReadError as error:
+            raise _UnreadableArchive(
+                f"it is not a zip or tar archive that can be read ({error})"
+            ) from error
+        return tar_ref, stream
 
     def _extraction_limits(self) -> ArchiveConverterConfigOptions:
         """The extraction limits from this converter's options, defaults where unset."""
@@ -637,7 +782,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     self.record_refused_input(refused)
                     continue
 
-                with archive_handle:
+                with archive_handle, contextlib.ExitStack() as stack:
                     # Every member is admitted against the extraction limits before
                     # anything is written, and the target directory is created only
                     # after that, so a refused archive leaves nothing behind.
@@ -671,13 +816,14 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                                     archive=archive_display,
                                 ),
                             )
-                    # Extract Tarball to target path after inspecting members
-                    elif tarfile.is_tarfile(archive_handle):
-                        archive_handle.seek(0)
-                        with tarfile.open(
-                            fileobj=archive_handle, mode="r:*", encoding="utf-8"
-                        ) as tar_ref:
-                            tar_members = _tar_members_within(tar_ref, budget)
+                    # Extract Tarball to target path after inspecting members. Read
+                    # through _tar_stream, which bounds what parsing the headers can
+                    # read; a file tarfile cannot open as a tar is refused below.
+                    else:
+                        tar_ref, stream = self._open_tar(archive_handle, stack)
+                        with tar_ref:
+                            tar_members = _tar_members_within(tar_ref, budget, stream)
+                            stream.end_header_pass()
                             if not target_path.exists():
                                 created_target = target_path
                             target_path.mkdir(parents=True, exist_ok=True)
@@ -698,19 +844,6 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                                 )
                             else:
                                 _copy_tar_members(tar_ref, safe_members, target_path)
-                    else:
-                        archive_handle.seek(0)
-                        if _is_plain_gzip(archive_file, archive_handle.read(2)):
-                            # data.json.gz: one compressed file, not an archive of
-                            # files. There is nothing to extract.
-                            ASH_LOGGER.debug(
-                                f"Skipping {archive_file}: a gzip-compressed file, "
-                                "not an archive"
-                            )
-                            continue
-                        raise _UnreadableArchive(
-                            "it is not a zip or tar archive that can be read"
-                        )
 
                 # Add the extracted directory to results
                 results.append(target_path)

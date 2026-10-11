@@ -181,6 +181,14 @@
   `incomplete_converters`, in the unified results, the workspace reports and the MCP
   workspace tools' project coverage.
 
+- **Parsing a tar's headers is bounded.** tarfile reads an extended header, a GNU
+  long name or a sparse map into memory while parsing the header, before the
+  extraction limits can be checked. The tar stream is now read through a reader that
+  refuses any single read over 1 MiB and bounds the header pass to 4 MiB plus 2 KiB
+  per member; the decompressor is chosen from the archive's leading bytes. An
+  archive over either is refused as one that cannot be read, and a sparse member
+  whose map entries overlap or are out of order is refused.
+
 - **An archive the converter cannot read makes the scan incomplete.** A `.zip`,
   `.tar` or `.gz` that zipfile and tarfile cannot read (a bad CRC, a truncated or
   damaged stream, a `.gz` that is one compressed file rather than a tarball, an empty

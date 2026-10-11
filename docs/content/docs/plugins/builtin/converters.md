@@ -81,9 +81,19 @@ or a link, and in `ash.summary.txt`, on the console and in the log every control
 or bidirectional-formatting character in a name is written as an escape (`\x1b`,
 `\u202e`).
 
+Reading a tar's headers is bounded as well, because tarfile reads an extended (pax)
+header, a GNU long name or a sparse map into memory while it parses the header,
+before any of the limits above can be checked. The decompressor is chosen from the
+archive's leading bytes (gzip, bzip2, xz, and zstd on Python 3.14), a single read
+of more than 1 MiB while parsing headers is refused, and the header pass may read
+4 MiB plus 2 KiB per member in all. An archive over either is refused as one that
+cannot be read. Real headers are a few hundred bytes; GNU tar's pax format, which
+writes an extended header for every member, reads about 1.5 KiB per member.
+
 While copying, no member is written past the size it declares. For a sparse tar
 member, whose map tarfile writes before it truncates the file to its declared size,
-a map that places data past that size refuses the member.
+a map that places data past that size, or whose entries overlap or are out of order,
+refuses the member.
 
 The defaults let ordinary source archives through. GitHub refuses files larger than
 100 MiB in a repository, and an AWS Lambda deployment package may hold up to 250 MB
