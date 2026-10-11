@@ -51,11 +51,27 @@ list, a scalar, ``null`` -- replaces what was there. Lists are replaced, never
 concatenated, so a child that writes ``suppressions`` drops its base's
 suppressions; to keep them and add more, use a ``patch`` ``add`` at
 ``/global_settings/suppressions/-``. To delete a key a base set, use a ``patch``
-``remove``. Keys that differ only in ``-`` versus ``_`` are one key, the same
-equivalence ``--config-overrides`` uses (``_resolve_dict_key``), so a base that
-writes ``cdk-nag`` and a child that writes ``cdk_nag`` merge instead of standing
-side by side. JSON-Patch pointers are matched to the document's own spelling
-the same way.
+``remove``. JSON-Patch pointers are matched to the document's own spelling,
+where a key differs only in ``-`` versus ``_`` (``_resolve_dict_key``).
+
+Spellings: a setting is merged as the config model reads it (``deep_merge``
+with the model). Where the model reads a field under two spellings, its name
+and its alias (``cdk_nag`` and ``cdk-nag``), both are one setting: each
+document's spellings are folded as the model folds them, the child's result is
+merged over the base's, and the result is written once, under the alias. A
+spelling the model does not read (``global-settings`` for ``global_settings``)
+in the base is left as it is, so it cannot take the child's value away from the
+setting. One in the child still reaches the base's spelling of the setting, as
+keys differing only in ``-`` versus ``_`` always did, unless the child also
+sets the setting under a spelling the model reads, which wins. Two
+spellings of a plugin's section in ``scanners``, ``reporters`` or
+``converters`` that ``get_plugin_config`` reads for the same plugin
+(``plugin_key_lookup_names``: ``BedrockSummary`` and
+``bedrock-summary-reporter``) are one section, written under the child's
+spelling. Keys inside a section whose model is not known (a plugin's own
+section) keep the older rule: keys that differ only in ``-`` versus ``_`` are
+one key. Workspace mode merges the operator's ``--config`` over a project's
+config by the same rules (``resolve_config``'s ``overlay_config_path``).
 
 ``move`` and ``copy`` are refused, as in ``runtime_patch.py``; #289 asks for
 ``add``, ``remove`` and ``replace``, and ``test`` is allowed because it reads
@@ -167,9 +183,12 @@ file that names it was not loaded as written.
 from __future__ import annotations
 
 import copy
+import functools
 import json
 import os
 import re
+import types
+import typing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -178,10 +197,15 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 import jsonpatch  # type: ignore[import-untyped]
 import yaml
 
+from pydantic import BaseModel
+
 from automated_security_helper.config.ash_config import (
     ENV_REFERENCE_PATTERN,
+    AshConfig,
     EnvReferenceNotResolved,
+    _PluginConfigSegment,
     load_yaml_config,
+    plugin_key_lookup_names,
     resolve_env_references,
 )
 from automated_security_helper.core.constants import (
@@ -874,23 +898,140 @@ def _resolve_base_path(
     return resolved
 
 
-def deep_merge(base: Any, overlay: Any) -> Any:
-    """Merge `overlay` over `base` under the rules in the module docstring."""
+@dataclass(frozen=True)
+class _Setting:
+    """One field of a config model, as the model reads it from a document."""
+
+    #: The spelling a merged value is written under: the alias, else the name.
+    written: str
+    #: Every spelling the model reads, lowest precedence first.
+    spellings: Tuple[str, ...]
+    #: The model the value is validated as, when it is one.
+    model: Optional[type[BaseModel]]
+    #: Where a document holds several spellings, whether the model takes the
+    #: last one whole (pydantic's alias over name) rather than merging them key
+    #: by key (``_PluginConfigSegment``'s validator).
+    whole: bool
+
+
+def _value_model(annotation: Any) -> Optional[type[BaseModel]]:
+    """The pydantic model a field's mapping is validated as, or None.
+
+    Only through ``Optional`` and other unions: a list is replaced whole, and the
+    keys of a ``Dict`` field are names, not settings.
+    """
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    if typing.get_origin(annotation) in (typing.Union, types.UnionType):
+        models = {_value_model(arg) for arg in typing.get_args(annotation)}
+        models.discard(None)
+        return models.pop() if len(models) == 1 else None
+    return None
+
+
+@functools.lru_cache(maxsize=None)
+def _settings_of(model: type[BaseModel]) -> Dict[str, _Setting]:
+    """Each field of ``model``, keyed by every spelling the model reads it under."""
+    segment = issubclass(model, _PluginConfigSegment)
+    by_name = segment or bool(
+        model.model_config.get("populate_by_name")
+        or model.model_config.get("validate_by_name")
+    )
+    settings: Dict[str, _Setting] = {}
+    for name, info in model.model_fields.items():
+        alias = info.alias if info.alias and info.alias != name else None
+        if alias is None:
+            spellings: Tuple[str, ...] = (name,)
+        elif by_name:
+            spellings = (name, alias)
+        else:
+            spellings = (alias,)
+        setting = _Setting(
+            written=alias or name,
+            spellings=spellings,
+            model=_value_model(info.annotation),
+            whole=not segment,
+        )
+        for spelling in spellings:
+            settings[spelling] = setting
+    return settings
+
+
+def _fold(values: List[Any], setting: _Setting) -> Any:
+    """One document's spellings of ``setting``, read as the model reads them."""
+    if setting.whole:
+        return values[-1]
+    folded = values[0]
+    for value in values[1:]:
+        folded = deep_merge(folded, value, setting.model)
+    return folded
+
+
+def deep_merge(base: Any, overlay: Any, model: Optional[type[BaseModel]] = None) -> Any:
+    """Merge `overlay` over `base` under the rules in the module docstring.
+
+    ``model`` is the config model both mappings are read as (``AshConfig`` for
+    a whole config document). With it, a setting is merged under the spellings
+    the model reads (see "Spellings"); without it, keys that differ only in
+    ``-`` versus ``_`` are one key.
+    """
     if not isinstance(base, dict) or not isinstance(overlay, dict):
         return copy.deepcopy(overlay)
     merged = copy.deepcopy(base)
-    base_keys = dict.fromkeys(base)
-    # Keys the overlay spells exactly as the base does (or that are new) are
-    # applied last, so where the overlay itself carries both spellings of one
-    # key, its exact spelling wins, matching how a single file is read.
+    rest = dict(overlay)
+    settings = _settings_of(model) if model is not None else {}
+    # The spellings of the fields the overlay sets under a spelling the model
+    # reads: settled here, so no other key of the overlay reaches them below.
+    settled: set[str] = set()
+    for setting in dict.fromkeys(settings.values()):
+        upper = [rest.pop(key) for key in setting.spellings if key in rest]
+        if not upper:
+            continue
+        settled.update(setting.spellings)
+        lower = [merged.pop(key) for key in setting.spellings if key in merged]
+        value = _fold(upper, setting)
+        merged[setting.written] = (
+            deep_merge(_fold(lower, setting), value, setting.model)
+            if lower
+            else copy.deepcopy(value)
+        )
+    if model is not None and issubclass(model, _PluginConfigSegment):
+        # A plugin's section: every spelling get_plugin_config reads for the
+        # same plugin is one section, under the overlay's spelling.
+        for key in list(rest):
+            names = plugin_key_lookup_names(key)
+            same = [
+                other
+                for other in merged
+                if other not in settings and plugin_key_lookup_names(other) & names
+            ]
+            if not same:
+                continue
+            lower_value: Any = merged.pop(same[0])
+            for other in same[1:]:
+                lower_value = deep_merge(lower_value, merged.pop(other))
+            merged[key] = deep_merge(lower_value, rest.pop(key))
+    # The rest: a key the model does not read as a field. Keys that differ
+    # only in '-' versus '_' are one key here, as they always were, so an
+    # overlay's unread spelling of a field still reaches the base's spelling of
+    # it -- but not a field the overlay set above under a spelling the model
+    # reads, which wins. Those the overlay spells exactly as the base does (or
+    # that are new) are applied last, so where the overlay carries both
+    # spellings of one key, its exact spelling wins.
+    base_keys = dict.fromkeys(
+        key for key in base if key in merged and key not in settled
+    )
     items = sorted(
-        overlay.items(),
+        rest.items(),
         key=lambda kv: _resolve_dict_key(base_keys, kv[0]) == kv[0],
     )
     for key, value in items:
         target = _resolve_dict_key(base_keys, key)
         if target in merged:
-            merged[target] = deep_merge(merged[target], value)
+            field = settings.get(target)
+            merged[target] = deep_merge(
+                merged[target], value, field.model if field else None
+            )
         else:
             merged[target] = copy.deepcopy(value)
     return merged
@@ -1075,8 +1216,9 @@ def _resolve(
                     base_named,
                     (real, named, *above),
                 ),
+                AshConfig,
             )
-        merged = deep_merge(merged, own)
+        merged = deep_merge(merged, own, AshConfig)
         if ops is not None:
             merged = _apply_patch(merged, ops, real)
     except ASHConfigSourceError:

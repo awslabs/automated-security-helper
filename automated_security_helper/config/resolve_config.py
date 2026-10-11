@@ -915,7 +915,7 @@ def _resolve_config(
                 # A document that is not a mapping is left as it is, so its
                 # validation error is still raised rather than replaced by the
                 # overlay's content.
-                data = deep_merge(data, overlay.data)
+                data = deep_merge(data, overlay.data, AshConfig)
                 layered_over = overlay.chain[-1]
             client_chain = untrusted_config or _has_a_client_file(document)
             try:
