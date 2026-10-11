@@ -11,7 +11,9 @@ holds the Python runner to, for the shell wrapper:
   CI variables are set.
 
 The real script runs against a fake OCI runner that records each invocation, so
-the assertions are on the command lines the wrapper assembled.
+the assertions are on the command lines the wrapper assembled, and with an ``id``
+that reports an unprivileged user unless a test names other IDs
+(tests/utils/host_ids.py).
 """
 
 import os
@@ -19,9 +21,11 @@ import shutil
 import stat
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import pytest
+
+from tests.utils.host_ids import UNPRIVILEGED_GID, UNPRIVILEGED_UID, with_fixed_ids
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ASH_SCRIPT = REPO_ROOT / "ash"
@@ -97,11 +101,23 @@ def project(tmp_path):
 
 
 def _run_ash_status(
-    fake_runner, cwd: Path, args: List[str], extra_env: Optional[Dict[str, str]] = None
+    fake_runner,
+    cwd: Path,
+    args: List[str],
+    extra_env: Optional[Dict[str, str]] = None,
+    host_ids: Tuple[str, str] = (UNPRIVILEGED_UID, UNPRIVILEGED_GID),
 ):
-    """Run ./ash against the fake runner: (returncode, stdout and stderr, calls)."""
+    """Run ./ash against the fake runner: (returncode, stdout and stderr, calls).
+
+    ``id`` reports *host_ids* (UID, GID), an unprivileged user unless a test names
+    others, whatever user the suite itself runs as.
+    """
     runner, log_dir = fake_runner
-    env = {k: v for k, v in os.environ.items() if k not in _SCRUBBED_ENV}
+    env = with_fixed_ids(
+        {k: v for k, v in os.environ.items() if k not in _SCRUBBED_ENV},
+        log_dir.parent / "fixed-id-bin",
+        *host_ids,
+    )
     env.update(
         {"OCI_RUNNER": str(runner), "FAKE_RUNNER_LOG_DIR": str(log_dir)},
     )
@@ -574,22 +590,14 @@ class TestANonRootBuildAsUid0IsRefused:
         assert calls == []
         assert "--build-target ci" in output
 
-    def test_running_as_root(self, fake_runner, project, tmp_path):
-        fake_bin = tmp_path / "fake-id-bin"
-        fake_bin.mkdir()
-        fake_id = fake_bin / "id"
-        fake_id.write_text("#!/bin/sh\necho 0\n")
-        fake_id.chmod(0o755)
-
+    def test_running_as_root(self, fake_runner, project):
         rc, output, calls = _run_ash_status(
-            fake_runner,
-            project,
-            ["--no-run"],
-            {"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+            fake_runner, project, ["--no-run"], host_ids=("0", UNPRIVILEGED_GID)
         )
 
         assert rc == 1, output
         assert calls == []
+        assert "--build-target ci" in output
 
     def test_the_ci_stage_builds_with_uid_0(self, fake_runner, project):
         """Control: ``ci`` creates no user."""
@@ -632,25 +640,17 @@ class TestANonRootBuildAsUid0IsRefused:
         assert "must be a numeric value" in output
 
     def test_an_unprivileged_host_user_builds_non_root_as_itself(
-        self, fake_runner, project, tmp_path
+        self, fake_runner, project
     ):
-        """Control: the refusal is about root; any other host user is unaffected."""
-        fake_bin = tmp_path / "fake-id-bin"
-        fake_bin.mkdir()
-        fake_id = fake_bin / "id"
-        fake_id.write_text("#!/bin/sh\necho 1000\n")
-        fake_id.chmod(0o755)
-
-        calls = run_ash(
-            fake_runner,
-            project,
-            ["--no-run"],
-            {"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+        """Control for test_running_as_root: only the IDs ``id`` reports differ."""
+        rc, output, calls = _run_ash_status(
+            fake_runner, project, ["--no-run"], host_ids=("1234", "1235")
         )
 
+        assert rc == 0, output
         [build] = calls
         assert _flag(build, "--target") == "non-root"
-        assert "UID=1000" in build and "GID=1000" in build
+        assert "UID=1234" in build and "GID=1235" in build
 
 
 class TestAnOutsideConfigThatExtendsIsRefused:
