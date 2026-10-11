@@ -21,7 +21,7 @@ from automated_security_helper.utils.content_db_staleness import (
 )
 from automated_security_helper.utils.converter_refusals import (
     converter_refusals,
-    summary_lines,
+    markdown_summary_lines,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
@@ -30,19 +30,6 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_se
     markdown_workspace_section,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
-
-_MARKDOWN_INLINE_SPECIALS = "\\`*_[]<>|"
-
-
-def _escape_markdown_inline(text: str) -> str:
-    """``text`` as literal inline markdown: one line, its markup characters escaped.
-
-    For text the scanned tree chose, such as an archive member's name, which would
-    otherwise render as a link, an image or a heading in a summary posted to a pull
-    request.
-    """
-    flat = " ".join(text.splitlines())
-    return "".join(f"\\{ch}" if ch in _MARKDOWN_INLINE_SPECIALS else ch for ch in flat)
 
 
 class MarkdownReporterConfigOptions(ReporterOptionsBase):
@@ -344,8 +331,9 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                     "were not scanned:"
                 )
                 md_parts.append("")
-                for line in summary_lines(refusals):
-                    md_parts.append(f"- {_escape_markdown_inline(line)}")
+                # Each in a code span: a name such as @someone or a URL would
+                # otherwise become a mention or a link where the summary is posted.
+                md_parts.extend(markdown_summary_lines(refusals))
                 md_parts.append("")
 
             # Add top hotspots (files with most findings)

@@ -75,6 +75,11 @@ incomplete conversion, so with `fail_on_incomplete_scanners` on (the default) th
 scan exits 1 and names the archive and the limit. The refusal is also listed in the
 console summary, `ash.summary.txt`, `ash.summary.md`, `ash.flat.json`
 (`converter_refusals`) and `ash.sarif` (an execution notification at level `error`).
+Names come from the archive, so they are shown as inert text: in `ash.summary.md`
+each refusal is a code span, so a name such as `@someone` or a URL is not a mention
+or a link, and in `ash.summary.txt`, on the console and in the log every control
+or bidirectional-formatting character in a name is written as an escape (`\x1b`,
+`\u202e`).
 
 While copying, no member is written past the size it declares. For a sparse tar
 member, whose map tarfile writes before it truncates the file to its declared size,

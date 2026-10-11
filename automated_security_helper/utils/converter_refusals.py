@@ -36,6 +36,7 @@ Where each report puts them:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -48,6 +49,42 @@ REFUSED_INPUT_NOTIFICATION_ID = "ASH-CONVERTER-INPUT-NOT-SCANNED"
 
 #: How many refusals a summary lists before it gives a count of the rest.
 SHOWN_IN_SUMMARY = 20
+
+#: Unicode formatting characters that reorder the text around them when displayed.
+_BIDI_CONTROLS = frozenset(
+    "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+)
+
+
+def inert_text(text: str) -> str:
+    """``text`` with every control and bidirectional-formatting character escaped.
+
+    For names the scanned tree chose, shown in a terminal or a text report: an
+    escape sequence in a member name would otherwise be interpreted by the reader's
+    terminal, and a right-to-left override would show the name reordered.
+    """
+    shown = []
+    for char in text:
+        code = ord(char)
+        if code < 0x20 or code == 0x7F or 0x80 <= code <= 0x9F:
+            shown.append(f"\\x{code:02x}")
+        elif char in _BIDI_CONTROLS:
+            shown.append(f"\\u{code:04x}")
+        else:
+            shown.append(char)
+    return "".join(shown)
+
+
+def markdown_code_span(text: str) -> str:
+    """``text`` as one inline code span, so markdown, mentions and links stay text.
+
+    The fence is one backtick longer than the longest run in the text, and padded
+    with a space on each side, which CommonMark strips.
+    """
+    text = inert_text(text)
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * (longest + 1)
+    return f"{fence} {text} {fence}"
 
 
 @dataclass(frozen=True)
@@ -122,16 +159,35 @@ def summary_lines(
 ) -> List[str]:
     """One line per refusal, at most ``shown``, then a line counting the rest."""
     lines = [
-        ("[scan incomplete] " if refusal.scan_incomplete else "") + refusal.message()
+        ("[scan incomplete] " if refusal.scan_incomplete else "")
+        + inert_text(refusal.message())
         for refusal in refusals[:shown]
     ]
     if len(refusals) > shown:
-        lines.append(
-            f"... and {len(refusals) - shown} more; every one is listed under "
-            "converter_results in ash_aggregated_results.json and in the flat JSON "
-            "report"
-        )
+        lines.append(_more_line(len(refusals) - shown))
     return lines
+
+
+def markdown_summary_lines(
+    refusals: List[ConverterRefusal], shown: int = SHOWN_IN_SUMMARY
+) -> List[str]:
+    """``summary_lines`` as markdown list items, each refusal inside a code span."""
+    lines = [
+        "- "
+        + ("**scan incomplete**: " if refusal.scan_incomplete else "")
+        + markdown_code_span(refusal.message())
+        for refusal in refusals[:shown]
+    ]
+    if len(refusals) > shown:
+        lines.append(f"- {_more_line(len(refusals) - shown)}")
+    return lines
+
+
+def _more_line(count: int) -> str:
+    return (
+        f"... and {count} more; every one is listed under converter_results in "
+        "ash_aggregated_results.json and in the flat JSON report"
+    )
 
 
 def refusal_invocations(model: "AshAggregatedResults") -> List["Invocation"]:

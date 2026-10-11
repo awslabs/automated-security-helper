@@ -233,13 +233,14 @@ class TestTheReports:
         lines = report.splitlines()
         assert "### Converter inputs not scanned" in lines
         assert (
-            "- \\[scan incomplete\\] archive: 'vendor/declared.zip' was not scanned: "
-            "its member 'big.py' declares 2 bytes, outside the max\\_member\\_bytes "
-            "extraction limit of 1"
+            "- **scan incomplete**: ` archive: 'vendor/declared.zip' was not scanned: "
+            "its member 'big.py' declares 2 bytes, outside the max_member_bytes "
+            "extraction limit of 1 `"
         ) in lines
         assert (
-            "- archive: member 'inner.zip' of 'dist/outer.zip' was not scanned: "
+            "- ` archive: member 'inner.zip' of 'dist/outer.zip' was not scanned: "
             + NESTED.reason
+            + " `"
         ) in lines
 
     def test_the_markdown_summary_renders_member_names_as_text(self):
@@ -254,7 +255,8 @@ class TestTheReports:
         report = MarkdownReporter(context=_context()).report(model)
 
         line = next(line for line in report.splitlines() if "example.invalid" in line)
-        assert "\\[docs\\]" in line
+        assert line.startswith("- ` ") and line.endswith(" `"), line
+        assert "[docs](https://example.invalid)\\x0a# heading.zip" in line
         assert "\n# heading" not in report
 
     def test_a_long_list_is_cut_short_with_a_count(self):

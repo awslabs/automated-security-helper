@@ -201,7 +201,10 @@
   `ash.summary.txt`, `ash.summary.md`, `ash.flat.json` (`converter_refusals`, always
   present) and `ash.sarif` (one execution notification per input, `error` for an
   archive over a limit, `warning` otherwise) list them; before, they were in `ash.log`
-  and `ash_aggregated_results.json` only.
+  and `ash_aggregated_results.json` only. Names from the archive are shown as inert
+  text: a code span per refusal in `ash.summary.md`, and control and
+  bidirectional-formatting characters escaped in the text summary, on the console
+  and in the log.
 
 - **trivy-repo and syft read no config file from the scanned tree, online or
   offline.** A `trivy.yaml` in the scanned repository

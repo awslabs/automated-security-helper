@@ -15,6 +15,7 @@ from automated_security_helper.models.asharp_model import (
     FailedInputInfo,
     RefusedInputInfo,
 )
+from automated_security_helper.utils.converter_refusals import inert_text
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
@@ -121,22 +122,24 @@ class ConverterPluginBase(PluginBase, Generic[T]):
             unlisted_members: The record stands for this many more members of the
                 archive, refused for the same reason and not listed one by one.
         """
-        # The names come from the scanned tree, so they are logged as data.
+        # The names come from the scanned tree, so they are logged as data, with
+        # control characters escaped (utils/converter_refusals.inert_text).
+        path = inert_text(refusal.path)
+        reason = inert_text(refusal.reason)
         if unlisted_members is not None:
             ASH_LOGGER.warning(
                 f"Skipped {unlisted_members} more members of archive "
-                f"'{refusal.path}', not listed one by one: {refusal.reason}",
+                f"'{path}', not listed one by one: {reason}",
                 extra=NO_MARKUP,
             )
         elif member is None:
             ASH_LOGGER.warning(
-                f"Skipped converter input '{refusal.path}': {refusal.reason}",
+                f"Skipped converter input '{path}': {reason}",
                 extra=NO_MARKUP,
             )
         else:
             ASH_LOGGER.warning(
-                f"Skipped member '{member}' of archive '{refusal.path}': "
-                f"{refusal.reason}",
+                f"Skipped member '{inert_text(member)}' of archive '{path}': {reason}",
                 extra=NO_MARKUP,
             )
         self.refused_inputs.append(
