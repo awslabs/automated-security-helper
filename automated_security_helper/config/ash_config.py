@@ -766,10 +766,12 @@ class RuntimeOverridesConfig(BaseModel):
         "/scanners/*/options/offline",
         "/scanners/ferret-scan/options/max_live_bytes",
         # A scanner's own config file, and which version of its tool runs. From a
-        # config file inside the scanned tree these come only from the operator
-        # (config/tool_config_trust.py, the tool_version and version checks), so
-        # a client's file may not set them either; refusing says so instead of
-        # leaving them out with a log line.
+        # config file inside the scanned tree the config file comes only from the
+        # operator (config/tool_config_trust.py). The version is a specifier set
+        # or release tag from any source, installed only from the tool's own
+        # index or release page, and a repository's config may still pin one, as
+        # a workspace project does. A client's file may set neither; refusing
+        # says so instead of leaving them out with a log line.
         "/scanners/bandit/options/config_file",
         "/scanners/checkov/options/config_file",
         "/scanners/ferret-scan/options/config_file",

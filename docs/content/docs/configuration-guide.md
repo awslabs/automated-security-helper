@@ -470,14 +470,20 @@ it counts as the client's.
 | trivy-repo's ignore file and secret config | trivy-repo always gets `--ignorefile` and `--secret-config`, so trivy does not read a `.trivyignore` or `trivy-secret.yaml` from the scanned repository. `scanners.trivy-repo.options.ignore_file` and `secret_config_file` (from the defaults, `--config-overrides` or a config file outside the tree), or `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`, name the files to use; each is passed only when it is outside the scanned tree, and a file that sets nothing is passed otherwise. |
 | `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.mode` | See [Scanner sandbox](scanner-sandbox.md). |
 | `scanners.bandit.options.config_file`, `scanners.grype.options.config_file`, `scanners.syft.options.config_file` | Taken from the defaults, `--config-overrides` or a config file outside the tree; a file named that way is used even inside the tree. ASH does not look for `.bandit`, `bandit.yaml`, `bandit.toml`, `.grype.yaml`, `.grype/config.yaml`, `.syft.yaml` or their `.ash/` copies by name, and otherwise passes each tool an empty config (`--ini` for bandit, `--config` for grype and syft), so the tool does not read one from the tree on its own. |
-| `scanners.opengrep.options.config`, `scanners.semgrep.options.config`, `scanners.opengrep.options.metrics`, `scanners.semgrep.options.metrics` | Taken from the defaults (`p/ci` and `auto`), `--config-overrides` or a config file outside the tree. `config` chooses the rules, from the registry, a URL the tool fetches or a path it reads, and `metrics` whether the tool sends usage data. To run a repository's own rules, name them with `--config-overrides`. |
+| `scanners.opengrep.options.config`, `scanners.semgrep.options.config`, `scanners.opengrep.options.patterns`, `scanners.opengrep.options.metrics`, `scanners.semgrep.options.metrics` | Taken from the defaults (`p/ci`, no patterns and `auto`), `--config-overrides` or a config file outside the tree. `config` chooses the rules, from the registry, a URL the tool fetches or a path it reads; opengrep's `patterns` runs the patterns in place of every rule config; and `metrics` chooses whether the tool sends usage data. `metrics: off`, which only stops it sending any, applies from every config. To run a repository's own rules, name them with `--config-overrides`. |
 | A `.semgrepignore` in the scanned tree | Not honored by semgrep or opengrep: ASH passes `--x-ignore-semgrepignore-files` with the tools' default exclusions, so the same paths are scanned as with no `.semgrepignore`, and the file is named in the results as a `config_warning` validation checkpoint. List the files to leave out in `global_settings.ignore_paths`. |
 | `scanners.ferret-scan.options.profile`, `scanners.ferret-scan.options.use_default_config` | Taken from the defaults, `--config-overrides` or a config file outside the tree. A profile chooses which checks ferret-scan runs and the lowest confidence it reports, and the bundled `redaction` and `secure-redaction` profiles also have it write redacted copies of the files it scans. `use_default_config: false` replaces the bundled config with an empty one, which drops the bundled validators' patterns. ferret-scan's other options, `checks` and `confidence_levels` among them, still apply. |
 | `scanners.snyk-code.options.honor_tree_exclusions` | Taken from the defaults, `--config-overrides` or a config file outside the tree. `snyk code test` leaves out the files that the `.snyk` and `.dcignore` files in the tree it tests exclude, and has no option to stop it, so while this is `false` (the default) snyk-code does not run on a tree that has one, and its error names the files. See [Exclusion files in the scanned tree](plugins/community/snyk-plugin.md#exclusion-files-in-the-scanned-tree). |
 | `reporters.<name>.extension` | Must be a filename suffix such as `json`, from every source, including `--config-overrides`: the report is written to `ash.<extension>` in the reports directory. A value containing `/`, `\`, `..` or NUL is replaced by the reporter's default. ASH also writes a report, and the files some reporters write beside it, only when the resolved file is directly inside the reports directory. When the reports directory, or a file an enabled reporter writes there, is already a symlink or a directory junction, the run exits 1 before any reporter writes, and the error names the link. |
 | Reporter destinations and credentials: `aws_region` and `aws_profile` of `aws-security-hub`, `bedrock-summary-reporter` and `s3`; `aws-security-hub`'s `account_id`; `bedrock-summary-reporter`'s `model_id`, `output_file`, `output_executive_file` and `output_technical_file`; `s3`'s `bucket_name` and `key_prefix`; `cloudwatch-logs`' `aws_region`, `log_group_name` and `log_stream_name` (all under `reporters.<name>.options`) | Taken from the defaults, `--config-overrides` or a config file outside the tree, whichever spelling of the reporter's section the file uses (`BedrockSummary` is read as `bedrock-summary-reporter`, for example). These options choose where findings are sent or written and which credentials send them. The reporters' other options, including `enabled`, still apply. The same holds for the options a reporter from a plugin module declares in `destination_options`, once the scan has imported the module; see [Declaring destination options](plugins/reporter-plugins.md#declaring-destination-options). |
 
-Each setting that is not honored is logged once, as a warning that names it.
+Each setting that is not honored is named in a warning when the config is
+resolved.
+
+A repository's config may still choose a scanner's `tool_version` and opengrep's
+`version`, within the limits above: a version specifier for the tool's own
+package, or a tag of opengrep's own releases, whose binary ASH installs only when
+it matches its SHA-256 digest. Workspace projects pin scanner versions this way.
 
 To set any of these for a repository you trust, use `--config-overrides`,
 `--ash-plugin-modules`, or a config file outside the scanned tree. A file path set
@@ -529,9 +535,9 @@ on which:
     one, or a module the server's config does not load that is inside the scanned
     tree or sends findings off the host. A file that does is refused the same
     way, naming the setting; an equal or tighter value scans.
-  - Choices that are the operator's are in the default `denied_paths` too, so a
-    file that sets one is refused rather than scanned without it: each scanner's
-    own config file (`config_file` for bandit, checkov, ferret-scan, grype and
+  - What chooses a scanner's own config, which version of a tool ASH installs, or
+    where findings go is in the default `denied_paths` too, so a file that sets
+    one is refused rather than scanned without it: each scanner's own config file (`config_file` for bandit, checkov, ferret-scan, grype and
     syft, and trivy-repo's `secret_config_file`), snyk-code's
     `honor_tree_exclusions`, every scanner's and the jupyter converter's
     `tool_version`, opengrep's `version` and `sha256`, opengrep's and semgrep's
@@ -573,11 +579,10 @@ on which:
     | cdk-nag | `nag_packs.AwsSolutionsChecks` (turning on another pack reports more, and is allowed) |
     | checkov | `frameworks`, `skip_frameworks` |
     | detect-secrets | `baseline_file`, `scan_settings` |
-    | ferret-scan | `checks`, `confidence_levels`, `disable_ip_types`, `enable_preprocessors`, `finding_limit`, `profile`, `recursive`, `respect_gitignore`, `use_default_config`, `validator_budget` |
+    | ferret-scan | `checks`, `confidence_levels`, `disable_ip_types`, `enable_preprocessors`, `finding_limit`, `max_live_bytes` (which bounds how much extracted content it holds), `profile`, `recursive`, `respect_gitignore`, `use_default_config`, `validator_budget` |
     | opengrep | `config`, `exclude_rule`, `patterns`, `severity` |
     | semgrep | `config`, `exclude_rule`, `severity` |
     | trivy-repo | `license_full`, `scanners` |
-    | ferret-scan | `max_live_bytes`, which bounds how much extracted content it holds |
     | every scanner | `offline`: a scanner set offline runs on cached data, and npm audit offline reports no advisories at all |
 
     Options that only tune output or performance, or whose default already
@@ -719,17 +724,19 @@ scanners:
       severity_threshold: MEDIUM  # ALL | LOW | MEDIUM | HIGH | CRITICAL -- uppercase only
       ignore_nosec: false         # true scans lines carrying a '# nosec' comment anyway
       excluded_paths: []          # Paths to exclude, each with a reason
-      config_file: null           # Explicit .bandit file, relative to the source directory
+      config_file: null           # The operator's bandit config file; see below
       scan_timeout: 1800          # Seconds before the bandit invocation is killed
       # Bandit is installed via UV tool management with the constraint
       # '>=1.7.0,<2.0.0' for SARIF support.
 ```
 
 Selecting individual bandit tests is done in a bandit configuration file rather than
-through ASH options: point `config_file` at one, or rely on the discovery described
-below.
-
-If you have been using Bandit separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory and the ```.ash``` directory for a file named ```.bandit```, ```.bandit.toml```, or ```.bandit.yaml```, and will use the settings found in the file if it is detected. For more details on using a Bandit configuration file, refer to the Bandit [documentation](https://bandit.readthedocs.io/en/latest/config.html).
+through ASH options. ASH does not look for one by name in the scanned tree. Name it
+with `config_file`, set with `--config-overrides` or in a config file outside the
+tree; a config file inside the tree does not set it (see
+[Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose)). Without one, bandit gets an empty config, so it
+does not read a `.bandit` file from the tree either. For the file's format, refer to
+the Bandit [documentation](https://bandit.readthedocs.io/en/latest/config.html).
 
 ### Semgrep
 
@@ -738,11 +745,11 @@ scanners:
   semgrep:
     enabled: true
     options:
-      config: 'p/ci'        # Ruleset, directory of YAML rules, or URL, passed to --config
+      config: 'p/ci'        # Ruleset, directory of YAML rules, or URL, passed to --config (operator only)
       exclude: ['*-converted.py', '*_report_result.txt']  # Paths to skip
       exclude_rule: []      # Rule IDs to skip (singular; 'exclude_rules' is not a field)
       severity: []          # Report only findings from rules of these severities
-      metrics: 'auto'       # How usage metrics are sent to the Semgrep server
+      metrics: 'auto'       # How usage metrics are sent to the Semgrep server ('off' from any config)
       offline: false        # Use locally cached rules only
       scan_timeout: 1800    # Seconds before the semgrep invocation is killed
       tool_version: null    # Version constraint (e.g., '>=1.125.0')
@@ -786,7 +793,13 @@ scanners:
       # with version constraint >=3.2.0,<4.0.0 for enhanced stability
 ```
 
-If you have been using Checkov separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory and the ```.ash``` directory for a file named ```.checkov.yml``` or ```.checkov.yaml```, and will use the settings found in the file if it is detected. For more details on using a bandit configuration file, refer to the Checkov [documentation](https://github.com/bridgecrewio/checkov?tab=readme-ov-file#configuration-using-a-config-file).
+A Checkov configuration file is passed to checkov only when it is outside the
+scanned tree: name it with `config_file`, set with `--config-overrides` or in a
+config file outside the tree (see [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose)).
+A `.checkov.yaml` or `.checkov.yml` in the scanned tree, or in its `.ash`
+directory, is not used, and checkov runs from outside the tree so it does not
+read one on its own. For the file's format, refer to the Checkov
+[documentation](https://github.com/bridgecrewio/checkov?tab=readme-ov-file#configuration-using-a-config-file).
 
 ### Grype
 
@@ -795,12 +808,17 @@ scanners:
   grype:
     enabled: true
     options:
-      config_file: .grype.yaml # Specific path to grype configuration file
+      config_file: null # The operator's grype config file; see below
       severity_threshold: MEDIUM # Options: ALL, LOW, MEDIUM, HIGH, CRITICAL
       offline: false # Run in offline mode
 ```
 
-If you have been using Grype separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory, the ```.ash``` directory, and the ```.grype``` directory for a file named ```.grype.yaml```. The current directory will also be searched for a ```grype.yaml``` file. If any of these files are found, ASH will use the settings found in the file. For more details on using a Grype configuration file, refer to the Grype [documentation](https://github.com/anchore/grype?tab=readme-ov-file#configuration).
+ASH does not look for a Grype configuration file by name in the scanned tree. Name
+one with `config_file`, set with `--config-overrides` or in a config file outside
+the tree (see [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose)). Without
+one, grype gets an empty config, so it does not read a `.grype.yaml` from the tree
+either. For the file's format, refer to the Grype
+[documentation](https://github.com/anchore/grype?tab=readme-ov-file#configuration).
 
 ### Syft
 
@@ -809,7 +827,7 @@ scanners:
   syft:
     enabled: true
     options:
-      config_file: .syft.yaml # Specific path to the Syft configuration file
+      config_file: null # The operator's syft config file; see below
       exclude:                # Each entry needs a path and a reason
         - path: 'tests'
           reason: 'Test fixtures are not shipped'
@@ -818,7 +836,12 @@ scanners:
       # "spdx-tag-value", "syft-json", "syft-table", "syft-text"
 ```
 
-If you have been using Syft separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory for a file named ```.syft.yaml``` or ```.syft.yml```. If either of these files are found, ASH will use the settings found in the file. For more details on using a Syft configuration file, refer to the Syft [documentation](https://github.com/anchore/syft/wiki/Configuration).
+ASH does not look for a Syft configuration file by name in the scanned tree. Name
+one with `config_file`, set with `--config-overrides` or in a config file outside
+the tree (see [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose)). Without
+one, syft gets an empty config, so it does not read a `.syft.yaml` from the tree
+either. For the file's format, refer to the Syft
+[documentation](https://github.com/anchore/syft/wiki/Configuration).
 
 ## UV Tool Management
 

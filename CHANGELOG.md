@@ -120,7 +120,8 @@
   suppressions and ignore paths apply, marked `client_supplied` in the results,
   unless the profile's own `denied_paths` lists them. A profile's own
   `denied_paths` now adds to the default list rather than replacing it, so
-  listing one more field lifts no default entry; set
+  listing one more field lifts no default entry, and a warning names the default
+  entries a list that holds some of them leaves out; set
   `replace_default_denied_paths: true` to use the list as written, and each
   default entry it leaves out is named in a warning. An entry, or a
   `denied_value_patterns` key, that does not start with `/` matched nothing and is
@@ -186,20 +187,23 @@
   `config`, `exclude_rule`, `patterns` and `severity`, semgrep's `config`,
   `exclude_rule` and `severity`, trivy-repo's `license_full` and `scanners`,
   ferret-scan's `max_live_bytes`, and every scanner's `offline` (npm audit
-  offline reports no advisories). So do the choices that are the operator's:
-  each scanner's own config file (`config_file` of bandit, checkov, ferret-scan,
-  grype and syft, and trivy-repo's `secret_config_file`), every `tool_version`,
-  opengrep's `version` and `sha256`, the AWS reporters' destinations and
-  credentials, and the GitLab SAST reporter's `exclude_suppressed`. Left at its
-  default, each still scans.
+  offline reports no advisories). So do each scanner's own config file
+  (`config_file` of bandit, checkov, ferret-scan, grype and syft, and
+  trivy-repo's `secret_config_file`), every `tool_version`, opengrep's `version`
+  and `sha256`, the AWS reporters' destinations and credentials, and the GitLab
+  SAST reporter's `exclude_suppressed`. Left at its default, each still scans.
 
-- **A config file inside the scanned tree can no longer choose what ASH installs,
-  imports or hands a scanner as its own configuration.** It applies to a discovered
-  `.ash/.ash.yaml`, a `--config` inside the tree, an `extends` base, or `ASH_CONFIG`:
+- **A config file inside the scanned tree can no longer choose where ASH installs
+  a tool from, what it imports, or what it hands a scanner as its own
+  configuration.** It applies to a discovered `.ash/.ash.yaml`, a `--config`
+  inside the tree, an `extends` base, or `ASH_CONFIG`:
   - `tool_version` (bandit, checkov, semgrep, ferret-scan, the jupyter converter)
     must be a PEP 440 version specifier set such as `>=1.2,<2`, from any source.
     Any other value is replaced by the default, with a warning naming the key.
-    `scanners.opengrep.options.version` likewise has to be a release tag.
+    `scanners.opengrep.options.version` likewise has to be a release tag, and a
+    version other than the pinned one needs its `sha256`. Within those limits a
+    repository's config still chooses the version, as a workspace project's
+    does.
   - `ash_plugin_modules` entries such a file adds are imported only when they name
     an installed module outside the tree. `--ash-plugin-modules`,
     `--config-overrides` and a config file outside the tree are unaffected.
@@ -261,11 +265,14 @@
     or in a config file outside the tree; a file named that way is used even
     inside the tree. `scanners.syft.options.config_file` now accepts a path
     written as a string. opengrep's and semgrep's `config` (the rules they run,
-    from the registry, a URL or a path) and `metrics` are the operator's the same
-    way: from such a file they are left at the default, `p/ci` and `auto`, with a
-    warning naming the key, and under the MCP server `metrics` joins the default
-    `denied_paths` (`config` already is one). So are the files other scanners read
-    that ASH already refused inside the tree: checkov's and ferret-scan's
+    from the registry, a URL or a path), opengrep's `patterns` (run in place of
+    every rule config) and their `metrics` are the operator's the same way: from
+    such a file they are left at the default, `p/ci`, no patterns and `auto`, with
+    a warning naming the key, and under the MCP server `metrics` joins the default
+    `denied_paths` (`config` and `patterns` already are). `metrics: off`, which
+    only stops the tool sending usage data, applies from any config, delivered
+    ones included. The files other scanners read that ASH already refused
+    inside the tree are the operator's too: checkov's and ferret-scan's
     `config_file`, detect-secrets' `baseline_file` and `file://` plugins and
     filters in `scan_settings`, and trivy-repo's `ignore_file` and
     `secret_config_file`. Such a file outside the tree is now passed only when the
@@ -337,7 +344,8 @@
   plugin's section under every spelling ASH reads as that plugin's config,
   including when the entry names plugins with a glob such as `trivy-*`.
 
-  Each value that is not honored is logged once as a warning naming the key. See
+  Each value that is not honored is named in a warning when the config is
+  resolved. See
   [Settings a repository's config cannot choose](docs/content/docs/configuration-guide.md#settings-a-repositorys-config-cannot-choose).
 
 - **ASH no longer follows symlinks out of the scanned tree when it reads tree files
@@ -950,6 +958,21 @@
   exclude the targets the scanner could not read on the affected tree, or exclude
   the scanner. Reverting to the previous behavior means accepting a report that
   states coverage it does not have.
+
+- **An MCP profile's `runtime_overrides` and a workspace policy are read more
+  strictly.**
+  - A profile's own `denied_paths` adds to the default list. Before, it replaced
+    it, so a profile that listed a copy of the defaults with an entry removed let
+    a client change that field; now the entry still applies, and a warning names
+    each default entry the list leaves out. Set
+    `replace_default_denied_paths: true` to use the list as written.
+  - A `denied_paths` entry or a `denied_value_patterns` key that does not start
+    with `/` matched nothing before. A config file that holds one, used by any
+    command, is now refused when it is read, with the entry named. Write it as a
+    JSON pointer, such as `/fail_on_findings`.
+  - The MCP workspace tools refuse a workspace policy file that is not in a
+    directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, where before they used it.
+    Move the file into such a directory, or name its directory there.
 
 ### Fixes
 
