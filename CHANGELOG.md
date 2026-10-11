@@ -175,7 +175,10 @@
   file written in the tree would be. The same holds for a link anywhere on the
   way to a config file, such as a linked `.ash` directory. On the CLI, a
   repository config that links to a file outside the scanned tree is held to the
-  limits of a config inside the tree. A refusal names the path the client used,
+  limits of a config inside the tree. Workspace mode does the same when it plans
+  and when it scans each project, and a project's `config_source` in the plan is
+  the path in the project, not the file a link there reaches. A refusal names the
+  path the client used,
   not the file the link reaches. A validation error for a config file an MCP
   client delivered or named gives the file and each problem's location without
   the values in the file, and a client's file that does not parse is reported by

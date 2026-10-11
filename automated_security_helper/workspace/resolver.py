@@ -422,6 +422,11 @@ def _apply_existence_checks(
         )
 
 
+def _as_named(path: Optional[Path]) -> Optional[str]:
+    """``path`` made absolute without following a symlink, or None."""
+    return Path(os.path.abspath(path)).as_posix() if path is not None else None
+
+
 def _resolve_project_config(
     candidate: _Candidate,
     config_overrides: Tuple[str, ...] = (),
@@ -992,10 +997,11 @@ def resolve_workspace(
                 # Settled below by _assign_display_labels, which needs the whole
                 # sibling set to know whether this label is ambiguous.
                 display_label=label,
-                config_source=config_path.resolve().as_posix() if config_path else None,
-                operator_config=(
-                    operator_config.resolve().as_posix() if operator_config else None
-                ),
+                # By the path the project holds it at, not the file a link there
+                # reaches: execution re-resolves from it, and a file is judged by
+                # every path it was reached by (config_sources, "Base paths").
+                config_source=_as_named(config_path),
+                operator_config=_as_named(operator_config),
                 scanners=scanners,
                 severity_threshold=config.global_settings.severity_threshold,
                 scanner_pins=pins,

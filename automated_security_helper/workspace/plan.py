@@ -146,7 +146,8 @@ class ProjectPlan(BaseModel):
             None,
             description=(
                 "Path of the config file resolved for this project, or null when "
-                "the project has none and took ASH's default config."
+                "the project has none and took ASH's default config. The path the "
+                "project holds it at, not the file a symlink there reaches."
             ),
         ),
     ] = None
