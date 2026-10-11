@@ -278,27 +278,57 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         source_dir = getattr(getattr(self, "context", None), "source_dir", None)
         return Path(source_dir if source_dir is not None else os.getcwd()) / path
 
-    def _baseline_allowed(self, real: Path) -> bool:
-        """Whether ASH may read the baseline that resolves to ``real`` for this scanner.
+    def _baseline_refusal(self, named: Path, real: Path) -> Optional[str]:
+        """Why ASH may not read the baseline named ``named``, resolving to ``real``.
 
-        ASH reads the baseline itself, outside the sandbox, and hands its contents
-        to the sandboxed worker. Under a sandbox it does that only for a file inside
-        the source tree, unless sandbox.read_path_scanners names detect-secrets.
-        Judged by the file the path resolves to, the file ASH then reads
-        (``_read_baseline``).
+        None when it may. Its entries mark candidates as known, so they leave the
+        report:
+
+        - A baseline an MCP client delivered is never read, sandbox or not: the
+          client chose which candidates to hide, as a client-supplied
+          ``baseline_file`` would.
+        - Under a sandbox, ASH reads the baseline itself, outside it, and hands
+          its contents to the sandboxed worker. So it reads one only when it
+          resolves inside the source tree, or, for a detect-secrets that
+          sandbox.read_path_scanners names, inside one of the operator's
+          sandbox.extra_read_paths entries: the same containment an option path
+          a scanner reads itself gets (``policy._contained_option_paths``).
+          Judged by the file the path resolves to, which ``_read_baseline``
+          then reads.
         """
+        from automated_security_helper.config.path_trust import (
+            _client_delivered_reason,
+        )
+        from automated_security_helper.config.sandbox_grants import is_within
+
+        delivered = _client_delivered_reason(named) or _client_delivered_reason(real)
+        if delivered is not None:
+            return delivered
         context = getattr(self, "context", None)
         sandbox = getattr(getattr(context, "config", None), "sandbox", None)
         if sandbox is None or getattr(sandbox, "mode", "off") == "off":
-            return True
-        if "detect-secrets" in (getattr(sandbox, "read_path_scanners", None) or []):
-            return True
+            return None
         source_dir = getattr(context, "source_dir", None)
-        if source_dir is None:
-            return False
-        from automated_security_helper.config.sandbox_grants import is_within
-
-        return is_within(real, Path(os.path.realpath(source_dir)))
+        if source_dir is not None and is_within(
+            real, Path(os.path.realpath(source_dir))
+        ):
+            return None
+        if "detect-secrets" not in (getattr(sandbox, "read_path_scanners", None) or []):
+            return (
+                "it is outside the source tree, and under the sandbox a file outside "
+                "the tree is read only for a scanner named in "
+                "sandbox.read_path_scanners"
+            )
+        roots = [
+            Path(os.path.realpath(os.path.expandvars(os.path.expanduser(entry))))
+            for entry in (getattr(sandbox, "extra_read_paths", None) or [])
+        ]
+        if any(is_within(real, root) for root in roots):
+            return None
+        return (
+            "it is outside the source tree and every sandbox.extra_read_paths entry, "
+            "which a granted baseline outside the tree has to be inside"
+        )
 
     @staticmethod
     def _read_baseline(real: Path) -> Dict[str, Any]:
@@ -345,13 +375,12 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         if self.config.options.baseline_file is not None:
             baseline = self._baseline_path(self.config.options.baseline_file)
             real_baseline = Path(os.path.realpath(baseline))
-            if not self._baseline_allowed(real_baseline):
+            refusal = self._baseline_refusal(baseline, real_baseline)
+            if refusal is not None:
                 ASH_LOGGER.warning(
                     f"Not reading the detect-secrets baseline {baseline.as_posix()}: "
-                    "it is outside the source tree, and under the sandbox a file "
-                    "outside the tree is read only for a scanner named in "
-                    "sandbox.read_path_scanners. Candidates the baseline would have "
-                    "marked are reported."
+                    f"{refusal}. Candidates the baseline would have marked are "
+                    "reported."
                 )
                 self.config.options.baseline_file = None
                 real_baseline = None

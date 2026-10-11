@@ -1797,9 +1797,23 @@ def test_a_baseline_outside_the_tree_is_not_read_under_the_sandbox(tmp_path, cap
     scanner = _detect_secrets(source, ["sandbox.mode=bwrap"], host)
     assert scanner.config.options.baseline_file is None
     assert any("baseline" in r.getMessage() for r in caplog.records)
-    granted = _detect_secrets(
+    # Granted, the file still has to be inside one of the operator's
+    # extra_read_paths entries, as an option path a scanner reads itself does:
+    # otherwise a repository's baseline_file could name any host file for ASH to
+    # read outside the sandbox.
+    granted_anywhere = _detect_secrets(
         source,
         ["sandbox.mode=bwrap", "sandbox.read_path_scanners=[detect-secrets]"],
+        host,
+    )
+    assert granted_anywhere.config.options.baseline_file is None
+    granted = _detect_secrets(
+        source,
+        [
+            "sandbox.mode=bwrap",
+            "sandbox.read_path_scanners=[detect-secrets]",
+            f"sandbox.extra_read_paths=[{tmp_path.as_posix()}]",
+        ],
         host,
     )
     assert granted.config.options.baseline_file is not None
@@ -1809,6 +1823,44 @@ def test_a_baseline_outside_the_tree_is_not_read_under_the_sandbox(tmp_path, cap
     inside.write_text('{"results": {}, "plugins_used": [], "filters_used": []}')
     in_tree = _detect_secrets(source, ["sandbox.mode=bwrap"], inside)
     assert in_tree.config.options.baseline_file is not None
+
+
+@pytest.mark.parametrize("named", ["by-option", "by-name"])
+def test_a_baseline_an_mcp_client_delivered_is_not_read(
+    tmp_path, monkeypatch, caplog, named
+):
+    # Its entries hide candidates from the report, and the client chose them: the
+    # same as a client-supplied baseline_file, sandbox or not.
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp"))
+    source = tmp_path / "mcp" / "session-1" / "src"
+    source.mkdir(parents=True)
+    baseline = source / ".secrets.baseline"
+    baseline.write_text('{"results": {}, "plugins_used": [], "filters_used": []}')
+    caplog.set_level("WARNING")
+    if named == "by-option":
+        scanner = _detect_secrets(source, [], baseline)
+    else:
+        from automated_security_helper.base.plugin_context import PluginContext
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
+            DetectSecretsScanner,
+        )
+
+        config = resolve_config(source_dir=source)
+        scanner = DetectSecretsScanner(
+            context=PluginContext(
+                source_dir=source,
+                output_dir=tmp_path / "out",
+                work_dir=tmp_path / "out" / "work",
+                config=config,
+            ),
+            config=config.get_plugin_config(
+                plugin_type="scanner", plugin_name="detect-secrets"
+            ),
+        )
+    assert scanner.config.options.baseline_file is None
+    assert any(
+        "an MCP client delivered" in record.getMessage() for record in caplog.records
+    )
 
 
 # Eleventh review.

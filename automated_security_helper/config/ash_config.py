@@ -763,10 +763,11 @@ class SandboxConfig(BaseModel):
             description=(
                 "Scanners allowed the extra host paths their own options ask for "
                 "(a rules file or baseline outside the source tree, for example). "
-                "Without this, a scanner whose read paths come from its options gets "
-                "only the default policy, and ASH does not read a detect-secrets "
-                "baseline_file outside the source tree. A granted path is mounted only "
-                "when it resolves inside the source tree or an extra_read_paths entry. "
+                "Under a sandbox, without this, a scanner whose read paths come from "
+                "its options gets only the default policy, and ASH does not read a "
+                "detect-secrets baseline_file outside the source tree. With it, a "
+                "granted path, that baseline included, is used only when it resolves "
+                "inside the source tree or an extra_read_paths entry. "
                 "Honored only from --config-overrides or a config file outside every "
                 "git checkout and the scanned directory."
             )
