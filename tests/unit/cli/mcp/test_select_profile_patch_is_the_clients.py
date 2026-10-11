@@ -564,10 +564,10 @@ def test_the_scan_pre_checks_and_validate_config_accept_a_patched_profile(
 ) -> None:
     """The copy is the client's, and what the allowlist let it change passes the client checks.
 
-    validate_config reports the same errors for the patched copy as for the
-    unpatched one: a materialized session config is a full dump, which the
-    validator reads as setting internal fields, and that is not about who wrote
-    it. What must not appear is a refusal by the client rules.
+    The patched copy is a full dump, which validate_config reads as setting
+    internal fields, and that is not about who wrote it. The unpatched copy holds
+    only the fields the profile sets, so it reports none. What must not appear for
+    either is a refusal by the client rules.
     """
     from automated_security_helper.cli import mcp_tools
 
@@ -597,7 +597,15 @@ def test_the_scan_pre_checks_and_validate_config_accept_a_patched_profile(
     def kinds(result: Dict[str, Any]) -> List[Tuple[str, str]]:
         return sorted((error["type"], error["field"]) for error in result["errors"])
 
-    assert kinds(validated) == kinds(unpatched)
+    assert kinds(unpatched) == []
+    # Each one names an internal field the full dump writes. The validator files
+    # those under the yaml reporter as yaml_parse_error, so the type is not enough.
+    assert [
+        error
+        for error in validated["errors"]
+        if "internal field" not in error["message"]
+        and "internal-only field" not in error["message"]
+    ] == []
     assert not {kind for kind, _field in kinds(validated)} & {
         "denied_by_runtime_policy",
         mcp_tools.CONFIG_INPUT_NOT_PERMITTED,

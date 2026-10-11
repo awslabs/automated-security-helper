@@ -142,6 +142,7 @@ def _handle_workspace_mode(
     dry_run: bool,
     workspace_config: str | None = None,
     config_overrides: tuple[str, ...] = (),
+    config: str | None = None,
 ) -> "WorkspacePlan":
     """Resolve a workspace and return the plan, or exit.
 
@@ -159,6 +160,11 @@ def _handle_workspace_mode(
     Argument validation happens before any filesystem work, so an operator who
     passed a contradictory pair of flags is told that rather than being sent to
     debug their workspace file first.
+
+    ``config`` is ``--config`` (or ``ASH_CONFIG``). The fields it sets are final
+    for every project, so it has to reach resolution as well as the scan, which
+    gets it as ``ProjectScanSettings.default_config_path``: resolved without it,
+    the plan and ``--dry-run`` would report each project's own values for them.
     """
     if source_dir is not None:
         _fail_workspace(
@@ -185,6 +191,8 @@ def _handle_workspace_mode(
             # reflects an override. The ceiling applies to that, and --dry-run
             # prints the value the scan will actually enforce.
             config_overrides=config_overrides,
+            # The same reason, for the operator's config file.
+            default_config=Path(config) if config else None,
         )
     except WorkspaceDefinitionError as exc:
         _fail_workspace(str(exc))
@@ -672,6 +680,7 @@ def run_ash_scan_cli_command(
             dry_run=dry_run,
             workspace_config=workspace_config,
             config_overrides=tuple(config_overrides),
+            config=config,
         )
         # The workspace root is the scan root: it is what container mode mounts at
         # /src, and what every workspace-relative finding path is relative to.

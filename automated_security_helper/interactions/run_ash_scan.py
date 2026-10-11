@@ -2297,10 +2297,11 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         max_parallel_projects=workspace_config.resolved_max_parallel_projects(),
         project_timeout=workspace_config.project_timeout,
         allow_missing_projects=opts.allow_missing_projects,
-        # ``opts.config`` in workspace mode is the fallback for a project that
-        # declares no config of its own, not a config for the workspace: each
-        # project's own ``.ash.yaml`` still wins, which is what makes one
-        # workspace scannable across differently-configured repositories.
+        # ``opts.config`` in workspace mode is the operator's config: a project
+        # with no config of its own uses it, and the plan records it as the
+        # ``operator_config`` layered over a project's own ``.ash.yaml``, whose
+        # fields it does not set stay the project's (resolver
+        # ``_resolve_project_config``).
         #
         # The caller has to pass the same value as ``resolve_workspace``'s
         # ``default_config``, because the plan's reported threshold comes from

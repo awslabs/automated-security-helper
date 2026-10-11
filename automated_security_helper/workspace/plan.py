@@ -150,6 +150,20 @@ class ProjectPlan(BaseModel):
             ),
         ),
     ] = None
+    operator_config: Annotated[
+        Optional[str],
+        Field(
+            None,
+            description=(
+                "The operator's config file layered over config_source: every "
+                "field it sets is final, and the project's own config fills only "
+                "the fields it leaves unset. The --config file on the CLI, or the "
+                "registered profile under the MCP server. Null when the operator "
+                "named none, or when the project has no config of its own, so "
+                "that config_source is the operator's file itself."
+            ),
+        ),
+    ] = None
     scanners: Annotated[
         List[str],
         Field(
@@ -444,6 +458,11 @@ class WorkspacePlan(BaseModel):
                 f"{_INDENT}{'config:':<{_FIELD_WIDTH}}"
                 f"{project.config_source or 'ASH default config'}"
             )
+            if project.operator_config:
+                lines.append(
+                    f"{_INDENT}{'operator:':<{_FIELD_WIDTH}}"
+                    f"{project.operator_config}  (the fields it sets are final)"
+                )
             # Both values when policy moved the threshold, so the reader can see
             # what was declared and what will be enforced. One value otherwise:
             # printing "CRITICAL -> CRITICAL" everywhere would bury the real cases.

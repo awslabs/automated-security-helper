@@ -1508,7 +1508,7 @@ class AshConfig(BaseModel):
         )
         return cls.model_validate(config_data, strict=True)
 
-    def save(self, config_path: Path):
+    def save(self, config_path: Path, exclude_unset: bool = False):
         """Save configuration to a file.
 
         The file loads back as the values saved. A string that reads as an
@@ -1517,9 +1517,18 @@ class AshConfig(BaseModel):
         session's config with this (``profile_registry
         .materialize_session_config``), and ``select_profile``'s ``patch_ops``
         and ``override_yaml`` put values from the client into it.
+
+        ``exclude_unset`` writes only the fields the config was loaded or built
+        with, so the file sets what the original set and nothing else; it still
+        loads back as the same values.
         """
         with open(config_path, mode="w", encoding="utf-8") as f:
-            yaml.dump(self.model_dump(by_alias=True), f, Dumper=_ConfigDumper, indent=2)
+            yaml.dump(
+                self.model_dump(by_alias=True, exclude_unset=exclude_unset),
+                f,
+                Dumper=_ConfigDumper,
+                indent=2,
+            )
 
     def get_plugin_config(
         self,

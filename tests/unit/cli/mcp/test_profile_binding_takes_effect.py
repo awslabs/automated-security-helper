@@ -301,7 +301,7 @@ class TestTheRecordedPathIsSpelledLikeThePlanSpellsPaths:
             def __init__(self):
                 self.saved_to = None
 
-            def save(self, target):
+            def save(self, target, exclude_unset=False):
                 self.saved_to = target
 
         # Patched on the sandbox module, not on profile_registry:

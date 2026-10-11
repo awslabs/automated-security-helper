@@ -295,6 +295,13 @@ def materialize_session_config(
     a profile after a client's ``patch_ops`` or ``override_yaml`` goes into
     ``client-config/``, which counts as the client's (``sandbox.CLIENT_CONFIG_DIR_NAME``).
 
+    The operator's copy holds only the fields the registered profile sets
+    (``AshConfig.save``'s ``exclude_unset``). It loads back as the same values,
+    and the workspace tools layer it over a project's own config, where a field
+    in the file is final (``workspace/resolver._resolve_project_config``): a copy
+    holding every default would set every field and leave the project's config
+    nothing to fill. The client's copy is written whole; it is never layered.
+
     Why a file at all
     -----------------
     The scan entry point takes a config path, not a resolved ``AshConfig``, and
@@ -358,7 +365,7 @@ def materialize_session_config(
     config_dir.mkdir(parents=True, exist_ok=True)
     target = config_dir / filename
     # Written to the native path; only the recorded spelling is normalized.
-    config.save(target)
+    config.save(target, exclude_unset=not client_patched)
     return target.as_posix()
 
 

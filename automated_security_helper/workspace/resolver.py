@@ -430,7 +430,7 @@ def _resolve_project_config(
     client_config_rules: Optional[ClientConfigRules] = None,
     trusted_config: Optional[Path] = None,
     remote_client: bool = False,
-) -> Tuple[AshConfig, Optional[Path]]:
+) -> Tuple[AshConfig, Optional[Path], Optional[Path]]:
     """Load one project's config through ASH's ordinary resolution path.
 
     ``workspace_root`` and ``trusted_config`` (``default_config`` when None) are
@@ -451,22 +451,45 @@ def _resolve_project_config(
     resolution search again, so the file the plan reports is definitionally the
     file that was loaded and the two cannot disagree.
 
-    ``default_config`` and where it sits in the precedence
-    -----------------------------------------------------
-    Used only when the project declares no config of its own -- when
-    ``find_config_file`` returns None, where ASH's built-in default would
-    otherwise apply. A project with an ``.ash.yaml`` keeps it, because the
-    project's own config is the more specific statement; the same rule makes an
-    explicit ``config_path`` beat a session-bound profile on a single-directory
-    MCP scan.
+    The operator's config, and where it sits in the precedence
+    ----------------------------------------------------------
+    The operator's config is ``trusted_config``, or ``default_config`` when that
+    is None: ``--config`` on the CLI, the profile the session bound or the call
+    named under the MCP server. Every field it sets is final for every project,
+    and a project's own config fills only the fields it leaves unset:
 
-    The MCP server passes a profile a client bound with ``select_profile`` here.
-    It must reach BOTH this function and ``execution._project_config_with_policy``,
-    which re-resolves at scan time: the plan's reported threshold comes from this
-    call and the scan's actual config comes from that one, so a value threaded
-    into only one of them makes ``--dry-run`` report a plan the scan does not run.
-    ``ProjectScanSettings.default_config_path`` is the same value on the execution
-    side, and the MCP caller sets both from one variable for that reason.
+    * A project with a config of its own resolves that file with the operator's
+      layered over it (``resolve_config``'s ``overlay_config_path``), by the
+      ``extends`` merge rule with the operator's file as the child: mappings
+      merge key by key, and a list the operator sets replaces the project's.
+      "Sets" means the key is in the operator's file or its ``extends`` chain,
+      whatever its value. The CLI overrides apply after both.
+    * A project with none resolves ``default_config`` alone, where ASH's built-in
+      default would otherwise apply.
+
+    Rejected: ignoring every project's own config when the operator names one,
+    which loses the per-project settings a workspace exists to keep; and taking
+    the operator's file as the base with the project merged over it, which lets
+    a project turn off ``fail_on_findings`` or ``fail_on_incomplete_scanners``
+    that the operator set.
+
+    Under the MCP server the client's patched copy (``default_config`` when it
+    differs from ``trusted_config``) is not layered over a project's own config:
+    the registered profile is. So a client's values are never final over a
+    project, and they are not trusted either: the patched copy is a project's
+    config only when the project has none, and is then checked as a file the
+    client delivered, as before. A session's operator copy holds only the fields
+    the profile sets (``profile_registry.materialize_session_config``), so the
+    project still fills the rest.
+
+    These values must reach BOTH this function and
+    ``execution._project_config_with_policy``, which re-resolves at scan time:
+    the plan's reported threshold comes from this call and the scan's actual
+    config from that one, so a value threaded into only one of them makes
+    ``--dry-run`` report a plan the scan does not run. The layered file is
+    recorded as ``ProjectPlan.operator_config``, which execution reads, and
+    ``ProjectScanSettings.default_config_path`` holds ``default_config`` on the
+    execution side.
 
     Why the CLI overrides are applied HERE
     -------------------------------------
@@ -479,8 +502,9 @@ def _resolve_project_config(
     therefore ``--dry-run`` -- reporting a threshold that is not the one enforced.
 
     Returns:
-        The resolved config, and the config file it came from -- ``None`` when the
-        project has none and took ASH's default config.
+        The resolved config; the config file it came from, ``None`` when the
+        project has none and took ASH's default config; and the operator's file
+        layered over it, ``None`` when nothing was layered.
 
     Raises:
         ASHConfigValidationError: When the project's own config is invalid, or an
@@ -492,8 +516,10 @@ def _resolve_project_config(
             message is re-issued with the project key so the operator knows which
             of N projects to look at.
     """
+    operator = trusted_config if trusted_config is not None else default_config
     try:
         config_path = find_config_file(candidate.resolved)
+        overlay = operator if config_path is not None else None
         if config_path is None and default_config is not None:
             config_path = Path(default_config)
         config = resolve_config(
@@ -502,13 +528,12 @@ def _resolve_project_config(
             fallback_to_default=True,
             config_overrides=list(config_overrides),
             scanned_root=workspace_root,
-            trusted_config_path=(
-                trusted_config if trusted_config is not None else default_config
-            ),
+            trusted_config_path=operator,
             client_config_policy=client_config_rules,
             remote_client=remote_client,
+            overlay_config_path=overlay,
         )
-        return config, config_path
+        return config, config_path, overlay
     except ASHConfigValidationError as exc:
         raise ASHConfigValidationError(
             f"Project '{candidate.key}' at '{candidate.resolved.as_posix()}' has "
@@ -879,19 +904,22 @@ def resolve_workspace(
             having none is not an error. When given it must exist; ASH does not
             fall back to searching, because that would apply different policy
             than the one named. It may not be any project's own config.
-        default_config: Config file to use for a project that declares none of
-            its own, in place of ASH's built-in default. A project with its own
-            ``.ash.yaml`` is unaffected. The MCP server passes a profile a client
-            bound with ``select_profile``; see
-            :func:`_resolve_project_config` on why the same value has to reach
+        default_config: The operator's config file (``--config``). Every field
+            it sets is final for every project: it is layered over a project's
+            own config, which fills only the fields it leaves unset, and a
+            project that declares no config uses it alone in place of ASH's
+            built-in default. The MCP server passes the profile a client bound
+            with ``select_profile``; see :func:`_resolve_project_config` for the
+            precedence, and on why the same value has to reach
             ``ProjectScanSettings.default_config_path`` as well.
         client_config_rules: The rules a config an MCP client delivered is
             checked against (``config/client_config_policy.py``).
         trusted_config: The operator's config the trust checks take as the
             trusted base, when it is not ``default_config``: the registered
             profile, when the MCP client patched the session's copy of it. None
-            takes ``default_config``. Must reach
-            ``ProjectScanSettings.trusted_config_path`` too.
+            takes ``default_config``. It is also the file layered over a
+            project's own config, so the client's patched copy is not. Must
+            reach ``ProjectScanSettings.trusted_config_path`` too.
         remote_client: The workspace is resolved for a remote MCP client, so a
             project config the operator did not set aside resolves no ``!ENV``
             (``resolve_config``). Must reach ``ProjectScanSettings.remote_client``
@@ -941,7 +969,7 @@ def resolve_workspace(
             )
             continue
 
-        config, config_path = _resolve_project_config(
+        config, config_path, operator_config = _resolve_project_config(
             candidate,
             config_overrides,
             default_config=Path(default_config) if default_config else None,
@@ -962,6 +990,9 @@ def resolve_workspace(
                 # sibling set to know whether this label is ambiguous.
                 display_label=label,
                 config_source=config_path.resolve().as_posix() if config_path else None,
+                operator_config=(
+                    operator_config.resolve().as_posix() if operator_config else None
+                ),
                 scanners=scanners,
                 severity_threshold=config.global_settings.severity_threshold,
                 scanner_pins=pins,

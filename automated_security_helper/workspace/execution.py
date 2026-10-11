@@ -383,7 +383,8 @@ class ProjectScanSettings:
     project_timeout: Optional[float] = None
     allow_missing_projects: bool = False
     #: Config file to use for a project that declares none of its own, in place
-    #: of ASH's built-in default. A project with an ``.ash.yaml`` is unaffected.
+    #: of ASH's built-in default. For a project with an ``.ash.yaml``, the plan's
+    #: ``operator_config`` names the operator's file layered over it.
     #:
     #: Must hold the SAME value the plan was resolved with -- ``resolver``'s
     #: ``default_config``. The resolver computes each project's reported threshold
@@ -923,9 +924,10 @@ def _project_config_with_policy(
         # The whole workspace is scanned, so a config anywhere under its root was
         # written by the repository, not only one under this project.
         scanned_root=_workspace_root(project),
-        # A project's own config replaces the operator's default config. The
-        # operator's file still decides the sandbox when the project's is in the
-        # tree, the same as it would for a project that has none.
+        # The operator's file is the trusted base for every project, and the
+        # file the plan layered over a project's own config
+        # (resolver._resolve_project_config) is that same file, so a field the
+        # operator set is its trusted value.
         trusted_config_path=(
             settings.trusted_config_path
             if settings.trusted_config_path is not None
@@ -933,6 +935,9 @@ def _project_config_with_policy(
         ),
         client_config_policy=settings.client_config_rules,
         remote_client=settings.remote_client,
+        # Read from the plan rather than re-derived from the settings, so the
+        # scan layers exactly the file --dry-run reported.
+        overlay_config_path=project.operator_config,
     )
 
     # The scanners' own checks on tool config file paths (config/path_trust.py)

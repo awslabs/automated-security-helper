@@ -301,21 +301,25 @@ class TestABoundProfileReachesAWorkspaceScan:
         )
 
     @pytest.mark.asyncio
-    async def test_a_projects_own_config_still_wins_over_the_profile(
+    async def test_a_projects_own_config_is_still_read_under_the_profile(
         self, tmp_path, isolated_registry, executions
     ):
-        """A project that declares a config keeps it.
+        """A project that declares a config keeps it, with the profile layered over it.
 
-        The project's own ``.ash.yaml`` is the more specific statement, and it is
-        what makes one workspace scannable across differently-configured
-        repositories. A profile that overrode it would silently rescan every
-        project under one config -- and the naive implementation, passing the
-        profile as the config for the whole workspace, does exactly that.
+        The project's own ``.ash.yaml`` is what makes one workspace scannable
+        across differently-configured repositories, so it is still the project's
+        ``config_source``. The profile is the operator's config, so the fields it
+        sets are final (``operator_config``), and the project's file fills the
+        rest. Passing the profile as the config for the whole workspace would
+        drop the project's file entirely; ``test_workspace_profile_is_final.py``
+        pins which values win.
         """
         self._bind(tmp_path, "session-a", "from-the-profile")
         root = tmp_path / "work"
         own = _project(root, "api")
-        (own / ".ash.yaml").write_text("project_name: the-api\n", encoding="utf-8")
+        (own / ".ash.yaml").write_text(
+            "scanners:\n  bandit:\n    enabled: false\n", encoding="utf-8"
+        )
         workspace = _workspace(root, ["api"])
 
         response = await _tool("mcp_scan_workspace")(
@@ -334,6 +338,8 @@ class TestABoundProfileReachesAWorkspaceScan:
             plan.active_projects[0].config_source
             == (own / ".ash.yaml").resolve().as_posix()
         )
+        assert "bandit" not in plan.active_projects[0].scanners
+        assert plan.active_projects[0].label == "from-the-profile"
 
     @pytest.mark.asyncio
     async def test_an_explicit_profile_argument_selects_a_registered_profile(

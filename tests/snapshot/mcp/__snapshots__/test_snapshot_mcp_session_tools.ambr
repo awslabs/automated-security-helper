@@ -393,6 +393,7 @@
           'config_source': None,
           'display_label': 'api',
           'effective_severity_threshold': 'MEDIUM',
+          'operator_config': None,
           'path': '<TMP>/allowed/work/api',
           'policy_scanners': list([
           ]),
@@ -420,6 +421,7 @@
           'config_source': '<TMP>/allowed/work/web/.ash/.ash.yaml',
           'display_label': 'web',
           'effective_severity_threshold': 'HIGH',
+          'operator_config': None,
           'path': '<TMP>/allowed/work/web',
           'policy_scanners': list([
           ]),
@@ -447,6 +449,7 @@
           'config_source': None,
           'display_label': 'gone',
           'effective_severity_threshold': 'MEDIUM',
+          'operator_config': None,
           'path': '<TMP>/allowed/work/gone',
           'policy_scanners': list([
           ]),
@@ -535,6 +538,7 @@
           'config_source': None,
           'display_label': 'api',
           'effective_severity_threshold': 'MEDIUM',
+          'operator_config': None,
           'path': '<TMP>/allowed/work/api',
           'policy_scanners': list([
           ]),
@@ -562,6 +566,7 @@
           'config_source': '<TMP>/allowed/work/web/.ash/.ash.yaml',
           'display_label': 'web',
           'effective_severity_threshold': 'HIGH',
+          'operator_config': None,
           'path': '<TMP>/allowed/work/web',
           'policy_scanners': list([
           ]),
@@ -589,6 +594,7 @@
           'config_source': None,
           'display_label': 'gone',
           'effective_severity_threshold': None,
+          'operator_config': None,
           'path': '<TMP>/allowed/work/gone',
           'policy_scanners': list([
           ]),

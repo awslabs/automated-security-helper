@@ -510,7 +510,9 @@ async def resolve_ash_workspace(
             each project's config so the reported threshold is the enforced one.
         profile: Name of a registered config profile to resolve under for this one
             call, instead of whatever select_profile bound to this session. Call
-            list_profiles to see what the operator registered.
+            list_profiles to see what the operator registered. The fields the
+            profile sets are final for every project, and a project's own config
+            fills the rest.
 
     Returns:
         Dict with `plan` (the rendered plan, for a human to read), `projects` (the
@@ -607,7 +609,8 @@ async def run_ash_workspace_scan(
             unknown name refuses the whole scan; running N repository scans under
             the default config because a profile name was misspelled, and
             reporting success, is exactly what the confinement refusal above
-            exists to prevent.
+            exists to prevent. The fields the profile sets are final for every
+            project, and a project's own config fills the rest.
 
     Returns:
         Dict with `scan_ids` (project key to registry scan id), `projects` (each

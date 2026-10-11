@@ -352,6 +352,7 @@ def _plan_projects(plan: WorkspacePlan) -> List[Dict[str, Any]]:
             "path": project.path,
             "display_label": project.display_label,
             "config_source": project.config_source,
+            "operator_config": project.operator_config,
             "scanners": list(project.scanners),
             "severity_threshold": project.severity_threshold,
             "effective_severity_threshold": project.effective_severity_threshold,
