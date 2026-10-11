@@ -1123,3 +1123,63 @@ class TestAggregatorOutput:
         path = aggregator.write(exit_code=0, wall_clock_seconds=1.0)
         parsed = json.loads(path.read_text(encoding="utf-8"))
         assert parsed["scanner_results"]["bandit"]["status"] == "ERROR"
+
+
+class TestStampingARunRecord:
+    """A record goes into the written file without loading it whole.
+
+    The inner run of a container scan stamps its completion marker after the
+    report step, and its refusal when the report step refuses; see
+    utils/inner_run_outcome.py.
+    """
+
+    RECORD = {"type": "run_completed", "metadata": {"run_id": "1" * 32}}
+
+    def _written(self, tmp_path):
+        from automated_security_helper.workspace.aggregation import (
+            WorkspaceAggregator,
+        )
+
+        return WorkspaceAggregator(
+            plan=_plan(tmp_path), output_dir=tmp_path / "out"
+        ).write(exit_code=0, wall_clock_seconds=0.1)
+
+    def test_the_record_is_stamped_and_the_rest_is_unchanged(self, tmp_path):
+        from automated_security_helper.workspace.aggregation import stamp_run_record
+
+        path = self._written(tmp_path)
+        before = json.loads(path.read_text(encoding="utf-8"))
+
+        assert stamp_run_record(path, self.RECORD)
+
+        after = json.loads(path.read_text(encoding="utf-8"))
+        assert after.pop("validation_checkpoints") == [self.RECORD]
+        before.pop("validation_checkpoints")
+        assert after == before
+
+    def test_a_file_the_aggregator_did_not_write_is_left_unchanged(self, tmp_path):
+        from automated_security_helper.workspace.aggregation import stamp_run_record
+
+        path = tmp_path / "ash_aggregated_results.json"
+        path.write_text(json.dumps({"validation_checkpoints": []}), encoding="utf-8")
+        before = path.read_bytes()
+
+        assert not stamp_run_record(path, self.RECORD)
+        assert path.read_bytes() == before
+
+    def test_a_failed_rewrite_leaves_the_file_and_no_staging_file(
+        self, tmp_path, monkeypatch
+    ):
+        from automated_security_helper.workspace import aggregation
+
+        path = self._written(tmp_path)
+        before = path.read_bytes()
+
+        def no_replace(*args, **kwargs):
+            raise OSError("no space left on device")
+
+        monkeypatch.setattr(aggregation.os, "replace", no_replace)
+
+        assert not aggregation.stamp_run_record(path, self.RECORD)
+        assert path.read_bytes() == before
+        assert sorted(p.name for p in path.parent.iterdir()) == [path.name]

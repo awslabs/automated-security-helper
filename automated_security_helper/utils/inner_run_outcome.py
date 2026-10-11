@@ -16,9 +16,11 @@ environment variable for nix mode, ``-e`` for the container), and the inner run
 writes that ID into its results file as a validation checkpoint:
 
 * ``run_completed`` when ``_run_local_mode`` or ``_run_workspace_mode`` completes
-  (``mark_run_completed``, ``mark_results_file_completed``);
+  (``mark_run_completed``; a workspace run stamps it into the file it streamed,
+  with ``workspace.aggregation.stamp_run_record``);
 * ``report_path_refused``, with the refusal's message, when its reports are
-  refused (``record_report_refusal``).
+  refused (``record_report_refusal``, or ``write_refusal_results`` when the run was
+  refused before it wrote a results file).
 
 The outer process (``read_back_outcome``) reads the file back only when it holds
 the completion marker with the outer process's own ID. With a refusal carrying that
@@ -113,7 +115,8 @@ def without_run_records(checkpoints: Iterable[Any]) -> List[Any]:
     return [checkpoint for checkpoint in checkpoints if not _is_run_record(checkpoint)]
 
 
-def _completion_marker(run_id: str) -> Dict[str, Any]:
+def completion_marker(run_id: str) -> Dict[str, Any]:
+    """The checkpoint that records that the run with ``run_id`` completed."""
     return {
         "type": RUN_COMPLETED_CHECKPOINT,
         "severity": "info",
@@ -133,34 +136,26 @@ def mark_run_completed(results: object, run_id: Optional[str]) -> None:
     if run_id is None and len(kept) == len(checkpoints):
         return
     if run_id is not None:
-        kept.append(_completion_marker(run_id))
+        kept.append(completion_marker(run_id))
     setattr(results, "validation_checkpoints", kept)
 
 
-def _rewrite_records(results_file: PathLike, record: Dict[str, Any]) -> bool:
-    path = Path(results_file)
-    try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(document, dict):
-            return False
-        checkpoints = document.get("validation_checkpoints")
-        document["validation_checkpoints"] = [
-            *without_run_records(checkpoints if isinstance(checkpoints, list) else []),
-            record,
-        ]
-        write_text_atomically(path, json.dumps(document, indent=2))
-    except (OSError, ValueError):
-        return False
-    return True
+def refusal_record(message: str, run_id: str, output_dir: PathLike) -> Dict[str, Any]:
+    """The checkpoint that records that the run with ``run_id`` was refused, and why.
 
-
-def mark_results_file_completed(results_file: PathLike, run_id: str) -> bool:
-    """Add this run's completion marker to a results file another step wrote.
-
-    Returns False when the file could not be read or rewritten; the outer process
-    then reads no marker and fails closed.
+    ``output_dir`` is the output directory as the run sees it, so the outer process
+    can give the paths in ``message`` as it sees them.
     """
-    return _rewrite_records(results_file, _completion_marker(run_id))
+    return {
+        "type": REPORT_PATH_REFUSED_CHECKPOINT,
+        "severity": "error",
+        "message": message,
+        "metadata": {
+            "run_id": run_id,
+            "output_dir": Path(output_dir).as_posix(),
+            "impact": "The run's reports were refused; the message says why.",
+        },
+    }
 
 
 def record_report_refusal(
@@ -168,24 +163,49 @@ def record_report_refusal(
 ) -> bool:
     """Record in the results file that this run's reports were refused, and why.
 
-    ``output_dir`` is the output directory as this run sees it, so the outer
-    process can give the paths in ``message`` as it sees them. Returns False when
-    the file could not be read or rewritten; the outer process then reads no
-    completion marker and fails closed, without the message.
+    Replaces any run record in the file. Returns False when the file could not be
+    read or rewritten; the outer process then reads no record of this run's
+    completion and fails closed, without the message.
     """
-    return _rewrite_records(
-        results_file,
-        {
-            "type": REPORT_PATH_REFUSED_CHECKPOINT,
-            "severity": "error",
-            "message": message,
-            "metadata": {
-                "run_id": run_id,
-                "output_dir": Path(output_dir).as_posix(),
-                "impact": "The run's reports were refused; the message says why.",
-            },
-        },
-    )
+    try:
+        path = Path(results_file)
+        document = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(document, dict):
+            return False
+        checkpoints = document.get("validation_checkpoints")
+        document["validation_checkpoints"] = [
+            *without_run_records(checkpoints if isinstance(checkpoints, list) else []),
+            refusal_record(message, run_id, output_dir),
+        ]
+        write_text_atomically(path, json.dumps(document, indent=2))
+    except (OSError, TypeError, ValueError):
+        return False
+    return True
+
+
+def write_refusal_results(
+    results_file: PathLike, message: str, run_id: str, output_dir: PathLike
+) -> bool:
+    """Write a results file that holds only the refusal, for a run refused before it wrote one.
+
+    A workspace run refuses a report file name before any project is scanned, so
+    there is no results file to record the refusal in, and the outer process would
+    have only "results file not found" to report. Returns False when it cannot be
+    written.
+    """
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    try:
+        document = json.loads(AshAggregatedResults().model_dump_json(by_alias=True))
+        document["validation_checkpoints"] = [
+            refusal_record(message, run_id, output_dir)
+        ]
+        path = Path(results_file)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_text_atomically(path, json.dumps(document, indent=2))
+    except (OSError, TypeError, ValueError):
+        return False
+    return True
 
 
 @dataclass(frozen=True)

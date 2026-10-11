@@ -290,9 +290,7 @@ def container_result(monkeypatch):
     The file then gets the completion marker the in-container run writes, as that run
     would (utils/inner_run_outcome.py).
     """
-    from automated_security_helper.utils.inner_run_outcome import (
-        mark_results_file_completed,
-    )
+    from tests.utils.helpers import mark_inner_run_completed
 
     def install(returncode=0, stdout="", stderr="", results_content=None):
         result = create_completed_process(
@@ -309,7 +307,7 @@ def container_result(monkeypatch):
                 results_file = output_dir.joinpath("ash_aggregated_results.json")
                 results_file.write_text(results_content, encoding="utf-8")
                 # A file that does not parse stays as written.
-                mark_results_file_completed(results_file, kwargs["outer_run_id"])
+                mark_inner_run_completed(results_file, kwargs["outer_run_id"])
             return result
 
         monkeypatch.setattr(ras, "run_ash_container", fake_run_ash_container)

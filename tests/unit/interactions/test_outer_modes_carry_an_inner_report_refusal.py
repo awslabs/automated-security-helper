@@ -449,6 +449,54 @@ def test_a_completion_marker_another_run_wrote_is_not_read_back(tmp_path, outer)
     assert refused.value.code == 1
 
 
+def test_a_workspace_refused_before_any_project_refuses_the_container_run(
+    tmp_path, monkeypatch
+):
+    """No results file exists yet, so the inner run writes one holding the refusal."""
+    from automated_security_helper.interactions.run_ash_scan import _run_workspace_mode
+    from automated_security_helper.utils.report_path_links import ReportPathRefused
+    from automated_security_helper.workspace import execution as workspace_execution
+    from automated_security_helper.workspace.plan import WorkspacePlan
+
+    opts = _opts(tmp_path)
+    message = (
+        f"the report file name 'ash.../x' is not a file in {opts.output_dir}/reports"
+    )
+
+    def refused_before_any_project(plan, settings):
+        raise ReportPathRefused(message)
+
+    monkeypatch.setattr(
+        workspace_execution, "execute_workspace", refused_before_any_project
+    )
+    plan = WorkspacePlan(
+        workspace_file=(tmp_path / "src" / "w.code-workspace").as_posix(),
+        workspace_root=(tmp_path / "src").as_posix(),
+        projects=[],
+    )
+
+    def inner(run_id: str) -> int:
+        inner_opts = ScanOptions(
+            source_dir=opts.source_dir,
+            output_dir=opts.output_dir,
+            workspace_plan=plan,
+        )
+        with patch.dict(os.environ, {RUN_ID_ENV: run_id}):
+            try:
+                _run_workspace_mode(inner_opts, MagicMock())
+            except SystemExit as exited:
+                return int(exited.code or 0)
+        return 0
+
+    with pytest.raises(SystemExit) as refused:
+        _container(opts, inner)
+
+    assert refused.value.code == 1
+    assert "The report file name 'ash.../x' is not a file in" in getattr(
+        refused.value, "reason", ""
+    )
+
+
 def test_the_container_output_directory_in_a_refusal_is_given_as_the_hosts(tmp_path):
     """The container sees the output directory at another path, as /out."""
     opts = _opts(tmp_path)

@@ -93,12 +93,14 @@ from automated_security_helper.utils.report_path_links import (
 )
 from automated_security_helper.utils.inner_run_outcome import (
     as_seen_from_the_host,
-    mark_results_file_completed,
+    completion_marker,
     mark_run_completed,
     new_outer_run_id,
     take_outer_run_id,
     read_back_outcome,
     record_report_refusal,
+    refusal_record,
+    write_refusal_results,
 )
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 from automated_security_helper.utils.severity_ladder import (
@@ -1182,6 +1184,35 @@ class ReportPathRefusedExit(SystemExit):
 def _refuse_report_path_link(refusal: ReportPathRefused) -> NoReturn:
     print(f"[bold red]ERROR (1) {escape_markup(str(refusal))}[/bold red]")
     raise ReportPathRefusedExit(str(refusal)) from refusal
+
+
+def _record_inner_workspace_refusal(
+    opts: ScanOptions, refusal: ReportPathRefused, run_id: Optional[str], logger
+) -> None:
+    """As the inner run of a container workspace scan, record ``refusal`` for the outer process.
+
+    Into the unified results file when the projects already wrote it (the report
+    step refused), stamped rather than loaded; otherwise, refused before any
+    project ran, into a results file that holds only the refusal.
+    """
+    if run_id is None:
+        return
+    from automated_security_helper.workspace.aggregation import stamp_run_record
+
+    results_file = opts.output_dir / "ash_aggregated_results.json"
+    if results_file.exists():
+        recorded = stamp_run_record(
+            results_file, refusal_record(str(refusal), run_id, opts.output_dir)
+        )
+    else:
+        recorded = write_refusal_results(
+            results_file, str(refusal), run_id, opts.output_dir
+        )
+    if not recorded:
+        logger.warning(
+            f"Could not record the refusal in {results_file}; the outer process "
+            "will report that this run did not complete."
+        )
 
 
 def _record_inner_report_refusal(
@@ -2518,8 +2549,19 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
         result = execute_workspace(opts.workspace_plan, settings)
         if outer_run_id is not None:
             # The inner run of a container scan: say it completed, for the outer
-            # process. See utils/inner_run_outcome.py.
-            mark_results_file_completed(result.results_path, outer_run_id)
+            # process, after the report step. Stamped into the file the aggregator
+            # streamed rather than by loading it. See utils/inner_run_outcome.py.
+            from automated_security_helper.workspace.aggregation import (
+                stamp_run_record,
+            )
+
+            if not stamp_run_record(
+                result.results_path, completion_marker(outer_run_id)
+            ):
+                logger.warning(
+                    f"Could not record in {result.results_path} that this run "
+                    "completed; the outer process will report that it did not."
+                )
         return result
     except WorkspaceDefinitionError as exc:
         # A refusal, not a project failure: nothing was scanned, so there is no
@@ -2533,6 +2575,7 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
     except ReportPathRefused as exc:
         # Exit 1, as in a single-directory scan: a link at a report path, or a file
         # name outside the reports directory, is not a workspace definition error.
+        _record_inner_workspace_refusal(opts, exc, outer_run_id, logger)
         _refuse_report_path_link(exc)
     except Exception as exc:
         logger.exception(exc)

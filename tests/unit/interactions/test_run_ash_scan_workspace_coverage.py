@@ -271,6 +271,16 @@ class TestResolveWorkspaceExecutionConfig:
 # ---------------------------------------------------------------------------
 
 
+def _write_unified_results(root: Path, results_path: Path) -> None:
+    """Write the unified results file as the workspace aggregator does."""
+    from automated_security_helper.workspace.aggregation import WorkspaceAggregator
+
+    written = WorkspaceAggregator(
+        plan=_plan(root, "api"), output_dir=results_path.parent
+    ).write(exit_code=0, wall_clock_seconds=0.1)
+    assert written == results_path
+
+
 @pytest.fixture
 def recorded_workspace_execution(monkeypatch):
     """Replace execute_workspace; record the plan and settings it was handed."""
@@ -312,8 +322,7 @@ class TestRunWorkspaceModeSettings:
     ):
         """The outer process reads the unified file back only with this marker."""
         expected = _run_result(tmp_path)
-        expected.results_path.parent.mkdir(parents=True)
-        expected.results_path.write_text(json.dumps({"name": "unified"}))
+        _write_unified_results(tmp_path, expected.results_path)
         recorded_workspace_execution(result=expected)
         run_id = "0123456789abcdef0123456789abcdef"
         if inner:
@@ -338,6 +347,75 @@ class TestRunWorkspaceModeSettings:
             assert [m["metadata"]["run_id"] for m in markers] == [run_id]
         else:
             assert markers == []
+
+    def test_a_marker_that_cannot_be_written_is_reported(
+        self, recorded_workspace_execution, logger, tmp_path, monkeypatch
+    ):
+        """The outer process then finds no marker and fails closed."""
+        from automated_security_helper.workspace import aggregation
+
+        expected = _run_result(tmp_path)
+        _write_unified_results(tmp_path, expected.results_path)
+        before = expected.results_path.read_bytes()
+        recorded_workspace_execution(result=expected)
+        monkeypatch.setenv("ASH_OUTER_RUN_ID", "0123456789abcdef0123456789abcdef")
+
+        def no_replace(*args, **kwargs):
+            raise OSError("no space left on device")
+
+        monkeypatch.setattr(aggregation.os, "replace", no_replace)
+        opts = ScanOptions(
+            source_dir=tmp_path,
+            output_dir=tmp_path / "out",
+            workspace_plan=_plan(tmp_path, "api"),
+        )
+
+        _run_workspace_mode(opts, logger)
+
+        assert expected.results_path.read_bytes() == before
+        assert any(
+            "could not record" in message.lower()
+            for message in logger.records["warning"]
+        ), logger.records
+
+    @pytest.mark.parametrize("results_file", ["not yet written", "written"])
+    def test_a_report_refusal_is_recorded_for_the_outer_process(
+        self, recorded_workspace_execution, logger, tmp_path, monkeypatch, results_file
+    ):
+        """Before any project (no results file yet) or when the report step starts."""
+        from automated_security_helper.utils.report_path_links import (
+            ReportPathRefused,
+        )
+
+        results_path = tmp_path / "out" / "ash_aggregated_results.json"
+        if results_file == "written":
+            _write_unified_results(tmp_path, results_path)
+        refusal = ReportPathRefused(
+            "the report file name 'ash.../x' is not a file in /out/reports"
+        )
+        recorded_workspace_execution(raises=refusal)
+        run_id = "0123456789abcdef0123456789abcdef"
+        monkeypatch.setenv("ASH_OUTER_RUN_ID", run_id)
+        opts = ScanOptions(
+            source_dir=tmp_path,
+            output_dir=tmp_path / "out",
+            workspace_plan=_plan(tmp_path, "api"),
+        )
+
+        with pytest.raises(SystemExit) as refused:
+            _run_workspace_mode(opts, logger)
+
+        assert refused.value.code == 1
+        records = [
+            checkpoint
+            for checkpoint in json.loads(results_path.read_text())[
+                "validation_checkpoints"
+            ]
+            if checkpoint.get("type") == "report_path_refused"
+        ]
+        assert [(r["message"], r["metadata"]["run_id"]) for r in records] == [
+            (str(refusal), run_id)
+        ]
 
     def test_the_root_configs_parallelism_bound_reaches_the_settings(
         self, recorded_workspace_execution, logger, tmp_path

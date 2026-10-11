@@ -121,8 +121,10 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 import shutil
+import uuid
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
@@ -152,6 +154,10 @@ PROJECT_ROOT_URI_BASE_ID = "PROJECTROOT"
 SPOOL_DIR_NAME = ".workspace-spool"
 
 RESULTS_FILENAME = "ash_aggregated_results.json"
+
+#: The header line :meth:`WorkspaceAggregator.write` emits for the results' validation
+#: checkpoints, which :func:`stamp_run_record` fills.
+_EMPTY_CHECKPOINTS_LINE = f"{json.dumps('validation_checkpoints')}: {json.dumps([])},\n"
 
 #: A Windows drive at the start of a path, e.g. ``C:/ws/api``. Matched on the raw
 #: text rather than via ``PureWindowsPath.drive``, whose value for unusual inputs
@@ -909,3 +915,48 @@ class WorkspaceAggregator:
             shutil.rmtree(self.spool_dir, ignore_errors=True)
 
         return target
+
+
+def stamp_run_record(results_path: Path, record: Dict[str, Any]) -> bool:
+    """Put ``record`` into the validation checkpoints of a file :meth:`write` wrote.
+
+    For the inner run of a container scan, which records its completion after the
+    report step and its refusal when the report step refuses (see
+    utils/inner_run_outcome.py). The file is copied once: header lines up to the
+    ``"validation_checkpoints": [],`` line that ``write`` emits, that line with the
+    record, then the rest, SARIF runs included, unchanged. Nothing is loaded or
+    serialized whole, so ``write``'s memory bound holds. The copy replaces the file
+    atomically, with the mode a plain write would give it.
+
+    Returns False, with the file unchanged, when it cannot be read or replaced or
+    is not one ``write`` wrote.
+    """
+    staging: Optional[Path] = None
+    try:
+        path = Path(results_path)
+        staging = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        with (
+            open(path, "r", encoding="utf-8") as source,
+            open(staging, "x", encoding="utf-8") as target,
+        ):
+            for line in source:
+                if line == _EMPTY_CHECKPOINTS_LINE:
+                    target.write(
+                        f"{json.dumps('validation_checkpoints')}: "
+                        f"{json.dumps([record])},\n"
+                    )
+                    break
+                if line.startswith('"sarif": '):
+                    return False
+                target.write(line)
+            else:
+                return False
+            shutil.copyfileobj(source, target)
+        os.replace(staging, path)
+        staging = None
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+    finally:
+        if staging is not None:
+            staging.unlink(missing_ok=True)

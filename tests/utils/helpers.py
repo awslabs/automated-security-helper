@@ -44,6 +44,25 @@ def importing_this_checkout(driver: str) -> str:
     ) + driver
 
 
+def mark_inner_run_completed(results_file: Path, run_id: str) -> bool:
+    """Add the completion marker an inner run writes to ``results_file``, as it would.
+
+    For tests that stand in for the inner run of a container or nix scan (see
+    utils/inner_run_outcome.py). False, with the file unchanged, when it is not JSON.
+    """
+    import json
+
+    from automated_security_helper.utils.inner_run_outcome import completion_marker
+
+    try:
+        document = json.loads(Path(results_file).read_text(encoding="utf-8"))
+    except ValueError:
+        return False
+    document.setdefault("validation_checkpoints", []).append(completion_marker(run_id))
+    Path(results_file).write_text(json.dumps(document), encoding="utf-8")
+    return True
+
+
 def is_under_test_scratch(path: Path) -> bool:
     """Whether ``path`` is one of the tests' own throwaway files.
 

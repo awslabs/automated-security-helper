@@ -824,7 +824,10 @@
   did not complete and naming the results file. That covers a refused report file
   name, which leaves nothing in `reports/`, a refusal whose record could not be
   written, and an inner run that failed after the scan phase had written the
-  results file, which used to be read back as a verdict. A record an earlier run
+  results file, which used to be read back as a verdict. A workspace run in a
+  container that is refused before any project is scanned writes a results file
+  holding only the refusal, so the host reports it with its message rather than as
+  a missing results file. A record an earlier run
   left in a file read back with `--use-existing` is ignored, and is dropped when
   the file is loaded, so reports do not repeat it. The inner run takes the ID out
   of its environment when it starts, and the scanner sandbox drops it, so the

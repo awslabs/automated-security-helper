@@ -102,23 +102,19 @@ def _write_this_runs_results(
     ``run_kwargs`` are what the wrapper passed to the stand-in runner; the marker
     carries the run ID among them (utils/inner_run_outcome.py).
     """
-    from automated_security_helper.utils.inner_run_outcome import (
-        mark_results_file_completed,
-    )
+    from tests.utils.helpers import mark_inner_run_completed
 
     results_file = output_dir / "ash_aggregated_results.json"
     results_file.write_text(json.dumps(document), encoding="utf-8")
-    assert mark_results_file_completed(results_file, run_kwargs["outer_run_id"])
+    assert mark_inner_run_completed(results_file, run_kwargs["outer_run_id"])
 
 
 def _complete_the_existing_results(existing: Path):
     """A stand-in inner run that reads ``existing`` and completes, as --use-existing does."""
-    from automated_security_helper.utils.inner_run_outcome import (
-        mark_results_file_completed,
-    )
+    from tests.utils.helpers import mark_inner_run_completed
 
     def run(*args, **kwargs):
-        assert mark_results_file_completed(existing, kwargs["outer_run_id"])
+        assert mark_inner_run_completed(existing, kwargs["outer_run_id"])
         return create_completed_process(args=[], returncode=0, stdout="", stderr="")
 
     return run
