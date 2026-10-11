@@ -1877,14 +1877,21 @@ def _run_container_mode(
     # Use the CLI-supplied value when present; fall back to the value already read from
     # the config file on the host.  Passing the resolved value avoids a race where the
     # user mutates the config file between the host read and the container's own read.
+    #
+    # Not in workspace mode. The in-container run layers the operator's --config over
+    # each project's own config and judges each project itself; a value the host read
+    # here (from --config, or from a config at the workspace root, which the workspace
+    # wrote) would reach it as a command-line flag and beat every project's own value.
+    # Only what the operator gave on the command line is forwarded there.
+    in_workspace = opts.workspace_plan is not None
     effective_fail_on_findings = (
         opts.fail_on_findings
-        if opts.fail_on_findings is not None
+        if opts.fail_on_findings is not None or in_workspace
         else resolved_fail_on_findings
     )
     effective_fail_on_incomplete_scanners = (
         opts.fail_on_incomplete_scanners
-        if opts.fail_on_incomplete_scanners is not None
+        if opts.fail_on_incomplete_scanners is not None or in_workspace
         else resolved_fail_on_incomplete_scanners
     )
 

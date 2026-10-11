@@ -781,6 +781,53 @@ def _build_custom_image(
     return "automated-security-helper:custom"
 
 
+#: Where workspace mode mounts the operator's ``--config`` in the container,
+#: read-only, with each base it extends at the same place relative to it.
+OPERATOR_CONFIG_MOUNT = "/ash-operator-config"
+
+
+def _operator_config_mounts(config: str) -> tuple[str, List[str]]:
+    """The ``--config`` path inside the container, and the mounts that put it there.
+
+    In workspace mode the operator's ``--config`` is final over every project,
+    and it is never inside the workspace (the plan refuses one that is), so the
+    ``/src`` mount does not reach it. Each file it is built from is mounted
+    read-only under ``OPERATOR_CONFIG_MOUNT``, at its path relative to the
+    directory its ``extends`` bases must stay inside, and under each name it
+    was reached by, so the in-container run resolves the same chain. Only those
+    files: mounting their directory would hand the scanners whatever else is in
+    it. Outside ``/src`` in the container too, so it is still the operator's
+    there.
+    """
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+        resolve_config_document,
+    )
+
+    path = Path(config).resolve()
+    document = resolve_config_document(path, confine_to=default_confinement_root(path))
+    root = Path(document.root) if document.root is not None else path.parent
+    mounts: List[str] = []
+    placed: set[str] = set()
+    for real in document.chain:
+        for named in (real, *document.names.get(real, ())):
+            try:
+                relative = Path(os.path.abspath(named)).relative_to(root)
+            except ValueError:
+                continue
+            destination = f"{OPERATOR_CONFIG_MOUNT}/{relative.as_posix()}"
+            if destination in placed:
+                continue
+            placed.add(destination)
+            mounts.extend(
+                [
+                    "--mount",
+                    f"type=bind,source={Path(real)},destination={destination},readonly",
+                ]
+            )
+    return f"{OPERATOR_CONFIG_MOUNT}/{path.relative_to(root).as_posix()}", mounts
+
+
 def _assemble_run_command(
     oci_command_prefix: List[str],
     resolved_oci_runner: str,
@@ -885,6 +932,11 @@ def _assemble_run_command(
 
     # Output dir mount
     cmd.extend(["--mount", f"type=bind,source={output_dir},destination=/out"])
+
+    # In workspace mode the operator's --config, which /src never holds.
+    if config and workspace_relative_file is not None:
+        config, config_mounts = _operator_config_mounts(config)
+        cmd.extend(config_mounts)
 
     # Network: offline always uses none; container_network overrides otherwise
     if offline or container_network == "none":
