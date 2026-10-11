@@ -376,7 +376,8 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         # trivy reads trivy.yaml and .trivyignore from its working directory, which
         # is the scanned repository. Either can drop findings with nothing in the
         # report saying so, so ASH passes its own unless the operator chose one.
-        extra.append(f"--config={self._trivy_file('config_file', 'trivy-config.yaml')}")
+        self._scan_config_file = self._trivy_file("config_file", "trivy-config.yaml")
+        extra.append(f"--config={self._scan_config_file}")
         # .trivyignore and trivy-secret.yaml as trivy-repo passes them
         # (TrivyScannerBase._trivy_input_file).
         extra.append(f"--ignorefile={self._ignore_file()}")

@@ -82,6 +82,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -401,9 +402,14 @@ class ProbeContext:
     env: Dict[str, str]
     executable: Optional[str] = None
     cache_dir: Optional[str] = None
+    #: The config file the scan passed the tool, so a probe reads the database
+    #: through the same settings; None means an empty one (trivy only).
+    config_file: Optional[str] = None
 
 
-def _run_json(command: List[str], env: Mapping[str, str]) -> Any:
+def _run_json(
+    command: List[str], env: Mapping[str, str], cwd: Optional[Path] = None
+) -> Any:
     """Run a tool's status command and parse its stdout as JSON, whatever it exits with.
 
     ``grype db status`` exits 1 when it considers the database invalid -- including when it
@@ -416,6 +422,7 @@ def _run_json(command: List[str], env: Mapping[str, str]) -> Any:
         env=dict(env),
         timeout=_PROBE_TIMEOUT_SECONDS,
         check=False,
+        cwd=cwd.as_posix() if cwd is not None else None,
     )
     text = (proc.stdout or "").strip()
     if not text:
@@ -437,9 +444,32 @@ def _built_from_grype(ctx: ProbeContext) -> tuple[datetime, str]:
 
 
 def _built_from_trivy(ctx: ProbeContext) -> tuple[datetime, str]:
+    """``VulnerabilityDB.UpdatedAt`` from ``trivy version``, read in isolation.
+
+    trivy loads ``trivy.yaml`` from its working directory unless ``--config`` names
+    a file, and that file's ``cache.dir`` decides which database ``version``
+    reports, so a probe run from ASH's own working directory could read another
+    cache than the scan did. It runs from an empty directory outside every
+    checkout instead, with ``--config``: the file the scan passed trivy, or an
+    empty one.
+    """
     if not ctx.executable:
         raise ValueError("trivy executable not found")
-    version = _run_json([ctx.executable, "version", "--format", "json"], ctx.env)
+    from automated_security_helper.utils.content_db_refresh import _inside_a_checkout
+
+    with tempfile.TemporaryDirectory(prefix="ash-trivy-probe-") as scratch:
+        workdir = Path(scratch)
+        config = ctx.config_file
+        if not config:
+            empty = workdir / "empty-config.yaml"
+            empty.write_text("", encoding="utf-8")
+            config = empty.as_posix()
+        cwd = workdir if not _inside_a_checkout(workdir) else Path(workdir.anchor)
+        version = _run_json(
+            [ctx.executable, "version", "--format", "json", "--config", config],
+            ctx.env,
+            cwd=cwd,
+        )
     db = version.get("VulnerabilityDB") if isinstance(version, dict) else None
     updated = db.get("UpdatedAt") if isinstance(db, dict) else None
     if not updated:

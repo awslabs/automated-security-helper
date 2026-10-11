@@ -220,8 +220,9 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             elif module_dir.is_dir():
                 shutil.rmtree(module_dir)
             module_dir.mkdir()
+        self._scan_config_file = config_file.resolve().as_posix()
         return [
-            f"--config={config_file.resolve().as_posix()}",
+            f"--config={self._scan_config_file}",
             f"--module-dir={module_dir.resolve().as_posix()}",
         ]
 

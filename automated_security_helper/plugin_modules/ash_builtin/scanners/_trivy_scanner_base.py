@@ -137,6 +137,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     # The cache directory the last online scan was pointed at (--cache-dir), so
     # the staleness probe reads the same one (content_database_probe_context).
     _pinned_cache_dir: Optional[str] = PrivateAttr(default=None)
+    # The --config file the last scan passed trivy, for the same reason: a
+    # trivy.yaml can name the cache (``cache.dir``).
+    _scan_config_file: Optional[str] = PrivateAttr(default=None)
 
     def _ignore_file(self) -> str:
         """The file trivy reads finding IDs to ignore from (``--ignorefile``)."""
@@ -321,7 +324,25 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         if self._pinned_cache_dir:
             context.env = {**context.env, "TRIVY_CACHE_DIR": self._pinned_cache_dir}
             context.cache_dir = self._pinned_cache_dir
+        context.config_file = self._scan_config_file or self._operator_config_file()
         return context
+
+    def _operator_config_file(self) -> Optional[str]:
+        """The operator's trivy config file, when it is honored and exists.
+
+        For a probe that runs before the scan has chosen its ``--config`` (the
+        offline dependency check), so it reads through the same file the scan will.
+        """
+        options = getattr(self.config, "options", None)
+        value = getattr(options, "config_file", None)
+        if not value or self.context is None:
+            return None
+        path = self._operator_path(
+            "config_file",
+            value,
+            "trivy runs with ASH's empty config instead.",
+        )
+        return path.as_posix() if path is not None and path.is_file() else None
 
     def _operator_path(
         self, option: str, value: Path | str, why: str

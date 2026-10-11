@@ -4,9 +4,9 @@
 """The scan, the update and the database probes agree on one cache, and the probes
 read nothing from the scanned tree.
 
-Two gaps, both waiting on the content-database probe helper in #792, and so both
-marked xfail(strict=True): when the helper lands and the trivy scanners use it,
-these pass, strict xfail turns that into a failure, and the marks come off.
+One gap waits on the content-database probe helper in #792 and is marked
+xfail(strict=True): when the helper lands and the trivy scanners use it, it
+passes, strict xfail turns that into a failure, and the mark comes off.
 
 * The scan is given ``--cache-dir`` from ``content_db_refresh.default_cache_dir``,
   which is ``TRIVY_CACHE_DIR`` or the platform default under ``$HOME``
@@ -15,11 +15,17 @@ these pass, strict xfail turns that into a failure, and the marks come off.
   follows ``XDG_CACHE_HOME``, and the post-scan staleness probe runs ``trivy
   version`` with no ``--cache-dir``, so the probe can read a different cache from
   the one the scan read. Offline scans pass no ``--cache-dir`` at all.
-* The offline dependency check (``TrivyScanner.validate_plugin_dependencies``)
-  runs ``trivy version`` from ASH's working directory with no ``--config``. A
-  ``trivy.yaml`` there is loaded, and its ``cache.dir`` decides which database the
-  check sees (measured with trivy 0.75.0: a planted ``cache.dir`` with a
-  ``metadata.json`` dated 2099 was reported as the database).
+
+The other is closed here. The offline dependency check
+(``TrivyScanner.validate_plugin_dependencies``) and the post-scan staleness probe
+both ran ``trivy version`` from ASH's working directory with no ``--config``. A
+``trivy.yaml`` there was loaded, and its ``cache.dir`` decided which database they
+measured (trivy 0.75.0: a planted ``cache.dir`` with a ``metadata.json`` dated 2099
+was reported as the database; on 2026-10-11 a ``trivy.yaml`` in the working
+directory naming an empty ``cache.dir`` made ``trivy version`` report no database
+while ``--config`` with an empty file reported the real one). Both now run from an
+empty directory with an explicit ``--config``: the file the scan passed trivy,
+or an empty one.
 """
 
 from __future__ import annotations
@@ -47,8 +53,8 @@ from automated_security_helper.utils.config_trust import record_provenance
 PluginContext.model_rebuild()
 
 _PENDING = (
-    "waits for the content-database probe helper in #792: the staleness probe run "
-    "in isolation and given the scan's cache dir, and that cache dir used offline too"
+    "waits for the content-database probe helper in #792: the staleness probe given "
+    "the scan's cache dir, and that cache dir used offline too"
 )
 
 
@@ -113,7 +119,6 @@ print(json.dumps({{"Version": "0.75.0",
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the stand-in trivy is a POSIX script")
-@pytest.mark.xfail(strict=True, reason=_PENDING)
 def test_the_offline_database_check_reads_nothing_from_the_tree(tmp_path, monkeypatch):
     from automated_security_helper.utils import subprocess_utils
 
@@ -147,3 +152,96 @@ def test_the_offline_database_check_reads_nothing_from_the_tree(tmp_path, monkey
     for call in probes:
         assert not Path(call["cwd"]).resolve().is_relative_to(source.resolve())
         assert any(a == "--config" or a.startswith("--config=") for a in call["argv"])
+
+
+def _fake_trivy(tmp_path: Path, monkeypatch) -> Path:
+    from automated_security_helper.utils import subprocess_utils
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    record = tmp_path / "calls.jsonl"
+    fake = bin_dir / "trivy"
+    fake.write_text(_FAKE_TRIVY.format(python=sys.executable, record=str(record)))
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(subprocess_utils, "_find_executable_cache", {})
+    return record
+
+
+def _config_flag(argv):
+    for i, arg in enumerate(argv):
+        if arg == "--config":
+            return argv[i + 1]
+        if arg.startswith("--config="):
+            return arg.split("=", 1)[1]
+    return None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stand-in trivy is a POSIX script")
+def test_the_post_scan_probe_reads_nothing_from_the_working_directory(
+    tmp_path, monkeypatch
+):
+    from automated_security_helper.utils.content_db_staleness import (
+        ProbeContext,
+        _built_from_trivy,
+    )
+
+    record = _fake_trivy(tmp_path, monkeypatch)
+    source = tmp_path / "repo"
+    (source / ".git").mkdir(parents=True)
+    (source / "trivy.yaml").write_text("cache:\n  dir: sentinel-cache\n")
+    monkeypatch.chdir(source)
+
+    _built_from_trivy(
+        ProbeContext(env=dict(os.environ), executable=str(tmp_path / "bin" / "trivy"))
+    )
+
+    (call,) = [json.loads(line) for line in record.read_text().splitlines()]
+    assert not Path(call["cwd"]).resolve().is_relative_to(source.resolve())
+    config = _config_flag(call["argv"])
+    assert config is not None, call
+    assert not Path(config).resolve().is_relative_to(source.resolve())
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stand-in trivy is a POSIX script")
+def test_the_probe_reads_through_the_config_the_scan_passed(tmp_path, monkeypatch):
+    """An operator's trivy.yaml can name the cache; the probe must read that one."""
+    record = _fake_trivy(tmp_path, monkeypatch)
+    source = tmp_path / "repo"
+    source.mkdir()
+    operator = tmp_path / "operator" / "trivy.yaml"
+    operator.parent.mkdir()
+    operator.write_text("cache:\n  dir: /operator/cache\n")
+    config = AshConfig()
+    # The operator's own value: from --config-overrides, outside the tree.
+    record_provenance(
+        config,
+        in_tree=[],
+        config_overrides=[f"scanners.trivy.options.config_file={operator}"],
+    )
+    scanner = TrivyScanner(
+        context=PluginContext(
+            source_dir=source,
+            output_dir=tmp_path / "out",
+            work_dir=tmp_path / "out" / "converted",
+            config=config,
+        ),
+        config=TrivyScannerConfig(
+            enabled=True,
+            options=TrivyScannerConfigOptions(config_file=str(operator)),
+        ),
+    )
+    scanner.results_dir = tmp_path / "results"
+    scanner.results_dir.mkdir()
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+    passed = [a.split("=", 1)[1] for a in argv if a.startswith("--config=")]
+
+    probe = scanner.content_database_probe_context()
+
+    assert passed == [operator.resolve().as_posix()]
+    assert probe.config_file == passed[0]
+    from automated_security_helper.utils.content_db_staleness import _built_from_trivy
+
+    _built_from_trivy(probe)
+    (call,) = [json.loads(line) for line in record.read_text().splitlines()]
+    assert _config_flag(call["argv"]) == passed[0]
