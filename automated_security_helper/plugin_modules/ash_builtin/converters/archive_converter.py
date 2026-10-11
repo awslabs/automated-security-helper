@@ -452,7 +452,11 @@ def _tar_members_within(
 _LFS_POINTER_FIRST_LINE = b"version https://git-lfs.github.com/spec/v1\n"
 #: "Pointer files must be less than 1024 bytes in size", in the LFS spec.
 _LFS_POINTER_MAX_BYTES = 1024
-_LFS_POINTER_LINE = re.compile(rb"[a-z0-9.-]+ [^\r\n]*\n")
+#: ``key value``: the spec's key characters, and a value of printable ASCII. The
+#: spec forbids only CR and LF in a value, but every value LFS writes (the version
+#: URL, ``sha256:<hex>``, a decimal size, extension oids) is printable ASCII, and
+#: allowing other bytes let a readable zip be taken for a pointer.
+_LFS_POINTER_LINE = re.compile(rb"[a-z0-9.-]+ [\x20-\x7e]*\n")
 _LFS_POINTER_OID = re.compile(rb"^oid sha256:[0-9a-f]{64}\n", re.MULTILINE)
 _LFS_POINTER_SIZE = re.compile(rb"^size [0-9]+\n", re.MULTILINE)
 _LFS_POINTER_REASON = (
@@ -466,17 +470,16 @@ def _is_git_lfs_pointer(head: bytes, size: int) -> bool:
     """Whether a file is a Git LFS pointer: the whole file, in the pointer format.
 
     Strict on purpose, because a pointer is reported rather than failing the scan:
-    under 1024 bytes, UTF-8 text, the version line first, every line ``key value``,
-    and an ``oid sha256:`` and a ``size`` line. A zip, tar or gzip file cannot meet
-    it: each holds bytes that are not such text.
+    under 1024 bytes, the version line first, every line ``key value`` in printable
+    ASCII, and an ``oid sha256:`` and a ``size`` line. No archive the converter
+    extracts can meet it. Every zip entry header zipfile reads holds a zero byte
+    (the high byte of its compression method, for every method zipfile can
+    extract), gzip starts with 0x1f 0x8b, and a tar under 1024 bytes holds no
+    member with content, whose header and data block alone take 1024.
     """
     if size >= _LFS_POINTER_MAX_BYTES or len(head) != size:
         return False
     if not head.startswith(_LFS_POINTER_FIRST_LINE):
-        return False
-    try:
-        head.decode("utf-8")
-    except UnicodeDecodeError:
         return False
     lines = head.splitlines(keepends=True)
     if not all(_LFS_POINTER_LINE.fullmatch(line) for line in lines):

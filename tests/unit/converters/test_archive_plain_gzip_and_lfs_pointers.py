@@ -25,6 +25,7 @@ from __future__ import annotations
 import gzip
 import io
 import tarfile
+import zipfile
 from pathlib import Path
 from typing import Dict, List
 
@@ -51,6 +52,33 @@ LFS_POINTER = (
     b"oid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\n"
     b"size 12345\n"
 )
+
+
+def zip_that_also_reads_as_a_pointer() -> bytes:
+    """A readable zip after pointer lines, inside a ``k <zip bytes>`` line.
+
+    zipfile finds a zip by its end record and reads past data in front of it, so
+    a zip whose bytes hold no CR or LF, given a one-byte comment ``\\n``, ends the
+    last ``key value`` line of a file that otherwise looks like a pointer. The
+    member's content is varied until its CRC has no CR, LF or byte over 0x7f.
+    """
+    prefix = (
+        b"version https://git-lfs.github.com/spec/v1\n"
+        b"oid sha256:" + b"a" * 64 + b"\n" + b"size 1\n" + b"k "
+    )
+    for n in range(100_000):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as archive:
+            info = zipfile.ZipInfo("app.py", date_time=(1980, 1, 1, 0, 0, 0))
+            info.external_attr = 0o444 << 16
+            info.create_system = 0
+            archive.comment = b"\n"
+            archive.writestr(info, f"password = 'hunter{n}'")
+        data = prefix + buffer.getvalue()
+        inner = data[len(prefix) : -1]
+        if max(data) < 0x80 and b"\n" not in inner and b"\r" not in inner:
+            return data
+    raise AssertionError("no content gave a CRC without CR, LF or high bytes")
 
 
 def convert(context, monkeypatch, files: Dict[str, bytes], limits=None):
@@ -227,6 +255,8 @@ class TestGitLfsPointers:
                 b"version https://git-lfs.github.com/spec/v1\nsize 1\n",
                 id="no-oid",
             ),
+            pytest.param(LFS_POINTER + b"k a\x00b\n", id="nul-inside-a-value"),
+            pytest.param(LFS_POINTER + b"k a\x7fb\n", id="control-byte-in-a-value"),
         ],
     )
     def test_a_file_that_only_starts_like_a_pointer_fails_the_gate(
@@ -238,6 +268,20 @@ class TestGitLfsPointers:
         assert [r.path for r in converter.failed_inputs] == ["x.zip"]
         assert converter.refused_inputs == []
         assert gate(converter) == ["archive"]
+
+    def test_a_zip_that_also_reads_as_a_pointer_is_extracted(
+        self, test_plugin_context, monkeypatch
+    ):
+        data = zip_that_also_reads_as_a_pointer()
+        assert len(data) < 1024 and data.startswith(b"version ")
+        assert zipfile.ZipFile(io.BytesIO(data)).namelist() == ["app.py"]
+
+        converter, results = convert(test_plugin_context, monkeypatch, {"x.zip": data})
+
+        (extracted,) = results
+        assert (extracted / "app.py").read_bytes().startswith(b"password = ")
+        assert converter.refused_inputs == []
+        assert converter.failed_inputs == []
 
     def test_a_tar_whose_first_name_starts_like_a_pointer_is_still_a_tar(
         self, test_plugin_context, monkeypatch
