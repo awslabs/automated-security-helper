@@ -588,3 +588,47 @@ def test_the_registered_profile_behind_a_session_resolves_env_for_a_remote_calle
         )
         assert resolved.project_name == "client"
         assert resolved.sandbox.mode == "bwrap"
+
+
+# ---------------------------------------------------------------------------
+# A named file that extends a base using !ENV
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [("base.yaml", UNTAGGED), ("base.yaml", TAGGED), ("base.toml", TOML)],
+    ids=["plain", "tagged", "toml"],
+)
+def test_remote_named_file_whose_base_uses_env_is_refused_everywhere(
+    _server, name, text
+):
+    """The base resolves no !ENV for a remote caller: get_config, validate, scan."""
+    from automated_security_helper.cli.mcp_tools import (
+        mcp_get_config,
+        mcp_validate_config,
+    )
+
+    _write(_server["other"] / name, text)
+    root = _write(_server["other"] / "named.yaml", f"extends: {name}\n")
+
+    got = mcp_get_config(config_path=str(root), session_id=SESSION)
+    validated = mcp_validate_config(config_path=str(root), session_id=SESSION)
+    entry, outcomes = _scan(_server["target"], root, SESSION)
+
+    assert got.get("error_type") == ENV_REFUSED, got
+    assert ENV_REFUSED in [e["type"] for e in validated["errors"]], validated
+    assert isinstance(outcomes[-1], ASHConfigEnvNotResolvedError), outcomes
+    assert not _carries_probe([got, validated, str(outcomes[-1]), entry.to_dict()])
+
+
+def test_stdio_named_repo_file_whose_base_uses_env_resolves(stdio_repo):
+    """The local user's own repository keeps !ENV in its bases too, as designed."""
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+    _write(stdio_repo / ".ash" / "base.yaml", UNTAGGED)
+    root = _write(stdio_repo / ".ash" / "named.yaml", "extends: base.yaml\n")
+
+    got = mcp_get_config(config_path=str(root))
+
+    assert got.get("project_name") == PROBE, got
