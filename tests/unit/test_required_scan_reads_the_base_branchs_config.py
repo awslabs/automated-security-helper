@@ -792,14 +792,22 @@ class TestToolConfigFilesComeFromTheBaseCommit:
     def test_the_rewritten_config_is_the_base_config_apart_from_those_paths(
         self, tmp_path, monkeypatch
     ):
-        """This repository's own config, and `!ENV` values, survive the rewrite."""
+        """This repository's own config, and environment references, survive the rewrite.
+
+        The probes carry a default (``:dflt``): ASH resolves a reference only when it
+        has one, so a probe without a default reads the same resolved or not and could
+        not tell a kept reference from one written back as a literal. A quoted scalar
+        is a literal in ASH's loader and must stay one.
+        """
         from automated_security_helper.config.ash_config import load_yaml_config
 
         real = (ga.REPO_ROOT / CONFIG_PATH).read_text(encoding="utf-8")
         extra = (
             "\nash_env_probe:\n"
-            "  explicit: !ENV ${ASH_PROBE_VALUE}\n"
-            "  implicit: ${ASH_PROBE_VALUE}\n"
+            "  explicit: !ENV ${ASH_PROBE_VALUE:dflt}\n"
+            "  implicit: ${ASH_PROBE_VALUE:dflt}\n"
+            "  single_quoted: '${ASH_PROBE_VALUE:dflt}'\n"
+            '  double_quoted: "${ASH_PROBE_VALUE:dflt}"\n'
         )
         base_files = {CONFIG_PATH: real + extra}
         # Every relative tool config file the real config names, read from the tree.
@@ -817,6 +825,14 @@ class TestToolConfigFilesComeFromTheBaseCommit:
         monkeypatch.setenv("ASH_PROBE_VALUE", "resolved")
         original = load_yaml_config(base_files[CONFIG_PATH])
         rewritten = load_yaml_config(config.read_text(encoding="utf-8"))
+        # Control: the probes resolve one way or the other in the original, so the
+        # comparison below can see a change in either direction.
+        assert original["ash_env_probe"] == {
+            "explicit": "resolved",
+            "implicit": "resolved",
+            "single_quoted": "${ASH_PROBE_VALUE:dflt}",
+            "double_quoted": "${ASH_PROBE_VALUE:dflt}",
+        }, original["ash_env_probe"]
         assert rewritten.pop("ash_env_probe") == original.pop("ash_env_probe")
         for name, section in original["scanners"].items():
             value = (section.get("options") or {}).get("config_file")
@@ -833,6 +849,60 @@ class TestToolConfigFilesComeFromTheBaseCommit:
 
         resolved = resolve_config(config_path=config, source_dir=repo.sandbox.workspace)
         assert resolved.project_name == original["project_name"]
+
+    @pytest.mark.parametrize(
+        "config_name,content",
+        [
+            pytest.param(
+                ".ash/.ash.json",
+                '{"project_name": "${ASH_PROBE_VALUE:dflt}", "scanners": '
+                '{"bandit": {"options": {"config_file": ".ash/bandit.yaml"}}}}\n',
+                id="json, where ASH resolves no reference",
+            ),
+            pytest.param(
+                ".ashrc.toml",
+                'project_name = "${ASH_PROBE_VALUE:dflt}"\n'
+                "[scanners.bandit.options]\n"
+                'config_file = ".ash/bandit.yaml"\n',
+                id="toml, where ASH resolves every reference",
+            ),
+        ],
+    )
+    def test_references_in_json_and_toml_configs_keep_their_meaning(
+        self, tmp_path, monkeypatch, config_name, content
+    ):
+        """The rewritten copy is YAML, so each string must be written the way that keeps it.
+
+        ASH reads a JSON config without resolving ``${...}`` and resolves it in every
+        TOML string; in YAML a plain ``${...}`` is a reference and a quoted one a literal.
+        """
+        from automated_security_helper.config.config_sources import read_config_file
+
+        repo = Repository(
+            tmp_path / "repo",
+            base_files={config_name: content, ".ash/bandit.yaml": BASE_BANDIT},
+        )
+        context = _pull_request(repo.base_sha, fork=False)
+        inputs = {**_required_inputs(context), "config": config_name}
+        config = _scan_config(repo, context, inputs)
+
+        monkeypatch.setenv("ASH_PROBE_VALUE", "resolved")
+        original_file = tmp_path / "original" / config_name
+        original_file.parent.mkdir(parents=True)
+        original_file.write_text(content, encoding="utf-8")
+        original = read_config_file(original_file)
+        rewritten = read_config_file(config)
+        assert config.suffix == ".yaml", config
+        assert rewritten["project_name"] == original["project_name"], (
+            f"project_name is {original['project_name']!r} when ASH reads "
+            f"{config_name} and {rewritten['project_name']!r} after the rewrite"
+        )
+        assert (
+            Path(rewritten["scanners"]["bandit"]["options"]["config_file"]).read_text(
+                encoding="utf-8"
+            )
+            == BASE_BANDIT
+        )
 
 
 class TestTheMergeQueueResolvesItsOwnTarget:

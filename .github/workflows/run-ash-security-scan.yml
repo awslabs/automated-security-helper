@@ -399,8 +399,10 @@ jobs:
       #
       # The config is parsed with the PyYAML that the installed ASH brings, by code
       # that does not import ASH, so it works with any ASH revision. The rewritten
-      # copy is YAML; `!ENV` tags are kept, and a plain `${...}` value stays a plain
-      # scalar, so ASH resolves both as before.
+      # copy is YAML, and every string keeps its meaning: what ASH would resolve as
+      # an environment reference (a plain or `!ENV` `${...}` in YAML, any `${...}` in
+      # TOML) is written as one, and what it would read as a literal (a quoted
+      # `${...}` in YAML, any string in JSON) is written quoted.
       - name: Read the tool config files the config names from config-ref
         id: config-ref-files
         if: inputs.config-ref != ''
@@ -417,6 +419,7 @@ jobs:
           uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- python -I - <<'PY'
           import json
           import os
+          import re
           import subprocess
           import sys
           from pathlib import Path
@@ -465,6 +468,14 @@ jobs:
               ).stdout
 
 
+          # ASH's YAML loader (load_yaml_config) treats a PLAIN scalar that starts with
+          # ${...} as an environment reference and a quoted one as a literal. The same
+          # implicit resolver on both ends keeps that distinction: a reference is read
+          # as EnvTag and written back plain, and a literal string that looks like one
+          # is written back quoted.
+          ENV_REFERENCE = re.compile(r"^\$\{(\w+):?(.*)?\}")
+
+
           class EnvTag(str):
               pass
 
@@ -477,8 +488,21 @@ jobs:
               pass
 
 
+          for resolver in (Loader, Dumper):
+              resolver.add_implicit_resolver("!ENV", ENV_REFERENCE, None)
           Loader.add_constructor("!ENV", lambda loader, node: EnvTag(loader.construct_scalar(node)))
           Dumper.add_representer(EnvTag, lambda dumper, value: dumper.represent_scalar("!ENV", str(value)))
+
+
+          def references(value):
+              """TOML strings: ASH resolves every one that matches, so all are references."""
+              if isinstance(value, dict):
+                  return {key: references(item) for key, item in value.items()}
+              if isinstance(value, list):
+                  return [references(item) for item in value]
+              if isinstance(value, str) and ENV_REFERENCE.match(value):
+                  return EnvTag(value)
+              return value
 
           text = config_file.read_text(encoding="utf-8")
           if config_file.name.endswith(".json"):
@@ -489,6 +513,7 @@ jobs:
               document = tomllib.loads(text)
               if config_file.name == "pyproject.toml":
                   document = (document.get("tool") or {}).get("ash")
+              document = references(document)
           else:
               document = yaml.load(text, Loader=Loader)
 
