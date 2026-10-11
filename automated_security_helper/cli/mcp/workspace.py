@@ -560,6 +560,7 @@ def _gate_client_overrides(
     from automated_security_helper.config.resolve_config import (
         _parse_config_value,
         apply_config_overrides,
+        load_config_file,
     )
     from automated_security_helper.config.runtime_patch import (
         RuntimePatchDeniedError,
@@ -567,11 +568,9 @@ def _gate_client_overrides(
         check_runtime_ops,
     )
 
-    base = (
-        AshConfig.from_file(config_path=Path(session_config))
-        if session_config
-        else AshConfig()
-    )
+    # load_config_file: a session config that does not load is a config error
+    # (exit 3), not the parser's own exception (exit 1, an internal error).
+    base = load_config_file(Path(session_config)) if session_config else AshConfig()
     mcp_cfg = getattr(base.global_settings, "mcp", None)
     allowlist = (
         mcp_cfg.runtime_overrides if mcp_cfg is not None else RuntimeOverridesConfig()

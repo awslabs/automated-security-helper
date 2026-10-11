@@ -893,6 +893,15 @@ def wizard(
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
+    if os.path.lexists(config_path) and not config_path.is_file():
+        # A link to nothing, a directory: not "no config yet", and writing the
+        # answers would go through the link to wherever it points.
+        typer.secho(
+            f"Invalid configuration: {config_path} exists but is not a regular "
+            "file, so the wizard will not write it.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(3)
     if config_path.exists():
         console.print(
             Panel(
@@ -903,11 +912,15 @@ def wizard(
         try:
             ash_config = AshConfig.from_file(config_path=config_path)
         except Exception as exc:
+            # Refused, not replaced by the defaults: the wizard writes its result
+            # back over this file, which would drop every setting it does not ask
+            # about.
             typer.secho(
-                f"Failed to load existing config: {exc}. Starting from defaults.",
-                fg=typer.colors.YELLOW,
+                f"Invalid configuration: {config_path} could not be loaded ({exc}). "
+                "Fix the file, or move it aside to start from the defaults.",
+                fg=typer.colors.RED,
             )
-            ash_config = AshConfig()
+            raise typer.Exit(3)
     else:
         console.print(
             Panel(

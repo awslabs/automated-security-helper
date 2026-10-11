@@ -82,12 +82,14 @@ scanner runs, and the message names the file. That covers:
 
 Scanning with the defaults instead would run without the file's suppressions,
 ignore paths, thresholds and sandbox settings, and report the scan as completed.
-The same applies to `ash report`, `ash plugin list`, `ash dependencies install`
-and `ash config get` (each exits 3), to workspace mode (see
+The same applies to `ash report`, `ash plugin list`, `ash dependencies install`,
+`ash config get` and `ash config wizard` (each exits 3; the wizard leaves the
+file as it was rather than rewriting it from the defaults), to workspace mode (see
 [Workspace mode](cli-reference.md#workspace-mode)), and to the MCP server:
 `scan_directory` refuses such a file, and an empty `config_path`, before it
-starts a scan, and `get_config` (with or without `raw`) returns an error instead
-of the default configuration, with `error_category` `file_not_found` for a file
+starts a scan, a workspace scan's session profile that does not load is reported
+as an invalid configuration (exit code 3), and `get_config` (with or without `raw`)
+returns an error instead of the default configuration, with `error_category` `file_not_found` for a file
 that does not exist and `invalid_format` for one that does not load. A config
 file outside the session's allowed config roots is refused as outside them
 before anything reads it, so the response says nothing about its contents.

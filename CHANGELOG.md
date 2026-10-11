@@ -786,7 +786,12 @@
   source that discovery found and ignored is now also reported as a
   `config_warning` in the scan's results and summary, since its settings are not
   applied. **A CI job that set `ASH_CONFIG` to a file it only sometimes writes now
-  fails when the file is absent; unset the variable instead.**
+  fails when the file is absent; unset the variable instead.** `ash config wizard`
+  on a file it cannot load (or a link to nothing) exits 3 and leaves it alone; it
+  used to start from the defaults and write them over the file. A results file
+  that records no configuration (`"ash_config": null`) now loads with none,
+  instead of with the defaults or the file `ASH_CONFIG` names in the process
+  re-rendering it.
 
 - **A `**` at either end of a multi-segment `ignore_paths` or `suppressions` pattern
   now takes effect.** The matcher anchored the first and last segments of a pattern

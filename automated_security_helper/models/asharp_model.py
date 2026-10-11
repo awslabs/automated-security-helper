@@ -733,11 +733,13 @@ class AshAggregatedResults(BaseModel):
     def validate_ash_config(cls, v: Any):
         from automated_security_helper.config.ash_config import AshConfig
 
-        try:
-            return AshConfig.model_validate(v)
-        except Exception as e:
-            ASH_LOGGER.error(f"Failed to validate ASH config: {e}")
-        return get_default_config()
+        # No configuration recorded stays None. It used to become
+        # get_default_config() -- the defaults, or the file ASH_CONFIG names in
+        # the process re-rendering the results -- presented as the scan's own.
+        # A value that is not a valid configuration raises.
+        if v is None:
+            return None
+        return AshConfig.model_validate(v)
 
     def model_post_init(self, context):
         """Initialize aggregator and trend analyzer with current findings."""
