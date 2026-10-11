@@ -2,12 +2,13 @@
 
 This page builds `findings-list`, a reporter plugin that writes `ash.findings.txt`: the number of actionable findings, then one line per finding with its scanner, rule and location. A reporter receives the aggregated results after every scanner has run and returns the text of its report; ASH writes the file.
 
-Before you start, you need ASH installed ([Install ASH](../how-to/install.md)) and a directory for the plugin package outside the repositories you scan. This page uses `~/ash-plugins`. [Plugins](index.md) explains how ASH loads plugin packages and what a loaded plugin can do.
+Before you start, you need ASH installed ([Install ASH](../how-to/install.md)) and a repository to scan, with your shell in its top directory. To keep the steps short, this page saves the plugin package in an `ash-plugins` directory there; a plugin you keep belongs outside the repositories you scan ([Package a third-party plugin](index.md#package-a-third-party-plugin)). [Plugins](index.md) explains how ASH loads plugin packages and what a loaded plugin can do.
 
 ## 1. Write the plugin
 
-Save this as `~/ash-plugins/acme_ash_plugins/__init__.py`:
+Save this as `ash-plugins/acme_ash_plugins/__init__.py`:
 
+<!-- doctest: save-as=ash-plugins/acme_ash_plugins/__init__.py -->
 ```python
 from typing import Literal
 
@@ -56,9 +57,8 @@ ASH_REPORTERS = [FindingsListReporter]
 
 ## 2. Check that ASH finds it
 
-<!-- doctest: illustrative reason="needs the plugin package saved in step 1" -->
 ```bash
-export PYTHONPATH="$HOME/ash-plugins"
+export PYTHONPATH="$PWD/ash-plugins"
 ash plugin list --ash-plugin-modules acme_ash_plugins
 ```
 
@@ -72,13 +72,18 @@ The reporters table has a row for the plugin:
 
 A loaded reporter runs in every scan, beside the built-in ones. This scan uses only detect-secrets, which needs no download:
 
-<!-- doctest: illustrative reason="needs the plugin package saved in step 1" -->
+<!-- doctest: run expect-exit=2 -->
 ```bash
 ash scan --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline
+```
+
+In a repository with one hardcoded password, the scan exits with code 2. Read the report:
+
+```bash
 cat .ash/ash_output/reports/ash.findings.txt
 ```
 
-In a repository with one hardcoded password, the scan exits with code 2 and the report reads:
+It reads:
 
 ```text
 1 actionable, 1 total
@@ -87,12 +92,11 @@ detect-secrets	SECRET-SECRET-KEYWORD	app.py:3
 
 To render the report again from the last scan's results without scanning, use `ash report`, which takes the module through a config override:
 
-<!-- doctest: illustrative reason="needs the plugin package saved in step 1" -->
 ```bash
 ash report --format findings-list --config-overrides 'ash_plugin_modules+=[acme_ash_plugins]'
 ```
 
-`ash scan --output-formats` cannot select this reporter: it accepts only the built-in format names, and when you pass it, only the reporters it names run. The reporter's options go under `reporters.findings-list` in an ASH config, where `enabled: false` leaves it out of a scan:
+`ash scan --output-formats` cannot select this reporter: it accepts only the built-in format names, and when you pass it, only the reporters it names run. The reporter's options go under its name, `findings-list`, in the `reporters` section of an ASH config, where `enabled: false` leaves it out of a scan:
 
 <!-- doctest: config kind=other reason="configures the example plugin, which the docs environment does not install" -->
 ```yaml

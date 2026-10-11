@@ -2,12 +2,13 @@
 
 An event subscriber is a function that ASH calls at a point in a scan: when a phase starts, when a scanner finishes, when the whole scan ends. Use one to log progress somewhere ASH does not, to time scans, or to start work that depends on a scanner's result. This page builds a module with two subscribers, one that prints a line as each scanner finishes and one that prints the scan's duration at the end.
 
-Before you start, you need ASH installed ([Install ASH](../how-to/install.md)) and a directory for the module outside the repositories you scan. This page uses `~/ash-plugins`. [Plugins](index.md) explains how ASH loads plugin modules and what a loaded module can do.
+Before you start, you need ASH installed ([Install ASH](../how-to/install.md)) and a repository to scan, with your shell in its top directory. To keep the steps short, this page saves the module in an `ash-plugins` directory there; a module you keep belongs outside the repositories you scan ([Package a third-party plugin](index.md#package-a-third-party-plugin)). [Plugins](index.md) explains how ASH loads plugin modules and what a loaded module can do.
 
 ## 1. Write the subscribers
 
-Save this as `~/ash-plugins/acme_ash_plugins/__init__.py`:
+Save this as `ash-plugins/acme_ash_plugins/__init__.py`:
 
+<!-- doctest: save-as=ash-plugins/acme_ash_plugins/__init__.py -->
 ```python
 from automated_security_helper.plugins.decorators import event_subscriber
 from automated_security_helper.plugins.events import AshEventType
@@ -25,9 +26,9 @@ def run_finished(**kwargs):
 
 ## 2. Scan with them
 
-<!-- doctest: illustrative reason="needs the module saved in step 1" -->
+<!-- doctest: run expect-exit=2 -->
 ```bash
-export PYTHONPATH="$HOME/ash-plugins"
+export PYTHONPATH="$PWD/ash-plugins"
 ash scan --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline
 ```
 

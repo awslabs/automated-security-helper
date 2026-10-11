@@ -76,7 +76,7 @@ With a `workspace_plan`, `run_ash_scan` returns the workspace result instead of 
 
 Every parameter is optional and can be passed by keyword. Unless the table says otherwise, a parameter means what the [`ash scan`](cli.md#scan) option of the same name means. `run_ash_scan` also accepts and ignores any other positional or keyword argument, so a misspelled parameter name is silently dropped.
 
-| Parameter | Default | Notes |
+| Parameter | If not passed | Notes |
 |---|---|---|
 | `source_dir` | the working directory | |
 | `output_dir` | `.ash/ash_output` under the working directory | Not under `source_dir`, as the CLI's default is. Pass it whenever `source_dir` is not the working directory. |

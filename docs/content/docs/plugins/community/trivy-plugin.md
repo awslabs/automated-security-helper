@@ -61,12 +61,13 @@ ASH does not pass `trivy repository --timeout`, so trivy's own default timeout o
 
 All options, with types and defaults, are in the [scanner reference](../../../reference/scanners.md#trivy-repo).
 
+<!-- doctest: options of=scanners.trivy-repo -->
 | Option | Default | Effect |
 |---|---|---|
 | `scanners` | `[vuln, secret, misconfig, license]` | which trivy scanners run |
 | `ignore_unfixed` | `true` | report only vulnerabilities that have a fixed version |
 | `license_full` | `true` | look for licenses in source file headers and license files too |
-| `severity_threshold` | `null` (the global threshold) | the threshold for this scanner's actionable findings. ASH also passes it to trivy (`trivy repository --severity`), so trivy does not report findings it rates below it. `ALL` passes no severity flag. |
+| `severity_threshold` | `null` | the threshold for this scanner's actionable findings; `null` uses the global threshold. ASH also passes it to trivy (`trivy repository --severity`), so trivy does not report findings it rates below it. `ALL` passes no severity flag. |
 | `offline` | `false` | run this scanner offline even when the scan is online |
 | `disable_telemetry` | `true` | pass `trivy repository --disable-telemetry` |
 | `scan_timeout` | `1800` | seconds before ASH stops trivy |

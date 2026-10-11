@@ -6,14 +6,15 @@ Before you start, you need:
 
 - ASH installed ([Install ASH](../how-to/install.md));
 - `ruff` on your `PATH` (`ruff --version` prints a version);
-- a directory for the plugin package outside the repositories you scan. This page uses `~/ash-plugins`.
+- a repository to scan, with your shell in its top directory. To keep the steps short, this page saves the plugin package in an `ash-plugins` directory there; a plugin you keep belongs outside the repositories you scan ([Package a third-party plugin](index.md#package-a-third-party-plugin)).
 
 [Plugins](index.md) explains how ASH loads plugin packages and what a loaded plugin can do.
 
 ## 1. Write the plugin
 
-Save this as `~/ash-plugins/acme_ash_plugins/__init__.py`:
+Save this as `ash-plugins/acme_ash_plugins/__init__.py`:
 
+<!-- doctest: save-as=ash-plugins/acme_ash_plugins/__init__.py -->
 ```python
 from typing import Literal
 
@@ -73,11 +74,10 @@ ASH_SCANNERS = [RuffSecurityScanner]
 
 ## 2. Check that ASH finds it
 
-Put the package's parent directory on Python's import path, then list the plugins with the module loaded:
+Put `ash-plugins` on Python's import path, then list the plugins with the module loaded:
 
-<!-- doctest: illustrative reason="needs the plugin package saved in step 1" -->
 ```bash
-export PYTHONPATH="$HOME/ash-plugins"
+export PYTHONPATH="$PWD/ash-plugins"
 ash plugin list --ash-plugin-modules acme_ash_plugins
 ```
 
@@ -89,9 +89,9 @@ The scanners table has a row for the plugin:
 
 ## 3. Scan with it
 
-From the repository you want to scan:
+In the same shell:
 
-<!-- doctest: illustrative reason="needs the plugin package saved in step 1" -->
+<!-- doctest: run expect-exit=2 -->
 ```bash
 ash scan --ash-plugin-modules acme_ash_plugins --scanners ruff-security
 ```
@@ -105,7 +105,7 @@ ASH runs ruff, reads its SARIF, and adds a row to the summary. In a repository w
 
 The findings are in every report under `.ash/ash_output/reports/`, and ruff's own SARIF file is in `.ash/ash_output/scanners/ruff-security/source/`. [Read the results](../how-to/read-results.md) explains the output directory.
 
-To load the plugin on every scan instead of passing the option, add it to an ASH config file. A repository's own config may name it only while the package is installed outside every git checkout and the scanned directory, as `~/ash-plugins` is unless your home directory is itself a git checkout:
+To load the plugin on every scan instead of passing the option, add it to an ASH config file. A repository's own config may name it only while the package is installed outside every git checkout and the scanned directory, which `ash-plugins` inside the repository is not; until you install it elsewhere, use this in a config file outside the repository, passed with `--config`:
 
 <!-- doctest: config kind=other reason="configures the example plugin, which the docs environment does not install" -->
 ```yaml

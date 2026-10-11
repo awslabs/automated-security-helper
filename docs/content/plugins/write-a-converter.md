@@ -2,12 +2,13 @@
 
 A converter runs before the scanners and writes files they can read. ASH's own converters extract archives and turn Jupyter notebooks into Python. This page builds `markdown-python`, a converter that copies the Python code blocks out of Markdown files so that Python scanners check the code in your documentation too. It keeps each line at its original line number, so a finding in the converted file points at the same line of the Markdown file.
 
-Before you start, you need ASH installed ([Install ASH](../how-to/install.md)) and a directory for the plugin package outside the repositories you scan. This page uses `~/ash-plugins`. [Plugins](index.md) explains how ASH loads plugin packages and what a loaded plugin can do.
+Before you start, you need ASH installed ([Install ASH](../how-to/install.md)) and a repository to scan, with your shell in its top directory. To keep the steps short, this page saves the plugin package in an `ash-plugins` directory there; a plugin you keep belongs outside the repositories you scan ([Package a third-party plugin](index.md#package-a-third-party-plugin)). [Plugins](index.md) explains how ASH loads plugin packages and what a loaded plugin can do.
 
 ## 1. Write the plugin
 
-Save this as `~/ash-plugins/acme_ash_plugins/__init__.py`:
+Save this as `ash-plugins/acme_ash_plugins/__init__.py`:
 
+<!-- doctest: save-as=ash-plugins/acme_ash_plugins/__init__.py -->
 ````python
 import re
 from pathlib import Path
@@ -91,9 +92,8 @@ ASH_CONVERTERS = [MarkdownPythonConverter]
 
 ## 2. Check that ASH finds it
 
-<!-- doctest: illustrative reason="needs the plugin package saved in step 1" -->
 ```bash
-export PYTHONPATH="$HOME/ash-plugins"
+export PYTHONPATH="$PWD/ash-plugins"
 ash plugin list --ash-plugin-modules acme_ash_plugins
 ```
 
@@ -105,9 +105,10 @@ The converters table has a row for the plugin:
 
 ## 3. Scan with it
 
-In the repository you scan, a file `docs/usage.md` holds a Python example at lines 5 to 8:
+Save this as `docs/usage.md` in the repository. It has a Python example at lines 5 to 8:
 
-````text
+<!-- doctest: save-as=docs/usage.md -->
+````markdown
 # Usage
 
 Call it like this:
@@ -120,9 +121,14 @@ subprocess.call(user_input, shell=True)
 
 Run a scan with the module loaded:
 
-<!-- doctest: illustrative reason="needs the plugin package saved in step 1" -->
+<!-- doctest: run expect-exit=2 -->
 ```bash
 ash scan --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline
+```
+
+The scan exits with code 2 for the hardcoded password in `app.py`. List what the converter wrote:
+
+```bash
 ls .ash/ash_output/converted/markdown-python/docs
 ```
 
