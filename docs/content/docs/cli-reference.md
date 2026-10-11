@@ -227,7 +227,8 @@ the container cannot see that, the host passes it `--config-from-scanned-reposit
 policy file the host resolved (`--workspace-config`, or the one found in the workspace
 root) is handed to the container the same way. The `./ash` wrapper and `Invoke-ASH`
 mount a config from outside the source directory on its own, so an `extends` base next
-to it is not reachable there; use `ash --mode container` for such a chain. A program that
+to it is not reachable there, and `Invoke-ASH` refuses one with an `extends` entry with
+exit 3; use `ash --mode container` for such a chain. A program that
 calls `run_ash_scan(mode=RunMode.container)` with no `config` gets `ASH_CONFIG`'s file
 handed to the container when no config is found in the source directory, which is when
 a local scan uses it.
@@ -239,7 +240,10 @@ such a path would be read as something else. The run is refused with exit 3 befo
 anything is built.
 
 `Invoke-ASH` exits with these codes also under `$ErrorActionPreference = 'Stop'` (the
-default of a `pwsh` step on GitHub Actions). It runs the runner through
+default of a `pwsh` step on GitHub Actions), writing the reason to stderr; no
+PowerShell error record is raised. Run from a session you type into, rather than from
+a script or `pwsh -Command`, it throws instead, so the session stays open, and
+`$LASTEXITCODE` holds the code. It runs the runner through
 `Invoke-Expression`, and passes each path and value it was given by name, so PowerShell
 reads a directory named `a$(...)` as that name. Three inputs are still parsed as
 PowerShell: the arguments after the named parameters, which are passed through to `ash`
@@ -267,9 +271,15 @@ The image stage is the one `--build-target` names; when it is not given, `non-ro
 `ci` on Windows, where the non-root user cannot write the bind-mounted output. The
 `CI`, `IsCI`, `ISCI` and `CODEBUILD_BUILD_ID` variables do not change it;
 `--custom-containerfile` builds on `ci`. A `non-root` build is refused when the
-container user's UID would be 0, which happens when ASH itself runs as root (common in CI
-jobs): pass `--build-target ci`, or `--container-uid` and `--container-gid`. See
-[Building your own container image](building-your-own-image.md).
+container user's UID or GID would be 0, which happens when ASH itself runs as root
+(common in CI jobs): pass `--build-target ci` (`-BuildTarget ci` for `Invoke-ASH`), or
+`--container-uid` and `--container-gid`. In AWS CodeBuild, for example:
+
+```bash
+ash --mode container --build-target ci
+```
+
+See [Building your own container image](building-your-own-image.md).
 
 ### Workspace Mode
 

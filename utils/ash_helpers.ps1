@@ -244,8 +244,7 @@ function Invoke-ASH {
         # before anything is built or run, with exit 3.
         function Assert-Mountable([string]$Label, [string]$Path) {
             if ($Path -match '[,"\r\n]') {
-                [Console]::Error.WriteLine("ERROR: The $Label '$Path' cannot be handed to the container runner: --mount reads its value as comma-separated fields, so a path holding a comma, a double quote or a line break would be read as something else. Rename it, or choose another path.")
-                exit 3
+                Stop-AshRefusal 3 "The $Label '$Path' cannot be handed to the container runner: --mount reads its value as comma-separated fields, so a path holding a comma, a double quote or a line break would be read as something else. Rename it, or choose another path."
             }
         }
         if (-not $NoRun) {
@@ -265,16 +264,14 @@ function Invoke-ASH {
         $configInCheckout = $false
         if (-not $NoRun -and ($PSBoundParameters.ContainsKey('Config') -or -not [string]::IsNullOrEmpty($Config))) {
             if ([string]::IsNullOrEmpty($Config) -or -not (Test-Path -LiteralPath $Config -PathType Leaf)) {
-                [Console]::Error.WriteLine("ERROR: Config file not found: '$Config'. -Config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container.")
-                exit 3
+                Stop-AshRefusal 3 "Config file not found: $Config. -Config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container."
             }
             # The runner mounts with its own rights, which can be wider than this user's.
             try {
                 [System.IO.File]::OpenRead((Get-Item -LiteralPath $Config).FullName).Close()
             }
             catch {
-                [Console]::Error.WriteLine("ERROR: Config file cannot be read: '$Config'. ASH does not hand the container runner a file it cannot read itself.")
-                exit 3
+                Stop-AshRefusal 3 "Config file cannot be read: $Config. ASH does not hand the container runner a file it cannot read itself."
             }
             $configFull = (Get-Item -LiteralPath $Config).FullName
             Assert-Mountable 'config file' $configFull
@@ -285,6 +282,12 @@ function Invoke-ASH {
                 $configInner = "/src/" + $configFull.Substring($sourcePrefix.Length).Replace('\', '/')
             }
             else {
+                # Mounted on its own, without the files it extends, so a config with an
+                # extends entry would not resolve inside the container. Refused, as is
+                # every chain ash --mode container cannot mount whole.
+                if ((Get-Content -LiteralPath $configFull -Raw) -match '(?m)(^|[{,])\s*["'']?extends["'']?\s*:') {
+                    Stop-AshRefusal 3 "The config file '$Config' is outside the source directory and has an extends entry. Invoke-ASH mounts such a config on its own, without the files it extends. Run ash --mode container, which mounts the chain, or put the config inside the source directory."
+                }
                 $configInner = "/ash-config/" + (Split-Path -Leaf $configFull)
                 $configMountArg = '--mount "type=bind,source=$configFull,destination=$configInner,readonly"'
                 # A config elsewhere in the scanned checkout -- the outermost directory
@@ -319,8 +322,7 @@ function Invoke-ASH {
                     $item = Get-Item -LiteralPath $configFull
                     while ($null -ne $item -and $item.FullName.StartsWith($checkoutPrefix, $pathComparison)) {
                         if ($item.LinkType) {
-                            [Console]::Error.WriteLine("ERROR: The config file '$Config' is inside the scanned tree and is reached through a link ('$($item.FullName)'). ASH does not mount a file the repository being scanned points it at.")
-                            exit 3
+                            Stop-AshRefusal 3 "The config file '$Config' is inside the scanned tree and is reached through a link ('$($item.FullName)'). ASH does not mount a file the repository being scanned points it at."
                         }
                         $item = Get-Item -LiteralPath (Split-Path -Parent $item.FullName)
                     }
@@ -365,8 +367,7 @@ function Invoke-ASH {
                 }
             }
             if ($null -eq $RESOLVED_OCI_RUNNER) {
-                [Console]::Error.WriteLine("ERROR: Unable to resolve an OCI_RUNNER -- exiting")
-                exit 1
+                Stop-AshRefusal 1 "Unable to resolve an OCI_RUNNER -- exiting"
             }
             else {
                 Write-Verbose "Resolved OCI_RUNNER to: $RESOLVED_OCI_RUNNER"
@@ -376,14 +377,31 @@ function Invoke-ASH {
 
                 # Build the container if not skipped
                 if (-not $NoBuild) {
-                    # The non-root stage creates its user with `adduser --uid <UID>`, and
-                    # UID 0 is root, which already exists: that build fails at that step,
-                    # after the whole core stage. Refused before building, as `ash
-                    # build-image` does; any spelling of zero counts. Without
-                    # -ContainerUID the Dockerfile's own default UID is used.
-                    if ($BuildTarget -eq 'non-root' -and $ContainerUID -match '^0+$') {
-                        [Console]::Error.WriteLine("ERROR: The non-root image stage creates a user with UID 0, which is root: -ContainerUID 0 was given. Pass -BuildTarget ci to build the image that runs as root, or -ContainerUID and -ContainerGID with the IDs the non-root user should have.")
-                        exit 1
+                    # -ContainerUID and -ContainerGID become build arguments, read as
+                    # numbers.
+                    foreach ($id in @(@('UID', $ContainerUID), @('GID', $ContainerGID))) {
+                        if ($id[1] -and $id[1] -notmatch '^[0-9]+$') {
+                            Stop-AshRefusal 3 "Container $($id[0]) must be a numeric value: '$($id[1])'."
+                        }
+                    }
+                    # The non-root stage creates its user with `adduser --uid <UID>
+                    # --gid <GID>`. UID 0 is root, which already exists, and GID 0 is
+                    # root's group. A non-root build as root is refused before building,
+                    # as ./ash and `ash --mode container` refuse it: by -ContainerUID or
+                    # -ContainerGID 0 (any spelling of zero), or, without -ContainerUID,
+                    # by a caller whose own UID (id -u) is 0. -BuildTarget ci is the
+                    # opt-in for the image that runs as root.
+                    if ($BuildTarget -eq 'non-root') {
+                        $buildUid = $ContainerUID
+                        if (-not $buildUid -and -not ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) -and (Get-Command id -ErrorAction SilentlyContinue)) {
+                            $buildUid = "$(& id -u)".Trim()
+                        }
+                        if ($buildUid -match '^0+$') {
+                            Stop-AshRefusal 3 "The non-root image stage creates a user with UID 0, which is root: Invoke-ASH is running as root, or -ContainerUID 0 was given. Pass -BuildTarget ci to build the image that runs as root, or -ContainerUID and -ContainerGID with the IDs the non-root user should have."
+                        }
+                        if ($ContainerGID -match '^0+$') {
+                            Stop-AshRefusal 3 "The non-root image stage gives its user GID 0, which is root's group: -ContainerGID 0 was given. Pass -BuildTarget ci to build the image that runs as root, or -ContainerGID with the GID the non-root user should have."
+                        }
                     }
                     Write-Host "Building image $AshImageName -- this may take a few minutes during the first build..."
 
@@ -544,6 +562,65 @@ function Invoke-ASH {
             throw $_
         }
     }
+}
+
+function Test-AshInteractiveSession {
+    <#
+    .SYNOPSIS
+    Whether this PowerShell session is one a person types into.
+
+    .DESCRIPTION
+    pwsh and powershell started with a command or a script to run (-Command, -File,
+    -EncodedCommand, a script path, or -NonInteractive) end when it does. One started
+    without either, or with -NoExit, is a session a person types into, which `exit`
+    would close. Parameter names may be abbreviated, as PowerShell accepts them.
+    #>
+    param(
+        [string[]]
+        $Arguments = [Environment]::GetCommandLineArgs()
+    )
+    $rest = @($Arguments | Select-Object -Skip 1)
+    foreach ($argument in $rest) {
+        $flag = ("$argument" -replace '^/', '-').ToLowerInvariant()
+        if ($flag.Length -ge 4 -and '-noexit'.StartsWith($flag)) {
+            return $true
+        }
+    }
+    foreach ($argument in $rest) {
+        $flag = ("$argument" -replace '^/', '-').ToLowerInvariant()
+        if ($flag -like '*.ps1' -or $flag -in @('-c', '-f', '-e', '-ec')) {
+            return $false
+        }
+        foreach ($name in @('-command', '-file', '-encodedcommand')) {
+            if ($flag.Length -ge 4 -and $name.StartsWith($flag)) {
+                return $false
+            }
+        }
+        if ($flag.Length -ge 5 -and '-noninteractive'.StartsWith($flag)) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Stop-AshRefusal {
+    <#
+    .SYNOPSIS
+    End an Invoke-ASH run that is refused, with its exit code and message.
+
+    .DESCRIPTION
+    The message goes to stderr directly: Write-Error under
+    $ErrorActionPreference = 'Stop' would end the script with exit 1 before the exit
+    code is set. In a session a person types into, the refusal throws instead of
+    exiting, so the session stays open; $LASTEXITCODE holds the code either way.
+    #>
+    param([int]$ExitCode, [string]$Message)
+    $global:LASTEXITCODE = $ExitCode
+    if (Test-AshInteractiveSession) {
+        throw "ERROR: $Message"
+    }
+    [Console]::Error.WriteLine("ERROR: $Message")
+    exit $ExitCode
 }
 
 Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'OCIRunner' -ScriptBlock {

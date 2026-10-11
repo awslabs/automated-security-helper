@@ -387,7 +387,14 @@
 - **`Invoke-ASH` exits 3 when it refuses, and passes each path as written.** Its refusals
   wrote their message with `Write-Error`, which under `$ErrorActionPreference = 'Stop'`
   (every `pwsh` step on GitHub Actions) ends the script with exit 1 before its `exit 3`;
-  they now write to stderr directly. The build and run commands it hands to
+  they now write to stderr directly and raise no PowerShell error record. In a session
+  a person types into (pwsh started without `-Command`, `-File` or a script), a
+  refusal throws instead of exiting, so the session stays open, with `$LASTEXITCODE`
+  set. It refuses a non-root build when it runs as root (`id -u` is 0) without
+  `-ContainerUID`, or with `-ContainerUID 0` or `-ContainerGID 0`, exit 3, naming
+  `-BuildTarget ci`; a `-ContainerUID` or `-ContainerGID` that is not a number, exit 3;
+  and a `-Config` outside the source directory with an `extends` entry, exit 3, since
+  it mounts such a config without the files it extends. The build and run commands it hands to
   `Invoke-Expression` had the source, output and config paths, the image name and the
   other values spliced into the string, which PowerShell parses. They are now passed
   by name, so each reaches the runner as written, `$(...)` included.

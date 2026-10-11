@@ -126,7 +126,9 @@ def test_the_check_sees_a_spliced_value():
 
 def test_no_refusal_writes_with_write_error_before_it_exits():
     lines = [line.strip() for line in HELPERS.read_text(encoding="utf-8").splitlines()]
-    exits = [i for i, line in enumerate(lines) if re.fullmatch(r"exit \d+", line)]
+    exits = [
+        i for i, line in enumerate(lines) if re.fullmatch(r"exit (\d+|\$\w+)", line)
+    ]
 
     assert exits, "no exit found"
     for index in exits:
