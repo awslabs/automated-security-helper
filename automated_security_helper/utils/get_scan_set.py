@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 import argparse
 import os
 
+from automated_security_helper.utils.git_command import git_argv
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.output_dir_links import open_no_follow
 from automated_security_helper.utils.scanned_tree import (
@@ -1126,7 +1127,8 @@ def git_repository_root(path: Path) -> Optional[Path]:
         return None
     try:
         result = subprocess.run(
-            [git, "rev-parse", "--show-toplevel"],  # nosec B603
+            # git_argv: the repository's config names no program git runs here.
+            git_argv("rev-parse", "--show-toplevel", program=git),  # nosec B603 B607
             capture_output=True,
             text=True,
             timeout=30,
@@ -1177,17 +1179,18 @@ def get_changed_files(
         # matched a finding. -z separates names with NUL and prints them raw, so a
         # name is never split or stripped either. Decoded as UTF-8, which is how git
         # stores paths; surrogateescape keeps any other byte, so the Path still
-        # names the file on disk.
+        # names the file on disk. git_argv: the repository's config names no
+        # program git runs here.
         result = subprocess.run(
-            [  # nosec B603
-                git,
+            git_argv(  # nosec B603 B607
                 "-c",
                 "core.quotepath=false",
                 "diff",
                 "--name-only",
                 "-z",
                 f"{base_ref}...HEAD",
-            ],
+                program=git,
+            ),
             capture_output=True,
             text=True,
             encoding="utf-8",

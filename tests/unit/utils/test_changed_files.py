@@ -62,6 +62,10 @@ class TestGetChangedFiles:
             [
                 GIT,
                 "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
                 "core.quotepath=false",
                 "diff",
                 "--name-only",
@@ -142,6 +146,10 @@ class TestGetChangedFiles:
         mock_run.assert_called_once_with(
             [
                 GIT,
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.hooksPath=/dev/null",
                 "-c",
                 "core.quotepath=false",
                 "diff",
