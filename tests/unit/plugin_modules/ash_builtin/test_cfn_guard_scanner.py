@@ -16,6 +16,10 @@ recorded in the file::
 
 That is also why the captured URIs read ``srv/templates/insecure.yaml``: cfn-guard
 writes the absolute path minus its leading ``/``, which is what the scanner replaces.
+
+``cfn-guard-3.2.1-wa-Security-Pillar-and-cis-aws-benchmark-level-1-insecure.sarif`` is
+the same command with a second ``--rules=<rules>/cis-aws-benchmark-level-1.guard``
+(exit 19): two rule sets that share rules.
 """
 
 from __future__ import annotations
@@ -59,6 +63,11 @@ CAPTURED_INSECURE = (
 )
 CAPTURED_COMPLIANT = (
     FIXTURES / "captured" / "cfn-guard-3.2.1-wa-Security-Pillar-compliant.sarif"
+)
+CAPTURED_OVERLAPPING_SETS = (
+    FIXTURES
+    / "captured"
+    / "cfn-guard-3.2.1-wa-Security-Pillar-and-cis-aws-benchmark-level-1-insecure.sarif"
 )
 
 #: The captured insecure run, as (rule id, start line) -> number of results: 24 in
@@ -190,6 +199,80 @@ class TestNormalization:
             SarifReport.model_validate(raw), "templates/insecure.yaml"
         )
         assert _observed(normalized) != EXPECTED_INSECURE
+
+    def test_a_rule_in_two_selected_rule_sets_is_reported_once(self):
+        """The registry's rule sets share rules, and cfn-guard reports a shared
+        rule's results once per set that holds it, identically.
+
+        Counted from the raw capture with a separate ``json.load``: 42 results,
+        29 distinct. The 24 wa-Security-Pillar gives alone are all among them, and
+        cis-aws-benchmark-level-1 adds 5 of its own.
+        """
+        raw = json.loads(CAPTURED_OVERLAPPING_SETS.read_text())["runs"][0]["results"]
+        distinct = {json.dumps(r, sort_keys=True) for r in raw}
+        assert (len(raw), len(distinct)) == (42, 29)  # the control
+
+        def finding(ruleId, message, region):
+            return (ruleId, message, region["startLine"], region["startColumn"])
+
+        expected = {
+            finding(
+                r["ruleId"],
+                r["message"]["text"],
+                r["locations"][0]["physicalLocation"]["region"],
+            )
+            for r in raw
+        }
+        assert len(expected) == 29
+
+        results = CfnGuardScanner.normalize_results(
+            _load(CAPTURED_OVERLAPPING_SETS), "templates/insecure.yaml"
+        )
+
+        assert len(results) == 29
+        observed = [
+            finding(
+                r.ruleId,
+                r.message.root.text,
+                r.locations[0].physicalLocation.root.region.model_dump(),
+            )
+            for r in results
+        ]
+        assert set(observed) == expected
+        # The single-set capture still parses to exactly its own findings.
+        single = CfnGuardScanner.normalize_results(
+            _load(CAPTURED_INSECURE), "templates/insecure.yaml"
+        )
+        assert _observed(single) == EXPECTED_INSECURE
+
+    @pytest.mark.parametrize("field", ["ruleId", "message", "startLine", "startColumn"])
+    def test_results_that_differ_in_any_field_are_never_merged(self, field):
+        """A copy of a result that differs in one field is another finding.
+
+        One rule's results for different failing clauses share the rule and the
+        location and differ only in their message, which is why the captured run
+        has five S3_BUCKET_PUBLIC_READ_PROHIBITED results at line 9.
+        """
+        raw = json.loads(CAPTURED_INSECURE.read_text())
+        results = raw["runs"][0]["results"]
+        twin = json.loads(json.dumps(results[0]))
+        region = twin["locations"][0]["physicalLocation"]["region"]
+        if field == "ruleId":
+            twin["ruleId"] = "ANOTHER_RULE"
+        elif field == "message":
+            twin["message"]["text"] += " (another clause)"
+        else:
+            region[field] += 1
+        results.append(twin)
+        exact = json.loads(json.dumps(results[1]))
+        results.append(exact)
+
+        normalized = CfnGuardScanner.normalize_results(
+            SarifReport.model_validate(raw), "templates/insecure.yaml"
+        )
+
+        # 24 captured, plus the twin; the exact copy of another result is dropped.
+        assert len(normalized) == 25
 
 
 class TestParseResponse:

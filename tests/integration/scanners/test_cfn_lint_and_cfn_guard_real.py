@@ -251,6 +251,32 @@ def test_the_default_region_is_us_east_1_whatever_the_environment_says(
     }, log
 
 
+def test_a_rule_in_two_selected_rule_sets_is_reported_once(tmp_path):
+    """wa-Security-Pillar and cis-aws-benchmark-level-1 share rules. cfn-guard
+    reports a shared rule's results once per set (42 on insecure.yaml, 29
+    distinct); ASH reports each once."""
+    _require_tools()
+    proc, output, log = _scan(
+        tmp_path,
+        "cfn-guard",
+        config={
+            "scanners": {
+                "cfn-guard": {
+                    "options": {
+                        "rule_sets": ["wa-Security-Pillar", "cis-aws-benchmark-level-1"]
+                    }
+                }
+            }
+        },
+    )
+    assert proc.returncode == 0, log
+    findings = [
+        (r["ruleId"], r["message"]["text"], _where(r))
+        for r in _results(output, "cfn-guard")
+    ]
+    assert len(findings) == len(set(findings)) == 29, log
+
+
 def test_ash_suppressions_apply_by_rule_path_and_line(tmp_path):
     _require_tools()
     suppressions = [

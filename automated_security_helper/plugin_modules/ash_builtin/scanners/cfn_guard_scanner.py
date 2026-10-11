@@ -519,8 +519,18 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
 
     @staticmethod
     def normalize_results(report: SarifReport, uri: str) -> List[Result]:
-        """The results of one template's run, located at ``uri`` and severity-mapped."""
+        """One template's results, located at ``uri``, severity-mapped, each once.
+
+        The registry's rule sets share rules, and cfn-guard 3.2.1 evaluates a
+        rule once per selected set that holds it, reporting identical results
+        each time: ``wa-Security-Pillar`` and ``cis-aws-benchmark-level-1`` on the
+        fixture's insecure template give 42 results, 29 of them distinct. A
+        result is dropped only when it is identical, field for field, to one
+        already kept. One rule's results for different failing clauses share the
+        rule and the location but not the message, so they all stay.
+        """
         results: List[Result] = []
+        seen: Set[str] = set()
         for run in report.runs or []:
             for result in run.results or []:
                 for location in result.locations or []:
@@ -535,6 +545,10 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 if result.properties is None:
                     result.properties = PropertyBag()
                 setattr(result.properties, "issue_severity", VIOLATION_SEVERITY)  # noqa: B010
+                identity = result.model_dump_json()
+                if identity in seen:
+                    continue
+                seen.add(identity)
                 results.append(result)
         return results
 

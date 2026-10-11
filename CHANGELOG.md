@@ -118,7 +118,8 @@
     default rule set `wa-Security-Pillar`, every violation HIGH. Both read the
     templates cfn-nag reads, and neither needs the network. cfn-lint checks
     against us-east-1 unless `regions`, the template or the operator's
-    `.cfnlintrc` names other regions; it does not read `AWS_REGION`.
+    `.cfnlintrc` names other regions; it does not read `AWS_REGION`. A
+    cfn-guard rule in two selected rule sets is reported once.
   - gitleaks 8.30.1 (`gitleaks dir`, working tree only),
     CRITICAL findings with values redacted (`--redact=100`), beside detect-secrets,
     which stays on and unchanged. Inline `gitleaks:allow` comments apply, and so
