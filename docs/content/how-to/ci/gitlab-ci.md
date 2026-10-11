@@ -132,9 +132,13 @@ ash-scan:
 ```
 
 Keep the `ash-gate` job from the first example. The scanners download their vulnerability
-databases during the scan, as they do in the first example. An image built for offline use
-carries the databases instead, and has to be rebuilt within their age bounds; see
-[Refresh cadence](../run-offline.md#refresh).
+databases during the scan, as they do in the first example. An image built with
+`OFFLINE=YES` carries the databases instead. It holds trivy's database to `warn`: past
+trivy's 24-hour bound its scans still pass, and the reports record the stale database.
+grype's database and the offline rulesets still fail the scan past their bounds, so rebuild
+the image within them; see [Refresh cadence](../run-offline.md#refresh).
+`--no-allow-stale-content-db`, as in the job above, holds trivy's database to its bound too,
+so with that flag the image fails every scan that includes trivy within a day of its build.
 
 ## Scan only what a merge request changes
 

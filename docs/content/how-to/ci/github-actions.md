@@ -32,10 +32,6 @@ jobs:
       install-syft: true
       install-opengrep: true
       install-cfn-nag: true
-      install-actionlint: true
-      install-cfn-guard: true
-      install-gitleaks: true
-      install-trivy: true
   sarif:
     needs: ash
     if: ${{ !cancelled() && (needs.ash.result == 'success' || needs.ash.result == 'failure') }}
@@ -53,10 +49,16 @@ Three things in this file are required, not optional:
 - Grant the scan job `contents: read`, `checks: write`, and `pull-requests: write`. The
   called workflow declares all three, and GitHub refuses to start the run when the calling
   job grants less, even if you turn off the comment and the check.
-- Set every `install-*` input to `true`. They default to `false`, while the scanners that
-  need those tools are on by default. A caller that leaves them out gets those scanners
-  reported as MISSING, and the job fails with exit code 1 even when nothing was found. To
-  leave a tool out, turn its scanner off, for example `ash-args: --exclude-scanners cfn-nag`.
+- Set `install-grype`, `install-syft`, `install-opengrep`, and `install-cfn-nag` to `true`.
+  They default to `false`, while the scanners that need those tools are on by default. A
+  caller that leaves them out gets those scanners reported as MISSING, and the job fails
+  with exit code 1 even when nothing was found. The inputs for actionlint, cfn-guard,
+  gitleaks, and trivy default to `true`, so the example leaves them out.
+
+To leave a tool out, turn its scanner off and do not install the tool, for example with
+`--exclude-scanners trivy` in `ash-args` and `install-trivy: false`. An input set to
+`false` while its scanner is on leaves that scanner MISSING, and the incomplete-scan gate
+fails the job with exit code 1.
 
 ASH's zizmor scanner reports each `uses:` line that names a tag as `zizmor/unpinned-uses` at
 HIGH, so a scan of a repository that holds this file fails until you pin both lines to a
@@ -95,10 +97,10 @@ repository can still affect.
 | `install-syft` | `false` | Install syft. |
 | `install-opengrep` | `false` | Install opengrep, and cache the binary for a week. |
 | `install-cfn-nag` | `false` | Set up Ruby and install cfn-nag from the Gemfile in ASH at `ash-version`. |
-| `install-actionlint` | `false` | Install actionlint. |
-| `install-cfn-guard` | `false` | Install cfn-guard and the rule files it evaluates. |
-| `install-gitleaks` | `false` | Install gitleaks. |
-| `install-trivy` | `false` | Install trivy. trivy downloads its vulnerability database during each scan. |
+| `install-actionlint` | `true` | Install actionlint. |
+| `install-cfn-guard` | `true` | Install cfn-guard and the rule files it evaluates. |
+| `install-gitleaks` | `true` | Install gitleaks. |
+| `install-trivy` | `true` | Install trivy. trivy downloads its vulnerability database during each scan. |
 | `changed-files-only` | `false` | Passes `--changed-files-only`. Has no effect in this workflow; see [Scan only the files a pull request changes](#changed-files). |
 | `base-ref` | `origin/main` | Passed as `--base-ref` when `changed-files-only` is `true`. |
 
@@ -108,14 +110,21 @@ installing it. bandit, checkov, semgrep, cfn-lint, and zizmor need no input: ASH
 them from PyPI with `uv tool install` during the scan. detect-secrets is part of ASH, and
 cdk-nag and npm-audit use the Node.js and npm that GitHub's Ubuntu runners include.
 
+The four inputs that default to `true` download their tools on every run: about 180 MB for
+trivy, which is its 52 MB release archive plus the vulnerability database it downloads
+during the scan, and about 14 MB for actionlint, cfn-guard, and gitleaks together. Set an
+input to `false` when the scan does not need its tool, for example with `ash-mode: container`
+or with the scanner turned off.
+
 ### What the workflow does {#steps}
 
 The workflow runs one job, `SAST, SCA, and IaC Scan`, on `ubuntu-latest` with a 30-minute
 timeout. Neither is an input. The job checks out the calling repository, installs the tools
-you asked for, and runs ASH with `uvx --reinstall`. It passes `--source-dir .`, the output
-directory, `--no-progress`, the fail-on-findings choice, `--build-target ci`, and `--mode`;
-`--verbose` unless `verbose` is `false`; `--changed-files-only` and `--base-ref` when
-`changed-files-only` is `true`; and then `ash-args`.
+that the `install-*` inputs select, and runs ASH with `uvx --reinstall`. It passes
+`--source-dir .`, the output directory, `--no-progress`, the fail-on-findings choice,
+`--build-target ci`, and `--mode`; `--verbose` unless `verbose` is `false`;
+`--changed-files-only` and `--base-ref` when `changed-files-only` is `true`; and then
+`ash-args`.
 
 After the scan, whether it passed or failed, the job:
 
@@ -265,10 +274,11 @@ The reusable workflow caches three things:
   than ASH's bound for it (120 hours) is deleted before the scan, so grype downloads a new
   one.
 
-It restores all three on every run. It saves the opengrep binary and grype's database only
-from a push to the repository's default branch, so pull requests do not each write a copy.
-A repository that never runs the workflow on such a push never saves those two, and every
-run downloads them.
+It restores all three on every run. Every other tool that the workflow installs, and
+trivy's database, is downloaded each time. It saves the opengrep binary and grype's
+database only from a push to the repository's default branch, so pull requests do not each
+write a copy. A repository that never runs the workflow on such a push never saves those
+two, and every run downloads them.
 
 In your own steps, cache ASH's tool directory and grype's database. These steps replace
 the install and scan steps of the job above:
@@ -329,7 +339,9 @@ job succeeds, and a scan with findings fails the job. Do not add `restore-keys` 
 database cache: a database past its bound only makes grype download a new one.
 
 Do not cache trivy's database. Its bound is 24 hours, and ASH declares it not cacheable in
-CI. trivy downloads it during each scan.
+CI. Before each online scan, ASH updates it in `$TRIVY_CACHE_DIR`, or in `~/.cache/trivy`
+when that variable is not set (`~/Library/Caches/trivy` on macOS), and passes that
+directory to trivy with `trivy --cache-dir`. Leave it out of your cache steps.
 
 [Content databases](../../concepts/content-databases.md) explains the bounds and what
 happens when a database is past one.

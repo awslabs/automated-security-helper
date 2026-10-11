@@ -43,10 +43,6 @@ jobs:
       install-syft: true
       install-opengrep: true
       install-cfn-nag: true
-      install-actionlint: true
-      install-cfn-guard: true
-      install-gitleaks: true
-      install-trivy: true
 ```
 
 What the parts do:
@@ -56,8 +52,10 @@ What the parts do:
   ASH from the `main` branch.
 - The three permissions let the job read the code, publish a check run, and comment on the
   pull request.
-- The `install-*` inputs install the tools that the default scanners need. Each input
-  defaults to `false`, and a scanner whose tool is missing makes the scan fail.
+- The four `install-*` inputs install grype, syft, opengrep, and cfn-nag, the tools of
+  scanners that are on by default. Each input defaults to `false`, and a scanner whose
+  tool is missing makes the scan fail. The workflow installs the tools for actionlint,
+  cfn-guard, gitleaks, and trivy unless you set their inputs to `false`.
 - `collect-sarif-report: false` because step 4 uploads the SARIF report from a separate
   job.
 - The `push` trigger scans `main` after each merge. Code scanning compares a pull request
@@ -84,8 +82,8 @@ version as the workflow.
 ## 2. Open a pull request and watch the scan
 
 Commit the file, push the branch, and open a pull request. Under **Checks**, the job
-**ash / SAST, SCA, and IaC Scan** starts. The first run downloads every scanner tool and the
-vulnerability databases, so expect it to take several minutes.
+**ash / SAST, SCA, and IaC Scan** starts. It downloads the scanner tools and the
+vulnerability databases first, so expect it to take several minutes.
 
 When it finishes, you see:
 
@@ -101,8 +99,8 @@ If the job fails, the end of its log says why:
 - A line such as `ERROR (2) Exiting due to 3 actionable findings found in ASH scan` means
   ASH found something in your code. The comment and the JUnit check list what.
 - `ERROR (1) Exiting because the scan was incomplete`, followed by scanners marked
-  `MISSING`, means a scanner's tool is not on the runner. Check that every `install-*` input
-  in step 1 is `true`.
+  `MISSING`, means a scanner's tool is not on the runner. Check that the four `install-*`
+  inputs in step 1 are `true` and that no other `install-*` input is set to `false`.
 
 [Exit codes](../reference/exit-codes.md) lists the rest.
 
@@ -123,8 +121,11 @@ Other choices, each set under `with:` in the workflow:
 
 - `fail-on-findings: false` reports findings without failing the job. A scan that did not
   complete still fails.
-- `ash-args: --exclude-scanners cfn-nag` leaves a scanner out. Remove its `install-*` input
-  too.
+- `ash-args: --exclude-scanners cfn-nag` leaves a scanner out. Remove `install-cfn-nag: true`
+  too. For actionlint, cfn-guard, gitleaks, or trivy, set its `install-*` input to `false`,
+  for example `install-trivy: false`, which saves trivy's download of about 180 MB per run.
+  An input set to `false` while its scanner is still on makes that scanner MISSING, and
+  the job fails with exit code 1.
 
 To accept one finding instead, suppress it with a reason and an expiration date; see
 [Suppress findings](../how-to/suppress-findings.md).
