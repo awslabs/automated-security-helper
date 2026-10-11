@@ -101,6 +101,48 @@ jobs:
           path: .ash/ash_output
 ```
 
+### Using the reusable scan workflow
+
+`.github/workflows/run-ash-security-scan.yml` is a reusable workflow that installs ASH
+and the scanners' tools, runs the scan in `ash-mode: local` by default, and posts the
+results:
+
+```yaml
+jobs:
+  ash:
+    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@main
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    with:
+      ash-version: main
+```
+
+`ash-version` selects the ASH the workflow installs, and the `uses:` ref selects the
+workflow file; keep them on the same ref. Each `install-*` input installs the tool of a
+scanner that is on by default and that ASH does not install for itself, and each
+defaults to `true`, so a caller that sets none of them gets every default scanner rather
+than MISSING ones. Each run downloads them (sizes measured on 2026-10-11):
+
+| Input | Downloads |
+| --- | --- |
+| `install-grype` | grype, about 32 MB, and its vulnerability database during the scan, about 190 MB compressed, unless a cached copy inside grype's bound is restored |
+| `install-syft` | syft, about 31 MB |
+| `install-opengrep` | OpenGrep, about 46 MB, reused from a weekly cache when it matches the pin |
+| `install-cfn-nag` | Ruby 3.3 and cfn-nag's pinned gems, about 2.1 MB |
+| `install-actionlint` | actionlint, about 2.4 MB |
+| `install-cfn-guard` | cfn-guard, about 3.4 MB, and its rules |
+| `install-gitleaks` | gitleaks, about 8.2 MB |
+| `install-trivy` | trivy, about 52 MB, and its vulnerability database during the scan, about 127 MB compressed |
+
+Set an input to `false` when the scan does not need the tool: in `ash-mode: container`,
+which brings its own tools, or with the scanner turned off
+(`scanners.<name>.enabled: false`). In local mode, a scanner that is on without its tool
+is MISSING, and the scan exits 1. The installs use `ash dependencies install`, so an
+`ash-version` older than the release that adds a tool's pin cannot install it: set that
+tool's input to `false` there.
+
 ### Using Container Mode
 
 ```yaml

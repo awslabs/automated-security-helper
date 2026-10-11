@@ -182,15 +182,20 @@
   image, or set `scanners.<name>.enabled: false` for any you do not want. Their
   findings count toward `fail_on_findings` like any scanner's, so a scan that passed
   can now exit 2. The reusable workflow
-  `.github/workflows/run-ash-security-scan.yml` installs four of their tools by
-  default: its new `install-actionlint`, `install-cfn-guard`, `install-gitleaks` and
-  `install-trivy` inputs default to true, so a caller that upgrades without setting
-  them still gets those scanners rather than MISSING ones. Each run therefore
-  downloads them: about 180 MB for trivy, which is a 52 MB release archive plus the
-  vulnerability database it downloads during the scan (127 MB compressed, measured
-  on 2026-10-11), and about 14 MB for the other three. A caller that does not need
-  one, for example in `ash-mode: container` or with the scanner disabled, sets its
-  input to false. trivy reads its vulnerability database, so online it downloads
+  `.github/workflows/run-ash-security-scan.yml` installs every default scanner's
+  tool by default: its new `install-actionlint`, `install-cfn-guard`,
+  `install-gitleaks` and `install-trivy` inputs, and the existing `install-grype`,
+  `install-syft`, `install-opengrep` and `install-cfn-nag`, which defaulted to
+  false, all default to true, so a caller that sets none of them gets those
+  scanners rather than MISSING ones. Each run therefore downloads them (measured on
+  2026-10-11): trivy about 180 MB (a 52 MB archive and the 127 MB compressed
+  database it fetches during the scan), grype about 32 MB and, unless a cached copy
+  inside its bound is restored, a 190 MB compressed database, OpenGrep 46 MB unless
+  its weekly cache matches, syft 31 MB, gitleaks, cfn-guard and actionlint about
+  14 MB together, and Ruby 3.3 with cfn-nag's 2.1 MB of gems. A caller that does
+  not need one, for example in `ash-mode: container` or with the scanner disabled,
+  sets its input to false, and so does a caller whose `ash-version` predates a
+  tool's pin, which cannot install it. trivy reads its vulnerability database, so online it downloads
   it, and offline it needs the database in its cache (`TRIVY_CACHE_DIR`). Configs that list the community Trivy
   plugin for `trivy-repo` now run trivy twice; set `scanners.trivy.enabled: false` to
   keep only `trivy-repo`.

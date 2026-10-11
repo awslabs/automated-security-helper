@@ -136,31 +136,32 @@ on:
         required: false
         default: "3.12"
         type: string
+      # Every install-* input installs the tool of a builtin scanner that is on by
+      # default and that ASH does not install for itself, so each defaults to true:
+      # an unset input would leave its scanner MISSING in ash-mode: local, which
+      # fails the incomplete-scan gate. Sizes measured on 2026-10-11 against the
+      # pinned releases. tests/unit/test_scan_workflow_installs_default_scanners.py
+      # holds every install-* input to that default.
       install-grype:
-        description: "Whether to install Grype scanner"
+        description: "Whether to install the grype scanner (about 32 MB), which then downloads its vulnerability database during the scan (about 190 MB compressed) unless a cached copy inside grype's bound is restored. Set false when the scan does not need it, for example in ash-mode: container or with scanners.grype.enabled: false."
         required: false
-        default: false
+        default: true
         type: boolean
       install-syft:
-        description: "Whether to install Syft scanner"
+        description: "Whether to install the syft scanner (about 31 MB). Set false when the scan does not need it, for example in ash-mode: container or with scanners.syft.enabled: false."
         required: false
-        default: false
+        default: true
         type: boolean
       install-opengrep:
-        description: "Whether to install OpenGrep scanner"
+        description: "Whether to install the OpenGrep scanner (about 46 MB, reused from the weekly Actions cache when it matches the pin). Set false when the scan does not need it, for example in ash-mode: container or with scanners.opengrep.enabled: false."
         required: false
-        default: false
+        default: true
         type: boolean
       install-cfn-nag:
-        description: "Whether to install the cfn-nag scanner"
+        description: "Whether to install the cfn-nag scanner: sets up Ruby 3.3 and installs cfn-nag's pinned gems (about 2.1 MB, two of them built natively). Set false when the scan does not need it, for example in ash-mode: container or with scanners.cfn-nag.enabled: false."
         required: false
-        default: false
+        default: true
         type: boolean
-      # The four tools below belong to builtin scanners that are on by default and
-      # that ASH does not install for itself, so they default to true: an unset input
-      # would leave its scanner MISSING in ash-mode: local, which fails the
-      # incomplete-scan gate. tests/unit/test_scan_workflow_installs_default_scanners.py
-      # holds every input of their install step to that default.
       install-actionlint:
         description: "Whether to install the actionlint scanner (about 2.4 MB). Set false when the scan does not need it, for example in ash-mode: container or with scanners.actionlint.enabled: false."
         required: false
