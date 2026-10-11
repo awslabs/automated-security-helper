@@ -305,7 +305,8 @@ scanned tree matches is left out of it, as git would leave it out. A nested igno
 file applies to the directory it sits in, a later negation (`!keep.log`) puts a file
 back, and a directory the root `.gitignore` excludes is not entered at all, so the
 ignore files inside it are not read. ASH also leaves out files on its own: `.git`,
-CDK assets under `cdk.out/asset.*`, and its bundled aws-cdk tree. A CloudFormation
+CDK assets under `cdk.out/asset.*`, its bundled aws-cdk tree, and its own output
+directory when that is inside the source directory. A CloudFormation
 template (`*.template.json`) an ignore file matches is kept, unless it sits in a
 directory the root `.gitignore` excludes. bandit, semgrep, checkov, grype and syft
 walk the source directory themselves, with their own ignore rules, so this setting

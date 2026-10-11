@@ -429,7 +429,7 @@
                    INFO     Identifying non-ignored files to include in scans
                    INFO     No ignore files were found under <TMP>, so no ignore rules removed anything from the scan set.
                    INFO     ASH_INCLUSIONS excluded 0 files from the scan set
-                   INFO     Found 1 files within the provided source directory to scan. Please see the 'ash-scan-set-files-list.txt' in the output folder for the full list of files identified to scan within the source directory identified.
+                   INFO     Found 0 files within the provided source directory to scan. Please see the 'ash-scan-set-files-list.txt' in the output folder for the full list of files identified to scan within the source directory identified.
                    INFO     Executing phases: ['scan']
                    INFO     ===== ASH Security Scan Starting =====
                    INFO     Executing phases: scan

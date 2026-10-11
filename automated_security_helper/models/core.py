@@ -70,8 +70,8 @@ class IgnoreFileExclusions(BaseModel):
             description=(
                 "How many files the ignore files removed from the scan set: the sum "
                 "of by_ignore_file. Files ASH leaves out on its own (.git, CDK "
-                "assets, the bundled aws-cdk tree) are not counted. 0 when the "
-                "ignore files were not honored."
+                "assets, the bundled aws-cdk tree, its own output directory) are "
+                "not counted. 0 when the ignore files were not honored."
             ),
         ),
     ] = 0

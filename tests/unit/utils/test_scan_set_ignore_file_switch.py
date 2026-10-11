@@ -219,6 +219,63 @@ class TestNotHonored:
         assert _record(root, output=str(output)) == {}
 
 
+class TestAshsOwnOutputDirectory:
+    """ASH's log and reports are not part of the code being scanned.
+
+    The default output directory is ``.ash/ash_output`` inside the source
+    directory, and only ``.ash/.gitignore`` (written by ``ash config init``) kept
+    it out of the scan set. With the ignore files not honored, ASH's own log
+    entered it.
+    """
+
+    TREE = {
+        "app.py": "x = 1\n",
+        ".ash/.gitignore": "ash_output*\n",
+        ".ash/ash_output/ash.log": "log\n",
+        ".ash/ash_output/reports/ash.summary.txt": "summary\n",
+    }
+
+    @pytest.mark.parametrize("honor", [True, False])
+    def test_it_is_never_in_the_scan_set(self, tmp_path, honor):
+        root = _build(tmp_path / "src", self.TREE)
+        output = root / ".ash" / "ash_output"
+        found = _names(
+            root,
+            scan_set(source=str(root), output=str(output), honor_ignore_files=honor),
+        )
+        assert not any(name.startswith(".ash/ash_output/") for name in found), found
+        assert "app.py" in found and ".ash/.gitignore" in found
+
+    def test_the_ignore_file_is_not_credited_with_it(self, tmp_path):
+        root = _build(tmp_path / "src", self.TREE)
+        output = root / ".ash" / "ash_output"
+        exclusions: dict = {}
+        scan_set(source=str(root), output=str(output), exclusions=exclusions)
+        assert exclusions["by_ignore_file"] == {".ash/.gitignore": 0}, exclusions
+
+    def test_not_counted_under_a_directory_the_root_gitignore_prunes(self, tmp_path):
+        root = _build(tmp_path / "src", {**self.TREE, ".gitignore": ".ash/\n"})
+        output = root / ".ash" / "ash_output"
+        exclusions: dict = {}
+        scan_set(source=str(root), output=str(output), exclusions=exclusions)
+        # .ash/.gitignore itself, and nothing from the output directory.
+        assert exclusions["by_ignore_file"] == {".gitignore": 1}, exclusions
+
+    def test_control_a_directory_of_that_name_elsewhere_is_scanned(self, tmp_path):
+        root = _build(
+            tmp_path / "src", {"app.py": "x = 1\n", "docs/ash_output/note.md": "n\n"}
+        )
+        found = _names(
+            root,
+            scan_set(
+                source=str(root),
+                output=str(tmp_path / "out"),
+                honor_ignore_files=False,
+            ),
+        )
+        assert "docs/ash_output/note.md" in found
+
+
 class TestHonorsIgnoreFiles:
     @pytest.mark.parametrize(
         "config, expected",

@@ -355,7 +355,7 @@
       }
     },
     "get_scan_summary": {
-      "description": "Get a lightweight summary of scan results without detailed findings.\n\nThis tool returns only high-level metadata and statistics, making it ideal for\nquick status checks without transferring large amounts of data.\n\nReturns:\n- Scan metadata (timestamps, duration, etc.)\n- Findings count by severity\n- Findings count by scanner/tool\n- Scanner execution status\n- No detailed finding information\n\nArgs:\n    output_dir: Path to the scan output directory (absolute path recommended)",
+      "description": "Get a lightweight summary of scan results without detailed findings.\n\nThis tool returns only high-level metadata and statistics, making it ideal for\nquick status checks without transferring large amounts of data.\n\nReturns:\n- Scan metadata (timestamps, duration, etc.), including\n  `ignore_file_exclusions`: whether the scanned repository's .gitignore and\n  .ignore files were honored and how many files they excluded from the scan set\n- Findings count by severity\n- Findings count by scanner/tool\n- Scanner execution status\n- No detailed finding information\n\nArgs:\n    output_dir: Path to the scan output directory (absolute path recommended)",
       "inputSchema": {
         "properties": {
           "output_dir": {

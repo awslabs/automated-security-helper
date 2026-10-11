@@ -210,17 +210,22 @@ def _count_files_ash_would_scan(
     directory: Path,
     own_spec: IgnoreParser,
     forced_inclusions: IgnoreParser,
+    own_output: Optional[str] = None,
 ) -> int:
     """How many files under *directory* stay in the scan set when no ignore file applies.
 
     The test is :func:`get_files_not_matching_spec`'s, with ``ASH_INCLUSIONS`` as
     the whole spec. A file ASH leaves out on its own (``.git``, CDK assets, the
-    bundled aws-cdk tree) was not removed by the ignore file that pruned its
-    directory, so it is not counted. Links to directories are not followed, as in
-    the walk that pruned the directory.
+    bundled aws-cdk tree, its own output directory *own_output*) was not removed
+    by the ignore file that pruned its directory, so it is not counted. Links to
+    directories are not followed, as in the walk that pruned the directory.
     """
     count = 0
-    for root, _dirs, files in os.walk(directory):
+    for root, dirs, files in os.walk(directory):
+        if own_output is not None:
+            dirs[:] = [
+                d for d in dirs if os.path.abspath(os.path.join(root, d)) != own_output
+            ]
         for name in files:
             full_path = os.path.join(root, name)
             if _is_bundled_cdk_path(full_path):
@@ -241,6 +246,7 @@ def _collect_ignorefiles_and_all_files(
     debug: bool = False,
     honor_ignore_files: bool = True,
     pruned_counts: Optional[Dict[str, int]] = None,
+    own_output: Optional[str] = None,
 ) -> tuple[List[str], List[str]]:
     """Walk the directory tree once to collect ignore files and all file paths.
 
@@ -260,6 +266,12 @@ def _collect_ignorefiles_and_all_files(
             pruned that ASH would have scanned without it. Those files are in
             neither list returned, so :func:`report_ignore_file_exclusions` adds
             them to that file's count.
+        own_output: ASH's output directory for this scan. When it sits inside
+            *path* it is not walked, whatever the ignore files say: ASH's own
+            log and reports are not part of the code being scanned. Without
+            this, only a ``.gitignore`` kept them out (``ash config init``
+            writes ``.ash/.gitignore`` for it), so turning the ignore files off
+            put ASH's log into the scan set.
 
     Returns a tuple of (ignore_file_paths, all_file_paths).
     """
@@ -306,8 +318,18 @@ def _collect_ignorefiles_and_all_files(
     own_spec: Optional[IgnoreParser] = None
     forced_inclusions: Optional[IgnoreParser] = None
     pruned_key = os.path.join(path, ".gitignore")
+    # abspath and not resolve, like _confine_base_path: the walked paths keep
+    # whatever prefix the caller spelled, and a symlinked output directory is
+    # refused before any scan set is built.
+    own_output_abs = os.path.abspath(own_output) if own_output else None
 
     for root, dirs, files in os.walk(path):
+        if own_output_abs is not None:
+            dirs[:] = [
+                d
+                for d in dirs
+                if os.path.abspath(os.path.join(root, d)) != own_output_abs
+            ]
         # Prune directories that are ignored by the root .gitignore.
         # This prevents descending into .venv/, node_modules/, etc.
         # and picking up their internal .gitignore files.
@@ -337,7 +359,7 @@ def _collect_ignorefiles_and_all_files(
                 own_spec = _ash_own_exclusion_spec(path)
                 forced_inclusions = _forced_inclusion_spec(path)
             removed = _count_files_ash_would_scan(
-                Path(root) / d, own_spec, forced_inclusions
+                Path(root) / d, own_spec, forced_inclusions, own_output_abs
             )
             pruned_counts[pruned_key] = pruned_counts.get(pruned_key, 0) + removed
 
@@ -1036,7 +1058,8 @@ def scan_set(
         honor_ignore_files: Whether the scanned repository's ``.gitignore`` and
             ``.ignore`` files decide what is left out. False scans every file but
             the ones ASH leaves out on its own (``.git``, CDK assets, the bundled
-            aws-cdk tree). The ``honor_ignore_files`` config key and
+            aws-cdk tree, and *output* when it is inside *source*). The
+            ``honor_ignore_files`` config key and
             ``--no-honor-ignore-files`` set it; see :func:`honors_ignore_files`.
         exclusions: When given, filled with the record of what the ignore files
             removed (:func:`ignore_file_exclusion_record`), which the orchestrator
@@ -1083,6 +1106,7 @@ def scan_set(
             debug=debug,
             honor_ignore_files=honor_ignore_files,
             pruned_counts=pruned_counts,
+            own_output=output,
         )
 
     if not ashignore_content:
