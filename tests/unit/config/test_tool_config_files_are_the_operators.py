@@ -535,3 +535,78 @@ def test_an_in_tree_config_repeating_the_operators_tool_config_is_no_change(
         ASH_LOGGER.removeHandler(handler)
     assert _config_file(config, "bandit") == "/etc/bandit.ini"
     assert not [r for r in records if "Ignoring" in r.getMessage()], records
+
+
+def _warnings_while(call: Any) -> List[str]:
+    import logging
+
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    records: List[logging.LogRecord] = []
+
+    class _Keep(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Keep(level=logging.WARNING)
+    ASH_LOGGER.addHandler(handler)
+    try:
+        call()
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+    return [r.getMessage() for r in records]
+
+
+@pytest.mark.parametrize("value", [True, None])
+def test_a_repositorys_ferret_default_config_choice_at_the_default_is_no_change(
+    tmp_path: Path, value: Any
+) -> None:
+    """``use_default_config: true`` is the default, so nothing is ignored or warned.
+
+    An explicit null is given the default too, rather than handed to the plugin.
+    """
+    repo = _repo(tmp_path, {"ferret-scan": {"options": {"use_default_config": value}}})
+    seen: Dict[str, Any] = {}
+    warnings = _warnings_while(
+        lambda: seen.setdefault("config", resolve_config(source_dir=repo))
+    )
+    options = seen["config"].get_plugin_config("scanner", "ferret-scan")["options"]
+    assert options.get("use_default_config", True) is True
+    assert not [w for w in warnings if "Ignoring" in w], warnings
+
+
+def test_a_confined_choice_on_a_model_section_falls_back_to_its_default() -> None:
+    """A section held as a model is set to the default when the trusted base has none."""
+    from types import SimpleNamespace
+
+    from automated_security_helper.config.tool_config_trust import _MISSING, _set
+
+    options = SimpleNamespace(use_default_config=False)
+    _set(options, "use_default_config", _MISSING, True)
+    assert options.use_default_config is True
+    _set(options, "use_default_config", None, True)
+    assert options.use_default_config is True
+
+
+def test_a_repositorys_default_value_under_an_operators_choice_is_not_warned_about(
+    tmp_path: Path,
+) -> None:
+    """The operator's value applies; the repository only wrote the default."""
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        yaml.safe_dump(
+            {"scanners": {"ferret-scan": {"options": {"use_default_config": False}}}}
+        ),
+        encoding="utf-8",
+    )
+    repo = _repo(tmp_path, {"ferret-scan": {"options": {"use_default_config": True}}})
+    seen: Dict[str, Any] = {}
+    warnings = _warnings_while(
+        lambda: seen.setdefault(
+            "config", resolve_config(source_dir=repo, trusted_config_path=operator)
+        )
+    )
+    options = seen["config"].get_plugin_config("scanner", "ferret-scan")["options"]
+    assert options["use_default_config"] is False
+    assert not [w for w in warnings if "Ignoring" in w], warnings

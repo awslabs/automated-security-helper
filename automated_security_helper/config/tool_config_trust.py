@@ -69,7 +69,9 @@ Failure modes and known limitations
 * ferret-scan's ``checks``, ``confidence_levels`` and ``exclude_patterns`` still
   apply from a repository's config, as other scanners' own filter options do:
   they are ASH options the config states, not a choice inside the tool's config.
-  Under the MCP server they are default ``denied_paths`` entries.
+  Under the MCP server ``checks`` and ``confidence_levels`` are default
+  ``denied_paths`` entries, and an ``exclude_patterns`` entry a client's config
+  adds is reported rather than applied (``config/client_scanner_exclusions.py``).
 """
 
 from __future__ import annotations
@@ -218,10 +220,15 @@ def confine_scanner_config_files(
                 continue
             for name, default in option_defaults.items():
                 wanted = _trusted_option(trusted_options, name)
-                current = _or_default(_get(options, name), default)
+                written = _get(options, name)
+                current = _or_default(written, default)
                 if current in TIGHTENING_VALUES.get((scanner, name), ()):
                     continue
                 if current == _or_default(wanted, default):
+                    if written is None and default is not None:
+                        # An explicit null reads as the default here, but the
+                        # plugin would get None; give it the trusted value.
+                        _set(options, name, wanted, default)
                     continue
                 if current != default:
                     ignored.append(f"scanners.{key}.options.{name}")
