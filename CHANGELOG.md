@@ -1099,6 +1099,22 @@
   config a scan of the current directory would use, instead of always
   `.ash/.ash.yaml`.
 
+### Documentation
+
+- The docs site is reorganized by task: a getting-started path for each audience (local
+  developer, CI owner, platform team, AI agent), how-to guides, concept pages (including
+  the configuration trust model, the scanner sandbox and content databases), and plugin
+  pages. Every moved page redirects to its replacement, keeping the URL fragment.
+- The CLI, configuration, environment variable, scanner, reporter, converter and MCP tool
+  references are generated from the code, and CI fails when one is stale.
+- CI checks every code block in the repository's markdown: commands and options must exist
+  in the CLI, configs must validate, environment variables must be ones ASH reads, Python
+  examples must import, and links and anchors must resolve. Shell and Python blocks run
+  offline in the integration-test job unless marked illustrative with a reason, and the
+  docs build runs with `--strict` and without network access. See
+  [Documentation](https://awslabs.github.io/automated-security-helper/contributing/documentation/).
+- The docs site no longer uses the mkdocs-mermaid2 plugin; Material renders the diagrams.
+
 ## v3.7.0 (2026-08-27)
 
 ### Feat
