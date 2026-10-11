@@ -5,15 +5,15 @@ service in your own AWS account: an MCP server for agents, a pull request gate, 
 sharded pipeline for large repositories. Each target comes as a CDK stack, with its
 synthesized CloudFormation template committed, and as a Terraform module.
 
-ASH publishes no container image, so every target builds the ASH image into an ECR
-repository in your account as part of the deployment, with a CodeBuild project that
-clones ASH from GitHub and rebuilds the image on a schedule.
+ASH publishes no container image, so every deployment builds the ASH image into an ECR
+repository in your account, with a CodeBuild project that clones ASH from GitHub and
+rebuilds the image on a schedule.
 
 ## What `deploy/` provides {#targets}
 
 | Target | What it deploys | CDK template | Terraform module |
 |---|---|---|---|
-| Image pipeline | ECR repository and scheduled CodeBuild image builds | `AshImagePipeline` | `ash-image-pipeline` |
+| Image pipeline | ECR repositories and scheduled CodeBuild builds of the ASH image | `AshImagePipeline` | `ash-image-pipeline` |
 | AgentCore | ASH's MCP server on Amazon Bedrock AgentCore Runtime | `AshAgentCore` | `agentcore` |
 | Fargate | ASH's MCP server on ECS Fargate behind an internal Application Load Balancer | `AshFargate` | `fargate` |
 | CodeCommit gate | A container Lambda function that scans a CodeCommit pull request and comments on it | `AshCodeCommitGate` | `codecommit-gate` |
@@ -35,25 +35,29 @@ clones ASH from GitHub and rebuilds the image on a schedule.
 [`deploy/README.md`](https://github.com/awslabs/automated-security-helper/blob/main/deploy/README.md)
 lists the parameters the targets share and how the CDK and Terraform names map.
 
-## Prerequisites {#prerequisites}
+Prerequisites:
 
 - An AWS account, and credentials that can create IAM roles, an ECR repository, a
   privileged CodeBuild project (it builds a container image), and the services of the
   target you choose.
 - Outbound internet access for the image build. CodeBuild clones ASH from GitHub, pulls
-  the Python base image from Amazon ECR Public and downloads the scanner tools.
+  the Python base image from Amazon ECR Public, and downloads the scanner tools.
 - For a console launch, nothing else. To deploy from source, Node.js and npm for CDK, or
   Terraform with access to the Terraform registry for `terraform init`.
 
 ## Before you deploy {#before}
 
-- `AshVersion`, the ASH tag the image is built from, defaults to `v3.7.0`. Some targets
-  call options that v3.7.0 does not have: stateless MCP (`ash mcp --stateless-http`), and
-  `ash merge` with the shard options for the distributed pipeline. With the default
-  version, the Fargate MCP container exits at startup, the AgentCore server starts in
-  stateful mode and logs a warning, and the distributed pipeline's merge step fails. Set
-  `AshVersion` to a release that has these options; each target's README lists what it
-  needs.
+- `AshVersion`, the git ref the image is built from, defaults to a 3.7.x release in the
+  CloudFormation templates; the Terraform `ash_version` variable has no default. Some
+  targets call options that releases up to 3.7.x do not have: stateless MCP
+  (`ash mcp --stateless-http`), and `ash merge` with the shard options for the
+  distributed pipeline. With the templates' default, the Fargate MCP container exits at
+  startup, the AgentCore server starts in stateful mode and logs a warning, and the
+  distributed pipeline cannot run its shard and merge commands. Set `AshVersion` to a
+  ref whose ASH has these options. The CloudFormation templates clone it with
+  `git clone --branch`, so there it must be a tag or a branch; the Terraform
+  `ash-image-pipeline` module also accepts a commit SHA. Each target's README lists what
+  it needs.
 - The image is only as current as its last build. The build runs on the `RebuildSchedule`
   you set, and rebuilding the image does not update a running service on its own; each
   target's README says how to roll it out.
@@ -61,7 +65,10 @@ lists the parameters the targets share and how the CDK and Terraform names map.
 
 ## Network defaults {#network}
 
-The templates set these defaults. Each README explains how to change them.
+The CloudFormation templates set these defaults. The Terraform modules have defaults of
+their own: for example, the `fargate` module can terminate TLS with a certificate and lets
+its tasks send to any address. Each module's README lists them, and each README explains
+how to change them.
 
 - Fargate: the load balancer is internal, listens on HTTP port 80, and has no ingress
   rule until you set `McpIngressCidr`, which rejects `0.0.0.0/0`. With it empty, nothing
@@ -74,7 +81,7 @@ The templates set these defaults. Each README explains how to change them.
 
 ## Target READMEs {#readmes}
 
-Each module's README covers its inputs, outputs, verified behavior and known limitations:
+Each module's README covers its inputs, outputs, verified behavior, and known limitations:
 
 - [`ash-image-pipeline`](https://github.com/awslabs/automated-security-helper/blob/main/deploy/terraform/modules/ash-image-pipeline/README.md)
 - [`agentcore`](https://github.com/awslabs/automated-security-helper/blob/main/deploy/terraform/modules/agentcore/README.md)

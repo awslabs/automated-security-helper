@@ -1,9 +1,11 @@
 # Run ASH offline
 
-In offline mode ASH installs nothing and no scanner fetches updates during the scan.
-Scanners that need vulnerability data read it from a local cache, and ASH fails the scan
-when a cache is older than its bound: a clean result from a stale database is not
-evidence of a clean target. [Content databases](../concepts/content-databases.md) explains
+In offline mode ASH installs nothing and runs every scanner in its offline mode. Scanners
+that need vulnerability data read it from a local cache, and ASH fails the scan when a
+cache is past its age bound: a clean result from a stale database is not evidence of a
+clean target. Offline mode does not remove the network itself, and two scanners can still
+make requests (see [What each scanner does offline](#scanners)); only the sandbox, or
+container mode with `--offline`, takes the network away. [Content databases](../concepts/content-databases.md) explains
 the bounds; this page is about preparing for them.
 
 ## Turn on offline mode
@@ -15,35 +17,36 @@ Pass `--offline` to a scan:
 ash scan --offline --scanners detect-secrets
 ```
 
-detect-secrets needs no network, so this scan finds the sample project's hardcoded
-password and exits 2. The log also shows a warning for each scanner whose offline cache
-is not set up, such as `Grype offline mode: GRYPE_DB_CACHE_DIR not set`.
+This scan runs offline as usual; in a repository with a hardcoded password it exits 2.
+The log also shows a warning for each scanner whose offline cache is not set up, such as
+`Grype offline mode: GRYPE_DB_CACHE_DIR not set`.
 
 The other ways to turn it on:
 
 | How | Scope |
 |---|---|
-| `ASH_OFFLINE=YES` (also `TRUE` or `1`) in the environment | Every ASH run that inherits it. `--offline` in local mode sets it for one scan and restores it afterwards. |
+| `ASH_OFFLINE=YES` (also `TRUE` or `1`) in the environment | Every ASH run that inherits it. `--offline` in local mode sets it for one scan and restores it afterward. |
 | `ash scan --mode container --offline` | Builds an offline image and runs it with no network. See [the offline image](#offline-image). |
 | `--mode nix` | Always offline. |
 | `scanners.<name>.options.offline: true` | That scanner only. `false`, the default, follows ASH and cannot give a scanner network while ASH is offline. |
 
-There is no top-level config key for offline mode.
+There is no config key for offline mode. `build.build_mode` exists in the config schema but has no effect.
 
 ## What each scanner does offline {#scanners}
 
 | Scanner | Offline behavior |
 |---|---|
-| grype | Reads its cached database with updates and grype's own age check off. ASH fails the scan when the database is more than 120 hours old. |
-| trivy, trivy-repo | Read the cached trivy database with every update off. ASH fails the scan when it is more than 24 hours old. With no database, `trivy` is MISSING. |
-| semgrep, opengrep | Run the rulesets in `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` plus ASH's bundled rules, instead of the configured registry rulesets. MISSING when the directory is unset or empty. ASH fails the scan when the rulesets are more than 30 days old. |
+| grype | Reads its cached database with updates and grype's own age check off. ASH fails the scan when the database is past its age bound ([Refresh cadence](#refresh)). |
+| trivy, trivy-repo | Read the cached trivy database with its updates off. ASH fails the scan when the database is past its age bound. With no database, `trivy` is MISSING. trivy still checks for a newer trivy release unless the network is gone. |
+| semgrep, opengrep | Run the rulesets in `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` plus ASH's bundled rules, instead of the configured registry rulesets. MISSING when the directory is unset or empty. ASH fails the scan when the rulesets are past their age bound. |
+| detect-secrets | Runs as usual. If its settings turn on detect-secrets' verification filter, it still sends each candidate secret to the service that issued it, to check whether it is live; under the sandbox, leave detect-secrets out of `sandbox.network_scanners` to stop that. |
 | checkov | Uses the policies in the installed package and skips platform downloads. |
 | npm-audit | Runs `npm audit --offline`. A lockfile it cannot audit becomes a warning, not an error, so the scanner can pass with no results. |
 | syft | Skips its update check. |
 | zizmor | Runs offline, as it does by default. |
 | snyk-code | Does not run. |
-| GuardDog | MISSING unless already installed. With `options.verify: true`, which downloads dependencies, the scanner reports ERROR; set `verify` to `false` for offline scans. |
-| bandit, detect-secrets, cdk-nag, cfn-nag, cfn-lint, cfn-guard, actionlint, gitleaks, hadolint | No change, once installed. |
+| guarddog | MISSING unless already installed. With `options.verify: true`, which downloads dependencies, the scanner reports ERROR; set `verify` to `false` for offline scans. |
+| bandit, cdk-nag, cfn-nag, cfn-lint, cfn-guard, actionlint, gitleaks, hadolint | No change, once installed. |
 
 Offline, ASH also skips every tool install. A scanner whose tool is not already on the
 machine is MISSING, and a MISSING scanner fails the scan by default.
@@ -52,7 +55,9 @@ machine is MISSING, and a MISSING scanner fails the scan by default.
 
 Do this while the host still has network access:
 
-1. Install the scanner tools with `ash dependencies install`.
+1. Install the scanner tools with `ash dependencies install`. It puts grype and trivy in
+   `~/.ash/bin` (or the directory `ASH_BIN_PATH` names), which ASH searches but which is
+   not on your `PATH`.
 2. Download each database into the cache the scan will read. Set the cache variables
    the same way for the download and for every scan; when they are unset, grype and
    trivy use their platform defaults (for example `~/.cache/grype/db` and `~/.cache/trivy`
@@ -61,8 +66,8 @@ Do this while the host still has network access:
     <!-- doctest: illustrative reason="downloads the grype and trivy databases from the network" -->
     ```bash
     export GRYPE_DB_CACHE_DIR="$HOME/ash-cache/grype" TRIVY_CACHE_DIR="$HOME/ash-cache/trivy"
-    grype db update
-    trivy image --download-db-only --cache-dir "$TRIVY_CACHE_DIR"
+    "${ASH_BIN_PATH:-$HOME/.ash/bin}/grype" db update
+    "${ASH_BIN_PATH:-$HOME/.ash/bin}/trivy" image --download-db-only --cache-dir "$TRIVY_CACHE_DIR"
     ```
 
 3. For semgrep and opengrep, download the rulesets into `SEMGREP_RULES_CACHE_DIR` and
@@ -70,15 +75,17 @@ Do this while the host still has network access:
    [Seeding the semgrep and opengrep rule cache](../docs/advanced-usage.md#seeding-the-semgrep-and-opengrep-rule-cache).
    Without a recorded time, ASH takes the age of the oldest rules file.
 
-If you also run scanners in the [sandbox](../docs/scanner-sandbox.md), the sandbox does
-not grant the rule cache directories by itself. Add them to `sandbox.extra_read_paths` in
-a config file outside every git checkout, or with `--config-overrides`.
+If you also run scanners in the sandbox ([Enable the scanner sandbox](../docs/scanner-sandbox.md)),
+semgrep and opengrep can read only the directories the sandbox mounts. Keep the rules
+cache under a system directory such as `/opt`, or add it to `sandbox.extra_read_paths` in
+a config file outside every git checkout or with `--config-overrides`. Then check that a
+sandboxed offline scan of a file with a known finding reports it.
 
 ## The offline image {#offline-image}
 
 `ash build-image --offline` and `ash scan --mode container --offline` build the image with
 `OFFLINE=YES`. The build needs network access: it downloads the grype database, the trivy
-database and the semgrep rulesets named by `--offline-semgrep-rulesets` (default `p/ci`),
+database, and the semgrep rulesets named by `--offline-semgrep-rulesets` (default `p/ci`),
 copies the rulesets for opengrep, and fails if any of them is empty. The image has
 `ASH_OFFLINE` set, so every scan in it runs offline.
 
@@ -99,13 +106,14 @@ is before you download them, and the rulesets from the time they were downloaded
 | opengrep rulesets | `opengrep-offline-rules` | 30 days | Download again, or rebuild the offline image |
 
 The trivy bound sets the pace. An offline image fails every scan that includes trivy
-within a day of its build, so rebuild offline images daily, refresh the trivy cache daily
-on offline hosts, or exclude trivy with `--exclude-scanners trivy`. The bounds are fixed in
+less than a day after its build, so rebuild offline images that scan with trivy more than
+once a day, refresh the trivy cache more than once a day on offline hosts, or exclude
+trivy with `--exclude-scanners trivy`. The bounds are fixed in
 the code; no setting changes them. When ASH cannot read a database's age at all, it counts
 the database as stale.
 
 A stale database fails the scan with exit code 1 and a message that names the database,
-its build time, its age and the bound. The findings are kept in the reports.
+its build time, its age, and the bound. The findings are kept in the reports.
 
 ## Allow a stale database {#allow-stale}
 

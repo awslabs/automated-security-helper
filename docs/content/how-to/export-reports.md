@@ -1,9 +1,9 @@
 # Export reports
 
 Every scan writes its reports to `reports/` in the output directory
-(`.ash/ash_output/reports/` by default). Thirteen reporters are on by default, so a default
-scan writes one file per format, and the usual way to export is to pick the file your
-destination reads:
+(`.ash/ash_output/reports/` by default). Thirteen reporters are on by default, and each
+writes its own file (`unused-suppressions` writes two), so the usual way to export is to
+pick the file your destination reads:
 
 | Destination | File in `reports/` |
 |---|---|
@@ -17,7 +17,7 @@ destination reads:
 | A person | `ash.html`, `ash.summary.md`, `ash.summary.txt` |
 | Your own scripts | `ash.flat.json` |
 
-[Reporters](../reference/reporters.md) lists every reporter with its options, and
+[Reporters reference](../reference/reporters.md) lists every reporter with its options, and
 [Output files](../reference/output-files.md) describes the rest of the output directory.
 
 ## Choose which reports to write {#formats}
@@ -29,7 +29,7 @@ To write fewer files, pass `--output-formats` (or `-f`) with a comma-separated l
 ash scan --scanners detect-secrets --output-formats sarif,junitxml
 ```
 
-The scan exits 2 for the sample project's finding, and `reports/` holds only the two
+When detect-secrets finds a secret, the scan exits 2, and `reports/` holds only the two
 files you asked for:
 
 ```bash
@@ -44,9 +44,9 @@ ash.sarif
 The option has limits:
 
 - It accepts `text`, `flat-json`, `yaml`, `csv`, `html`, `junitxml`, `markdown`, `sarif`,
-  `ocsf`, `cyclonedx` and `spdx`. It also accepts `aggregated`, `dict`, `asff` and `custom`,
-  which write nothing.
-- It cannot name `github-ghas`, `gitlab-sast`, `gitlab-cyclonedx` or
+  `ocsf`, `cyclonedx`, and `spdx`. It also accepts `aggregated`, `dict`, `asff`, and
+  `custom`, which write nothing.
+- It cannot name `github-ghas`, `gitlab-sast`, `gitlab-cyclonedx`, or
   `unused-suppressions`. A scan that names one stops with a usage error before scanning,
   and exits 2, the same code as a scan with findings. Any `--output-formats` list turns
   those four reporters off.
@@ -55,8 +55,8 @@ The option has limits:
 - A config file has no output-formats key, and ASH ignores an `output_formats:` line
   in one.
 
-To control reporters from configuration, turn each one on or off. This keeps the
-default set and adds SPDX:
+To control reporters from configuration, turn each one on or off. This adds SPDX to the
+default set and drops HTML:
 
 <!-- doctest: config kind=ash -->
 ```yaml
@@ -67,7 +67,8 @@ reporters:
     enabled: false
 ```
 
-On the command line, the same settings are `--config-overrides reporters.spdx.enabled=true`.
+On the command line, the same settings are
+`--config-overrides reporters.spdx.enabled=true --config-overrides reporters.html.enabled=false`.
 
 To produce one more format after a scan, render it from the saved results with
 `ash report`. It runs any loaded reporter, including the four that `--output-formats`
@@ -79,8 +80,10 @@ ash report --format gitlab-sast --log-level QUIET > gl-sast-report.json
 
 ## GitHub code scanning {#github}
 
-Upload `ash.ghas.sarif`. It is SARIF 2.1.0 with every rule given a `security-severity`,
-so GitHub shows Critical, High, Medium and Low, and it leaves out suppressed findings
+Upload `ash.ghas.sarif`. It is SARIF 2.1.0 in which every rule a scanner declares gets a
+`security-severity`, so GitHub shows those findings as Critical, High, Medium, or Low. A
+scanner that declares no rules, such as detect-secrets, gives results with no rule entry,
+and GitHub shows those by their SARIF level. The file leaves out suppressed findings
 (`exclude_suppressed`, default `true`), because GitHub has its own dismissal workflow. The
 job needs `security-events: write`, and the upload step has to run when the scan step
 fails, because a scan with findings exits 2:
@@ -121,8 +124,8 @@ them out.
 
 `ash.junit.xml` has one test suite per scanner and one test case per finding. Suppressed
 findings and findings below the severity threshold are written as skipped test cases, so
-a CI test view shows the same verdict as the scan. To report those below the threshold as
-failures, set `reporters.junitxml.options.respect_severity_threshold: false`.
+a CI test view shows the same verdict as the scan. Actionable findings are written as
+`<error>` elements. To report those below the threshold as errors too, set `reporters.junitxml.options.respect_severity_threshold: false`.
 
 ## CycloneDX and SPDX {#sbom}
 
@@ -131,7 +134,7 @@ run, the file contains `{}`, which is not a valid CycloneDX document. `ash.spdx.
 converts the same SBOM to SPDX 2.3 and is written only when you enable the `spdx`
 reporter.
 
-## CSV, HTML and the summaries {#other}
+## CSV, HTML, and the summaries {#other}
 
 - `ash.csv` has one row per finding, with suppression status and justification columns.
 - `ash.html` is a single page with inline styles, suitable for an artifact viewer.
@@ -143,7 +146,7 @@ reporter.
 
 - Reports can contain source text. ASH masks secrets in finding messages, but a scanner
   that includes the matching source lines in its result passes them through to the SARIF,
-  CSV, flat JSON, GitLab SAST and YAML reports. Treat report files as you treat the code.
+  CSV, flat JSON, GitLab SAST, and YAML reports. Treat report files as you treat the code.
 - Findings in files that ASH extracted from archives or converted from notebooks carry
   absolute paths from the machine that ran the scan.
 - A reporter that fails does not change the exit code. ASH logs the error and the file is

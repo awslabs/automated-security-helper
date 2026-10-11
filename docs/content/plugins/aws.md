@@ -8,7 +8,7 @@ can choose where they send data and which credentials they use.
 |---|---|---|
 | `s3` | An S3 bucket | The scan summary and the resolved ASH configuration |
 | `cloudwatch-logs` | A CloudWatch Logs log group | The same summary and configuration |
-| `bedrock-summary-reporter` | Amazon Bedrock | Finding messages, rule IDs, file paths and line numbers, and severity counts |
+| `bedrock-summary-reporter` | Amazon Bedrock | Finding messages, file paths, and severity counts |
 | `aws-security-hub` | Nothing in this version | Nothing; see [aws-security-hub](#aws-security-hub) |
 
 The S3 and CloudWatch Logs reporters do not send individual findings. To collect findings
@@ -53,14 +53,17 @@ reporters:
     enabled: false
 ```
 
-A repository's own config file can also set `enabled: false` for these reporters when a
+A repository's own config file can also turn these reporters off and set the Bedrock
+reporter's content options, such as `include_code_snippets` and `custom_prompt`, when a
 scan reads it. If you load the package with `--ash-plugin-modules` and let ASH read the
-repository's config, the repository can turn your reporters off. Pass your config with
-`--config` to prevent that; ASH then does not read the repository's config file.
+repository's config, the repository can change what your reporters do. Pass your config
+with `--config` to prevent that; in a scan of one directory, ASH then does not read the
+repository's config file.
 
 A reporter that is missing its destination or credentials, or fails its pre-flight call,
 is dropped from the run without changing the exit code. S3 and CloudWatch Logs skip
-silently when the bucket or log group is not set, so check the log for each run.
+without a log message when the bucket or log group is not set, so check after each run
+that `reports/ash.s3.json` and `reports/ash.cwlog.json` exist.
 
 ## Destinations and credentials {#destinations}
 
@@ -88,12 +91,16 @@ Bedrock reporter still sends data.
 
 In container mode, the scan runs inside the container and the host's AWS environment
 variables and credential files are not passed in ([Run ASH in a container](../how-to/run-in-a-container.md#mounts)).
+A role the container can reach through the instance metadata service may still be used;
+use `--offline`, or a network that blocks the metadata service, if that matters.
 
 ## What each reporter sends {#what-is-sent}
 
-Every reporter first calls `sts:GetCallerIdentity`, which needs no IAM permission.
+The S3, CloudWatch Logs, and Bedrock reporters first call `sts:GetCallerIdentity`, which
+needs no IAM permission. The Security Hub reporter calls it only when `account_id` is not
+set.
 
-### s3 {#s3}
+### `s3` {#s3}
 
 Uploads one object per scan to `<key_prefix>ash-report-<generated_at>.json` (in workspace
 mode `<key_prefix><project>/ash-report-<generated_at>.json`), or `.yaml` with
@@ -108,7 +115,7 @@ Before the upload it calls `HeadBucket`. Locally it writes the uploaded content 
 IAM: `s3:PutObject` on `arn:aws:s3:::<bucket>/<key_prefix>*`, and `s3:ListBucket` on the
 bucket, which `HeadBucket` requires.
 
-### cloudwatch-logs {#cloudwatch-logs}
+### `cloudwatch-logs` {#cloudwatch-logs}
 
 Sends one log event per scan with the same summary and configuration as the S3 object,
 to the stream `log_stream_name` in `log_group_name`. It creates the stream if needed;
@@ -117,37 +124,39 @@ the log group must already exist. Locally it writes the event and the API respon
 
 IAM: `logs:CreateLogStream` and `logs:PutLogEvents` on the log group.
 
-### bedrock-summary-reporter {#bedrock}
+### `bedrock-summary-reporter` {#bedrock}
 
 Asks a Bedrock model, through the Converse API, for an executive summary, a risk
-assessment, recommendations and a technical analysis, and writes them to
-`reports/ash.bedrock.summary.md`, `reports/bedrock-executive.md` and
-`reports/bedrock-technical.md`. A scan of the sample project made six Converse calls.
+assessment, recommendations, and a technical analysis, and writes them to
+`reports/ash.bedrock.summary.md`, `reports/bedrock-executive.md`, and
+`reports/bedrock-technical.md`. A test scan of a small project with one finding made six
+Converse calls; more severity levels in the results mean more calls.
 
-The prompts contain the names of the scanners that ran, severity counts, and, for each
-finding sent, its rule ID, level, message text and file paths with line numbers. With
-`actionable_only` (default `true`) it leaves out suppressed findings; findings below the
-severity threshold are still sent. It sends a sample of the rest: up to `max_findings_to_analyze` (default 10) per request and up to
-`max_findings_per_severity` (default 5) per severity. With `batch_processing: true` it sends
-every actionable finding, in batches. Source code is sent only with
-`include_code_snippets: true`. `custom_prompt`, `custom_context`, `industry_context` and
+The prompts contain the names of every scanner in the results, severity counts, and, for
+each finding sent, its level, its message text, and its file paths. Line numbers are sent
+where a scanner's message includes them. With `actionable_only` (default `true`) the
+reporter leaves out suppressed findings; findings below the severity threshold are still
+sent. It sends a sample of the rest: up to `max_findings_to_analyze` (default 10) per
+request and up to `max_findings_per_severity` (default 5) per severity. With
+`batch_processing: true` and `group_by_severity: false` it sends every actionable finding,
+in batches. `custom_prompt`, `custom_context`, `industry_context`, and
 `compliance_frameworks` are added to the prompts.
 
-`exclude_scanner_types` (default `["SECRET"]`) has no effect in this version: findings
-from secret scanners are sent with the others. Finding messages describe the match and
-do not normally contain the secret value, but they name the file and line.
+Findings from secret scanners are sent with the others: the type of secret, the file and,
+in the message, the line. Source code is sent only with `include_code_snippets: true`;
+leave it off when the scanned code may hold credentials.
 
-When a call fails, the reporter retries with another model from a built-in list for the
-same model family, unless `enable_fallback_models` is `false`.
+The reporter sends every request to `model_id`. Set it to a model or inference profile
+your role can invoke in that Region.
 
 IAM: `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles`, which it calls
 to check the model, and `bedrock:InvokeModel`, which the Converse API requires. The
 default model is a cross-Region inference profile, so allow `bedrock:InvokeModel` on the
 inference profile and on the foundation model in each Region the profile routes to, as
 the [Bedrock inference profile prerequisites](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-prereq.html)
-describe. Add the fallback models too, or turn fallback off.
+describe.
 
-### aws-security-hub {#aws-security-hub}
+### `aws-security-hub` {#aws-security-hub}
 
 This version does not send findings to Security Hub. The reporter calls `DescribeHub` to
 check that Security Hub is enabled, then logs a warning that findings have not been sent
@@ -159,11 +168,16 @@ finding count. It needs `securityhub:DescribeHub`.
 `ash report --format s3`, or the name of any of the other three, runs that reporter
 against the results of a previous scan, which sends the data again. It skips the
 reporter's pre-flight call and uses the destinations of the configuration it resolves.
+`ash report` has no `--ash-plugin-modules` option and does not read `ASH_PLUGIN_MODULES`,
+and without `--config` it reads the config file of the directory you run it from. Run it
+from outside the repository, and load the package with your config file
+(`--config`) or with
+`--config-overrides 'ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_aws_plugins]'`.
 
 ## Example IAM policy {#iam}
 
 A policy for the configuration above (S3 and CloudWatch Logs only), with your account,
-bucket and log group:
+bucket, and log group:
 
 <!-- doctest: config kind=other reason="IAM policy document, not an ASH config" -->
 ```json

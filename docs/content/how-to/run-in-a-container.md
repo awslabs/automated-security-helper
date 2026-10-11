@@ -8,27 +8,32 @@ reuse it.
 Prerequisites:
 
 - ASH installed on the host ([Install ASH](install.md)).
-- One of finch, docker, nerdctl or podman on `PATH`.
+- One of finch, docker, nerdctl, or podman on `PATH`.
 - Network access while the image builds. The build pulls the Python base image from
-  Amazon ECR Public, clones ASH from GitHub and downloads the scanner tools.
+  Amazon ECR Public, clones ASH from GitHub unless it builds a local source tree, and
+  downloads the scanner tools.
 
 ## Scan in container mode
 
-Run ASH from a directory outside the repository you scan, name the repository with
-`--source-dir`, and write the results outside it:
+Run container-mode scans from a directory that is not the repository you scan and holds
+no `Dockerfile` of its own. If you installed ASH from a clone of its repository, run them
+from that clone. Name the repository with `--source-dir`, and keep the source and the
+output in separate directory trees:
 
 <!-- doctest: illustrative reason="needs a container runtime and network access to build the image" -->
 ```bash
 cd ~/work
-ash scan --mode container --source-dir my-app --output-dir ash-results/my-app
+ash scan --mode container --source-dir src/my-app --output-dir ash-output/my-app
 ```
 
 ASH builds the image (several minutes the first time; later builds reuse the layer
-cache), runs the scan inside it, reads the results back from the output directory and
-exits with the same [exit codes](../reference/exit-codes.md) as a local scan.
+cache), runs the scan inside it, reads the results back from the output directory, and
+exits with the same [exit codes](../reference/exit-codes.md) as a local scan. A container
+that fails to start, and a build that fails, exit with the runtime's own status instead.
 
 These `ash scan` options control the image:
 
+<!-- doctest: options of=cli.scan -->
 | Option | Effect |
 |---|---|
 | `--no-build` | Run the existing image instead of building it. |
@@ -44,7 +49,7 @@ Spell options out in full: the short flags differ between the two commands. On `
 
 ## Choose the container runtime {#runtime}
 
-ASH uses the first of finch, docker, nerdctl and podman that it finds on `PATH`. To pick
+ASH uses the first of finch, docker, nerdctl, and podman that it finds on `PATH`. To pick
 one, pass `--oci-runner podman` or set `OCI_RUNNER=podman`. To prefix every runtime call
 with another command, such as `sudo`, set `OCI_RUNNER_WRAPPER=sudo`.
 
@@ -60,10 +65,10 @@ The Dockerfile has two final stages:
 
 ASH builds the `ci` target whatever `--build-target` says when any of these is true:
 
-- One of the environment variables `CI`, `IsCI`, `ISCI` or `CODEBUILD_BUILD_ID` is set, to
+- One of the environment variables `CI`, `IsCI`, `ISCI`, or `CODEBUILD_BUILD_ID` is set, to
   any value, including `false`. Most CI services set `CI`. To build the non-root image in
   such a job, run ASH with those variables removed, for example
-  `env -u CI ash build-image --no-run`.
+  `env -u CI -u IsCI -u ISCI -u CODEBUILD_BUILD_ID ash build-image --no-run`.
 - You pass `--custom-containerfile`.
 - You run `ash build-image` on Windows.
 
@@ -78,34 +83,34 @@ The image installs ASH from source, chosen from how ASH was installed on the hos
 |---|---|
 | From a git URL with a tag, such as `@v3.7.0` | That tag, cloned from GitHub when the image builds. |
 | From a git URL with a branch, such as `@main` | The tip of that branch when the image builds, which can differ from the commit installed on the host. |
-| From a git URL with no ref | The installed commit id. The build clones with `git clone --branch`, which cannot check out a commit id, so pass `--ash-revision-to-install` with a tag or branch. |
-| A clone of the ASH repository, or a local path | The local source tree: the build uses the `Dockerfile` in the current directory, or in the nearest parent directory that also holds a `pyproject.toml`, so run ASH from inside your ASH clone. |
+| From a git URL with no ref | The installed commit ID. The build clones with `git clone --branch`, which cannot check out a commit ID, so the build fails; pass `--ash-revision-to-install` with a tag or branch. |
+| A clone of the ASH repository, or a local path | The local source tree. Run ASH from inside that clone. |
 
 `--ash-revision-to-install` overrides the table with a tag or branch name. It accepts
-letters, digits, dots, hyphens, underscores and slashes.
+letters, digits, dots, hyphens, underscores, and slashes.
 
 ## Mounts and network {#mounts}
 
 The container sees two host directories: the source directory at `/src` and the output
-directory at `/out`. ASH mounts the source read-only only when the output directory is
-outside it, and it decides that by comparing path strings: an output directory whose path
-starts with the source path counts as inside. The default output directory,
-`<source>/.ash/ash_output`, is inside, so by default the scan can write to your source.
-Pass an `--output-dir` whose path does not start with the source path (`/work/my-app` and
-`/work/my-app-results` count as nested) to mount the source read-only.
+directory at `/out`. Keep the two in separate directory trees, such as
+`~/work/src/my-app` and `~/work/ash-output/my-app`, as in the example above; ASH then
+mounts the source read-only. The default output directory, `.ash/ash_output`, is inside
+the scanned directory.
 
 Inside the container ASH runs a local-mode scan of `/src`. Some things do not carry over:
 
-- Configuration files outside the source directory. `--config` is passed into the
-  container as the same path, and a file the container cannot read at that path is not
-  found: ASH logs `Configuration file not found` and scans with the default
-  configuration plus your `--config-overrides`. Only `fail_on_findings` and
-  `fail_on_incomplete_scanners` from your file still apply, because the host passes them
-  as flags. In container mode, give settings with `--config-overrides`, or
-  [run ASH inside your own image](#own-image) with the file mounted.
+- Your `--config` file. ASH does not pass the file into the container; it passes the
+  path, which the scan inside reads relative to `/src`, where your host's file is not. ASH
+  there logs `Configuration file not found` and scans with the default configuration plus
+  your `--config-overrides`. Only `fail_on_findings` and `fail_on_incomplete_scanners`
+  from your file still apply, because the host passes them as flags. In container mode,
+  give settings with `--config-overrides`, or [run ASH inside your own image](#own-image)
+  with the file mounted.
 - Environment variables. The container gets only the variables ASH sets for it, so AWS
-  credentials and other settings in the host environment are not passed in. Options you
-  give on the command line are.
+  credentials and other settings in the host environment are not passed in.
+- `--ignore-suppressions`. It has no effect in container mode: suppressions still apply.
+- `--log-level`. Of the logging options, only `--quiet`, `--verbose`, `--debug`, and
+  `--simple` reach the scan inside.
 - The scanner sandbox. `--sandbox` is ignored; the container is the boundary.
 - `--changed-files-only`. ASH logs a warning and scans every file.
 - Third-party plugin modules. `--ash-plugin-modules` is passed in, but only modules
@@ -125,10 +130,10 @@ Build the image once, push it to a registry your organization controls, and run 
 image in CI instead of building per run. With `ASH_IMAGE_NAME` set, `ash build-image` tags
 the image with your registry's name:
 
-<!-- doctest: illustrative reason="needs a container runtime, network access and a registry" -->
+<!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 ```bash
 export ASH_IMAGE_NAME=registry.example.com/security/ash:3.7.0
-ash build-image --no-run --ash-revision-to-install v3.7.0 \
+ash build-image --no-run --oci-runner docker --ash-revision-to-install v3.7.0 \
   --container-uid 1001 --container-gid 1001
 docker push "$ASH_IMAGE_NAME"
 ```
@@ -150,6 +155,7 @@ docker build --target non-root --build-arg UID=1001 --build-arg GID=1001 \
 
 Build arguments:
 
+<!-- doctest: options of=dockerfile -->
 | Argument | Default | Effect |
 |---|---|---|
 | `BASE_IMAGE` | `public.ecr.aws/docker/library/python:3.12-slim-bookworm` | Base image for every stage. Point it at a mirror of the same image. |
@@ -179,11 +185,11 @@ vulnerability databases, so it ages; see [Run ASH offline](run-offline.md#refres
 
 ## Windows and macOS {#platforms}
 
-ASH's own CI tests container mode on Linux only, with docker, podman, finch and nerdctl.
+ASH's own CI tests container mode on Linux only, with docker, podman, finch, and nerdctl.
 
 - On Windows, `ash build-image` always builds the root `ci` image, because the non-root
   user cannot write to the bind-mounted output directory there. `ash scan --mode container`
   does not force it. If `ash` runs a different program, such as the `ash` shell that ships
   with Git for Windows, run `ashv3`, which is the same command.
-- On macOS, ASH looks for finch before docker. The image builds for the host's
-  architecture; the Dockerfile supports amd64 and arm64.
+- On macOS, the image builds for the host's architecture; the Dockerfile supports amd64
+  and arm64.
