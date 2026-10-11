@@ -662,6 +662,14 @@ jobs:
         uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
         with:
           ruby-version: "3.3"
+          # Neither from the checkout. The action's default `bundler: Gemfile.lock`
+          # installs the Bundler that the BUNDLED WITH section of a Gemfile.lock in
+          # `working-directory` names, and that directory defaults to the checkout,
+          # so a pull request adding one at its root picked the Bundler this job
+          # runs. `default` is the Bundler Ruby 3.3 ships, which is what an absent
+          # Gemfile.lock resolved to before.
+          bundler: default
+          working-directory: ${{ runner.temp }}
 
       - name: Install cfn-nag
         if: inputs.install-cfn-nag

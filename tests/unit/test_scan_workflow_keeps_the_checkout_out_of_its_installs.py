@@ -385,3 +385,43 @@ class TestUvItselfIsNotChosenByTheCheckout:
                 f"step {step.get('name')!r} puts the uv cache at {rendered!r}, not "
                 "under RUNNER_TEMP"
             )
+
+
+class TestRubyIsNotChosenByTheCheckout:
+    """setup-ruby's defaults read version files in the checkout.
+
+    ruby/setup-ruby v1 (action.yml) reads `.ruby-version`, `.tool-versions` or
+    `mise.toml` when `ruby-version` is unset, and with its default `bundler:
+    Gemfile.lock` installs the Bundler that the BUNDLED WITH section of a
+    Gemfile.lock in `working-directory` names. `working-directory` defaults to the
+    checkout, so a pull request that adds a Gemfile.lock at its root chose the
+    Bundler release the scan job installed and ran.
+    """
+
+    def test_every_setup_ruby_step_names_its_versions(self):
+        _, job = _workflow_and_job()
+        steps = [
+            step
+            for step in job.get("steps") or []
+            if str(step.get("uses") or "").startswith("ruby/setup-ruby@")
+        ]
+        assert steps, "the scan job has no setup-ruby step; this compared nothing"
+        for step in steps:
+            inputs = step.get("with") or {}
+            assert str(inputs.get("ruby-version") or "").strip() not in (
+                "",
+                "default",
+            ), (
+                f"step {step.get('name')!r} lets setup-ruby read the Ruby version "
+                "from the checkout"
+            )
+            bundler = str(inputs.get("bundler") or "Gemfile.lock").strip()
+            assert bundler != "Gemfile.lock", (
+                f"step {step.get('name')!r} installs the Bundler that a Gemfile.lock "
+                "in the checkout names; set `bundler:` explicitly"
+            )
+            working_directory = str(inputs.get("working-directory") or "")
+            assert "runner.temp" in working_directory, (
+                f"step {step.get('name')!r} resolves its version files in "
+                f"{working_directory or 'the checkout'!r}, not under RUNNER_TEMP"
+            )
