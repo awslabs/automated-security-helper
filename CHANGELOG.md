@@ -104,6 +104,19 @@
   options does not, an empty variable grants nothing, and one naming `/`, `$HOME` or a
   directory above `$HOME` is not mounted.
 
+  Converters are covered too. Under a sandbox the jupyter converter installs nothing
+  (it used to install nbconvert when it was missing and ASH was online) and runs
+  nbconvert, its version probe and its dependency check sandboxed, with a scanner's
+  confinement: a staged copy of the notebook readable, only
+  `<output>/converted/jupyter/` writable, no network unless
+  `sandbox.network_scanners` names `jupyter`. The convert phase applies the same
+  scope to every converter. When no sandbox backend can be used, no notebook is
+  converted: each is listed in the converter's `refused_inputs` with the reason, the
+  converter counts as not having run, and the scan exits 1 while
+  `fail_on_incomplete_scanners` is on. A scanner's own version probe at construction,
+  which a sandboxed scan refused with a misleading "renamed by a config file" reason,
+  now runs sandboxed as documented.
+
   If a sandbox was requested and cannot be provided, the scanner is recorded
   `MISSING` with the reason and the scan exits 1. ASH never falls back to running it
   unsandboxed. `auto` picks bubblewrap, then firejail, then Landlock on Linux, and

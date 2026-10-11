@@ -11,6 +11,10 @@ from automated_security_helper.models.asharp_model import (
     ConverterStatusInfo,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.scope import (
+    converter_run_scope,
+    plugin_probe_scope,
+)
 
 
 def _converter_display_name(plugin_instance: Any) -> str:
@@ -176,19 +180,23 @@ class ConvertPhase(EnginePhase):
         all_converter_instances = []
         for plugin_class in converter_classes:
             try:
-                plugin_instance = plugin_class(
-                    context=self.plugin_context,
-                    config=(
-                        self.plugin_context.config.get_plugin_config(
-                            plugin_type="converter",
-                            # EnginePhase annotates self.plugins as instances, but
-                            # this phase receives the plugin classes.
-                            plugin_name=plugin_config_key(cast(type, plugin_class)),
-                        )
-                        if self.plugin_context.config is not None
-                        else None
-                    ),
-                )
+                # Under a sandbox, what a converter runs while it is constructed and
+                # validated (nbconvert's version probe, its dependency check) runs
+                # sandboxed, as a scanner's probes do, and installs nothing.
+                with plugin_probe_scope(plugin_class, self.plugin_context):
+                    plugin_instance = plugin_class(
+                        context=self.plugin_context,
+                        config=(
+                            self.plugin_context.config.get_plugin_config(
+                                plugin_type="converter",
+                                # EnginePhase annotates self.plugins as instances,
+                                # but this phase receives the plugin classes.
+                                plugin_name=plugin_config_key(cast(type, plugin_class)),
+                            )
+                            if self.plugin_context.config is not None
+                            else None
+                        ),
+                    )
                 all_converter_instances.append(plugin_instance)
             except Exception as e:
                 failed_name = getattr(plugin_class, "__name__", "Unknown")
@@ -226,9 +234,10 @@ class ConvertPhase(EnginePhase):
         # change the scan and report phases, which share it.
         for plugin_instance in all_converter_instances:
             try:
-                plugin_instance.dependencies_satisfied = (
-                    plugin_instance.validate_plugin_dependencies()
-                )
+                with plugin_probe_scope(plugin_instance, self.plugin_context):
+                    plugin_instance.dependencies_satisfied = (
+                        plugin_instance.validate_plugin_dependencies()
+                    )
             except Exception as e:
                 # Fail closed. A dependency check that raised has not shown the
                 # dependency to be present, and filter_enabled_plugins drops the
@@ -240,11 +249,18 @@ class ConvertPhase(EnginePhase):
                 )
                 plugin_instance.dependencies_satisfied = False
 
-        filtered_instances = self.filter_enabled_plugins(
-            plugin_instances=all_converter_instances,
-            plugin_context=self.plugin_context,
-            python_only=python_based_plugins_only,
-        )
+        # One at a time, so the dependency check the filter repeats runs in that
+        # converter's own probe scope too.
+        filtered_instances = []
+        for plugin_instance in all_converter_instances:
+            with plugin_probe_scope(plugin_instance, self.plugin_context):
+                filtered_instances.extend(
+                    self.filter_enabled_plugins(
+                        plugin_instances=[plugin_instance],
+                        plugin_context=self.plugin_context,
+                        python_only=python_based_plugins_only,
+                    )
+                )
 
         # A row for every converter the filter dropped, so a converter that did not
         # run is present in the machine-readable output instead of being absent from
@@ -359,8 +375,10 @@ class ConvertPhase(EnginePhase):
                         f"Failed to notify converter start event: {str(event_error)}"
                     )
 
-                # Pass the source directory as the target
-                convert_result_initial = plugin_instance.convert()
+                # Pass the source directory as the target. Under a sandbox, the
+                # converter's tool runs confined like a scanner's.
+                with converter_run_scope(plugin_instance, self.plugin_context):
+                    convert_result_initial = plugin_instance.convert()
                 # Ensure all convert_result are strings in case some are Paths
                 convert_result = []
                 if convert_result_initial is not None:

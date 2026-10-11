@@ -101,7 +101,7 @@ def as_nbformat_writes(nb: dict) -> bytes:
 
 
 def fake_executable(directory: Path, name: str) -> Path:
-    """A file ASH's lookup accepts as ``name``. Never run: ``subprocess.run`` is replaced."""
+    """A file ASH's lookup accepts as ``name``. Never run: ``spawn_run`` is replaced."""
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / (f"{name}.exe" if WINDOWS else name)
     path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -159,6 +159,9 @@ def replace_subprocess(monkeypatch, run) -> None:
             SubprocessError=subprocess.SubprocessError,
         ),
     )
+    # The converter starts nbconvert through spawn_run, so a scanner sandbox can
+    # confine it.
+    monkeypatch.setattr(jupyter_converter, "spawn_run", run)
 
 
 @pytest.fixture(autouse=True)

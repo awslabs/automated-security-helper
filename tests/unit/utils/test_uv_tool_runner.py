@@ -100,6 +100,23 @@ class TestIsUvAvailable:
             runner.is_uv_available()
             assert mock_run.call_count == 1
 
+    def test_a_sandbox_refusal_is_not_remembered(self, runner):
+        """A check refused by a probe's sandbox scope says nothing about uv itself.
+
+        The runner is shared by the whole process, so caching that answer made uv
+        read as missing for every later spawn, sandboxed or not.
+        """
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+
+        with sandbox_scope(RefusingScope("jupyter", "no bwrap here")):  # type: ignore[arg-type]
+            assert runner.is_uv_available() is False
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            assert runner.is_uv_available() is True
+
 
 class TestListAvailableTools:
     """Tests for list_available_tools."""
@@ -195,6 +212,20 @@ class TestGetToolVersion:
         runner._uv_available_cache = True
         with patch("subprocess.run", side_effect=RuntimeError("boom")):
             assert runner.get_tool_version("bandit") is None
+
+    def test_a_sandbox_refusal_is_not_remembered(self, runner):
+        """A probe its sandbox scope refused did not run, so it measured nothing."""
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+
+        runner._uv_available_cache = True
+        with sandbox_scope(RefusingScope("bandit", "no bwrap here")):  # type: ignore[arg-type]
+            assert runner.get_tool_version("bandit") is None
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.7.8\n")
+            assert runner.get_tool_version("bandit") == "bandit 1.7.8"
 
 
 class TestInstallToolWithVersion:

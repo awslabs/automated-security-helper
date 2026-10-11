@@ -332,10 +332,26 @@ sandbox on, the repository's `mode` applies, because a sandbox the repository as
 for only takes access away. In workspace mode, the operator's `--config` decides for
 a project that has its own config file, the same as for one that doesn't.
 
-A sandboxed scan does not install tools: installing runs a package's build code and
-writes uv's tool directory, which a sandboxed scanner may only read. Run
-`ash dependencies install` first; a scanner whose tool is missing is recorded
-`MISSING`.
+A sandboxed scan does not install tools, for scanners and converters alike:
+installing runs a package's build code and writes uv's tool directory, which a
+sandboxed scanner may only read. Run `ash dependencies install` first; a scanner
+whose tool is missing is recorded `MISSING`, and so is the jupyter converter when
+nbconvert is missing, which fails the scan if the tree has notebooks.
+
+### Converters
+
+The jupyter converter runs nbconvert, a third-party tool, over the repository's
+notebooks, so under a sandbox nbconvert runs with the confinement a scanner gets: no
+network unless `sandbox.network_scanners` names `jupyter`, the environment allowlist,
+read access to a staged copy of the notebook and the tool, and the converter's own
+`<output>/converted/jupyter/` directory as the only writable place. Its version probe
+and dependency check run sandboxed as well. The convert phase applies the same scope
+to every converter, so a third-party converter's tool is confined the same way.
+
+If no sandbox backend can be used, nbconvert is not run on any notebook: each one is
+listed in the converter's `refused_inputs` with the reason, the converter is recorded
+as not having run, and with `fail_on_incomplete_scanners` on (the default) the scan
+exits 1. Nothing a converter starts runs unsandboxed under a sandbox.
 
 ## Threat model
 
@@ -359,10 +375,11 @@ source tree, or see environment variables outside the allowlist.
 
 Out of scope:
 
-- ASH itself, its converters, and `git`, which run unsandboxed. ASH is the trusted
-  base. Converters unpack archives and notebooks into the work directory; they are
-  ASH code, not third-party tools. `git` runs only for `--changed-files-only` and
-  workspace planning, never inside a scanner.
+- ASH itself and `git`, which run unsandboxed. ASH is the trusted base, and that
+  includes the converters' own code: the archive converter unpacks archives into the
+  work directory in ASH's process. The tools a converter starts are not ASH code and
+  are sandboxed; see [Converters](#converters). `git` runs only for
+  `--changed-files-only` and workspace planning, never inside a scanner.
 - Plugin modules. A config file can list `ash_plugin_modules`, which ASH imports into
   its own process, so they run unsandboxed. From a config file inside the scanned
   tree, only installed modules outside the tree are imported (see
@@ -398,8 +415,11 @@ its scan, and around the content-database check that runs `grype db status`.
 `_prepare_spawn` rewrites the command line for the active backend when a scope is
 active. Probes get a throwaway results directory. A scanner that cannot be sandboxed
 as requested gets a refusing scope, so its probes fail instead of running unsandboxed.
-Spawns made outside any scanner scope (ASH's own `git` calls, converters, the
-container runtime) are unaffected. A sandboxed scan never installs a tool.
+The convert phase enters the same kind of scope around each converter's construction,
+dependency check and `convert()`, and the jupyter converter enters one around each
+nbconvert run, with the staged notebook as its scan target. Spawns made outside any
+scope (ASH's own `git` calls, the container runtime) are unaffected. A sandboxed scan
+never installs a tool.
 
 `tests/unit/utils/test_sandbox_choke_point.py` fails the build if any module in the
 package outside a short, reasoned exemption list calls `subprocess.run`,

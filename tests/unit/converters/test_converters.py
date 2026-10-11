@@ -497,7 +497,7 @@ class TestJupyterConverter:
             mock_scan_set,
         )
         monkeypatch.setattr(
-            "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter.subprocess.run",
+            "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter.spawn_run",
             mock_subprocess_run,
         )
 

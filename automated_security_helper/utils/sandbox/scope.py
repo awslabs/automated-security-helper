@@ -2,10 +2,13 @@
 
 The scanner executor enters :func:`sandbox_scope` around each ``scanner.scan()`` call.
 The scope lives in a context variable, so it is per thread: scanners run in parallel
-threads, each with its own policy, and spawns ASH makes outside a scanner (``git``,
-converters, the container runtime) see no scope and are left alone.
-:func:`prepare_spawn` is called by every spawn helper in ``utils/subprocess_utils.py``;
-it is the single place a command line is rewritten for a sandbox.
+threads, each with its own policy, and spawns ASH makes for itself (``git``, the
+container runtime) see no scope and are left alone. A converter's tool reads the
+scanned tree as a scanner's does, so the convert phase and the jupyter converter
+enter the same kind of scope around what a converter runs (:func:`converter_run_scope`,
+:func:`plugin_probe_scope`). :func:`prepare_spawn` is called by every spawn helper in
+``utils/subprocess_utils.py``; it is the single place a command line is rewritten for a
+sandbox.
 
 A scanner that starts a process from a thread it created itself would not inherit the
 scope. No builtin scanner does; ``tests/unit/utils/test_sandbox_choke_point.py`` keeps
@@ -183,9 +186,15 @@ def scanner_sandbox_scope(
     name = _plugin_name(scanner_plugin)
     declared, declared_config = _declared_identity(scanner_plugin)
     config = getattr(scanner_plugin, "config", None)
+    # A class (the phases pass one while constructing a plugin) has no config yet,
+    # so nothing has renamed it; only an instance's config can.
     if declared is not None and (
         declared != name
-        or (declared_config is not None and not isinstance(config, declared_config))
+        or (
+            declared_config is not None
+            and config is not None
+            and not isinstance(config, declared_config)
+        )
     ):
         raise SandboxUnavailable(
             f"{name}: the config names this scanner {name!r}, but its own name is "
@@ -306,12 +315,48 @@ def plugin_probe_scope(plugin: Any, context: Any) -> Iterator[None]:
         shutil.rmtree(probe_dir, ignore_errors=True)
 
 
+def sandbox_requested(context: Any) -> bool:
+    """Whether the run's ``sandbox.mode`` is anything but ``off``."""
+    settings = _sandbox_settings(context)
+    return settings is not None and SandboxMode(settings.mode) != SandboxMode.off
+
+
+@contextmanager
+def converter_run_scope(converter: Any, context: Any) -> Iterator[None]:
+    """Sandbox what a converter's ``convert()`` runs, as a scanner's ``scan()`` is.
+
+    A converter's tool reads the scanned tree like a scanner's, so under a sandbox its
+    spawns get a scanner's policy, with the converter's results directory as the one
+    writable place. When the sandbox cannot be provided the scope refuses every spawn,
+    so a tool never runs unsandboxed; the converter records what it could not convert.
+    """
+    if not sandbox_requested(context):
+        yield
+        return
+    scope: "SandboxScope | RefusingScope"
+    try:
+        scope = scanner_sandbox_scope(converter, context, None) or RefusingScope(
+            _plugin_name(converter), "no sandbox scope"
+        )
+    except SandboxUnavailable as refusal:
+        scope = RefusingScope(_plugin_name(converter), str(refusal))
+    scope_reset = _ACTIVE.set(scope)
+    try:
+        yield
+    finally:
+        _ACTIVE.reset(scope_reset)
+
+
 def _plugin_name(plugin: Any) -> str:
     name = str(getattr(getattr(plugin, "config", None), "name", "") or "")
     if name:
         return name
     if isinstance(plugin, type):
-        return plugin.__name__
+        # The name its config class declares, which is what an instance of it is
+        # called and what grants are looked up by.
+        from automated_security_helper.base.plugin_config import declared_plugin_name
+
+        return declared_plugin_name(plugin) or plugin.__name__
     return plugin.__class__.__name__
 
 

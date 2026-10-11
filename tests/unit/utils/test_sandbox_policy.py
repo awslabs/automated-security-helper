@@ -805,6 +805,9 @@ class TestSymlinkedOutputDirectory:
             )
 
 
+_BUILTIN = "automated_security_helper.plugin_modules.ash_builtin"
+
+
 class TestProbeScope:
     def test_off_mode_leaves_probes_alone(self, tmp_path):
         from automated_security_helper.utils.sandbox.scope import (
@@ -832,6 +835,53 @@ class TestProbeScope:
                 assert isinstance(active, RefusingScope)
                 assert "no bwrap here" in active.reason
             assert active_scope() is None
+        finally:
+            clear_backend_cache()
+
+    @pytest.mark.parametrize(
+        "plugin_path, own_name",
+        [
+            (f"{_BUILTIN}.scanners.bandit_scanner.BanditScanner", "bandit"),
+            (f"{_BUILTIN}.converters.jupyter_converter.JupyterConverter", "jupyter"),
+        ],
+        ids=["scanner", "converter"],
+    )
+    def test_a_plugin_class_gets_a_sandbox_for_its_construction_probes(
+        self, tmp_path, monkeypatch, plugin_path, own_name
+    ):
+        """Before an instance exists, the probes run under the plugin's own name.
+
+        The class is what the scan and convert phases pass while constructing a
+        plugin, whose model_post_init runs ``uv tool run <tool> --version``. It has
+        no config instance, so it must not be judged a plugin a config file renamed.
+        """
+        import importlib
+
+        from automated_security_helper.utils.sandbox.scope import (
+            SandboxScope,
+            active_scope,
+            plugin_probe_scope,
+        )
+
+        module_name, _, attribute = plugin_path.rpartition(".")
+        plugin_class = getattr(importlib.import_module(module_name), attribute)
+
+        class Recorder:
+            name = "recorder"
+
+            def probe(self):
+                return None
+
+        clear_backend_cache()
+        monkeypatch.setitem(scope_module.BACKENDS, "bwrap", Recorder)
+        try:
+            with plugin_probe_scope(plugin_class, _context(tmp_path)):
+                active = active_scope()
+                assert isinstance(active, SandboxScope), (
+                    f"the construction probes of {own_name} were refused: "
+                    f"{getattr(active, 'reason', active)!r}"
+                )
+                assert active.scanner_name == own_name
         finally:
             clear_backend_cache()
 

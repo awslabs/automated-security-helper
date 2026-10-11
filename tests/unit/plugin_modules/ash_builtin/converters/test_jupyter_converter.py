@@ -303,7 +303,7 @@ class TestValidatePluginDependencies:
         converter._get_tool_installation_info = Mock(return_value={"available": False})
         converter._install_uv_tool = Mock(return_value=False)
 
-        with patch(f"{MODULE}.subprocess.run") as run:
+        with patch(f"{MODULE}.spawn_run") as run:
             run.return_value = subprocess.CompletedProcess(
                 ["jupyter", "nbconvert", "--version"], 0, "7.16.4\n", ""
             )
@@ -325,7 +325,7 @@ class TestValidatePluginDependencies:
         converter._get_tool_installation_info = Mock(return_value={"available": False})
         converter._install_uv_tool = Mock(return_value=False)
 
-        with patch(f"{MODULE}.subprocess.run") as run:
+        with patch(f"{MODULE}.spawn_run") as run:
             run.return_value = subprocess.CompletedProcess(
                 ["jupyter", "nbconvert", "--version"], 1, "", "not found"
             )
@@ -349,7 +349,7 @@ class TestValidatePluginDependencies:
         converter._get_tool_installation_info = Mock(return_value={"available": False})
         converter._install_uv_tool = Mock(return_value=False)
 
-        with patch(f"{MODULE}.subprocess.run", side_effect=exc):
+        with patch(f"{MODULE}.spawn_run", side_effect=exc):
             assert converter.validate_plugin_dependencies() is False
 
     def test_uv_disabled_skips_straight_to_direct_probe(self, converter):
@@ -357,7 +357,7 @@ class TestValidatePluginDependencies:
         info = Mock()
         converter._get_tool_installation_info = info
 
-        with patch(f"{MODULE}.subprocess.run") as run:
+        with patch(f"{MODULE}.spawn_run") as run:
             run.return_value = subprocess.CompletedProcess(["jupyter"], 0, "", "")
             assert converter.validate_plugin_dependencies() is True
 
@@ -643,7 +643,7 @@ class TestConvert:
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
         converter.use_uv_tool = False
         run = nbconvert_double()
-        monkeypatch.setattr(f"{MODULE}.subprocess.run", run)
+        monkeypatch.setattr(f"{MODULE}.spawn_run", run)
 
         results = converter.convert()
 
@@ -679,7 +679,7 @@ class TestConvert:
         a_directory.mkdir(parents=True, exist_ok=True)
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(a_directory)])
         run = nbconvert_double()
-        monkeypatch.setattr(f"{MODULE}.subprocess.run", run)
+        monkeypatch.setattr(f"{MODULE}.spawn_run", run)
         converter.use_uv_tool = False
 
         assert converter.convert() == []
@@ -704,7 +704,7 @@ class TestConvert:
         )
         converter.use_uv_tool = False
         run = nbconvert_double()
-        monkeypatch.setattr(f"{MODULE}.subprocess.run", run)
+        monkeypatch.setattr(f"{MODULE}.spawn_run", run)
 
         results = converter.convert()
 
@@ -722,7 +722,7 @@ class TestConvert:
         notebook = write_notebook(converter.context.source_dir, "nb.ipynb")
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
         run = nbconvert_double()
-        monkeypatch.setattr(f"{MODULE}.subprocess.run", run)
+        monkeypatch.setattr(f"{MODULE}.spawn_run", run)
 
         uv_cwds = []
 
@@ -754,7 +754,7 @@ class TestConvert:
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
         converter._execute_nbconvert_via_uv = Mock(return_value=False)
         run = nbconvert_double()
-        monkeypatch.setattr(f"{MODULE}.subprocess.run", run)
+        monkeypatch.setattr(f"{MODULE}.spawn_run", run)
 
         results = converter.convert()
 
@@ -773,7 +773,7 @@ class TestConvert:
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
         converter._execute_nbconvert_via_uv = Mock(return_value=False)
         monkeypatch.setattr(
-            f"{MODULE}.subprocess.run",
+            f"{MODULE}.spawn_run",
             nbconvert_double(
                 returncode=2, stderr="nbconvert failed", create_output=False
             ),
@@ -812,7 +812,7 @@ class TestConvert:
             output_file(cmd).write_text("ok\n", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, "", "")
 
-        monkeypatch.setattr(f"{MODULE}.subprocess.run", _run)
+        monkeypatch.setattr(f"{MODULE}.spawn_run", _run)
 
         results = converter.convert()
 
@@ -838,7 +838,7 @@ class TestConvert:
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
         converter.use_uv_tool = False
         monkeypatch.setattr(
-            f"{MODULE}.subprocess.run",
+            f"{MODULE}.spawn_run",
             Mock(side_effect=subprocess.TimeoutExpired(cmd=["jupyter"], timeout=60)),
         )
 
@@ -857,7 +857,7 @@ class TestConvert:
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
         converter.use_uv_tool = False
         monkeypatch.setattr(
-            f"{MODULE}.subprocess.run", nbconvert_double(create_output=False)
+            f"{MODULE}.spawn_run", nbconvert_double(create_output=False)
         )
 
         assert converter.convert() == []
@@ -885,7 +885,7 @@ class TestConvert:
                 raise ValueError("something unexpected")
             return real(cmd, *args, **kwargs)
 
-        monkeypatch.setattr(f"{MODULE}.subprocess.run", _run)
+        monkeypatch.setattr(f"{MODULE}.spawn_run", _run)
 
         results = converter.convert()
 
@@ -1008,7 +1008,7 @@ class TestCandidateInputCount:
 
         monkeypatch.setattr(converter, "_notebooks_in_scan_set", _spy)
 
-        with patch(f"{MODULE}.subprocess.run", nbconvert_double()):
+        with patch(f"{MODULE}.spawn_run", nbconvert_double()):
             converter.convert()
         converter.candidate_input_count()
 

@@ -77,6 +77,12 @@ in the working directory or through a relative PATH entry, and one inside the sc
 tree, such as in an activated `.venv/bin` in the repository, is not run unless you
 allow it; see [Tools inside the scanned directory](../../advanced-usage.md#tools-inside-the-scanned-directory).
 
+**Under `--sandbox`**: nbconvert, its version probe and its dependency check run in
+the scanner sandbox, and nbconvert is never installed (`install_timeout` does not
+apply); install it first with `ash dependencies install`. When no sandbox backend can
+be used, no notebook is converted and each is listed in `refused_inputs`. See
+[Converters](../../scanner-sandbox.md#converters) in the sandbox page.
+
 **Key Features**:
 - Code cell extraction
 - Cell number preservation for accurate line mapping

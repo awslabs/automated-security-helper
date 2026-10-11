@@ -64,6 +64,13 @@ class UVToolRetryConfig:
         self.network_check_timeout = max(0.0, float(self.network_check_timeout))
 
 
+def _refused_by_sandbox(error: BaseException) -> bool:
+    """Whether ``error`` is the scanner sandbox refusing a spawn, not the spawn failing."""
+    from automated_security_helper.utils.sandbox.policy import SandboxUnavailable
+
+    return isinstance(error, SandboxUnavailable)
+
+
 def _install_retry_delay(config: UVToolRetryConfig, attempt: int) -> float:
     """Seconds to wait after 0-based ``attempt`` before the next install try.
 
@@ -137,7 +144,12 @@ class UVToolRunner:
                 errors="replace",
             )
             self._uv_available_cache = result.returncode == 0
-        except Exception:
+        except Exception as error:
+            if _refused_by_sandbox(error):
+                # Refused by the sandbox scope this check ran in, which says nothing
+                # about uv; remembered, it would read as missing for every later
+                # spawn in the process.
+                return False
             self._uv_available_cache = False
 
         return self._uv_available_cache
@@ -297,7 +309,10 @@ class UVToolRunner:
                     version_line = result.stdout.strip().split("\n")[0]
                     version = version_line.strip()
 
-            except Exception:  # nosec B110 — version check failure is non-critical
+            except Exception as error:  # nosec B110 — version check failure is non-critical
+                if _refused_by_sandbox(error):
+                    # The probe never ran, so there is no answer to remember.
+                    return None
                 version = None
 
             with _uv_tool_runner_cache_lock:
