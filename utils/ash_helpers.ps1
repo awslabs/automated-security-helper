@@ -195,16 +195,21 @@ function Invoke-ASH {
         if ($Offline) {
             $ashCmdArgs.Add('--offline')
         }
+        # The commands below run through Invoke-Expression, which parses its string as
+        # PowerShell. Every value that comes from the operator or the file system is
+        # therefore written into it by name (`$Scanners[0]`, "$sourceDirFull"), which
+        # Invoke-Expression expands as a value, never by its text, which it would parse
+        # and could run: a source directory named `a$(...)` ran what was inside.
         if ($PSBoundParameters.ContainsKey('Scanners')) {
-            foreach ($scanner in $Scanners) {
+            for ($i = 0; $i -lt $Scanners.Count; $i++) {
                 $ashCmdArgs.Add("--scanners")
-                $ashCmdArgs.Add($scanner)
+                $ashCmdArgs.Add("`$Scanners[$i]")
             }
         }
         if ($PSBoundParameters.ContainsKey('ExcludeScanners')) {
-            foreach ($scanner in $ExcludeScanners) {
+            for ($i = 0; $i -lt $ExcludeScanners.Count; $i++) {
                 $ashCmdArgs.Add("--exclude-scanners")
-                $ashCmdArgs.Add($scanner)
+                $ashCmdArgs.Add("`$ExcludeScanners[$i]")
             }
         }
         if ($IgnoreSuppressions) {
@@ -239,7 +244,7 @@ function Invoke-ASH {
         # before anything is built or run, with exit 3.
         function Assert-Mountable([string]$Label, [string]$Path) {
             if ($Path -match '[,"\r\n]') {
-                Write-Error "The $Label '$Path' cannot be handed to the container runner: --mount reads its value as comma-separated fields, so a path holding a comma, a double quote or a line break would be read as something else. Rename it, or choose another path."
+                [Console]::Error.WriteLine("ERROR: The $Label '$Path' cannot be handed to the container runner: --mount reads its value as comma-separated fields, so a path holding a comma, a double quote or a line break would be read as something else. Rename it, or choose another path.")
                 exit 3
             }
         }
@@ -259,7 +264,7 @@ function Invoke-ASH {
         $configFromRepository = $false
         if (-not $NoRun -and ($PSBoundParameters.ContainsKey('Config') -or -not [string]::IsNullOrEmpty($Config))) {
             if ([string]::IsNullOrEmpty($Config) -or -not (Test-Path -LiteralPath $Config -PathType Leaf)) {
-                Write-Error "Config file not found: '$Config'. -Config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container."
+                [Console]::Error.WriteLine("ERROR: Config file not found: '$Config'. -Config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container.")
                 exit 3
             }
             # The runner mounts with its own rights, which can be wider than this user's.
@@ -267,7 +272,7 @@ function Invoke-ASH {
                 [System.IO.File]::OpenRead((Get-Item -LiteralPath $Config).FullName).Close()
             }
             catch {
-                Write-Error "Config file cannot be read: '$Config'. ASH does not hand the container runner a file it cannot read itself."
+                [Console]::Error.WriteLine("ERROR: Config file cannot be read: '$Config'. ASH does not hand the container runner a file it cannot read itself.")
                 exit 3
             }
             $configFull = (Get-Item -LiteralPath $Config).FullName
@@ -280,7 +285,7 @@ function Invoke-ASH {
             }
             else {
                 $configInner = "/ash-config/" + (Split-Path -Leaf $configFull)
-                $configMountArg = "--mount `"type=bind,source=$configFull,destination=$configInner,readonly`""
+                $configMountArg = '--mount "type=bind,source=$configFull,destination=$configInner,readonly"'
                 # A config elsewhere in the scanned checkout -- the outermost directory
                 # at or above SourceDir holding a .git entry, as a local scan defines
                 # it -- was written by the repository being scanned. The scan inside
@@ -303,7 +308,7 @@ function Invoke-ASH {
                     $item = Get-Item -LiteralPath $configFull
                     while ($null -ne $item -and $item.FullName.StartsWith($checkoutPrefix, $pathComparison)) {
                         if ($item.LinkType) {
-                            Write-Error "The config file '$Config' is inside the scanned tree and is reached through a link ('$($item.FullName)'). ASH does not mount a file the repository being scanned points it at."
+                            [Console]::Error.WriteLine("ERROR: The config file '$Config' is inside the scanned tree and is reached through a link ('$($item.FullName)'). ASH does not mount a file the repository being scanned points it at.")
                             exit 3
                         }
                         $item = Get-Item -LiteralPath (Split-Path -Parent $item.FullName)
@@ -311,7 +316,7 @@ function Invoke-ASH {
                 }
             }
             $ashCmdArgs.Add("--config")
-            $ashCmdArgs.Add("`"$configInner`"")
+            $ashCmdArgs.Add('"$configInner"')
             if ($configFromRepository) {
                 $ashCmdArgs.Add('--config-from-scanned-repository')
             }
@@ -349,7 +354,7 @@ function Invoke-ASH {
                 }
             }
             if ($null -eq $RESOLVED_OCI_RUNNER) {
-                Write-Error "Unable to resolve an OCI_RUNNER -- exiting"
+                [Console]::Error.WriteLine("ERROR: Unable to resolve an OCI_RUNNER -- exiting")
                 exit 1
             }
             else {
@@ -380,19 +385,19 @@ function Invoke-ASH {
 
                     # Add UID/GID build args
                     if ($ContainerUID) {
-                        $buildCmd += "--build-arg", "UID=$ContainerUID"
+                        $buildCmd += "--build-arg", '"UID=$ContainerUID"'
                     }
                     if ($ContainerGID) {
-                        $buildCmd += "--build-arg", "GID=$ContainerGID"
+                        $buildCmd += "--build-arg", '"GID=$ContainerGID"'
                     }
                     $dockerfilePath = Resolve-Path $(Join-Path $ashRoot "Dockerfile")
                     # Add other build args
                     $buildCmd += @(
-                        "--tag", $AshImageName
+                        "--tag", '"$AshImageName"'
                         "--target", $BuildTarget
-                        "--file", "`"$dockerfilePath`""
+                        "--file", '"$dockerfilePath"'
                         "--build-arg", "OFFLINE=$(if ($Offline) {'YES'} else {'NO'})"
-                        "--build-arg", "OFFLINE_SEMGREP_RULESETS=`"$OfflineSemgrepRulesets`""
+                        "--build-arg", '"OFFLINE_SEMGREP_RULESETS=$OfflineSemgrepRulesets"'
                         "--build-arg", "BUILD_DATE=$(Get-Date -UFormat %s)"
                     )
 
@@ -426,7 +431,7 @@ function Invoke-ASH {
                         $baseLayoutDir = $Matches['dir']
                         if ($ociRunnerName -in @('nerdctl', 'finch')) {
                             Write-Host "Base image taken from the verified OCI layout named by ASH_BASE_OCI_LAYOUT, with no registry call."
-                            $buildCmd += "--build-context", "`"ash-base-image=oci-layout://$baseLayoutDir`""
+                            $buildCmd += "--build-context", '"ash-base-image=oci-layout://$baseLayoutDir"'
                             $buildCmd += "--build-arg", "BASE_IMAGE=ash-base-image"
                             $buildCmd += "--pull=false"
                         }
@@ -436,7 +441,7 @@ function Invoke-ASH {
                     }
                     elseif ($env:ASH_BASE_IMAGE_OVERRIDE) {
                         Write-Host "Base image redirected to $($env:ASH_BASE_IMAGE_OVERRIDE) by ASH_BASE_IMAGE_OVERRIDE."
-                        $buildCmd += "--build-arg", "BASE_IMAGE=$($env:ASH_BASE_IMAGE_OVERRIDE)"
+                        $buildCmd += "--build-arg", '"BASE_IMAGE=$env:ASH_BASE_IMAGE_OVERRIDE"'
                     }
 
                     # Add any extra build args
@@ -445,7 +450,7 @@ function Invoke-ASH {
                     }
 
                     # Add the build context
-                    $buildCmd += "`"$ashRoot`""
+                    $buildCmd += '"$ashRoot"'
 
                     # Execute the build command
                     $buildCmdStr = $buildCmd -join ' '
@@ -472,19 +477,19 @@ function Invoke-ASH {
                         $RESOLVED_OCI_RUNNER
                         'run'
                         '--rm'
-                        "-e", "ASH_ACTUAL_SOURCE_DIR=`"$sourceDirFull`""
-                        "-e", "ASH_ACTUAL_OUTPUT_DIR=`"$outputDirFull`""
+                        "-e", '"ASH_ACTUAL_SOURCE_DIR=$sourceDirFull"'
+                        "-e", '"ASH_ACTUAL_OUTPUT_DIR=$outputDirFull"'
                         "-e", "ASH_DEBUG=`"$ashDebug`""
-                        "-e", "ASH_OUTPUT_FORMAT=`"$OutputFormat`""
+                        "-e", '"ASH_OUTPUT_FORMAT=$OutputFormat"'
                     )
 
                     # Add source directory mount, read-only wherever the output
                     # directory is: the output has its own mount at /out and the scan
                     # inside writes there, also when OutputDir is inside SourceDir.
-                    $runCmd += "--mount `"type=bind,source=$sourceDirFull,destination=/src,readonly`""
+                    $runCmd += '--mount "type=bind,source=$sourceDirFull,destination=/src,readonly"'
 
                     # Add output directory mount
-                    $runCmd += "--mount `"type=bind,source=$outputDirFull,destination=/out`""
+                    $runCmd += '--mount "type=bind,source=$outputDirFull,destination=/out"'
 
                     # Add the config file mount, when the config is outside SourceDir
                     if ($configMountArg) {
@@ -498,7 +503,7 @@ function Invoke-ASH {
 
                     # Add image name and ASH command
                     $runCmd += @(
-                        $AshImageName
+                        '"$AshImageName"'
                         'ash'
                         '--source-dir /src'
                         '--output-dir /out'

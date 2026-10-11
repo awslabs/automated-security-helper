@@ -263,9 +263,10 @@ class TestThePowerShellEntrypoint:
             f"utils/ash_helpers.ps1 must read {OVERRIDE}, or the powershell legs resolve FROM "
             "against the registry that just refused"
         )
-        assert f'"--build-arg", "BASE_IMAGE=$($env:{OVERRIDE})"' in body, (
+        assert f'"--build-arg", \'"BASE_IMAGE=$env:{OVERRIDE}"\'' in body, (
             "the override must be appended as a --build-arg/value pair in the same idiom as "
-            "the other build args, so it survives the Invoke-Expression join"
+            "the other build args, so it survives the Invoke-Expression join, and by name, "
+            "so Invoke-Expression expands it as a value rather than parsing it"
         )
 
     def test_it_is_emitted_before_the_callers_own_build_args(self, body: str):

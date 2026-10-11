@@ -238,6 +238,13 @@ carriage return or a line feed: `--mount` reads its value as comma-separated fie
 such a path would be read as something else. The run is refused with exit 3 before
 anything is built.
 
+`Invoke-ASH` exits with these codes also under `$ErrorActionPreference = 'Stop'` (the
+default of a `pwsh` step on GitHub Actions). It runs the runner through
+`Invoke-Expression`, and passes each path and value it was given by name, so PowerShell
+reads a directory named `a$(...)` as that name. Three inputs are still parsed as
+PowerShell: the arguments after the named parameters, which are passed through to `ash`
+as written, `OCI_RUNNER_WRAPPER`, and the runner's command name.
+
 The scan inside the container sees the host only through these mounts, and receives only
 the environment variables ASH sets for it. So any other value that names a host file
 names a path that does not exist in the container: a scanner option such as

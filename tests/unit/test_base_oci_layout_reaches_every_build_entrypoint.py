@@ -388,7 +388,7 @@ class TestThePowerShellEntrypoint:
         else_at = body.index("else", branch_at)
         branch = body[branch_at:else_at]
         assert (
-            '"--build-context", "`"ash-base-image=oci-layout://$baseLayoutDir`""'
+            '"--build-context", \'"ash-base-image=oci-layout://$baseLayoutDir"\''
             in branch
         )
         assert '"--build-arg", "BASE_IMAGE=ash-base-image"' in branch

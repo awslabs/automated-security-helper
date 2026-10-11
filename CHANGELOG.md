@@ -194,6 +194,13 @@
   `--config` that could not be handed to the container, or a path `--mount` cannot
   carry, refused the scan with exit 3 only after the previous run's results and reports
   had been cleared from the output directory. The inputs are now checked first.
+- **`Invoke-ASH` exits 3 when it refuses, and runs no part of a path.** Its refusals
+  wrote their message with `Write-Error`, which under `$ErrorActionPreference = 'Stop'`
+  (every `pwsh` step on GitHub Actions) ends the script with exit 1 before its `exit 3`;
+  they now write to stderr directly. The build and run commands it hands to
+  `Invoke-Expression` had the source, output and config paths, the image name and the
+  other values spliced into the string, so PowerShell parsed them, and a directory
+  named `a$(...)` ran what was inside the parentheses. They are now passed by name.
 - **`./ash` mounts the directory you named, or stops.** A `--source-dir` it could not
   enter (one that does not exist) left the working directory in its place, and that
   was mounted and scanned; it now exits 1, as `ash --source-dir` does, and so does an
