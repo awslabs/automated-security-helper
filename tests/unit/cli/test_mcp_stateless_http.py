@@ -191,7 +191,7 @@ class TestHostBinding:
             app = build_streamable_http_app(
                 mount_path="/mcp", stateless_http=True, host="0.0.0.0"
             )
-        except (ASHValidationError, ValueError):
+        except ASHValidationError:
             return
         resp = _post(app, CLIENT_HEADERS, base_url=self.PROXY_BASE_URL)
         assert resp.status_code == 421, (

@@ -90,7 +90,7 @@ class TestHostReachesTheApp:
         """
         try:
             app = build_sse_app(mount_path="/sse", host="0.0.0.0")
-        except (ASHValidationError, ValueError):
+        except ASHValidationError:
             return
         assert _post_message(app, PROXY_BASE_URL) == HOST_REJECTED
 
