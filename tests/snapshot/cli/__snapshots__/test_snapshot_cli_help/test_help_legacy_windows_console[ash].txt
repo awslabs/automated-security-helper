@@ -500,9 +500,16 @@
 │                                                                           docker to run the     │
 │                                                                           containerized tools   │
 │                                                                           [env var: OCI_RUNNER] │
-│ --build-target                                       <non-root|ci>        Specify the target    │
-│                                                                           stage of the ASH      │
-│                                                                           image to build        │
+│ --build-target                                       <non-root|ci>        The ASH image stage   │
+│                                                                           to build and run:     │
+│                                                                           'non-root' (an        │
+│                                                                           unprivileged user,    │
+│                                                                           the default) or 'ci'  │
+│                                                                           (root). CI            │
+│                                                                           environment variables │
+│                                                                           do not change it;     │
+│                                                                           --custom-containerfi… │
+│                                                                           builds on 'ci'.       │
 │ --container-uid        -u                            <str>                UID to use for the    │
 │                                                                           container user        │
 │ --container-gid        -g                            <str>                GID to use for the    │
