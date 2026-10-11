@@ -81,7 +81,8 @@ The runner treats a page as one session, the way a reader follows a tutorial:
 - Files, the working directory and shell variables carry from one shell block to the
   next. Shell blocks run under `set -e`, so a block stops at its first failing command.
 - A Python block runs in a fresh interpreter in the session's directory and
-  environment. It cannot change the session.
+  environment, with that directory on its import path. It cannot change the session,
+  except through `save-as` (below).
 - HOME is private to the session, `ash` is the one in the project's virtual
   environment, and the network is unreachable: proxies point at a port that refuses
   connections, and uv, pip and npm run offline. A block that needs the network must be
@@ -123,6 +124,47 @@ files, and the command of an MCP server entry, get the same checks as a shell bl
 A `pre-commit` block must use hook ids that
 [`.pre-commit-hooks.yaml`](https://github.com/awslabs/automated-security-helper/blob/main/.pre-commit-hooks.yaml)
 defines.
+
+### Saving a block as a file
+
+A tutorial often shows a file and then a command that uses it. With `save-as=<path>`,
+the runner writes the block, exactly as shown, to that path in the page's project
+before the blocks after it run. Missing directories are created. `save-as` works on
+any block: Python, shell, config, Dockerfile or text.
+
+````markdown
+<!-- doctest: save-as=my_plugins/greeting.py -->
+```python
+def hello():
+    return "hi"
+```
+
+```python
+from my_plugins.greeting import hello
+
+print(hello())
+```
+````
+
+| Marker | What the runner does |
+|--------|----------------------|
+| `<!-- doctest: save-as=my_plugins/greeting.py -->` | saves the block and does not run it |
+| `<!-- doctest: run save-as=tools/check.py -->` | saves the block, then runs it; a Python block runs from the saved file, so `__file__` is that path |
+| `<!-- doctest: config kind=github-actions save-as=.github/workflows/ash.yml -->` | saves the block, which is still validated as its kind |
+| `<!-- doctest: save-as=.ash/.ash.yaml -->` on a YAML block | saves the block, which is still validated as a complete ASH config |
+
+The path is relative to the root of the page's fixture project, whatever directory
+earlier blocks changed to. An absolute path, a path containing `..`, and a path that
+goes through a symbolic link are refused, and the block fails; the static check
+reports the first two before CI runs. A marker without a mode may carry nothing but
+`save-as`. An `illustrative` block is never run or saved, so `illustrative` with
+`save-as` is an error: use a marker without a mode to save a block that must not run,
+such as a PowerShell script.
+
+The python check knows which modules a page saves. `save-as=my_plugins/scanner.py`
+makes `my_plugins` and `my_plugins.scanner` importable by every Python block of the
+page, a name imported from a saved module must be defined in it, and a relative
+import in a saved package resolves within that package.
 
 ### Option tables
 
@@ -293,7 +335,8 @@ docs checkout's copy of the package would then be the one imported.
 
 Each static finding is one line: the file and line, the check in brackets, and the
 problem. Runner failures name the page, the line of the block, the command, the exit
-code and the end of the output.
+code and the end of the output. A refused `save-as` reports `save-as refused` and the
+reason instead of an exit code.
 
 ### markers
 
@@ -306,6 +349,9 @@ code and the end of the output.
 | unknown mode, is not a key of | use a mode and key from the tables above |
 | needs reason=, is a placeholder | say why the block cannot run |
 | names no directory | use a fixture from `tests/test_data/docs_fixtures` |
+| is not a relative path, leaves the page's project | give `save-as` a path inside the project, without `..` |
+| never saves it | drop `illustrative` to save the block without running it, or drop `save-as` |
+| may only carry save-as | name a mode for the other keys |
 | never closed | close the fence; everything after it was read as code |
 
 ### cli
@@ -346,7 +392,11 @@ lookups could not be resolved; make the lookup a literal or a module constant.
 
 `does not parse` gives the line of the syntax error. `no such module` and `has no
 name` mean an import does not resolve in the project's environment: the module was
-renamed or removed, or the block needs an extra that is not installed.
+renamed or removed, or the block needs an extra that is not installed. When the module
+is one the page saves, `has no name ... the page saves` means the saved block does not
+define that name, and `no such module` means no block saves it. `cannot run outside a
+package` and `goes above the top-level package` are relative imports with no package
+to resolve in: save the block inside one with `save-as=<package>/<module>.py`.
 
 ### options
 
