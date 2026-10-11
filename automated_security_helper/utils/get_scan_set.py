@@ -33,6 +33,16 @@ ASH_INCLUSIONS = [
 ASH_INCLUSIONS_MARKER = "ASH_INCLUSIONS"
 BUNDLED_CDK_MARKER = "node_modules/aws-cdk (ASH built-in exclusion)"
 
+# The lines that wrap each ignore file's text in ash-ignore-report.txt, around the
+# name of the file the block came from. Written and read through these constants
+# only, and read exactly (prefix and suffix, nothing searched for in between): a
+# directory name may contain "START CONTENTS:" or "#########" on Linux and macOS,
+# and searching the line for the token read such a name as the marker's end.
+MARKER_SUFFIX = " #########"
+START_MARKER_PREFIX = "######### START CONTENTS: "
+END_MARKER_PREFIX = "######### END CONTENTS: "
+SOURCE_DIR_TOKEN = "${SOURCE_DIR}/"
+
 # The file names ASH reads as ignore files when it walks the scanned tree.
 IGNORE_FILE_NAMES = frozenset({".ignore", ".gitignore"})
 
@@ -577,7 +587,7 @@ def get_ash_ignorespec_lines(
             with io.TextIOWrapper(handle) as f:
                 content = f.readlines()
         debug_echo(f"Found .ignore file: {clean}", debug=debug)
-        lines.append(f"######### START CONTENTS: {clean} #########")
+        lines.append(f"{START_MARKER_PREFIX}{clean}{MARKER_SUFFIX}")
         # Comment lines are left out. They hold no rule (git reads a line starting
         # with "#" as a comment, and the compiler below skips every such line), and
         # a comment shaped like this function's own START CONTENTS marker would be
@@ -585,12 +595,12 @@ def get_ash_ignorespec_lines(
         # and compiled against that file's directory. Compared stripped, because
         # every line is stripped below before the compiler sees it.
         lines.extend(line for line in content if not line.strip().startswith("#"))
-        lines.append(f"######### END CONTENTS: {clean} #########")
+        lines.append(f"{END_MARKER_PREFIX}{clean}{MARKER_SUFFIX}")
         lines.append("")
     lines = [line.strip() for line in lines]
-    lines.append("######### START CONTENTS: ASH_INCLUSIONS #########")
+    lines.append(f"{START_MARKER_PREFIX}{ASH_INCLUSIONS_MARKER}{MARKER_SUFFIX}")
     lines.extend(ASH_INCLUSIONS)
-    lines.append("######### END CONTENTS: ASH_INCLUSIONS #########")
+    lines.append(f"{END_MARKER_PREFIX}{ASH_INCLUSIONS_MARKER}{MARKER_SUFFIX}")
     return lines
 
 
@@ -678,6 +688,22 @@ def get_ash_ignorespec(
     return parser
 
 
+def _start_marker_path(stripped: str) -> Optional[str]:
+    """The path a START CONTENTS marker line names, or None for any other line.
+
+    Read as the text between :data:`START_MARKER_PREFIX` and :data:`MARKER_SUFFIX`,
+    so an END or SKIPPED line, and a path holding either token, are not mistaken
+    for the start of a block.
+    """
+    if not (
+        stripped.startswith(START_MARKER_PREFIX) and stripped.endswith(MARKER_SUFFIX)
+    ):
+        return None
+    if len(stripped) < len(START_MARKER_PREFIX) + len(MARKER_SUFFIX):
+        return None
+    return stripped[len(START_MARKER_PREFIX) : len(stripped) - len(MARKER_SUFFIX)]
+
+
 def get_ash_ignorespec_with_attribution(
     lines: list[str],
     source_dir: str | Path,
@@ -738,25 +764,22 @@ def get_ash_ignorespec_with_attribution(
             continue
 
         # Detect section markers to determine the base path for rules
-        if stripped.startswith("#########") and "START CONTENTS:" in stripped:
-            # Extract the path from the marker
-            # Format: "######### START CONTENTS: ${SOURCE_DIR}/subdir/.gitignore #########"
-            # or:     "######### START CONTENTS: ${SOURCE_DIR}/.gitignore #########"
-            # or:     "######### START CONTENTS: ASH_INCLUSIONS #########"
-            content_path = stripped
+        content_path = _start_marker_path(stripped)
+        if content_path is not None:
+            # The path between the exact prefix and suffix:
+            #   "######### START CONTENTS: ${SOURCE_DIR}/subdir/.gitignore #########"
+            #   "######### START CONTENTS: ${SOURCE_DIR}/.gitignore #########"
+            #   "######### START CONTENTS: ASH_INCLUSIONS #########"
             try:
-                content_path = (
-                    stripped.split("START CONTENTS:")[1].strip().rstrip("#").strip()
-                )
-                if content_path == "ASH_INCLUSIONS":
+                if content_path == ASH_INCLUSIONS_MARKER:
                     current_base_path = root_base_path
-                elif "${SOURCE_DIR}" in content_path:
+                elif content_path.startswith(SOURCE_DIR_TOKEN):
                     # Extract the directory containing the .gitignore/.ignore
                     # file. The marker is written with "/" separators, so it is
-                    # read back as a posix path regardless of host platform.
-                    relative_path = content_path.replace("${SOURCE_DIR}", "").lstrip(
-                        "/"
-                    )
+                    # read back as a posix path regardless of host platform. Only
+                    # the leading token stands for the scan root: the same text
+                    # later in the path is part of a directory name.
+                    relative_path = content_path[len(SOURCE_DIR_TOKEN) :].lstrip("/")
                     parent_dir = PurePosixPath(relative_path).parent
                     if str(parent_dir) == ".":
                         current_base_path = root_base_path
@@ -959,7 +982,7 @@ def ignore_file_exclusion_record(
     for marker, count in counts.items():
         if marker in (ASH_INCLUSIONS_MARKER, BUNDLED_CDK_MARKER):
             continue
-        key = marker.removeprefix("${SOURCE_DIR}/")
+        key = marker.removeprefix(SOURCE_DIR_TOKEN)
         by_ignore_file[key] = by_ignore_file.get(key, 0) + count
     return {
         "honored": honored,

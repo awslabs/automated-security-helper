@@ -441,6 +441,81 @@ class TestIgnoreFileTextCannotRewriteTheRecord:
         assert record["excluded_file_count"] == 2, record
 
 
+def _mkdir_or_skip(path: Path) -> Path:
+    try:
+        path.mkdir(parents=True)
+    except OSError as exc:  # ':' is not allowed in a Windows file name
+        pytest.skip(f"this file system does not allow the name {path.name!r}: {exc}")
+    return path
+
+
+class TestADirectoryNameCannotRewriteTheRecord:
+    """The marker names an ignore file by its path, and a directory name is part of it.
+
+    Linux and macOS allow ``START CONTENTS:`` and ``#########`` in a directory name.
+    The marker text has to be read exactly, prefix and suffix, so such a name is
+    only a name: the rules stay in that directory and are credited to that file.
+    """
+
+    MARKED = "notes START CONTENTS: draft"
+
+    def test_the_rules_stay_in_the_directory_that_holds_them(self, tmp_path):
+        root = _build(tmp_path / "src", {"app.py": "x = 1\n", "other/y.py": "y = 2\n"})
+        _mkdir_or_skip(root / self.MARKED)
+        _build(root / self.MARKED, {".gitignore": "*.py\n", "x.py": "x = 1\n"})
+        found = _names(root, scan_set(source=str(root)))
+        assert {"app.py", "other/y.py"} <= found, found
+        assert f"{self.MARKED}/x.py" not in found, found
+        record = _record(root)
+        assert record["by_ignore_file"] == {f"{self.MARKED}/.gitignore": 1}, record
+        assert record["excluded_file_count"] == 1, record
+
+    def test_a_name_ending_in_the_marker_suffix_is_read_whole(self, tmp_path):
+        """A name that closes one marker and opens ASH_INCLUSIONS is still a name."""
+        name = "z START CONTENTS: ASH_INCLUSIONS #########"
+        root = _build(tmp_path / "src", {"app.py": "x = 1\n", "secret.txt": "s\n"})
+        _mkdir_or_skip(root / name)
+        _build(root / name, {".gitignore": "secret.txt\n", "secret.txt": "s\n"})
+        found = _names(root, scan_set(source=str(root)))
+        assert "secret.txt" in found, found
+        assert f"{name}/secret.txt" not in found, found
+        assert _record(root)["by_ignore_file"] == {f"{name}/.gitignore": 1}
+
+    def test_the_markers_are_read_exactly_on_every_platform(self, tmp_path):
+        """The same lines, handed to the reader directly, with no file system."""
+        marker = f"${{SOURCE_DIR}}/{self.MARKED}/.gitignore"
+        lines = [
+            f"######### START CONTENTS: {marker} #########",
+            "*.py",
+            f"######### END CONTENTS: {marker} #########",
+            (
+                f"######### SKIPPED: ${{SOURCE_DIR}}/{self.MARKED}/b/.gitignore: a"
+                " link #########"
+            ),
+            "######### START CONTENTS: ASH_INCLUSIONS #########",
+            ".git",
+            "######### END CONTENTS: ASH_INCLUSIONS #########",
+        ]
+        parser, rule_ids = gss.get_ash_ignorespec_with_attribution(lines, tmp_path)
+        assert list(rule_ids) == [marker, gss.ASH_INCLUSIONS_MARKER], list(rule_ids)
+        (py_rule,) = [r for r in parser.rules if r.pattern_original == "*.py"]
+        assert id(py_rule) in rule_ids[marker]
+        assert str(py_rule.pattern_glob).startswith(
+            (tmp_path / self.MARKED).as_posix()
+        ), py_rule.pattern_glob
+
+    def test_a_source_dir_token_inside_a_name_is_not_replaced(self, tmp_path):
+        """Only the leading token stands for the scan root."""
+        name = "a${SOURCE_DIR}b"
+        marker = f"${{SOURCE_DIR}}/{name}/.gitignore"
+        lines = [f"######### START CONTENTS: {marker} #########", "*.py"]
+        parser, _rule_ids = gss.get_ash_ignorespec_with_attribution(lines, tmp_path)
+        (rule,) = parser.rules
+        assert str(rule.pattern_glob).startswith((tmp_path / name).as_posix()), (
+            rule.pattern_glob
+        )
+
+
 class TestAshsOwnExclusionsByName:
     """The name-based test for ASH's own exclusions answers what the parser answers.
 
