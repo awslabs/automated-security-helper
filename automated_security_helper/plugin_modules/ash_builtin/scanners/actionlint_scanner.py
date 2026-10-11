@@ -75,7 +75,9 @@ Decisions, and why
    problems, 2 for a bad command line and 3 for a fatal error (for example an
    unreadable file). 0 and 1 are success. Anything else, a timeout, output that is not
    the expected JSON, or exit 1 with no findings raises ``ScannerError``, so a broken
-   run is ERROR and never an empty PASSED.
+   run is ERROR and never an empty PASSED. Each target (the source tree, then the
+   converted files) is judged by its own run's exit code; the base class would
+   otherwise carry the worst code from one target into the next.
 
 Severity mapping
 ----------------
@@ -740,6 +742,11 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             global_ignore_paths = []
         self.targets_attempted = 0
         self.targets_failed = 0
+        # ScannerExecutor runs this instance over the source and then the converted
+        # target, and the base class keeps the worst exit code across runs. Without
+        # this, a source that exits 1 (findings) makes a clean converted target read
+        # as "exited 1 but reported none". Reset above every return, as zizmor does.
+        self.exit_code = 0
 
         if not target.exists() or not any(target.iterdir()):
             self._plugin_log(

@@ -835,6 +835,80 @@ def test_a_failing_exit_code_raises_even_with_valid_json(
         scanner.scan(target=repo, target_type="source")
 
 
+def _through_the_base_class(monkeypatch, responses: list) -> None:
+    """Replace only the process call, one response per run.
+
+    ``_run_subprocess`` and the base class's exit-code accumulation (it keeps the
+    worst code across calls) run for real, which ``FakeRun`` bypasses.
+    """
+    remaining = iter(responses)
+    monkeypatch.setattr(
+        "automated_security_helper.utils.subprocess_utils."
+        "run_command_with_output_handling",
+        lambda **_: next(remaining),
+    )
+
+
+def _converted_target(output: Path, workflow: Path | None) -> Path:
+    """``work_dir`` as the archive converter leaves it, holding *workflow* or not."""
+    work_dir = output / "converted"
+    extracted = work_dir / "archive.zip"
+    extracted.mkdir(parents=True)
+    if workflow is None:
+        (extracted / "app.py").write_text("print(1)\n")
+    else:
+        destination = extracted / ".github" / "workflows"
+        destination.mkdir(parents=True)
+        shutil.copy(workflow, destination / workflow.name)
+    return work_dir
+
+
+@pytest.mark.parametrize("converted_has_workflows", [True, False])
+def test_each_target_starts_from_a_clean_exit_code(
+    repo, monkeypatch, on_path, converted_has_workflows
+):
+    """ScannerExecutor runs one instance over the source, then the converted target.
+
+    A source with findings exits 1. A clean converted target after it must report
+    its own exit 0, not fail as "exited 1 but reported none".
+    """
+    output = repo.parent / "ash_output"
+    work_dir = _converted_target(
+        output,
+        repo / ".github" / "workflows" / "clean.yml"
+        if converted_has_workflows
+        else None,
+    )
+    scanner = _scanner(repo, output=output)
+    _through_the_base_class(
+        monkeypatch,
+        [
+            {
+                "returncode": 1,
+                "stdout": (FIXTURES / "actionlint-1.7.12-default.json").read_text(),
+            },
+            {
+                "returncode": 0,
+                "stdout": (FIXTURES / "actionlint-1.7.12-clean.json").read_text(),
+            },
+        ],
+    )
+
+    source = scanner.scan(target=repo, target_type="source")
+    assert len(source.runs[0].results) == len(EXPECTED_DEFAULT)
+    assert scanner.exit_code == 1
+
+    converted = scanner.scan(target=work_dir, target_type="converted")
+
+    assert scanner.exit_code == 0
+    assert scanner.targets_failed == 0
+    if converted_has_workflows:
+        assert converted.runs[0].results == []
+        assert converted.runs[0].invocations[0].exitCode == 0
+    else:
+        assert converted.runs == []
+
+
 def test_a_credentials_finding_does_not_copy_the_password_into_the_report():
     sarif = build_sarif(_load("actionlint-1.7.12-default.json"), exit_code=1)
     credentials = sarif["runs"][0]["results"][0]
