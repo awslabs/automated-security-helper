@@ -89,7 +89,9 @@ class S3ReporterConfigOptions(ReporterOptionsBase):
 class S3ReporterConfig(ReporterPluginConfigBase):
     name: Literal["s3"] = "s3"
     extension: str = "s3.json"
-    enabled: bool = True
+    # Off by default: this reporter sends findings to an AWS service with the
+    # operator's credentials, so only the operator's config turns it on.
+    enabled: bool = False
     options: S3ReporterConfigOptions = S3ReporterConfigOptions()
 
 

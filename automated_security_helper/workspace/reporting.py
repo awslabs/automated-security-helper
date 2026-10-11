@@ -347,16 +347,27 @@ def _selected_reporters(
         # because they route the operator to different knobs: disabled means edit
         # the config, not-requested means widen --output-format, and unavailable
         # means the reporter's own dependencies are unsatisfied.
+        #
+        # The dependency check is last, and only for a reporter that produces an
+        # artefact at workspace level: it can contact a remote service (the AWS
+        # reporters call STS or DescribeHub), and a reporter this step does not
+        # run -- not requested, or per-project, whose check its own project's
+        # scan made -- is not checked here.
         skipped: Optional[str] = None
         if _disabled_by_config(instance):
             skipped = SKIP_DISABLED
-        elif check_dependencies and _dependencies_unsatisfied(instance):
-            skipped = SKIP_UNSATISFIED_DEPENDENCIES
         if skipped is None and python_based_plugins_only:
             if not instance.is_python_only():
                 skipped = SKIP_NOT_PYTHON_ONLY
         if skipped is None and not _matches_requested_formats(instance, output_formats):
             skipped = SKIP_NOT_REQUESTED
+        if (
+            skipped is None
+            and check_dependencies
+            and behaviour in _EMITTING_BEHAVIOURS
+            and _dependencies_unsatisfied(instance)
+        ):
+            skipped = SKIP_UNSATISFIED_DEPENDENCIES
 
         if skipped is not None:
             ASH_LOGGER.debug(
@@ -529,9 +540,8 @@ def emit_workspace_reports(
 
         if skipped is not None:
             # Recorded rather than omitted. Six of the nineteen shipped reporters
-            # land here on a default run -- yaml and spdx ship disabled, and the
-            # four AWS ones report unsatisfied dependencies without credentials --
-            # and an operator asking where their yaml report went deserves an
+            # land here on a default run -- yaml, spdx and the four AWS ones ship
+            # disabled -- and an operator asking where their yaml report went deserves an
             # answer rather than silence. Silence is the defect this manifest
             # exists to prevent; only the reason differs from a withheld artefact.
             entry["skipped"] = skipped

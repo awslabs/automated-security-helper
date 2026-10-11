@@ -831,9 +831,11 @@ class TestTheManifestIsExhaustive:
         calls Bedrock and Security Hub, so without the stub this unit test reached a
         live AWS account -- slow, dependent on ambient credentials, and touching
         someone's real region to decide the outcome of a test about declarations.
-        Stubbing it also makes the assertion stronger: all nineteen are *considered*,
-        so each one's behaviour is exercised through the branch that acts on it
-        rather than through the skip branch.
+        Stubbing it also makes the assertion stronger: every reporter that ships
+        enabled is *considered*, so its behaviour is exercised through the branch
+        that acts on it rather than through the skip branch. The four AWS reporters
+        ship disabled (workspace-level reporting uses ASH's default config), so they
+        are recorded with their behaviour and skipped as disabled.
 
         Artefacts are not asserted. The four AWS reporters are all PER_PROJECT, so
         being considered does not invoke them -- which is what makes stubbing their
@@ -881,9 +883,16 @@ class TestTheManifestIsExhaustive:
         not_considered = sorted(
             name for name, entry in entries.items() if not entry["considered"]
         )
-        # yaml and spdx ship disabled; nothing else should be turned away once
-        # dependencies are satisfied.
-        assert not_considered == ["spdx", "yaml"]
+        # yaml, spdx and the four AWS reporters ship disabled; nothing else should
+        # be turned away once dependencies are satisfied.
+        assert not_considered == [
+            "aws-security-hub",
+            "bedrock-summary-reporter",
+            "cloudwatch-logs",
+            "s3",
+            "spdx",
+            "yaml",
+        ]
 
     def test_unsatisfied_dependencies_are_distinguished_from_disabled(self, workspace):
         """Two reasons, two knobs: credentials or an install, versus the config.

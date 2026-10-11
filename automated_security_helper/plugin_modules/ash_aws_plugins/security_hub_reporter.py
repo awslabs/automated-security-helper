@@ -53,13 +53,15 @@ class SecurityHubReporterConfig(ReporterPluginConfigBase):
             description="File extension for Security Hub ASFF output",
         ),
     ] = "aws-security-hub.asff.json"
+    # Off by default: this reporter sends findings to an AWS service with the
+    # operator's credentials, so only the operator's config turns it on.
     enabled: Annotated[
         bool,
         Field(
-            default=True,
+            default=False,
             description="Whether the Security Hub reporter is enabled",
         ),
-    ] = True
+    ] = False
     options: Annotated[
         SecurityHubReporterConfigOptions,
         Field(

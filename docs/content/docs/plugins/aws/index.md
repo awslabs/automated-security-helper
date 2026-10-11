@@ -21,6 +21,20 @@ AWS plugins provide:
 | **[CloudWatch Logs Reporter](cloudwatch-logs-reporter.md)** | Real-time logging            | Structured logging, metric filters, alarms                    | Real-time monitoring, automated alerting              |
 | **[S3 Reporter](s3-reporter.md)**                           | Cloud storage for reports    | Multiple formats, lifecycle management, analytics integration | Long-term archival, data analytics                    |
 
+## Enabling the AWS reporters
+
+All four AWS reporters are **disabled by default**. Each sends findings to an AWS
+service with the credentials of the host running ASH, so it runs only when your
+configuration turns it on: `enabled: true` in its section of a config file you pass
+with `--config` or `ASH_CONFIG`, or `--config-overrides
+reporters.<name>.enabled=true`.
+
+- A scan checks a reporter's dependencies (STS, Security Hub's `DescribeHub`,
+  Bedrock's model list) only when it will run that reporter: an enabled reporter
+  that the requested `--output-formats` leave out is neither checked nor run.
+- `ash report --format <name>` refuses an AWS reporter that is not enabled, and
+  exits 1 with the setting to change.
+
 ## Quick Start
 
 ### Basic Setup

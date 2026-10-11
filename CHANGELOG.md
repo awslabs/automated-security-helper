@@ -150,6 +150,20 @@
 
 ### Behavior changes
 
+- **The AWS reporters are disabled by default.** The Security Hub, CloudWatch
+  Logs, S3 and Bedrock summary reporters shipped `enabled: true`, so loading
+  `ash_aws_plugins` (by any earlier scan in the process, an MCP server, or a config
+  naming it) was enough for a scan to build each of them and run its dependency
+  check, which contacts AWS with the host's credentials: Security Hub called
+  `DescribeHub`, the others STS. Each now ships `enabled: false`; turn one on with
+  `enabled: true` in its section of your config or with `--config-overrides`.
+  - A reporter's dependency check now runs only for the reporters a run will use:
+    the requested `--output-formats` are applied first, so `-f sarif` checks no AWS
+    reporter, and workspace reporting no longer checks a per-project reporter at
+    workspace level.
+  - `ash report --format <aws reporter>` refuses a reporter that is not enabled and
+    exits 1, instead of sending the stored findings.
+
 - **The archive converter enforces extraction limits, and an archive over one makes
   the scan incomplete.** `converters.archive.options` gains `max_members` (100000),
   `max_member_bytes` (256 MiB), `max_total_bytes` (1 GiB) and

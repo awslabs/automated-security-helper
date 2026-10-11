@@ -14,6 +14,8 @@ The S3 Reporter provides:
 
 ## Configuration
 
+This reporter is disabled by default: it sends findings to AWS with the host's credentials, so it runs only when your config sets `enabled: true` for it (see [Enabling the AWS reporters](index.md#enabling-the-aws-reporters)).
+
 ### Basic Configuration
 
 ```yaml

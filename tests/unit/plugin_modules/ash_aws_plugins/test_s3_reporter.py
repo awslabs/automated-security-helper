@@ -68,7 +68,8 @@ def test_s3_reporter_config_defaults(ash_temp_path):
     config = S3ReporterConfig()
     assert config.name == "s3"
     assert config.extension == "s3.json"
-    assert config.enabled is True
+    # Off by default: it sends findings to AWS, so only the operator turns it on.
+    assert config.enabled is False
     assert isinstance(config.options, S3ReporterConfigOptions)
 
 

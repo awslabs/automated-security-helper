@@ -277,13 +277,11 @@ class ReportPhase(EnginePhase):
                     f"Error creating reporter {getattr(plugin_class, '__name__', 'Unknown')}: {e}"
                 )
 
-        base_filtered = self.filter_enabled_plugins(
-            plugin_instances=all_reporter_instances,
-            plugin_context=self.plugin_context,
-            python_only=python_based_plugins_only,
-        )
-
-        # Apply the format filter on top of the base enabled/deps/python check.
+        # The format filter runs first, then the enabled/python/dependency check
+        # on what is left. A reporter's dependency check can contact a remote
+        # service (Security Hub calls DescribeHub, the other AWS reporters STS),
+        # so it runs only for the reporters this run will use: `-f sarif` checks
+        # nothing else.
         #
         # Matched on the reporter's configured name, not on its extension. The
         # extension is a filename suffix and the requested formats are format
@@ -291,25 +289,29 @@ class ReportPhase(EnginePhase):
         # strings coincide and silently skipped the rest. See
         # reporter_matches_requested_formats for the full account and for why
         # renaming the extensions instead was rejected.
-        enabled_reporters: List[object] = []
-        enabled_reporter_names = []
-        for plugin_instance in base_filtered:
-            display_name = plugin_instance.__class__.__name__
-            if hasattr(plugin_instance, "config") and hasattr(
-                plugin_instance.config, "name"
-            ):
-                display_name = plugin_instance.config.name
+        def _display_name(plugin_instance) -> str:
+            name = getattr(getattr(plugin_instance, "config", None), "name", None)
+            return name or plugin_instance.__class__.__name__
 
+        requested_reporters: List[object] = []
+        for plugin_instance in all_reporter_instances:
             if not reporter_matches_requested_formats(plugin_instance, output_formats):
                 ASH_LOGGER.debug(
-                    f"Reporter {display_name} format "
+                    f"Reporter {_display_name(plugin_instance)} format "
                     f"'{reporter_format_name(plugin_instance)}' not in requested "
                     f"formats {output_formats}, skipping"
                 )
                 continue
+            requested_reporters.append(plugin_instance)
 
-            enabled_reporters.append(plugin_instance)
-            enabled_reporter_names.append(display_name)
+        enabled_reporters: List[object] = self.filter_enabled_plugins(
+            plugin_instances=requested_reporters,
+            plugin_context=self.plugin_context,
+            python_only=python_based_plugins_only,
+        )
+        enabled_reporter_names = [
+            _display_name(plugin_instance) for plugin_instance in enabled_reporters
+        ]
 
         ASH_LOGGER.verbose(
             f"Prepared {len(enabled_reporter_names)} enabled reporters: {enabled_reporter_names}"

@@ -93,13 +93,15 @@ class CloudWatchLogsReporterConfig(ReporterPluginConfigBase):
             description="File extension for CloudWatch Logs output files",
         ),
     ] = "cwlog.json"
+    # Off by default: this reporter sends findings to an AWS service with the
+    # operator's credentials, so only the operator's config turns it on.
     enabled: Annotated[
         bool,
         Field(
-            default=True,
+            default=False,
             description="Whether the CloudWatch Logs reporter is enabled",
         ),
-    ] = True
+    ] = False
     options: Annotated[
         CloudWatchLogsReporterConfigOptions,
         Field(

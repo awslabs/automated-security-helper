@@ -279,7 +279,9 @@ def _without_snippets(value: Any) -> Any:
 class BedrockSummaryReporterConfig(ReporterPluginConfigBase):
     name: Literal["bedrock-summary-reporter"] = "bedrock-summary-reporter"
     extension: str = "bedrock.summary.md"
-    enabled: bool = True
+    # Off by default: this reporter sends findings to an AWS service with the
+    # operator's credentials, so only the operator's config turns it on.
+    enabled: bool = False
     options: BedrockSummaryReporterConfigOptions = BedrockSummaryReporterConfigOptions()
 
 

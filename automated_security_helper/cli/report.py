@@ -63,6 +63,30 @@ JSON_STDOUT_FORMATS = frozenset(
 # Reporters whose output is Markdown, rendered with rich's Markdown.
 MARKDOWN_STDOUT_FORMATS = frozenset({"markdown", "bedrock-summary-reporter"})
 
+#: ASH's plugin packages whose reporters send findings to a remote service with
+#: the operator's credentials (Security Hub, CloudWatch Logs, S3, Bedrock).
+OFF_HOST_REPORTER_PACKAGES = (
+    "automated_security_helper.plugin_modules.ash_aws_plugins",
+)
+
+
+def sends_findings_off_host(reporter_class) -> bool:
+    """Whether ``reporter_class`` comes from a package in OFF_HOST_REPORTER_PACKAGES."""
+    module = getattr(reporter_class, "__module__", "") or ""
+    return any(
+        module == package or module.startswith(package + ".")
+        for package in OFF_HOST_REPORTER_PACKAGES
+    )
+
+
+def _enabled_in(plugin_config, reporter_plugin) -> bool:
+    """The reporter's ``enabled``: from its config section, else its own default."""
+    if isinstance(plugin_config, dict) and "enabled" in plugin_config:
+        return plugin_config["enabled"] is True
+    if plugin_config is not None and hasattr(plugin_config, "enabled"):
+        return getattr(plugin_config, "enabled") is True
+    return getattr(getattr(reporter_plugin, "config", None), "enabled", False) is True
+
 
 def get_report_formats(incomplete: str = None) -> List[str]:
     report_formats = []
@@ -258,11 +282,27 @@ def report_command(
                 ASH_LOGGER.trace(e)
         raise typer.Exit(1)
 
+    # A reporter that sends findings off the host runs only when the operator's
+    # config enables it, as it would in a scan. Naming it with --format is not
+    # enough: it would send the stored findings with whatever credentials the
+    # host has.
+    plugin_config = ash_config.get_plugin_config(
+        plugin_type="reporter", plugin_name=report_format
+    )
+    if sends_findings_off_host(reporter_class) and not _enabled_in(
+        plugin_config, reporter_plugin
+    ):
+        name = reporter_plugin.config.name
+        print(
+            f"[red]Error: reporter '{name}' sends findings off the host and is not "
+            "enabled in the configuration. Enable it in an operator config "
+            f"(reporters.{name}.enabled: true) or with --config-overrides "
+            f"reporters.{name}.enabled=true.[/red]"
+        )
+        raise typer.Exit(1)
+
     # Generate the report
     try:
-        plugin_config = ash_config.get_plugin_config(
-            plugin_type="reporter", plugin_name=report_format
-        )
         if plugin_config is not None and reporter_class is not None:
             # get_plugin_config returns the section as a plain dict. Assigning
             # that to reporter.config left a dict where every reporter reads
