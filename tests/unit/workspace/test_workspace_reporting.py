@@ -25,6 +25,7 @@ subject here, since it is the shape that broke ``runs[0]``.
 """
 
 import json
+import re
 from pathlib import Path
 
 import sys
@@ -37,6 +38,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.core.exceptions import ASHValidationError
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
     WorkspaceProjectResult,
@@ -1179,7 +1181,8 @@ class TestTheWorkspaceWriterStaysInTheReportsDirectory:
     @pytest.mark.skipif(
         sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
     )
-    def test_a_symlinked_report_file_is_not_followed(self, workspace, tmp_path):
+    def test_a_symlinked_report_file_refuses_the_step(self, workspace, tmp_path):
+        """Refused before any reporter runs; nothing is written through the link."""
         _, output_dir, _ = workspace
         outside = tmp_path / "outside.txt"
         outside.write_text("unchanged", encoding="utf-8")
@@ -1187,15 +1190,18 @@ class TestTheWorkspaceWriterStaysInTheReportsDirectory:
         reports.mkdir(parents=True, exist_ok=True)
         (reports / "ash.merged.txt").symlink_to(outside)
 
-        _emit(workspace, FakeSymlinkedReporter)
+        with pytest.raises(ASHValidationError, match="ash.merged.txt is a symlink"):
+            _emit(workspace, FakeSymlinkedReporter)
 
         assert outside.read_text(encoding="utf-8") == "unchanged"
+        assert [path.name for path in reports.iterdir()] == ["ash.merged.txt"]
 
 
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
-def test_a_symlinked_manifest_is_not_followed(workspace, tmp_path):
+def test_a_symlinked_manifest_refuses_the_step(workspace, tmp_path):
+    """Refused before any reporter runs, so no report is written beside it either."""
     _, output_dir, _ = workspace
     outside = tmp_path / "outside-manifest.json"
     outside.write_text("unchanged", encoding="utf-8")
@@ -1203,9 +1209,13 @@ def test_a_symlinked_manifest_is_not_followed(workspace, tmp_path):
     reports.mkdir(parents=True, exist_ok=True)
     (reports / MANIFEST_FILENAME).symlink_to(outside)
 
-    _emit(workspace, FakeMergedReporter)
+    with pytest.raises(
+        ASHValidationError, match=f"{re.escape(MANIFEST_FILENAME)} is a symlink"
+    ):
+        _emit(workspace, FakeMergedReporter)
 
     assert outside.read_text(encoding="utf-8") == "unchanged"
+    assert [path.name for path in reports.iterdir()] == [MANIFEST_FILENAME]
 
 
 def test_a_report_that_cannot_be_written_does_not_stop_the_others(workspace):

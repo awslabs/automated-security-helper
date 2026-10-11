@@ -228,3 +228,98 @@ def test_write_report_file_returns_none_when_the_write_fails(tmp_path):
     assert write_report_file(tmp_path / "reports", "free", "x") == (
         tmp_path / "reports" / "free"
     )
+
+
+# The files each of these reporters writes are the ones it declares in
+# companion_file_names, which is what the report phase checks for links before any
+# reporter runs. Asserted against what the reporter really wrote.
+
+
+def _written(tmp_path: Path) -> set:
+    reports = tmp_path / "out" / "reports"
+    return {path.name for path in reports.iterdir()} if reports.is_dir() else set()
+
+
+def test_the_unused_suppressions_reporter_declares_what_it_writes(tmp_path):
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
+        UnusedSuppressionsReporter,
+    )
+
+    reporter = UnusedSuppressionsReporter(context=_context(tmp_path))
+    reporter.report(AshAggregatedResults())
+
+    assert _written(tmp_path) == set(reporter.companion_file_names()) != set()
+
+
+def test_the_unused_suppressions_reporter_declares_nothing_when_it_writes_nothing(
+    tmp_path,
+):
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
+        UnusedSuppressionsReporter,
+        UnusedSuppressionsReporterConfig,
+        UnusedSuppressionsReporterConfigOptions,
+    )
+
+    reporter = UnusedSuppressionsReporter(
+        context=_context(tmp_path),
+        config=UnusedSuppressionsReporterConfig(
+            options=UnusedSuppressionsReporterConfigOptions(output_format="json")
+        ),
+    )
+    reporter.report(AshAggregatedResults())
+
+    assert _written(tmp_path) == set(reporter.companion_file_names()) == set()
+
+
+def test_the_s3_reporter_declares_its_local_copy(tmp_path):
+    from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import (
+        S3Reporter,
+        S3ReporterConfig,
+        S3ReporterConfigOptions,
+    )
+
+    _s3_report(tmp_path)
+    reporter = S3Reporter(
+        context=_context(tmp_path),
+        config=S3ReporterConfig(
+            options=S3ReporterConfigOptions(
+                aws_region="us-west-2",
+                aws_profile="test-profile",
+                bucket_name="test-bucket",
+                file_format="json",
+            )
+        ),
+    )
+
+    assert _written(tmp_path) == set(reporter.companion_file_names()) != set()
+
+
+@pytest.mark.parametrize(
+    "exclude_sections",
+    [[], ["executive_summary"], ["technical_analysis"]],
+    ids=["all-sections", "no-executive", "no-technical"],
+)
+def test_the_bedrock_reporter_declares_its_files(tmp_path, exclude_sections):
+    from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
+        BedrockSummaryReporter,
+        BedrockSummaryReporterConfig,
+        BedrockSummaryReporterConfigOptions,
+    )
+
+    with patch(f"{AWS}.bedrock_summary_reporter.boto3"):
+        reporter = BedrockSummaryReporter(
+            context=_context(tmp_path),
+            config=BedrockSummaryReporterConfig(
+                options=BedrockSummaryReporterConfigOptions(
+                    aws_region="us-west-2",
+                    model_id="test-vendor.test-model-v1:0",
+                    enable_caching=False,
+                    exclude_sections=exclude_sections,
+                )
+            ),
+        )
+        reporter._write_markdown_files(
+            _RuntimeDouble(), AshAggregatedResults(), [], [], "summary"
+        )
+
+    assert _written(tmp_path) == set(reporter.companion_file_names()) != set()

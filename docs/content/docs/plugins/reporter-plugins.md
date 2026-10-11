@@ -301,7 +301,9 @@ class SimpleReporter(ReporterPluginBase[SimpleReporterConfig]):
 1. **Handle Configuration**: Use Pydantic models for configuration
 2. **Validate Dependencies**: Implement the `validate` method to check dependencies
 3. **Error Handling**: Use try/except blocks and provide meaningful error messages
-4. **Output to Files**: Write reports to the `reports` directory
+4. **Output to Files**: Write reports to the `reports` directory. Return the report and ASH writes it to
+   `ash.<extension>`; write any other file there with `write_report_file` and return its name from
+   `companion_file_names()`, so that a link already at that name stops the run before any reporter writes
 5. **Return Content**: Return the report content as a string
 6. **Use Model Methods**: Use the model's helper methods like `to_simple_dict()` and `to_flat_vulnerabilities()`
 

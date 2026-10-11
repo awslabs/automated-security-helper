@@ -673,6 +673,12 @@ async def _run_scan_async(
             _logger.info(f"Scan {scan_id} completed successfully")
         else:
             error_message = f"ASH exited with code {e.code}"
+            # A refusal that carries its reason (ReportPathRefusedExit: a link at a
+            # report path) says why, since the client cannot read the console the
+            # reason was printed to.
+            reason = getattr(e, "reason", None)
+            if isinstance(reason, str) and reason:
+                error_message = f"{error_message}: {reason}"
             registry.finish_scan(scan_id, MCScanStatus.FAILED, error_message)
             _logger.error(f"Scan {scan_id} failed: {error_message}")
 

@@ -7,6 +7,8 @@ from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.reporter_plugin import (
     confined_report_path,
+    reporter_file_name,
+    reporter_file_names,
     reporter_format_name,
     reporter_matches_requested_formats,
 )
@@ -14,6 +16,9 @@ from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.report_path_links import (
+    refuse_linked_report_paths,
+)
 
 #: The reporter for this format is switched off in configuration. This is the
 #: common case and the one an operator can fix in a line: ``yaml`` and ``spdx``
@@ -323,6 +328,19 @@ class ReportPhase(EnginePhase):
             )
         )
 
+        # Before any reporter runs. A link at the reports directory, or at a file
+        # one of these reporters writes there (named by the reporter itself), stops
+        # the run with ReportPathLinkRefused: the write through it would be refused
+        # and the link left for the next reader. See utils/report_path_links.py.
+        refuse_linked_report_paths(
+            report_dir,
+            [
+                name
+                for plugin_instance in enabled_reporters
+                for name in reporter_file_names(plugin_instance)
+            ],
+        )
+
         # Create the main report task with initial progress
         report_task = self.progress_display.add_task(
             phase=ExecutionPhase.REPORT,
@@ -407,13 +425,9 @@ class ReportPhase(EnginePhase):
                     if report_result:
                         ASH_LOGGER.debug(f"Reporter {display_name} returned a report")
 
-                        # Determine output filename based on reporter's extension if available
-                        output_filename = "ash.txt"  # Default
-                        if hasattr(plugin_instance, "config") and hasattr(
-                            plugin_instance.config, "extension"
-                        ):
-                            extension = plugin_instance.config.extension
-                            output_filename = f"ash.{extension}"
+                        # ash.<extension>, or ash.txt without one: the name the
+                        # link check above examined.
+                        output_filename = reporter_file_name(plugin_instance)
 
                         # Write the report to a file
                         output_file = confined_report_path(report_dir, output_filename)

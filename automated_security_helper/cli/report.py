@@ -15,6 +15,9 @@ from rich import print, print_json  # noqa: A004
 from rich.markdown import Markdown
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base.reporter_plugin import (
+    reporter_companion_file_names,
+)
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.constants import ASH_CONFIG_SOURCES_DESCRIPTION
 from automated_security_helper.core.enums import AshLogLevel, ExportFormat
@@ -23,6 +26,9 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.utils.log import get_logger
+from automated_security_helper.utils.report_path_links import (
+    refuse_linked_report_paths,
+)
 
 
 # Reporters whose output is a JSON document, printed with rich's print_json.
@@ -256,6 +262,13 @@ def report_command(
                 context=plugin_context,
                 config=plugin_config,
             )
+        # The report goes to stdout, but a reporter that writes files of its own
+        # writes them to the reports directory. A link at one of them refuses the
+        # command before the reporter runs; the handler below prints why.
+        refuse_linked_report_paths(
+            output_dir_path.joinpath("reports"),
+            reporter_companion_file_names(reporter_plugin),
+        )
         report_content = reporter_plugin.report(model)
         if report_content is None:
             # `report` is annotated `-> str | None`, and a reporter returns None

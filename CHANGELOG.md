@@ -644,6 +644,30 @@
   ordinary `*` (as in gitignore); it used to match only a file literally named `.py`.
   Every other pattern shape matches exactly what it did.
 
+- **A link already at a report path stops the run with exit 1, before any reporter
+  writes.** That covers the reports directory itself, each enabled reporter's
+  `reports/ash.<extension>`, the files reporters write beside their reports (the
+  unused-suppressions reporter's markdown, the S3 reporter's local copy, the Bedrock
+  summary reporter's files) and, in workspace mode, `reports/workspace-reports.json`,
+  when any of them is a symlink or a directory junction. The error names the link. A
+  link there that led out of the reports directory used to make that reporter's write
+  fail with an error in the log while the scan exited 0, and the link stayed in place
+  for the next step that read the report. The names checked come from the reporters
+  that will run: a reporter declares the files it writes itself in
+  `companion_file_names()`. The check runs when the report phase starts, so it covers
+  `ash scan` (including `--use-existing`), `ash merge` and MCP scans, whose error
+  message now carries the reason; `ash report` checks the files the chosen reporter
+  writes itself. A workspace run is refused before any project is scanned, and again
+  when its report step starts if a link appeared in the meantime. In container and
+  nix mode, where the outer process re-derives the verdict from the results file,
+  it exits 1 too when a link is directly in `reports/` after the inner run, rather
+  than reading the results back. The exit code is never counted from a
+  `reports/ash.sarif` that is a link. A fresh scan removes `reports/` and anything in
+  it while setting up its directories, so a link left there by an earlier run is
+  cleared rather than refused, as before. A regular file at a report path is still
+  replaced. A reporter without an `extension` now writes `ash.txt`, the name the
+  workspace report step already gave it, rather than `ash.None`.
+
 ### Breaking changes
 
 - **MCP scans can now end in a new terminal status, `incomplete`.** Clients

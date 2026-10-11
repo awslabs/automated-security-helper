@@ -47,6 +47,14 @@ reporters:
 
 Reports are written to `.ash/ash_output/reports/` by default.
 
+ASH does not write a report through a link. When the reports directory, a report
+file of an enabled reporter, a file a reporter writes beside its report (such as
+`ash.unused-suppressions.md`) or, in workspace mode, `reports/workspace-reports.json`
+is already a symlink or a directory junction, the run exits 1 before any reporter
+writes, and the error names the link. A workspace run is refused before any project
+is scanned, and container and nix mode exit 1 when a link is left in `reports/` after
+the inner run. A regular file at one of those names is replaced as before.
+
 ---
 
 ## Flat JSON

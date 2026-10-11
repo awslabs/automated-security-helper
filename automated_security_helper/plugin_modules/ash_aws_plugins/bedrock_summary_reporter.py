@@ -4,7 +4,7 @@ import logging
 import os
 from collections import defaultdict
 from pathlib import Path
-from typing import Annotated, Dict, List, Literal, Any, TYPE_CHECKING
+from typing import Annotated, Dict, List, Literal, Any, TYPE_CHECKING, Tuple
 
 import boto3
 import botocore.exceptions
@@ -283,6 +283,22 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         if self.config is None:
             self.config = BedrockSummaryReporterConfig()
         return super().model_post_init(context)
+
+    def companion_file_names(self) -> Tuple[str, ...]:
+        """The markdown files ``_write_markdown_files`` writes, with ``output_markdown`` on."""
+        config = self.config
+        if isinstance(config, dict):
+            config = BedrockSummaryReporterConfig.model_validate(config)
+        opts = config.options
+        if not opts.output_markdown:
+            return ()
+        included = set(opts.include_sections) - set(opts.exclude_sections)
+        names = [opts.output_file]
+        if "executive_summary" in included:
+            names.append(opts.output_executive_file)
+        if "technical_analysis" in included:
+            names.append(opts.output_technical_file)
+        return tuple(names)
 
     def validate_plugin_dependencies(self) -> bool:
         """Validate reporter configuration and requirements."""

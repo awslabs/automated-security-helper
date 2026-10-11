@@ -39,7 +39,16 @@ from abc import abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Generic, Iterable, Optional, TypeVar
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    Generic,
+    Iterable,
+    Optional,
+    Tuple,
+    TypeVar,
+)
 from typing_extensions import Self
 
 from pydantic import (
@@ -164,7 +173,9 @@ def write_report_file(report_dir: Path, filename: str, content: str) -> Optional
 
     For the files a reporter writes beside the one ``ReportPhase`` writes. The name
     has to pass ``confined_report_path``, and the write replaces the file rather
-    than writing through it, so a symlink at that name is not followed.
+    than writing through it, so a symlink at that name is not followed. A reporter
+    that calls this declares the names in ``companion_file_names``, so that a link
+    already at one of them refuses the run before any reporter writes.
     """
     from automated_security_helper.utils.atomic_write import write_text_atomically
 
@@ -204,6 +215,38 @@ def reporter_format_name(instance: "ReporterPluginBase") -> str | None:
     never emitted on the strength of a format the operator asked for by name.
     """
     return getattr(getattr(instance, "config", None), "name", None)
+
+
+def reporter_file_name(instance: object) -> str:
+    """The file in the reports directory that ``ReportPhase`` writes this reporter's report to.
+
+    ``ash.<extension>``, or ``ash.txt`` for a reporter without an extension. The
+    workspace report step names a workspace-level report the same way.
+    """
+    extension = getattr(getattr(instance, "config", None), "extension", None)
+    return f"ash.{extension}" if extension else "ash.txt"
+
+
+def reporter_companion_file_names(instance: object) -> Tuple[str, ...]:
+    """The files this reporter writes itself in the reports directory, from its declaration.
+
+    See ``ReporterPluginBase.companion_file_names``. Only strings are kept.
+    """
+    declared = getattr(instance, "companion_file_names", None)
+    if not callable(declared):
+        return ()
+    return tuple(name for name in declared() if isinstance(name, str))
+
+
+def reporter_file_names(instance: object) -> Tuple[str, ...]:
+    """Every file this reporter's run writes in the reports directory.
+
+    Its report's file, then the files it writes itself, without repeats. This is
+    what ``ReportPhase`` and the workspace report step check for links before any
+    reporter runs (utils/report_path_links.py).
+    """
+    names = (reporter_file_name(instance), *reporter_companion_file_names(instance))
+    return tuple(dict.fromkeys(names))
 
 
 def reporter_matches_requested_formats(
@@ -291,6 +334,16 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         """Configure the reporter with provided configuration."""
         if config:
             self.config = config
+
+    def companion_file_names(self) -> Tuple[str, ...]:
+        """The files this reporter writes itself in the reports directory, beside its report.
+
+        Empty by default. A reporter that writes files with ``write_report_file``
+        returns the names it would write with its current options. ``ReportPhase``
+        and the workspace report step refuse the run, before any reporter writes,
+        when one of them is already a link.
+        """
+        return ()
 
     def _pre_report(self) -> None:
         self.start_time = datetime.now(timezone.utc)

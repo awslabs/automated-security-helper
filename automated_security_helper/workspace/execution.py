@@ -316,6 +316,7 @@ from automated_security_helper.workspace.policy import (
 from automated_security_helper.workspace.reporting import (
     WorkspaceReportOutcome,
     emit_workspace_reports,
+    refuse_linked_workspace_report_paths,
     unsupported_reporter_names,
 )
 
@@ -1261,6 +1262,9 @@ def execute_workspace(
             unsupported in workspace mode. Raised rather than recorded because
             nothing has been scanned yet -- that is an exit-4 refusal, not a
             project failure.
+        ReportPathLinkRefused: When a path a workspace report would be written to
+            is a link: before any project is scanned, or when the report step
+            starts if the link appeared during the scan.
     """
     if orchestrator_factory is None:
         from automated_security_helper.core.orchestrator import ASHScanOrchestrator
@@ -1326,6 +1330,15 @@ def execute_workspace(
                 f"Nothing was scanned. Disable them, narrow --output-format to "
                 f"exclude them, or scan the projects separately."
             )
+        # Here for the same two reasons: a link at a workspace report path
+        # refuses the run before any project is scanned.
+        refuse_linked_workspace_report_paths(
+            plan,
+            output_dir,
+            output_formats=settings.output_formats,
+            python_based_plugins_only=settings.python_based_plugins_only,
+            reporter_classes=reporter_classes,
+        )
 
     bound = min(configured_bound, len(active) or 1)
     ASH_LOGGER.info(

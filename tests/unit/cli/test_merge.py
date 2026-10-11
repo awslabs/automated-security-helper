@@ -26,6 +26,8 @@ between a partial merge and a false clean bill of health.
 """
 
 import json
+import re
+import sys
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
@@ -1674,6 +1676,38 @@ class TestMergeCli:
 
         assert result.exit_code != 0
         assert "not a valid format" in result.output
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    def test_a_link_at_a_report_path_refuses_the_reports(self, tmp_path):
+        """A link already at ``reports/ash.sarif`` exits 1 naming it; nothing is written through it."""
+        shard_paths = write_shards(tmp_path / "artifacts", build_shards(3))
+        output_dir = tmp_path / "merged"
+        (output_dir / "reports").mkdir(parents=True)
+        outside = tmp_path / "outside.sarif"
+        outside.write_text("unchanged", encoding="utf-8")
+        link = output_dir / "reports" / "ash.sarif"
+        link.symlink_to(outside)
+
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(output_dir), "--output-formats", "sarif,csv"]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 1, result.output
+        # Compared without styling or whitespace: the console styles the path and
+        # wraps long lines.
+        console = "".join(re.sub(r"\x1b\[[0-9;]*m", "", result.output).split())
+        assert "".join(f"{link.as_posix()} is a symlink".split()) in console, (
+            result.output
+        )
+        assert outside.read_text(encoding="utf-8") == "unchanged"
+        assert sorted(path.name for path in (output_dir / "reports").iterdir()) == [
+            "ash.sarif"
+        ]
 
 
 def _incomplete_entries(

@@ -76,6 +76,13 @@ Failure modes and known limitations
   ``models.workspace``: a finding is a certainty and must not be suppressed by
   anything weaker. No reporter shipped here declares ``UNSUPPORTED``; the path is
   built and tested so the enum member is a mechanism rather than a comment.
+* A symlink or directory junction at ``reports/``, at a file a workspace-level
+  reporter writes there, or at the manifest refuses the run with
+  ``ReportPathLinkRefused`` (exit 1), before any project is scanned
+  (:func:`refuse_linked_workspace_report_paths`). One that appears while the
+  projects are scanned is refused when the report step starts, before anything is
+  written; the results file has been written by then, with the exit code the
+  projects gave. See utils/report_path_links.py.
 * The per-project artefact paths in the manifest are derived from each reporter's
   configured ``extension``, which is how ``ReportPhase`` derives the filename it
   writes. A reporter that writes extra files under its own steam -- as
@@ -101,10 +108,15 @@ from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterWorkspaceBehaviour,
+    reporter_file_name,
+    reporter_file_names,
     reporter_matches_requested_formats,
     write_report_file,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.report_path_links import (
+    refuse_linked_report_paths,
+)
 from automated_security_helper.workspace.plan import WorkspacePlan
 
 #: Where workspace-level reports land, mirroring the ``reports/`` directory a
@@ -179,13 +191,12 @@ def _reporter_name(instance: ReporterPluginBase) -> str:
 def _report_filename(instance: ReporterPluginBase) -> str:
     """The filename ``ReportPhase`` would give this reporter's output.
 
-    Mirrors ``ReportPhase._execute_phase`` exactly, including its ``ash.txt``
-    fallback for a reporter that declares no extension, so a workspace-level
-    report and a per-project one are never named differently for the same
-    reporter.
+    The same function ``ReportPhase._execute_phase`` names its file with, including
+    the ``ash.txt`` fallback for a reporter that declares no extension, so a
+    workspace-level report and a per-project one are never named differently for
+    the same reporter.
     """
-    extension = getattr(getattr(instance, "config", None), "extension", None)
-    return f"ash.{extension}" if extension else "ash.txt"
+    return reporter_file_name(instance)
 
 
 def _disabled_by_config(instance: ReporterPluginBase) -> bool:
@@ -398,6 +409,57 @@ def _workspace_context(
     return context, config_lookup
 
 
+def _workspace_report_file_names(selection) -> List[str]:
+    """Every file the workspace report step writes in ``reports/``.
+
+    The files of each reporter that will produce a workspace-level artefact, as the
+    reporter names them, and the manifest. ``selection`` is what
+    :func:`_selected_reporters` yields.
+    """
+    names: List[str] = []
+    for instance, behaviour, skipped in selection:
+        if skipped is None and behaviour in _EMITTING_BEHAVIOURS:
+            names.extend(reporter_file_names(instance))
+    names.append(MANIFEST_FILENAME)
+    return names
+
+
+def refuse_linked_workspace_report_paths(
+    plan: WorkspacePlan,
+    output_dir: Path,
+    *,
+    output_formats: Sequence[str] = (),
+    python_based_plugins_only: bool = False,
+    reporter_classes: Optional[Sequence[type]] = None,
+) -> None:
+    """Refuse the run when a workspace report would be written through a link.
+
+    Run before any project is scanned, for the reason
+    :func:`unsupported_reporter_names` is: nothing gets scanned or written, so the
+    results file and the exit status cannot disagree. Nothing clears the
+    workspace's ``reports/`` before the report step, so a link there now is a link
+    there then. :func:`emit_workspace_reports` checks again before it writes. No
+    dependency validation, for the same reason as there, so the names checked are
+    those of every enabled reporter that writes a workspace-level file.
+
+    Raises:
+        ReportPathLinkRefused: ``reports/``, one of those reporters' files or the
+            manifest is a symlink or a directory junction.
+    """
+    context, config_lookup = _workspace_context(plan.workspace_root, Path(output_dir))
+    selection = _selected_reporters(
+        context=context,
+        config_lookup=config_lookup,
+        output_formats=output_formats,
+        python_based_plugins_only=python_based_plugins_only,
+        reporter_classes=reporter_classes,
+        check_dependencies=False,
+    )
+    refuse_linked_report_paths(
+        Path(output_dir) / REPORTS_DIR_NAME, _workspace_report_file_names(selection)
+    )
+
+
 def unsupported_reporter_names(
     plan: WorkspacePlan,
     output_dir: Path,
@@ -491,6 +553,10 @@ def emit_workspace_reports(
     Returns:
         What was written, what was withheld, and what refused. The caller folds
         ``refused`` into the exit code; nothing here calls ``sys.exit``.
+
+    Raises:
+        ReportPathLinkRefused: ``reports/``, a file a reporter here would write or
+            the manifest is a link. Nothing is written.
     """
     output_dir = Path(output_dir)
     reports_dir = output_dir / REPORTS_DIR_NAME
@@ -510,13 +576,21 @@ def emit_workspace_reports(
     # pays the cost of materialising the whole model.
     model = None
 
-    for instance, behaviour, skipped in _selected_reporters(
-        context=context,
-        config_lookup=config_lookup,
-        output_formats=output_formats,
-        python_based_plugins_only=python_based_plugins_only,
-        reporter_classes=reporter_classes,
-    ):
+    selection = list(
+        _selected_reporters(
+            context=context,
+            config_lookup=config_lookup,
+            output_formats=output_formats,
+            python_based_plugins_only=python_based_plugins_only,
+            reporter_classes=reporter_classes,
+        )
+    )
+    # Before any reporter runs and before the manifest: a link that appeared
+    # after refuse_linked_workspace_report_paths ran is refused here, with
+    # nothing written.
+    refuse_linked_report_paths(reports_dir, _workspace_report_file_names(selection))
+
+    for instance, behaviour, skipped in selection:
         name = _reporter_name(instance)
         filename = _report_filename(instance)
         entry: Dict[str, Any] = {

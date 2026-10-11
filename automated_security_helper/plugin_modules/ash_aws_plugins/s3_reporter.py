@@ -5,7 +5,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Literal, Optional, TYPE_CHECKING
+from typing import Annotated, Literal, Optional, TYPE_CHECKING, Tuple
 
 import boto3
 from pydantic import Field
@@ -153,6 +153,17 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             self.config = S3ReporterConfig()
         return super().model_post_init(context)
 
+    def companion_file_names(self) -> Tuple[str, ...]:
+        """The local copy of the uploaded content, ``s3-report.<json|yaml>``."""
+        return (self._local_copy_name(),)
+
+    def _local_copy_name(self) -> str:
+        config = self.config
+        if isinstance(config, dict):
+            config = S3ReporterConfig.model_validate(config)
+        file_extension = "json" if config.options.file_format == "json" else "yaml"
+        return f"s3-report.{file_extension}"
+
     def validate_plugin_dependencies(self) -> bool:
         """Validate reporter configuration and requirements."""
         self.dependencies_satisfied = False
@@ -241,7 +252,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             reports_dir = Path(self.context.output_dir) / "reports"
             reports_dir.mkdir(parents=True, exist_ok=True)
             local_copy = write_report_file(
-                reports_dir, f"s3-report.{file_extension}", output_content
+                reports_dir, self._local_copy_name(), output_content
             )
 
             # What ReportPhase writes to reports/ash.s3.json: a receipt for the

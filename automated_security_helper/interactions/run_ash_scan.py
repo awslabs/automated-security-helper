@@ -16,6 +16,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    NoReturn,
     Optional,
     Sequence,
     Set,
@@ -81,6 +82,10 @@ from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, escape_ma
 from automated_security_helper.utils.process_env import (
     apply_environ_overrides,
     restore_environ,
+)
+from automated_security_helper.utils.report_path_links import (
+    ReportPathLinkRefused,
+    linked_report_path,
 )
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 from automated_security_helper.utils.severity_ladder import (
@@ -1139,6 +1144,49 @@ class ScanIncompleteExit(SystemExit):
         self.results = results
 
 
+class ReportPathRefusedExit(SystemExit):
+    """``sys.exit(1)`` for a run refused because a report path is a link, with the reason.
+
+    A ``SystemExit`` with code 1, so the CLI's exit code is that of any other error.
+    ``reason`` is the message printed to the console, which names the link; an
+    in-process caller (the MCP scan runner) reports it rather than a bare "exited
+    with code 1". See utils/report_path_links.py.
+    """
+
+    def __init__(self, reason: str):
+        super().__init__(1)
+        self.reason = reason
+
+
+def _refuse_report_path_link(refusal: ReportPathLinkRefused) -> NoReturn:
+    print(f"[bold red]ERROR (1) {escape_markup(str(refusal))}[/bold red]")
+    raise ReportPathRefusedExit(str(refusal)) from refusal
+
+
+def _refuse_links_left_in_reports(opts: ScanOptions) -> None:
+    """Refuse the read-back of a container or nix run when ``reports/`` holds a link.
+
+    The inner run's report phase refuses a link at a file its reporters write, and
+    exits 1. That status alone does not reach the operator: 1 is a verdict this
+    process re-derives from the results file. This process does not know the inner
+    run's reporters (an image can carry plugins this host lacks), but no reporter
+    creates a link, and _discard_prior_run_artifacts removed ``reports/`` unless
+    ``--use-existing`` kept it. So a link directly in ``reports/`` after the inner
+    run is one the inner run refused or one no reporter wrote, and either way the
+    run is refused here rather than answered from the files beside it.
+    """
+    reports = opts.output_dir / "reports"
+    try:
+        listed = [entry.name for entry in reports.iterdir()]
+    except OSError:
+        listed = []
+    # ash.sarif always, since _compute_exit_code reads it back. That also has the
+    # directory itself examined when it lists nothing, as a dangling link does.
+    found = linked_report_path(reports, ["ash.sarif", *listed])
+    if found is not None:
+        _refuse_report_path_link(ReportPathLinkRefused(found))
+
+
 def _severity_filters_finding(result, min_sev_rank: int) -> bool:
     """Return True when *result* meets the minimum severity threshold.
 
@@ -1756,6 +1804,8 @@ def _run_container_mode(
             )
         sys.exit(container_returncode)
 
+    _refuse_links_left_in_reports(opts)
+
     output_file = opts.output_dir / "ash_aggregated_results.json"
     if output_file.exists():
         with open(output_file, mode="r", encoding="utf-8") as f:
@@ -1809,6 +1859,8 @@ def _run_nix_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
         # sit at INFO -- a debug record is emitted nowhere, neither to the terminal nor to
         # ash.log.
         logger.warning(f"Nix shell exited with code {nix_result.returncode}")
+
+    _refuse_links_left_in_reports(opts)
 
     # The inner scan wrote to the same output directory this process was given, so unlike
     # container mode there is no path to translate back.
@@ -2055,6 +2107,10 @@ def _run_local_mode(
         # operator's config is fine.
         print(f"[bold red]ERROR (1) {e}[/bold red]")
         sys.exit(1)
+    except ReportPathLinkRefused as e:
+        # The report phase refused before any reporter wrote: a link is at the
+        # reports directory or at a report file. Not a fault, so no traceback.
+        _refuse_report_path_link(e)
     except Exception as e:
         logger.exception(e)
         print(
@@ -2283,6 +2339,10 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
     except ASHConfigValidationError as exc:
         print(f"[bold red]ERROR (3) Invalid configuration: {exc}[/bold red]")
         sys.exit(int(WorkspaceExitCode.INVALID_PROJECT_CONFIG))
+    except ReportPathLinkRefused as exc:
+        # Exit 1, as in a single-directory scan: a link at a report path is not a
+        # workspace definition error.
+        _refuse_report_path_link(exc)
     except Exception as exc:
         logger.exception(exc)
         print(
@@ -2665,6 +2725,12 @@ def _compute_exit_code(
     # Literal and ScannerOptionsBase.severity_threshold is Literal | None whose None
     # means "defer to global" -- so this is parity rather than a new behaviour.
     sarif_file = Path(opts.output_dir).joinpath("reports", "ash.sarif")
+    # Not read through a link, which would let the file it points to decide the exit
+    # code. The report phase refuses one where the SARIF reporter writes; this covers
+    # a run in which that reporter did not write it.
+    found = linked_report_path(sarif_file.parent, [sarif_file.name])
+    if found is not None:
+        _refuse_report_path_link(ReportPathLinkRefused(found))
     if sarif_file.exists():
         try:
             with open(sarif_file, encoding="utf-8") as f:

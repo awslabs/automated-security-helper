@@ -176,7 +176,8 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.utils.atomic_write import write_text_atomically
-from automated_security_helper.utils.log import ASH_LOGGER, get_logger
+from automated_security_helper.utils.log import ASH_LOGGER, escape_markup, get_logger
+from automated_security_helper.utils.report_path_links import ReportPathLinkRefused
 
 #: The filename every ASH scan writes its aggregated results to. A ``--results``
 #: directory is searched for this name.
@@ -1285,12 +1286,18 @@ def merge_command(
         progress_display=LiveProgressDisplay(show_progress=False),
         asharp_model=merged,
     )
-    merged = report_phase.execute(
-        report_dir=output_dir_path.joinpath("reports"),
-        cli_output_formats=parsed_formats or None,
-        aggregated_results=merged,
-        python_based_plugins_only=False,
-    )
+    try:
+        merged = report_phase.execute(
+            report_dir=output_dir_path.joinpath("reports"),
+            cli_output_formats=parsed_formats or None,
+            aggregated_results=merged,
+            python_based_plugins_only=False,
+        )
+    except ReportPathLinkRefused as exc:
+        # Refused before any reporter wrote: a link at the reports directory or at
+        # a report file. Printed like the other refusals here, without a traceback.
+        print(f"[red]Refusing to write reports: {escape_markup(str(exc))}[/red]")
+        raise typer.Exit(1)
 
     exit_code = _merged_exit_code(
         merged,
