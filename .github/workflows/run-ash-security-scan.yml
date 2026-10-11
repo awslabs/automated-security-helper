@@ -261,9 +261,9 @@ jobs:
       # outside the tree: as the operator's. The caller chose that commit; the
       # checkout did not.
       #
-      # Only this one file comes from config-ref. Tool config files it names by a
-      # relative path (scanners.<name>.options.config_file) are still read from the
-      # checkout, and a config that `extends` another file fails to load here.
+      # The tool config files it names by a relative path
+      # (scanners.<name>.options.config_file) come from the same commit, in the step
+      # after Set up Python. A config that `extends` another file fails to load here.
       - name: Read the ASH config from config-ref
         id: config-ref
         if: inputs.config-ref != ''
@@ -371,6 +371,146 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ inputs.python-version }}
+
+      # THE TOOL CONFIG FILES THAT CONFIG NAMES COME FROM CONFIG-REF TOO
+      #
+      # A scanner option such as scanners.bandit.options.config_file names a file
+      # the scanner's own tool reads, by a path that is relative to the checkout
+      # (bandit resolves it against the working directory, grype against the source
+      # directory). Reading only the config from config-ref would leave those files
+      # to the pull request: an `exclude_dirs` in .ash/bandit.yaml or an `ignore:`
+      # rule in .ash/.grype.yaml would still change its own required check.
+      #
+      # So every relative `config_file` the fetched config names is read from the
+      # same commit, written beside the config under RUNNER_TEMP, and the config is
+      # rewritten to point at the copies. A file the commit does not have, a symlink,
+      # or a path outside the repository fails the step; nothing falls back to the
+      # checkout's copy. An absolute path is the operator's and is left as it is.
+      # A config that names no relative `config_file` is passed on byte for byte.
+      #
+      # The config is parsed with the PyYAML that the installed ASH brings, by code
+      # that does not import ASH, so it works with any ASH revision. The rewritten
+      # copy is YAML; `!ENV` tags are kept, and a plain `${...}` value stays a plain
+      # scalar, so ASH resolves both as before.
+      - name: Read the tool config files the config names from config-ref
+        id: config-ref-files
+        if: inputs.config-ref != ''
+        env:
+          CONFIG_FILE: ${{ steps.config-ref.outputs.path }}
+          CONFIG_COMMIT: ${{ steps.config-ref.outputs.commit }}
+          CONFIG_REF: ${{ inputs.config-ref }}
+          DEST_ROOT: ${{ runner.temp }}/ash-config-ref
+        run: |
+          set -euo pipefail
+          # Runs in the checkout only so that git reads the fetched commit; -I keeps
+          # the checkout off sys.path and --no-config keeps uv from reading its
+          # settings, as for every other helper in this job.
+          uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- python -I - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          import yaml
+
+          config_file = Path(os.environ["CONFIG_FILE"])
+          commit = os.environ["CONFIG_COMMIT"]
+          ref = os.environ["CONFIG_REF"]
+          dest_root = Path(os.environ["DEST_ROOT"])
+
+
+          def fail(message):
+              print(f"::error::{message}")
+              sys.exit(1)
+
+
+          def plain(value):
+              relative = value[2:] if value.startswith("./") else value
+              parts = relative.split("/")
+              if any(part in ("", ".", "..") for part in parts):
+                  return None
+              return relative
+
+
+          def read_blob(relative):
+              listing = subprocess.run(
+                  ["git", "--literal-pathspecs", "ls-tree", "-z", commit, "--", relative],
+                  check=True,
+                  capture_output=True,
+              ).stdout
+              records = [record for record in listing.split(b"\0") if record]
+              if not records:
+                  return None
+              meta, _, path = records[0].partition(b"\t")
+              mode, kind, oid = meta.decode().split()
+              if (
+                  len(records) != 1
+                  or kind != "blob"
+                  or mode in ("120000", "160000")
+                  or path != relative.encode()
+              ):
+                  fail(f"{relative} at {ref} is not a regular file ({mode} {kind}); refusing to scan with it.")
+              return subprocess.run(
+                  ["git", "cat-file", "blob", oid], check=True, capture_output=True
+              ).stdout
+
+
+          class EnvTag(str):
+              pass
+
+
+          class Loader(yaml.SafeLoader):
+              pass
+
+
+          class Dumper(yaml.SafeDumper):
+              pass
+
+
+          Loader.add_constructor("!ENV", lambda loader, node: EnvTag(loader.construct_scalar(node)))
+          Dumper.add_representer(EnvTag, lambda dumper, value: dumper.represent_scalar("!ENV", str(value)))
+
+          text = config_file.read_text(encoding="utf-8")
+          if config_file.name.endswith(".json"):
+              document = json.loads(text)
+          elif config_file.name.endswith(".toml"):
+              import tomllib
+
+              document = tomllib.loads(text)
+              if config_file.name == "pyproject.toml":
+                  document = (document.get("tool") or {}).get("ash")
+          else:
+              document = yaml.load(text, Loader=Loader)
+
+          rewritten = []
+          scanners = document.get("scanners") if isinstance(document, dict) else None
+          for name, section in (scanners.items() if isinstance(scanners, dict) else []):
+              options = section.get("options") if isinstance(section, dict) else None
+              value = options.get("config_file") if isinstance(options, dict) else None
+              if not isinstance(value, str) or not value or value.startswith("/"):
+                  continue
+              relative = plain(value)
+              if relative is None:
+                  fail(f"scanners.{name}.options.config_file is '{value}', which is not a plain path inside the repository; refusing to scan with it.")
+              blob = read_blob(relative)
+              if blob is None:
+                  fail(f"scanners.{name}.options.config_file names {relative}, which {ref} does not have; refusing to scan with the checkout's copy instead.")
+              target = dest_root / relative
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(blob)
+              options["config_file"] = str(target)
+              rewritten.append(f"scanners.{name}.options.config_file: {relative} as of {ref}")
+
+          path = config_file
+          if rewritten:
+              path = config_file.with_name(config_file.name + ".config-ref.yaml")
+              path.write_text(yaml.dump(document, Dumper=Dumper, sort_keys=False), encoding="utf-8")
+              for line in rewritten:
+                  print(line)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"path={path}\n")
+          PY
 
       # THE GRYPE DATABASE CACHE IS TIME-BOUNDED BY THE SAME NUMBER GRYPE ENFORCES
       #
@@ -818,7 +958,7 @@ jobs:
           # The config read from config-ref when the caller set one, else the
           # `config` input as before. Set here as well as passed as --config, so
           # every part of ASH that reads ASH_CONFIG sees the same file.
-          ASH_CONFIG: ${{ steps.config-ref.outputs.path || inputs.config }}
+          ASH_CONFIG: ${{ steps.config-ref-files.outputs.path || inputs.config }}
           ASH_MODE: ${{ inputs.ash-mode }}
           ASH_ARGS: ${{ inputs.ash-args }}
           # Bare `inputs.fail-on-findings`, not `== 'true'`. GitHub casts
@@ -927,17 +1067,18 @@ jobs:
           path: ~/.cache/grype/db
           key: grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.grype-db }}
 
-      # Not after a failed config-ref step: with no path from it, the expression below
-      # would fall back to the checkout's config, the one config-ref exists to avoid.
+      # Not after a failed config-ref step: with no path from them, the expression
+      # below would fall back to the checkout's config, which config-ref exists to
+      # avoid.
       - name: Show ASH Summary Report
-        if: (success() || failure()) && steps.config-ref.outcome != 'failure'
+        if: (success() || failure()) && steps.config-ref.outcome != 'failure' && steps.config-ref-files.outcome != 'failure'
         shell: bash
         env:
           ASH_REPO_CLONE_URL: https://github.com/${{ github.repository }}.git
           # The same config the scan used. `ash report` resolves a config too, and
           # loads the plugin modules it names, so without this it would discover the
           # checkout's.
-          ASH_CONFIG: ${{ steps.config-ref.outputs.path || inputs.config }}
+          ASH_CONFIG: ${{ steps.config-ref-files.outputs.path || inputs.config }}
         run: |-
           # No --reinstall here. The Run ASH step above already installed this exact
           # source, so re-forcing a download makes the report step do a second git

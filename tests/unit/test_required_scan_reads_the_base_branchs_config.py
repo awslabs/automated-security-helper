@@ -61,6 +61,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -118,8 +119,33 @@ def _git(*args: str, cwd: Path, home: Path) -> str:
 class Repository:
     """An origin with one base commit, and a checkout of a different tree."""
 
-    def __init__(self, root: Path, *, base_files: dict[str, str | None]):
+    def __init__(
+        self,
+        root: Path,
+        *,
+        base_files: dict[str, str | None],
+        checkout_files: dict[str, str] | None = None,
+    ):
         self.sandbox = ga.StepSandbox(root / "runner")
+        # `uv run ... -- python ...` runs that python here, as the real uv would run
+        # it from the environment it builds; this interpreter has ASH and PyYAML.
+        shim_dir = root / "uv-shim"
+        shim_dir.mkdir()
+        shim = shim_dir / "uv"
+        shim.write_text(
+            "#!/bin/sh\n"
+            'while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done\n'
+            '[ "$#" -gt 0 ] && shift\n'
+            '[ "$1" = "python" ] && shift\n'
+            f'exec "{sys.executable}" "$@"\n',
+            encoding="utf-8",
+        )
+        shim.chmod(0o755)
+        self.uv_env = {
+            "PATH": os.pathsep.join(
+                [str(shim_dir), str(self.sandbox.stub_dir), os.environ.get("PATH", "")]
+            )
+        }
         home = self.sandbox.home
         origin = root / "origin.git"
         origin.mkdir()
@@ -154,6 +180,10 @@ class Repository:
         checkout_config = workspace / CONFIG_PATH
         checkout_config.parent.mkdir(parents=True)
         checkout_config.write_text(CHECKOUT_CONFIG, encoding="utf-8")
+        for name, content in (checkout_files or {}).items():
+            path = workspace / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
 
 
 # --------------------------------------------------------------------------- contexts
@@ -308,18 +338,30 @@ def _outputs(sandbox: ga.StepSandbox) -> dict[str, str]:
 def _run_config_ref_step(
     repo: Repository, context: dict[str, Any], inputs: dict[str, Any]
 ) -> tuple[ga.StepRun | None, dict[str, Any]]:
-    """Run the config-ref step if its `if:` holds; return it and the steps context."""
+    """Run the steps gated on config-ref in order, stopping at the first failure."""
     workflow, job = _job()
-    found = _config_ref_steps()
-    if not found:
-        return None, {}
-    (step,) = found
     ctx = ga.with_inputs(context, inputs)
-    if not ga.condition_holds(step.get("if"), ctx):
-        return None, {}
-    run = ga.run_step(repo.sandbox, workflow, job, step, ctx)
-    outputs = _outputs(repo.sandbox) if run.proc.returncode == 0 else {}
-    return run, {step["id"]: {"outputs": outputs, "outcome": "success"}}
+    steps: dict[str, Any] = {}
+    run = None
+    for step in _config_ref_steps():
+        scoped = {**ctx, "steps": steps}
+        if not ga.condition_holds(step.get("if"), scoped):
+            continue
+        output_file = repo.sandbox.runner_temp / "_runner_file_commands" / "output"
+        if output_file.exists():
+            output_file.write_text("", encoding="utf-8")
+        run = ga.run_step(
+            repo.sandbox, workflow, job, step, scoped, extra_env=repo.uv_env
+        )
+        ok = run.proc.returncode == 0
+        steps[step["id"]] = {
+            "outputs": _outputs(repo.sandbox) if ok else {},
+            "outcome": "success" if ok else "failure",
+            "stdout": run.proc.stdout,
+        }
+        if not ok:
+            break
+    return run, steps
 
 
 def _ash_invocations(
@@ -347,7 +389,10 @@ def _config_argument(argv: list[str]) -> str | None:
 
 class TestTheRequiredCheckScansWithTheBaseCommitsConfig:
     def test_the_locators_find_the_steps(self):
-        assert len(_config_ref_steps()) == 1, "expected one step gated on config-ref"
+        found = _config_ref_steps()
+        assert found and found[0].get("id") == "config-ref", (
+            "expected the steps gated on config-ref, starting with the fetch"
+        )
         names = {str(s.get("name")) for s in _ash_steps()}
         assert len(names) >= 2, f"expected the scan and the report steps, found {names}"
 
@@ -425,7 +470,8 @@ class TestTheRequiredCheckScansWithTheBaseCommitsConfig:
         inputs = {**_required_inputs(context), "config-ref-missing": "defaults"}
         run, steps = _run_config_ref_steps_or_fail(repo, context, inputs)
         assert (
-            "::warning::" in run.proc.stdout and "default config" in run.proc.stdout
+            "::warning::" in steps["config-ref"]["stdout"]
+            and "default config" in steps["config-ref"]["stdout"]
         ), run.describe()
         for name, call in _ash_invocations(repo, context, inputs, steps):
             config = _config_argument(call["argv"])
@@ -521,19 +567,18 @@ class TestTheConfigRefStepRefusesWhatItCannotReadExactly:
         path = steps["config-ref"]["outputs"]["path"]
         assert Path(path).read_text(encoding="utf-8") == BASE_CONFIG
 
-    def test_no_step_runs_ash_after_the_config_ref_step_failed(self, tmp_path):
+    @pytest.mark.parametrize("failed", ["config-ref", "config-ref-files"])
+    def test_no_step_runs_ash_after_a_config_ref_step_failed(self, tmp_path, failed):
         """With no path from the step, the fallback would be the checkout's config."""
         repo = Repository(tmp_path, base_files={CONFIG_PATH: BASE_CONFIG})
         context = _pull_request(repo.base_sha, fork=False)
         inputs = _required_inputs(context)
         assert inputs.get("config-ref"), "the required check sets no config-ref"
+        assert failed in {s.get("id") for s in _config_ref_steps()}, failed
+        steps = {"config-ref": {"outcome": "success", "outputs": {"path": "/x"}}}
+        steps[failed] = {"outcome": "failure", "outputs": {}}
         ctx = ga.with_inputs(
-            {
-                **context,
-                "__status__": "failure",
-                "steps": {"config-ref": {"outcome": "failure", "outputs": {}}},
-            },
-            inputs,
+            {**context, "__status__": "failure", "steps": steps}, inputs
         )
         running = [
             str(step.get("name"))
@@ -603,3 +648,188 @@ class TestOtherScansKeepTheCheckoutsConfig:
         )
         inputs = _required_inputs(context)
         assert ga.to_string(inputs.get("config-ref")) == "", inputs.get("config-ref")
+
+
+# --------------------------------------------------------------------------- 5
+
+TOOL_CONFIG_BASE = (
+    "# the base commit's config, naming tool config files\n"
+    "project_name: base\n"
+    "scanners:\n"
+    "  bandit:\n"
+    "    options:\n"
+    "      config_file: .ash/bandit.yaml\n"
+    "  grype:\n"
+    "    options:\n"
+    "      config_file: ./.ash/.grype.yaml\n"
+    "  checkov:\n"
+    "    options:\n"
+    "      config_file: /etc/an-operator-path.yaml\n"
+)
+BASE_BANDIT = "# bandit config at the base commit\nskips: []\n"
+BASE_GRYPE = "# grype config at the base commit\nignore: []\n"
+CHECKOUT_BANDIT = (
+    "# bandit config in the pull request\nexclude_dirs: ['automated_security_helper']\n"
+)
+CHECKOUT_GRYPE = "# grype config in the pull request\nignore:\n  - package:\n      name: example-package\n"
+
+
+def _scan_config(repo: Repository, context, inputs) -> Path:
+    """The --config the scan step passes, after the config-ref steps ran."""
+    run, steps = _run_config_ref_steps_or_fail(repo, context, inputs)
+    configs = {
+        _config_argument(call["argv"])
+        for _, call in _ash_invocations(repo, context, inputs, steps)
+    }
+    assert len(configs) == 1 and None not in configs, configs
+    return Path(configs.pop())
+
+
+def _tool_config_paths(config: Path) -> dict[str, Any]:
+    from automated_security_helper.config.ash_config import load_yaml_config
+
+    with open(config, encoding="utf-8") as handle:
+        document = load_yaml_config(handle)
+    return {
+        name: (section.get("options") or {}).get("config_file")
+        for name, section in (document.get("scanners") or {}).items()
+    }
+
+
+class TestToolConfigFilesComeFromTheBaseCommit:
+    """The base config's relative scanners.*.options.config_file are fetched too.
+
+    bandit reads `config_file` relative to the working directory and grype relative
+    to the source directory, both the checkout, so with only `.ash/.ash.yaml` taken
+    from config-ref a pull request still set bandit's and grype's config for its own
+    required check.
+    """
+
+    def _repo(self, tmp_path, base_files):
+        return Repository(
+            tmp_path,
+            base_files=base_files,
+            checkout_files={
+                ".ash/bandit.yaml": CHECKOUT_BANDIT,
+                ".ash/.grype.yaml": CHECKOUT_GRYPE,
+            },
+        )
+
+    def test_each_relative_tool_config_comes_from_the_base_commit(self, tmp_path):
+        repo = self._repo(
+            tmp_path,
+            {
+                CONFIG_PATH: TOOL_CONFIG_BASE,
+                ".ash/bandit.yaml": BASE_BANDIT,
+                ".ash/.grype.yaml": BASE_GRYPE,
+            },
+        )
+        context = _pull_request(repo.base_sha, fork=False)
+        config = _scan_config(repo, context, _required_inputs(context))
+        paths = _tool_config_paths(config)
+        for scanner, expected in (("bandit", BASE_BANDIT), ("grype", BASE_GRYPE)):
+            path = paths[scanner]
+            assert path and Path(path).is_absolute(), (
+                f"scanners.{scanner}.options.config_file is {path!r}, which resolves "
+                "in the checkout, so the pull request's copy configures its own scan"
+            )
+            assert not repo.sandbox.is_inside_workspace(path), path
+            assert Path(path).read_text(encoding="utf-8") == expected, (
+                f"{path} does not hold the base commit's {scanner} config"
+            )
+        assert paths["checkov"] == "/etc/an-operator-path.yaml", (
+            "an absolute path is the operator's and must be left as it is"
+        )
+
+    def test_a_tool_config_missing_at_the_base_commit_is_refused(self, tmp_path):
+        repo = self._repo(
+            tmp_path, {CONFIG_PATH: TOOL_CONFIG_BASE, ".ash/.grype.yaml": BASE_GRYPE}
+        )
+        context = _pull_request(repo.base_sha, fork=False)
+        run, steps = _run_config_ref_step(repo, context, _required_inputs(context))
+        assert run is not None and run.proc.returncode != 0, run and run.describe()
+        assert (
+            "::error::" in run.proc.stdout and ".ash/bandit.yaml" in run.proc.stdout
+        ), run.describe()
+        assert steps.get("config-ref-files", {}).get("outcome") == "failure", steps
+
+    @pytest.mark.parametrize(
+        "value", ["../outside.yaml", ".ash/../../outside.yaml", ".ash//bandit.yaml"]
+    )
+    def test_a_tool_config_path_outside_the_repository_is_refused(
+        self, tmp_path, value
+    ):
+        config = TOOL_CONFIG_BASE.replace(".ash/bandit.yaml", value)
+        repo = self._repo(
+            tmp_path,
+            {
+                CONFIG_PATH: config,
+                ".ash/bandit.yaml": BASE_BANDIT,
+                ".ash/.grype.yaml": BASE_GRYPE,
+            },
+        )
+        context = _pull_request(repo.base_sha, fork=False)
+        run, _ = _run_config_ref_step(repo, context, _required_inputs(context))
+        assert run is not None and run.proc.returncode != 0, run and run.describe()
+        assert (
+            "::error::" in run.proc.stdout and "scanners.bandit" in run.proc.stdout
+        ), run.describe()
+
+    def test_a_symlinked_tool_config_at_the_base_commit_is_refused(self, tmp_path):
+        repo = self._repo(
+            tmp_path,
+            {
+                CONFIG_PATH: TOOL_CONFIG_BASE,
+                ".ash/bandit.yaml": None,
+                ".ash/.grype.yaml": BASE_GRYPE,
+            },
+        )
+        context = _pull_request(repo.base_sha, fork=False)
+        run, _ = _run_config_ref_step(repo, context, _required_inputs(context))
+        assert run is not None and run.proc.returncode != 0, run and run.describe()
+        assert "not a regular file" in run.proc.stdout, run.describe()
+
+    def test_the_rewritten_config_is_the_base_config_apart_from_those_paths(
+        self, tmp_path, monkeypatch
+    ):
+        """This repository's own config, and `!ENV` values, survive the rewrite."""
+        from automated_security_helper.config.ash_config import load_yaml_config
+
+        real = (ga.REPO_ROOT / CONFIG_PATH).read_text(encoding="utf-8")
+        extra = (
+            "\nash_env_probe:\n"
+            "  explicit: !ENV ${ASH_PROBE_VALUE}\n"
+            "  implicit: ${ASH_PROBE_VALUE}\n"
+        )
+        base_files = {CONFIG_PATH: real + extra}
+        # Every relative tool config file the real config names, read from the tree.
+        named = _tool_config_paths(ga.REPO_ROOT / CONFIG_PATH)
+        relative = sorted(
+            v.removeprefix("./") for v in named.values() if v and not v.startswith("/")
+        )
+        assert relative, "this repository's config names no tool config file"
+        for name in relative:
+            base_files[name] = (ga.REPO_ROOT / name).read_text(encoding="utf-8")
+        repo = Repository(tmp_path, base_files=base_files)
+        context = _pull_request(repo.base_sha, fork=False)
+        config = _scan_config(repo, context, _required_inputs(context))
+
+        monkeypatch.setenv("ASH_PROBE_VALUE", "resolved")
+        original = load_yaml_config(base_files[CONFIG_PATH])
+        rewritten = load_yaml_config(config.read_text(encoding="utf-8"))
+        assert rewritten.pop("ash_env_probe") == original.pop("ash_env_probe")
+        for name, section in original["scanners"].items():
+            value = (section.get("options") or {}).get("config_file")
+            if value:
+                new = rewritten["scanners"][name]["options"].pop("config_file")
+                section["options"].pop("config_file")
+                assert (
+                    Path(new).read_text(encoding="utf-8")
+                    == base_files[value.removeprefix("./")]
+                )
+        assert rewritten == original
+
+        from automated_security_helper.config.resolve_config import resolve_config
+
+        resolved = resolve_config(config_path=config, source_dir=repo.sandbox.workspace)
+        assert resolved.project_name == original["project_name"]
