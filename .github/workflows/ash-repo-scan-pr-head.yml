@@ -1,0 +1,64 @@
+name: Run ASH (pull request head, informational)
+# Scans a pull request with the ASH that pull request ships, for information only.
+#
+# WHY THIS EXISTS
+#
+# The required check `ash / SAST, SCA, and IaC Scan` (ash-repo-scan.yml) installs
+# ASH from the pull request's base commit, so a pull request cannot change the scan
+# that gates it. That leaves a pull request that changes ASH itself without a run of
+# its own code against this repository. This workflow is that run.
+#
+# WHY IT CANNOT GATE ANYTHING
+#
+#   * Its check name says it is informational, and it is not one of the required
+#     checks listed in DEVELOPMENT.md. Do not add it to a ruleset: a required check
+#     that runs the pull request's own ASH is the gate this split removed.
+#   * It reports nothing to the pull request. The PR comment is a single comment
+#     that the last writer replaces, the JUnit check run has one fixed name, and
+#     SARIF lands in code scanning under one category, so each of them would show
+#     this run's verdict where the required scan's belongs. Its results are in the
+#     job summary and in this run's `ash_output` artifact.
+#   * It is a workflow of its own rather than a second job in ash-repo-scan.yml, so
+#     its `ash_output` artifact cannot collide with the required scan's in one run
+#     (upload-artifact refuses a second artifact with a name the run already has,
+#     which would fail whichever job uploaded second), and upload-ash-sarif.yml
+#     there keeps reading the required scan's artifact only.
+#
+# A job that calls a reusable workflow cannot take `continue-on-error`, so a red run
+# here is red; it still blocks nothing because nothing requires it.
+on:
+  pull_request:
+    branches:
+      - "*"
+
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight run per pull request; pushing again supersedes the previous run.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ash-pr-head:
+    name: ash (pull request head, informational only -- does not gate)
+    uses: ./.github/workflows/run-ash-security-scan.yml
+    # The called workflow declares these at its top level, and GitHub refuses the
+    # whole run at startup when a caller grants less, whatever the inputs below
+    # switch off. For a fork pull request GitHub makes the token read-only anyway.
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    with:
+      # The pull request's head commit, from the repository it comes from.
+      ash-version: ${{ github.event.pull_request.head.sha }}
+      ash-repo: ${{ github.event.pull_request.head.repo.full_name }}
+      collect-sarif-report: false
+      collect-junit-xml-report: false
+      post-pr-comment: false
+      verbose: true
+      install-grype: true
+      install-syft: true
+      install-opengrep: true
+      install-cfn-nag: true

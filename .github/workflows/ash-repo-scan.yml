@@ -42,16 +42,24 @@ jobs:
       # No security-events here. The called workflow drops it, so granting it here
       # never reached the upload step; the sarif job below holds it instead.
     with:
-      # For PR runs, install ASH from the PR's head repo and branch so fork PRs work.
+      # This job is the required check `ash / SAST, SCA, and IaC Scan`, so the ASH
+      # that judges a pull request is never the one the pull request changes.
+      #
+      # For PR runs, install ASH from this repository at the pull request's base
+      # commit, for same-repo and fork PRs alike. It used to be the PR's head repo
+      # and branch, which let a pull request that changes how ASH scans (a scanner
+      # that stops reporting, a parser that drops results, a gate that exits 0) be
+      # judged by the ASH it ships. ash-repo-scan-pr-head.yml runs the PR's own ASH
+      # as an informational check that nothing requires.
       # For merge_group runs, github.head_ref is empty and github.ref_name is the
       # ephemeral gh-readonly-queue/... branch, which GitHub deletes as soon as the
       # queue entry is processed. The scan step's uvx install would win the race and
       # the later report step's would not, failing with "couldn't find remote ref".
       # The commit is unreachable once the branch is gone, so its SHA is not
       # fetchable either - the only stable choice is the default branch.
-      # For non-PR runs (workflow_dispatch, push), use the current repo and ref.
-      ash-version: ${{ github.head_ref || (github.event_name == 'merge_group' && github.event.repository.default_branch) || github.ref_name }}
-      ash-repo: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+      # For non-PR runs (workflow_dispatch), use the current repo and ref.
+      ash-version: ${{ github.event.pull_request.base.sha || (github.event_name == 'merge_group' && github.event.repository.default_branch) || github.ref_name }}
+      ash-repo: ${{ github.repository }}
       # Off because the sarif job below uploads instead. The upload step inside the
       # called workflow cannot hold security-events: write, so it fails on
       # workflow_dispatch; see upload-ash-sarif.yml for why.

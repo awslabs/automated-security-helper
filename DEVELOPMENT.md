@@ -360,6 +360,15 @@ feat!: redesign plugin API (breaking change)
 
 A pre-commit hook (`commitizen`) also validates local commit messages.
 
+### The ASH scan of this repository
+
+ASH scans its own repository on every pull request, in two workflows:
+
+- `ash / SAST, SCA, and IaC Scan` (`.github/workflows/ash-repo-scan.yml`) is a required check. On a pull request it installs ASH, and the cfn-nag Gemfile it pins, from this repository at the pull request's base commit, for same-repository and fork pull requests alike. In the merge queue it installs from the default branch. A pull request is therefore never judged by the ASH it changes: a change that makes a scanner stop reporting, or the gate exit 0, has no effect on its own required check.
+- `ash (pull request head, informational only -- does not gate) / SAST, SCA, and IaC Scan` (`.github/workflows/ash-repo-scan-pr-head.yml`) runs the pull request's own ASH against the same tree. It is not a required check and must not be added to a ruleset. It posts no PR comment, publishes no JUnit check and uploads no SARIF, so nothing it reports can be mistaken for the required scan's result; its findings are in the job summary and in the run's `ash_output` artifact. When you change ASH itself, this is the run that shows what your change does.
+
+On `pull_request`, GitHub runs the workflow files from the pull request's merge commit, so a pull request that edits `ash-repo-scan.yml` or `run-ash-security-scan.yml` still changes its own gate. Review changes to `.github/workflows/` with that in mind; nothing inside a workflow file can prevent it.
+
 ### Releasing
 
 Releases are cut by maintainers via **Actions > ASH - Create Release > Run workflow**. The workflow:

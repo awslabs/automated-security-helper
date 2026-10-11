@@ -9,12 +9,12 @@ on:
   workflow_call:
     inputs:
       ash-version:
-        description: "ASH tag or branch to use. Defaults to a beta release until ASHv3 is released."
+        description: "ASH tag, branch or commit to install. Defaults to main."
         required: false
         default: "main"
         type: string
       ash-repo:
-        description: "GitHub repository to install ASH from (owner/repo). For fork PRs, pass the fork repo."
+        description: "GitHub repository to install ASH from (owner/repo)."
         required: false
         default: "awslabs/automated-security-helper"
         type: string
@@ -495,10 +495,9 @@ jobs:
       # comment to learn which release a sha is. This sha is v1.321.0.
       #
       # No `bundler-cache: true`. That input has the action run `bundle install`
-      # itself against BUNDLE_GEMFILE, and this Gemfile is neither at the repository
-      # root nor reliably present: the step below resolves it to
-      # automated_security_helper/assets/Gemfile or else curls the pin into
-      # RUNNER_TEMP, then installs under sudo with BUNDLE_GEMFILE set explicitly.
+      # itself against BUNDLE_GEMFILE, and this Gemfile is not in the repository at
+      # all: the step below curls the pin into RUNNER_TEMP, then installs with
+      # BUNDLE_GEMFILE set explicitly.
       # Caching an install other than the one that actually runs is worse than not
       # caching. Bundler itself comes from this action by default, and the guard
       # below checks for it rather than assuming it.
@@ -517,21 +516,24 @@ jobs:
         if: inputs.install-cfn-nag
         env:
           # Same repo and ref the scan itself is installed from, so the gem
-          # version can never disagree with the ASH that invokes it.
+          # version can never disagree with the ASH that invokes it, and the
+          # scanned checkout never picks it.
           ASH_ASSETS_URL: https://raw.githubusercontent.com/${{ inputs.ash-repo }}/${{ inputs.ash-version }}/automated_security_helper/assets
         run: |
           set -euo pipefail
           # ASH's own Gemfile and Gemfile.lock are the version pin -- naming
           # 0.8.10 here as well would create a second place to update, and the
           # container image already builds cfn-nag from these two files.
-          GEMFILE="${GITHUB_WORKSPACE}/automated_security_helper/assets/Gemfile"
-          if [ ! -f "${GEMFILE}" ]; then
-            # The checkout is the calling repository, not ASH's, so fetch the pin.
-            GEMFILE="${RUNNER_TEMP}/ash-cfn-nag/Gemfile"
-            mkdir -p "$(dirname "${GEMFILE}")"
-            curl -sSfL "${ASH_ASSETS_URL}/Gemfile" -o "${GEMFILE}"
-            curl -sSfL "${ASH_ASSETS_URL}/Gemfile.lock" -o "${GEMFILE}.lock"
-          fi
+          #
+          # Always fetched, never taken from the checkout. This step used
+          # ${GITHUB_WORKSPACE}/automated_security_helper/assets/Gemfile whenever the
+          # checkout had one, which is every run where ASH scans itself: on a pull
+          # request that is the pull request's Gemfile, so the pull request chose the
+          # cfn-nag that scanned it, whatever ref ASH itself came from.
+          GEMFILE="${RUNNER_TEMP}/ash-cfn-nag/Gemfile"
+          mkdir -p "$(dirname "${GEMFILE}")"
+          curl -sSfL "${ASH_ASSETS_URL}/Gemfile" -o "${GEMFILE}"
+          curl -sSfL "${ASH_ASSETS_URL}/Gemfile.lock" -o "${GEMFILE}.lock"
           echo "Installing cfn-nag from ${GEMFILE}"
           # Every tool is resolved with `command -v` as the runner user rather than
           # assumed on PATH. The failure this names -- Ruby absent for the runner
@@ -584,19 +586,17 @@ jobs:
           # which makes their existence a product of this step rather than an
           # inference about where RubyGems might have put one.
           #
-          # Under RUNNER_TEMP rather than beside the Gemfile on purpose. When ASH
-          # scans itself the Gemfile is inside GITHUB_WORKSPACE, and writing four Ruby
-          # scripts there would add them to the tree the very next step scans. The
-          # generated wrapper bakes an absolute-ized BUNDLE_GEMFILE computed from its
-          # own directory, so it does not need to sit next to the Gemfile; verified by
-          # running one from `/` with a PATH holding nothing but the binstub directory
-          # and the system defaults.
+          # Under RUNNER_TEMP, in a directory of their own, and never in
+          # GITHUB_WORKSPACE: writing four Ruby scripts into the checkout would add
+          # them to the tree the very next step scans. The generated wrapper bakes an
+          # absolute-ized BUNDLE_GEMFILE computed from its own directory, so it does
+          # not need to sit next to the Gemfile; verified by running one from `/` with
+          # a PATH holding nothing but the binstub directory and the system defaults.
           #
-          # This does not make the Gemfile's directory untouched: bundler records
-          # settings next to it either way, so `.bundle/config` appears there with
-          # BUNDLE_JOBS from the install above and BUNDLE_BIN from `--path`. That file
-          # predates this change and is one small YAML; what is kept out of the
-          # scanned tree is the executable content.
+          # bundler also records settings next to the Gemfile, so `.bundle/config`
+          # appears in RUNNER_TEMP/ash-cfn-nag with BUNDLE_JOBS from the install above
+          # and BUNDLE_BIN from `--path`. Now that the Gemfile is always fetched, that
+          # file is outside the scanned tree too.
           #
           # --force so a warm RUNNER_TEMP regenerates against the bundle just
           # installed instead of leaving a stale wrapper in place; without it bundler
