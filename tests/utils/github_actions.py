@@ -844,8 +844,16 @@ def run_step(
     context: dict[str, Any],
     *,
     extra_env: dict[str, str] | None = None,
+    github_env: dict[str, str] | None = None,
 ) -> StepRun:
-    """Run one step's ``run:`` block the way a Linux runner would, with stubs on PATH."""
+    """Run one step's ``run:`` block the way a Linux runner would, with stubs on PATH.
+
+    ``github_env`` is what earlier steps wrote to ``GITHUB_ENV`` (``read_github_env``).
+    The runner applies it over the workflow and job ``env:`` and under the step's own
+    ``env:`` (actions/runner: job env and file commands both land in the job's global
+    environment, in that order, and StepsRunner merges the step's env on top), in the
+    process environment and in the ``env`` context alike.
+    """
     if "run" not in step:
         raise ExpressionError(f"step {step.get('name')!r} has no run: block")
     ctx = dict(context)
@@ -857,9 +865,10 @@ def run_step(
     workflow_env = render_env(workflow.data.get("env"), {**ctx, "env": {}})
     ctx["env"] = workflow_env
     job_env = render_env(job.get("env"), ctx)
-    ctx["env"] = {**workflow_env, **job_env}
+    file_env = dict(github_env or {})
+    ctx["env"] = {**workflow_env, **job_env, **file_env}
     step_env = render_env(step.get("env"), ctx)
-    ctx["env"] = {**workflow_env, **job_env, **step_env}
+    ctx["env"] = {**workflow_env, **job_env, **file_env, **step_env}
 
     files = sandbox.runner_temp / "_runner_file_commands"
     files.mkdir(exist_ok=True)
@@ -883,7 +892,14 @@ def run_step(
         "STUB_REAL_PYTHON": shutil.which("python3", path=os.environ.get("PATH"))
         or sys.executable,
     }
-    env = {**base_env, **workflow_env, **job_env, **step_env, **(extra_env or {})}
+    env = {
+        **base_env,
+        **workflow_env,
+        **job_env,
+        **file_env,
+        **step_env,
+        **(extra_env or {}),
+    }
 
     defaults_run = {
         **((workflow.data.get("defaults") or {}).get("run") or {}),
@@ -914,6 +930,43 @@ def run_step(
         if line
     ]
     return StepRun(str(step.get("name")), proc, calls)
+
+
+def read_github_env(sandbox: StepSandbox) -> dict[str, str]:
+    """What the steps run so far wrote to ``GITHUB_ENV``, later lines winning.
+
+    Both forms the runner accepts: ``NAME=value``, and ``NAME<<DELIMITER`` followed by
+    the value's lines and a line holding only the delimiter.
+    """
+    path = sandbox.runner_temp / "_runner_file_commands" / "env"
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    lines = path.read_text(encoding="utf-8").splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        i += 1
+        if not line:
+            continue
+        if "<<" in line and ("=" not in line or line.index("<<") < line.index("=")):
+            name, delimiter = line.split("<<", 1)
+            body = []
+            while i < len(lines) and lines[i] != delimiter:
+                body.append(lines[i])
+                i += 1
+            if i >= len(lines):
+                raise ExpressionError(
+                    f"GITHUB_ENV: no closing {delimiter!r} for {name!r}"
+                )
+            i += 1
+            values[name] = "\n".join(body)
+        elif "=" in line:
+            name, value = line.split("=", 1)
+            values[name] = value
+        else:
+            raise ExpressionError(f"GITHUB_ENV: cannot read the line {line!r}")
+    return values
 
 
 def interpreter_options(python_argv: list[str]) -> list[str]:

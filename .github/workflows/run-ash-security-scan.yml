@@ -209,6 +209,15 @@ env:
   # below quotes it. Unquoted, the shell would split it into three words and pass
   # `@` to uvx as the command to run.
   ASH_UVX_SOURCE: automated-security-helper[cdk] @ git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}
+  # Where cfn-nag's Gemfile comes from: the same repo and ref the scan itself is
+  # installed from, so the gem version can never disagree with the ASH that
+  # invokes it, and the scanned checkout never picks it.
+  #
+  # Both of these name ash-version as given. The job's first step replaces them,
+  # through GITHUB_ENV, with the commit that name resolved to when the job
+  # started; see "Pin the ASH ref to a commit". Neither may be set again in a
+  # step's own `env:`, which would win over that.
+  ASH_ASSETS_URL: https://raw.githubusercontent.com/${{ inputs.ash-repo }}/${{ inputs.ash-version }}/automated_security_helper/assets
   ASH_OUTPUT_DIR: ${{ inputs.output-dir }}
   # No ASH_CONFIG here. The Run ASH and Show ASH Summary Report steps set it to the
   # config the scan uses (from config-ref, or the `config` input), and no other
@@ -244,6 +253,74 @@ jobs:
       # miss; the saves are unchanged (push to the default branch only).
       RESTORE_CACHES: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
     steps:
+      # THE ASH REF IS RESOLVED TO ONE COMMIT, ONCE, BEFORE ANYTHING INSTALLS ASH
+      #
+      # ash-version may be a branch or a tag (refs/heads/main in the merge queue,
+      # main by default). ASH_UVX_SOURCE and ASH_ASSETS_URL above carry the name,
+      # and every uv/uvx call and the cfn-nag Gemfile fetch resolved it again, so a
+      # merge landing mid-run could give one step one ASH and the next another.
+      # This step resolves the name with `git ls-remote` and writes both variables
+      # with the commit to GITHUB_ENV, which the runner applies over the
+      # workflow-level values for every later step. A full commit id is used as
+      # given; a tag yields its commit, not the tag object. A name that is both a
+      # branch and a tag on different commits, or that matches nothing, is refused,
+      # and so is an ash-repo that is not owner/name, since it is written into
+      # GITHUB_ENV.
+      - name: Pin the ASH ref to a commit
+        id: ash-pin
+        env:
+          ASH_REPO: ${{ inputs.ash-repo }}
+          ASH_VERSION: ${{ inputs.ash-version }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${ASH_REPO}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+            echo "::error::ash-repo must be owner/name, not '${ASH_REPO}'."
+            exit 1
+          fi
+          if [[ -z "${ASH_VERSION}" || "${ASH_VERSION}" == -* || "${ASH_VERSION}" =~ [[:space:][:cntrl:]] ]]; then
+            echo "::error::ash-version '${ASH_VERSION}' is not a branch, tag or commit name."
+            exit 1
+          fi
+          if [[ "${ASH_VERSION}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            COMMIT="${ASH_VERSION,,}"
+          else
+            if [[ "${ASH_VERSION}" == refs/* ]]; then
+              CANDIDATES=("${ASH_VERSION}")
+            else
+              CANDIDATES=("refs/heads/${ASH_VERSION}" "refs/tags/${ASH_VERSION}")
+            fi
+            LISTING="${RUNNER_TEMP}/ash-pin.ls-remote"
+            git ls-remote -- "https://github.com/${ASH_REPO}.git" "${ASH_VERSION}" "${ASH_VERSION}^{}" > "${LISTING}"
+            COMMITS=()
+            for NAME in "${CANDIDATES[@]}"; do
+              FOUND="$(awk -v ref="${NAME}^{}" '$2 == ref { print $1 }' "${LISTING}")"
+              if [ -z "${FOUND}" ]; then
+                FOUND="$(awk -v ref="${NAME}" '$2 == ref { print $1 }' "${LISTING}")"
+              fi
+              if [ -n "${FOUND}" ]; then COMMITS+=("${FOUND}"); fi
+            done
+            rm -f -- "${LISTING}"
+            UNIQUE="$(printf '%s\n' "${COMMITS[@]}" | sort -u | grep -c . || true)"
+            if [ "${UNIQUE}" -gt 1 ]; then
+              echo "::error::ash-version '${ASH_VERSION}' is both a branch and a tag of ${ASH_REPO}, on different commits. Name one: refs/heads/${ASH_VERSION} or refs/tags/${ASH_VERSION}."
+              exit 1
+            elif [ "${UNIQUE}" -eq 1 ]; then
+              COMMIT="${COMMITS[0]}"
+            elif [[ "${ASH_VERSION}" =~ ^[0-9a-fA-F]{7,39}$ ]]; then
+              # An abbreviated commit id names one commit already; uv resolves it.
+              COMMIT="${ASH_VERSION}"
+            else
+              echo "::error::ash-version '${ASH_VERSION}' is not a branch, tag or commit of ${ASH_REPO}."
+              exit 1
+            fi
+          fi
+          {
+            echo "ASH_UVX_SOURCE=automated-security-helper[cdk] @ git+https://github.com/${ASH_REPO}@${COMMIT}"
+            echo "ASH_ASSETS_URL=https://raw.githubusercontent.com/${ASH_REPO}/${COMMIT}/automated_security_helper/assets"
+          } >> "$GITHUB_ENV"
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "ASH ${ASH_REPO}@${ASH_VERSION} is pinned to ${COMMIT} for this run" | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -280,6 +357,10 @@ jobs:
           CONFIG_REF: ${{ inputs.config-ref }}
           CONFIG_PATH: ${{ inputs.config }}
           CONFIG_REF_MISSING: ${{ inputs.config-ref-missing }}
+          ASH_VERSION: ${{ inputs.ash-version }}
+          ASH_REPO: ${{ inputs.ash-repo }}
+          SCANNED_REPO: ${{ github.repository }}
+          ASH_COMMIT: ${{ steps.ash-pin.outputs.commit }}
         run: |
           set -euo pipefail
           case "${CONFIG_REF_MISSING}" in
@@ -306,7 +387,16 @@ jobs:
           DEST="${DEST_ROOT}/${RELATIVE}"
           rm -rf "${DEST_ROOT}"
           mkdir -p "$(dirname "${DEST}")"
-          git fetch --no-tags --no-recurse-submodules --depth=1 origin "${CONFIG_REF}"
+          # When config-ref names the same ref of the same repository as ash-version,
+          # as in the merge queue, read the commit the first step pinned ASH to, so
+          # a merge landing in between cannot pair one commit's ASH with another's
+          # config.
+          FETCH="${CONFIG_REF}"
+          if [ -n "${ASH_COMMIT}" ] && [ "${CONFIG_REF}" = "${ASH_VERSION}" ] \
+              && [ "${ASH_REPO,,}" = "${SCANNED_REPO,,}" ]; then
+            FETCH="${ASH_COMMIT}"
+          fi
+          git fetch --no-tags --no-recurse-submodules --depth=1 origin "${FETCH}"
           COMMIT="$(git rev-parse FETCH_HEAD)"
           # -z, because without it git quotes a name holding non-ASCII bytes and the
           # path comparison below would refuse a regular file. Listed to a file
@@ -954,11 +1044,6 @@ jobs:
 
       - name: Install cfn-nag
         if: inputs.install-cfn-nag
-        env:
-          # Same repo and ref the scan itself is installed from, so the gem
-          # version can never disagree with the ASH that invokes it, and the
-          # scanned checkout never picks it.
-          ASH_ASSETS_URL: https://raw.githubusercontent.com/${{ inputs.ash-repo }}/${{ inputs.ash-version }}/automated_security_helper/assets
         run: |
           set -euo pipefail
           # ASH's own Gemfile and Gemfile.lock are the version pin -- naming

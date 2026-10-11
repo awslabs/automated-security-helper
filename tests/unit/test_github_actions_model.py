@@ -165,3 +165,45 @@ class TestTheModelReadsTheRealWorkflows:
                 except ga.ExpressionError as error:
                     unreadable.append(f"  {workflow.name}: {job_id}: {error}")
         assert not unreadable, "\n".join(unreadable)
+
+
+class TestGithubEnvLayering:
+    """GITHUB_ENV overrides workflow and job env and yields to the step's own env."""
+
+    def test_both_file_command_forms_are_read(self, tmp_path):
+        sandbox = ga.StepSandbox(tmp_path)
+        files = sandbox.runner_temp / "_runner_file_commands"
+        files.mkdir(exist_ok=True)
+        (files / "env").write_text(
+            "A=one\nB<<EOF\nline 1\nline 2\nEOF\nA=two\nC=x=y\n", encoding="utf-8"
+        )
+        assert ga.read_github_env(sandbox) == {
+            "A": "two",
+            "B": "line 1\nline 2",
+            "C": "x=y",
+        }
+
+    def test_the_precedence_is_workflow_job_file_step(self, tmp_path):
+        sandbox = ga.StepSandbox(tmp_path)
+        workflow = ga.Workflow(
+            tmp_path / "w.yml",
+            {"env": {"W": "workflow", "J": "workflow", "F": "workflow"}},
+        )
+        job = {"env": {"J": "job", "F": "job"}}
+        step = {
+            "run": 'printf "%s %s %s %s\\n" "$W" "$J" "$F" "$S"\n',
+            "env": {"S": "step", "F2": "${{ env.F }}"},
+        }
+        run = ga.run_step(
+            sandbox,
+            workflow,
+            job,
+            step,
+            ga.base_context(),
+            github_env={"F": "file", "S": "file"},
+        )
+        assert run.proc.stdout.strip() == "workflow job file step", run.describe()
+        rendered = ga.render_env(
+            step["env"], {**ga.base_context(), "env": {"F": "file"}}
+        )
+        assert rendered["F2"] == "file"

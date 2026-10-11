@@ -173,6 +173,8 @@ class Repository:
             home=home,
         )
         self.base_sha = _git("rev-parse", "HEAD", cwd=seed, home=home)
+        self.origin = origin
+        self._seed = seed
 
         workspace = self.sandbox.workspace
         _git("init", "-q", ".", cwd=workspace, home=home)
@@ -184,6 +186,34 @@ class Repository:
             path = workspace / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
+
+    def advance(self, files: dict[str, str]) -> str:
+        """Commit `files` on main and push it: the branch moves on mid-run."""
+        home = self.sandbox.home
+        for name, content in files.items():
+            path = self._seed / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        _git("add", "-A", cwd=self._seed, home=home)
+        _git("commit", "-q", "-m", "later", cwd=self._seed, home=home)
+        _git(
+            "push",
+            "-q",
+            f"file://{self.origin}",
+            "HEAD:refs/heads/main",
+            cwd=self._seed,
+            home=home,
+        )
+        return _git("rev-parse", "HEAD", cwd=self._seed, home=home)
+
+    def ash_url_env(self) -> dict[str, str]:
+        """Serve https://github.com/<BASE_REPO>.git from origin, for the pin step's git."""
+        return {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": f"url.file://{self.origin}.insteadOf",
+            "GIT_CONFIG_VALUE_0": f"https://github.com/{BASE_REPO}.git",
+        }
 
 
 # --------------------------------------------------------------------------- contexts
@@ -336,12 +366,18 @@ def _outputs(sandbox: ga.StepSandbox) -> dict[str, str]:
 
 
 def _run_config_ref_step(
-    repo: Repository, context: dict[str, Any], inputs: dict[str, Any]
+    repo: Repository,
+    context: dict[str, Any],
+    inputs: dict[str, Any],
+    earlier: dict[str, Any] | None = None,
 ) -> tuple[ga.StepRun | None, dict[str, Any]]:
-    """Run the steps gated on config-ref in order, stopping at the first failure."""
+    """Run the steps gated on config-ref in order, stopping at the first failure.
+
+    ``earlier`` is the steps context of steps that ran before them, such as the pin.
+    """
     workflow, job = _job()
     ctx = ga.with_inputs(context, inputs)
-    steps: dict[str, Any] = {}
+    steps: dict[str, Any] = dict(earlier or {})
     run = None
     for step in _config_ref_steps():
         scoped = {**ctx, "steps": steps}
@@ -1150,3 +1186,59 @@ class TestFetchedToolConfigsLoadNoCodeFromTheCheckout:
         run, _ = self._run(tmp_path, "- external-checks-dir\n- checks\n")
         assert run is not None and run.proc.returncode != 0, run and run.describe()
         assert "::error::" in run.proc.stdout, run.describe()
+
+
+# --------------------------------------------------------------------------- 8
+
+
+class TestTheConfigComesFromTheCommitTheAshInstallIsPinnedTo:
+    """In the merge queue, config-ref and ash-version both name refs/heads/main.
+
+    The pin step resolves that name once, when the job starts; reading the config by
+    name a moment later could read a newer commit than the ASH that scans with it.
+    When config-ref names the same ref of the same repository as ash-version, the
+    config-ref step reads the pinned commit.
+    """
+
+    def _pin(self, repo: Repository, context, inputs) -> dict[str, Any]:
+        workflow, job = _job()
+        (step,) = [s for s in job["steps"] if s.get("id") == "ash-pin"]
+        run = ga.run_step(
+            repo.sandbox,
+            workflow,
+            job,
+            step,
+            ga.with_inputs(context, inputs),
+            extra_env=repo.ash_url_env(),
+        )
+        assert run.proc.returncode == 0, run.describe()
+        return {"ash-pin": {"outputs": _outputs(repo.sandbox), "outcome": "success"}}
+
+    def test_a_merge_after_the_pin_does_not_change_the_config(self, tmp_path):
+        repo = Repository(tmp_path, base_files={CONFIG_PATH: BASE_CONFIG})
+        context = _merge_group(PREVIOUS_ENTRY_SHA)
+        inputs = _required_inputs(context)
+        assert inputs["config-ref"] == inputs["ash-version"], inputs
+        pinned = self._pin(repo, context, inputs)
+        assert pinned["ash-pin"]["outputs"]["commit"] == repo.base_sha
+        repo.advance(
+            {CONFIG_PATH: "# merged after the job started\nproject_name: later\n"}
+        )
+
+        run, steps = _run_config_ref_step(repo, context, inputs, earlier=pinned)
+        assert run is not None and run.proc.returncode == 0, run and run.describe()
+        path = Path(steps["config-ref"]["outputs"]["path"])
+        assert path.read_text(encoding="utf-8") == BASE_CONFIG, (
+            "the config was read from a newer commit than the one ASH is pinned to"
+        )
+        assert steps["config-ref"]["outputs"]["commit"] == repo.base_sha
+
+    def test_control_without_the_pin_the_name_reads_the_newer_commit(self, tmp_path):
+        """Shows the race exists, so the test above can tell it from no race."""
+        repo = Repository(tmp_path, base_files={CONFIG_PATH: BASE_CONFIG})
+        context = _merge_group(PREVIOUS_ENTRY_SHA)
+        inputs = _required_inputs(context)
+        later = repo.advance({CONFIG_PATH: "project_name: later\n"})
+        run, steps = _run_config_ref_step(repo, context, inputs)
+        assert run is not None and run.proc.returncode == 0, run and run.describe()
+        assert steps["config-ref"]["outputs"]["commit"] == later
