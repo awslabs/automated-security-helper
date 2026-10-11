@@ -1050,8 +1050,14 @@
   stalling the scan or exhausting memory, and a JSON config with a UTF-8 byte order
   mark is read as YAML and TOML already were. Discovery tells a `pyproject.toml`
   that is not a regular file by its type and does not open it, and no config file
-  is opened in a way that could make a tty the controlling terminal. The same
-  refusal applies to `ash report`, `ash plugin list` and `ash dependencies install`
+  is opened in a way that could make a tty the controlling terminal. Under the MCP
+  server, a config source found in the scanned directory that is a symbolic link
+  out of the session's config roots (a `pyproject.toml`, a config file or a linked
+  `.ash/`) is refused before discovery opens it, by `scan_directory` before a scan
+  starts and by the scan's own discovery, with the same response whether the
+  target is missing, unreadable or readable; discovery used to open it, so a
+  missing or unreadable target refused the scan and a readable one did not. The
+  same refusal applies to `ash report`, `ash plugin list` and `ash dependencies install`
   (each exits 3), to workspace mode (planning, `--dry-run` included, and execution;
   `--config` is now passed to planning and must name an existing file even when
   every project has its own config; the workspace execution settings read from the

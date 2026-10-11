@@ -1255,7 +1255,9 @@ def _severity_filters_finding(result, min_sev_rank: int) -> bool:
 
 
 def _discovered_config_path(
-    source_dir: Path, log_selection: bool = False
+    source_dir: Path,
+    log_selection: bool = False,
+    permit: Optional[Callable[[Path], bool]] = None,
 ) -> Optional[str]:
     """The config source a scan of *source_dir* uses, by the one discovery rule.
 
@@ -1269,12 +1271,16 @@ def _discovered_config_path(
     uses, and the sources discovery ignored become resolution warnings when the
     orchestrator resolves this file, which logs each one once and records it with
     the results. Logging them here as well printed each one twice.
+
+    ``permit`` is the scan's ``config_base_gate``: every source discovery finds
+    is checked against it before anything opens it. Every caller passes it, so
+    no reader here opens a source the scan's resolution would refuse.
     """
     from automated_security_helper.config.config_sources import (
         discover_config_source,
     )
 
-    discovery = discover_config_source(source_dir)
+    discovery = discover_config_source(source_dir, permit=permit)
     if discovery.selected is None:
         return None
     return discovery.selected.path.as_posix()
@@ -1342,7 +1348,9 @@ def _load_config_file(opts: ScanOptions):
     config_path_str = opts.config
     if config_path_str is None:
         try:
-            config_path_str = _discovered_config_path(opts.source_dir)
+            config_path_str = _discovered_config_path(
+                opts.source_dir, permit=opts.config_base_gate
+            )
         except Exception:
             # Surfaces again, with its message, when the orchestrator resolves.
             return None
@@ -1474,10 +1482,13 @@ def _live_progress_enabled(opts: ScanOptions) -> bool:
 
 def _scan_config_path(opts: ScanOptions, log_selection: bool = False) -> Optional[str]:
     """The config file a single-directory scan resolves: ``--config``, else the
-    one discovery finds in the source directory, else None (the defaults)."""
+    one discovery finds in the source directory under the scan's
+    ``config_base_gate``, else None (the defaults)."""
     if opts.config is not None:
         return opts.config
-    return _discovered_config_path(opts.source_dir, log_selection=log_selection)
+    return _discovered_config_path(
+        opts.source_dir, log_selection=log_selection, permit=opts.config_base_gate
+    )
 
 
 class OutputDirRefusedExit(SystemExit):
@@ -2229,7 +2240,9 @@ def _resolve_workspace_execution_config(opts: ScanOptions):
 
     config_path_str = opts.config
     if config_path_str is None:
-        config_path_str = _discovered_config_path(opts.source_dir)
+        config_path_str = _discovered_config_path(
+            opts.source_dir, permit=opts.config_base_gate
+        )
 
     if config_path_str is None:
         return WorkspaceExecutionConfig()

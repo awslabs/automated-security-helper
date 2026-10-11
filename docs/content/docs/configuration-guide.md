@@ -92,7 +92,11 @@ as an invalid configuration (exit code 3), and `get_config` (with or without `ra
 returns an error instead of the default configuration, with `error_category` `file_not_found` for a file
 that does not exist and `invalid_format` for one that does not load. A config
 file outside the session's allowed config roots is refused as outside them
-before anything reads it, so the response says nothing about its contents.
+before anything reads it, so the response says nothing about its contents. That
+includes a config source found in the scanned directory: a `pyproject.toml`, a
+config file or an `.ash/` directory that is a symbolic link out of the roots is
+refused before discovery opens it, with the same response whether its target is
+missing, unreadable or readable.
 
 ### Configuring ASH in pyproject.toml
 

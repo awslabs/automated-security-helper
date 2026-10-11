@@ -86,6 +86,13 @@ consulted before the confinement root, and its refusal,
 ``ASHConfigInputNotPermittedError``, names the ``extends`` entry as written and
 not the path it resolved to. Without a predicate the rules above are unchanged.
 
+Discovery takes the same predicate (``discover_config_source(..., permit=)``).
+A source found in the scanned directory can be a symbolic link to any file, and
+discovery reads ``pyproject.toml`` to look for its table, so every source that
+exists is checked by the path it resolves to before anything opens it. A refused
+one raises ``ASHConfigInputNotPermittedError`` naming the source as found, so the
+refusal reads the same whether its target is missing, unreadable or readable.
+
 Bounds
 ------
 Every config file is opened without blocking and read only when the opened file
@@ -449,25 +456,75 @@ def _pyproject_is_a_source(path: Path, found_before: List[ConfigSource]) -> bool
         return False
 
 
-def discover_config_source(search_dir: Path) -> ConfigDiscovery:
+def _existing_candidates(search_dir: Path) -> List[ConfigSource]:
+    """Every config name in `search_dir` that exists, in precedence order, unopened."""
+    candidates: List[ConfigSource] = []
+    for name in ASH_CONFIG_FILE_NAMES:
+        for candidate in (search_dir / name, search_dir / ".ash" / name):
+            if os.path.lexists(candidate):
+                candidates.append(ConfigSource(candidate, SOURCE_KIND_DEDICATED))
+    for name in ASH_RC_FILE_NAMES:
+        candidate = search_dir / name
+        if os.path.lexists(candidate):
+            candidates.append(ConfigSource(candidate, SOURCE_KIND_ASHRC))
+    pyproject = search_dir / ASH_PYPROJECT_FILE_NAME
+    if os.path.lexists(pyproject):
+        candidates.append(ConfigSource(pyproject, SOURCE_KIND_PYPROJECT))
+    return candidates
+
+
+def _check_candidates(
+    candidates: List[ConfigSource], permit: Optional[PermitBase]
+) -> None:
+    if permit is None:
+        return
+    for candidate in candidates:
+        # realpath reads links and opens nothing, and does not raise on a loop.
+        if not permit(Path(os.path.realpath(candidate.path))):
+            # Names the candidate as found, never what it resolves to, so the
+            # refusal reads the same whether that target is missing, unreadable
+            # or readable.
+            raise ASHConfigInputNotPermittedError(
+                f"{candidate.path.as_posix()}, a config source found in the "
+                "scanned directory, reaches a file outside the directories this "
+                "caller may read config from."
+            )
+
+
+def check_discovery_candidates(search_dir: Path, permit: Optional[PermitBase]) -> None:
+    """Refuse `search_dir` when a config source in it resolves outside `permit`.
+
+    The check ``discover_config_source(search_dir, permit=permit)`` makes before
+    it opens anything, for a caller that refuses before a scan starts (MCP
+    ``scan_directory``). Opens nothing itself.
+    """
+    _check_candidates(_existing_candidates(Path(search_dir)), permit)
+
+
+def discover_config_source(
+    search_dir: Path, permit: Optional[PermitBase] = None
+) -> ConfigDiscovery:
     """Find every config source in `search_dir` and select one by precedence.
 
     A name counts when it exists, whatever it is; see "Failure" in the module
     docstring for why a dangling link is selected rather than skipped.
+
+    ``permit`` is the caller's predicate for the files it may read config from,
+    as for an ``extends`` base. Every source that exists -- the one selected and
+    the ones ignored, which are reported and, for ``pyproject.toml``, read -- is
+    checked by the path it resolves to before anything opens it, and one the
+    predicate refuses raises ``ASHConfigInputNotPermittedError`` naming the
+    source as found. Without it nothing is checked.
     """
     search_dir = Path(search_dir)
+    candidates = _existing_candidates(search_dir)
+    _check_candidates(candidates, permit)
     found: List[ConfigSource] = []
-    for name in ASH_CONFIG_FILE_NAMES:
-        for candidate in (search_dir / name, search_dir / ".ash" / name):
-            if os.path.lexists(candidate):
-                found.append(ConfigSource(candidate, SOURCE_KIND_DEDICATED))
-    for name in ASH_RC_FILE_NAMES:
-        candidate = search_dir / name
-        if os.path.lexists(candidate):
-            found.append(ConfigSource(candidate, SOURCE_KIND_ASHRC))
-    pyproject = search_dir / ASH_PYPROJECT_FILE_NAME
-    if os.path.lexists(pyproject) and _pyproject_is_a_source(pyproject, found):
-        found.append(ConfigSource(pyproject, SOURCE_KIND_PYPROJECT))
+    for candidate in candidates:
+        if candidate.kind != SOURCE_KIND_PYPROJECT or _pyproject_is_a_source(
+            candidate.path, found
+        ):
+            found.append(candidate)
     if not found:
         return ConfigDiscovery()
     return ConfigDiscovery(selected=found[0], ignored=found[1:])

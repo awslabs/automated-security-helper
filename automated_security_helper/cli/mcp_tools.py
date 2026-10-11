@@ -115,6 +115,36 @@ def _scan_owner(session_id: Optional[str]) -> str:
     return session_id or _default_session_id()
 
 
+def _discovered_config_refusal(
+    target: Path, session_id: Optional[str]
+) -> Optional[MCPResourceError]:
+    """The refusal for a config source in ``target`` outside this session's grant, or None.
+
+    ``target`` is a directory this session may scan, but a config source in it
+    -- ``pyproject.toml``, a dedicated config name, a linked ``.ash/`` -- may be a
+    symbolic link to a file anywhere on the server. Each one that exists is
+    checked by the path it resolves to, opening none of them, so the answer is
+    the same whether that file is missing, unreadable or readable. The scan's own
+    discovery checks them the same way (``run_ash_scan``'s config_base_gate).
+    """
+    from automated_security_helper.cli.mcp.sandbox import (
+        config_base_gate,
+        config_chain_refusal,
+    )
+    from automated_security_helper.config.config_sources import (
+        check_discovery_candidates,
+    )
+    from automated_security_helper.core.exceptions import (
+        ASHConfigInputNotPermittedError,
+    )
+
+    try:
+        check_discovery_candidates(target, config_base_gate(session_id))
+    except ASHConfigInputNotPermittedError as exc:
+        return config_chain_refusal(target, exc)
+    return None
+
+
 async def mcp_scan_directory(
     directory_path: str,
     severity_threshold: str = "MEDIUM",
@@ -274,6 +304,10 @@ async def mcp_scan_directory(
                     "Run 'ash config lint' on the file to check it",
                 ],
             )
+    else:
+        link_out = _discovered_config_refusal(resolved_target, session_id)
+        if link_out is not None:
+            return _config_refusal(link_out, "scan_directory")
 
     # Claimed before the scan id is returned, because the scan takes the
     # session's lock only later, on a worker thread: from here on a change to
