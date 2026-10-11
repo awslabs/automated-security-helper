@@ -7,7 +7,9 @@ Why this exists
 ---------------
 bandit, grype and syft each read a config file of their own, and that file can
 leave findings out: bandit's ``skips`` and ``exclude_dirs``, grype's ``ignore``
-and ``only-fixed``, syft's ``exclude``. ASH used to find such a file by name in
+and ``only-fixed``, syft's ``exclude``. opengrep's and semgrep's ``config``
+chooses the rules they run, from the registry, a URL the tool fetches, or a
+path it reads, and their ``metrics`` whether they send usage data. ASH used to find such a file by name in
 the source directory (``.bandit``, ``bandit.yaml``, ``.grype.yaml``,
 ``.syft.yaml`` and others), and took ``scanners.<name>.options.config_file``
 from whatever config the repository carried. So the repository being scanned
@@ -56,12 +58,16 @@ from automated_security_helper.utils.log import ASH_LOGGER
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
 
-#: Scanners whose own config file is the operator's choice, and the options that
-#: name it.
+#: Scanners whose own config is the operator's choice, and the options that set
+#: it: bandit's, grype's and syft's config file, and the rules opengrep and
+#: semgrep run (``config``: a registry entry, a URL or a path, fetched or read
+#: by the tool) and whether they send usage metrics (``metrics``).
 SCANNER_CONFIG_FILE_OPTIONS: Dict[str, Tuple[str, ...]] = {
     "bandit": ("config_file",),
     "grype": ("config_file",),
     "syft": ("config_file",),
+    "opengrep": ("config", "metrics"),
+    "semgrep": ("config", "metrics"),
 }
 
 _MISSING = object()
@@ -146,9 +152,10 @@ def confine_scanner_config_files(
         files = ", ".join(describe_config_path(path) for path in in_tree)
         ASH_LOGGER.warning(
             f"Ignoring {', '.join(sorted(set(ignored)))} from {files}: a scanner's "
-            "own config file is the operator's choice, and that config is inside "
-            "the scanned tree or was delivered by an MCP client. Name the file with "
-            "--config-overrides or in a config file outside the tree."
+            "own config file, the rules it runs and whether it sends metrics are "
+            "the operator's choice, and that config is inside the scanned tree or "
+            "was delivered by an MCP client. Set them with --config-overrides or in "
+            "a config file outside the tree."
         )
 
 

@@ -1030,8 +1030,6 @@ _REVIEWED_OPTIONS: Dict[tuple, str] = {
     ("syft", "additional_outputs"): (
         "extra output files; components come from the CycloneDX report"
     ),
-    ("opengrep", "metrics"): "usage metrics, not findings",
-    ("semgrep", "metrics"): "usage metrics, not findings",
     ("detect-secrets", "skip_generated_lockfiles"): "on by default; off reports more",
     ("trivy-repo", "ignore_unfixed"): "on by default; off reports more",
     ("trivy-repo", "disable_telemetry"): "telemetry, not findings",

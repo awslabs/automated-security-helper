@@ -242,6 +242,8 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/converters/jupyter/options/tool_version",
             "/scanners/opengrep/options/version",
             "/scanners/opengrep/options/sha256",
+            "/scanners/opengrep/options/metrics",
+            "/scanners/semgrep/options/metrics",
             "/reporters/bedrock-summary-reporter/options/aws_*",
             "/reporters/cloudwatch-logs/**",
             "/reporters/aws-security-hub/options/aws_region",

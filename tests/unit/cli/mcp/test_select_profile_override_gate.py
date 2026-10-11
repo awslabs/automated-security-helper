@@ -483,6 +483,14 @@ _POINTED_DENIALS: Dict[str, Tuple[str, Any]] = {
         "/scanners/opengrep/options/sha256",
         {"linux/amd64": "0" * 64},
     ),
+    "/scanners/opengrep/options/metrics": (
+        "/scanners/opengrep/options/metrics",
+        "on",
+    ),
+    "/scanners/semgrep/options/metrics": (
+        "/scanners/semgrep/options/metrics",
+        "on",
+    ),
 }
 
 #: Destination and credential options of the AWS reporters, which the profile

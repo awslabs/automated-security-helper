@@ -130,6 +130,59 @@ def test_an_mcp_clients_overrides_are_not_replayed_as_the_operators(
     assert read(from_the_operator) == override.partition("=")[2]
 
 
+#: opengrep's and semgrep's rules and metrics setting, each with a value other
+#: than its default.
+RULE_CHOICES = [
+    ("opengrep", "config", "p/default"),
+    ("semgrep", "config", "https://rules.example.invalid/rules.yaml"),
+    ("opengrep", "metrics", "on"),
+    ("semgrep", "metrics", "on"),
+]
+_RULE_IDS = [f"{scanner}.{option}" for scanner, option, _ in RULE_CHOICES]
+
+
+def _option(config: Any, scanner: str, option: str) -> Any:
+    return config.get_plugin_config("scanner", scanner)["options"].get(option)
+
+
+@pytest.mark.parametrize(("scanner", "option", "value"), RULE_CHOICES, ids=_RULE_IDS)
+def test_a_repositorys_config_does_not_choose_the_rules_or_metrics(
+    tmp_path: Path, scanner: str, option: str, value: str
+) -> None:
+    repo = _repo(tmp_path, {scanner: {"options": {option: value}}})
+    default = _option(resolve_config(source_dir=tmp_path / "empty"), scanner, option)
+    config = resolve_config(source_dir=repo)
+    assert _option(config, scanner, option) == default != value
+
+
+@pytest.mark.parametrize(("scanner", "option", "value"), RULE_CHOICES, ids=_RULE_IDS)
+def test_an_override_chooses_the_rules_or_metrics(
+    tmp_path: Path, scanner: str, option: str, value: str
+) -> None:
+    repo = _repo(tmp_path, {scanner: {"options": {"severity": []}}})
+    config = resolve_config(
+        source_dir=repo,
+        config_overrides=[f"scanners.{scanner}.options.{option}={value}"],
+    )
+    assert _option(config, scanner, option) == value
+
+
+@pytest.mark.parametrize(("scanner", "option", "value"), RULE_CHOICES, ids=_RULE_IDS)
+def test_an_operator_config_outside_the_tree_chooses_the_rules_or_metrics(
+    tmp_path: Path, scanner: str, option: str, value: str
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        yaml.safe_dump({"scanners": {scanner: {"options": {option: value}}}}),
+        encoding="utf-8",
+    )
+    config = resolve_config(config_path=operator, source_dir=repo)
+    assert _option(config, scanner, option) == value
+
+
 def _context(tmp_path: Path) -> PluginContext:
     from automated_security_helper.config.default_config import get_default_config
 

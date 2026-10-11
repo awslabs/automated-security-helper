@@ -465,6 +465,10 @@ _OPERATOR_CHOICES = [
         "scanners.opengrep.options.version",
     ),
     (
+        "scanners:\n  semgrep:\n    options:\n      metrics: 'on'\n",
+        "scanners.semgrep.options.metrics",
+    ),
+    (
         "converters:\n  jupyter:\n    options:\n      tool_version: '==1.0.0'\n",
         "converters.jupyter.options.tool_version",
     ),

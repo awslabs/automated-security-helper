@@ -218,7 +218,11 @@
     for example `--config-overrides scanners.bandit.options.config_file=.bandit`,
     or in a config file outside the tree; a file named that way is used even
     inside the tree. `scanners.syft.options.config_file` now accepts a path
-    written as a string.
+    written as a string. opengrep's and semgrep's `config` (the rules they run,
+    from the registry, a URL or a path) and `metrics` are the operator's the same
+    way: from such a file they are left at the default, `p/ci` and `auto`, with a
+    warning naming the key, and under the MCP server `metrics` joins the default
+    `denied_paths` (`config` already is one).
   - A reporter's `extension` has to be a filename suffix, from any source: a value
     with `/`, `\`, `..` or NUL is replaced by the reporter's default, with a
     warning naming the key. Reports, the files the unused-suppressions, S3 and

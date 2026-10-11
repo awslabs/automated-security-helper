@@ -777,6 +777,8 @@ class RuntimeOverridesConfig(BaseModel):
         "/converters/jupyter/options/tool_version",
         "/scanners/opengrep/options/version",
         "/scanners/opengrep/options/sha256",
+        "/scanners/opengrep/options/metrics",
+        "/scanners/semgrep/options/metrics",
         # AWS-credential-bearing reporter options (plugin-provided, hyphenated
         # names), and every other destination and credential option of the
         # built-in AWS reporters (config/reporter_trust.py).
