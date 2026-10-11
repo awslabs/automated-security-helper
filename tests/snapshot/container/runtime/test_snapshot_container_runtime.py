@@ -115,7 +115,9 @@ def test_build_image_help_in_image(text_snapshot):
     assert result["stdout"] == text_snapshot("txt")
 
 
-def test_container_scan_of_the_fixture(run_cli, snapshot, fixture_repo, local_checkout):
+def test_container_scan_of_the_fixture(
+    run_cli, snapshot, fixture_repo, project_build_files_in_cwd
+):
     result = run_cli(
         [
             "scan",
@@ -140,7 +142,7 @@ def test_container_scan_of_the_fixture(run_cli, snapshot, fixture_repo, local_ch
 
 
 def test_container_exit_status_for_an_invalid_config(
-    run_cli, snapshot, fixture_repo, local_checkout
+    run_cli, snapshot, fixture_repo, project_build_files_in_cwd
 ):
     (fixture_repo / ".ash" / ".ash.yaml").write_text(BAD_CONFIG, encoding="utf-8")
     result = run_cli(

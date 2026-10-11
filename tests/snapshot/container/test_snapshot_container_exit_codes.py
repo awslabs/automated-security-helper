@@ -34,7 +34,7 @@ pytestmark = pytest.mark.snapshot_masking(mask_durations=True)
 
 
 @pytest.fixture(autouse=True)
-def _src(in_tmp, local_checkout, monkeypatch):
+def _src(in_tmp, project_build_files_in_cwd, monkeypatch):
     (in_tmp / "src").mkdir()
     # The summary prints the absolute output directory, whose length is the
     # machine's, so at 100 columns rich would fold each path at a different place.

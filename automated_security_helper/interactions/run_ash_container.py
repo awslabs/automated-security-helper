@@ -17,6 +17,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import List
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 import typer
 import threading
 import io
@@ -104,6 +106,36 @@ def container_was_started(result) -> bool:
     return getattr(result, _NOT_STARTED_ATTR, False) is not True
 
 
+#: The paths beside the package that mark a full clone of the ASH repository.
+_CHECKOUT_MARKERS = (
+    ".github",
+    ".gitignore",
+    ".dockerignore",
+    "Dockerfile",
+    "pyproject.toml",
+    "NOTICE",
+    "docs",
+    "tests",
+)
+
+
+def _checkout_root() -> Path:
+    """The directory a full clone would put this package in, whether or not it is one."""
+    return Path(__file__).parent.parent.parent
+
+
+def _is_checkout(root: Path) -> bool:
+    return all(root.joinpath(marker).exists() for marker in _CHECKOUT_MARKERS)
+
+
+def _direct_url_json_path() -> Path:
+    """Where the installer recorded the source of this package (PEP 610)."""
+    mod = import_module("automated_security_helper")
+    return Path(mod.__path__[0] + "-" + mod.__version__ + ".dist-info").joinpath(
+        "direct_url.json"
+    )
+
+
 def get_ash_revision() -> str | None:
     """
     Get the revision of the Automated Security Helper repo to install based on how the
@@ -119,28 +151,13 @@ def get_ash_revision() -> str | None:
         str: The revision of the Automated Security Helper container
     """
     return_val = None
-    ash_repo_root = Path(__file__).parent.parent.parent
-    if all(
-        [
-            ash_repo_root.joinpath(".github").exists(),
-            ash_repo_root.joinpath(".gitignore").exists(),
-            ash_repo_root.joinpath(".dockerignore").exists(),
-            ash_repo_root.joinpath("Dockerfile").exists(),
-            ash_repo_root.joinpath("pyproject.toml").exists(),
-            ash_repo_root.joinpath("NOTICE").exists(),
-            ash_repo_root.joinpath("docs").exists(),
-            ash_repo_root.joinpath("tests").exists(),
-        ]
-    ):
+    if _is_checkout(_checkout_root()):
         ASH_LOGGER.info(
             "ASH installation appears to be alongide the repository contents, building with LOCAL source"
         )
         return "LOCAL"
 
-    mod = import_module("automated_security_helper")
-    direct_url_json_path = Path(
-        mod.__path__[0] + "-" + mod.__version__ + ".dist-info"
-    ).joinpath("direct_url.json")
+    direct_url_json_path = _direct_url_json_path()
     if direct_url_json_path.exists():
         print(
             f"Found direct_url.json file for module @ {direct_url_json_path.as_posix()}"
@@ -343,8 +360,64 @@ def _get_oci_wrapper_prefix() -> List[str]:
     return shlex.split(oci_wrapper) if oci_wrapper else []
 
 
+def _recorded_source_tree() -> Path | None:
+    """The local directory the installer recorded this package was built from, if any.
+
+    pip and uv write ``direct_url.json`` (PEP 610) for an install from a URL. A
+    ``file://`` URL with ``dir_info`` is an install from a directory (``pip install
+    <dir>``, ``uvx --from <dir>``); one naming an archive or a wheel is not a source
+    tree, and neither is a directory that has since lost its Dockerfile.
+    """
+    try:
+        direct_url = json.loads(_direct_url_json_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError, AttributeError, TypeError):
+        return None
+    if not isinstance(direct_url, dict) or "dir_info" not in direct_url:
+        return None
+    url = direct_url.get("url")
+    if not isinstance(url, str) or not url.startswith("file://"):
+        return None
+    tree = Path(url2pathname(urlparse(url).path))
+    if not tree.joinpath("Dockerfile").is_file():
+        return None
+    return tree
+
+
+def _local_source_tree() -> Path:
+    """The ASH source tree a LOCAL revision builds: its Dockerfile and its context.
+
+    Found from the running package, never from the working directory: the working
+    directory is usually the project being scanned, and a Dockerfile there is that
+    project's. A clone the package runs from (an editable install) comes first,
+    then the directory the installer recorded.
+
+    Raises:
+        FileNotFoundError: With what to do instead, when the package came from a
+            wheel or an index and no ASH source tree is recorded for it.
+    """
+    checkout = _checkout_root()
+    if _is_checkout(checkout):
+        return checkout
+    recorded = _recorded_source_tree()
+    if recorded is not None:
+        return recorded
+    raise FileNotFoundError(
+        "Dockerfile not found: a LOCAL revision builds the ASH source tree this ASH "
+        f"was installed from, and this installation ({checkout.as_posix()}) has none "
+        "beside it or recorded for it. Build a released revision instead "
+        "(--ash-revision-to-install <tag>), reinstall ASH from its source directory, "
+        "or pass --no-build to run an image you already have."
+    )
+
+
 def _find_dockerfile(resolved_revision: str | None) -> Path:
     """Locate the Dockerfile to use for image builds.
+
+    Always one of ASH's own. A pinned revision builds the Dockerfile packaged with
+    ASH, which installs that revision from git; a LOCAL revision builds the
+    Dockerfile at the root of the ASH source tree, see :func:`_local_source_tree`.
+    The build context is the Dockerfile's directory (``_build_image``), so it is
+    never the working directory either.
 
     Args:
         resolved_revision: The resolved ASH revision string (or None).
@@ -356,28 +429,11 @@ def _find_dockerfile(resolved_revision: str | None) -> Path:
         FileNotFoundError: When the Dockerfile cannot be located.
     """
     if resolved_revision == "LOCAL":
-        dockerfile_path = Path.cwd().joinpath("Dockerfile")
-        if not dockerfile_path.exists():
-            current_path = Path.cwd().resolve()
-            while current_path.parent != current_path:
-                if (
-                    current_path.joinpath("Dockerfile").exists()
-                    and current_path.joinpath("pyproject.toml").exists()
-                ):
-                    dockerfile_path = current_path.joinpath("Dockerfile")
-                    break
-                current_path = current_path.parent
+        dockerfile_path = _local_source_tree().joinpath("Dockerfile")
     else:
-        cwd_dockerfile = Path.cwd().joinpath("Dockerfile")
-        if cwd_dockerfile.exists() and Path.cwd().joinpath("pyproject.toml").exists():
-            dockerfile_path = cwd_dockerfile
-            ASH_LOGGER.info(
-                f"Found Dockerfile in current directory, using LOCAL build context despite revision={resolved_revision}"
-            )
-        else:
-            dockerfile_path = ASH_ASSETS_DIR.joinpath("Dockerfile")
+        dockerfile_path = ASH_ASSETS_DIR.joinpath("Dockerfile")
 
-    if not dockerfile_path.exists():
+    if not dockerfile_path.is_file():
         raise FileNotFoundError(f"Dockerfile not found at {dockerfile_path}")
 
     return dockerfile_path

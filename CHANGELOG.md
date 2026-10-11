@@ -120,6 +120,16 @@
 
 ### Behavior changes
 
+- **Container mode builds ASH's own Dockerfile, never one in the working directory.**
+  `ash --mode container` and `ash build-image` used to build a `Dockerfile` in the
+  directory they were started from (with a `pyproject.toml` beside it, for an ASH
+  installed from git), or the nearest such pair above it, with that directory as the
+  build context, and tag the result as ASH's image. A pinned revision now always
+  builds the packaged Dockerfile. A `LOCAL` revision builds the Dockerfile at the root
+  of the ASH source tree the running package was installed from, found from the
+  package itself or from the installer's `direct_url.json`; an installation with no
+  such tree (for example, one from a wheel file) is refused with what to do instead.
+  See [Which Dockerfile ASH builds](docs/content/docs/building-your-own-image.md#which-dockerfile-ash-builds).
 - **A repository-written config file can no longer choose what ASH installs,
   imports or hands a scanner as its own configuration.** It applies to a discovered
   `.ash/.ash.yaml`, a `--config` path, an `extends` base, or `ASH_CONFIG`, when the

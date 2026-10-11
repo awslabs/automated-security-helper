@@ -56,6 +56,27 @@ Tag with the ASH version you built rather than only `latest`, so a scan result c
 traced back to a specific image. A moving `latest` makes two scans that disagree
 impossible to explain.
 
+## Which Dockerfile ASH builds
+
+`ash build-image` and `ash --mode container` build ASH's own Dockerfile. They never
+build a `Dockerfile` found in the directory you run them from or in a directory above
+it: that file belongs to the project being scanned. Which of ASH's Dockerfiles is
+used depends on how ASH was installed:
+
+- **Installed from a git URL or a package index.** The Dockerfile packaged with ASH,
+  which installs the same ASH revision from git inside the image
+  (`--ash-revision-to-install` picks another one).
+- **Installed from its source tree** (an editable install, or `pip install <dir>` or
+  `uvx --from <dir>`; the revision is `LOCAL`). The `Dockerfile` at the root of that
+  source tree, with the tree as the build context. ASH finds the tree from where the
+  running package is installed, so `ash` run from a subdirectory of the checkout, or
+  from another project, builds the same image.
+
+A `LOCAL` revision for an installation with no source tree beside it or recorded for
+it (for example, ASH installed from a wheel file) is refused before anything is
+built. Pass `--ash-revision-to-install <tag>`, reinstall ASH from its source
+directory, or run an image you already have with `--no-build`.
+
 ## Keeping it current
 
 ASH orchestrates external scanners, and their versions are not all pinned. A rebuild
