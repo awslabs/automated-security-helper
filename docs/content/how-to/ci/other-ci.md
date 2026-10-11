@@ -4,7 +4,7 @@ Every CI integration does the same things: install ASH outside the checkout, ins
 scanner tools, run the scan, keep the reports whatever the exit code, and let the exit code
 fail the build. This page gives that recipe as plain shell, then shows it in Jenkins, AWS
 CodeBuild, and Azure Pipelines. GitHub Actions and GitLab CI have their own pages:
-[GitHub Actions](github-actions.md), [GitLab CI](gitlab-ci.md).
+[Run ASH in GitHub Actions](github-actions.md) and [Run ASH in GitLab CI](gitlab-ci.md).
 
 ## The recipe {#recipe}
 
@@ -257,7 +257,7 @@ exit "$ash_exit"
 - [examples/GitHubActions/ash-repo-scan.yml](https://github.com/awslabs/automated-security-helper/blob/main/examples/GitHubActions/ash-repo-scan.yml)
   is out of date. It calls the workflow at the floating `v3` tag without the `install-*`
   inputs, and grants `security-events: write` to a workflow that cannot use it. Follow
-  [GitHub Actions](github-actions.md) instead.
+  [Run ASH in GitHub Actions](github-actions.md) instead.
 - [examples/AWSCodeBuild/](https://github.com/awslabs/automated-security-helper/tree/main/examples/AWSCodeBuild)
   is out of date. It installs `v3.0.0-beta`, and its README asks for Python 3.8 while ASH
   needs 3.10 or later. Use the [buildspec above](#codebuild).

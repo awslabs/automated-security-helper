@@ -13,8 +13,8 @@ scanning. It uses the reusable workflows that ASH ships, pinned to release v{{VE
 - git, to look up the commit of the release in step 1.
 
 Nothing else has to be installed on your machine. Using another CI service? See
-[GitLab CI](../how-to/ci/gitlab-ci.md) or
-[Jenkins, CodeBuild, Azure Pipelines, and other CI systems](../how-to/ci/other-ci.md).
+[Run ASH in GitLab CI](../how-to/ci/gitlab-ci.md) or
+[Run ASH in Jenkins, CodeBuild, Azure Pipelines, and other CI systems](../how-to/ci/other-ci.md).
 
 ## 1. Add the workflow
 

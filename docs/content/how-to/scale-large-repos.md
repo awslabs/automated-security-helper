@@ -66,8 +66,8 @@ ASH falls back to a full scan, with a warning and the full scan's exit code, whe
 ref does not exist (in a shallow clone, for example), when there is no merge base, when the
 directory is not in a git repository or git is not installed, and in container mode. CI
 clones are often shallow, so fetch the base branch's history first; the
-[GitHub Actions](ci/github-actions.md#changed-files) and
-[GitLab CI](ci/gitlab-ci.md#scan-only-what-a-merge-request-changes) pages show how.
+[Run ASH in GitHub Actions](ci/github-actions.md#changed-files) and
+[Run ASH in GitLab CI](ci/gitlab-ci.md#scan-only-what-a-merge-request-changes) show how.
 
 The option is not available over MCP.
 
