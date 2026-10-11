@@ -63,6 +63,11 @@ so ASH also passes ``--no-ignores``, which turns off those comments and the
 on; it is honored only when the operator set it, and from a config in the
 scanned tree it is ignored with a warning.
 
+``options.tool_version`` picks which zizmor is installed and which one on PATH is
+accepted. A value other than the default is honored only when the operator set
+it; from a config in the scanned tree it is ignored with a warning and the default
+constraint applies.
+
 Severity mapping
 ----------------
 zizmor rates every finding twice, a severity (Informational/Low/Medium/High)
@@ -429,7 +434,10 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "Version constraint for zizmor installation, in pip requirement "
-                "syntax. The default below is the constraint the scanner enforces."
+                "syntax. The default below is the constraint the scanner enforces. "
+                "Another value is honored only when set by --config-overrides or a "
+                "config file outside the scanned tree; from a config in the scanned "
+                "tree it is ignored with a warning and the default applies."
             )
         ),
     ] = ZIZMOR_DEFAULT_VERSION_CONSTRAINT
@@ -467,6 +475,8 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     _online_refusal_logged: bool = PrivateAttr(default=False)
     # Whether the tree-set honor_inline_ignores refusal was already logged.
     _ignores_refusal_logged: bool = PrivateAttr(default=False)
+    # Whether the tree-set tool_version refusal was already logged.
+    _tool_version_refusal_logged: bool = PrivateAttr(default=False)
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -513,8 +523,33 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     # ------------------------------------------------------------------
 
     def _get_tool_version_constraint(self) -> str | None:
-        """The configured ``tool_version``; its default is the enforced constraint."""
-        return self._options.tool_version
+        """The operator's ``tool_version``, or the default constraint.
+
+        The constraint chooses which zizmor ``uv tool install`` fetches and which
+        one already on PATH is accepted, so a config in the scanned tree could pin a
+        release that lacks audits or that ASH's output handling was never checked
+        against. Like ``config_file``, a value other than the default is honored
+        only when the operator set it; any other is ignored with a warning, once.
+        """
+        configured = self._options.tool_version
+        if configured == ZIZMOR_DEFAULT_VERSION_CONSTRAINT:
+            return configured
+        context_config = self.context.config if self.context is not None else None
+        if set_by_operator(
+            context_config, "scanners.zizmor.options.tool_version", configured
+        ):
+            return configured
+        if not self._tool_version_refusal_logged:
+            self._tool_version_refusal_logged = True
+            self._plugin_log(
+                f"Ignoring scanners.zizmor.options.tool_version ({configured!r}): "
+                "it came from a config in the scanned tree or from an MCP client, "
+                f"so zizmor is held to {ZIZMOR_DEFAULT_VERSION_CONSTRAINT!r}. Set "
+                "it with --config-overrides or a config file outside the scanned "
+                "tree.",
+                level=logging.WARNING,
+            )
+        return ZIZMOR_DEFAULT_VERSION_CONSTRAINT
 
     def _probe_executable_version(self, executable: str) -> Optional[str]:
         """``<executable> --version``, parsed. None when it does not run or parse."""

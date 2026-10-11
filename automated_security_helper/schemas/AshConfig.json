@@ -5308,7 +5308,7 @@
             }
           ],
           "default": ">=1.29.0,<2.0.0",
-          "description": "Version constraint for zizmor installation, in pip requirement syntax. The default below is the constraint the scanner enforces.",
+          "description": "Version constraint for zizmor installation, in pip requirement syntax. The default below is the constraint the scanner enforces. Another value is honored only when set by --config-overrides or a config file outside the scanned tree; from a config in the scanned tree it is ignored with a warning and the default applies.",
           "title": "Tool Version"
         }
       },

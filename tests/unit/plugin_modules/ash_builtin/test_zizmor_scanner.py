@@ -192,6 +192,36 @@ def test_zizmor_is_on_by_default():
     assert options.tool_version == ZIZMOR_DEFAULT_VERSION_CONSTRAINT
 
 
+@pytest.mark.parametrize("operator", [False, None])
+def test_a_tool_version_from_the_scanned_tree_is_replaced_by_the_default(
+    repo, caplog, operator
+):
+    """The constraint picks which zizmor is installed and which one on PATH is
+    accepted, so the scanned repository may not choose it."""
+    with caplog.at_level("WARNING"):
+        scanner = _scanner(repo, operator=operator, tool_version="==1.29.0")
+    assert scanner._get_tool_version_constraint() == ZIZMOR_DEFAULT_VERSION_CONSTRAINT
+    assert scanner.uv_tool_install_commands == [
+        f"uv tool install zizmor{ZIZMOR_DEFAULT_VERSION_CONSTRAINT}"
+    ]
+    assert "scanners.zizmor.options.tool_version" in caplog.text
+
+
+def test_the_operators_tool_version_is_used(repo, caplog):
+    with caplog.at_level("WARNING"):
+        scanner = _scanner(repo, operator=True, tool_version="==1.29.0")
+    assert scanner._get_tool_version_constraint() == "==1.29.0"
+    assert scanner.uv_tool_install_commands == ["uv tool install zizmor==1.29.0"]
+    assert "scanners.zizmor.options.tool_version" not in caplog.text
+
+
+def test_the_default_tool_version_needs_no_operator(repo, caplog):
+    with caplog.at_level("WARNING"):
+        scanner = _scanner(repo, operator=False)
+    assert scanner._get_tool_version_constraint() == ZIZMOR_DEFAULT_VERSION_CONSTRAINT
+    assert "scanners.zizmor.options.tool_version" not in caplog.text
+
+
 def test_install_command_carries_the_version_constraint(repo):
     scanner = _scanner(repo)
     assert scanner.uv_tool_install_commands == [

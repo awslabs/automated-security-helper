@@ -73,7 +73,11 @@ scanners:
   comments and the `ignore` rules of an operator's `config_file`. Off by default;
   see "Suppressions". Honored only when the operator sets it.
 - `tool_version`: the pip-style constraint for installing zizmor. A value that is
-  not a valid constraint is ignored with a warning and the default is used.
+  not a valid constraint is ignored with a warning and the default is used. It
+  decides which zizmor is installed and which one on `PATH` is accepted, so a value
+  other than the default is honored only when the operator sets it
+  (`--config-overrides`, or an ASH config file outside the scanned tree); set by an
+  ASH config inside the scanned tree, it is ignored with a warning.
 - `install_timeout`: seconds allowed for `uv tool install` of zizmor.
 - `scan_timeout`: seconds zizmor may run; past it zizmor is killed and the scanner
   reports `ERROR`.
