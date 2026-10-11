@@ -90,7 +90,7 @@ COPY automated_security_helper/assets/install-pinned-tool.py /usr/local/bin/inst
 COPY automated_security_helper/utils/tool_downloads.py /ash-pins/utils/tool_downloads.py
 COPY automated_security_helper/core/exceptions.py /ash-pins/core/exceptions.py
 RUN chmod +x /usr/local/bin/install-pinned-tool
-ARG UV_VERSION="0.12.23"
+ARG UV_VERSION="0.12.24"
 RUN ASH_PINS_DIR=/ash-pins with-retry 'install-pinned-tool uv -b /root/.local/bin'
 ENV PATH="/root/.local/bin:$PATH"
 RUN uv --version
@@ -326,7 +326,7 @@ RUN chmod +x /usr/local/bin/install-pinned-tool
 ARG ASH_THIRD_PARTY_DIR="/usr/share/doc/ash/third-party"
 ENV ASH_PINS_DIR="/ash-pins"
 
-ARG UV_VERSION="0.12.23"
+ARG UV_VERSION="0.12.24"
 RUN with-retry 'install-pinned-tool uv -b /root/.local/bin'
 RUN uv --version
 

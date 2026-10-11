@@ -20,9 +20,9 @@
 # the image that holds API credentials.
 #
 # Pinned by digest (.github/scripts/assert-images-pinned.py enforces it): the multi-arch
-# index python:3.12-slim resolved to on 2026-10-05 (Python 3.12.15). Both stages name the
+# index python:3.12-slim resolved to on 2026-10-09 (Python 3.12.15). Both stages name the
 # same digest.
-FROM python:3.12-slim@sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d AS build
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS build
 
 WORKDIR /build
 COPY build-requirements.txt ./
@@ -31,7 +31,7 @@ COPY pyproject.toml README.md ./
 COPY ash_operator ./ash_operator
 RUN pip wheel --no-cache-dir --no-deps --no-build-isolation --no-index --wheel-dir /wheels .
 
-FROM python:3.12-slim@sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
 
 # Non-root from the start. The numeric uid matches manifests/operator.yaml so
 # readOnlyRootFilesystem and runAsUser agree. --user-group is explicit because a

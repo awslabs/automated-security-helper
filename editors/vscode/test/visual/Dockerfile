@@ -9,7 +9,7 @@
 # Built in CI from this file, never pulled or pushed as a finished image.
 
 # Base image by digest: a tag can be repointed, a digest cannot.
-FROM node:22-bookworm-slim@sha256:1b3abbc0bf2421c8733f58c6fd7bbb961a960f37e05ed7369eccd1fbb0edcc84
+FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
 
 # Debian packages from snapshot.debian.org at one fixed instant, so every build of this
 # file installs the same versions of Xvfb, fontconfig, FreeType and the fonts. The live
@@ -36,10 +36,10 @@ RUN test "$(fc-list : family | sort -u)" = "$(printf 'DejaVu Sans\nDejaVu Sans M
 
 # VS Code itself, at the version the integration job also pins, verified against the
 # SHA-256 the update service publishes for that build
-# (https://update.code.visualstudio.com/api/versions/1.140.0/linux-x64/stable).
-ARG VSCODE_VERSION=1.140.0
-ARG VSCODE_COMMIT=07f806f999227108933c2e30515b26eecc1fda74
-ARG VSCODE_SHA256=d32031e9e213d59532af3cf32fcb8b357a1cdd10417967b4f5b5ba30436dc0dc
+# (https://update.code.visualstudio.com/api/versions/1.141.0/linux-x64/stable).
+ARG VSCODE_VERSION=1.141.0
+ARG VSCODE_COMMIT=2a59476c9bfcb90b3ddc372c36762471b7dfad1c
+ARG VSCODE_SHA256=d77d588f0454cbaaa71e723497de4160d15b95fba4988abe177b1432e6bd570a
 RUN curl -fsSL --retry 5 -o /tmp/vscode.tar.gz \
       "https://update.code.visualstudio.com/${VSCODE_VERSION}/linux-x64/stable" \
  && echo "${VSCODE_SHA256}  /tmp/vscode.tar.gz" | sha256sum -c - \

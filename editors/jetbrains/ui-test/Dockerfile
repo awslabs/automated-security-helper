@@ -22,7 +22,7 @@
 #
 # Built in CI and thrown away with the job. It is never pushed: nothing in this repository
 # publishes it, and .github/scripts/assert-no-image-publish.py fails a workflow that would.
-FROM gradle:jdk21@sha256:4debe478645a3ad9208f3403ac021859fdf4d1a819d59970d75309b098f28f76
+FROM gradle:jdk21@sha256:d5c815d1281e3edc7e986ca573b1b309639747fa0d91a2199adadf327cfdf634
 
 # The archive snapshot the X packages come from; move it together with the versions below.
 ARG UBUNTU_SNAPSHOT=20261001T000000Z

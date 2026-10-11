@@ -225,7 +225,7 @@ jobs:
     env:
       # The build these tests were last run against. A floating `stable` would let
       # an upstream release change the result of an unchanged commit.
-      ASH_IT_VSCODE_VERSION: "1.140.0"
+      ASH_IT_VSCODE_VERSION: "1.141.0"
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -273,7 +273,7 @@ jobs:
     permissions:
       contents: read
     env:
-      ASH_IT_VSCODE_VERSION: "1.140.0"
+      ASH_IT_VSCODE_VERSION: "1.141.0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -431,7 +431,7 @@ jobs:
   # the ashx -> ash fallback notice, each compared with its PNG baseline in
   # test/visual/__snapshots__/ at zero differing pixels. Rendered inside the image
   # test/visual/Dockerfile builds, which pins the base image by digest, Debian packages
-  # (Xvfb, fonts, FreeType) to one snapshot.debian.org instant, and VS Code 1.140.0 by
+  # (Xvfb, fonts, FreeType) to one snapshot.debian.org instant, and VS Code 1.141.0 by
   # SHA-256; test/visual/run.ts pins the screen, DPI, scale factor, theme, font and
   # settings. The image is built here and never pushed. On a mismatch the captures
   # and a diff image per scenario are uploaded.

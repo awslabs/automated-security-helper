@@ -37,11 +37,14 @@ E2E_DIR = Path(__file__).resolve().parent
 # The node image the kind cluster boots, pinned by digest rather than left to kind's
 # built-in default: that default is a tag nothing in this tree records, and
 # .github/scripts/assert-images-pinned.py requires every kind cluster to name a digest.
-# This is kind v0.30.0's own default (its release notes list it), so pinning it changes
+# This is kind v0.33.0's own default (its release notes list it), so pinning it changes
 # nothing about the cluster. Bump it together with KIND_VERSION in
-# .github/workflows/ash-kubernetes-operator.yml.
+# .github/workflows/ash-kubernetes-operator.yml: kind does not promise that a node image
+# built for one release works with another, and since v0.32.0 `kind load` needs a kind at
+# least as new as the image. Kubernetes 1.37 here is also the minor KUBECTL_VERSION in that
+# workflow targets, and kubectl is supported within one minor of the API server.
 KIND_NODE_IMAGE = (
-    "kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a"
+    "kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5"
 )
 
 

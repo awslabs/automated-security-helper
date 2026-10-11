@@ -1096,7 +1096,8 @@ class TestVerifyThirdParty:
         pins, third_party, path = self._tree(tmp_path)
         exe = Path(path) / "grype"
         exe.write_text('#!/bin/sh\necho "grype 0.119.0"\n')
-        self._fails(pins, third_party, path, "does not report 0.120.1")
+        pinned = THIRD_PARTY_LICENSES["grype"].version.lstrip("v")
+        self._fails(pins, third_party, path, f"does not report {pinned}")
 
     def test_an_executable_missing_from_path(self, tmp_path):
         pins, third_party, path = self._tree(tmp_path)
@@ -1138,7 +1139,8 @@ class TestVerifyThirdParty:
         )
         (third_party / "index.json").unlink()
         (Path(path) / "uv").write_text('#!/bin/sh\necho "uv 0.1.0"\n')
-        self._fails(pins, third_party, searched, "does not report 0.12.23", site_dirs)
+        pinned = THIRD_PARTY_LICENSES["uv"].version
+        self._fails(pins, third_party, searched, f"does not report {pinned}", site_dirs)
 
     def test_every_release_copy_is_checked_not_only_the_first(self, tmp_path):
         """grype is in both /usr/local/bin and /.ash/bin in the image."""
@@ -1153,7 +1155,9 @@ class TestVerifyThirdParty:
     def test_only_a_python_package_copy_of_the_primary_fails(self, tmp_path):
         pins, third_party, path = self._tree(tmp_path)
         (Path(path) / "uv").unlink()
-        py_bin, site_dirs = self._python_owned_copy(tmp_path, "uv", "0.12.23")
+        py_bin, site_dirs = self._python_owned_copy(
+            tmp_path, "uv", THIRD_PARTY_LICENSES["uv"].version
+        )
         searched = os.pathsep.join([py_bin, path])
         self._fails(
             pins, third_party, searched, "other than as a Python package", site_dirs

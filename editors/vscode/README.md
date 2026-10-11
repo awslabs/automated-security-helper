@@ -317,7 +317,7 @@ the one under test.
 What the extension shows a user is pinned twice: jest snapshots of every
 notification, diagnostic, log line and contribution (`test/ui-snapshots.test.ts`),
 and PNG baselines of the Problems panel, a hover and two notifications rendered by
-VS Code 1.140.0 in a pinned container (`test/visual/`). A change to either fails
+VS Code 1.141.0 in a pinned container (`test/visual/`). A change to either fails
 until it is rewritten with `npm run snapshots -- --snapshot-update <structural|visual>`
 and committed with a `Snapshot-Update: <reason>` trailer, which CI checks. See
 [test/visual/README.md](test/visual/README.md).

@@ -285,7 +285,7 @@ describe('the pixel suite environment is pinned', () => {
 
   test('VS Code by version and SHA-256, the same version the integration job runs', () => {
     const version = /^ARG VSCODE_VERSION=(\S+)$/m.exec(dockerfile)?.[1];
-    expect(version).toBe('1.140.0');
+    expect(version).toBe('1.141.0');
     expect(dockerfile).toMatch(/^ARG VSCODE_SHA256=[0-9a-f]{64}$/m);
     expect(dockerfile).toMatch(/sha256sum -c -/);
     const workflow = fs.readFileSync(

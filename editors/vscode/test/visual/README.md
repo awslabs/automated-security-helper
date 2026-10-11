@@ -104,7 +104,7 @@ everything that can move a pixel is fixed:
 - `Dockerfile`: the base image by digest; every Debian package (Xvfb, fontconfig,
   FreeType, ImageMagick, the GTK and NSS libraries) from snapshot.debian.org at one
   instant; DejaVu as the only font family installed, checked at build time; VS Code
-  1.140.0, the version the integration job also runs, verified against the SHA-256
+  1.141.0, the version the integration job also runs, verified against the SHA-256
   its update service publishes.
 - `run.ts`: a 1280x800x24 screen at 96 DPI, `--force-device-scale-factor=1`,
   software rendering (`--disable-gpu`), the Default Dark Modern theme, DejaVu Sans
@@ -112,6 +112,13 @@ everything that can move a pixel is fixed:
   setting that would open something on its own or draw something time-dependent
   turned off. The workspace is always `/tmp/ash-visual/sample-project`, because its
   name is in the title bar.
+
+  The window is 1279x799, one pixel short of the screen each way, so the last column
+  and row of every baseline are the X server's black root window. VS Code opens its
+  first window at that size on this screen. Up to 1.140.0 (Electron 43.7.3) it then
+  reconfigured itself to cover the screen; from 1.141.0 (Electron 43.7.7) it stays
+  where it opened. Measured with `xev -root -event substructure` under the same Xvfb
+  and settings.
 
 The image is built from the Dockerfile on each run and is never pushed.
 
