@@ -451,6 +451,23 @@ def test_a_link_a_client_delivered_is_the_clients_wherever_it_points(
     _assert_refused(_scan_resolution(_server["target"], str(link)))
 
 
+def test_a_link_in_an_operator_config_root_to_another_checkout_is_the_clients(
+    _server, monkeypatch
+) -> None:
+    """Judged by the file it reaches as well as where it sits."""
+    other = _in_another_checkout(_server)
+    roots = _server["tmp"] / "operator-configs"
+    roots.mkdir()
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(roots))
+    link = roots / "ash.yaml"
+    link.symlink_to(other)
+    _assert_refused(_scan_resolution(_server["target"], str(link)))
+    # Positive control: the same file, in the root itself, is the operator's.
+    link.unlink()
+    link.write_text(other.read_text(encoding="utf-8"), encoding="utf-8")
+    assert not isinstance(_scan_resolution(_server["target"], str(link)), Exception)
+
+
 _OPERATOR_CHOICES = [
     (
         "scanners:\n  bandit:\n    options:\n      config_file: other.ini\n",
@@ -549,17 +566,20 @@ def test_a_profile_holding_an_earlier_default_list_denies_todays_entries(
     )
 
 
-@pytest.mark.parametrize("delivered_tree", [False, True])
-def test_scan_directory_refuses_before_the_scan_starts(_server, delivered_tree) -> None:
+@pytest.mark.parametrize("named", ["upload", "delivered-tree", "another-checkout"])
+def test_scan_directory_refuses_before_the_scan_starts(_server, named) -> None:
     """Refused up front with the field named; the background scan never starts."""
     from automated_security_helper.cli import mcp_tools
 
-    if delivered_tree:
+    if named == "delivered-tree":
         source = _upload({".ash/.ash.yaml": BEDROCK_REGION})
         target, config_path = source, None
-    else:
+    elif named == "upload":
         source = _upload({"ash.yaml": BEDROCK_REGION})
         target, config_path = _server["target"], str(source / "ash.yaml")
+    else:
+        target = _server["target"]
+        config_path = str(_in_another_checkout(_server))
     started: List[Dict[str, Any]] = []
 
     async def not_started(**kwargs: Any) -> None:
