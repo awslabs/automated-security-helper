@@ -372,8 +372,8 @@ can tell the reason apart from a scan that failed to start (`scan_start_failure`
 | `config_env_not_resolved` | `run_ash_scan`, `get_config`, and as a `validate_config` error `type` | Such a file uses `!ENV` |
 
 Delivering source while a scan of the same session runs is refused as well:
-`set_source_zip_finalize` returns `error_type: SourceDeliveryBusyError`, and
-`set_source_git` returns `success: false` with no `error_type`. See
+`set_source_git` and `set_source_zip_finalize` both return
+`error_type: SourceDeliveryBusyError`. See
 [Config files in delivered source](mcp/streamable-http.md#config-files-in-delivered-source).
 
 ### Example Error Response

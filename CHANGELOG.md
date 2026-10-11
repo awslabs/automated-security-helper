@@ -149,7 +149,9 @@
   policy, as written and as each project gets them. The policy comes from the
   registered profile, never from the session's patched copy, and
   `/global_settings/mcp` joins the default `denied_paths`. Delivering source
-  while a scan of the session runs is refused. See
+  while a scan of the session runs is refused, and `set_source_git` and
+  `set_source_zip_finalize` both report it with
+  `error_type: SourceDeliveryBusyError`. See
   [Config files in delivered source](docs/content/docs/mcp/streamable-http.md#config-files-in-delivered-source).
 
 - **A value a client patched into its session profile is the client's.**

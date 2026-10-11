@@ -358,10 +358,10 @@ TOOL_NOTES: dict[str, dict] = {
             (
                 "Refused while a scan of this session is running, because the clone "
                 "would replace the tree and config files that scan is reading. The "
-                "response is `success: false` with `error` set to `a scan of this session "
-                "is running; deliver the source after it finishes`, and no `error_type`. "
-                "Deliver the source again once `get_scan_progress` reports a terminal "
-                "status."
+                "response is `success: false`, `error_type: SourceDeliveryBusyError`, "
+                "and `error` set to `a scan of this session is running; deliver the "
+                "source after it finishes`. Deliver the source again once "
+                "`get_scan_progress` reports a terminal status."
             ),
         ],
     },

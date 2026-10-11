@@ -2117,10 +2117,13 @@ def mcp_set_source_git(
 
     Returns:
         ``{"success": True, "source_dir": str}`` on success;
-        ``{"success": False, "error": str}`` on git failure.
+        ``{"success": False, "error": str}`` on git failure. While a scan of the
+        session runs, ``error_type`` is ``SourceDeliveryBusyError``, as
+        ``set_source_zip_finalize`` reports the same refusal.
     """
     from automated_security_helper.cli.mcp.scan_target import validate_scan_target
     from automated_security_helper.cli.mcp.source_delivery import (
+        SourceDeliveryBusyError,
         _validate_clone_url,
         local_clone_path,
         set_source_git,
@@ -2154,6 +2157,10 @@ def mcp_set_source_git(
             depth=depth,
             session_id=session_id,
         )
+    except SourceDeliveryBusyError as e:
+        # A RuntimeError too, so it is caught first: a client retries this one
+        # after the scan ends, and branches on error_type to know that.
+        return {"success": False, "error": str(e), "error_type": type(e).__name__}
     except (RuntimeError, ValueError) as e:
         return {"success": False, "error": str(e)}
 
