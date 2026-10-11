@@ -113,9 +113,11 @@ class ZzMarkReporter(ReporterPluginBase[ZzMarkReporterConfig]):
 ASH_REPORTERS = [ZzMarkReporter]
 """
 
-#: argv[1] is a JSON list of scans. A scan is ``{"source_dir", "output_dir",
-#: "modules"}``, or ``{"workspace_file", "output_dir"}`` for a workspace scan.
-#: Prints one report line: per scan, the exit code and each scanner row's status.
+#: argv[1] is a JSON list of steps. A scan is ``{"source_dir", "output_dir",
+#: "modules"}``, or ``{"workspace_file", "output_dir"}`` for a workspace scan;
+#: ``{"list": true}`` calls the MCP ``list_scanners`` tool function, which imports the
+#: community scanner packages. Prints one report line: per scan, the exit code and
+#: each scanner row's status.
 _PROGRAM = r"""
 import json
 import sys
@@ -142,6 +144,11 @@ from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 
 scans = []
 for step in json.loads(sys.argv[1]):
+    if step.get("list"):
+        from automated_security_helper.cli.mcp_tools import mcp_list_scanners
+
+        mcp_list_scanners()
+        continue
     if "workspace_file" in step:
         from automated_security_helper.workspace.resolver import resolve_workspace
 
@@ -252,6 +259,7 @@ class _Process:
             errors="replace",
             timeout=900,
         )
+        self.output = completed.stdout + completed.stderr
         for line in completed.stdout.splitlines():
             if _REPORT_PREFIX in line:
                 return json.loads(line.split(_REPORT_PREFIX, 1)[1])
@@ -319,6 +327,52 @@ class TestALaterScansModulesTakePart:
         assert "ferret-scan" not in _rows(snyk_scan), (
             f"the second scan ran ferret-scan, which only the first scan named: {snyk_scan}"
         )
+
+
+class TestThePluginRootNamesNoPlugin:
+    """ASH's plugin root holds every package ASH ships; naming it refuses the scan.
+
+    Selecting everything below it would select whatever the process had imported:
+    after ``list_scanners`` that is ferret-scan, snyk-code and trivy-repo.
+    """
+
+    def test_an_in_tree_config_naming_it_after_list_scanners_refuses(self, tmp_path):
+        proc = _Process(tmp_path)
+        tree = proc.tree("tree")
+        (tree / ".ash").mkdir()
+        (tree / ".ash" / ".ash.yaml").write_text(
+            "project_name: tree\nash_plugin_modules:\n"
+            "  - automated_security_helper.plugin_modules\n",
+            encoding="utf-8",
+        )
+
+        (scan,) = proc.run(
+            [
+                {"list": True},
+                {"source_dir": str(tree), "output_dir": str(tmp_path / "out")},
+            ]
+        )
+
+        assert scan["exit"] == 3, (scan, proc.output[-3000:])
+        assert scan["rows"] is None, scan
+
+    def test_the_python_api_naming_it_refuses(self, tmp_path):
+        proc = _Process(tmp_path)
+        tree = proc.tree("tree")
+
+        (scan,) = proc.run(
+            [
+                {"list": True},
+                {
+                    "source_dir": str(tree),
+                    "output_dir": str(tmp_path / "out"),
+                    "modules": ["automated_security_helper.plugin_modules"],
+                },
+            ]
+        )
+
+        assert scan["exit"] == 3, (scan, proc.output[-3000:])
+        assert scan["rows"] is None, scan
 
 
 class TestEventHandlersFollowTheScansModules:

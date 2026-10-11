@@ -2,7 +2,7 @@
 
 import importlib
 import sys
-from typing import Any, Callable, Dict, Iterable, List
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.plugins import ash_plugin_manager
@@ -143,30 +143,61 @@ _ALLOWED_MODULE_PREFIXES = (
 #: installed distributions with ``startswith("ash_") and endswith("_plugins")`` --
 #: so this widens the allowlist to the naming rule the rest of the codebase and the
 #: documentation already share, rather than inventing one.
+#:
+#: Matched with its separator: the top-level package is ``ash_plugins`` or ends in
+#: ``_ash_plugins``, so ``hash_plugins`` or ``flash_plugins`` is not in the namespace.
 _ALLOWED_TOP_LEVEL_SUFFIX = "ash_plugins"
 
 
-def _is_allowed_module_path(module_path: str) -> bool:
-    """Whether *module_path* is inside the ASH plugin namespace.
+def _module_path_refusal(module_path: str) -> Optional[str]:
+    """Why *module_path* names no plugin module a scan may import, or None.
 
-    The top-level package is what is tested, so ``my_ash_plugins.scanners`` is
-    accepted on the strength of ``my_ash_plugins`` rather than needing its own rule.
+    The top-level package is what the namespace rule tests, so
+    ``my_ash_plugins.scanners`` is accepted on the strength of ``my_ash_plugins``
+    rather than needing its own rule. A name has to be a dotted path of ASCII
+    identifiers, the only spelling that can import the module it names; anything
+    else (a stray space, an empty segment, a comma, a fullwidth letter) would fail
+    to import and was skipped with a warning. ASH's plugin root and the package
+    above it are refused although they are in the namespace: the root holds every
+    plugin package ASH ships, so naming it names none of them, and selecting
+    everything below it would select whatever the process happened to have
+    imported (see :func:`scan_plugin_filter`).
     """
+    parts = module_path.split(".")
+    if not module_path.isascii() or not all(part.isidentifier() for part in parts):
+        return "not a dotted path of Python identifiers"
+    if _module_within(_OPT_IN_PLUGIN_ROOT, module_path):
+        return (
+            "ASH's plugin root, which holds every plugin package ASH ships rather "
+            "than naming one"
+        )
     for prefix in _ALLOWED_MODULE_PREFIXES:
         if prefix.endswith("."):
             if module_path.startswith(prefix):
-                return True
+                return None
         elif module_path == prefix or module_path.startswith(prefix + "."):
-            return True
+            return None
 
-    top_level = module_path.split(".", 1)[0]
-    return top_level.endswith(_ALLOWED_TOP_LEVEL_SUFFIX)
+    top_level = parts[0]
+    if top_level == _ALLOWED_TOP_LEVEL_SUFFIX or top_level.endswith(
+        "_" + _ALLOWED_TOP_LEVEL_SUFFIX
+    ):
+        return None
+    return "outside ASH's plugin namespace"
+
+
+def _is_allowed_module_path(module_path: str) -> bool:
+    """Whether *module_path* names a plugin module a scan may import."""
+    return _module_path_refusal(module_path) is None
 
 
 def _namespace_rule() -> str:
     return (
-        f"Module paths must start with one of: {', '.join(_ALLOWED_MODULE_PREFIXES)}, "
-        f"or name a top-level package ending in '{_ALLOWED_TOP_LEVEL_SUFFIX}'."
+        "Module paths must be dotted Python identifiers that start with one of: "
+        f"{', '.join(_ALLOWED_MODULE_PREFIXES)}, or name a top-level package "
+        f"called '{_ALLOWED_TOP_LEVEL_SUFFIX}' or ending in "
+        f"'_{_ALLOWED_TOP_LEVEL_SUFFIX}'; ASH's plugin root '{_OPT_IN_PLUGIN_ROOT}' "
+        "names no plugin package, so name the package below it."
     )
 
 
@@ -191,18 +222,20 @@ def refuse_plugin_modules_outside_namespace(plugin_modules: Iterable[str]) -> No
             exit code 3, invalid configuration.
     """
     refused = [
-        name
+        f"{name!r} ({reason})"
         for name in dict.fromkeys(plugin_modules)
-        if name and not _is_allowed_module_path(name)
+        if name
+        for reason in [_module_path_refusal(name)]
+        if reason is not None
     ]
     if refused:
         raise PluginModuleNamespaceError(
             "ash_plugin_modules names "
-            + ", ".join(repr(name) for name in refused)
-            + f", outside ASH's plugin namespace. {_namespace_rule()} Nothing was "
-            "imported and nothing was scanned. Rename the package, or remove the "
-            "entry from the config file, --config-overrides, --ash-plugin-modules "
-            "or ASH_PLUGIN_MODULES."
+            + ", ".join(refused)
+            + f", which is not a plugin module ASH imports. {_namespace_rule()} "
+            "Nothing was imported and nothing was scanned. Rename the package, or "
+            "remove the entry from the config file, --config-overrides, "
+            "--ash-plugin-modules or ASH_PLUGIN_MODULES."
         )
 
 
@@ -229,6 +262,24 @@ def _is_builtin_plugin_module(module: str) -> bool:
         return True
     return _module_within(module, "automated_security_helper") and not (
         _module_within(module, _OPT_IN_PLUGIN_ROOT)
+    )
+
+
+def _holds_plugin_packages(name: str) -> bool:
+    """Whether *name* holds other plugin packages rather than being one.
+
+    ASH's plugin root and anything above it, and a namespace package (one with no
+    ``__init__``, whose portions can come from separate distributions). A class
+    below such a name belongs to one of the packages it holds, which the scan did
+    not name.
+    """
+    if _module_within(_OPT_IN_PLUGIN_ROOT, name):
+        return True
+    module = sys.modules.get(name)
+    return (
+        module is not None
+        and hasattr(module, "__path__")
+        and getattr(module, "__file__", None) is None
     )
 
 
@@ -260,12 +311,15 @@ def scan_plugin_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
     registered, so it gets ASH's built-in plugins plus those of the modules its
     own ``ash_plugin_modules`` names: a class or handler defined in one of those
     modules (or below it), or one such a module lists in ``ASH_CONVERTERS``,
-    ``ASH_SCANNERS``, ``ASH_REPORTERS`` or ``ASH_EVENT_HANDLERS``.
+    ``ASH_SCANNERS``, ``ASH_REPORTERS`` or ``ASH_EVENT_HANDLERS``. A name that holds
+    other plugin packages (ASH's plugin root, a namespace package) selects nothing
+    below it, since what is below it depends on what the process imported.
 
     Call it after the modules are imported; it reads their declarations from
     ``sys.modules`` and imports nothing.
     """
     modules = tuple(dict.fromkeys(name for name in plugin_modules if name))
+    packages = tuple(name for name in modules if not _holds_plugin_packages(name))
     declared: List[Any] = []
     for name in modules:
         declared.extend(_declared_by(name))
@@ -274,7 +328,7 @@ def scan_plugin_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
         module = getattr(plugin, "__module__", None) or ""
         if _is_builtin_plugin_module(module):
             return True
-        if any(_module_within(module, name) for name in modules):
+        if any(_module_within(module, name) for name in packages):
             return True
         return plugin in declared
 

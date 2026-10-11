@@ -459,7 +459,7 @@ ash --ash-plugin-modules my_ash_plugins
 ```
 
 The package name has to be inside ASH's plugin namespace, which `my_ash_plugins` is
-because it ends in `ash_plugins`; a name outside it refuses the scan with exit code 3
+because it ends in `_ash_plugins`; a name outside it refuses the scan with exit code 3
 (see [Custom Plugin Modules](../configuration-guide.md#custom-plugin-modules)).
 
 ## Best Practices
