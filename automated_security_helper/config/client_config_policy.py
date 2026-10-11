@@ -318,6 +318,10 @@ class ClientConfigRules(BaseModel):
     #: Why the policy could not be established, or None. Held rather than raised,
     #: so only a config with a client-delivered file is refused for it.
     unreadable: Optional[str] = None
+    #: The MCP session the rules were built for, or None. Its ``config/``
+    #: directory, and no other session's, holds files the operator set aside for
+    #: it (``cli/mcp/sandbox.client_named_config_is_untrusted``).
+    session_id: Optional[str] = None
 
 
 def policy_of(config: AshConfig) -> RuntimeOverridesConfig:

@@ -582,10 +582,14 @@ def session_client_rules(
         entry = session_profile_entry(session_id, profile)
         trusted = entry.config if entry is not None else trusted_default_config()
     except Exception as exc:  # noqa: BLE001 -- held, and raised only where it applies
-        return unreadable_rules(
+        rules = unreadable_rules(
             f"the trusted config could not be loaded: {type(exc).__name__}: {exc}"
         )
-    return rules_from(trusted)
+    else:
+        rules = rules_from(trusted)
+    # Which session's config/ directory holds the files set aside for this
+    # client (ClientConfigRules.session_id).
+    return rules.model_copy(update={"session_id": session_id})
 
 
 def clear_session_state(session_id: Optional[str] = None) -> None:

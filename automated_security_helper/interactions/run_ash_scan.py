@@ -1328,8 +1328,14 @@ def _load_with_confinement(
     source_dir: Path,
     permit_base: Optional[Callable[[Path], bool]] = None,
     remote_client: bool = False,
+    session_id: Optional[str] = None,
 ):
-    """Load a config file with its `extends` bases confined as a scan would."""
+    """Load a config file with its `extends` bases confined as a scan would.
+
+    ``session_id`` is the MCP session the scan runs for
+    (``ClientConfigRules.session_id``), whose ``config/`` directory holds the
+    files set aside for a remote caller.
+    """
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
         env_refused_for,
@@ -1340,7 +1346,7 @@ def _load_with_confinement(
         config_path,
         confine_to=default_confinement_root(config_path, source_dir),
         permit_base=permit_base,
-        refuse_env=env_refused_for(remote_client),
+        refuse_env=env_refused_for(remote_client, session_id),
     )
 
 
@@ -1375,6 +1381,7 @@ def _load_config_file(opts: ScanOptions):
             opts.source_dir,
             opts.config_base_gate,
             opts.remote_client,
+            getattr(opts.client_config_policy, "session_id", None),
         )
     except Exception:
         return None
@@ -2306,6 +2313,7 @@ def _resolve_workspace_execution_config(opts: ScanOptions):
             opts.source_dir,
             opts.config_base_gate,
             opts.remote_client,
+            getattr(opts.client_config_policy, "session_id", None),
         ).workspace
     except Exception as exc:  # noqa: BLE001 -- scheduling knobs, not policy
         logging.getLogger(__name__).warning(

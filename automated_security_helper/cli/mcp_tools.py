@@ -133,7 +133,7 @@ def _delivered_config_env_error(
             path,
             confine_to=confine_to,
             permit_base=config_base_gate(session_id),
-            refuse_env=env_refused_for(caller_is_remote(session_id)),
+            refuse_env=env_refused_for(caller_is_remote(session_id), session_id),
         )
     except ASHConfigEnvNotResolvedError as exc:
         return exc
@@ -215,7 +215,7 @@ def _client_config_denial(
     # A named path the client chose is the client's wherever it is, as the scan
     # reads it (resolve_config's untrusted_config).
     named_by_client = config_path is not None and client_named_config_is_untrusted(
-        config_path
+        config_path, session_id=session_id
     )
     try:
         if config_path is not None:
@@ -230,7 +230,7 @@ def _client_config_denial(
             path,
             confine_to=confine,
             permit_base=permit_base,
-            refuse_env=env_refused_for(caller_is_remote(session_id)),
+            refuse_env=env_refused_for(caller_is_remote(session_id), session_id),
         )
     except Exception as exc:  # noqa: BLE001 -- reported by the scan's own read
         _logger.debug(f"Config chain not read before the scan: {exc}")
@@ -531,7 +531,7 @@ async def _run_scan_async(
     # aside (client_named_config_is_untrusted), even when it is a file in another
     # repository the server may scan.
     untrusted_config = config_path is not None and client_named_config_is_untrusted(
-        config_path
+        config_path, session_id=session_id
     )
     trusted_config_path = (
         resolve_session_trusted_config_path(session_id) if untrusted_config else None
@@ -1445,7 +1445,7 @@ def mcp_get_config(
     # the operator did not set aside, named or discovered; see "Environment
     # variables" in config/config_sources.py.
     remote_client = caller_is_remote(session_id)
-    refuse_env = env_refused_for(remote_client)
+    refuse_env = env_refused_for(remote_client, session_id)
 
     if raw:
         # pyproject.toml yields its [tool.ash] table, as when it is loaded. A
@@ -1485,7 +1485,7 @@ def mcp_get_config(
             delivered if delivered is not None and delivered.is_dir() else Path.cwd()
         )
     untrusted_config = (
-        client_named_config_is_untrusted(path)
+        client_named_config_is_untrusted(path, session_id=session_id)
         if config_path is not None
         else config_is_client_supplied(path)
     )
@@ -1638,7 +1638,7 @@ def mcp_validate_config(
         valid, raw_errors = ConfigValidator.validate_config_file(
             path,
             permit_base=permit_base,
-            refuse_env=env_refused_for(remote_client),
+            refuse_env=env_refused_for(remote_client, session_id),
         )
     else:
         return {
@@ -1693,7 +1693,8 @@ def _validated_document_denials(
     checked = (
         caller_is_remote(session_id)
         if config_content is not None
-        else config_path is not None and client_named_config_is_untrusted(config_path)
+        else config_path is not None
+        and client_named_config_is_untrusted(config_path, session_id=session_id)
     )
     if rules.unreadable is not None and checked:
         return [
@@ -1723,7 +1724,7 @@ def _validated_document_denials(
                 path,
                 confine_to=default_confinement_root(path),
                 permit_base=config_base_gate(session_id),
-                refuse_env=env_refused_for(caller_is_remote(session_id)),
+                refuse_env=env_refused_for(caller_is_remote(session_id), session_id),
             )
             # A named path the client chose counts as delivered, every file of
             # its chain with it, as resolve_config(untrusted_config=True) does.

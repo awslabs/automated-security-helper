@@ -412,6 +412,7 @@ def _refuse_config_inputs_outside_the_permitted_roots(
 
 def _refuse_a_client_chosen_policy(
     plan: WorkspacePlan,
+    session_id: Optional[str] = None,
 ) -> Optional[MCPResourceError]:
     """Refuse a plan whose workspace policy the operator did not set aside.
 
@@ -419,8 +420,8 @@ def _refuse_a_client_chosen_policy(
     the runtime-override denylist keeps from a client. Under the MCP tools the
     client names the definition and may name the policy, so either way the
     policy file is the client's choice unless it sits where the operator keeps
-    config: a directory ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, or a session's
-    own ``config/`` directory (``client_named_config_is_untrusted``). A file a
+    config: a directory ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, or the calling
+    session's own ``config/`` directory (``client_named_config_is_untrusted``). A file a
     client delivered is always the client's, and so is a policy in a checkout
     the server may scan, named or found beside the definition.
 
@@ -437,7 +438,9 @@ def _refuse_a_client_chosen_policy(
     )
 
     source = plan.workspace_config_source
-    if source is None or not client_named_config_is_untrusted(Path(source)):
+    if source is None or not client_named_config_is_untrusted(
+        Path(source), session_id=session_id
+    ):
         return None
     how = (
         "was delivered by an MCP client"
@@ -1192,7 +1195,7 @@ async def mcp_resolve_workspace(
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "resolve_workspace")
 
-    policy_refusal = _refuse_a_client_chosen_policy(plan)
+    policy_refusal = _refuse_a_client_chosen_policy(plan, session_id)
     if policy_refusal is not None:
         return _error_response(
             policy_refusal,
@@ -1349,7 +1352,7 @@ async def mcp_scan_workspace(
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "scan_workspace")
 
-    policy_refusal = _refuse_a_client_chosen_policy(plan)
+    policy_refusal = _refuse_a_client_chosen_policy(plan, session_id)
     if policy_refusal is not None:
         return _error_response(
             policy_refusal,

@@ -112,7 +112,7 @@ the MCP server's two:
 
 * For a remote caller (``cli/mcp/sandbox.caller_is_remote``), every file the
   operator did not set aside: anything outside ``ASH_MCP_ALLOWED_CONFIG_ROOTS``
-  and the sessions' ``config/`` directories
+  and the calling session's ``config/`` directory
   (``cli/mcp/sandbox.client_named_config_is_untrusted``). That covers a path the
   client names, a file discovered in a directory it names, and a scan target's
   own config, as well as anything it delivered.
@@ -475,11 +475,13 @@ def config_is_client_delivered(path: Path) -> bool:
     return config_is_client_supplied(path)
 
 
-def env_refused_for(remote_client: bool) -> RefuseEnv:
+def env_refused_for(remote_client: bool, session_id: Optional[str] = None) -> RefuseEnv:
     """The files that resolve no ``!ENV`` for a caller; see "Environment variables".
 
     ``remote_client`` is ``cli.mcp.sandbox.caller_is_remote`` for the MCP call
-    the config is read for, and False for everything else.
+    the config is read for, and False for everything else. ``session_id`` is
+    that call's session: of the sessions' ``config/`` directories, only its own
+    is set aside for a remote caller.
     """
     if not remote_client:
         return config_is_client_delivered
@@ -487,7 +489,10 @@ def env_refused_for(remote_client: bool) -> RefuseEnv:
         client_named_config_is_untrusted,
     )
 
-    return client_named_config_is_untrusted
+    def refused(path: Path) -> bool:
+        return client_named_config_is_untrusted(path, session_id=session_id)
+
+    return refused
 
 
 def refuse_env_everywhere(path: Path) -> bool:

@@ -346,30 +346,40 @@ def config_is_client_supplied(config_path: str | Path) -> bool:
     return False
 
 
-def client_named_config_is_untrusted(config_path: str | Path) -> bool:
+def client_named_config_is_untrusted(
+    config_path: str | Path, session_id: Optional[str] = None
+) -> bool:
     """Whether a config path an MCP client named is the client's choice, not the operator's.
 
     A path a client names is the client's unless the operator set it aside: it is
-    in a directory ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, or in a session's own
-    ``config/`` directory, which only the server writes. A file the client
-    delivered (``config_is_client_supplied``) is always the client's. So is a
-    config in another repository under the allowed scan roots: the operator let
-    the server scan it, not take its config as their own. Checked both as named
-    and as resolved, as ``config_is_client_supplied`` is.
+    in a directory ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, or in the ``config/``
+    directory of the calling session, ``session_id``, which only the server
+    writes (``DEFAULT_SESSION_ID``'s when None, as ``select_profile`` writes it).
+    Another session's ``config/`` directory is not set aside for this caller. A
+    file a client delivered (``config_is_client_supplied``) is always the
+    client's. So is a config in another repository under the allowed scan roots:
+    the operator let the server scan it, not take its config as their own. Both
+    the path as named and the file it resolves to must be set aside; a symlink
+    on the way that a client delivered makes it the client's through
+    ``config_is_client_supplied``.
 
     For a remote caller this is also which config files resolve no ``!ENV``,
     named or not (``config_sources.env_refused_for``).
     """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        DEFAULT_SESSION_ID,
+    )
+
     if config_is_client_supplied(config_path):
         return True
-    shared = shared_workspace_root()
-    config_roots = operator_config_roots()
+    config_roots = list(operator_config_roots())
+    # Resolved as the gates resolve it, so an id that cannot name one directory
+    # owns no config directory here either.
+    own = _sandbox_for_gate(session_id or DEFAULT_SESSION_ID).root
+    if own is not None:
+        config_roots.append(own / CONFIG_DIR_NAME)
 
     def chosen_by_operator(candidate: Path) -> bool:
-        if shared is not None:
-            parts = _parts_below(candidate, shared)
-            if parts is not None and len(parts) >= 2 and parts[1] == CONFIG_DIR_NAME:
-                return True
         return any(_parts_below(candidate, root) is not None for root in config_roots)
 
     return not all(
@@ -840,7 +850,7 @@ def validate_config_chain(
                 path, Path(source_dir) if source_dir is not None else None
             ),
             permit_base=config_base_gate(session_id),
-            refuse_env=env_refused_for(caller_is_remote(session_id)),
+            refuse_env=env_refused_for(caller_is_remote(session_id), session_id),
         )
     except ASHConfigInputNotPermittedError as exc:
         return config_chain_refusal(config_path, exc)

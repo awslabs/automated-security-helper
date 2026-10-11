@@ -312,7 +312,9 @@ def resolve_config(
     chain: List[Path] = []
     documents: Dict[Path, Any] = {}
     names: Dict[Path, Tuple[Path, ...]] = {}
-    refuse_env = env_refused_for(remote_client)
+    refuse_env = env_refused_for(
+        remote_client, getattr(client_config_policy, "session_id", None)
+    )
     overlay = (
         _load_overlay(overlay_config_path, source_dir, permit_base, refuse_env)
         if overlay_config_path is not None
