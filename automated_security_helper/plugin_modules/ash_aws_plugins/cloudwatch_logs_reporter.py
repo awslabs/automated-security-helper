@@ -102,12 +102,14 @@ class CloudWatchLogsReporterConfig(ReporterPluginConfigBase):
             description="Whether the CloudWatch Logs reporter is enabled",
         ),
     ] = False
+    # A factory, so the environment defaults are read when the config is built.
     options: Annotated[
         CloudWatchLogsReporterConfigOptions,
         Field(
+            default_factory=CloudWatchLogsReporterConfigOptions,
             description="Configuration options for CloudWatch Logs reporter",
         ),
-    ] = CloudWatchLogsReporterConfigOptions()
+    ]
 
 
 @ash_reporter_plugin

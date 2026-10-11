@@ -163,6 +163,146 @@ class TestAScanChecksOnlyTheReportersItUses:
         assert ("securityhub", "DescribeHub") in requests
 
 
+#: For each reporter that defaults to off, an operator section with every option
+#: its dependency check needs, so the only thing keeping it from contacting AWS
+#: is ``enabled``. The request each check makes first is the control.
+COMPLETE_SECTIONS = {
+    "s3": (
+        (
+            "    options:\n"
+            "      bucket_name: b\n"
+            "      aws_region: us-east-1\n"
+            "      max_retries: 0\n"
+        ),
+        ("sts", "GetCallerIdentity"),
+    ),
+    "cloudwatch-logs": (
+        (
+            "    options:\n"
+            "      aws_region: us-east-1\n"
+            "      log_group_name: g\n"
+            "      max_retries: 0\n"
+        ),
+        ("sts", "GetCallerIdentity"),
+    ),
+    "aws-security-hub": (
+        (
+            '    options:\n      aws_region: us-east-1\n      account_id: "123456789012"\n'
+        ),
+        ("securityhub", "DescribeHub"),
+    ),
+}
+
+
+class TestACompleteSectionWithoutEnabledContactsNothing:
+    """Options alone do not turn a cloud reporter on; its ``enabled`` default does not either."""
+
+    def _scan(self, root, name, enabled_line):
+        from automated_security_helper.interactions.run_ash_scan import run_ash_scan
+
+        options, _ = COMPLETE_SECTIONS[name]
+        config = root / "operator" / "ash.yaml"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(
+            "ash_plugin_modules:\n"
+            f"  - {AWS_PLUGIN_MODULE}\n"
+            "reporters:\n"
+            f"  {name}:\n"
+            f"{enabled_line}"
+            f"{options}",
+            encoding="utf-8",
+        )
+        run_ash_scan(
+            source_dir=str(_source_tree(root)),
+            output_dir=str(root / "out"),
+            config=str(config),
+            scanners=["detect-secrets"],
+            offline=True,
+            progress=False,
+            quiet=True,
+            show_summary=False,
+            fail_on_findings=False,
+            color=False,
+        )
+
+    @pytest.mark.parametrize("name", sorted(COMPLETE_SECTIONS))
+    def test_a_section_with_every_option_but_enabled_contacts_nothing(
+        self, tmp_path, requests, sessions, name
+    ):
+        self._scan(tmp_path, name, "")
+
+        assert requests == []
+        assert sessions == []
+
+    @pytest.mark.parametrize("name", sorted(COMPLETE_SECTIONS))
+    def test_the_same_section_with_enabled_true_reaches_aws(
+        self, tmp_path, requests, name
+    ):
+        """Control: the options are enough for the check to make its request."""
+        self._scan(tmp_path, name, "    enabled: true\n")
+
+        assert COMPLETE_SECTIONS[name][1] in requests
+
+
+def _aws_reporter_configs():
+    from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
+        BedrockSummaryReporterConfig,
+    )
+    from automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_reporter import (
+        CloudWatchLogsReporterConfig,
+    )
+    from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import (
+        S3ReporterConfig,
+    )
+    from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter import (
+        SecurityHubReporterConfig,
+    )
+
+    return [
+        BedrockSummaryReporterConfig,
+        CloudWatchLogsReporterConfig,
+        S3ReporterConfig,
+        SecurityHubReporterConfig,
+    ]
+
+
+class TestTheEnvironmentIsReadWhenAConfigIsBuilt:
+    """A reporter's region and profile come from the environment of the run, not of the import.
+
+    Reading them when the module was imported fixed whatever ``AWS_REGION`` and
+    ``AWS_PROFILE`` the importing process had for every later config: a test
+    that removes them, or an MCP server whose environment changes, still saw the
+    old values.
+    """
+
+    @pytest.mark.parametrize(
+        "config_class", _aws_reporter_configs(), ids=lambda cls: cls.__name__
+    )
+    def test_region_and_profile_follow_the_environment(self, monkeypatch, config_class):
+        for name in ("AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("AWS_REGION", "eu-west-2")
+        monkeypatch.setenv("AWS_PROFILE", "profile-read-at-construction")
+
+        # CloudWatch Logs has no profile option.
+        has_profile = "aws_profile" in type(config_class().options).model_fields
+
+        options = config_class().options
+
+        assert options.aws_region == "eu-west-2"
+        if has_profile:
+            assert options.aws_profile == "profile-read-at-construction"
+
+        monkeypatch.setenv("AWS_REGION", "ap-south-1")
+        monkeypatch.delenv("AWS_PROFILE")
+
+        options = config_class().options
+
+        assert options.aws_region == "ap-south-1"
+        if has_profile:
+            assert options.aws_profile is None
+
+
 class TestReportCommand:
     def _report(self, output_dir, *extra, report_format="aws-security-hub"):
         from automated_security_helper.cli.main import app

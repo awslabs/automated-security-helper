@@ -22,19 +22,24 @@ if TYPE_CHECKING:
 
 
 class SecurityHubReporterConfigOptions(ReporterOptionsBase):
+    # Read from the environment when the options are built, not when this module
+    # is imported, so a config built later sees the run's environment.
     aws_region: Annotated[
         str | None,
         Field(
+            default_factory=lambda: os.environ.get(
+                "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None)
+            ),
             description="AWS Region for Security Hub integration",
         ),
-    ] = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None))
+    ]
     aws_profile: Annotated[
         str | None,
         Field(
-            default=None,
+            default_factory=lambda: os.environ.get("AWS_PROFILE", None),
             description="AWS Profile to use for authentication",
         ),
-    ] = os.environ.get("AWS_PROFILE", None)
+    ]
     account_id: Annotated[
         str | None,
         Field(
@@ -65,9 +70,10 @@ class SecurityHubReporterConfig(ReporterPluginConfigBase):
     options: Annotated[
         SecurityHubReporterConfigOptions,
         Field(
+            default_factory=SecurityHubReporterConfigOptions,
             description="Configuration options for Security Hub reporter",
         ),
-    ] = SecurityHubReporterConfigOptions()
+    ]
 
 
 @ash_reporter_plugin

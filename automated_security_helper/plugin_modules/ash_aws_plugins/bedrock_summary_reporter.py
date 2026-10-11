@@ -42,39 +42,52 @@ if TYPE_CHECKING:
 
 
 class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
+    # The environment defaults are read when the options are built, not when this
+    # module is imported, so a config built later sees the run's environment.
     aws_region: Annotated[
         str | None,
         Field(
+            default_factory=lambda: os.environ.get(
+                "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+            ),
             pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}",
             description="AWS region to use for Bedrock. If not specified, the default region will be used. If specified, the region will be used for all Bedrock requests.",
         ),
-    ] = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+    ]
     aws_profile: Annotated[
         str | None,
         Field(
+            default_factory=lambda: os.environ.get("AWS_PROFILE", None),
             description="AWS profile to use for Bedrock. If not specified, the default profile will be used.",
         ),
-    ] = os.environ.get("AWS_PROFILE", None)
+    ]
     model_id: Annotated[
         str,
         Field(
+            default_factory=lambda: os.environ.get(
+                "ASH_BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+            ),
             description="Bedrock model ID to use for generating summaries.",
         ),
-    ] = os.environ.get(
-        "ASH_BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
-    )
+    ]
     temperature: Annotated[
         float,
         Field(
+            default_factory=lambda: float(
+                os.environ.get("ASH_BEDROCK_TEMPERATURE", "0.5")
+            ),
             description="Temperature parameter for the Bedrock model. Higher values make output more random.",
         ),
-    ] = float(os.environ.get("ASH_BEDROCK_TEMPERATURE", "0.5"))
+    ]
     max_tokens: Annotated[
         int,
         Field(
+            default_factory=lambda: int(
+                os.environ.get("ASH_BEDROCK_MAX_TOKENS", "4000")
+            ),
             description="Maximum number of tokens to generate in the response.",
         ),
-    ] = int(os.environ.get("ASH_BEDROCK_MAX_TOKENS", "4000"))
+    ]
     top_p: Annotated[
         float,
         Field(
@@ -287,7 +300,10 @@ class BedrockSummaryReporterConfig(ReporterPluginConfigBase):
     # Off by default: this reporter sends findings to an AWS service with the
     # operator's credentials, so only the operator's config turns it on.
     enabled: bool = False
-    options: BedrockSummaryReporterConfigOptions = BedrockSummaryReporterConfigOptions()
+    # A factory, so the environment defaults are read when the config is built.
+    options: BedrockSummaryReporterConfigOptions = Field(
+        default_factory=BedrockSummaryReporterConfigOptions
+    )
 
 
 @ash_reporter_plugin

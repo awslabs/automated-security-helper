@@ -92,7 +92,8 @@ class S3ReporterConfig(ReporterPluginConfigBase):
     # Off by default: this reporter sends findings to an AWS service with the
     # operator's credentials, so only the operator's config turns it on.
     enabled: bool = False
-    options: S3ReporterConfigOptions = S3ReporterConfigOptions()
+    # A factory, so the environment defaults are read when the config is built.
+    options: S3ReporterConfigOptions = Field(default_factory=S3ReporterConfigOptions)
 
 
 @ash_reporter_plugin
