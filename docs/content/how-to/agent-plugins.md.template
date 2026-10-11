@@ -3,7 +3,7 @@
 The repository ships a generated integration for each of several agent platforms, under
 [`ash-agent-plugins/agentic-coding/plugins/`](https://github.com/awslabs/automated-security-helper/tree/main/ash-agent-plugins/agentic-coding/plugins).
 Each one registers ASH's MCP server with the agent and adds instructions that tell the agent
-how to use the tools: a skill, rules, commands or an agent definition, depending on what the
+how to use the tools: a skill, rules, commands, or an agent definition, depending on what the
 platform supports. If you would rather add the server yourself, follow
 [Connect an AI agent to ASH](../getting-started/agents.md).
 
@@ -26,11 +26,11 @@ Every MCP configuration in these files starts the server the same way:
 ```
 
 `uvx` installs ASH v{{VERSION}} from GitHub the first time the agent starts the server, and
-reuses that copy afterwards. The plugin does not need ASH installed separately.
+reuses that copy afterward. The plugin does not need ASH installed separately.
 
 ## Prerequisites
 
-- [uv](https://docs.astral.sh/uv/), with `uvx` on the PATH that the agent uses. On Linux and
+- [uv](https://docs.astral.sh/uv/), with `uvx` on the `PATH` that the agent uses. On Linux and
   macOS, uv's installer is:
 
     <!-- doctest: illustrative reason="installs uv from the network" -->
@@ -38,7 +38,7 @@ reuses that copy afterwards. The plugin does not need ASH installed separately.
     curl -LsSf https://astral.sh/uv/install.sh | sh
     ```
 
-    Desktop apps often do not see your shell's PATH. If the agent cannot start the server,
+    Desktop apps often do not see your shell's `PATH`. If the agent cannot start the server,
     replace `uvx` in its config with the absolute path that `command -v uvx` prints.
 - git, and network access to GitHub the first time the server starts.
 - The scanner tools. Install them once for your user:
@@ -50,11 +50,22 @@ reuses that copy afterwards. The plugin does not need ASH installed separately.
 
     Without them the scans still run, but they end with status `incomplete` and list the
     missing scanners.
+- The plugin files, from a clone of the repository:
 
-The generated configs let uv choose the Python version. ASH needs Python 3.10 to 3.14, and on
-a machine whose newest Python is outside that range, uv can pick it and ASH then fails to
-install. Add `"--python", "3.12"` at the start of the config's arguments; uv downloads Python
-3.12 if it is not installed:
+    <!-- doctest: illustrative reason="clones from the network" -->
+    ```bash
+    git clone --depth 1 https://github.com/awslabs/automated-security-helper.git
+    cd automated-security-helper/ash-agent-plugins/agentic-coding/plugins
+    ```
+
+The paths below are relative to that `plugins` directory.
+
+### Pin the Python version
+
+The generated configs let uv choose the Python version. Releases up to 3.7.x fail to install
+under Python 3.15, which uv picks on a machine where it is the newest Python. Add
+`"--python", "3.12"` at the start of the config's arguments; uv downloads Python 3.12 if it is
+not installed:
 
 <!-- doctest: config kind=mcp-client -->
 ```json
@@ -74,29 +85,21 @@ install. Add `"--python", "3.12"` at the start of the config's arguments; uv dow
 }
 ```
 
+### Directories the server refuses
+
 The plugins do not set `ASH_MCP_ALLOWED_ROOTS`, so a project in a directory the server refuses
 by default, such as `/root`, needs it added to the config's environment; see
 [step 5 of the tutorial](../getting-started/agents.md#5-ask-for-a-scan).
-
-- The plugin files, from a clone of the repository:
-
-    <!-- doctest: illustrative reason="clones from the network" -->
-    ```bash
-    git clone --depth 1 https://github.com/awslabs/automated-security-helper.git
-    cd automated-security-helper/ash-agent-plugins/agentic-coding/plugins
-    ```
-
-The paths below are relative to that `plugins` directory.
 
 ## Choose your platform
 
 | Platform | Directory | What it adds | Notes |
 |----------|-----------|--------------|-------|
-| Claude Code | `claude/` | MCP server, the `ash-mcp` skill, `scan` and `results` commands, a security-scanner agent | |
+| Claude Code | `claude/` | MCP server, the `ash-mcp` skill, `scan` and `results` commands, and a security-scanner agent | |
 | Codex CLI | `codex/` | MCP server, the `ash-mcp` skill | |
 | Kiro | `kiro/` | A power: MCP server and instructions | |
-| GitHub Copilot in VS Code | `copilot/` | `.vscode/mcp.json`, Copilot instructions, `scan` and `results` prompts, an agent | |
-| OpenCode | `opencode/` | MCP server, skill, commands and agent | |
+| GitHub Copilot in VS Code | `copilot/` | `.vscode/mcp.json`, Copilot instructions, `scan` and `results` prompts, and an agent | |
+| OpenCode | `opencode/` | MCP server, skill, commands, and agent | |
 | Cursor | `cursor/` | MCP server and a rule | |
 | Windsurf | `windsurf/` | A rule, and an `install.sh` that writes your global MCP config | Read the warning below. |
 | Cline | `cline/` | Rules, and an `install.sh` that writes your global MCP settings | Read the warning below. |
@@ -104,7 +107,7 @@ The paths below are relative to that `plugins` directory.
 | Gemini CLI | `gemini/` | An extension: MCP server and instructions | |
 | Goose | `goose/` | An extension and `AGENTS.md` | |
 | Claude Desktop | `mcpb/` | An MCP bundle, `ash.mcpb` | |
-| Roo Code | `roo/` | MCP server, rules and a custom mode | Roo Code's maintainers announced its [shutdown](https://docs.roocode.com/sunset) for 2026-05-15. |
+| Roo Code | `roo/` | MCP server, rules, and a custom mode | Roo Code's maintainers announced its [shutdown](https://docs.roocode.com/sunset) for 2026-05-15. |
 | Amazon Q Developer CLI | `amazonq/` | An agent definition | Amazon Q Developer CLI is now Kiro CLI. The script writes the Amazon Q Developer CLI agent location. |
 | Aider | `aider/` | Conventions only | Aider does not support MCP, so it cannot call ASH's tools. |
 | Any Agent Skills client | `generic-skill/`, and `skills/` at the repository root | The `ash-mcp` skill only, with no MCP server | See [Agent Skills](#agent-skills). |
@@ -127,7 +130,7 @@ claude --plugin-dir claude
 
 ### Codex CLI
 
-Add the directory as a plugin marketplace, then install the `ash` plugin from it:
+Add the directory as a plugin marketplace:
 
 <!-- doctest: illustrative reason="needs Codex CLI" -->
 ```bash
@@ -139,7 +142,7 @@ codex plugin marketplace add ./codex
 Add `kiro/` as a power from its GitHub directory. Kiro reads `POWER.md` for the instructions
 and `mcp.json` for the server.
 
-### GitHub Copilot, OpenCode, Cursor, Continue and Roo Code
+### GitHub Copilot, OpenCode, Cursor, Continue, and Roo Code
 
 Copy the platform's files into the root of the repository you want to scan:
 
@@ -149,7 +152,7 @@ Copy the platform's files into the root of the repository you want to scan:
 | OpenCode | `opencode/opencode.json` and `opencode/.opencode/` |
 | Cursor | `cursor/.cursor/`, and `cursor/AGENTS.md` if you want it |
 | Continue | `continue/.continue/` |
-| Roo Code | `roo/.roo/`, `roo/.roomodes` and `roo/AGENTS.md` |
+| Roo Code | `roo/.roo/`, `roo/.roomodes`, and `roo/AGENTS.md` |
 
 If the repository already has one of these files, such as `.vscode/mcp.json`, add the `ash`
 entry to it instead of replacing it. VS Code's `mcp.json` names its servers under `servers`,
@@ -190,7 +193,7 @@ repository if you want Goose to read it.
 ### Claude Desktop
 
 Open `mcpb/ash.mcpb` with Claude Desktop. The bundle contains only a manifest that starts the
-server with `uvx`, so `uvx` must be on the PATH that Claude Desktop sees.
+server with `uvx`, so `uvx` must be on the `PATH` that Claude Desktop sees.
 
 ### Amazon Q Developer CLI
 
@@ -224,7 +227,7 @@ tutorial](../getting-started/agents.md#3-connect-the-agent).
 
 Each file pins ASH v{{VERSION}}, the release this repository's files were generated for. To
 use another release, change the tag in the `uvx --from` argument of the installed MCP
-configuration, for example in `.mcp.json`, `.cursor/mcp.json` or `.vscode/mcp.json`. Older
+configuration, for example in `.mcp.json`, `.cursor/mcp.json`, or `.vscode/mcp.json`. Older
 releases have fewer MCP tools than the [MCP tools reference](../reference/mcp-tools.md) lists.
 
 To use an ASH you installed yourself instead, replace `uvx` and its arguments:
@@ -243,16 +246,21 @@ To use an ASH you installed yourself instead, replace `uvx` and its arguments:
 
 ## Known problems in the bundled instructions
 
-The skill and commands in these plugins contain three errors. Correct the agent when you
-see them:
+The skill and commands in these plugins contain these errors. Correct the agent when you see
+them:
 
-- They tell the agent to stop polling when the status is `completed`, `failed` or
+- They tell the agent to stop polling when the status is `completed`, `failed`, or
   `cancelled`. A scan can also end `incomplete`, which is final too: the results are readable
   and `incomplete_scanners` names what did not run.
 - They list `INFO` as a value of `severity_threshold`. ASH accepts `ALL`, `LOW`, `MEDIUM`,
-  `HIGH` and `CRITICAL`.
+  `HIGH`, and `CRITICAL`.
 - The infrastructure-as-code example filters results with the scanner name `cfn_nag`. Result
   filters use the names in the scan results, such as `cfn-nag`, and `cfn_nag` matches nothing.
+- They say ASH runs nine scanners. ASH has more built-in scanners than that; the scan results
+  list the ones that ran.
+- They say MCP scans run Python-based scanners only. MCP scans run in local mode, which runs
+  every enabled scanner whose tool is installed, including the ones that are not written in
+  Python.
 
 ## Regenerate the plugins
 

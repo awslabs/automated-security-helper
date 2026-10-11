@@ -5,15 +5,15 @@ small project for you. The agent starts the scan, follows it to the end, reads t
 explains a finding, drafts a suppression, and compares two scans.
 
 Any agent or IDE that can start a local MCP server over stdio works: Claude Code, Kiro, Cursor,
-GitHub Copilot in VS Code, Codex, Gemini CLI and others. The agent starts `ash mcp` as a child
+GitHub Copilot in VS Code, Codex, Gemini CLI, and others. The agent starts `ash mcp` as a child
 process on your machine, and every scan runs there, with the scanner tools installed there.
 
-You need git, and an agent that supports MCP tools.
+You need git and an agent that supports MCP tools.
 
 ## 1. Install ASH
 
 Install ASH with one of the methods in [Install ASH](../how-to/install.md), then check that
-`ash` is on your PATH:
+`ash` is on your `PATH`:
 
 ```bash
 ash --version
@@ -28,9 +28,11 @@ Then install the tools the scanners run:
 ash dependencies install
 ```
 
-You can skip this step. The scan still runs, but every scanner whose tool is missing is
-reported as MISSING and the scan ends with status `incomplete`. [Manage scanner
-tools](../docs/advanced-usage.md) explains where ASH looks for tools.
+You can skip this step. ASH then installs the Python-based scanners, such as bandit, checkov,
+and semgrep, with uv during the scan, which needs uv on your `PATH` and network access. Every
+other scanner whose tool is missing is reported as MISSING, and the scan ends with status
+`incomplete`. [Manage scanner tools](../docs/advanced-usage.md) explains where ASH looks for
+tools.
 
 ## 2. Create a project to scan
 
@@ -87,7 +89,7 @@ claude mcp add ash -- ash mcp
 
 Restart the agent, or reload its MCP servers, so it starts `ash mcp`.
 
-If the agent reports that it cannot start the server, it probably does not see the same PATH
+If the agent reports that it cannot start the server, it probably does not see the same `PATH`
 as your shell, which is common for desktop apps. Put the absolute path of `ash` in `command`.
 This prints it:
 
@@ -133,12 +135,12 @@ like this:
 | `completed` | Every selected scanner ran. |
 | `incomplete` | The scan finished and its results are readable, but at least one selected scanner did not run or did not finish. `incomplete_scanners` names each one and the reason, such as `missing_dependencies`. The findings are real but do not cover what those scanners check. |
 | `failed` | The scan crashed or left no readable results. `error_message` says why. |
-| `cancelled` | Someone cancelled the scan. |
+| `cancelled` | Someone canceled the scan. |
 
 `incomplete` is a final status. If your agent keeps polling after the scan reports it, tell
 the agent that the scan is finished.
 
-When the scan ends, the agent reports the findings. Among them are three from bandit:
+When the scan ends, the agent reports three findings, all from bandit:
 
 | Rule | Severity | Line | Finding |
 |------|----------|------|---------|
@@ -152,11 +154,11 @@ MEDIUM. The LOW finding is reported but does not fail a scan.
 If the status is `incomplete`, ask the agent which scanners were incomplete and why. Install
 their tools (step 1) and ask for the scan again.
 
-If the agent reports "Scan target is outside the permitted roots", the project is inside one of
-the system directories the server refuses by default: `/boot`, `/dev`, `/etc`, `/proc`, `/root`
-or `/sys`. This happens when you work as root, in a container for example. Name the directory
-that holds your projects in `ASH_MCP_ALLOWED_ROOTS`, in the server's environment, and restart
-the agent:
+If the agent reports "Scan target is outside the permitted roots", the project is in a place
+the server refuses by default: the filesystem root, or one of `/boot`, `/dev`, `/etc`, `/proc`,
+`/root`, and `/sys` (Windows has its own list). This happens when you work as root, in a
+container for example. Name the directory that holds your projects in `ASH_MCP_ALLOWED_ROOTS`,
+in the server's environment, and restart the agent:
 
 <!-- doctest: config kind=mcp-client -->
 ```json
@@ -173,7 +175,8 @@ the agent:
 }
 ```
 
-Once the variable is set, the server scans only the directories it names.
+Once the variable is set, the server scans, and reads results from, only the directories it
+names and their subdirectories.
 
 ## 6. Read the results
 
@@ -182,8 +185,8 @@ ASH wrote its output into the project, in `.ash/ash_output`. The agent read it t
 
 | File | What it holds |
 |------|---------------|
-| `.ash/ash_output/reports/ash.summary.md` | A readable summary: scanners, counts and findings. |
-| `.ash/ash_output/reports/ash.flat.json` | One record per finding, with its `id`, `rule_id`, `severity`, `file_path` and line. |
+| `.ash/ash_output/reports/ash.summary.md` | A readable summary: scanners, counts, and findings. |
+| `.ash/ash_output/reports/ash.flat.json` | One record per finding, with its `id`, `rule_id`, `severity`, `file_path`, and line. |
 | `.ash/ash_output/reports/ash.html` | The same findings as a web page. |
 | `.ash/ash_output/ash_aggregated_results.json` | Everything ASH knows about the scan, including each scanner's status. |
 
@@ -214,7 +217,10 @@ Draft an ASH suppression for the B324 finding with the reason
 "MD5 builds a cache key; it does not protect anything". Do not edit any files.
 ```
 
-The agent calls `suggest_suppression`, which writes nothing and returns an entry like this:
+The agent calls `suggest_suppression`, which writes nothing and returns an entry like this.
+`suggest_suppression` takes the path of the results file,
+`.ash/ash_output/ash_aggregated_results.json`, not the output directory that `explain_finding`
+takes.
 
 ```text
 client_supplied: false
@@ -229,7 +235,7 @@ rule_id: B324
 The expiration date defaults to 90 days from today. From that date on, the suppression no
 longer applies and the finding comes back. ASH sets `client_supplied` itself, so leave it out
 of your config. Add the entry to the project's config under `global_settings.suppressions`,
-with the date the agent gave you:
+and put in the date the agent gave you:
 
 ```bash
 mkdir -p .ash
@@ -251,13 +257,16 @@ Check that ASH accepts the file:
 ash config get .ash/.ash.yaml > /dev/null && echo "config is valid"
 ```
 
-It prints `config is valid`. An invalid config exits with code 3 and names the field.
-[Suppress a finding](../how-to/suppress-findings.md) covers the other fields a suppression can
-use.
+It prints `config is valid`. A wrong value or a missing required field, such as `reason`,
+makes it exit with code 3 and name the field. A misspelled key inside a suppression, such as
+`expiry` for `expiration`, is not reported. [Suppress findings](../how-to/suppress-findings.md)
+covers the other fields a suppression can use.
 
 ## 9. Fix a finding and compare the scans
 
-The next scan replaces the results in `.ash/ash_output`, so keep a copy of this scan first:
+The next scan replaces the results in `.ash/ash_output`, so keep a copy of this scan first. If
+you set `ASH_MCP_ALLOWED_ROOTS`, keep the copy inside one of its directories, where the server
+can read it:
 
 <!-- doctest: illustrative reason="needs the results of the scan the agent ran" -->
 ```bash
@@ -302,10 +311,11 @@ your reason. The scan now has no actionable findings.
 ## Next steps
 
 - [ASH GenAI integration guide](../docs/genai-steering-guide.md): instructions written for the
-  agent itself. `ash get-genai-guide` saves a copy you can give your agent.
-- [MCP tools reference](../reference/mcp-tools.md): every tool, its parameters and its
+  agent itself. `ash get-genai-guide` downloads the current guide from GitHub, so you can give
+  it to your agent.
+- [MCP tools reference](../reference/mcp-tools.md): every tool, its parameters, and its
   resources.
-- [Run the ASH MCP server](../how-to/mcp-server.md): limit which directories an agent can
-  scan, or run the server over HTTP.
+- [Run the MCP server](../how-to/mcp-server.md): limit which directories an agent can scan, or
+  run the server over HTTP.
 - [Scale to large repositories](../how-to/scale-large-repos.md): scan a VS Code workspace with
   the workspace tools.
