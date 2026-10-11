@@ -225,9 +225,21 @@
               # depend on where the shell was entered. See nix/refresh-content-dbs.sh.
               sh ${self}/nix/refresh-content-dbs.sh
 
-              if [ -z "$(ls -A "$ASH_CFN_GUARD_RULES_DIR" 2>/dev/null)" ]; then
-                echo "ash: seeding the AWS Guard Rules Registry for cfn-guard (one time, needs network)" >&2
+              # Installed whenever the bundle there is not the one this flake pins, not
+              # only when the directory is empty. A bundle lands in a directory named for
+              # its version and cfn-guard reads only the pinned version's, so after an
+              # upgrade that bumps the pin the previous release's directory is still
+              # there and cfn-guard would be MISSING. `--check` reads no network: it is
+              # the test `ash dependencies install` makes before skipping a bundle (the
+              # manifest names the pinned url and digest, and every file still matches
+              # it). Both calls name this flake's pins rather than $ASH_PINS_DIR's.
+              # tests/unit/test_nix_cfn_guard_rules_reseed.py runs this block.
+              if ! python3 ${self}/automated_security_helper/assets/install-pinned-tool.py \
+                --pins-dir ${self}/automated_security_helper \
+                aws-guard-rules-registry --rules-bundle --check -d "$ASH_CFN_GUARD_RULES_DIR" >/dev/null 2>&1; then
+                echo "ash: installing the pinned AWS Guard Rules Registry for cfn-guard (needs network)" >&2
                 python3 ${self}/automated_security_helper/assets/install-pinned-tool.py \
+                  --pins-dir ${self}/automated_security_helper \
                   aws-guard-rules-registry --rules-bundle -d "$ASH_CFN_GUARD_RULES_DIR" >/dev/null 2>&1 \
                   || echo "ash: rules download FAILED; cfn-guard will report MISSING" >&2
               fi

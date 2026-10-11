@@ -27,7 +27,9 @@ current pin and whose files still hash to what it records, so a second
 does not need write access to a directory root created. The scanner checks it again
 before every scan, for the rule files it is about to load, so a partial or corrupted
 install is reported as MISSING with a reason instead of evaluating a template against
-whatever is left.
+whatever is left. The nix shell makes the installer's check as well, on every entry,
+through ``install-pinned-tool --rules-bundle --check``, which cannot import this module;
+tests/unit/test_nix_cfn_guard_rules_reseed.py keeps the two checks giving one answer.
 
 Extraction rules, and why
 -------------------------

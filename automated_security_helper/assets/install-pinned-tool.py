@@ -553,6 +553,56 @@ def install_bundle(
     return final
 
 
+def installed_bundle_problem(
+    name: str, rules_dir: Path, package_root: Path
+) -> "str | None":
+    """Why the bundle under ``rules_dir`` is not the pinned ``name``; None when it is.
+
+    The same test as rules_bundles.verify_installed_bundle, which ``ash dependencies
+    install`` makes before it skips a bundle: the pinned version's directory holds a
+    manifest naming the pinned url and digest, and every file the manifest lists
+    still hashes to the digest recorded for it. Nothing is downloaded. The nix shell
+    runs this (``--check``) on every entry, so an ASH upgrade that bumps the pin
+    reinstalls the rules instead of leaving only the previous release's directory,
+    where the scanner does not look. tests/unit/test_nix_cfn_guard_rules_reseed.py
+    asks both functions about the same directories and requires the same answer.
+    """
+    pins = load_pins(package_root)
+    try:
+        bundle = pins.get_rules_bundle(name)
+    except pins.ToolNotProvisionableError as exc:
+        raise SystemExit(str(exc))
+    directory = rules_dir / f"{bundle.name}-{bundle.version}"
+    manifest_path = directory / _RULES_MANIFEST_NAME
+    if not manifest_path.is_file():
+        return f"{manifest_path} does not exist"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return f"{manifest_path} is unreadable ({exc})"
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("files"), dict):
+        return f"{manifest_path} is malformed"
+    if (
+        manifest.get("url") != bundle.url
+        or str(manifest.get("sha256", "")).lower() != bundle.sha256.lower()
+    ):
+        return (
+            f"{directory} holds {manifest.get('url')!r}, not the pinned "
+            f"{bundle.name} {bundle.version}"
+        )
+    for member, expected in manifest["files"].items():
+        path = directory / str(member)
+        if not path.is_file():
+            return f"{path} is listed in the manifest but missing"
+        try:
+            actual = _sha256_file(path)
+        except OSError as exc:
+            return f"{path} could not be read ({exc})"
+        if actual != str(expected):
+            return f"{path} no longer matches the digest in its manifest"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Third-party license and notice files
 #
@@ -1211,13 +1261,34 @@ def main(argv: "list[str] | None" = None) -> int:
         default=None,
         help="directory to install a rules bundle under (required with --rules-bundle)",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help=(
+            "with --rules-bundle, install nothing: exit 0 when the bundle under "
+            "--rules-dir is the pinned one with every file intact, 1 otherwise"
+        ),
+    )
     args = parser.parse_args(argv)
 
     package_root = Path(args.pins_dir) if args.pins_dir else default_package_root()
     third_party_dir = os.environ.get(_THIRD_PARTY_ENV)
+    if args.check and not args.rules_bundle:
+        parser.error("--check needs --rules-bundle")
     if args.rules_bundle:
         if not args.rules_dir:
             parser.error("--rules-bundle needs --rules-dir")
+        if args.check:
+            problem = installed_bundle_problem(
+                args.tool, Path(args.rules_dir), package_root
+            )
+            if problem is not None:
+                print(
+                    f"{args.tool} is not the pinned bundle: {problem}", file=sys.stderr
+                )
+                return 1
+            print(f"{args.tool} is installed and matches its pin")
+            return 0
         install_bundle(
             args.tool,
             Path(args.rules_dir),

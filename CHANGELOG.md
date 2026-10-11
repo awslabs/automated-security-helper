@@ -100,7 +100,7 @@
   tool, pinned, digest-verified and with its license files; `ash dependencies install`
   installs the same pinned binaries locally, and the uv tools (cfn-lint and zizmor)
   within their `tool_version` ranges; and nix mode supplies them (cfn-guard from its
-  pinned release asset, its rules seeded by the shell on first entry and trivy's
+  pinned release asset, its rules installed by the shell on first entry and again whenever they are not the pinned bundle, and trivy's
   database refreshed on every entry). A tool that is absent is MISSING, as for every builtin scanner. Under
   `--sandbox` each gets what it declares, listed in
   `docs/content/docs/scanner-sandbox.md`. See
