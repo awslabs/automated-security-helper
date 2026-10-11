@@ -1251,6 +1251,16 @@
 
 ### Fixes
 
+- **Two offline scans overlapping in one process both stay offline, and the process
+  is online again after them.** An offline scan set `ASH_OFFLINE=YES` and put back the
+  value it had seen when it ended. With two overlapping (two MCP sessions, or two
+  `run_ash_scan(offline=True)` threads), the first to end put back "unset" while the
+  other was still running, so the rest of that scan ran online: secret verification
+  permitted, none of the offline tool variables on its spawns, trivy's Terraform checks
+  on, npm-audit auditing against the registry. The last to end put back "YES", so every
+  later scan in the process ran offline. Offline scans now hold the variable, and the
+  last one to end restores what the process started with.
+
 - **A profile's own `runtime_overrides.denied_paths` no longer drops the shipped
   denials that trust depends on.** A list set in a profile replaced the default list
   whole, so an operator who added one entry let MCP clients turn on detect-secrets

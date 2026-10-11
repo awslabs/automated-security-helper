@@ -83,8 +83,8 @@ from automated_security_helper.utils.output_dir_links import (
     OUTPUT_WORKING_DIRS,
 )
 from automated_security_helper.utils.process_env import (
-    apply_environ_overrides,
-    restore_environ,
+    hold_environ,
+    release_environ,
 )
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 from automated_security_helper.utils.severity_ladder import (
@@ -1993,12 +1993,15 @@ def _run_local_mode(
 
     # Through utils/process_env.py rather than os.environ directly: an MCP server
     # runs this in an executor thread while other scans may be spawning, and the
-    # helper's lock is what keeps their environment copies consistent. The
-    # previous value is restored rather than popped, so an ASH_OFFLINE=YES the
-    # process started with survives the scan.
-    _offline_previous = None
+    # helper's lock is what keeps their environment copies consistent. Held rather
+    # than set and restored: with two offline scans overlapping in one process, the
+    # first to end would put back "unset" while the other still runs, and the last
+    # would put back the first one's "YES". The last release restores what the
+    # process started with, so an ASH_OFFLINE=YES it was started with survives.
+    _offline_held = False
     if opts.offline:
-        _offline_previous = apply_environ_overrides({"ASH_OFFLINE": "YES"})
+        hold_environ("ASH_OFFLINE", "YES")
+        _offline_held = True
 
     _changed_file_set = None
     if opts.changed_files_only:
@@ -2202,8 +2205,8 @@ def _run_local_mode(
         )
         sys.exit(1)
     finally:
-        if _offline_previous is not None:
-            restore_environ(_offline_previous)
+        if _offline_held:
+            release_environ("ASH_OFFLINE")
 
 
 # ---------------------------------------------------------------------------
@@ -2395,10 +2398,11 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
         print(f"[bold red]ERROR (3) Invalid configuration: {exc}[/bold red]")
         sys.exit(int(WorkspaceExitCode.INVALID_PROJECT_CONFIG))
 
-    # Set and restored through utils/process_env.py; see _run_local_mode.
-    _offline_previous = None
+    # Held and released through utils/process_env.py; see _run_local_mode.
+    _offline_held = False
     if opts.offline:
-        _offline_previous = apply_environ_overrides({"ASH_OFFLINE": "YES"})
+        hold_environ("ASH_OFFLINE", "YES")
+        _offline_held = True
 
     try:
         return execute_workspace(opts.workspace_plan, settings)
@@ -2419,8 +2423,8 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
         )
         sys.exit(int(WorkspaceExitCode.INTERNAL_ERROR))
     finally:
-        if _offline_previous is not None:
-            restore_environ(_offline_previous)
+        if _offline_held:
+            release_environ("ASH_OFFLINE")
 
 
 def _print_workspace_summary(
