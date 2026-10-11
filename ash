@@ -178,12 +178,12 @@ if [[ "${CONFIG_GIVEN}" = "NO" ]]; then
 fi
 if [[ "${NO_RUN}" = "NO" && ( "${CONFIG_GIVEN}" = "YES" || -n "${CONFIG_PATH}" ) ]]; then
   if [[ -z "${CONFIG_PATH}" || ! -f "${CONFIG_PATH}" ]]; then
-    echo "ERROR: Config file not found: '${CONFIG_PATH}'. --config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container." >&2
+    echo "ERROR: Config file not found: ${CONFIG_PATH}. --config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container." >&2
     exit 3
   fi
   # The runner mounts with its own rights, which can be wider than this user's.
   if [[ ! -r "${CONFIG_PATH}" ]]; then
-    echo "ERROR: Config file cannot be read: '${CONFIG_PATH}'. ASH does not hand the container runner a file it cannot read itself." >&2
+    echo "ERROR: Config file cannot be read: ${CONFIG_PATH}. ASH does not hand the container runner a file it cannot read itself." >&2
     exit 3
   fi
   CONFIG_REAL="$(resolve_file "${CONFIG_PATH}")"

@@ -1051,14 +1051,14 @@ def _unreadable_config(config: str | None) -> str | None:
         return None
     if not config or not Path(config).is_file():
         return (
-            f"Config file not found: {config!r}. --config (or ASH_CONFIG) has to name "
+            f"Config file not found: {config}. --config (or ASH_CONFIG) has to name "
             "an existing file: container mode mounts it read-only for the scan inside "
             "the container."
         )
     if not os.access(config, os.R_OK):
         # The runner mounts with its own rights, which can be wider than ASH's.
         return (
-            f"Config file cannot be read: {config!r}. ASH does not hand the container "
+            f"Config file cannot be read: {config}. ASH does not hand the container "
             "runner a file it cannot read itself."
         )
     return None

@@ -224,3 +224,12 @@ def test_an_outside_config_without_extends_still_runs(host, tmp_path):
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "run" in calls
+
+
+@pytestmark_posix
+def test_a_missing_config_names_the_path(host):
+    result, calls = host("-NoBuild -Config missing.yaml")
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert calls == []
+    assert "Config file not found: missing.yaml" in result.stderr

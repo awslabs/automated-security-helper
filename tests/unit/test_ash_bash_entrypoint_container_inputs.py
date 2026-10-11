@@ -730,3 +730,37 @@ class TestAnOutsideConfigThatExtendsIsRefused:
         assert (
             _flag(_inner_args(_only(calls, "run")), "--config") == "/src/.ash/ash.yaml"
         )
+
+
+class TestAnExplicitConfigIsCheckedOnTheHost:
+    """As ``ash --mode container``: a missing ``--config`` exits 3 with
+    ``Config file not found: <path>``, and a relative one is the file in the
+    working directory, never one the source directory holds by that name."""
+
+    def test_a_missing_config_names_the_path(self, fake_runner, project):
+        rc, output, calls = _run_ash_status(
+            fake_runner, project, ["--no-build", "--config", "missing.yaml"]
+        )
+
+        assert rc == 3, output
+        assert calls == []
+        assert "Config file not found: missing.yaml" in output
+
+    def test_a_relative_config_is_the_working_directorys_file(
+        self, fake_runner, tmp_path
+    ):
+        (tmp_path / "src").mkdir()
+        (tmp_path / "ash.yaml").write_text("project_name: operator\n")
+        (tmp_path / "src" / "ash.yaml").write_text("project_name: repository\n")
+
+        calls = run_ash(
+            fake_runner,
+            tmp_path,
+            ["--no-build", "--source-dir", "src", "--config", "ash.yaml"],
+        )
+
+        run = _only(calls, "run")
+        assert _flag(_inner_args(run), "--config") == "/ash-config/ash.yaml"
+        assert _mount(run, "/ash-config/ash.yaml")["source"] == str(
+            (tmp_path / "ash.yaml").resolve()
+        )
