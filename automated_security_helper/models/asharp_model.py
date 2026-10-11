@@ -15,7 +15,6 @@ from pydantic import (
     model_validator,
 )
 
-from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import ExportFormat, ScannerStatus
 from automated_security_helper.core.sharding import ShardAssignment
@@ -820,14 +819,18 @@ class AshAggregatedResults(BaseModel):
     def to_simple_dict(self) -> dict:
         """Convert the AshAggregatedResults to a simple dictionary representation.
 
+        ``ash_config`` is the configuration the results record, as the fields that
+        were set, and None when they record none. ASH's defaults never stand in
+        for it: they are not the configuration the scan ran with.
+
         Returns:
             dict: A simple dictionary representation of the AshAggregatedResults
         """
-        conf = {}
-        if self.ash_config is not None:
-            conf = self.ash_config.model_dump(by_alias=True, exclude_unset=True)
-        if len(conf.keys()) == 0:
-            conf = get_default_config()
+        conf = (
+            self.ash_config.model_dump(by_alias=True, exclude_unset=True)
+            if self.ash_config is not None
+            else None
+        )
         simple_dict = {
             "name": self.name,
             "description": self.description,

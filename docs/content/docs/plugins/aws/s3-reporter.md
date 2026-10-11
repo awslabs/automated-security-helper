@@ -227,6 +227,11 @@ The S3 reporter uploads ASH aggregated results in the specified format (JSON or 
 - **Summary statistics**: Counts by severity level
 - **Scanner details**: Information about which scanners were run
 
+Its `ash_config` is the configuration the results record, as the settings that
+were set. When the results record no configuration, `ash_config` is `null`. ASH's
+defaults, or the file `ASH_CONFIG` names where `ash report` runs, are never put in
+its place.
+
 ### File Naming
 
 Files are uploaded with the following naming pattern:

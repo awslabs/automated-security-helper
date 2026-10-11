@@ -129,6 +129,10 @@ Results are published as structured JSON logs:
 }
 ```
 
+The event's `ash_config` is the configuration the results record, as the settings
+that were set, and `null` when they record none. ASH's defaults, or the file
+`ASH_CONFIG` names where `ash report` runs, are never put in its place.
+
 ### Automatic Log Stream Management
 
 - **Auto-creation**: Log streams are created automatically if they don't exist

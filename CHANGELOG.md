@@ -1030,7 +1030,9 @@
   used to start from the defaults and write them over the file. A results file
   that records no configuration (`"ash_config": null`) now loads with none,
   instead of with the defaults or the file `ASH_CONFIG` names in the process
-  re-rendering it.
+  re-rendering it; the CloudWatch Logs and S3 payloads then carry
+  `"ash_config": null`, and a recorded configuration with no settings set is sent
+  as `{}`, never as the defaults.
 
 - **A `**` at either end of a multi-segment `ignore_paths` or `suppressions` pattern
   now takes effect.** The matcher anchored the first and last segments of a pattern
