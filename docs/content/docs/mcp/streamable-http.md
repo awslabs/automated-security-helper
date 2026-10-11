@@ -144,16 +144,22 @@ This matters most on Bedrock AgentCore Runtime, where it is **not** established 
 
 ```python
 await mcp__ash__set_source_git(
-    url="git@github.com:org/repo.git",
+    url="https://git.example.com/org/repo.git",
     ref="main",
-    ssh_key_id="ash-ci-deploy-key",
     depth=1,
 )
 ```
 
-`ssh_key_id` is a **server-side keyring lookup** — the operator pre-registers SSH keys on the host and the client only references them by name. Raw private keys are never accepted over the wire. `depth=1` is the default; increase only when the scan needs older revisions.
+The client names the URL and the server runs git, so the operator decides what git may reach:
 
-The cloned working tree lands under the per-session workspace and becomes the session's `source_dir`.
+- Only hosts listed in `ASH_MCP_GIT_ALLOWED_HOSTS` (comma- or whitespace-separated host names, matched exactly and case-insensitively against the URL's host, any port) are cloned. The list is empty by default, so every remote is refused until the operator names one: `ASH_MCP_GIT_ALLOWED_HOSTS=github.com,git.example.com`. A refusal has `error_type: clone_host_not_permitted`.
+- Only `https://`, `ssh://` and scp-like `user@host:path` URLs. `http://` and `git://` (no integrity protection), `file://` and plain paths (the server's own filesystem) are always refused, as are URLs that begin with `-` or use the `ext::` transport.
+- git never uses the server's credentials or configuration. It runs with an environment built from a short allowlist (no ssh agent socket, askpass helper, proxy or token variables), with system and global git config switched off, with an empty `credential.helper`, with `GIT_TERMINAL_PROMPT=0`, with only the https and ssh protocols allowed, and without following http redirects. ssh runs with `-F /dev/null`, no identity file, no agent, batch mode and `StrictHostKeyChecking=yes`, so an ssh host's key must be in the system-wide known-hosts file (`/etc/ssh/ssh_known_hosts`).
+- `ssh_key_id` must be omitted. The server registers no ssh keys, so any id is refused with `error_type: ssh_key_not_registered`. Raw private keys are never accepted over the wire.
+
+Run the server as an account with no git or ssh credentials anyway: the rules above keep the server's credentials out of git, and a dedicated account keeps them off the host. An operator who needs git to go through a proxy cannot configure one here; deliver the tree as a zip instead.
+
+`depth=1` is the default; increase only when the scan needs older revisions. The cloned working tree lands under the per-session workspace and becomes the session's `source_dir`.
 
 ### Chunked zip upload
 
@@ -416,6 +422,7 @@ The streamable-HTTP transport puts the MCP server on the network. A few invarian
 - **Set `ASH_MCP_ALLOWED_ROOTS`.** Scan targets are confined to the roots it names, plus the per-session workspace. The fallback when it is unset refuses only a short list of system directories and leaves the rest of the server's filesystem available as a scan target, so on a network-reachable deployment it is not a substitute for naming the roots yourself. See [Restricting scan targets](#restricting-scan-targets).
 - **Always run behind TLS in production.** ASH does not terminate TLS itself. Use nginx, traefik, an API gateway, or a service mesh sidecar.
 - **The runtime-override allowlist defaults to disabled.** A profile must explicitly set `mcp.runtime_overrides.enabled: true` and enumerate `allowed_paths` for any client patching to succeed, through `patch_ops` or `override_yaml`. Leaving it off is the safe default — clients can still pick profiles, just not modify them.
+- **`set_source_git` clones only from hosts in `ASH_MCP_GIT_ALLOWED_HOSTS`**, which is empty by default, and never with the server account's credentials or git configuration. See [Git ref](#git-ref).
 - **Source-upload limits are per-session, not per-tenant.** A misbehaving tenant can still consume their session quota. Pair the transport with upstream rate limits if untrusted clients can connect.
 - **Workspaces are wiped on disconnect.** Don't rely on session-resident state to survive reconnects; persisted state across server restarts is explicitly out of scope (Track 10.8).
 

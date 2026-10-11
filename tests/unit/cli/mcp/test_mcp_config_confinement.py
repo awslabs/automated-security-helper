@@ -780,8 +780,11 @@ class TestInsideTheRootsStillWorks:
         )
         assert result["success"] is True, result
 
-    def test_set_source_git_with_a_remote_url_reaches_git(self, layout):
+    def test_set_source_git_with_a_remote_url_reaches_git(self, layout, monkeypatch):
         from automated_security_helper.cli import mcp_server
+
+        # The tool clones only from hosts the operator lists.
+        monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", "example.com")
 
         def fake_run(cmd, **kw):
             res = MagicMock()

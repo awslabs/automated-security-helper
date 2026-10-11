@@ -1527,12 +1527,18 @@ async def set_source_git(
 
     After this returns, call run_ash_scan() with no source_dir to scan the clone.
 
+    The server clones only from hosts its operator listed, over https or ssh,
+    and never with the server's own credentials: no ssh agent, keys, credential
+    helpers, proxies or git configuration of the server account reach git. A
+    local path or file:// URL is refused.
+
     Args:
-        url: Remote URL to clone (https or ssh). Rejected if it begins with '-'
-             or uses the ext:: transport, both of which make git run a command.
+        url: Remote URL to clone: https://, ssh:// or user@host:path. Refused if
+             it begins with '-' or uses the ext:: transport, both of which make
+             git run a command, and unless its host is on the operator's list.
         ref: Optional branch, tag, or commit. Defaults to the remote's default branch.
-        ssh_key_id: Opaque identifier for a key the operator registered on the
-                    server. Raw private keys are never accepted over the wire.
+        ssh_key_id: Must be omitted. The server registers no ssh keys, so any id
+                    is refused. Raw private keys are never accepted over the wire.
         depth: Shallow-clone depth. Defaults to 1.
 
     Returns:

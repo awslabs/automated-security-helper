@@ -304,7 +304,7 @@ The ASH MCP server provides these tools:
 | `validate_config` | Validate a config file or an inline config string against the schema | Catch a malformed `.ash.yaml` without starting a scan |
 | `list_profiles` | List the config profiles the operator registered at startup | Discover which named configs a deployment offers |
 | `select_profile` | Bind a registered profile to this session, optionally patched or overridden | Run every later scan in the session under a named config without naming it each time |
-| `set_source_git` | Clone a repository into the session workspace and make it the scan target | Scan a repo when the client and server share no filesystem |
+| `set_source_git` | Clone a repository from a host the operator allowed into the session workspace and make it the scan target | Scan a repo when the client and server share no filesystem |
 | `set_source_zip_chunk` | Upload one base64 chunk (max 1 MiB) of a zipped source tree | Ship a working tree to a remote server without git access |
 | `set_source_zip_finalize` | Verify the uploaded zip's sha256, extract it, and make it the scan target | Complete a chunked upload before scanning |
 | `clear_source` | Delete the session's delivered source tree and workspace | Reclaim space or replace the delivered tree |

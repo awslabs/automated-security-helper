@@ -158,12 +158,17 @@ class TestSetSourceGit:
             )
 
         assert target == tmp_path / _SESSION / "source"
+        clone = called["cmds"][0]
         # git by the absolute path it resolved to, never by name.
-        assert called["cmds"][0][0:4] == [GIT, "clone", "--depth", "1"]
+        assert clone[0] == GIT
+        # The -c options git runs with come before the subcommand; see
+        # test_set_source_git_uses_no_server_credentials.py for what they do.
+        at = clone.index("clone")
+        assert clone[at : at + 3] == ["clone", "--depth", "1"]
         # "--" fences the url off from git's option parsing, so it sits after
         # the end-of-options marker rather than directly after the depth.
-        assert called["cmds"][0][4] == "--"
-        assert called["cmds"][0][5] == "https://example.com/foo.git"
+        assert clone[at + 3] == "--"
+        assert clone[at + 4] == "https://example.com/foo.git"
         # Workspace was recorded.
         assert sd.get_session_source_dir(_SESSION) == target
         sd.clear_source(_SESSION, workspace_root=tmp_path)
@@ -194,7 +199,8 @@ class TestSetSourceGit:
             res = MagicMock()
             res.stdout = ""
             res.stderr = ""
-            if cmd[:2] == [GIT, "clone"]:
+            # git's -c options precede the subcommand, so match it by name.
+            if cmd[0] == GIT and "clone" in cmd:
                 res.returncode = 0
             elif "checkout" in cmd:
                 res.returncode = 1
@@ -687,6 +693,8 @@ class TestMcpWrappers:
             return target
 
         monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path))
+        # The tool clones only from hosts the operator lists.
+        monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", "example.com")
         with patch.object(sd, "set_source_git", side_effect=fake_clone):
             r = mcp_tools.mcp_set_source_git(
                 url="https://example.com/foo.git",
@@ -703,6 +711,7 @@ class TestMcpWrappers:
         from automated_security_helper.cli import mcp_tools
 
         monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path))
+        monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", "example.com")
         with patch.object(sd, "set_source_git", side_effect=RuntimeError("boom")):
             r = mcp_tools.mcp_set_source_git(
                 url="https://example.com/x.git",

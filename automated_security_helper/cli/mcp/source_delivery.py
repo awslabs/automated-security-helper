@@ -8,9 +8,10 @@ Source delivery for the MCP server.
 Two delivery channels are supported:
 
 1. ``set_source_git`` — clone a remote repository (optionally at a specific
-   ref) into a per-session workspace via ``git clone --depth``. SSH keys are
-   resolved from a server-side keyring identifier; raw private keys are never
-   accepted over the wire.
+   ref) into a per-session workspace via ``git clone --depth``. git runs
+   without the server's own credentials or configuration (see
+   :func:`_git_environment`); no ssh key can be named, and raw private keys are
+   never accepted over the wire.
 2. ``set_source_zip_chunk`` + ``set_source_zip_finalize`` — accept a zipped
    source tree as base64-encoded chunks (≤ 1 MiB each), reassemble in a
    per-session ``incoming/`` directory, verify a sha256 checksum at finalize
@@ -52,6 +53,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import re
 import shutil
 import subprocess  # nosec B404 - git is invoked as a subprocess; see _validate_clone_url
 import zipfile
@@ -187,27 +189,125 @@ def _ensure_dir(path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# SSH key resolution (placeholder).
+# ssh keys and the environment git runs with.
 # ---------------------------------------------------------------------------
 
 
-def _resolve_ssh_key(ssh_key_id: Optional[str]) -> Optional[Path]:
-    """Resolve an ``ssh_key_id`` to a key file on disk.
+def _refuse_ssh_key_id(ssh_key_id: Optional[str]) -> None:
+    """Refuse any ``ssh_key_id``: the server registers no ssh keys.
 
-    The actual server-side keyring backend is out of scope for this track —
-    cascade-73 / a future security-track will own the real implementation.
-    For now this function returns ``None`` for any input, which causes the
-    git clone to fall back to whatever credentials the host process already
-    has access to (e.g. an agent-forwarded SSH key, or none).
+    The parameter exists so a future operator-side key registry can be added
+    without changing the tool's signature. Until one exists every id names a
+    key nobody registered. Cloning anyway would authenticate with whatever the
+    server process can reach, which is the opposite of what naming a key asks
+    for, so the clone is refused before git runs.
 
-    Raw private-key material must never be accepted over the wire; only the
-    opaque identifier is accepted, by design.
+    Raises:
+        ValueError: for every non-None ``ssh_key_id``.
     """
 
-    if ssh_key_id is None:
-        return None
-    # TODO(track-10.x security): wire this up to the real keyring backend.
-    return None
+    if ssh_key_id is not None:
+        raise ValueError(
+            f"ssh_key_id {ssh_key_id!r} is not registered: this server registers no "
+            f"ssh keys, so set_source_git cannot authenticate with one. Clone a "
+            f"repository that needs no credentials, or deliver the tree with "
+            f"set_source_zip_chunk and set_source_zip_finalize."
+        )
+
+
+#: Environment variables git may inherit from the server. Everything else --
+#: ssh agent sockets, askpass helpers, proxies, tokens, ``GIT_*`` overrides and
+#: config locations -- is dropped. Trust anchors for TLS are kept: they are not
+#: credentials, and an operator who installed a private CA needs them.
+_GIT_INHERITED_ENV = (
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+    "TZ",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "GIT_SSL_CAINFO",
+    "GIT_SSL_CAPATH",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+)
+
+#: ssh as git runs it for a clone: no configuration file (``-F`` also skips the
+#: system one), no identity file, no agent, no Kerberos, no shared connection,
+#: never a prompt, and only the system-wide known hosts. ssh reads the default
+#: identity files from the account's home directory in the password database,
+#: not from ``$HOME``, so overriding the environment alone would not stop it.
+_GIT_SSH_COMMAND = " ".join(
+    [
+        "ssh",
+        "-F",
+        os.devnull,
+        "-o BatchMode=yes",
+        "-o IdentitiesOnly=yes",
+        "-o IdentityFile=none",
+        "-o IdentityAgent=none",
+        "-o GSSAPIAuthentication=no",
+        "-o ControlPath=none",
+        "-o StrictHostKeyChecking=yes",
+        f"-o UserKnownHostsFile={os.devnull}",
+    ]
+)
+
+#: ``-c`` options on every git invocation of a delivery. An empty
+#: ``credential.helper`` resets the helper list, so no configured helper runs;
+#: only the https and ssh protocols are allowed, for submodules and anything
+#: else git might reach as well as for the clone itself; and an http redirect
+#: is not followed, so an allowed host cannot send git to one that is not.
+_GIT_CONFIG = (
+    "-c",
+    "credential.helper=",
+    "-c",
+    "core.askPass=",
+    "-c",
+    "protocol.allow=never",
+    "-c",
+    "protocol.https.allow=always",
+    "-c",
+    "protocol.ssh.allow=always",
+    "-c",
+    "http.followRedirects=false",
+)
+
+
+def _git_environment(home: Path) -> Dict[str, str]:
+    """The environment git runs with for a delivery.
+
+    Built from an allowlist rather than by deleting known-bad names from the
+    server's environment, because the bad set is open-ended: a deployment can
+    hold any number of token or proxy variables under names nothing here could
+    list. System and global git configuration are switched off, so no helper,
+    proxy or rewrite rule the server's own account configured applies, and
+    ``HOME`` is the session's own directory.
+
+    Args:
+        home: The session directory, used as ``HOME``.
+    """
+
+    inherited = snapshot_environ()
+    env = {name: inherited[name] for name in _GIT_INHERITED_ENV if name in inherited}
+    env.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_SSH_COMMAND": _GIT_SSH_COMMAND,
+        }
+    )
+    return env
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +377,76 @@ def _validate_clone_url(url: str) -> str:
     return url
 
 
+#: URL schemes a clone may use. Plain http and the git protocol carry no
+#: integrity protection, file:// reads the server's own filesystem, and every
+#: other scheme is a transport helper.
+_CLONE_SCHEMES = ("https", "ssh")
+
+#: A host name as the allowlist compares it: letters, digits, dots and hyphens,
+#: starting with a letter or digit. Anything else is refused rather than
+#: interpreted, so this parser and git's cannot disagree about the host.
+_HOST_NAME = re.compile(r"[a-z0-9][a-z0-9.-]*")
+
+
+def remote_clone_host(url: str) -> str:
+    """Return the host ``url`` makes git connect to, or raise if it is not allowed.
+
+    Accepts ``https://`` and ``ssh://`` URLs and the scp-like ``[user@]host:path``
+    form, the three ways git reaches a remote over https or ssh. The host is
+    returned lower-cased with any trailing dot removed, for comparison against
+    the operator's allowlist.
+
+    Raises:
+        ValueError: for a local path or ``file://`` URL, any other scheme, or a
+            host this parser cannot state unambiguously.
+    """
+
+    from urllib.parse import urlsplit
+
+    if any(ch.isspace() or ord(ch) < 0x20 or ch == "\\" for ch in url):
+        raise ValueError(
+            "refusing a clone url with whitespace, control characters or backslashes"
+        )
+    if local_clone_path(url) is not None:
+        raise ValueError(
+            "refusing a local clone source: set_source_git clones from a remote "
+            "https or ssh url only; it never reads the server's filesystem"
+        )
+    if "://" in url:
+        parts = urlsplit(url)
+        scheme = parts.scheme.lower()
+        if scheme not in _CLONE_SCHEMES:
+            raise ValueError(
+                f"refusing a {scheme}:// clone url: only "
+                f"{', '.join(s + '://' for s in _CLONE_SCHEMES)} and the scp-like "
+                f"user@host:path form are allowed"
+            )
+        host = parts.hostname or ""
+    else:
+        authority = url.split(":", 1)[0]
+        host = authority.rsplit("@", 1)[-1]
+    host = host.lower().rstrip(".")
+    if not _HOST_NAME.fullmatch(host):
+        raise ValueError(f"refusing a clone url whose host cannot be read: {url!r}")
+    return host
+
+
+#: Hosts ``set_source_git`` may clone from, set by the operator. Comma- or
+#: whitespace-separated host names. Unset or empty means no remote is allowed.
+ASH_MCP_GIT_ALLOWED_HOSTS_ENV = "ASH_MCP_GIT_ALLOWED_HOSTS"
+
+
+def git_allowed_hosts() -> frozenset:
+    """The hosts the operator allows clones from, lower-cased; possibly none."""
+
+    raw = os.environ.get(ASH_MCP_GIT_ALLOWED_HOSTS_ENV, "")
+    return frozenset(
+        entry.strip().lower().rstrip(".")
+        for entry in raw.replace(",", " ").split()
+        if entry.strip()
+    )
+
+
 def _is_windows_drive_path(url: str) -> bool:
     return len(url) >= 2 and url[1] == ":" and url[0].isalpha()
 
@@ -338,12 +508,17 @@ def set_source_git(
 ) -> Path:
     """Clone ``url`` (optionally at ``ref``) into the session workspace.
 
+    The operator's host allowlist is the MCP tool boundary's policy
+    (``mcp_tools.mcp_set_source_git``); this function enforces what holds for
+    every caller: a remote https or ssh url, no ssh key, and git run without the
+    server's credentials or configuration.
+
     Args:
         url: Remote URL to clone (https or ssh).
         ref: Optional branch/tag/commit to check out. When ``None``, the
             remote default branch is used.
-        ssh_key_id: Opaque identifier resolved server-side via
-            :func:`_resolve_ssh_key`. Raw private keys are not accepted.
+        ssh_key_id: Must be None. No ssh keys are registered, so any id is
+            refused; raw private keys are never accepted.
         depth: Shallow-clone depth. Defaults to 1 (latest commit only).
         workspace_root: Override workspace root; defaults to
             :func:`resolve_workspace_root`.
@@ -353,8 +528,9 @@ def set_source_git(
         The absolute path of the cloned working tree.
 
     Raises:
-        ValueError: if ``session_id`` is invalid, or if ``url``/``ref`` is
-            option-like or uses a command-executing git transport.
+        ValueError: if ``session_id`` is invalid, if ``url``/``ref`` is
+            option-like or uses a command-executing git transport, if ``url`` is
+            local or not https/ssh, or if ``ssh_key_id`` is set.
         RuntimeError: if git is not on PATH, or ``git clone`` (or the optional
             ``git checkout`` for an explicit ref) fails.
     """
@@ -362,6 +538,8 @@ def set_source_git(
     # Validate before touching the filesystem so a rejected request leaves no
     # session directory behind.
     url = _validate_clone_url(url)
+    remote_clone_host(url)
+    _refuse_ssh_key_id(ssh_key_id)
     if ref:
         ref = _reject_option_like(ref, "ref")
 
@@ -379,15 +557,11 @@ def set_source_git(
         shutil.rmtree(target, ignore_errors=True)
     _ensure_dir(target)
 
-    env = snapshot_environ()
-    key_path = _resolve_ssh_key(ssh_key_id)
-    if key_path is not None:
-        env["GIT_SSH_COMMAND"] = (
-            f"ssh -i {str(key_path)} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-        )
+    env = _git_environment(session_dir)
 
     cmd = [
         git,
+        *_GIT_CONFIG,
         "clone",
         "--depth",
         str(int(depth)),
@@ -415,6 +589,7 @@ def set_source_git(
         # explicitly before checking out so non-default refs work reliably.
         fetch_cmd = [
             git,
+            *_GIT_CONFIG,
             "-C",
             str(target),
             "fetch",
@@ -432,7 +607,15 @@ def set_source_git(
             # diagnostic.
             pass
 
-        checkout_cmd = [git, "-C", str(target), "checkout", "--detach", ref]
+        checkout_cmd = [
+            git,
+            *_GIT_CONFIG,
+            "-C",
+            str(target),
+            "checkout",
+            "--detach",
+            ref,
+        ]
         co_res = subprocess.run(  # nosec B603 - list-form argv, git resolved by _git_executable, ref validated by _reject_option_like
             checkout_cmd, capture_output=True, text=True, env=env, check=False
         )

@@ -1791,23 +1791,36 @@ def mcp_set_source_git(
 ) -> Dict[str, Any]:
     """Clone ``url`` at ``ref`` into the per-session workspace.
 
+    The client names the URL and the server runs git, so what git can reach is
+    the server's to decide. Refused before anything is created or cloned: an
+    option-like or command-executing URL, a local path or ``file://`` URL
+    (never cloned, whatever the scan roots allow), a scheme other than https
+    or ssh, a host the operator did not list in ``ASH_MCP_GIT_ALLOWED_HOSTS``
+    (empty by default, so every remote is refused until the operator names
+    one), and any ``ssh_key_id``, because no keys are registered. git then runs
+    without the server's credentials or configuration; see
+    ``source_delivery._git_environment``.
+
     Args:
-        url: Remote URL to clone (https or ssh). A local path or ``file://`` URL
-            must be inside the session's scan roots.
+        url: Remote URL to clone: ``https://``, ``ssh://`` or ``user@host:path``.
         ref: Optional branch/tag/commit. ``None`` uses the remote default.
-        ssh_key_id: Opaque, server-side keyring identifier. Raw private keys
-            are not accepted over the wire.
+        ssh_key_id: Must be None; no ssh keys are registered on the server.
+            Raw private keys are not accepted over the wire.
         depth: Shallow-clone depth. Defaults to 1.
         session_id: MCP session identifier scoping the workspace.
 
     Returns:
         ``{"success": True, "source_dir": str}`` on success;
-        ``{"success": False, "error": str}`` on git failure.
+        ``{"success": False, "error": str}`` on a refusal or a git failure,
+        with ``error_type`` naming the refusal.
     """
-    from automated_security_helper.cli.mcp.scan_target import validate_scan_target
     from automated_security_helper.cli.mcp.source_delivery import (
+        ASH_MCP_GIT_ALLOWED_HOSTS_ENV,
+        _refuse_ssh_key_id,
         _validate_clone_url,
+        git_allowed_hosts,
         local_clone_path,
+        remote_clone_host,
         set_source_git,
     )
 
@@ -1818,18 +1831,48 @@ def mcp_set_source_git(
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
-    # A local clone source reads the server's filesystem, so it gets the scan
-    # roots a scan target gets. Checked before anything is created or cloned.
-    local_source = local_clone_path(url)
-    if local_source is not None:
-        target_error = validate_scan_target(local_source, session_id=session_id)
-        if target_error is not None:
-            return {
-                "success": False,
-                "error": str(target_error),
-                "error_type": "scan_target_not_permitted",
-                "error_category": target_error.context["error_category"],
-            }
+    if local_clone_path(url) is not None:
+        return {
+            "success": False,
+            "error": (
+                "set_source_git clones from a remote https or ssh url only; a "
+                "local path or file:// url would read the server's own "
+                "filesystem. Name a directory the operator granted as "
+                "run_ash_scan's source_dir instead."
+            ),
+            "error_type": "local_clone_source_refused",
+            "error_category": ErrorCategory.INVALID_PATH.value,
+        }
+
+    try:
+        host = remote_clone_host(url)
+    except ValueError as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "clone_url_not_permitted",
+        }
+    if host not in git_allowed_hosts():
+        return {
+            "success": False,
+            "error": (
+                f"Refusing to clone from {host!r}: it is not in "
+                f"{ASH_MCP_GIT_ALLOWED_HOSTS_ENV}, the hosts the operator lets "
+                f"this server clone from. The list is empty unless the operator "
+                f"sets it. Ask the operator to add the host, or deliver the tree "
+                f"with set_source_zip_chunk and set_source_zip_finalize."
+            ),
+            "error_type": "clone_host_not_permitted",
+        }
+
+    try:
+        _refuse_ssh_key_id(ssh_key_id)
+    except ValueError as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "ssh_key_not_registered",
+        }
 
     try:
         source_dir = set_source_git(
