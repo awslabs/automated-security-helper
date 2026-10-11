@@ -343,7 +343,7 @@ Workspaces live under `ASH_MCP_WORKSPACE_ROOT` (defaults to `$XDG_CACHE_HOME/ash
 | --- | --- |
 | streamable-HTTP, stateful | when the client's `DELETE` is answered (the removal is complete before the response is sent), and for every session the server issued when the server shuts down |
 | sse | when the event stream closes |
-| stdio | when the server exits |
+| stdio | when the last stdio server sharing the workspace root exits (every stdio server of one user shares `__default__`, so one server's exit leaves it in place while another runs) |
 | streamable-HTTP, `--stateless-http` | never visibly: see the sweep below |
 
 A session that ends while one of its scans runs keeps its tree until that scan returns.

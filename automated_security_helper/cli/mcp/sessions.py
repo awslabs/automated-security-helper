@@ -53,6 +53,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from typing_extensions import Self
 
 from automated_security_helper.cli.mcp.session_paths import (
     session_directory,
@@ -328,6 +329,150 @@ def finish_ended_session(session_id: Optional[str]) -> None:
         end_session(session_id)
 
 
+#: Directory under the workspace root holding one entry per live stdio server.
+#: Not a session workspace: its name is not a valid session id component that
+#: ASH ever issues, and it carries no session marker.
+_STDIO_SERVERS_DIR = ".stdio-servers"
+_STDIO_SERVERS_LOCK = ".lock"
+
+
+def _try_lock(handle: Any) -> bool:
+    """Take an exclusive lock on ``handle`` without waiting; True if taken."""
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def _lock_blocking(handle: Any) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+
+class StdioServerPresence:
+    """Marks this process as a live stdio server sharing the default workspace.
+
+    Every stdio server of one user resolves the same
+    ``<workspace root>/__default__``, so a server that removed it on exit took
+    the tree and bound profile of every other stdio server still running. Each
+    server holds an exclusive lock on its own entry under
+    ``<workspace root>/.stdio-servers`` for its lifetime. On exit it drops its
+    entry and removes the default workspace only if no other entry is still
+    locked; an entry whose lock can be taken belongs to a server that died, and
+    is removed. Registration and the exit check both run under one lock file,
+    so a server starting while another exits is either counted or starts after
+    the removal.
+
+    Limits: a server on another host sharing the root through a network
+    filesystem may not see this process's locks, and a root that cannot be
+    created leaves the default workspace in place.
+    """
+
+    def __init__(self) -> None:
+        self._entry: Optional[Path] = None
+        self._handle: Any = None
+
+    @staticmethod
+    def _registry() -> Path:
+        from automated_security_helper.cli.mcp.source_delivery import (
+            resolve_workspace_root,
+        )
+
+        return resolve_workspace_root() / _STDIO_SERVERS_DIR
+
+    def __enter__(self) -> Self:
+        import uuid
+
+        try:
+            registry = self._registry()
+            registry.mkdir(parents=True, exist_ok=True)
+            with open(registry / _STDIO_SERVERS_LOCK, "a+b") as guard:
+                _lock_blocking(guard)
+                entry = registry / f"{os.getpid()}-{uuid.uuid4().hex}"
+                handle = open(entry, "a+b")
+                # A file nobody else has opened: the lock is always free.
+                _try_lock(handle)
+                self._entry, self._handle = entry, handle
+        except (OSError, RuntimeError):
+            # No registry: this server is not counted, and on exit it leaves the
+            # default workspace alone rather than guess.
+            self._entry = self._handle = None
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        from automated_security_helper.cli.mcp.profile_registry import (
+            DEFAULT_SESSION_ID,
+        )
+
+        if self._entry is None:
+            return
+        registry = self._entry.parent
+        try:
+            with open(registry / _STDIO_SERVERS_LOCK, "a+b") as guard:
+                _lock_blocking(guard)
+                self._release()
+                if not self._another_server_is_live(registry):
+                    end_session(DEFAULT_SESSION_ID)
+        except OSError:
+            self._release()
+
+    def _release(self) -> None:
+        if self._handle is not None:
+            self._handle.close()
+            self._handle = None
+        if self._entry is not None:
+            try:
+                self._entry.unlink()
+            except OSError:
+                pass
+            self._entry = None
+
+    @staticmethod
+    def _another_server_is_live(registry: Path) -> bool:
+        live = False
+        for entry in registry.iterdir():
+            if entry.name == _STDIO_SERVERS_LOCK or not entry.is_file():
+                continue
+            try:
+                with open(entry, "a+b") as handle:
+                    taken = _try_lock(handle)
+            except OSError:
+                # Windows refuses to open a file another process holds.
+                live = True
+                continue
+            if not taken:
+                live = True
+                continue
+            try:
+                entry.unlink()  # its server died without exiting
+            except OSError:
+                live = True
+        return live
+
+    def abandon_for_tests(self) -> None:
+        """Drop the lock but keep the entry, as a server that died would."""
+        if self._handle is not None:
+            self._handle.close()
+            self._handle = None
+        self._entry = None
+
+
 def _last_used(sandbox: Path) -> float:
     """The newest mtime of the sandbox directory and its direct children."""
     newest = sandbox.lstat().st_mtime
@@ -387,7 +532,7 @@ def sweep_stale_workspaces(
     removed: List[str] = []
     for entry in entries:
         session_id = entry.name
-        if session_id == DEFAULT_SESSION_ID:
+        if session_id in (DEFAULT_SESSION_ID, _STDIO_SERVERS_DIR):
             continue
         try:
             validated_path_component(session_id)
@@ -405,6 +550,7 @@ def sweep_stale_workspaces(
 __all__ = [
     "MCPSession",
     "MCPSessionRegistry",
+    "StdioServerPresence",
     "end_session",
     "finish_ended_session",
     "get_default_registry",
