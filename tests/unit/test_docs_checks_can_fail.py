@@ -1385,6 +1385,7 @@ docs_dir: docs/content
 strict: true
 hooks:
   - docs/hooks/redirects.py
+  - docs/hooks/install_refs.py
 not_in_nav: |
   hidden.md
 validation:
@@ -1444,6 +1445,7 @@ def _site(
     root = tmp_path / "repo"
     _write(root, "mkdocs.yml", mkdocs)
     _write(root, dc.REDIRECT_HOOK, "# hook\n")
+    _write(root, dc.INSTALL_REFS_HOOK, "# hook\n")
     _write(root, dc.REDIRECTS_FILE, redirects)
     _write(root, dc.DOCS_WORKFLOW, workflow)
     _write(root, dc.RELEASE_TAG_WORKFLOW, tag_workflow)
@@ -1715,9 +1717,15 @@ SITE_DEFECTS = [
     ),
     (
         "hook unregistered",
-        MKDOCS.replace("hooks:\n  - docs/hooks/redirects.py\n", ""),
+        MKDOCS.replace("  - docs/hooks/redirects.py\n", ""),
         WORKFLOW,
-        "hooks does not list",
+        "hooks does not list docs/hooks/redirects.py",
+    ),
+    (
+        "install refs hook unregistered",
+        MKDOCS.replace("  - docs/hooks/install_refs.py\n", ""),
+        WORKFLOW,
+        "hooks does not list docs/hooks/install_refs.py",
     ),
     (
         "privacy dropped",

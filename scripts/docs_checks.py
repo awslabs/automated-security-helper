@@ -71,6 +71,10 @@ REDIRECTS_FILE = "docs/redirects.yml"
 #: The mkdocs hook that turns REDIRECTS_FILE into redirect pages.
 REDIRECT_HOOK = "docs/hooks/redirects.py"
 
+#: The mkdocs hook that renders the version-pinned pages for the version mike builds,
+#: so the main version's install commands install main.
+INSTALL_REFS_HOOK = "docs/hooks/install_refs.py"
+
 #: The workflow whose build job must run ``mkdocs build --strict``.
 DOCS_WORKFLOW = ".github/workflows/ash-repo-docs.yml"
 
@@ -5252,6 +5256,22 @@ def check_site_build(root: Path = REPO_ROOT) -> list[Finding]:
     if not (root / REDIRECT_HOOK).is_file():
         findings.append(
             Finding("site", REDIRECT_HOOK, 1, "the redirect hook does not exist")
+        )
+    if INSTALL_REFS_HOOK not in hooks:
+        findings.append(
+            Finding(
+                "site",
+                MKDOCS_YML,
+                1,
+                f"hooks does not list {INSTALL_REFS_HOOK}, so the install commands "
+                "of the main version pin the last release",
+            )
+        )
+    if not (root / INSTALL_REFS_HOOK).is_file():
+        findings.append(
+            Finding(
+                "site", INSTALL_REFS_HOOK, 1, "the install refs hook does not exist"
+            )
         )
     privacy = _plugin_config(site, "privacy")
     if privacy is None:
