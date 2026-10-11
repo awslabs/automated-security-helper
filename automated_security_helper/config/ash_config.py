@@ -806,11 +806,12 @@ class RuntimeOverridesConfig(BaseModel):
         "/scanners/ferret-scan/options/max_live_bytes",
         # A scanner's own config file, and which version of its tool runs. From a
         # config file inside the scanned tree the config file comes only from the
-        # operator (config/tool_config_trust.py). The version is a specifier set
-        # or release tag from any source, installed only from the tool's own
-        # index or release page, and a repository's config may still pin one, as
-        # a workspace project does. A client's file may set neither; refusing
-        # says so instead of leaving them out with a log line.
+        # operator (config/tool_config_trust.py), and so does every scanner's and
+        # converter's tool_version. The version is a specifier set or release tag
+        # from any source, installed only from the tool's own index or release
+        # page; a repository's config may still choose opengrep's version. A
+        # client's file may set none of them; refusing says so instead of
+        # leaving them out with a log line.
         "/scanners/bandit/options/config_file",
         "/scanners/checkov/options/config_file",
         "/scanners/ferret-scan/options/config_file",

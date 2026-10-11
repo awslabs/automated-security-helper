@@ -474,7 +474,7 @@ it counts as the client's.
 
 | Setting | From a config file inside the scanned tree |
 |---|---|
-| `scanners.<name>.options.tool_version`, `converters.jupyter.options.tool_version` | Must be a PEP 440 version specifier set such as `>=1.2,<2` or `==1.4.1`. This applies from every source, including `--config-overrides`. Any other value is replaced by the scanner's default constraint. |
+| `scanners.<name>.options.tool_version`, `converters.<name>.options.tool_version` | Taken from the defaults, `--config-overrides` or a config file outside the tree, for every scanner and converter, including those a plugin module adds. It chooses which release of the tool ASH installs and which one already on `PATH` it accepts. A value equal to the operator's applies; any other is ignored with a warning, and the operator's value or the tool's default constraint applies. From every source, including `--config-overrides`, it must also be a PEP 440 version specifier set such as `>=1.2,<2` or `==1.4.1`; any other value is replaced by the default constraint. |
 | `scanners.opengrep.options.version` | Must be a release tag such as `v1.15.1`, from every source. Any other value is replaced by the pinned version. |
 | `ash_plugin_modules` | An entry is imported only if it names an installed module that Python finds outside the scanned tree. An entry that is not importable, or that would be imported from a file in the tree, is skipped. So are `automated_security_helper.plugin_modules.ash_aws_plugins` and `automated_security_helper.plugin_modules.ash_snyk_plugins`, and any module inside either: the AWS reporters send findings to AWS with the operator's credentials, and the Snyk Code scanner sends the scanned source to Snyk with the operator's Snyk token, so only `--ash-plugin-modules` (or `ASH_PLUGIN_MODULES`), `--config-overrides` or a config file outside the tree can add them. The same holds for their classes when another package the tree's config loads lists or imports them: a scanner or reporter defined in either package is selected only when one of those operator sources loads that package, a module inside it, or the package that lists the class, and each one dropped is named in a warning. |
 | `scanners.checkov.options.config_file`, `scanners.ferret-scan.options.config_file` | Taken from the defaults, `--config-overrides` or a config file outside the tree, and passed to the tool only when the file is outside the scanned tree. The same applies to the `.checkov.yaml` and `ferret.yaml` files these scanners look for by name. ferret-scan then uses its bundled config. checkov and ferret-scan also read such a file from their working directory on their own, so ASH runs both from the filesystem root and always passes ferret-scan a `--config`; finding paths are unchanged. |
@@ -493,10 +493,11 @@ it counts as the client's.
 Each setting that is not honored is named in a warning when the config is
 resolved.
 
-A repository's config may still choose a scanner's `tool_version` and opengrep's
-`version`, within the limits above: a version specifier for the tool's own
-package, or a tag of opengrep's own releases, whose binary ASH installs only when
-it matches its SHA-256 digest. Workspace projects pin scanner versions this way.
+A repository's config may still choose opengrep's `version`, within the limits
+above: a tag of opengrep's own releases, whose binary ASH installs only when it
+matches its SHA-256 digest. It does not choose a scanner's `tool_version`, so a
+workspace project does not pin a scanner version either; the operator's value
+applies to every project.
 
 To set any of these for a repository you trust, use `--config-overrides`,
 `--ash-plugin-modules`, or a config file outside the scanned tree. A file path set
@@ -953,7 +954,7 @@ Each UV-managed scanner can specify version constraints in two ways:
 1. **Default Constraints**: Built-in version constraints ensure compatibility and stability
 2. **Custom Constraints**: Override defaults via configuration options (where supported)
 
-For scanners that support custom version constraints (like Semgrep and Checkov), you can specify them in your configuration:
+For scanners that support custom version constraints (like Semgrep and Checkov), you can specify them in a config file outside the scanned tree, or with `--config-overrides`. A repository's own config does not choose them; see [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose).
 
 ```yaml
 scanners:

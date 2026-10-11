@@ -34,6 +34,15 @@ files they name, with no option to stop it, so the scanner does not run on a tre
 that has one (``ash_snyk_plugins/snyk_code_scanner.tree_exclusion_files``) unless
 this option, the operator's, accepts them.
 
+``tool_version``, which every scanner and converter that installs its tool with
+uv or pip may have, chooses which release runs: the one uv installs and the one
+already on PATH that ASH accepts. A specifier set is the only value accepted from
+any source (``base/options.tool_version_constraint``); which one applies is the
+operator's choice too, for every scanner and converter section, built in or added
+by a plugin module (``confine_tool_versions``). The plugins read the value they
+are given, so this one step covers each of them, and a plugin added later is
+covered without a gate of its own.
+
 What happens now
 ----------------
 * When the config was built from a file inside the scanned tree, or from a file
@@ -78,7 +87,7 @@ Failure modes and known limitations
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Sequence, Tuple
 
 from automated_security_helper.config.untrusted_source import (
     IN_TREE_OR_DELIVERED,
@@ -127,6 +136,19 @@ SCANNER_CONFIG_CHOICE_OPTIONS: Dict[str, Dict[str, Any]] = {
     "ferret-scan": {"profile": None, "use_default_config": True},
     "snyk-code": {"honor_tree_exclusions": False},
 }
+
+#: Options of every scanner and converter section, built in or added by a plugin
+#: module, that only the operator sets: ``tool_version`` chooses which release of
+#: the tool ASH installs and which one already on PATH it accepts
+#: (``confine_tool_versions``).
+OPERATOR_ONLY_PLUGIN_OPTIONS: Tuple[str, ...] = ("tool_version",)
+
+#: The config sections ``confine_tool_versions`` walks, each with the plugin type
+#: ``AshConfig.get_plugin_config`` reads it by.
+_PLUGIN_SEGMENTS: Tuple[Tuple[str, Literal["scanner", "converter"]], ...] = (
+    ("scanners", "scanner"),
+    ("converters", "converter"),
+)
 
 _MISSING = object()
 
@@ -253,6 +275,127 @@ def confine_scanner_config_files(
             f"Ignoring {', '.join(sorted(set(ignored)))} from {files}: these choose "
             "a scanner's own configuration, which is the operator's choice, and "
             f"{source.reason}. {tail}"
+        )
+
+
+def _plugin_sections(segment: Any) -> List[Tuple[str, Any]]:
+    """Every section of a ``scanners`` or ``converters`` segment, by the key a file uses.
+
+    The built-in sections under their alias, then each section a plugin module
+    adds (``extra="allow"``), so a plugin ASH does not ship is covered too.
+    """
+    by_key = {
+        (field.alias or name): name
+        for name, field in type(segment).model_fields.items()
+    }
+    extra = getattr(segment, "__pydantic_extra__", None) or {}
+    found: List[Tuple[str, Any]] = []
+    for key in list(by_key) + [key for key in extra if key not in by_key]:
+        section = getattr(segment, by_key[key]) if key in by_key else extra.get(key)
+        if section is not None:
+            found.append((key, section))
+    return found
+
+
+def _spellings_in(options: Any, name: str) -> List[str]:
+    """The keys ``options`` holds ``name`` under: either spelling in a plugin's dict."""
+    if isinstance(options, dict):
+        return [key for key in options if key.replace("-", "_") == name]
+    if name in type(options).model_fields or name in (
+        getattr(options, "__pydantic_extra__", None) or {}
+    ):
+        return [name]
+    return []
+
+
+def _field_default(options: Any, name: str) -> Any:
+    """The default an options model gives ``name``; None for a plugin's dict."""
+    if isinstance(options, dict):
+        return None
+    field = type(options).model_fields.get(name)
+    return None if field is None or field.is_required() else field.get_default()
+
+
+def confine_tool_versions(
+    config: "AshConfig",
+    trusted_config: "AshConfig",
+    config_overrides: Optional[Sequence[str]],
+    in_tree: Sequence[Path],
+    source: UntrustedSource = IN_TREE_OR_DELIVERED,
+) -> None:
+    """Replace the ``tool_version`` a config that is not the operator's set, in place.
+
+    ``tool_version`` chooses which release of a scanner's or converter's tool uv
+    installs and which one already on PATH is accepted. For every section of
+    ``scanners`` and ``converters`` (``OPERATOR_ONLY_PLUGIN_OPTIONS``), built in
+    or added by a plugin module, under either spelling of the key, the value
+    comes from the trusted base with ``--config-overrides`` replayed; where that
+    sets none, the plugin's own default applies. A value equal to the trusted
+    one is kept, so a repository config that repeats the operator's value is
+    unchanged. Each value that is not kept is named in one warning.
+
+    The plugins read the value as before (``_get_tool_version_constraint``),
+    so they receive the operator's value or their default, on every route that
+    resolves a config: a scan, a workspace project, the MCP server and
+    ``ash merge`` (``resolve_config.confine_to_trusted_base``).
+
+    Args:
+        config: The resolved AshConfig, changed in place.
+        trusted_config: The trusted base ``resolve_config`` built: the defaults,
+            or the operator's config outside the tree.
+        config_overrides: The operator's ``--config-overrides``. Those under
+            ``scanners`` and ``converters`` are replayed onto ``trusted_config``.
+        in_tree: The config files that are not the operator's, named in the
+            warning.
+        source: Why those files are not the operator's, and the fix, for the
+            warning.
+    """
+    from automated_security_helper.config.resolve_config import (
+        apply_config_overrides,
+    )
+
+    sections = {segment for segment, _kind in _PLUGIN_SEGMENTS}
+    replayed = [
+        override
+        for override in config_overrides or []
+        if override.partition("=")[0].removesuffix("+").strip().split(".")[0]
+        in sections
+    ]
+    if replayed:
+        trusted_config = apply_config_overrides(trusted_config, replayed)
+
+    ignored: List[str] = []
+    for segment, kind in _PLUGIN_SEGMENTS:
+        for key, section in _plugin_sections(getattr(config, segment)):
+            options = _options_of(section)
+            if options is None:
+                continue
+            trusted_section = trusted_config.get_plugin_config(kind, key)
+            trusted_options = (trusted_section or {}).get("options") or {}
+            for name in OPERATOR_ONLY_PLUGIN_OPTIONS:
+                default = _field_default(options, name)
+                wanted = _trusted_option(trusted_options, name)
+                for spelling in _spellings_in(options, name):
+                    written = _get(options, spelling)
+                    current = _or_default(written, default)
+                    if current == _or_default(wanted, default):
+                        if written is None and default is not None:
+                            _set(options, spelling, wanted, default)
+                        continue
+                    if current != default:
+                        ignored.append(f"{segment}.{key}.options.{name}")
+                    _set(options, spelling, wanted, default)
+    if ignored:
+        from automated_security_helper.config.config_sources import (
+            describe_config_path,
+        )
+
+        files = ", ".join(describe_config_path(path) for path in in_tree)
+        ASH_LOGGER.warning(
+            f"Ignoring {', '.join(sorted(set(ignored)))} from {files}: tool_version "
+            "chooses which release of a tool ASH installs and accepts, which is the "
+            f"operator's choice, and {source.reason}. The operator's value, or the "
+            f"tool's default constraint, applies instead. Set it with {source.remedy}."
         )
 
 

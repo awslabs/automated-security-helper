@@ -341,7 +341,7 @@ Workspace resolution refuses the whole workspace rather than scanning part of it
 - a folder entry is a symlink
 - two entries resolve to the same directory, or one is nested inside another
 - two entries reduce to the same project key
-- two projects pin incompatible `tool_version` constraints for the same scanner
+- the scanners' `tool_version` constraints the plan records are incompatible for the same scanner. A project's own config does not set `tool_version` (it is ignored with a warning), so every project records the operator's value or the scanner's default.
 - the `folders` list is empty, or the file is not valid JSON
 
 `--allow-missing-projects` opts out of the first item only. Projects skipped that way are recorded in the plan's `skipped_projects` payload with a reason, not just logged. Nothing opts out of the others: they are problems with the definition rather than with the machine, so they are wrong everywhere.

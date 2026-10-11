@@ -243,8 +243,16 @@
     Any other value is replaced by the default, with a warning naming the key.
     `scanners.opengrep.options.version` likewise has to be a release tag, and a
     version other than the pinned one needs its `sha256`. Within those limits a
-    repository's config still chooses the version, as a workspace project's
-    does.
+    repository's config still chooses opengrep's version.
+  - `tool_version` of every scanner and converter, including one a plugin module
+    adds, is the operator's: it comes from the defaults, `--config-overrides` or a
+    config file outside the tree. From the tree's config it is ignored with a
+    warning naming the key, unless it equals the operator's value, and the
+    operator's value or the tool's default constraint applies. A workspace
+    project's config no longer pins a scanner version either, so projects whose
+    pins conflict are no longer refused: every project gets the operator's
+    value. To pin a version for a scan, set it with `--config-overrides` or in
+    the operator's `--config`.
   - `ash_plugin_modules` entries such a file adds are imported only when they name
     an installed module outside the tree. `--ash-plugin-modules`,
     `--config-overrides` and a config file outside the tree are unaffected.

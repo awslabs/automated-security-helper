@@ -547,7 +547,10 @@ def _validate_scanner_pins(
     """Refuse a workspace whose projects demand irreconcilable tool versions.
 
     Only projects that will actually be scanned are compared: a skipped project
-    cannot conflict with one that runs.
+    cannot conflict with one that runs. A project's own config does not choose
+    ``tool_version`` (``config/tool_config_trust.confine_tool_versions``), so the
+    pins recorded are the operator's or the scanner's default; the check still
+    holds the plan to one installable version per scanner, whatever set them.
 
     An undecidable comparison is refused alongside an incompatible one. Assuming
     compatibility would mean a project could be scanned by a tool version it

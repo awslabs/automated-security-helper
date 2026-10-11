@@ -37,6 +37,7 @@ from automated_security_helper.config.reporter_trust import (
 )
 from automated_security_helper.config.tool_config_trust import (
     confine_scanner_config_files,
+    confine_tool_versions,
 )
 from automated_security_helper.config.sandbox_grants import (
     confine_sandbox_grants,
@@ -427,8 +428,9 @@ def confine_to_trusted_base(
     scanned tree or one an MCP client delivered, in order: the sandbox grants
     (``sandbox_grants``), ``ash_plugin_modules`` (``plugin_module_trust``), the
     reporters' destinations and whether the off-host reporters run
-    (``reporter_trust``), and the scanners' own config files
-    (``tool_config_trust``). Each takes the value from ``trusted`` with the
+    (``reporter_trust``), the scanners' own config files, and every scanner's
+    and converter's ``tool_version`` (``tool_config_trust``). Each takes the
+    value from ``trusted`` with the
     operator's overrides replayed onto it, and names what it ignored in one
     warning. ``ash merge`` runs the same steps on the config a shard recorded,
     with its own ``source``, so a step added here applies to both.
@@ -465,6 +467,7 @@ def confine_to_trusted_base(
     confine_scanner_config_files(
         config, trusted, operator_overrides, files, source=source
     )
+    confine_tool_versions(config, trusted, operator_overrides, files, source=source)
 
 
 def _is_a_client_file(path: Path | str) -> bool:

@@ -20,6 +20,11 @@ The enhanced installation system provides:
 
 ## Configuration Options
 
+`tool_version` is the operator's setting. Set it in a config file outside the
+scanned tree or with `--config-overrides`; a value in the scanned repository's own
+config is ignored with a warning unless it equals the operator's. See
+[Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose).
+
 ### Bandit Scanner Configuration
 
 ```yaml
