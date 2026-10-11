@@ -168,6 +168,13 @@ otherwise undo the flag.
 
 #### What offline mode turns off
 
+Online and offline, trivy-repo and syft read no config file from the scanned tree,
+because a `trivy.yaml` there can turn on a VEX repository download or client/server
+mode and a `.syft.yaml` remote license and package lookups. trivy always gets
+`--config`, naming `TRIVY_CONFIG` when that is a file outside the scanned tree and an
+empty config ASH ships otherwise; syft runs from outside the tree and is given only a
+`config_file` outside it.
+
 Besides the database and rule downloads, offline mode turns off what the scanners do
 over the network on their own:
 
@@ -184,11 +191,9 @@ over the network on their own:
   (`SYFT_GOLANG_USE_PACKAGES_LIB=false`), and the toolchain grype runs gets
   `GOPROXY=off` and `GOTOOLCHAIN=local`, so it downloads no module and no toolchain.
   The full list is in `automated_security_helper/utils/offline_tool_env.py`.
-- trivy-repo also gets `--skip-version-check` and `--disable-telemetry`, whatever
-  `disable_telemetry` says, and `--config` naming `TRIVY_CONFIG` when that is a file
-  outside the scanned tree, or an empty config otherwise. A `trivy.yaml` in the scanned
-  repository is not read offline, because its settings can reach the network (a VEX
-  repository, client/server mode). Online, trivy still reads it.
+- trivy's version check and telemetry are off whatever `disable_telemetry` says, through
+  `TRIVY_SKIP_VERSION_CHECK` and `TRIVY_DISABLE_TELEMETRY` rather than flags, which a
+  trivy too old to know them would refuse.
 - trivy-repo does not run trivy's Terraform checks offline. trivy downloads the source
   of every `module` block a `.tf` file names (from the Terraform registry, with the
   host's `git`, or over HTTPS), and has no setting that stops it, so ASH passes
@@ -196,9 +201,6 @@ over the network on their own:
   cannot be read from `trivy repository --help`, trivy's misconfiguration checks are
   skipped offline. checkov still checks Terraform. Any `git` a tool runs offline gets
   `GIT_ALLOW_PROTOCOL=file`, so it reaches no remote.
-- syft runs from outside the scanned tree and is not given a `.syft.yaml` from it; a
-  `config_file` outside the tree is still passed. Online, syft still uses the tree's
-  `.syft.yaml`.
 - npm-audit passes `--no-update-notifier` to npm. A pnpm project is not audited:
   `pnpm audit --offline` sends the dependency list to the registry anyway, so ASH
   skips it and logs a warning naming the lockfile, as it does for yarn 2 and later.

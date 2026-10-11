@@ -1491,12 +1491,16 @@ ash --scanners trivy-repo
 ```
 
 In offline mode (`--offline`, `ASH_OFFLINE`, or `options.offline: true`) ASH passes
-`--skip-db-update`, `--skip-java-db-update`, `--offline-scan`, `--skip-check-update`,
-`--skip-version-check` and `--disable-telemetry`; trivy's version check and telemetry
-contact check.trivy.dev, and `--skip-check-update` covers only the checks bundle. It
-also passes `--config`: `TRIVY_CONFIG` when that names a file outside the scanned tree,
-otherwise an empty config, so a `trivy.yaml` in the scanned repository is not read
-offline. Online, trivy reads a `trivy.yaml` from the source directory as before.
+`--skip-db-update`, `--skip-java-db-update`, `--offline-scan` and `--skip-check-update`,
+and sets `TRIVY_SKIP_VERSION_CHECK=true` and `TRIVY_DISABLE_TELEMETRY=true`: trivy's
+version check and telemetry contact check.trivy.dev, and `--skip-check-update` covers
+only the checks bundle. Variables rather than flags, because a trivy too old to know
+the flags refuses the command, while it ignores the variables.
+
+Online and offline, ASH passes `--config`: `TRIVY_CONFIG` when that names a file
+outside the scanned tree, otherwise an empty config ASH ships, so a `trivy.yaml` in
+the scanned repository is never read. Its settings can reach the network (a VEX
+repository, client/server mode) or change what is reported.
 
 Offline, trivy's Terraform checks do not run. trivy downloads the source of every
 `module` block it evaluates (a registry module from registry.terraform.io, a `git::`

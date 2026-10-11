@@ -159,35 +159,32 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         # fixing grype while leaving the identical probe here is how the bug comes
         # back the first time anyone adds a syft config.
         #
-        # Offline, a config inside the scanned tree is not passed (see
+        # A config inside the scanned tree is never passed (see
         # config/path_trust.py), and syft runs from outside the tree so it does not
         # find one there itself (_working_directory): a .syft.yaml can turn on remote
         # license and package lookups, which contacted proxy.golang.org and
-        # github.com in an offline scan. Online it is still passed.
+        # github.com in an offline scan, and change what is reported.
         source_dir = Path(self.context.source_dir)
-        offline = self._scanner_offline()
         for index, conf_path in enumerate(possible_config_paths):
             candidate = Path(conf_path)
             if not candidate.is_absolute():
                 candidate = source_dir / candidate
             if not candidate.exists():
                 continue
-            if offline:
-                configured = index == 0 and self.config.options.config_file is not None
-                honored = honored_path(
-                    conf_path,
-                    source_dir=source_dir,
-                    config=getattr(self.context, "config", None),
-                    key="scanners.syft.options.config_file"
-                    if configured
-                    else f"syft config file {conf_path}",
-                )
-                if honored is None:
-                    continue
-                value = honored.as_posix()
-            else:
-                value = candidate.resolve().as_posix()
-            self.args.extra_args.append(ToolExtraArg(key="--config", value=value))
+            configured = index == 0 and self.config.options.config_file is not None
+            honored = honored_path(
+                conf_path,
+                source_dir=source_dir,
+                config=getattr(self.context, "config", None),
+                key="scanners.syft.options.config_file"
+                if configured
+                else f"syft config file {conf_path}",
+            )
+            if honored is None:
+                continue
+            self.args.extra_args.append(
+                ToolExtraArg(key="--config", value=honored.as_posix())
+            )
             break
 
         for item in self.config.options.exclude:
@@ -203,14 +200,12 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
 
         return super()._process_config_options()
 
-    def _working_directory(self, target: Path, results_dir: Path) -> Path | None:
-        """Offline, run syft from outside the scanned tree; online, from the source.
+    def _working_directory(self, target: Path, results_dir: Path) -> Path:
+        """A working directory outside the scanned tree, online and offline.
 
         syft reads ``.syft.yaml`` (and ``.syft/config.yaml``) from its working
-        directory. See _process_config_options for why that matters offline.
+        directory. See _process_config_options for why that matters.
         """
-        if not self._scanner_offline():
-            return None
         return cwd_outside_scanned_tree(
             target,
             results_dir=results_dir,
@@ -281,7 +276,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             return False
 
         try:
-            # Absolute, because offline syft runs from outside the source directory
+            # Absolute, because syft runs from outside the source directory
             # (_working_directory), where a relative path names something else.
             target = Path(os.path.abspath(target))
             target_results_dir = Path(os.path.abspath(self.results_dir)).joinpath(

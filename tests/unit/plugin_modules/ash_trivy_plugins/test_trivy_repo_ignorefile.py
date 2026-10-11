@@ -159,7 +159,9 @@ def test_the_flags_follow_the_subcommand_however_the_target_is_spelled(tmp_path)
     assert argv[4].startswith("--secret-config=")
     # The cache the scan, the refresh and the staleness check all read.
     assert argv[5].startswith("--cache-dir=")
-    assert argv[6:] == resolved[2:]
+    # A config file ASH chose, so trivy reads no trivy.yaml from the scanned tree.
+    assert argv[6].startswith("--config=")
+    assert argv[7:] == resolved[2:]
 
 
 def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_update(

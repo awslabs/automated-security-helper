@@ -306,9 +306,9 @@ scanners:
       offline: false                       # Skip update checks
 ```
 
-In offline mode syft runs from outside the scanned tree and is not given a `.syft.yaml`
-from it, because such a file can turn on remote license and package lookups. A
-`config_file` outside the tree is still used.
+syft runs from outside the scanned tree and is not given a `.syft.yaml` or
+`config_file` from it, online or offline, because such a file can turn on remote
+license and package lookups. A `config_file` outside the tree is still used.
 
 **Key Features**:
 - Package discovery across multiple ecosystems

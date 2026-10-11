@@ -150,17 +150,20 @@
 
 ### Behavior changes
 
-- **Offline, trivy-repo and syft read no config file from the scanned tree, and pnpm
-  projects are not audited.** A `trivy.yaml` in the scanned repository could turn on a
-  VEX repository download or client/server mode, and a `.syft.yaml` remote license and
-  package lookups; both reached the network with every offline flag ASH passed.
-  Offline, trivy now gets `--config` naming `TRIVY_CONFIG` when that is outside the
-  tree, or an empty config, and syft runs from outside the tree without the tree's
-  `.syft.yaml` (a `config_file` outside the tree still applies). So an offline scan of
-  a repository with either file can report differently from an online one, which still
-  reads them. `pnpm audit --offline` sends the dependency list to the registry, so
-  offline a pnpm project is skipped with a warning naming the lockfile, as yarn 2 and
-  later already were.
+- **trivy-repo and syft read no config file from the scanned tree, online or offline,
+  and offline pnpm projects are not audited.** A `trivy.yaml` in the scanned repository
+  could turn on a VEX repository download or client/server mode, and a `.syft.yaml`
+  remote license and package lookups; both reached the network with every offline flag
+  ASH passed, and online both decided what was reported. trivy now always gets
+  `--config` naming `TRIVY_CONFIG` when that is outside the tree, or an empty config
+  ASH ships, and syft runs from outside the tree and is given only a `config_file`
+  outside it. A repository that tuned trivy or syft through those files gets their
+  defaults; put the settings in a file outside the tree (`TRIVY_CONFIG`,
+  `scanners.syft.options.config_file`). Offline, trivy's version check and telemetry
+  are turned off by `TRIVY_SKIP_VERSION_CHECK` and `TRIVY_DISABLE_TELEMETRY`, which an
+  older trivy ignores, rather than by flags it would refuse. `pnpm audit --offline`
+  sends the dependency list to the registry, so offline a pnpm project is skipped with
+  a warning naming the lockfile, as yarn 2 and later already were.
 
 - **Offline, trivy-repo does not run trivy's Terraform checks.** trivy downloads the
   source of every `module` block in the scanned Terraform, from the registry, with the
@@ -1131,8 +1134,8 @@
   every checkov command) and registry.npmjs.org (npm's update notifier, with
   `--offline`). Offline, every process ASH starts now gets the variables that turn
   those checks off, and the syft and grype settings that look things up over the
-  network; trivy-repo also gets `--skip-version-check` and `--disable-telemetry`
-  whatever `disable_telemetry` says, and npm `--no-update-notifier`. On a Go module,
+  network, trivy's version check and telemetry included whatever `disable_telemetry`
+  says; npm also gets `--no-update-notifier`. On a Go module,
   offline syft no longer runs the Go toolchain on PATH (`golang.use-packages-lib`
   was on by default), and the toolchain grype runs gets `GOPROXY=off` and
   `GOTOOLCHAIN=local`, so neither can download modules or a toolchain. See
