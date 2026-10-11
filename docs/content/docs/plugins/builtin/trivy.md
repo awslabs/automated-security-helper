@@ -17,7 +17,7 @@ The `trivy` scanner is a builtin scanner, enabled by default: a default scan run
 
 trivy has four scanners. This scanner runs one of them unless you ask for more:
 
-| trivy scanner | Default | Why |
+| trivy scanner | By default | Why |
 |---------------|---------|-----|
 | `vuln` | on | Known vulnerabilities in dependencies, from trivy's own database. grype answers the same question from a different database; a second database is the reason to enable trivy. ASH does not deduplicate across scanners, so a vulnerability both find is reported by each, trivy usually under the CVE id and grype under the GHSA id, and one suppression by `rule_id` does not cover both. |
 | `secret` | off | detect-secrets runs by default. Both would report the same credential under different rule ids, and a suppression for one does not cover the other. |
@@ -54,13 +54,14 @@ scanners:
 
 ## trivy configuration in the scanned repository
 
-trivy reads `trivy.yaml`, `.trivyignore` and, for the `secret` scanner, `trivy-secret.yaml` from its working directory, which is the repository being scanned. Any of them can remove findings without the report saying so: a `severity: [CRITICAL]` or `scan.skip-files` entry in `trivy.yaml` removes every lower-rated or skipped finding, an `ignore-policy` it names (a Rego file) drops whatever the policy matches, each `.trivyignore` line removes an advisory, and `trivy-secret.yaml` can disable secret rules. A `trivy.yaml` can also point trivy at a directory of WASM modules (`module.dir`) and enable them, which runs them during the scan. So the builtin scanner passes `--config`, `--ignorefile` and `--secret-config` pointing at files of its own that set nothing, and a repository's own files are not read. trivy reads no other file from a default location: `--ignore-policy` has no default.
+trivy reads `trivy.yaml`, `.trivyignore` and, for the `secret` scanner, `trivy-secret.yaml` from its working directory, which is the repository being scanned. Any of them can remove findings without the report saying so: a `severity: [CRITICAL]` or `scan.skip-files` entry in `trivy.yaml` removes every lower-rated or skipped finding, an `ignore-policy` it names (a Rego file) drops whatever the policy matches, each `.trivyignore` line removes an advisory, and `trivy-secret.yaml` can disable secret rules. A `trivy.yaml` can also point trivy at a directory of WASM modules (`module.dir`) and enable them, which runs them during the scan. So the builtin scanner passes `trivy --config`, `trivy --ignorefile` and `trivy --secret-config` pointing at files of its own that set nothing, and a repository's own files are not read. trivy reads no other file from a default location: `trivy --ignore-policy` has no default.
 
 To use your own:
 
 - `config_file`: set it as the operator, through `--config-overrides` or an ASH config file outside the scanned tree, for a file outside the scanned tree. Set by an ASH config inside the tree, or naming a file inside it, it is ignored with a warning and trivy gets ASH's empty config.
 - `ignore_file` and `secret_config_file`: under the same rule as `config_file`. Otherwise `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG` from the environment, for a file outside the scanned tree. A file inside the tree is ignored with a warning, and trivy gets ASH's empty one. trivy-repo takes these two the same way.
 
+<!-- doctest: illustrative reason="runs a full scan, which needs every scanner installed" -->
 ```bash
 ash scan --config-overrides 'scanners.trivy.options.ignore_file=/etc/ash/trivyignore'
 ```
@@ -71,7 +72,7 @@ To accept a finding, prefer an ASH suppression, which is recorded in the reports
 
 ## Severity
 
-Each finding is reported at trivy's own severity for it (CRITICAL, HIGH, MEDIUM, LOW). That is the severity trivy's `--severity` filter uses, which is how `severity_threshold` reaches trivy, so a finding cannot pass the filter as HIGH and be reported as MEDIUM. A finding below the threshold is dropped by trivy itself: it is not reported, suppressed or counted, unlike a scanner whose threshold ASH applies after the scan. A finding trivy rates UNKNOWN falls back to ASH's usual SARIF mapping: the rule's CVSS score (`security-severity`), then the SARIF level.
+Each finding is reported at trivy's own severity for it (CRITICAL, HIGH, MEDIUM, LOW). That is the severity the `trivy --severity` filter uses, which is how `severity_threshold` reaches trivy, so a finding cannot pass the filter as HIGH and be reported as MEDIUM. A finding below the threshold is dropped by trivy itself: it is not reported, suppressed or counted, unlike a scanner whose threshold ASH applies after the scan. A finding trivy rates UNKNOWN falls back to ASH's usual SARIF mapping: the rule's CVSS score (`security-severity`), then the SARIF level.
 
 ## Suppressions
 
@@ -87,7 +88,7 @@ Symbol-scoped suppressions (function or class) do not apply: a dependency findin
 
 The database is declared as `trivy-db` in `automated_security_helper/utils/content_databases.py`, with a 24h bound measured from its `UpdatedAt`, which is trivy's own rule for its published database. After the scan, ASH reads `UpdatedAt` from `trivy version --format json` and fails the scan when the database is older than that (`content_db_staleness: warn` or `--allow-stale-content-db` turns the failure into a warning carried in every report). This is the same check grype's database gets. In an image built with `OFFLINE=YES` the stale database warns instead of failing; see [Offline and air-gapped use](#offline-and-air-gapped-use).
 
-- Online, ASH updates the database once per scan before trivy and trivy-repo run (`trivy image --download-db-only`, outside the scanner sandbox and under a lock in trivy's cache, so the two never write it at the same time), and fails the scan if it cannot download one. The update runs from an empty directory outside the scanned tree with an explicit `--config`: an empty one, or your `config_file` when it is honored, so a database mirror it names applies. Both scanners then run with `--skip-db-update --skip-java-db-update`, `--skip-check-update` when `misconfig` is on, and `--cache-dir` naming the cache the update wrote, so the scan only reads the cache. `fs` and `repository` scans never read the Java database.
+- Online, ASH updates the database once per scan before trivy and trivy-repo run (`trivy image --download-db-only`, outside the scanner sandbox and under a lock in trivy's cache, so the two never write it at the same time), and fails the scan if it cannot download one. The update runs from an empty directory outside the scanned tree with an explicit `--config`: an empty one, or your `config_file` when it is honored, so a database mirror it names applies. Both scanners then run with `--skip-db-update --skip-java-db-update`, `trivy --skip-check-update` when `misconfig` is on, and `trivy --cache-dir` naming the cache the update wrote, so the scan only reads the cache. `fs` and `repository` scans never read the Java database.
 - Offline, ASH passes `--skip-db-update --skip-java-db-update --offline-scan --skip-check-update`, so trivy uses whatever database is in its cache, and the post-scan check holds it to the bound.
 
 The database is only read by the `vuln` scanner; with `vuln` off nothing is measured.
@@ -96,6 +97,7 @@ The database is only read by the `vuln` scanner; with `vuln` off nothing is meas
 
 trivy needs a database in its cache to scan offline. With none, ASH reports trivy `MISSING` with the reason and the scan exits 1; trivy is not run. To provide one, on a machine with network access:
 
+<!-- doctest: illustrative reason="needs trivy and the network" -->
 ```bash
 TRIVY_CACHE_DIR=/path/to/cache trivy image --download-db-only
 ```
@@ -104,6 +106,6 @@ and point the offline scan at the same `TRIVY_CACHE_DIR`. In nix mode, export `T
 
 ## Running it alongside the trivy-repo community plugin
 
-The community `trivy-repo` plugin (enabled through `ash_plugin_modules`) keeps its name and its defaults (all four trivy scanners, unfixed vulnerabilities dropped, `license_full: true`), and has a `module_dir` option `trivy` does not. It names its own config file and modules directory, so a `trivy.yaml` in the scanned repository is not loaded, and settings that file made no longer apply. The two share their implementation (the database update, the cache and the treatment of trivy's input files) but are separate scanners. trivy-repo keeps its own scan path: it gets no `--timeout` (trivy's 5-minute default applies), no `--skip-dirs` for ASH's output directory, no offline check for a missing database, and its findings are rated by ASH's usual SARIF mapping rather than at trivy's own severity (see [Severity](#severity)), so one finding can carry different ASH severities in the two scanners.
+The community `trivy-repo` plugin (enabled through `ash_plugin_modules`) keeps its name and its defaults (all four trivy scanners, unfixed vulnerabilities dropped, `license_full: true`), and has a `module_dir` option `trivy` does not. It names its own config file and modules directory, so a `trivy.yaml` in the scanned repository is not loaded, and settings that file made no longer apply. The two share their implementation (the database update, the cache and the treatment of trivy's input files) but are separate scanners. trivy-repo keeps its own scan path: it gets no `trivy --timeout` (trivy's 5-minute default applies), no `trivy --skip-dirs` for ASH's output directory, no offline check for a missing database, and its findings are rated by ASH's usual SARIF mapping rather than at trivy's own severity (see [Severity](#severity)), so one finding can carry different ASH severities in the two scanners.
 
 `trivy` is on by default, so listing the Trivy plugin for `trivy-repo` runs trivy twice, and each finding is reported once per scanner, under that scanner's name. Both read the same database, which is measured once for each. The rule ids are the same, so one suppression by `rule_id` and `path` covers both. To avoid the duplicate, keep one: set `scanners.trivy.enabled: false`, or stop listing the plugin.

@@ -364,7 +364,7 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
                 "Relative paths are resolved against the source directory; "
                 "absolute paths are used as given. Honored only when set by "
                 "--config-overrides or a config file outside the scanned tree; "
-                "otherwise zizmor runs with `--no-config`, so a `zizmor.yml` or "
+                "otherwise it runs `zizmor --no-config`, so a `zizmor.yml` or "
                 "`.github/zizmor.yml` in the scanned repository is not read."
             ),
         ),

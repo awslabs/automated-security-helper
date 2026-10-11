@@ -57,7 +57,7 @@ scanners:
   `--config-overrides`, or an ASH config file outside the scanned tree. A relative
   path is resolved against the source directory; an absolute path may point outside
   it (a config shared across repositories). Without it, ASH runs zizmor with
-  `--no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned
+  `zizmor --no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned
   repository is not read: a config there can disable audits or ignore findings,
   which zizmor then never reports, so they would be neither in ASH's results nor
   counted as suppressed. `config_file` set by an ASH config inside the scanned tree

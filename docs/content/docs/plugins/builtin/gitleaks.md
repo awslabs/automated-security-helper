@@ -47,7 +47,7 @@ The scanned repository's own gitleaks configuration is not used. A `.gitleaks.to
 
 `config_file` or `baseline_path` set by an ASH config inside the scanned tree (`.ash/.ash.yaml`) is ignored with a warning, and a `.gitleaks.toml` or `.ash/.gitleaks.toml` in the tree is noted at INFO. The operator's files may be absolute paths or point outside the source directory, and a file the operator names may also be inside the scanned tree.
 
-gitleaks always reads `.gitleaksignore` at the root of the path it scans, whatever `--gitleaks-ignore-path` says, and has no flag to turn that off. When the scan root has one, ASH runs gitleaks again on each file it names, one file per run (such a run reads no `.gitleaksignore`), and reports the findings the first run dropped. A failed re-run fails the scan.
+gitleaks always reads `.gitleaksignore` at the root of the path it scans, whatever `gitleaks --gitleaks-ignore-path` says, and has no flag to turn that off. When the scan root has one, ASH runs gitleaks again on each file it names, one file per run (such a run reads no `.gitleaksignore`), and reports the findings the first run dropped. A failed re-run fails the scan.
 
 gitleaks' options are described by the JSON schema (`automated_security_helper/schemas/AshConfig.json`) and listed above.
 
@@ -57,7 +57,7 @@ gitleaks reports no severity of its own. ASH rates every gitleaks finding CRITIC
 
 ## Secret values never reach ASH's output
 
-ASH always runs gitleaks with `--redact=100`, so gitleaks writes `REDACTED` in place of each secret in its report and its log. ASH also overwrites any report snippet that is not `REDACTED` before the result is stored, so the value cannot appear in `ash_aggregated_results.json`, the SARIF, or any other report.
+ASH always runs `gitleaks --redact=100`, so gitleaks writes `REDACTED` in place of each secret in its report and its log. ASH also overwrites any report snippet that is not `REDACTED` before the result is stored, so the value cannot appear in `ash_aggregated_results.json`, the SARIF, or any other report.
 
 ## Suppressing findings
 
@@ -85,7 +85,7 @@ Rule, path and line suppressions apply. A `symbol` suppression (the enclosing fu
 
 ## Exit codes
 
-ASH runs gitleaks with `--exit-code=2`, because gitleaks otherwise exits 1 both when it finds leaks and when it fails. 0 (nothing found) and 2 (leaks found) are success; any other code, including 1 for an unreadable config or path, makes the scanner report an error and the scan exit 1.
+ASH runs `gitleaks --exit-code=2`, because gitleaks otherwise exits 1 both when it finds leaks and when it fails. 0 (nothing found) and 2 (leaks found) are success; any other code, including 1 for an unreadable config or path, makes the scanner report an error and the scan exit 1.
 
 ## Known limitations
 

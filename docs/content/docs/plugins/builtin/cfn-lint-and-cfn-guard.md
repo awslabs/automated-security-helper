@@ -14,6 +14,7 @@ cfn-lint and cfn-guard are builtin scanners, enabled by default: a default scan 
 
 cfn-lint is a Python package (MIT-0). ASH installs it with `uv tool install 'cfn-lint[sarif]>=1.43.3,<2.0.0'`, either on first use or ahead of time:
 
+<!-- doctest: illustrative reason="installs cfn-lint from PyPI" -->
 ```bash
 ash dependencies install --tool cfn-lint
 ```
@@ -92,7 +93,7 @@ Package-scoped suppressions do not apply (cfn-lint reports on templates, not pac
 
 ### Offline use
 
-cfn-lint needs no network to scan. Its resource schemas ship inside the package, and it only downloads updates when asked to (`--update-specs` and similar), which ASH never does. A scan inside a network namespace with no interfaces produced the same results as one with network access. Installing cfn-lint needs network once; in offline mode (`ASH_OFFLINE=true`) a cfn-lint that is not already installed is reported as MISSING with the reason.
+cfn-lint needs no network to scan. Its resource schemas ship inside the package, and it only downloads updates when asked to (`cfn-lint --update-specs` and similar), which ASH never does. A scan inside a network namespace with no interfaces produced the same results as one with network access. Installing cfn-lint needs network once; in offline mode (`ASH_OFFLINE=true`) a cfn-lint that is not already installed is reported as MISSING with the reason.
 
 ### How ASH runs it
 
@@ -114,6 +115,7 @@ cfn-lint is MIT-0 (MIT No Attribution). It is installed as a separate tool and i
 
 ### Installation
 
+<!-- doctest: illustrative reason="downloads cfn-guard and its rules bundle" -->
 ```bash
 ash dependencies install --tool cfn-guard
 ```
@@ -184,6 +186,7 @@ global_settings:
 
 Package-scoped and symbol-scoped suppressions do not apply to templates. The registry's rules also honor cfn-guard's own in-template suppression, which never reaches ASH:
 
+<!-- doctest: config kind=other reason="a CloudFormation template fragment" -->
 ```yaml
 Resources:
   LogBucket:
