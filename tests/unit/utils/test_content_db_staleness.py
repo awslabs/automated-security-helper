@@ -1381,3 +1381,37 @@ class TestABuildTimeInTheFutureIsNotFresh:
             scanner, _sarif("trivy-repo"), cdb.DEFAULT_STALENESS_POLICY
         )
         assert not record.stale
+
+
+# --------------------------------------------------------------------------- spellings
+
+
+@pytest.mark.parametrize(
+    "value, built",
+    [
+        ("YES", True),
+        ("yes", True),
+        ("true", True),
+        ("TRUE", True),
+        ("1", True),
+        ("NO", False),
+        ("false", False),
+        ("0", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_the_offline_image_is_recognized_by_every_spelling_ash_offline_takes(
+    monkeypatch, value, built
+):
+    """``built_offline`` takes the spellings ``ASH_OFFLINE`` does, so an image whose
+    build argument is ``true`` or ``1`` is the offline image too."""
+    from automated_security_helper.core.constants import is_offline_mode
+
+    environ = {} if value is None else {cdb.OFFLINE_IMAGE_ENV: value}
+    assert cdb.built_offline(environ) is built
+    if value is None:
+        monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    else:
+        monkeypatch.setenv("ASH_OFFLINE", value)
+    assert is_offline_mode() is built

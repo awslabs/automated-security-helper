@@ -638,6 +638,61 @@ def test_offline_without_a_database_is_missing_with_the_reason(tmp_path, monkeyp
     assert "no trivy database was found" in scanner.dependency_unavailable_reason
 
 
+def _offline_probe_config(tmp_path, monkeypatch, **scanner_kwargs):
+    """The --config the offline database check would pass ``trivy version``."""
+    _found_binary(monkeypatch)
+    seen = []
+
+    def probe(ctx):
+        seen.append(ctx.config_file)
+        return (None, "x")
+
+    monkeypatch.setattr(staleness, "_built_from_trivy", probe)
+    scanner = _scanner(tmp_path, offline=True, **scanner_kwargs)
+    assert scanner.validate_plugin_dependencies() is True
+    (config_file,) = seen
+    return config_file
+
+
+def test_the_offline_check_reads_through_the_operators_trivy_config(
+    tmp_path, monkeypatch
+):
+    """The check runs before the scan chose its --config, so it asks for the file the
+    scan will pass: the operator's, set by --config-overrides, outside the tree."""
+    chosen = tmp_path / "operator" / "trivy.yaml"
+    chosen.parent.mkdir()
+    chosen.write_text("cache:\n  dir: /operator/cache\n", encoding="utf-8")
+    config_file = _offline_probe_config(
+        tmp_path,
+        monkeypatch,
+        overrides=(f"scanners.trivy.options.config_file={chosen}",),
+        config_file=str(chosen),
+    )
+    assert config_file is not None and Path(config_file) == chosen.resolve()
+
+
+def test_the_offline_check_ignores_a_trivy_config_the_tree_sets(tmp_path, monkeypatch):
+    chosen = tmp_path / "elsewhere" / "trivy.yaml"
+    chosen.parent.mkdir()
+    chosen.write_text("cache:\n  dir: /tree/cache\n", encoding="utf-8")
+    assert _offline_probe_config(tmp_path, monkeypatch, config_file=str(chosen)) is None
+
+
+def test_the_offline_check_ignores_a_trivy_config_that_does_not_exist(
+    tmp_path, monkeypatch
+):
+    """It falls back to the probe's own empty config; the scan itself then fails on
+    the missing file, with the path."""
+    missing = tmp_path / "operator" / "trivy.yaml"
+    config_file = _offline_probe_config(
+        tmp_path,
+        monkeypatch,
+        overrides=(f"scanners.trivy.options.config_file={missing}",),
+        config_file=str(missing),
+    )
+    assert config_file is None
+
+
 def test_offline_with_a_database_is_satisfied(tmp_path, monkeypatch):
     _found_binary(monkeypatch)
     monkeypatch.setattr(staleness, "_built_from_trivy", lambda ctx: (None, "x"))

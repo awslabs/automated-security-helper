@@ -77,7 +77,7 @@ def _scanner(tmp_path: Path, source: Path, **options) -> TrivyScanner:
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="trivy's XDG rule is Linux's"
 )
-@pytest.mark.xfail(strict=True, reason=_PENDING)
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_PENDING)
 @pytest.mark.parametrize("offline", [False, True], ids=["online", "offline"])
 def test_the_scan_and_the_staleness_probe_read_one_cache(
     tmp_path, monkeypatch, offline
@@ -245,3 +245,34 @@ def test_the_probe_reads_through_the_config_the_scan_passed(tmp_path, monkeypatc
     _built_from_trivy(probe)
     (call,) = [json.loads(line) for line in record.read_text().splitlines()]
     assert _config_flag(call["argv"]) == passed[0]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stand-in trivy is a POSIX script")
+def test_a_probe_whose_temporary_directory_is_in_a_checkout_runs_from_the_root(
+    tmp_path, monkeypatch
+):
+    """The probe's scratch directory is made in the temporary directory; when that is
+    inside a checkout, trivy runs from the filesystem root instead."""
+    import tempfile
+
+    from automated_security_helper.utils.content_db_staleness import (
+        ProbeContext,
+        _built_from_trivy,
+    )
+
+    record = _fake_trivy(tmp_path, monkeypatch)
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / "tmp").mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(checkout / "tmp"))
+
+    _built_from_trivy(
+        ProbeContext(env=dict(os.environ), executable=str(tmp_path / "bin" / "trivy"))
+    )
+
+    (call,) = [json.loads(line) for line in record.read_text().splitlines()]
+    # Not vacuous: the probe's empty config was written inside the checkout.
+    assert checkout.resolve() in Path(_config_flag(call["argv"])).resolve().parents
+    cwd = Path(call["cwd"])
+    assert not any((p / ".git").exists() for p in [cwd, *cwd.parents])
+    assert cwd == Path(cwd.anchor)

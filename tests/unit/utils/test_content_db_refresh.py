@@ -118,6 +118,27 @@ def test_grype_is_updated_outside_the_sandbox_and_away_from_the_repo(
     assert not any((p / ".git").exists() for p in [call.cwd, *call.cwd.parents])
 
 
+@pytest.mark.parametrize("tool", ["grype", "trivy"])
+def test_a_temporary_directory_inside_a_checkout_is_not_the_working_directory(
+    recorder, tmp_path, monkeypatch, tool
+):
+    """When the temporary directory is inside a checkout, the update runs from the
+    filesystem root instead, so no config file the checkout holds can be found."""
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / "tmp").mkdir()
+    monkeypatch.setattr(refresh.tempfile, "tempdir", str(checkout / "tmp"))
+    refresh.prepare_content_db(tool, tmp_path / "cache", offline=False, executable=tool)
+    (call,) = recorder.calls
+    config = Path(
+        call.argv[call.argv.index("-c" if tool == "grype" else "--config") + 1]
+    )
+    # Not vacuous: the update's own files were made inside the checkout.
+    assert checkout in config.parents
+    assert not any((p / ".git").exists() for p in [call.cwd, *call.cwd.parents])
+    assert call.cwd == Path(call.cwd.anchor)
+
+
 def test_trivy_gets_its_database_and_when_asked_its_checks_bundle(recorder, tmp_path):
     cache = tmp_path / "trivy"
     refresh.prepare_content_db(
