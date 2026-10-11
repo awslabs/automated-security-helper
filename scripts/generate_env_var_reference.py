@@ -74,7 +74,7 @@ from pathlib import Path
 from typing import Iterable, Iterator, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _reference_docs import (  # noqa: E402
+from _reference_docs import (
     add_docs_root_argument,
     banner,
     code,
@@ -1378,7 +1378,7 @@ def read_env_names(repo_root: Optional[Path] = None) -> tuple[set[str], list[str
 
 def _cli_envvars() -> dict[str, list[tuple[str, str, str, str]]]:
     """envvar name -> [(command label, option, anchor, default, help)] from the click tree."""
-    from generate_cli_docs import (  # type: ignore[import-not-found]
+    from generate_cli_docs import (
         format_default,
         iter_commands,
         load_root_command,

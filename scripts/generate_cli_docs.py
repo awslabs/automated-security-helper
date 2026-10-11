@@ -75,7 +75,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _reference_docs import (  # noqa: E402
+from _reference_docs import (
     NO_DESCRIPTION,
     add_docs_root_argument,
     banner,

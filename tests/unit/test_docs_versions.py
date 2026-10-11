@@ -48,10 +48,6 @@ def _load():
 
 dv = _load()
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("git") is None, reason="the versioned site is a git branch"
-)
-
 
 # ---------------------------------------------------------------------------
 # What each ref publishes
@@ -223,6 +219,12 @@ def _manager(path: Path = MANAGER_SCRIPT):
 
 
 def _git(repo: Path, *args: str, env=None) -> str:
+    if shutil.which("git") is None:
+        pytest.fail(
+            "git is not on PATH. The versioned site is a git branch: these tests "
+            "commit a small site, publish it with mike and push it to a local bare "
+            "remote, so they need git installed."
+        )
     return subprocess.run(
         ["git", *args], cwd=repo, env=env, text=True, capture_output=True, check=True
     ).stdout

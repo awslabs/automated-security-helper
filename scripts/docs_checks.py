@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import ast
 import difflib
-import fnmatch
 import functools
 import importlib
 import importlib.util
@@ -2551,7 +2550,7 @@ def _strip_jsonc(text: str) -> str:
 def _parse_toml(text: str) -> Any:
     try:
         import tomllib  # Python 3.11+
-    except ModuleNotFoundError:  # pragma: no cover - 3.10 only
+    except ModuleNotFoundError:  # Python 3.10
         import toml
 
         return toml.loads(text)
@@ -2572,7 +2571,7 @@ def parse_config_text(text: str, lang: str) -> tuple[Any, str | None]:
             return json.loads(_strip_jsonc(text)), None
         if lang == "toml":
             return _parse_toml(text), None
-    except Exception as exc:  # noqa: BLE001 -- every parser's error is the finding
+    except Exception as exc:  # every parser's error is the finding
         first = (
             str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
         )
@@ -2592,6 +2591,17 @@ class ConfigModels:
     generic_option_keys: dict[type, frozenset[str]] = field(default_factory=dict)
     #: The workspace policy file's model, a second config schema, if this ASH has one.
     workspace_policy: type | None = None
+    #: Plugin modules that raised on import (an optional extra that is not installed),
+    #: with the error. Their plugins' config classes are not in plugin_configs.
+    unloaded: dict[str, str] = field(default_factory=dict)
+
+    def skipped_notes(self) -> list[str]:
+        """One line per plugin module that did not import, for a check to print."""
+        return [
+            f"plugin module {name} did not import ({error}), so its plugins' "
+            "config classes were not checked"
+            for name, error in sorted(self.unloaded.items())
+        ]
 
 
 #: Option keys the scanner base class reads from ANY scanner's options with getattr,
@@ -2641,12 +2651,18 @@ def load_config_models() -> ConfigModels:
         "converters": "ConverterConfig",
     }
     configs: dict[str, dict[str, type]] = {section: {} for section in segments}
+    unloaded: dict[str, str] = {}
     for info in pkgutil.walk_packages(
         plugin_modules.__path__, plugin_modules.__name__ + "."
     ):
+        module = None
         try:
             module = importlib.import_module(info.name)
-        except Exception:  # noqa: BLE001, S112  # nosec B112 -- an optional extra is not a docs problem
+        except Exception as exc:
+            # An optional extra that is not installed is not a docs problem. It is
+            # recorded, and the checks that use these models say what they skipped.
+            unloaded[info.name] = f"{type(exc).__name__}: {exc}"
+        if module is None:
             continue
         for attr in dir(module):
             obj = getattr(module, attr)
@@ -2672,6 +2688,7 @@ def load_config_models() -> ConfigModels:
         PASSTHROUGH_MODELS,
         {ScannerOptionsBase: GENERIC_SCANNER_OPTION_KEYS},
         AshWorkspaceConfig,
+        unloaded,
     )
 
 
@@ -2879,7 +2896,7 @@ def _read_ash_config(
         logging.disable(logging.WARNING)
         try:
             return read_config_file(path), None
-        except Exception as exc:  # noqa: BLE001 -- the reader's error is the finding
+        except Exception as exc:  # the reader's error is the finding
             first = (
                 str(exc).strip().splitlines()[0]
                 if str(exc).strip()
@@ -2921,8 +2938,14 @@ def config_block_problems(
     return []
 
 
-def check_config_blocks(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding]:
-    """Config blocks parse, and those that are ASH configs validate with nothing ignored."""
+def check_config_blocks(
+    files: Iterable[Path], root: Path = REPO_ROOT, notes: list[str] | None = None
+) -> list[Finding]:
+    """Config blocks parse, and those that are ASH configs validate with nothing ignored.
+
+    ``notes``, when given, receives a line for each plugin module that did not
+    import, whose plugins' keys the ASH config blocks were not checked against.
+    """
     findings: list[Finding] = []
     models: ConfigModels | None = None
     for page in load_pages(files, root):
@@ -2941,6 +2964,8 @@ def check_config_blocks(files: Iterable[Path], root: Path = REPO_ROOT) -> list[F
                 findings.append(
                     Finding("config", page.rel, block.fence_line, f"{label}: {problem}")
                 )
+    if notes is not None and models is not None:
+        notes.extend(models.skipped_notes())
     return findings
 
 
@@ -3215,8 +3240,6 @@ def _normalize(value: Any) -> Any:
 
 
 def _model_keys(model: type) -> dict[str, KeySpec]:
-    from pydantic import BaseModel  # noqa: F401 -- for the isinstance in _normalize
-
     keys: dict[str, KeySpec] = {}
     spellings = _field_keys(model)
     for field_name, info in model.model_fields.items():
@@ -3229,7 +3252,7 @@ def _model_keys(model: type) -> dict[str, KeySpec]:
                     names,
                     default=_normalize(info.get_default(call_default_factory=True)),
                 )
-            except Exception:  # noqa: BLE001 -- a factory that needs the other fields
+            except Exception:  # a factory that needs the other fields
                 spec = KeySpec(names, default=COMPUTED, compare=False)
         for name in names:
             keys[name] = spec
@@ -3353,7 +3376,7 @@ def mcp_section(of: str) -> tuple[Section | None, str | None]:
     """The parameters of one MCP tool: its input schema's properties and defaults."""
     try:
         tools = _mcp_tool_schemas()
-    except Exception as exc:  # noqa: BLE001 -- the server not loading is the finding
+    except Exception as exc:  # the server not loading is the finding
         return None, f"of={of}: the MCP server's tools cannot be listed ({exc!r})"
     words = of.split(".")[1:]
     if len(words) != 1:
@@ -3942,14 +3965,20 @@ def config_path_problem(span: str, models: ConfigModels) -> str | None:
 
 
 def check_option_tables(
-    files: Iterable[Path], root: Path = REPO_ROOT, code: Path | None = None
+    files: Iterable[Path],
+    root: Path = REPO_ROOT,
+    code: Path | None = None,
+    notes: list[str] | None = None,
 ) -> list[Finding]:
     """Option tables name their section, list its keys with its defaults; config paths resolve.
 
     ``code`` is the tree Python, Dockerfile and CloudFormation sections are read from;
-    by default the checkout of the installed ASH.
+    by default the checkout of the installed ASH. ``notes``, when given, receives a
+    line for each plugin module that did not import, whose sections were not checked.
     """
     models = load_config_models()
+    if notes is not None:
+        notes.extend(models.skipped_notes())
     code = code or code_root(root)
     findings: list[Finding] = []
     for page in load_pages(files, root):
@@ -4216,7 +4245,7 @@ def _import_problems(
             if module == ASH_MODULE or module.startswith(ASH_MODULE + "."):
                 try:
                     imported = importlib.import_module(module)
-                except Exception as exc:  # noqa: BLE001 -- an import that raises is the finding
+                except Exception as exc:  # an import that raises is the finding
                     problems.append(
                         (
                             node.lineno,
@@ -4293,7 +4322,14 @@ _RESOLVABLE_TAG_MODULES = ("pymdownx.", "material.", "markdown.")
 
 
 class _TolerantLoader:
-    """A YAML loader for mkdocs.yml: ``!!python/name:x`` resolves, ``!ENV`` gives its default."""
+    """A YAML loader for mkdocs.yml: ``!!python/name:x`` resolves, ``!ENV`` gives its default.
+
+    It is ``yaml.SafeLoader`` with three constructors added. ``!!python/name:x``
+    imports ``x`` only from a module under :data:`_RESOLVABLE_TAG_MODULES` and is
+    otherwise kept as its text; ``!!python/object`` tags read as ``None``; ``!ENV``
+    reads the variable, or its default. Every other tag is an error, as it is for
+    ``yaml.safe_load``.
+    """
 
     @staticmethod
     def load(text: str) -> Any:
@@ -4310,7 +4346,7 @@ class _TolerantLoader:
                 return suffix
             try:
                 return getattr(importlib.import_module(module_name), attr)
-            except Exception:  # noqa: BLE001 -- an unimportable tag is not a docs problem here
+            except Exception:  # an unimportable tag is not a docs problem here
                 return suffix
 
         def env(loader: Any, node: Any) -> Any:
@@ -4327,7 +4363,11 @@ class _TolerantLoader:
             "tag:yaml.org,2002:python/object", lambda loader, suffix, node: None
         )
         Loader.add_constructor("!ENV", env)
-        return yaml.load(text, Loader=Loader)  # nosec B506 -- SafeLoader subclass; tags limited above
+        loader = Loader(text)
+        try:
+            return loader.get_single_data()
+        finally:
+            loader.dispose()
 
 
 @dataclass
@@ -4379,7 +4419,7 @@ def _site_page_ids(path_str: str, root_str: str, text: str) -> frozenset[str]:
         text = text.replace(VERSION_PLACEHOLDER, current_version(root_str))
     try:
         md = markdown.Markdown(extensions=extensions, extension_configs=configs)
-    except Exception:  # noqa: BLE001 -- fall back to the core set if an extension will not load
+    except Exception:  # fall back to the core set if an extension will not load
         md = markdown.Markdown(extensions=["toc", "tables", "fenced_code"])
     html = md.convert(text)
     ids = set(re.findall(r'\bid="([^"]+)"', html)) | set(
@@ -5084,21 +5124,17 @@ def nav_targets(site: Site) -> tuple[set[Path], list[tuple[str, int, str]]]:
 
 
 def _not_in_nav_spec(site: Site) -> Callable[[str], bool]:
+    # mkdocs matches not_in_nav with pathspec's gitignore rules, and depends on
+    # pathspec, so the check uses that matcher rather than an approximation of it.
+    import pathspec
+
     patterns = str(site.config.get("not_in_nav") or "")
     lines = [
         line
         for line in patterns.splitlines()
         if line.strip() and not line.strip().startswith("#")
     ]
-    try:
-        import pathspec
-
-        spec = pathspec.GitIgnoreSpec.from_lines(lines)
-        return spec.match_file
-    except ImportError:  # pragma: no cover - mkdocs depends on pathspec
-        return lambda rel: any(
-            fnmatch.fnmatch(rel, line.strip().lstrip("/")) for line in lines
-        )
+    return pathspec.GitIgnoreSpec.from_lines(lines).match_file
 
 
 def check_nav(root: Path = REPO_ROOT) -> list[Finding]:

@@ -3211,3 +3211,146 @@ def test_the_gate_wrappers_read_the_gates_corpus(tmp_path, monkeypatch, fixture_
     monkeypatch.setattr(gate, "REPO_ROOT", fixture_root)
     assert any("unknown mode" in f for f in gate.check_doc_markers())
     assert any("--bogus" in f for f in gate.check_doc_cli())
+
+
+# ---------------------------------------------------------------------------
+# What the checks could not look at, and how mkdocs.yml and TOML blocks are read
+# ---------------------------------------------------------------------------
+
+
+def test_a_plugin_module_that_does_not_import_is_reported_as_skipped(
+    monkeypatch, capsys, fixture_root
+):
+    """A broken optional extra is not a finding, and the checks say they skipped it.
+
+    The module that declares the semgrep scanner config is made to raise on import.
+    load_config_models records it instead of dropping it, the semgrep config class is
+    missing from the models, the option-tables and config-blocks checks put a note
+    in ``notes`` and report no finding for it, and the gate prints the note as a
+    ``skipped:`` line under the check, with or without --verbose.
+    """
+    dc.load_config_models.cache_clear()
+    try:
+        broken = dc.load_config_models().plugin_configs["scanners"]["semgrep"]
+        broken_module = broken.__module__
+        real_import = dc.importlib.import_module
+
+        def import_module(name, *args, **kwargs):
+            if name == broken_module:
+                raise ImportError("planted: an optional extra is not installed")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(dc.importlib, "import_module", import_module)
+        dc.load_config_models.cache_clear()
+        models = dc.load_config_models()
+        assert models.unloaded == {
+            broken_module: "ImportError: planted: an optional extra is not installed"
+        }
+        assert "semgrep" not in models.plugin_configs["scanners"]
+        expected = (
+            f"plugin module {broken_module} did not import (ImportError: planted: "
+            "an optional extra is not installed), so its plugins' config classes "
+            "were not checked"
+        )
+        assert models.skipped_notes() == [expected]
+
+        page = _write(
+            fixture_root,
+            "docs/page.md",
+            "<!-- doctest: config kind=ash -->\n"
+            f"{FENCE}yaml\nproject_name: x\n{FENCE}\n",
+        )
+        notes: list[str] = []
+        assert dc.check_option_tables([page], fixture_root, notes=notes) == []
+        assert notes == [expected]
+        notes = []
+        assert dc.check_config_blocks([page], fixture_root, notes=notes) == []
+        assert notes == [expected]
+
+        gate = _load("_ash_docs_gate_for_docs_checks", GATE_PATH)
+        monkeypatch.setattr(gate, "collect_md_files", lambda: [page])
+        monkeypatch.setattr(gate, "REPO_ROOT", fixture_root)
+        monkeypatch.setattr(gate, "_VERBOSE", False)
+        capsys.readouterr()
+        assert gate.check_doc_option_tables() == []
+        assert gate.check_doc_config_blocks() == []
+        printed = capsys.readouterr().out.splitlines()
+        assert printed == [f"        skipped: {expected}"] * 2
+    finally:
+        dc.load_config_models.cache_clear()
+
+
+def test_every_plugin_module_imports_here():
+    """The positive control: in this environment nothing is skipped."""
+    dc.load_config_models.cache_clear()
+    try:
+        models = dc.load_config_models()
+        assert models.unloaded == {}
+        assert models.skipped_notes() == []
+        assert "semgrep" in models.plugin_configs["scanners"]
+    finally:
+        dc.load_config_models.cache_clear()
+
+
+def test_the_mkdocs_loader_adds_three_constructors_to_the_safe_loader(monkeypatch):
+    """``!!python/name:`` imports only from the allowlist, and nothing else changes.
+
+    A name under pymdownx, material or markdown resolves to the object; any other
+    module stays the tag's text and is not imported; ``!!python/object`` tags read
+    as None; ``!ENV`` reads the variable or its default. A tag SafeLoader does not
+    know is still an error, and so is a second document.
+    """
+    import yaml
+    from pymdownx import emoji, superfences
+
+    monkeypatch.setenv("DOCS_CHECKS_PLANTED_SET", "set")
+    monkeypatch.delenv("DOCS_CHECKS_PLANTED_UNSET", raising=False)
+    monkeypatch.delitem(sys.modules, "this_module_is_not_imported", raising=False)
+    data = dc._TolerantLoader.load(
+        "index: !!python/name:pymdownx.emoji.twemoji\n"
+        "format: !!python/name:pymdownx.superfences.fence_code_format\n"
+        "outside: !!python/name:os.system\n"
+        "unimported: !!python/name:this_module_is_not_imported.attr\n"
+        "missing: !!python/name:pymdownx.no_such_module.attr\n"
+        "applied: !!python/object/apply:os.system ['true']\n"
+        "plain_object: !!python/object:os.PathLike {}\n"
+        "env_set: !ENV [DOCS_CHECKS_PLANTED_UNSET, DOCS_CHECKS_PLANTED_SET, fallback]\n"
+        "env_unset: !ENV [DOCS_CHECKS_PLANTED_UNSET, fallback]\n"
+        "env_scalar: !ENV DOCS_CHECKS_PLANTED_SET\n"
+        "env_scalar_unset: !ENV DOCS_CHECKS_PLANTED_UNSET\n"
+        "plain: [1, two, {three: 3.0}]\n"
+    )
+    assert data == {
+        "index": emoji.twemoji,
+        "format": superfences.fence_code_format,
+        "outside": "os.system",
+        "unimported": "this_module_is_not_imported.attr",
+        "missing": "pymdownx.no_such_module.attr",
+        "applied": None,
+        "plain_object": None,
+        "env_set": "set",
+        "env_unset": "fallback",
+        "env_scalar": "set",
+        "env_scalar_unset": None,
+        "plain": [1, "two", {"three": 3.0}],
+    }
+    assert "this_module_is_not_imported" not in sys.modules
+    for text in ("docs_dir: !relative docs\n", "a: 1\n---\nb: 2\n", "a: [1\n"):
+        with pytest.raises(yaml.YAMLError):
+            dc._TolerantLoader.load(text)
+
+
+def test_toml_blocks_parse_the_same_without_tomllib(monkeypatch):
+    """Both arms of _parse_toml: tomllib, and the toml package Python 3.10 uses."""
+    text = 'title = "x"\n[tool.ash]\nfail_on_findings = true\nignore = ["a"]\n'
+    expected = {
+        "title": "x",
+        "tool": {"ash": {"fail_on_findings": True, "ignore": ["a"]}},
+    }
+    assert dc.parse_config_text(text, "toml") == (expected, None)
+    with monkeypatch.context() as patched:
+        patched.setitem(sys.modules, "tomllib", None)
+        assert dc.parse_config_text(text, "toml") == (expected, None)
+        document, problem = dc.parse_config_text("title = \n", "toml")
+    assert document is None
+    assert problem.startswith("does not parse as toml: ")

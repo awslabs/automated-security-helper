@@ -191,7 +191,7 @@ class VersionTemplateManager:
         """
         if sys.version_info >= (3, 11):
             import tomllib
-        else:  # pragma: no cover - exercised only on 3.10
+        else:
             import tomli as tomllib
 
         with (self.project_root / "pyproject.toml").open("rb") as handle:

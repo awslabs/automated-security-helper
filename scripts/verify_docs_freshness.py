@@ -426,9 +426,11 @@ def check_scanners() -> list[str]:
     README, so `bandit` matched the word inside an unrelated code sample.
     normalize_name plus a table-scoped comparison replaces all of it.
     """
+    names = scanner_names()
+    _print_skipped(_docs_checks().load_config_models().skipped_notes())
     return compare_inventories(
         "Scanner",
-        scanner_names(),
+        names,
         read_text(SCANNERS_REFERENCE_MD),
         "Scanner",
         "docs/content/reference/scanners.md",
@@ -922,6 +924,17 @@ def check_doc_cli() -> list[str]:
 _VERBOSE = False
 
 
+def _print_skipped(notes: list[str]) -> None:
+    """What a check could not look at, printed whether or not --verbose is set.
+
+    A plugin module that does not import (an optional extra that is not installed)
+    is not a docs finding, but a check that passes without having seen its plugins
+    has to say so.
+    """
+    for note in notes:
+        print(f"        skipped: {note}")
+
+
 def check_doc_env_vars() -> list[str]:
     notes: list[str] | None = [] if _VERBOSE else None
     findings = _docs_checks().check_env_vars(collect_md_files(), REPO_ROOT, notes=notes)
@@ -931,10 +944,12 @@ def check_doc_env_vars() -> list[str]:
 
 
 def check_doc_config_blocks() -> list[str]:
-    return [
-        str(f)
-        for f in _docs_checks().check_config_blocks(collect_md_files(), REPO_ROOT)
-    ]
+    notes: list[str] = []
+    findings = _docs_checks().check_config_blocks(
+        collect_md_files(), REPO_ROOT, notes=notes
+    )
+    _print_skipped(notes)
+    return [str(f) for f in findings]
 
 
 def check_doc_python_blocks() -> list[str]:
@@ -965,10 +980,12 @@ def check_doc_code_links() -> list[str]:
 
 
 def check_doc_option_tables() -> list[str]:
-    return [
-        str(f)
-        for f in _docs_checks().check_option_tables(collect_md_files(), REPO_ROOT)
-    ]
+    notes: list[str] = []
+    findings = _docs_checks().check_option_tables(
+        collect_md_files(), REPO_ROOT, notes=notes
+    )
+    _print_skipped(notes)
+    return [str(f) for f in findings]
 
 
 # ---------------------------------------------------------------------------

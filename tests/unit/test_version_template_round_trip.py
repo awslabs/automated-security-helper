@@ -270,3 +270,23 @@ class TestTheRoundTripCheckCanFail:
             "committed doc. If it does not, the comparison is not reading what it "
             "believes it is reading."
         )
+
+
+class TestPackagedRelease:
+    """``packaged_release`` reads ``[tool.commitizen] version`` with either parser."""
+
+    def test_both_parsers_read_the_commitizen_version(self, monkeypatch):
+        """tomllib on 3.11 and later, tomli on 3.10: both arms, on one interpreter.
+
+        The 3.10 arm is reached here by reporting 3.10 for the one call and giving
+        it a ``tomli`` module, which has tomllib's API (tomllib is tomli, moved into
+        the standard library). On the 3.10 cell of the unit-test matrix both calls
+        take that arm with the real tomli.
+        """
+        manager = VersionTemplateManager(REPO_ROOT)
+        expected = _packaged_version()
+        assert manager.packaged_release() == expected
+        with monkeypatch.context() as patched:
+            patched.setattr(sys, "version_info", (3, 10, 0, "final", 0))
+            patched.setitem(sys.modules, "tomli", tomllib)
+            assert manager.packaged_release() == expected

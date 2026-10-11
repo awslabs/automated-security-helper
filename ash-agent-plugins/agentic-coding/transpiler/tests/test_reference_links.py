@@ -200,7 +200,7 @@ def test_the_cut_is_the_last_break_that_fits():
 
 def test_a_byte_limit_counts_multibyte_characters():
     text = "# T\n\n" + "é" * 10 + "\n\n" + "é" * 10 + "\n"
-    size = lambda s: len(s.encode("utf-8"))  # noqa: E731
+    size = lambda s: len(s.encode("utf-8"))
     cut = _truncate_markdown(text, 30, None, size)
     assert size(cut) <= 30
     assert cut == "# T\n\n" + "é" * 10
