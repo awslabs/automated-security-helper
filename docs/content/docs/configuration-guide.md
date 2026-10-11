@@ -444,63 +444,68 @@ a config file inside the scanned tree, only installed modules are imported; see
 ## Settings a repository's config cannot choose
 
 ASH reads its configuration from the repository it scans unless `--config` names a
-file elsewhere. When any file the configuration was built from is inside the scanned
-tree (a discovered `.ash/.ash.yaml`, a `--config` path inside the tree, an `extends`
-base, or the file `ASH_CONFIG` names), a few settings are limited, because they decide
-what ASH installs, imports or hands a scanner as its own configuration. "Inside the
-scanned tree" here means inside any git checkout, found from the file's own path and
-its resolved path, or inside the source directory when the source directory is
-outside a checkout. A checkout is something other people can push to, so this
-includes a config file, tool config or plugin kept in a checkout of your own, such
-as an ops or dotfiles repository. Pass `ash_plugin_modules` and the sandbox
-settings with `--ash-plugin-modules` or `--config-overrides` instead, or keep the
-config file outside every checkout.
+file elsewhere. A few settings decide what ASH installs, imports or hands a scanner
+as its own configuration, so they are limited when someone other than the operator
+could have written them. Two terms are used below:
+
+- **Repository-written**: inside any git checkout, or inside the source directory
+  when that is outside every checkout. A checkout is something other people can push
+  to, so this includes a checkout of your own, such as an ops or dotfiles
+  repository. Under the MCP server, a file any MCP client delivered counts too:
+  everything under the MCP workspace root (`$ASH_MCP_WORKSPACE_ROOT`, by default
+  `~/.cache/ash-mcp/`) except each session's `config/` directory, which only the
+  server writes.
+- **The scanned tree**: the source directory, or the outermost git checkout holding
+  it.
+
+A file is judged by the path as written, relative to the source directory, by the
+file it resolves to, and by every symlink resolving it follows, so a symlink the
+scanned repository planted counts where it sits and where it points, and so does a
+path of your own that leads through one.
+
+A config is limited when any file it was built from is repository-written: a
+discovered `.ash/.ash.yaml`, a `--config` path, an `extends` base, or the file
+`ASH_CONFIG` names. Under the MCP server, a config file a client delivered (an upload
+or a file in a delivered tree, named as `config_path`) is limited the same way,
+wherever it is. Pass `ash_plugin_modules` and the sandbox settings with
+`--ash-plugin-modules` or `--config-overrides` instead, or keep the config file
+outside every checkout.
 
 A file that one of the path settings below names is judged by who named it:
 
 - **Named by the operator**, with `--config-overrides`, in a config file outside the
   scanned tree, or through an environment variable such as `TRIVY_IGNOREFILE`: it is
-  passed to the tool unless it is inside the scanned tree itself (the source
-  directory, or the outermost git checkout holding it) or an MCP client delivered
+  passed to the tool unless it is inside the scanned tree or an MCP client delivered
   it. A tool config or ignore file kept in an ops repository works.
-- **Named by a config file inside the scanned tree**, or found by name in the source
-  directory: it is passed only from outside every git checkout and the scanned
-  directory, so the repository cannot point a tool at a file in someone's checkout.
+- **Named by a config inside the scanned tree or one an MCP client delivered**, or
+  found by name in the source directory: it is passed only when the file is not
+  repository-written, so the repository cannot point a tool at a file in someone's
+  checkout.
 
 When the operator's config file extends one inside the scanned tree, only the paths
 the operator's file writes itself count as the operator's. An MCP client's
 `config_overrides`, and a session profile its `select_profile` `patch_ops` or
-`override_yaml` changed, count as the client's. Either way, a file is judged by the
-path as
-written, relative to the source directory, by the file it resolves to, and by every
-symlink resolving it follows, so a symlink the scanned repository planted counts as
-inside the tree wherever it points, and so does a path of your own that leads
-through one.
-
-Under the MCP server, a config file a client delivered (an upload or a file in a
-delivered tree, named as `config_path`) is limited the same way, wherever it is. A
-file any MCP client delivered also counts as inside the scanned tree for the path
-and module checks below: everything under the MCP workspace root
-(`$ASH_MCP_WORKSPACE_ROOT`, by default `~/.cache/ash-mcp/`) except each session's
-`config/` directory, which only the server writes.
+`override_yaml` changed, count as the client's.
 
 | Setting | Limit |
 |---|---|
 | `scanners.<name>.options.tool_version`, `converters.jupyter.options.tool_version` | Must be a PEP 440 version specifier set such as `>=1.2,<2` or `==1.4.1`. This applies from every source, including `--config-overrides`. Any other value is replaced by the scanner's default constraint. |
 | `scanners.opengrep.options.version` | Must be a release tag such as `v1.15.1`, from every source. Any other value is replaced by the pinned version. |
-| `ash_plugin_modules` | From a config file inside the scanned tree, an entry is imported only if it names an installed module that Python finds outside the scanned tree. An entry that is not importable, or that would be imported from a file in the tree, is skipped. A virtualenv inside a git checkout counts as inside it, so a module installed there is skipped too; the warning gives the module's location and the checkout. |
+| `ash_plugin_modules` | From a repository-written config, an entry is imported only if it names an installed module that Python finds in a location that is not repository-written. An entry that is not importable, or that would be imported from such a location, is skipped. A virtualenv inside a git checkout counts as inside it, so a module installed there is skipped too; the warning gives the module's location and the checkout. |
 | `scanners.checkov.options.config_file`, `scanners.ferret-scan.options.config_file` | Passed to the tool by the rule above. The same applies to the `.checkov.yaml` and `ferret.yaml` files these scanners look for by name. ferret-scan then uses its bundled config. checkov and ferret-scan also read such a file from their working directory on their own, so ASH runs both from the filesystem root and always passes ferret-scan a `--config`; finding paths are unchanged. |
-| `scanners.detect-secrets.options.scan_settings` plugins and filters | An entry that names a file (`file://...`) is kept by the rule above. This includes entries read from a baseline file, which count as named inside the scanned tree. detect-secrets' built-in plugins and filters are unaffected. |
+| `scanners.detect-secrets.options.scan_settings` plugins and filters | An entry that names a file (`file://...`) is kept by the rule above. Entries read from a baseline file count as named inside the scanned tree. detect-secrets' built-in plugins and filters are unaffected. |
+| `scanners.detect-secrets.options.baseline_file` | A baseline an MCP client delivered is not read. Under a sandbox, a baseline outside the source tree is read only when `sandbox.read_path_scanners` names detect-secrets and the file is inside a `sandbox.extra_read_paths` entry. |
 | trivy-repo's ignore file and secret config | trivy-repo always gets `--ignorefile` and `--secret-config`, so trivy does not read a `.trivyignore` or `trivy-secret.yaml` from the scanned repository. `scanners.trivy-repo.options.ignore_file` and `secret_config_file`, or `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`, name the files to use; each is passed by the rule above, and a file that sets nothing is passed otherwise. |
-| `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`, `sandbox.env_scanners` | Not used from a config file inside the scanned tree: these grant sandbox access. A `network_scanners` list still removes network from the scanners it does not name. See [Scanner sandbox](scanner-sandbox.md). |
-| `sandbox.mode` | From a config file inside the scanned tree, applies only when nothing the operator set turns the sandbox on. When `--sandbox`, `ASH_CONFIG` or the operator's config file turns it on, this cannot turn it off or switch backends. |
+| `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`, `sandbox.env_scanners` | Not used from a repository-written config: these grant sandbox access. A `network_scanners` list still removes network from the scanners it does not name. See [Scanner sandbox](scanner-sandbox.md). |
+| `sandbox.mode` | From a repository-written config, applies only when nothing the operator set turns the sandbox on. When `--sandbox`, `ASH_CONFIG` or the operator's config file turns it on, this cannot turn it off or switch backends. |
 
 Each setting that is not honored is logged once, as a warning that names it.
 
 To set any of these for a repository you trust, use `--config-overrides`,
-`--ash-plugin-modules`, or a config file outside the scanned tree. A file path set
-that way still has to point outside the tree. Under `--sandbox`, a file outside the
-system paths the sandbox already reads also has to be listed in
+`--ash-plugin-modules`, or a config file outside every checkout and the scanned
+directory. A tool config path set that way follows the operator's rule above: it
+may be in a checkout of your own, but not inside the scanned tree. Under `--sandbox`,
+a file outside the system paths the sandbox already reads also has to be listed in
 `sandbox.extra_read_paths`, or the tool cannot open it and the scanner reports an
 error.
 
@@ -680,7 +685,7 @@ detect-secrets baseline rather than in ASH options. Point `baseline_file` at one
 rely on the discovery described below. The `scan_settings` option takes the same
 structure as a baseline's own settings block if you would rather inline it.
 
-If you have been using detect-secrets separately and have an existing baseline file you would like to use with ASH, ASH can automatically use it. ASH automatically searches your current directory and the ```.ash``` directory for a ```.secrets.baseline``` file. For more details on baseline files, refer to the detect-secrets [documentation](https://github.com/Yelp/detect-secrets/tree/master).
+If you have been using detect-secrets separately and have an existing baseline file you would like to use with ASH, ASH can automatically use it. ASH automatically searches the source directory and its ```.ash``` directory for a ```.secrets.baseline``` file; a relative `baseline_file` is taken from the source directory too. For more details on baseline files, refer to the detect-secrets [documentation](https://github.com/Yelp/detect-secrets/tree/master).
 
 ### Checkov
 

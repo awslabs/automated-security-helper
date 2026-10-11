@@ -85,7 +85,8 @@
   In workspace mode, an operator `--config` that does not validate is now refused
   (exit 3) even for projects that have their own config file, because the sandbox
   mode is read from it. Under a sandbox, a detect-secrets `baseline_file` outside the
-  source tree is read only when `sandbox.read_path_scanners` names detect-secrets,
+  source tree is read only when `sandbox.read_path_scanners` names detect-secrets
+  and the file is inside a `sandbox.extra_read_paths` entry,
   and a scanner whose config section is renamed to another scanner's name is not run
   sandboxed.
 
@@ -119,19 +120,21 @@
 
 ### Behavior changes
 
-- **A config file inside the scanned tree can no longer choose what ASH installs,
+- **A repository-written config file can no longer choose what ASH installs,
   imports or hands a scanner as its own configuration.** It applies to a discovered
-  `.ash/.ash.yaml`, a `--config` inside the tree, an `extends` base, or `ASH_CONFIG`:
+  `.ash/.ash.yaml`, a `--config` path, an `extends` base, or `ASH_CONFIG`, when the
+  file is repository-written (defined below):
   - `tool_version` (bandit, checkov, semgrep, ferret-scan, the jupyter converter)
     must be a PEP 440 version specifier set such as `>=1.2,<2`, from any source.
     Any other value is replaced by the default, with a warning naming the key.
     `scanners.opengrep.options.version` likewise has to be a release tag.
   - `ash_plugin_modules` entries such a file adds are imported only when they name
-    an installed module outside the tree. `--ash-plugin-modules`,
-    `--config-overrides` and a config file outside the tree are unaffected.
+    an installed module in a location that is not repository-written.
+    `--ash-plugin-modules`, `--config-overrides` and a config file that is not
+    repository-written are unaffected.
   - checkov's and ferret-scan's `config_file`, the `.checkov.yaml` and `ferret.yaml`
     files they find by name, and detect-secrets plugins and filters that name a
-    file are passed to the tool only when the file is outside the scanned tree.
+    file are passed to the tool by the rule below.
     checkov and ferret-scan now run from the filesystem root, because each reads
     its config file from its working directory itself, and ferret-scan always
     gets a `--config`; the paths in their findings are unchanged.
@@ -139,26 +142,26 @@
     scanned repository, either of which could remove findings from the report. It
     gets an explicit `--ignorefile` and `--secret-config`: the
     `scanners.trivy-repo.options.ignore_file` / `secret_config_file` options, or
-    `TRIVY_IGNOREFILE` / `TRIVY_SECRET_CONFIG`, when that file is outside the scanned
-    tree, otherwise one that sets nothing. A repository that relied on either file
+    `TRIVY_IGNOREFILE` / `TRIVY_SECRET_CONFIG`, by the rule below, otherwise one that
+    sets nothing. A repository that relied on either file
     now sees those findings, with a warning naming the file. Under `--sandbox`, an
     operator file outside the system paths also has to be listed in
     `sandbox.extra_read_paths`.
   - ferret-scan's `tool_version` no longer accepts a bare version or `latest`;
     write `==1.2.3`, or leave it unset for the supported range.
 
-  For these checks and the sandbox grants alike, a file counts as inside the scanned
-  tree when it is inside any git checkout, by its own path or its resolved path, or
-  inside the source directory when that is outside a checkout. A tool config or
+  For these checks and the sandbox grants alike, a file is repository-written when it
+  is inside any git checkout, by its own path or its resolved path, or inside the
+  source directory when that is outside a checkout. "The scanned tree" is narrower:
+  the source directory, or the outermost git checkout holding it. A tool config or
   ignore file a setting names (checkov's and ferret-scan's `config_file`,
   detect-secrets `file://` plugins and filters, trivy-repo's `ignore_file` and
   `secret_config_file`, `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`) is judged by
   who named it. One the operator named, with `--config-overrides`, in a config file
   outside the scanned tree, or through `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG`,
-  is passed unless it is inside the scanned tree itself (the source directory, or
-  the outermost checkout holding it) or an MCP client delivered it, so one kept in
-  an ops repository works. One a config inside the scanned tree names has to be
-  outside every git checkout as well. When the operator's config file extends one
+  is passed unless it is inside the scanned tree or an MCP client delivered it, so
+  one kept in an ops repository works. One a config inside the scanned tree names
+  has to be outside every git checkout as well. When the operator's config file extends one
   inside the tree, only the paths the operator's file writes itself count as the
   operator's. An MCP client's `config_overrides`, and a session profile its
   `select_profile` patch changed, are the client's, not the operator's. A
@@ -171,7 +174,9 @@
 
   Under the MCP server, a config a client delivered is limited the same way, and a
   file any MCP client delivered (under the MCP workspace root, except each session's
-  `config/` directory) counts as inside the scanned tree for these checks. The
+  `config/` directory) counts as repository-written for these checks, and a
+  detect-secrets baseline a client delivered, named or found by name, is not read.
+  The
   workspace tools' `config_overrides` are checked against the session config's
   `runtime_overrides` allowlist, as `select_profile`'s `patch_ops` and
   `override_yaml` are, and are refused while runtime overrides are off (the
@@ -670,9 +675,10 @@
 
   **Which database is checked.** ASH resolves each tool's cache directory the way the
   tool does on the host: `GRYPE_DB_CACHE_DIR` or `TRIVY_CACHE_DIR`, else
-  `$XDG_CACHE_HOME` when it is an absolute path (trivy reads it only on Linux), else
-  `~/.cache` on Linux, `~/Library/Caches` on macOS and the local application-data
-  directory on Windows. In every run, sandboxed or not, it names that one directory
+  `$XDG_CACHE_HOME` when it is an absolute path (trivy reads it only on Linux, and
+  uses `$TMPDIR/trivy` for a relative one), else `~/.cache` on Linux,
+  `~/Library/Caches` on macOS and the local application-data directory on Windows
+  (its `cache` subdirectory for grype). In every run, sandboxed or not, it names that one directory
   to the scan, to the age check and to the database update it runs before a
   sandboxed online scan, so all three read the same database. The age check and the update run from a directory
   outside the scanned tree with an empty config file ASH ships, so a `trivy.yaml` or
@@ -782,7 +788,8 @@
   directory, although the option's description says the source directory. So
   `ash --source-dir repo` run from elsewhere missed the repository's baseline, and
   used one in the working directory if there was one. They are now taken from the
-  source directory.
+  source directory. A baseline that is not a regular file is skipped with a
+  warning.
 
 - `ash dependencies install --tool ArchiveConverter` works again. Building each plugin
   from its own config section renamed the archive converter's selector to `archive`,

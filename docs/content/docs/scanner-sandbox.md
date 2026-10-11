@@ -62,7 +62,8 @@ it needs.
   update`, and `trivy image --download-db-only` plus, for a misconfiguration scan,
   trivy's checks bundle. Nothing from the scanned repository reaches these, or ASH's
   check of the database's age after the scan: they run from a directory outside the
-  scanned tree, with an empty config file ASH ships, against the cache directory the
+  scanned tree or any other checkout, with an empty config file ASH ships, against
+  the cache directory the
   scan reads. A lock in that cache directory makes
   concurrent scans take turns, and each tool is updated once per scan. The scanners
   then run with their own update turned off (`--skip-db-update`,
@@ -271,8 +272,11 @@ cache path a scanner's options name is never mounted.
 ASH itself reads some files that scanner options name, outside the sandbox, and
 passes their contents on. detect-secrets' `baseline_file` is one. Under a sandbox,
 ASH reads such a file only when it is inside the source tree, or when
-`sandbox.read_path_scanners` names the scanner. Otherwise it skips the file with a
-warning, and the candidates the baseline would have marked are reported.
+`sandbox.read_path_scanners` names the scanner and the file is inside one of the
+operator's `sandbox.extra_read_paths` entries, the same containment a path the
+scanner reads itself gets. Otherwise it skips the file with a warning, and the
+candidates the baseline would have marked are reported. A baseline an MCP client
+delivered is not read at all.
 
 A config file is judged by the name it was found under as well as by the file it
 resolves to, so a `.ash/.ash.yaml` that is a symlink out of the scanned directory
@@ -503,7 +507,7 @@ tool's unpack directory (below). Nothing runs from the source tree, the output a
 results directories, the host caches, the other private caches or the private
 `TMPDIR`, even where a tool path contains one of them (a repository checked out under
 `/opt`), so a program the scanner writes, or one the scanned repository ships, cannot
-be started. A tool path inside the scanned tree, such as a virtualenv ASH itself runs
+be started. A tool path inside the source tree, such as a virtualenv ASH itself runs
 from, stays executable.
 
 Mach service lookups are limited to a list measured on the macOS 14, 15 and 26 CI

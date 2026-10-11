@@ -387,15 +387,17 @@ lists in `sandbox.read_path_scanners` or `sandbox.env_scanners`.
 
 **Fix**
 
-Name the scanner:
+Name the scanner, and put the file's directory in `sandbox.extra_read_paths`:
 
 ```bash
-ash --sandbox auto --config-overrides 'sandbox.read_path_scanners=[detect-secrets]'
+ash --sandbox auto \
+  --config-overrides 'sandbox.read_path_scanners=[detect-secrets]' \
+  --config-overrides 'sandbox.extra_read_paths=[/opt/baselines]'
 ```
 
-That is all detect-secrets needs, because ASH reads the baseline itself. For a
-plugin scanner that reads the path inside the sandbox, the path also has to be
-inside the source tree or a `sandbox.extra_read_paths` entry before it is mounted:
+A path outside the source tree has to be inside a `sandbox.extra_read_paths` entry
+whether ASH reads it, as it does detect-secrets' baseline, or a plugin scanner
+reads it inside the sandbox:
 
 ```bash
 ash --sandbox auto \
