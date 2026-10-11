@@ -331,7 +331,7 @@ class ReportPhase(EnginePhase):
         )
 
         # Account for every requested format that will produce nothing. Checked
-        # against all_reporter_instances rather than base_filtered so that a
+        # against all_reporter_instances rather than enabled_reporters so that a
         # reporter which exists but is disabled is reported as disabled instead of
         # as nonexistent.
         _log_unsatisfied_output_formats(

@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Reporters that contact AWS run, and check their dependencies, only when the operator enabled them.
 
-The Security Hub, CloudWatch Logs, S3 and Bedrock summary reporters all default
-to ``enabled: True``. Once ``ash_aws_plugins`` is imported into a process -- by
+The Security Hub, CloudWatch Logs, S3 and Bedrock summary reporters defaulted
+to ``enabled: True`` (now ``False``). Once ``ash_aws_plugins`` is imported -- by
 an earlier scan, by an MCP server that loaded it once, or by any test -- an
 in-process scan builds each of them and calls ``validate_plugin_dependencies``,
 and that already contacts AWS with whatever credentials the host has: Security

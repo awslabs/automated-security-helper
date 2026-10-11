@@ -437,18 +437,15 @@ def unsupported_reporter_names(
     Answered from declarations and config alone -- no model, no results file, no
     scan, and deliberately no dependency validation.
 
-    That last exclusion is not an optimisation. ``SecurityHubReporter`` and
-    ``BedrockSummaryReporter`` call AWS inside
-    ``validate_plugin_dependencies``, so validating here would put live API calls
-    on the path *before every workspace scan* -- latency and log noise on a run
-    they cannot affect, since a reporter whose dependencies are unsatisfied is
-    already skipped by :func:`emit_workspace_reports`. It also means the two
-    answers differ in one narrow case, on purpose: a reporter that is enabled,
-    declares ``UNSUPPORTED``, and has unsatisfied dependencies refuses the run
-    here rather than being quietly skipped later. That is the right direction --
-    the operator's configuration asks for something the format cannot do, and
-    telling them so does not depend on whether an unrelated credential happens to
-    be present.
+    That last exclusion is not an optimisation. The AWS reporters call AWS inside
+    ``validate_plugin_dependencies`` (Security Hub ``DescribeHub``, the others
+    STS), so validating here would put live API calls on the path *before every
+    workspace scan* -- latency and log noise on a run they cannot affect.
+    :func:`emit_workspace_reports` checks dependencies only for a reporter that
+    emits a workspace-level artefact, so an enabled ``UNSUPPORTED`` reporter is
+    refused here and recorded as unsupported there, whether or not its
+    dependencies are satisfied: whether the format can express a workspace does
+    not depend on a credential being present.
 
     Why a pre-flight at all:
 

@@ -430,11 +430,11 @@ def isolate_from_aws(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
     """Leave botocore no credentials and no reachable endpoint for the scan.
 
     Once a test in the process has imported ``ash_aws_plugins``, its reporters are
-    registered, and the report phase builds each one and calls
-    ``validate_plugin_dependencies``. The Security Hub reporter defaults to
-    enabled and calls ``DescribeHub`` there with whatever credentials the host
-    has. Without credentials botocore stops before sending anything; the loopback
-    endpoint is a second stop in case some provider still finds one.
+    registered, and the report phase builds each one. They default to disabled,
+    so none calls ``validate_plugin_dependencies`` (Security Hub's ``DescribeHub``,
+    the others' STS) unless a test enables it or a regression turns one back on;
+    this covers both. Without credentials botocore stops before sending anything;
+    the loopback endpoint is a second stop in case some provider still finds one.
     """
     import os
 
