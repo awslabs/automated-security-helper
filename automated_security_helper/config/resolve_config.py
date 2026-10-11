@@ -12,7 +12,9 @@ from automated_security_helper.config.client_config_policy import (
 )
 from automated_security_helper.config.config_sources import (
     RefuseEnv,
+    ResolvedConfigDocument,
     _resolve_dict_key,
+    deep_merge,
     default_confinement_root,
     describe_config_path,
     discover_config_source,
@@ -39,7 +41,10 @@ from automated_security_helper.config.sandbox_grants import (
     files_inside,
     scanned_trees,
 )
-from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.core.exceptions import (
+    ASHConfigSourceError,
+    ASHConfigValidationError,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -216,6 +221,7 @@ def resolve_config(
     untrusted_config: bool = False,
     client_config_policy: Optional[ClientConfigRules] = None,
     remote_client: bool = False,
+    overlay_config_path: Path | str | None = None,
 ) -> AshConfig:
     """
     Load configuration from file or return default configuration.
@@ -235,8 +241,8 @@ def resolve_config(
             ``config/sandbox_grants.py``. Defaults to ``source_dir``, or the
             working directory when that is None too.
         trusted_config_path: The operator's own config file, when the config
-            actually selected can replace it (workspace mode's default config,
-            which a project's own config file replaces). Used in place of the
+            actually selected is another file (workspace mode's operator config,
+            for a project with a config file of its own). Used in place of the
             defaults as the trusted base the grants come from, unless it is
             inside the scanned tree as well.
         untrusted_config: The selected config file was written by the caller,
@@ -260,6 +266,27 @@ def resolve_config(
             See "Environment variables" in ``config/config_sources.py``. The
             operator's own files (``trusted_config_path``, ``ASH_CONFIG``) are
             read as before.
+        overlay_config_path: A config file merged over the selected one before
+            it is validated, by the ``extends`` rule with this file as the child
+            (``config_sources.deep_merge``). The file is resolved on its own
+            first, ``extends`` and ``patch`` included, so it means what it means
+            as a trusted base or as a project's only config; then every field
+            the result holds replaces the selected config's, mappings merge key
+            by key, and a list it holds replaces the selected config's list
+            whole. Its ``patch`` therefore does not reach the selected config: a
+            key it removes is left to the selected config, and an ``add`` at
+            ``/global_settings/suppressions/-`` adds to its own list, which then
+            replaces the selected config's. ``config_overrides`` apply after it.
+            Where the default config would be used instead of a selected file
+            (none was found, or it could not be loaded), this file is used
+            alone. Workspace mode passes the
+            operator's ``--config`` here for a project that has a config of its
+            own (``workspace/resolver.py``), and the same file as
+            ``trusted_config_path``, so a field the operator set is its trusted
+            value. Its files join the chain: one inside the scanned tree, or one
+            an MCP client delivered, is checked and confined as any other file of
+            the chain is. Refused when it is missing or does not validate on its
+            own, and not combined with ``untrusted_config``.
 
     A file of the chain an MCP client delivered
     (``cli/mcp/sandbox.config_is_client_supplied``) is confined as a file inside
@@ -270,8 +297,18 @@ def resolve_config(
     Returns:
         The resolved AshConfig object
     """
+    if overlay_config_path is not None and untrusted_config:
+        # untrusted_config treats every file of the chain as the caller's, which
+        # would include the overlay, the operator's own file.
+        raise ValueError("overlay_config_path cannot be combined with untrusted_config")
     chain: List[Path] = []
     documents: Dict[Path, Any] = {}
+    refuse_env = env_refused_for(remote_client)
+    overlay = (
+        _load_overlay(overlay_config_path, source_dir, permit_base, refuse_env)
+        if overlay_config_path is not None
+        else None
+    )
     config = _resolve_config(
         config_path,
         source_dir,
@@ -280,7 +317,8 @@ def resolve_config(
         permit_base,
         chain,
         documents,
-        refuse_env=env_refused_for(remote_client),
+        refuse_env=refuse_env,
+        overlay=overlay,
     )
     if config is None:
         return config
@@ -412,6 +450,59 @@ def _load_operator_config(
     return config, list(document.chain)
 
 
+def _load_overlay(
+    overlay_config_path: Path | str,
+    source_dir: Path | str | None,
+    permit_base: Optional[Callable[[Path], bool]],
+    refuse_env: RefuseEnv,
+) -> ResolvedConfigDocument:
+    """The overlay file's merged document, read as the operator's config is.
+
+    Refused rather than skipped when it is missing, cannot be read, or does not
+    validate on its own: the caller asked for its fields to be final, and
+    dropping the file would scan with the project's values for them instead.
+    """
+    path = Path(overlay_config_path)
+    if not path.is_file():
+        raise ASHConfigSourceError(
+            f"Config file '{describe_config_path(path)}' does not exist or is not "
+            "a file."
+        )
+    try:
+        document = resolve_config_document(
+            path,
+            confine_to=default_confinement_root(path, source_dir),
+            permit_base=permit_base,
+            refuse_env=refuse_env,
+        )
+    except ASHConfigValidationError:
+        raise
+    except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as e:
+        # json.JSONDecodeError is a ValueError.
+        raise ASHConfigSourceError(
+            f"Config file '{describe_config_path(path)}' could not be read: {e}"
+        ) from e
+    try:
+        AshConfig.model_validate(document.data, strict=True)
+    except ValidationError as e:
+        raise ASHConfigValidationError(
+            f"Configuration validation failed for '{describe_config_path(path)}': "
+            f"{str(e)}. Run 'ash config lint' to identify and fix issues."
+        ) from e
+    return document
+
+
+def _overlaid(
+    overlay: ResolvedConfigDocument,
+    chain: List[Path],
+    documents: Dict[Path, Any],
+) -> AshConfig:
+    """The overlay file alone, in place of the default config."""
+    chain.extend(overlay.chain)
+    documents.update(overlay.documents)
+    return AshConfig.model_validate(overlay.data, strict=True)
+
+
 def _resolve_config(
     config_path: Path | str | None,
     source_dir: Path | str | None,
@@ -421,13 +512,27 @@ def _resolve_config(
     chain: List[Path],
     documents: Dict[Path, Any],
     refuse_env: Optional[RefuseEnv] = None,
+    overlay: Optional[ResolvedConfigDocument] = None,
 ) -> AshConfig:
     """resolve_config without the sandbox confinement.
 
     Appends every file read to ``chain``, and each file's parsed document to
     ``documents``. ``refuse_env`` decides which files of the chain resolve no
-    ``!ENV`` (``config_sources``).
+    ``!ENV`` (``config_sources``). ``overlay`` is ``overlay_config_path``'s
+    document, merged over the selected file's, and used alone wherever the
+    default config would be returned.
     """
+
+    def fallback(default: Optional[AshConfig]) -> Optional[AshConfig]:
+        # The default config, or the overlay alone in its place: falling back to
+        # the defaults would drop the fields the overlay makes final.
+        if overlay is None or default is None:
+            return default
+        return _overlaid(overlay, chain, documents)
+
+    # The overlay's file, once it has been merged into the selected file's
+    # document; named in a validation error.
+    layered_over: Optional[Path] = None
     try:
         # Start with default config
         config = get_default_config() if fallback_to_default else None
@@ -443,6 +548,7 @@ def _resolve_config(
             ASH_LOGGER.verbose(
                 "source_dir and config_path are both null, returning the default config"
             )
+            config = fallback(config)
             # Apply overrides to default config if provided
             if config_overrides:
                 return apply_config_overrides(config, config_overrides)
@@ -483,6 +589,7 @@ def _resolve_config(
                 ASH_LOGGER.verbose(
                     "Configuration file not found or provided, using default config"
                 )
+                config = fallback(config)
                 # Apply overrides to default config if provided
                 if config_overrides:
                     return apply_config_overrides(config, config_overrides)
@@ -501,6 +608,7 @@ def _resolve_config(
                 ASH_LOGGER.warning(
                     f"Configuration file not found: {config_path.as_posix()}"
                 )
+                config = fallback(config)
                 # Apply overrides to default config if provided
                 if config_overrides and config:
                     return apply_config_overrides(config, config_overrides)
@@ -518,9 +626,19 @@ def _resolve_config(
                 permit_base=permit_base,
                 refuse_env=refuse_env,
             )
-            config = AshConfig.model_validate(document.data, strict=True)
+            data = document.data
+            if overlay is not None and isinstance(data, dict):
+                # A document that is not a mapping is left as it is, so its
+                # validation error is still raised rather than replaced by the
+                # overlay's content.
+                data = deep_merge(data, overlay.data)
+                layered_over = overlay.chain[-1]
+            config = AshConfig.model_validate(data, strict=True)
             chain.extend(document.chain)
             documents.update(document.documents)
+            if overlay is not None:
+                chain.extend(overlay.chain)
+                documents.update(overlay.documents)
             ASH_LOGGER.debug(f"Loaded config from file: {config_path}")
 
             # Apply config overrides if provided
@@ -533,12 +651,20 @@ def _resolve_config(
             ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
             if fallback_to_default:
                 ASH_LOGGER.warning("Using default configuration due to file load error")
+                config = fallback(config)
                 # Apply overrides to default config if provided
                 if config_overrides and config:
                     config = apply_config_overrides(config, config_overrides)
                 config._resolution_warnings.append(
                     f"Failed to load configuration file: {str(e)}. "
-                    "Using default configuration — suppressions and custom settings are NOT active."
+                    + (
+                        "Using default configuration — suppressions and custom "
+                        "settings are NOT active."
+                        if overlay is None
+                        else f"Using {describe_config_path(overlay.chain[-1])} "
+                        "alone — the file's own suppressions and settings are NOT "
+                        "active."
+                    )
                 )
                 return config  # Return default config on file error
             else:
@@ -546,9 +672,14 @@ def _resolve_config(
 
         except ValidationError as e:
             ASH_LOGGER.error(f"Configuration validation failed: {str(e)}")
+            layered = (
+                f" with '{describe_config_path(layered_over)}' layered over it"
+                if layered_over is not None
+                else ""
+            )
             raise ASHConfigValidationError(
                 f"Configuration validation failed for "
-                f"'{describe_config_path(config_path)}': {str(e)}. "
+                f"'{describe_config_path(config_path)}'{layered}: {str(e)}. "
                 "Run 'ash config lint' to identify and fix issues."
             ) from e
 
@@ -560,7 +691,7 @@ def _resolve_config(
         # Always return a valid config, even in case of unexpected errors
         if fallback_to_default:
             ASH_LOGGER.error(f"Unexpected error in resolve_config: {str(e)}")
-            config = get_default_config()
+            config = fallback(get_default_config())
             # Apply overrides to default config if provided
             if config_overrides:
                 return apply_config_overrides(config, config_overrides)
