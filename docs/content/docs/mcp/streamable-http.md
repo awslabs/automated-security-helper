@@ -341,14 +341,14 @@ Workspaces live under `ASH_MCP_WORKSPACE_ROOT` (defaults to `$XDG_CACHE_HOME/ash
 
 | Transport | The session ends |
 | --- | --- |
-| streamable-HTTP, stateful | when the client's `DELETE` is answered (the removal is complete before the response is sent), and for every session the server issued when the server shuts down |
+| streamable-HTTP, stateful | when the client's `DELETE` is answered (the removal is complete before the response is sent), when the MCP SDK answers 404 for a session it discarded (after its 30-minute idle timeout, say) and a client asks about it again, and for every session the server issued when the server shuts down |
 | sse | when the event stream closes |
 | stdio | when the last stdio server sharing the workspace root exits (every stdio server of one user shares `__default__`, so one server's exit leaves it in place while another runs) |
 | streamable-HTTP, `--stateless-http` | never visibly: see the sweep below |
 
 A session that ends while one of its scans runs keeps its tree until that scan returns.
 
-The server cannot see every end: a stateless server has no session at all, and a stateful session the MCP SDK closes for being idle (after 30 minutes) sends nothing ASH observes. So every HTTP server also sweeps the workspace root, before it answers its first request and then at most every five minutes, and removes the workspace of any session nobody used for longer than `--session-workspace-ttl` seconds (default 86400, 24 hours). Each request that names a session counts as a use. The sweep removes only directories ASH created as session workspaces, each of which carries a `.ash-mcp-session` marker file; it never removes anything else under the root, the stdio session's workspace (its own servers remove it), a symlink, or a workspace a running scan holds. Give `ASH_MCP_WORKSPACE_ROOT` a directory that belongs to ASH alone anyway: session workspaces created before the marker existed are never swept. Servers that share one `ASH_MCP_WORKSPACE_ROOT` sweep each other's idle workspaces by the same rule.
+The server cannot see every end: a stateless server has no session at all, and a stateful session the MCP SDK closes for being idle (after 30 minutes) sends nothing ASH observes unless a client uses its id again. So every HTTP server also sweeps the workspace root, before it answers its first request and then at most every five minutes, and removes the workspace of any session nobody used for longer than `--session-workspace-ttl` seconds (default 86400, 24 hours). Each request that names a session counts as a use. The sweep removes only directories ASH created as session workspaces, each of which carries a `.ash-mcp-session` marker file; it never removes anything else under the root, the stdio session's workspace (its own servers remove it), a symlink, or a workspace a running scan holds. Give `ASH_MCP_WORKSPACE_ROOT` a directory that belongs to ASH alone anyway: session workspaces created before the marker existed are never swept. Servers that share one `ASH_MCP_WORKSPACE_ROOT` sweep each other's idle workspaces by the same rule.
 
 Concurrency:
 

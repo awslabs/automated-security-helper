@@ -30,11 +30,13 @@ When a session ends
 The MCP SDK exposes no stable session-end callback, so the ends are observed
 where ASH can see them: ``http_sessions.SessionBoundary`` calls
 :func:`end_session` when a stateful session's ``DELETE`` is answered, when the
-SDK answers 404 for a session this app issued (it discarded it), when an sse
-event stream closes, and for every session an app issued when the app shuts
-down; ``mcp_server.run_mcp_server`` calls it for the stdio session when the
-server exits. A stateless server sees no end at all, and a stateful session the
-SDK closed for being idle sends no request that ASH could see, so
+SDK answers 404 on its session path for a session this app issued (it discarded
+the session, after its idle timeout for one, and a client asked about it
+again), when an sse event stream closes, and for every session an app issued
+when the app shuts down; ``mcp_server.run_mcp_server`` ends the stdio session
+when the last stdio server sharing the root exits (``StdioServerPresence``). A
+stateless server sees no end at all, and a stateful session the SDK closed for
+being idle that no client asks about again sends nothing ASH could see, so
 :func:`sweep_stale_workspaces` removes workspaces nobody used for longer than a
 TTL, on every HTTP transport.
 

@@ -123,6 +123,23 @@ def _response_header(
     return None
 
 
+def _on_the_sdk_session_path(scope: Scope) -> bool:
+    """True when the SDK handles this request on its session-tracking path.
+
+    The SDK sends a request that names a protocol version outside the
+    ``initialize`` handshake versions to a separate, sessionless path; every
+    other request goes through its session check. The same rule, from the SDK's
+    own list. If the list cannot be read, no request counts, so a 404 never ends
+    a session.
+    """
+    try:
+        from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS
+    except ImportError:
+        return False
+    version = _header(scope, b"mcp-protocol-version")
+    return version is None or version in HANDSHAKE_PROTOCOL_VERSIONS
+
+
 def _canonical_sse_session(raw: Optional[str]) -> Optional[str]:
     """The hex form the SDK issues, for any spelling ``uuid.UUID`` accepts."""
 
@@ -174,11 +191,13 @@ class SessionBoundary:
 
     A session's workspace and bound profile are removed
     (``sessions.end_session``) when this app sees the session end: a stateful
-    session's ``DELETE``, answered only after the removal is complete; an sse
-    event stream finishing; and every session this app issued when it shuts
-    down. Sessions whose end it cannot see -- every stateless one, and a stateful
-    one the SDK closed for being idle -- are removed by the TTL sweep, which runs
-    before the first request is answered and then at most every five minutes.
+    session's ``DELETE``, answered only after the removal is complete; the SDK
+    answering 404 for a stateful session it discarded; an sse event stream
+    finishing; and every session this app issued when it shuts down. Sessions
+    whose end it cannot see -- every stateless one, and a stateful one the SDK
+    closed for being idle that no client asks about again -- are removed by the
+    TTL sweep, which runs before the first request is answered and then at most
+    every five minutes.
     """
 
     def __init__(
@@ -304,23 +323,32 @@ class SessionBoundary:
         return watched
 
     def _watch_stateful(self, scope: Scope, send: Send) -> Send:
-        """Record the ids a stateful app issues, and end one its DELETE ends."""
+        """Record the ids a stateful app issues, and end the ones it ends.
+
+        An id counts as issued only from a successful response: the SDK also
+        sends one on a refused opening request and then discards that session.
+        A session ends here when its ``DELETE`` succeeds, and when the SDK
+        answers 404 for it on its own session path, which it does once it has
+        discarded the session (its idle timeout, for one). A 404 on the newer
+        protocol's path can mean an unknown method, so it ends nothing.
+        """
 
         header = _header(scope, _SESSION_HEADER)
-        ending = (
-            header
-            if scope.get("method") == "DELETE" and header in self._issued
-            else None
-        )
+        known = header if header in self._issued else None
+        deleting = scope.get("method") == "DELETE"
+        session_path = _on_the_sdk_session_path(scope)
 
         async def watched(message: Message) -> None:
             if message.get("type") == "http.response.start":
+                status = int(message.get("status", 0))
                 issued = _response_header(message.get("headers"), _SESSION_HEADER)
-                if ending and 200 <= int(message.get("status", 0)) < 300:
+                if known and deleting and 200 <= status < 300:
                     # Before the response leaves: a client that has its DELETE
                     # answered can rely on the workspace being gone.
-                    await self._end(ending)
-                elif issued:
+                    await self._end(known)
+                elif known and status == 404 and session_path:
+                    await self._end(known)
+                elif issued and 200 <= status < 300:
                     self._issued.add(issued)
             await send(message)
 
