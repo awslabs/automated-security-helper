@@ -464,6 +464,61 @@ def test_a_gitleaksignore_entry_with_a_nul_byte_is_skipped(
     assert _findings(report) == REPORTED
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
+@pytest.mark.parametrize(
+    "file_name, entry",
+    [
+        ("app/a\vb.py", "app/a\vb.py"),
+        ("app/a\u2028b.py", "app/a\u2028b.py"),
+        ("app/a\x1cb.py", "app/a\x1cb.py"),
+        ("app/a\rb.py", "app/a\rb.py"),
+        ("\x1fapp.py", "\x1fapp.py"),
+        ("app/one.py", "app\\one.py"),
+    ],
+    ids=[
+        "vertical tab",
+        "U+2028",
+        "U+001C",
+        "carriage return",
+        "leading U+001F",
+        "backslash",
+    ],
+)
+def test_an_entry_gitleaks_reads_differently_from_python_is_added_back(
+    tmp_path, path_with_gitleaks, file_name, entry
+):
+    """gitleaks splits .gitleaksignore on newlines alone, trims Go's whitespace and
+    turns backslashes into slashes. ASH parsed it with Python's splitlines() and
+    strip(), so these entries hid a finding ASH never re-scanned."""
+    source = tmp_path / "src"
+    _plant_token(source / file_name)
+    (source / ".gitleaksignore").write_text(
+        f"{entry}:github-pat:1\n", encoding="utf-8", newline=""
+    )
+    # The control: gitleaks, reading the tree's file, hides the finding.
+    alone = tmp_path / "alone.sarif"
+    subprocess.run(
+        [
+            "gitleaks",
+            "dir",
+            "--report-format=sarif",
+            f"--report-path={alone}",
+            "--redact=100",
+            "--exit-code=0",
+            "--no-banner",
+            "--",
+            ".",
+        ],
+        cwd=source,
+        check=True,
+        capture_output=True,
+        timeout=120,
+    )
+    assert _raw_findings(json.loads(alone.read_text(encoding="utf-8"))) == set()
+    _, report = _scan_direct(source, tmp_path / "out")
+    assert _findings(report) == {("github-pat", file_name, 1)}
+
+
 def test_an_operator_config_file_still_applies(tmp_path, path_with_gitleaks):
     source = _copy_fixture(tmp_path)
     operator_config = tmp_path / "operator.toml"

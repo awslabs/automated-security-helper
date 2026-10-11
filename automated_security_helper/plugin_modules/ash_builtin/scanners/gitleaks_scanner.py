@@ -188,6 +188,21 @@ _BINARY = getattr(os, "O_BINARY", 0)
 #: the scan: its entries could not all be re-scanned.
 MAX_IGNORE_FILE_BYTES = 32 * 1024 * 1024
 
+#: The characters Go's ``unicode.IsSpace`` reports as space, which
+#: ``strings.TrimSpace`` strips from both ends of each ``.gitleaksignore`` line:
+#: Unicode's White_Space property. Python's ``str.strip()`` strips more (U+001C
+#: to U+001F), so it would read a different file name than gitleaks does.
+_GO_SPACE = (
+    "\t\n\v\f\r \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006"
+    "\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
+)
+
+#: ``bufio.MaxScanTokenSize``. gitleaks reads ``.gitleaksignore`` with a
+#: ``bufio.Scanner``, which stops at the first line it cannot hold with its
+#: newline in a buffer this size; ``AddGitleaksIgnore`` does not check the error,
+#: so the rest of the file is silently not applied.
+_MAX_SCAN_TOKEN = 64 * 1024
+
 #: What gitleaks logs, at WRN, before each ``.gitleaksignore`` line it cannot
 #: parse, which it then quotes. ``_mask_quoted_ignore_entries`` drops the quote.
 INVALID_ENTRY_LOG = "Invalid .gitleaksignore entry"
@@ -216,6 +231,41 @@ def _write_private_copy(source: BinaryIO, destination: Path) -> None:
     )
     with os.fdopen(fd, "wb") as out:
         shutil.copyfileobj(source, out)
+
+
+def gitleaksignore_files(data: bytes) -> List[str]:
+    """The file part of each fingerprint in ``data``, as gitleaks 8.30.1 reads it.
+
+    ``Detector.AddGitleaksIgnore`` (``detect/detect.go`` at v8.30.1) reads the
+    file with a ``bufio.Scanner`` (``ScanLines``: lines end at ``\n`` alone, one
+    trailing ``\r`` dropped, reading stops at a line of 64 KiB or more), trims each
+    line with ``strings.TrimSpace``, skips empty lines and lines starting with
+    ``#``, splits on ``:`` and replaces ``\`` with ``/`` in the file part: the
+    first of three parts, or the second of four (``commit:file:rule:line``). The
+    rejoined line is matched exactly against each finding's
+    ``<file>:<rule>:<line>`` (``AddFinding``), so the file it can hide is
+    everything before the last two ``:``. A line with fewer than three parts can
+    hide nothing.
+
+    Bytes are decoded with ``surrogateescape``, so a name that is not UTF-8 maps
+    back to the same bytes on disk.
+    """
+    files = []
+    for raw in data.split(b"\n"):
+        if len(raw) >= _MAX_SCAN_TOKEN:
+            break
+        line = raw.decode("utf-8", "surrogateescape").strip(_GO_SPACE)
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(":")
+        if len(parts) == 3:
+            parts[0] = parts[0].replace("\\", "/")
+        elif len(parts) == 4:
+            parts[1] = parts[1].replace("\\", "/")
+        file_part = ":".join(parts).rsplit(":", 2)
+        if len(file_part) == 3 and file_part[0]:
+            files.append(file_part[0])
+    return files
 
 
 def _mask_quoted_ignore_entries(log_path: Path) -> None:
@@ -615,9 +665,9 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     ) -> List[str]:
         """The files ``<target>/.gitleaksignore`` names, relative to the target.
 
-        A dir-scan fingerprint is ``<file>:<rule id>:<line>``. Entries in another
-        form (a git-scan fingerprint starts with a commit), and files that are not
-        inside the target, are left out: gitleaks could not have matched them.
+        Parsed as gitleaks parses it (``gitleaksignore_files``). A dir-scan
+        fingerprint is ``<file>:<rule id>:<line>``; files that are not inside the
+        target are left out, since gitleaks could not have matched them.
 
         Each path is normalized, whatever spelling the entry used (``./``, ``//``,
         ``..``, absolute), into the path the directory scan reaches the file by.
@@ -636,16 +686,9 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             return []
         target_abs = Path(os.path.normpath(Path(target).absolute()))
         names = set()
-        text = data.decode("utf-8", errors="replace")
-        for line in text.splitlines():
-            entry = line.strip()
-            if not entry or entry.startswith("#"):
-                continue
-            parts = entry.rsplit(":", 2)
-            if len(parts) != 3 or not parts[0]:
-                continue
+        for name in gitleaksignore_files(data):
             # Joining keeps an absolute entry as it is.
-            lexical = Path(os.path.normpath(target_abs / parts[0]))
+            lexical = Path(os.path.normpath(target_abs / name))
             if lexical == target_abs or not lexical.is_relative_to(target_abs):
                 continue
             names.add(lexical.relative_to(target_abs).as_posix())

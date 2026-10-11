@@ -1158,3 +1158,93 @@ def test_a_directory_named_gitleaksignore_is_not_a_reason_to_stop(tmp_path):
     final_args, _, _ = scanner._execute_scan(source, "source", [])
     assert final_args[-2:] == ["--", "."]
     assert scanner._gitleaksignore_files(source) == []
+
+
+# --------------------------------------------------------------------------- #
+# .gitleaksignore is parsed as gitleaks 8.30.1 parses it
+# --------------------------------------------------------------------------- #
+
+#: Characters Python's str.splitlines() or str.strip() treat as line breaks or
+#: whitespace and gitleaks does not: it splits lines on "\n" alone
+#: (bufio.ScanLines) and trims with Go's strings.TrimSpace.
+NOT_A_BREAK_TO_GITLEAKS = ["\v", "\f", "\r", "\x1c", "\x1d", "\x1e", "\x85", " ", " "]
+
+
+def _copied_for(tmp_path, monkeypatch, entries: bytes, *files: bytes) -> list:
+    """The files the re-scan copies for an ignore file holding ``entries``."""
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, {})
+    source = Path(scanner.context.source_dir)
+    for name in files:
+        path = os.path.join(os.fsencode(source), name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(b"x")
+    with open(os.path.join(os.fsencode(source), b".gitleaksignore"), "wb") as handle:
+        handle.write(entries)
+    _add_back(scanner, source, _report(), tmp_path)
+    return [os.fsencode(name) for call in calls for name in call["files"]]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
+@pytest.mark.parametrize("char", NOT_A_BREAK_TO_GITLEAKS, ids=repr)
+def test_a_name_with_a_character_python_breaks_lines_on_is_one_entry(
+    tmp_path, monkeypatch, char
+):
+    name = f"app/a{char}b.py".encode()
+    assert _copied_for(tmp_path, monkeypatch, name + b":github-pat:1\n", name) == [name]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
+@pytest.mark.parametrize("char", ["\x1c", "\x1d", "\x1e", "\x1f"], ids=repr)
+def test_a_leading_character_go_does_not_trim_stays_in_the_name(
+    tmp_path, monkeypatch, char
+):
+    """Python's strip() removes these; Go's TrimSpace does not."""
+    name = f"{char}app.py".encode()
+    assert _copied_for(tmp_path, monkeypatch, name + b":github-pat:1\n", name) == [name]
+
+
+def test_a_backslash_in_the_file_part_is_a_slash(tmp_path, monkeypatch):
+    """gitleaks replaces "\\" with "/" in a fingerprint's file before matching."""
+    assert _copied_for(
+        tmp_path, monkeypatch, b"app\\one.py:github-pat:1\n", b"app/one.py"
+    ) == [b"app/one.py"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="':' in a file name")
+def test_a_four_part_entry_is_normalized_where_gitleaks_normalizes_it(
+    tmp_path, monkeypatch
+):
+    """Four parts read as commit:file:rule:line, so gitleaks replaces the
+    backslashes in the second; matched as a dir fingerprint, the file is a:b/c.py."""
+    assert _copied_for(
+        tmp_path, monkeypatch, b"a:b\\c.py:github-pat:1\n", b"a:b/c.py"
+    ) == [b"a:b/c.py"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
+def test_a_name_that_is_not_utf_8_is_kept_byte_for_byte(tmp_path, monkeypatch):
+    name = b"app/\xff\xfe.py"
+    assert _copied_for(tmp_path, monkeypatch, name + b":github-pat:1\n", name) == [name]
+
+
+def test_gitleaks_stops_reading_at_a_line_it_cannot_buffer(tmp_path, monkeypatch):
+    """bufio.Scanner's 64 KiB token limit ends gitleaks' read, unreported, so no
+    entry after such a line hides anything."""
+    entries = (
+        b"app/before.py:github-pat:1\n"
+        + b"#" * 65536
+        + b"\n"
+        + b"app/after.py:github-pat:1\n"
+    )
+    assert _copied_for(
+        tmp_path, monkeypatch, entries, b"app/before.py", b"app/after.py"
+    ) == [b"app/before.py"]
+
+
+def test_a_line_gitleaks_can_buffer_is_read(tmp_path, monkeypatch):
+    """The control: 65535 bytes and its newline fit."""
+    entries = b"#" * 65535 + b"\n" + b"app/after.py:github-pat:1\n"
+    assert _copied_for(tmp_path, monkeypatch, entries, b"app/after.py") == [
+        b"app/after.py"
+    ]
