@@ -968,9 +968,10 @@ jobs:
           pip install ".[cdk]"
           ash dependencies install
       # trivy-repo is a plugin scanner, so ASH knows its name only once its module is
-      # loaded: the config written here loads it, for its install and for the parity
-      # runs (`ash dependencies install --tool trivy-repo` without it exits 2,
-      # "Unknown tool(s)"). Its database and checks bundle are then fetched into
+      # loaded (`ash dependencies install --tool trivy-repo` without it exits 2,
+      # "Unknown tool(s)"): the install loads it with an override, and the config
+      # written here loads it for the parity runs. Its database and checks bundle are
+      # then fetched into
       # trivy's own default cache, so that the offline pair has them: offline, ASH
       # updates nothing, and under sandbox-exec the cache is read-only, which an
       # offline trivy-repo scan must survive.
@@ -986,7 +987,8 @@ jobs:
             'scanners:' \
             '  trivy-repo:' \
             '    enabled: true' > "$PARITY_CONFIG"
-          ash dependencies install --config "$PARITY_CONFIG" --tool trivy-repo
+          ash dependencies install --tool trivy-repo \
+            --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_trivy_plugins]"
           trivy="$(python -c 'from automated_security_helper.utils.subprocess_utils import find_executable; print(find_executable("trivy") or "")')"
           test -n "$trivy" || { echo "::error::trivy was not installed"; exit 1; }
           "$trivy" --version
