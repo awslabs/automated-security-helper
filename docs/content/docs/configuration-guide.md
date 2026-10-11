@@ -773,7 +773,13 @@ detect-secrets baseline rather than in ASH options. Point `baseline_file` at one
 rely on the discovery described below. The `scan_settings` option takes the same
 structure as a baseline's own settings block if you would rather inline it.
 
-If you have been using detect-secrets separately and have an existing baseline file you would like to use with ASH, ASH can automatically use it. ASH automatically searches the source directory and its ```.ash``` directory for a ```.secrets.baseline``` file; a relative `baseline_file` is taken from the source directory too. For more details on baseline files, refer to the detect-secrets [documentation](https://github.com/Yelp/detect-secrets/tree/master).
+If you have been using detect-secrets separately and have an existing baseline file
+you would like to use with ASH, ASH can use it automatically. It looks for
+`.ash/.secrets.baseline`, then `.secrets.baseline`, in the source directory
+(`--source-dir`), wherever ASH is run from, and takes a relative `baseline_file` from
+the source directory too. A baseline in the directory ASH runs from does not apply to
+a scan of another directory. For more details on baseline files, refer to the
+detect-secrets [documentation](https://github.com/Yelp/detect-secrets/tree/master).
 
 ### Checkov
 

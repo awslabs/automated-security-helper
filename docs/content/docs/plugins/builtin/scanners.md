@@ -162,6 +162,12 @@ scanners:
 - Database connection strings
 - API keys and tokens
 
+**Baseline**: ASH reads a detect-secrets baseline for the plugins, filters and accepted
+findings to use. It takes `baseline_file` when set, else `.ash/.secrets.baseline`, else
+`.secrets.baseline`, each relative to the source directory, so the same tree gives the
+same result whichever directory ASH runs from. See
+[Detect-Secrets](../../configuration-guide.md#detect-secrets) in the configuration guide.
+
 **Dependencies**: `detect-secrets` Python package
 
 ---
