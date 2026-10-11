@@ -481,14 +481,23 @@ def test_a_refusal_another_run_recorded_does_not_explain_this_one(tmp_path, oute
 
 
 @OUTER
-def test_a_results_file_without_a_completion_marker_is_not_read_back(tmp_path, outer):
-    """As an inner ASH that predates the marker writes it, even with exit 0."""
+@pytest.mark.parametrize("inner_status", [0, 2])
+def test_a_results_file_without_a_completion_marker_is_not_read_back(
+    tmp_path, outer, inner_status
+):
+    """As an inner ASH that predates the marker writes it.
+
+    Exit 1, ASH's scan-error status, whatever the inner run's status: 2 would claim
+    findings this process never read.
+    """
+    from automated_security_helper.utils.get_ash_version import get_ash_version
+
     opts = _opts(tmp_path)
     logger = MagicMock()
 
     def inner(run_id: str) -> int:
         _write_results(opts.output_dir)
-        return 0
+        return inner_status
 
     with pytest.raises(SystemExit) as refused:
         outer(opts, inner, logger)
@@ -497,8 +506,9 @@ def test_a_results_file_without_a_completion_marker_is_not_read_back(tmp_path, o
     errors = _errors(logger)
     assert "did not complete" in errors, errors
     if outer is _container:
-        # The image can hold an older ASH.
-        assert "older" in errors, errors
+        # The image can hold an older ASH; both ways to replace it are named.
+        assert "rebuild the image from this ASH" in errors, errors
+        assert f"--ash-revision-to-install v{get_ash_version()}" in errors, errors
     else:
         # The shell runs this ASH's own interpreter, which the message names.
         assert sys.executable in errors, errors

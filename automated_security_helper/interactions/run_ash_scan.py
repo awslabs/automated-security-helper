@@ -1267,12 +1267,20 @@ def _refuse_an_inner_run_that_did_not_complete(
     # In container mode the inner ASH is the image's, which can be older than this
     # one. In nix mode it is started with this ASH's own interpreter
     # (run_ash_nix.inner_ash_command), so the message names that instead.
-    older = (
-        " An ASH older than this one does not write that record: rebuild the image "
-        "from this ASH."
-        if mode == "container"
-        else f" The inner run was started with this ASH's interpreter, {sys.executable}."
-    )
+    if mode == "container":
+        from automated_security_helper.utils.get_ash_version import get_ash_version
+
+        version = get_ash_version()
+        older = (
+            " An ASH older than this one does not write that record: rebuild the "
+            "image from this ASH (run without --no-build, with --force if the image "
+            f"is cached), or pass --ash-revision-to-install v{version} to install "
+            f"ASH {version} in it."
+        )
+    else:
+        older = (
+            f" The inner run was started with this ASH's interpreter, {sys.executable}."
+        )
     logger.error(
         f"The {mode} run did not complete, so its results are not read back: "
         f"{output_file} {found}. The run's own output above says what stopped it."

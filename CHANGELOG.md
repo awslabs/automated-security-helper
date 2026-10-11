@@ -976,9 +976,12 @@
   read the inner run's results back only when the inner run recorded that it
   completed, which an ASH older than this one does not do. An image built from an
   older ASH, for example with `--ash-revision-to-install` naming an older release,
-  or a `--no-build` run of an older image, now exits 1 with an error that says the
-  inner run did not complete and names the results file. Build the image from this
-  ASH. Nix mode now starts the inner run with this ASH's own interpreter rather than
+  or a `--no-build` run of an older image, now exits 1 (ASH's scan-error status,
+  whatever the container's own status was) with an error that says the inner run
+  did not complete and names the results file. Rebuild the image from this ASH (run
+  without `--no-build`, with `--force` if the image is cached), or pass
+  `--ash-revision-to-install v<version>` with this ASH's version; the error names
+  both. Nix mode now starts the inner run with this ASH's own interpreter rather than
   the first `ash` on `PATH` inside the Nix shell, so the two are the same ASH.
 
 - **A `reports/` directory that is a symlink is refused.** `ash merge`,
