@@ -174,6 +174,24 @@ def reporter_matches_requested_formats(
     return name is not None and str(name) in requested
 
 
+def off_host_reporter_refused(reporter_class: type, plugin_config: object) -> bool:
+    """Whether a reporter that sends findings off the host is not enabled to run.
+
+    A reporter class that sets ``sends_off_host`` sends findings to a remote
+    service with the host's credentials, so it runs only when its section of the
+    config says ``enabled: true``. Its own default does not count: a reporter from
+    any package that declares itself off-host and ships enabled still needs the
+    operator to turn it on. ``ash report``, the report phase and the workspace
+    report step all ask this. ``plugin_config`` is what
+    ``AshConfig.get_plugin_config`` returns, a dict or None.
+    """
+    if getattr(reporter_class, "sends_off_host", False) is not True:
+        return False
+    return not (
+        isinstance(plugin_config, dict) and plugin_config.get("enabled") is True
+    )
+
+
 class ReporterPluginBase(PluginBase, Generic[T]):
     """Base reporter plugin with some methods of the IReporter abstract class
     implemented for convenience.
@@ -195,6 +213,13 @@ class ReporterPluginBase(PluginBase, Generic[T]):
     workspace_behaviour: ClassVar[ReporterWorkspaceBehaviour] = (
         ReporterWorkspaceBehaviour.PER_PROJECT
     )
+
+    #: Whether this reporter sends findings off the host (to a remote service,
+    #: with the host's credentials). Such a reporter runs only when its config
+    #: section sets ``enabled: true``; see :func:`off_host_reporter_refused`. A
+    #: class attribute, so it is known before the reporter is built and does not
+    #: depend on which package the reporter comes from.
+    sends_off_host: ClassVar[bool] = False
 
     @model_validator(mode="after")
     def setup_paths(self) -> Self:

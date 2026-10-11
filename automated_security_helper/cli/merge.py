@@ -1435,8 +1435,23 @@ def merge_command(
     # ReportPhase writes reports/ash.<extension> for every enabled reporter, and
     # its progress display is used unconditionally, so a display is supplied with
     # output turned off rather than None.
+    # No reporter that sends findings off the host runs here. Its config would be
+    # the one the shards carried, not one the operator of this merge supplied,
+    # and it would send the merged findings with this host's credentials. Run
+    # `ash report --format <name>` on the merged results with an operator config
+    # to send them.
+    reporter_classes = []
+    for reporter_class in ash_plugin_manager.plugin_modules(plugin_type="reporter"):
+        if getattr(reporter_class, "sends_off_host", False) is True:
+            logger.info(
+                f"Not running reporter {getattr(reporter_class, '__name__', reporter_class)} "
+                "in ash merge: it sends findings off the host. Use `ash report "
+                "--format <name>` on the merged results with an operator config."
+            )
+            continue
+        reporter_classes.append(reporter_class)
     report_phase = ReportPhase(
-        plugins=ash_plugin_manager.plugin_modules(plugin_type="reporter"),
+        plugins=reporter_classes,
         plugin_context=plugin_context,
         progress_display=LiveProgressDisplay(show_progress=False),
         asharp_model=merged,

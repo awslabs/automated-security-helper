@@ -107,6 +107,7 @@ from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterWorkspaceBehaviour,
+    off_host_reporter_refused,
     reporter_matches_requested_formats,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -368,7 +369,9 @@ def _selected_reporters(
         # run -- not requested, or per-project, whose check its own project's
         # scan made -- is not checked here.
         skipped: Optional[str] = None
-        if _disabled_by_config(instance):
+        if _disabled_by_config(instance) or off_host_reporter_refused(
+            reporter_class, config_lookup(plugin_config_key(reporter_class))
+        ):
             skipped = SKIP_DISABLED
         if skipped is None and python_based_plugins_only:
             if not instance.is_python_only():

@@ -6,6 +6,7 @@ from typing import Dict, Iterable, List, Sequence
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.reporter_plugin import (
+    off_host_reporter_refused,
     reporter_format_name,
     reporter_matches_requested_formats,
 )
@@ -257,6 +258,10 @@ class ReportPhase(EnginePhase):
 
         # Create all reporter instances upfront, then filter via the shared helper.
         all_reporter_instances = []
+        # A reporter that sends findings off the host and whose config section
+        # does not set enabled: true is built (so a requested format it would
+        # have satisfied is reported as disabled, not missing) but never run.
+        off_host_refused = set()
         for plugin_class in reporter_classes:
             try:
                 plugin_config = (
@@ -272,6 +277,8 @@ class ReportPhase(EnginePhase):
                     config=plugin_config,
                 )
                 all_reporter_instances.append(plugin_instance)
+                if off_host_reporter_refused(plugin_class, plugin_config):
+                    off_host_refused.add(id(plugin_instance))
             except Exception as e:
                 ASH_LOGGER.error(
                     f"Error creating reporter {getattr(plugin_class, '__name__', 'Unknown')}: {e}"
@@ -295,6 +302,12 @@ class ReportPhase(EnginePhase):
 
         requested_reporters: List[object] = []
         for plugin_instance in all_reporter_instances:
+            if id(plugin_instance) in off_host_refused:
+                ASH_LOGGER.debug(
+                    f"Reporter {_display_name(plugin_instance)} sends findings off "
+                    "the host and its config does not enable it, skipping"
+                )
+                continue
             if not reporter_matches_requested_formats(plugin_instance, output_formats):
                 ASH_LOGGER.debug(
                     f"Reporter {_display_name(plugin_instance)} format "

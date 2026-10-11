@@ -150,6 +150,8 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+    # Sends findings to AWS with the host's credentials.
+    sends_off_host = True
 
     def model_post_init(self, context):
         if self.config is None:

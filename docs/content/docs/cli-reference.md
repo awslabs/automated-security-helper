@@ -552,6 +552,8 @@ The merged report does not depend on the order the shards are listed in. They ar
 
 The reporters and severity thresholds come from the scan's own configuration, carried through the shard results, rather than from a config file resolved on the collector host. The collector job need not have the source tree checked out at all, and a config file found there could disagree with the one the shards actually scanned under, which would move the verdict without moving the findings.
 
+`ash merge` runs no reporter that sends findings off the host (the AWS reporters), even when the shards' configuration enables one: that configuration came with the shard results, not from the operator of the merge, and the reporter would send the merged findings with the collector host's credentials. To send them, run `ash report --format <name>` on the merged output with a config that enables the reporter.
+
 ### What Merge Refuses
 
 Coverage is verified before anything is merged, so a bad set of shards fails without leaving a half-written report behind. A merge is refused when:

@@ -325,6 +325,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+    # Sends findings to AWS with the host's credentials.
+    sends_off_host = True
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
