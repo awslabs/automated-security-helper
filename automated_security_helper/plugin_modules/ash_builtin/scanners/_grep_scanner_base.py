@@ -238,8 +238,15 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         each directory above it up to the repository root (the first one holding
         ``.git``). Only its presence is checked; the file is not read. The note
         is a config warning, which the orchestrator records in the results as a
-        ``config_warning`` validation checkpoint, once per file.
+        ``config_warning`` validation checkpoint, once per file. A file an MCP
+        client delivered (``cli/mcp/sandbox.config_is_client_supplied``, judged by
+        its path, each symlink on the way and the file it resolves to) is named
+        as client-supplied.
         """
+        # Imported here, as config/path_trust.py does: importing cli.mcp runs its
+        # __init__, which imports the config modules.
+        from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+
         source = getattr(self.context, "source_dir", None)
         if source is None:
             return
@@ -254,12 +261,23 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         config = getattr(self.context, "config", None)
         warnings = getattr(config, "_resolution_warnings", None)
         for ignore_file in found:
-            message = (
-                f"{ignore_file.as_posix()} was not honored: ASH runs semgrep and "
-                "opengrep with --x-ignore-semgrepignore-files and their default "
-                "exclusions, so a .semgrepignore in the scanned tree does not leave "
-                "files out. List them in global_settings.ignore_paths instead."
-            )
+            if config_is_client_supplied(ignore_file):
+                message = (
+                    f"{ignore_file.as_posix()} is client-supplied (an MCP client "
+                    "delivered it) and was not honored: ASH runs semgrep and opengrep "
+                    "with --x-ignore-semgrepignore-files and their default "
+                    "exclusions, so it does not leave files out. List them in "
+                    "global_settings.ignore_paths instead, where a client's entries "
+                    "apply marked client_supplied."
+                )
+            else:
+                message = (
+                    f"{ignore_file.as_posix()} was not honored: ASH runs semgrep and "
+                    "opengrep with --x-ignore-semgrepignore-files and their default "
+                    "exclusions, so a .semgrepignore in the scanned tree does not "
+                    "leave files out. List them in global_settings.ignore_paths "
+                    "instead."
+                )
             if isinstance(warnings, list) and message not in warnings:
                 warnings.append(message)
                 self._plugin_log(message, level=logging.WARNING)

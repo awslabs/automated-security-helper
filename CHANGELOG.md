@@ -318,7 +318,8 @@
     ASH passes `--x-ignore-semgrepignore-files` together with the tools' default
     exclusions, so the paths scanned are those scanned with no `.semgrepignore`.
     A `.semgrepignore` that either tool would have read is named in the results as
-    a `config_warning` validation checkpoint. To leave files out, list them in
+    a `config_warning` validation checkpoint, which in a tree an MCP client
+    delivered says the file is client-supplied. To leave files out, list them in
     `global_settings.ignore_paths`; under the MCP server a client's entries there
     are marked `client_supplied`, as usual.
   - ferret-scan's `profile` and `use_default_config` are the operator's too. A
