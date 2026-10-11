@@ -233,17 +233,25 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         """Bring trivy's shared caches up to date first, then run ``command``.
 
         ``command`` gains, in place so the invocation ASH records is the one that
-        ran, the flags that skip the update, the cache directory the update wrote
-        and ``--cache-backend=memory``. trivy keeps its scan cache
+        ran, the flags that skip the update, the cache directory the update wrote,
+        ``--cache-backend=memory`` and ``--exit-code=0``. trivy keeps its scan cache
         (``fanal/fanal.db``) in the cache directory unless told otherwise, ``trivy
         repository`` included, and a sandbox may mount that directory read-only:
         with the scan cache in memory the scan only reads the database and checks
         there. The scan cache only saves re-analysing an unchanged target, so
         results are the same either way.
+
+        ``--exit-code`` is the code trivy exits with when it finds anything. The
+        operator's ``TRIVY_EXIT_CODE``, which the sandbox passes through, and an
+        ``exit-code`` in the operator's trivy.yaml both set it, and the flag outranks
+        both (measured with trivy 0.75.0). Pinned to 0, a nonzero exit only ever
+        means trivy failed: ``trivy`` refuses the report of any other run, and
+        ``trivy-repo`` records the exit code in its SARIF invocation.
         """
         flags = self._shared_update_flags(command)
         if not any(a.startswith("--cache-backend") for a in command):
             flags.append("--cache-backend=memory")
+        flags.append("--exit-code=0")
         command[2:2] = flags
         return super()._run_subprocess(command, *args, **kwargs)
 

@@ -244,6 +244,26 @@ def test_an_unbounded_scan_timeout_scans(tmp_path, trivy_env):
     assert STABLE <= _pairs(report)
 
 
+@pytest.mark.parametrize("where", ["env", "config"])
+def test_an_operators_exit_code_setting_keeps_the_report(
+    tmp_path, trivy_env, monkeypatch, where
+):
+    """TRIVY_EXIT_CODE (passed through the sandbox too) or exit-code in the operator's
+    trivy.yaml makes trivy exit 1 on any finding; ASH pins it to 0 with the flag."""
+    source = _copy_fixture(tmp_path)
+    options: dict = {}
+    if where == "env":
+        monkeypatch.setenv("TRIVY_EXIT_CODE", "1")
+    else:
+        operator_config = tmp_path / "operator" / "trivy.yaml"
+        operator_config.parent.mkdir()
+        operator_config.write_text("exit-code: 1\n", encoding="utf-8")
+        options = {"operator": True, "config_file": str(operator_config)}
+    scanner, report = _scan_direct(source, tmp_path / "out", **options)
+    assert scanner.exit_code == 0
+    assert STABLE <= _pairs(report)
+
+
 # --------------------------------------------------------------------------- #
 # ash scan, end to end
 # --------------------------------------------------------------------------- #

@@ -1307,7 +1307,28 @@ def test_offline_runs_no_update(tmp_path, monkeypatch):
     scanner._run_subprocess(command=["trivy", "fs", "/t"], results_dir=tmp_path)
 
     assert fake.calls == []
-    assert ran == [["trivy", "fs", "--cache-backend=memory", "/t"]]
+    assert ran == [["trivy", "fs", "--cache-backend=memory", "--exit-code=0", "/t"]]
+
+
+@pytest.mark.parametrize("offline", [False, True])
+@pytest.mark.parametrize("kind", ["trivy", "trivy-repo"])
+def test_every_scan_pins_trivys_exit_code_to_zero(tmp_path, monkeypatch, offline, kind):
+    """TRIVY_EXIT_CODE, or exit-code in an operator's trivy.yaml, makes trivy exit
+    nonzero on any finding; the flag outranks both (trivy 0.75.0), so a nonzero exit
+    only ever means trivy failed."""
+    ran = _update_env(tmp_path, monkeypatch, _FakeTrivy())
+    monkeypatch.setenv("TRIVY_EXIT_CODE", "1")
+    if kind == "trivy":
+        scanner = _scanner(tmp_path, offline=offline)
+    else:
+        scanner = _repo_scanner(tmp_path, offline=offline)
+    sub = "fs" if kind == "trivy" else "repository"
+
+    scanner._run_subprocess(command=["trivy", sub, "/t"], results_dir=tmp_path)
+
+    (final,) = ran
+    assert [a for a in final if a.startswith("--exit-code")] == ["--exit-code=0"]
+    assert final.index("--exit-code=0") < final.index("/t")
 
 
 def test_the_update_runs_outside_the_scanner_sandbox(tmp_path, monkeypatch):

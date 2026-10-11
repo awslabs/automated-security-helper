@@ -69,6 +69,8 @@ ash scan --config-overrides 'scanners.trivy.options.ignore_file=/etc/ash/trivyig
 
 A configured file that does not exist fails the scan rather than running without it.
 
+ASH always passes `trivy --exit-code=0`, which outranks `TRIVY_EXIT_CODE` and an `exit-code` set in your `config_file`. trivy then exits nonzero only when it fails, and its report is read whatever it found. trivy-repo gets the same flag.
+
 To accept a finding, prefer an ASH suppression, which is recorded in the reports and counted. The community `trivy-repo` plugin passes its own config file, modules directory, ignore file and secret config the same way; see its `config_file`, `module_dir`, `ignore_file` and `secret_config_file` options.
 
 ## Severity

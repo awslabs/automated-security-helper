@@ -154,6 +154,8 @@
     `--sandbox` used trivy's own default before, which is `%LocalAppData%\trivy` on
     Windows and `$XDG_CACHE_HOME/trivy` when that is set, so there the first online
     scan downloads the database again; set `TRIVY_CACHE_DIR` to keep one location.
+    Both scanners run with `--exit-code=0`, so `TRIVY_EXIT_CODE` or an `exit-code`
+    in the operator's trivy.yaml no longer turns a scan with findings into a failure.
 
   Options that name something a tool executes or loads are not taken from a config
   file inside the scanned tree: actionlint's `shellcheck` and `pyflakes` accept only

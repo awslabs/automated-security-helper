@@ -107,8 +107,11 @@ output directory, apart from the converted work directory, whatever trivy does.
 
 Exit codes
 ----------
-trivy exits 0 whether or not it finds anything (ASH does not pass
-``--exit-code``) and 1 on any fatal error, so 0 is the only success code.
+trivy exits 0 whether or not it finds anything and 1 on any fatal error, so 0 is
+the only success code. ASH passes ``--exit-code=0`` to make sure of the first:
+``TRIVY_EXIT_CODE`` or an ``exit-code`` in the operator's trivy.yaml would
+otherwise make trivy exit 1 on any finding, and the report would be refused
+(``TrivyScannerBase._run_subprocess``).
 """
 
 from __future__ import annotations
@@ -451,8 +454,8 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         """Refuse the report of a run trivy did not finish (any exit but 0)."""
         if self.exit_code not in self.success_exit_codes:
             raise ScannerError(
-                f"trivy exited {self.exit_code}; it exits 0 whether or not it finds "
-                "anything, so this run failed"
+                f"trivy exited {self.exit_code}; run with --exit-code=0, it exits 0 "
+                "whether or not it finds anything, so this run failed"
             )
         return super()._read_results_file(results_file)
 
