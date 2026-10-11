@@ -32,6 +32,10 @@ from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.subprocess_utils import find_executable
 
 
+#: ``snyk code test`` exits 3 when the target holds no file it supports.
+_NO_SUPPORTED_FILES_EXIT_CODE = 3
+
+
 class SnykCodeScannerConfigOptions(ScannerOptionsBase):
     pass
 
@@ -195,6 +199,9 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         Returns:
             dict: Scan results
         """
+        # No claim until this target's run makes one (exit 3 below), so the count
+        # from an earlier target is never read as this one's.
+        self.targets_attempted = None
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (
@@ -253,9 +260,26 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 timeout=self._effective_scan_timeout(),
             )
 
-            # snyk exits 1 when it found issues, which is a completed scan, and 2 or 3
-            # when it failed or found no supported project; see success_exit_codes.
+            # snyk exits 1 when it found issues, which is a completed scan, 2 when it
+            # failed, and 3 when it found no supported project; see success_exit_codes.
             self._record_target_exit_code(response)
+            # Exit 3 is snyk's "no supported projects detected": the target holds no
+            # file Snyk Code reads, so it evaluated nothing. SKIPPED, by the
+            # maintainer's ruling, rather than the ERROR every other code outside
+            # success_exit_codes gets: a Terraform-only tree is not a failed scan.
+            # targets_attempted = 0 is what the executor grades SKIPPED. Exit 2 is
+            # still a failure.
+            if self.exit_code == _NO_SUPPORTED_FILES_EXIT_CODE:
+                self._plugin_log(
+                    f"Snyk Code found no supported files in {target}; nothing was "
+                    "evaluated (snyk exit code 3).",
+                    target_type=target_type,
+                    level=logging.INFO,
+                )
+                self.targets_attempted = 0
+                self._post_scan(target=target, target_type=target_type)
+                return True
+
             if not self._exit_code_accepted():
                 raise ScannerError(
                     f"Snyk scan failed with exit code {self.exit_code}: {self.errors}"

@@ -1247,6 +1247,15 @@
 
 ### Fixes
 
+- **snyk-code on a tree with no file Snyk supports is SKIPPED, not ERROR.**
+  `snyk code test` exits 3 when the target holds no file it reads ("no supported
+  projects detected"), for example a Terraform-only tree. scan() raised on every
+  exit code but 0, so snyk-code was recorded ERROR and the default completeness gate
+  failed the scan. Exit 3 now records that nothing was evaluated, which is SKIPPED;
+  exit 2 is still ERROR. The plugin README and `snyk-plugin.md` also say what offline
+  mode does: snyk-code is MISSING, the scan exits 1, and `--exclude-scanners
+  snyk-code` leaves it out.
+
 - **Every built-in plugin group registers, whichever ASH module a process imports
   first.** Importing the results model loads the built-in plugins, and those import
   core modules back. When one of those core modules was the first ASH module
