@@ -1258,3 +1258,89 @@ class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
 
         assert coverage_has_gap({"stale_content_databases": [{"name": "grype-db"}]})
         assert not coverage_has_gap({"stale_content_databases": []})
+
+
+# --------------------------------------------------------------------------- two readers
+
+
+class TestEveryScannerThatReadAStaleDatabaseIsNamed:
+    """trivy and trivy-repo both read trivy-db. Records were kept one per database, so
+    when both read a stale one, only one scanner was named in every report."""
+
+    @staticmethod
+    def _both(tmp_path, trivy_age, repo_age, policy=cdb.STALENESS_FAIL):
+        reports = []
+        for name, age in (("trivy", trivy_age), ("trivy-repo", repo_age)):
+            (tmp_path / name).mkdir()
+            exe = fake_trivy(tmp_path / name, datetime.now(UTC) - age)
+            scanner = StubScanner(
+                name,
+                staleness.ProbeContext(env=dict(os.environ), executable=str(exe)),
+            )
+            sarif = _sarif(name)
+            staleness.assess_scanner(scanner, sarif, policy)
+            reports.append(sarif)
+        return _aggregate(*reports)
+
+    def test_both_scanners_are_named(self, tmp_path):
+        model = self._both(tmp_path, _over("trivy-db"), _over("trivy-db"))
+        pairs = [("trivy-db", "trivy"), ("trivy-db", "trivy-repo")]
+        assert [
+            (r.name, r.scanner)
+            for r in staleness.stale_content_databases(model, enforced_only=True)
+        ] == pairs
+        assert [(r.name, r.scanner) for r in staleness.content_db_records(model)] == (
+            pairs
+        )
+        assert _exit_code(tmp_path, model) == 1
+
+        reports = _reports(model)
+        stale_md = reports["markdown"].split("### Stale content databases", 1)[1]
+        assert "(trivy, failed the scan)" in stale_md
+        assert "(trivy-repo, failed the scan)" in stale_md
+        assert reports["text"].count("[FAILED THE SCAN]") == 2
+        flat = json.loads(reports["flat"])["content_databases"]
+        assert [(d["name"], d["scanner"], d["enforced"]) for d in flat] == [
+            ("trivy-db", "trivy", True),
+            ("trivy-db", "trivy-repo", True),
+        ]
+        assert len(_notifications(reports["sarif"])) == 2
+
+    def test_a_fresh_reader_does_not_hide_a_stale_one(self, tmp_path):
+        model = self._both(tmp_path, _under("trivy-db"), _over("trivy-db"))
+        assert [(r.scanner, r.stale) for r in staleness.content_db_records(model)] == [
+            ("trivy", False),
+            ("trivy-repo", True),
+        ]
+        assert [r.scanner for r in staleness.stale_content_databases(model, True)] == [
+            "trivy-repo"
+        ]
+        flat = json.loads(_reports(model)["flat"])["content_databases"]
+        assert [(d["scanner"], d["stale"], d["enforced"]) for d in flat] == [
+            ("trivy", False, False),
+            ("trivy-repo", True, True),
+        ]
+
+    @pytest.mark.parametrize("stale_first", [True, False])
+    def test_one_scanners_stale_record_is_never_hidden_behind_its_fresh_one(
+        self, tmp_path, stale_first
+    ):
+        """One scanner measured per target type writes the database twice."""
+        reports = []
+        ages = [_over("trivy-db"), _under("trivy-db")]
+        for i, age in enumerate(ages if stale_first else reversed(ages)):
+            (tmp_path / str(i)).mkdir()
+            exe = fake_trivy(tmp_path / str(i), datetime.now(UTC) - age)
+            scanner = StubScanner(
+                "trivy",
+                staleness.ProbeContext(env=dict(os.environ), executable=str(exe)),
+            )
+            sarif = _sarif("trivy")
+            staleness.assess_scanner(scanner, sarif, cdb.STALENESS_FAIL)
+            reports.append(sarif)
+        model = _aggregate(*reports)
+        (record,) = staleness.content_db_records(model)
+        assert record.stale and record.scanner == "trivy"
+        (stale,) = staleness.stale_content_databases(model, enforced_only=True)
+        assert stale.scanner == "trivy"
+        assert _exit_code(tmp_path, model) == 1

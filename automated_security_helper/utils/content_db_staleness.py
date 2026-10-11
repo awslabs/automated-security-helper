@@ -96,6 +96,7 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
+    Tuple,
 )
 
 from automated_security_helper.utils.content_databases import (
@@ -720,14 +721,16 @@ def _extra(props: Any) -> Dict[str, Any]:
 
 
 def content_db_records(results: Any) -> List[ContentDbAgeRecord]:
-    """Every content database measurement in an aggregated result, deduplicated.
+    """Every content database measurement in an aggregated result, one per database and scanner.
 
     One scanner measured per target type writes the same database twice; the later
-    measurement of a database wins, and a stale record is kept over a fresh one for the same
-    database, so a duplicate can never hide a stale reading.
+    measurement wins, and a stale record is kept over a fresh one for the same database and
+    scanner, so a duplicate can never hide a stale reading. Two scanners that read one
+    database (trivy and trivy-repo both read trivy-db) keep a record each, so a report names
+    every scanner that read a stale database. Sorted by database, then scanner.
     """
     sarif = getattr(results, "sarif", None)
-    by_name: Dict[str, ContentDbAgeRecord] = {}
+    by_key: Dict[Tuple[str, str], ContentDbAgeRecord] = {}
     for run in getattr(sarif, "runs", None) or []:
         for invocation in getattr(run, "invocations", None) or []:
             for raw in (
@@ -741,10 +744,11 @@ def content_db_records(results: Any) -> List[ContentDbAgeRecord]:
                         f"Unreadable content database record {raw!r}: {exc}"
                     )
                     continue
-                current = by_name.get(record.name)
+                key = (record.name, record.scanner)
+                current = by_key.get(key)
                 if current is None or record.stale or not current.stale:
-                    by_name[record.name] = record
-    return [by_name[name] for name in sorted(by_name)]
+                    by_key[key] = record
+    return [by_key[key] for key in sorted(by_key)]
 
 
 def stale_content_databases(
@@ -754,10 +758,11 @@ def stale_content_databases(
 
     Read from the notifications rather than the property list, because the notification's
     level is what the policy decided when the scan ran; a record carried without one -- which
-    nothing in ASH writes -- cannot fail a scan.
+    nothing in ASH writes -- cannot fail a scan. One per database and scanner, as in
+    ``content_db_records``, an enforced one kept over one that only warns.
     """
     sarif = getattr(results, "sarif", None)
-    found: Dict[str, ContentDbAgeRecord] = {}
+    found: Dict[Tuple[str, str], ContentDbAgeRecord] = {}
     for run in getattr(sarif, "runs", None) or []:
         for invocation in getattr(run, "invocations", None) or []:
             for notification in (
@@ -783,9 +788,10 @@ def stale_content_databases(
                 record.policy = STALENESS_FAIL if level == "error" else STALENESS_WARN
                 if enforced_only and not record.enforced:
                     continue
-                if record.name not in found or record.enforced:
-                    found[record.name] = record
-    return [found[name] for name in sorted(found)]
+                key = (record.name, record.scanner)
+                if key not in found or record.enforced:
+                    found[key] = record
+    return [found[key] for key in sorted(found)]
 
 
 def probe_env(extra: Optional[Mapping[str, str]]) -> Dict[str, str]:
