@@ -45,6 +45,19 @@ Two build targets exist:
 | `non-root` | An unprivileged user | The default. Prefer it. |
 | `ci` | Root | The runner's UID/GID mapping makes an unprivileged user impractical |
 
+`non-root` is the default everywhere except `ash build-image` on Windows, which builds `ci`
+because the non-root user cannot write the bind-mounted output directory there. Running
+in CI does not change the default: `CI`, `IsCI`, `ISCI` and `CODEBUILD_BUILD_ID` play no
+part, and an explicit `--build-target` always wins. `--custom-containerfile` builds on
+`ci` (see [Extending the image](#extending-the-image)).
+
+The `non-root` stage creates its user with the UID and GID of the account running ASH,
+or with `--container-uid` and `--container-gid`. A UID of 0 is root and cannot be that
+user, so a `non-root` build with UID 0 is refused before anything is built. That is the
+case when ASH itself runs as root, as many CI jobs do (AWS CodeBuild, container-based
+GitLab and Jenkins jobs): pass `--build-target ci` there, or give the non-root user its
+IDs explicitly.
+
 Point ASH at your published image with `ASH_IMAGE_NAME`:
 
 ```bash

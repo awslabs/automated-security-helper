@@ -439,6 +439,44 @@ def _find_dockerfile(resolved_revision: str | None) -> Path:
     return dockerfile_path
 
 
+def _resolve_build_target(
+    build_target: BuildTarget | str | None, custom_containerfile: str | None
+) -> str:
+    """The image stage to build and run: the one asked for, ``non-root`` by default.
+
+    Environment variables play no part. ``CI``, ``IsCI``, ``ISCI`` and
+    ``CODEBUILD_BUILD_ID`` used to select the root ``ci`` stage whenever they were
+    set to anything, ``CI=false`` and an empty value included, and to override an
+    explicit ``--build-target non-root`` while doing it. ``ci`` is now built when it
+    is asked for, or under ``--custom-containerfile``, which is documented to build
+    on ``ci`` so the custom image is not shifted to the non-root user.
+    """
+    if custom_containerfile is not None:
+        return BuildTarget.CI.value
+    if build_target is None:
+        return BuildTarget.NON_ROOT.value
+    return build_target.value if hasattr(build_target, "value") else str(build_target)
+
+
+def _non_root_stage_uid_refusal(build_target: str, container_uid: str) -> str | None:
+    """Why a ``non-root`` build with this UID cannot work, or None when it can.
+
+    The ``non-root`` stage creates its user with ``adduser --uid <UID>``, and UID 0
+    is root, which already exists: the build would fail at that step, after the
+    whole ``core`` stage had been built. A host running as root gets UID 0 by
+    default (CI jobs often do), so it is refused here, before any build, with the
+    two ways forward.
+    """
+    if build_target != BuildTarget.NON_ROOT.value or container_uid != "0":
+        return None
+    return (
+        "The non-root image stage creates a user with UID 0, which is root: ASH is "
+        "running as root, or --container-uid 0 was given. Pass --build-target ci to "
+        "build the image that runs as root, or --container-uid and --container-gid "
+        "with the IDs the non-root user should have."
+    )
+
+
 def _runner_supports_buildx(resolved_oci_runner: str) -> bool:
     """Whether the runner actually provides ``buildx``, probed once per path.
 
@@ -526,15 +564,15 @@ def _gha_layer_cache_args(
     if not _runner_supports_buildx(resolved_oci_runner):
         return []
 
-    # One scope per distinct set of layers. Note that build_target cannot be the
-    # discriminator: it is forced to "ci" whenever CI is set, and this point is
-    # only reachable with ACTIONS_RUNTIME_TOKEN set, so it is always "ci" here. It
-    # stays in the key anyway for callers that do vary it. What actually differs
-    # between the cache-enabled cells is the CPU architecture -- buildkit requests
-    # a different manifest per arch, so those entries can never be shared -- and
-    # OFFLINE, which the Dockerfile consumes near the top and which therefore
-    # invalidates nearly every layer below it. Without both, the cells overwrite
-    # one another and buildkit keeps only whichever finished last.
+    # One scope per distinct set of layers. build_target is in the key because the
+    # two stages end in different layers (`non-root` adds a user and installs the
+    # Python tools again for it), and it is whatever the caller asked for: CI
+    # variables do not choose it. The other two components matter as much: the CPU
+    # architecture -- buildkit requests a different manifest per arch, so those
+    # entries can never be shared -- and OFFLINE, which the Dockerfile consumes near
+    # the top and which therefore invalidates nearly every layer below it. Without
+    # all three, the cells overwrite one another and buildkit keeps only whichever
+    # finished last.
     scope = (
         f"ash-{build_target}-{platform.machine()}-{'offline' if offline else 'online'}"
     )
@@ -1150,7 +1188,8 @@ def run_ash_container(
         force: Force rebuild of the ASH container image
         quiet: Don't print verbose text about the build process
         oci_runner: Use the specified OCI runner instead of docker to run the containerized tools
-        build_target: Specify the target stage of the ASH image to build
+        build_target: The image stage to build and run. None means ``non-root``;
+            CI environment variables do not change it (see _resolve_build_target).
         offline: Build ASH for offline execution
         offline_semgrep_rulesets: Specify Semgrep rulesets for use in ASH offline mode
         container_uid: UID to use for the container user
@@ -1267,34 +1306,24 @@ def run_ash_container(
                 )
             )
 
-    # Resolve build target
-    resolved_build_target = (
-        "ci"
-        if (
-            custom_containerfile is not None
-            or os.environ.get(
-                "CI",
-                os.environ.get(
-                    "IsCI",
-                    os.environ.get("ISCI", os.environ.get("CODEBUILD_BUILD_ID", None)),
-                ),
-            )
-            is not None
-        )
-        else (
-            build_target.value
-            if hasattr(build_target, "value") and build_target is not None
-            else str(build_target)
-            if build_target is not None
-            else "non-root"
-        )
-    )
+    resolved_build_target = _resolve_build_target(build_target, custom_containerfile)
     ash_base_image_name = os.environ.get(
         "ASH_IMAGE_NAME", f"automated-security-helper:{resolved_build_target}"
     )
 
     # Build phase
     if build:
+        root_uid_refusal = _non_root_stage_uid_refusal(
+            resolved_build_target, container_uid
+        )
+        if root_uid_refusal is not None:
+            typer.secho(root_uid_refusal, fg=typer.colors.RED)
+            return _not_started(
+                create_completed_process(
+                    args=[], returncode=1, stdout="", stderr=root_uid_refusal
+                )
+            )
+
         # Only a build reads the Dockerfile. --no-build runs an image that is already
         # present, so looking one up first refused a scan outside an ASH checkout
         # (revision LOCAL, no Dockerfile in or above the working directory) although

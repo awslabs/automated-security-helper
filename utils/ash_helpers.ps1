@@ -61,7 +61,8 @@ function Invoke-ASH {
     .PARAMETER BuildTarget
     The target stage to build in the Dockerfile.
 
-    Defaults to 'non-root'.
+    Defaults to 'non-root', and to 'ci' on Windows. CI environment variables do not
+    change it.
 
     .PARAMETER Offline
     If $true, runs ASH in offline mode.
@@ -124,10 +125,13 @@ function Invoke-ASH {
         [parameter()]
         [string]
         $OutputFormat = "text",
+        # 'ci' on Windows (Windows PowerShell 5 runs only there), where the bind-mounted
+        # output directory is not writable by the non-root user; 'non-root' everywhere
+        # else. CI variables do not choose the stage: pass -BuildTarget ci to ask for it.
         [parameter()]
         [ValidateSet("ci", "non-root")]
         [string]
-        $BuildTarget = $(if($env:CI -or $env:IsCI -or $env:CODEBUILD_BUILD_ID -or $PSVersionTable.PSVersion.Major -le 5 -or $IsWindows){"ci"}else{"non-root"}),
+        $BuildTarget = $(if($PSVersionTable.PSVersion.Major -le 5 -or $IsWindows){"ci"}else{"non-root"}),
         [parameter()]
         [switch]
         $Offline,

@@ -678,9 +678,9 @@ class TestBuildImage:
         monkeypatch.setattr(rac.platform, "machine", lambda: "x86_64")
 
         # build_target is "ci" rather than this module's "non-root" default because
-        # that is the only value reachable here: run_ash_container forces "ci"
-        # whenever CI is set, and the cache requires ACTIONS_RUNTIME_TOKEN, which
-        # only exists inside Actions.
+        # it is the stage this repository's Actions legs ask for with
+        # --build-target ci, and the cache requires ACTIONS_RUNTIME_TOKEN, which only
+        # exists inside Actions.
         _build_image(**_build_image_kwargs(dockerfile, build_target="ci", debug=True))
 
         cmd = recorded_commands[0]

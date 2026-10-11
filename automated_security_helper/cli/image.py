@@ -64,7 +64,7 @@ def build_ash_image_cli_command(
         BuildTarget,
         typer.Option(
             "--build-target",
-            help="Specify the target stage of the ASH image to build",
+            help="The ASH image stage to build: 'non-root' (an unprivileged user) or 'ci' (root). Always 'ci' on Windows. CI environment variables do not change it.",
             case_sensitive=False,
         ),
     ] = BuildTarget.NON_ROOT,

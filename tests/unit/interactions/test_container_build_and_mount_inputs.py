@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import shutil
 import subprocess  # nosec B404 - one test runs a Python child against a copied package
 import sys
@@ -36,6 +37,7 @@ import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.core.enums import (
+    BuildTarget,
     ExecutionPhase,
     ExecutionStrategy,
 )
@@ -487,3 +489,123 @@ class TestTheSourceIsMountedReadOnly:
         src = _mount(run, "/src")
         assert Path(str(src["source"])).resolve() == (project / "src").resolve()
         assert "readonly" in src, f"/src is writable: {src}"
+
+
+# ---------------------------------------------------------------------------
+# The image stage
+# ---------------------------------------------------------------------------
+
+
+class TestTheBuildTargetIsTheOneRequested:
+    @pytest.fixture(autouse=True)
+    def _cwd(self, monkeypatch, tmp_path, packaged):
+        work = tmp_path / "work"
+        (work / "src").mkdir(parents=True)
+        monkeypatch.chdir(work)
+        return work
+
+    def _build_and_run(self, **kwargs: Any) -> None:
+        rac.run_ash_container(
+            source_dir="src",
+            output_dir=str(Path("..") / "out"),
+            ash_revision_to_install="v3.7.0",
+            build=True,
+            run=True,
+            **kwargs,
+        )
+
+    @pytest.mark.parametrize(("name", "value"), CI_SETTINGS)
+    def test_a_ci_variable_does_not_override_an_explicit_non_root_target(
+        self, name, value, commands, monkeypatch
+    ):
+        monkeypatch.setenv(name, value)
+
+        self._build_and_run(build_target=BuildTarget.NON_ROOT)
+
+        assert _flag(_only(commands, "build"), "--target") == "non-root"
+        assert "automated-security-helper:non-root" in _only(commands, "run")
+
+    @pytest.mark.parametrize(("name", "value"), CI_SETTINGS)
+    def test_a_ci_variable_does_not_select_the_root_target_by_default(
+        self, name, value, commands, monkeypatch
+    ):
+        monkeypatch.setenv(name, value)
+
+        self._build_and_run(build_target=None)
+
+        assert _flag(_only(commands, "build"), "--target") == "non-root"
+        assert "automated-security-helper:non-root" in _only(commands, "run")
+
+    def test_without_ci_variables_the_default_is_non_root(self, commands):
+        """Control."""
+        self._build_and_run(build_target=None)
+
+        assert _flag(_only(commands, "build"), "--target") == "non-root"
+
+    @pytest.mark.parametrize("ci_value", [None, "true"], ids=["no-CI", "CI=true"])
+    def test_an_explicit_ci_target_is_built(self, ci_value, commands, monkeypatch):
+        """Control: ``ci`` stays available to whoever asks for it."""
+        if ci_value is not None:
+            monkeypatch.setenv("CI", ci_value)
+
+        self._build_and_run(build_target=BuildTarget.CI)
+
+        assert _flag(_only(commands, "build"), "--target") == "ci"
+        assert "automated-security-helper:ci" in _only(commands, "run")
+
+    def test_a_custom_containerfile_builds_the_ci_target(self, commands, tmp_path):
+        """Control: documented in `--custom-containerfile`'s help and the image guide."""
+        containerfile = tmp_path / "Containerfile.custom"
+        containerfile.write_text(
+            "ARG ASH_BASE_IMAGE\nFROM ${ASH_BASE_IMAGE}\n", encoding="utf-8"
+        )
+
+        self._build_and_run(
+            build_target=BuildTarget.NON_ROOT,
+            custom_containerfile=str(containerfile),
+        )
+
+        builds = [cmd for cmd in commands if _subcommand(cmd) == "build"]
+        assert _flag(builds[0], "--target") == "ci"
+
+    @pytest.mark.parametrize(
+        ("name", "value", "target_args"),
+        [
+            pytest.param("CI", "true", ["--build-target", "non-root"], id="explicit"),
+            pytest.param("CODEBUILD_BUILD_ID", "project:build-1", [], id="default"),
+        ],
+    )
+    def test_the_scan_cli_builds_non_root_under_ci(
+        self, name, value, target_args, commands, monkeypatch
+    ):
+        monkeypatch.setenv(name, value)
+
+        _invoke_cli(
+            [
+                "scan",
+                "--mode",
+                "container",
+                "--no-progress",
+                "--no-run",
+                "--source-dir",
+                "src",
+                "--output-dir",
+                str(Path("..") / "out"),
+                "--ash-revision-to-install",
+                "v3.7.0",
+                *target_args,
+            ]
+        )
+
+        assert _flag(_only(commands, "build"), "--target") == "non-root"
+
+    def test_the_build_image_cli_builds_non_root_under_ci(self, commands, monkeypatch):
+        """`ash build-image` on Windows builds ``ci`` for its own documented reason
+        (cli/image.py: bind-mounted output is not writable there); CI variables
+        are not part of that."""
+        monkeypatch.setenv("CI", "true")
+
+        _invoke_cli(["build-image", "--no-run", "--ash-revision-to-install", "v3.7.0"])
+
+        expected = "ci" if platform.system().lower().startswith("win") else "non-root"
+        assert _flag(_only(commands, "build"), "--target") == expected

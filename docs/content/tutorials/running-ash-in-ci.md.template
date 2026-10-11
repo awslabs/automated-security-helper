@@ -8,11 +8,22 @@ ASH supports running in CI environments as an executable container (e.g., via `d
 
 ### Building ASH Container Images for CI Usage
 
-Building ASH images for use in CI platforms requires targeting the `ci` stage of the `Dockerfile`:
+`ash --mode container` and `ash build-image` build the `non-root` stage of the
+`Dockerfile` unless you pass `--build-target ci`. Running inside a CI job does not change
+that: `CI`, `IsCI`, `ISCI` and `CODEBUILD_BUILD_ID` play no part in choosing the stage.
+
+Pass `--build-target ci`, whose image runs as root, when the CI job itself runs as root,
+as AWS CodeBuild and container-based GitLab and Jenkins jobs do. The `non-root` stage
+creates its user with the UID of the account running ASH, and ASH refuses to build it as
+UID 0. Use it as well when the platform starts containers with UIDs you cannot set, so
+the non-root user could not write the mounted output directory. Otherwise keep the
+default: on GitHub-hosted runners, for example, the job runs as an unprivileged user and
+`non-root` works.
 
 ```bash
 # Via ash CLI
 ash build-image --build-target ci
+ash --mode container --build-target ci
 
 # Via docker or other OCI CLI
 docker build --tag automated-security-helper:ci --target ci .
@@ -328,7 +339,8 @@ ash-scan-container:
   script:
     - apk add --no-cache python3 py3-pip git
     - pip3 install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
-    - ash --mode container
+    # The job runs as root, so build the image stage that runs as root
+    - ash --mode container --build-target ci
   artifacts:
     paths:
       - .ash/ash_output
@@ -454,7 +466,8 @@ phases:
 
   build:
     commands:
-      - ash --mode container
+      # CodeBuild runs the build as root, so build the image stage that runs as root
+      - ash --mode container --build-target ci
 
 artifacts:
   files:
@@ -637,7 +650,8 @@ pipeline {
         }
         stage('Run ASH Scan') {
             steps {
-                sh 'ash --mode container'
+                // The docker agent runs as root, so build the image stage that runs as root
+                sh 'ash --mode container --build-target ci'
             }
         }
     }

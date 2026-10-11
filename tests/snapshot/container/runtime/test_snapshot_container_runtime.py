@@ -13,8 +13,10 @@ same snapshots. Locally: build the image, then
         --run-container-snapshots --no-cov -n 0
 
 Inputs: ``OCI_RUNNER`` (default ``docker``), ``OCI_RUNNER_WRAPPER`` (``sudo`` for
-finch in CI) and ``ASH_IMAGE_NAME`` (default ``automated-security-helper:ci``, which
-is what every CI leg builds). ``pwsh`` must be on PATH for the PowerShell wrapper
+finch in CI) and ``ASH_IMAGE_NAME`` (default ``automated-security-helper:ci``, the
+tag of the ``ci`` stage: every leg that runs this module builds its image with
+``--build-target ci``, and the scans below ask for that stage, since CI variables
+do not select it). ``pwsh`` must be on PATH for the PowerShell wrapper
 tests; it is on the hosted Linux runners these legs use.
 
 A scan through the image prints the inner ASH's whole log first, and that log
@@ -48,6 +50,8 @@ pytestmark = [
     pytest.mark.snapshot_masking(mask_durations=True),
 ]
 
+# The ``ci`` stage's tag, which every leg running this module builds with an explicit
+# ``--build-target ci``; see the module docstring.
 IMAGE = os.environ.get("ASH_IMAGE_NAME") or "automated-security-helper:ci"
 RUNNER = os.environ.get("OCI_RUNNER") or "docker"
 RUNNER_PREFIX = [

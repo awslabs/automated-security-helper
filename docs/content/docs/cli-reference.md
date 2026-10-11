@@ -169,7 +169,7 @@ ash [options]
 | `--offline-semgrep-rulesets`  | Semgrep rulesets for offline mode                       | `p/ci`                |                         |
 | `--build/--no-build`, `-b/-B` | Whether to build the ASH container image                | `True`                |                         |
 | `--run/--no-run`, `-r/-R`     | Whether to run the ASH container image                  | `True`                |                         |
-| `--build-target`              | Container build target: `non-root` or `ci`              | `non-root`            |                         |
+| `--build-target`              | Container build target: `non-root` or `ci` (runs as root). CI environment variables do not change it | `non-root`            |                         |
 | `--oci-runner`, `-o`          | OCI runner to use. Unset by default; ASH uses the first of `finch`, `docker`, `nerdctl`, `podman` found on `PATH`                                       | first found              | `OCI_RUNNER`            |
 | `--python-only/--full`        | Use only Python-based plugins                           | `False`               |                         |
 | `--cleanup`                   | Clean up temporary files after scan                     | `False`               |                         |
@@ -197,6 +197,13 @@ the scan inside the ASH image with these bind mounts:
 The source is mounted read-only wherever the output directory is, including the default
 `.ash/ash_output` inside the source directory: the scan inside the container writes only
 to `/out`.
+
+The image stage is the one `--build-target` names, `non-root` when it is not given. The
+`CI`, `IsCI`, `ISCI` and `CODEBUILD_BUILD_ID` variables do not change it;
+`--custom-containerfile` builds on `ci`. A `non-root` build is refused when the
+container user's UID would be 0, which happens when ASH itself runs as root (common in CI
+jobs): pass `--build-target ci`, or `--container-uid` and `--container-gid`. See
+[Building your own container image](building-your-own-image.md).
 
 ### Workspace Mode
 
@@ -854,7 +861,7 @@ ash build-image [options]
 
 | Option                       | Description                                | Default    | Environment Variable |
 |------------------------------|--------------------------------------------|------------|----------------------|
-| `--build-target`             | Container build target: `non-root` or `ci` | `non-root` |                      |
+| `--build-target`             | Container build target: `non-root` or `ci` (runs as root). CI environment variables do not change it | `non-root` (`ci` on Windows) |                      |
 | `--offline`                  | Build for offline use                      | `False`    |                      |
 | `--offline-semgrep-rulesets` | Semgrep rulesets for offline mode          | `p/ci`     |                      |
 | `--oci-runner`, `-o`         | OCI runner to use. Unset by default; ASH uses the first of `finch`, `docker`, `nerdctl`, `podman` found on `PATH`                          | first found   | `OCI_RUNNER`         |

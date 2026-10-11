@@ -137,6 +137,20 @@
   `<src>-out` counted as inside too (`Invoke-ASH` matched a substring anywhere in the
   path). The output directory has its own mount at `/out`, so `/src` is now read-only
   in every case. See [Running a scan in a container](docs/content/docs/cli-reference.md#running-a-scan-in-a-container).
+- **CI variables no longer select the root `ci` image stage.** `ash --mode container`
+  and `ash build-image` built and ran the `ci` stage, which runs as root, whenever
+  `CI`, `IsCI`, `ISCI` or `CODEBUILD_BUILD_ID` was set to anything (`CI=false` and an
+  empty value included), overriding an explicit `--build-target non-root`; `Invoke-ASH`
+  defaulted to `ci` under `CI`, `IsCI` or `CODEBUILD_BUILD_ID` the same way. The stage
+  is now the one `--build-target` (`-BuildTarget`) names, and `non-root` when none is
+  given. `ci` is still built on request, under `--custom-containerfile`, and by
+  `ash build-image` and `Invoke-ASH` on Windows. **What this changes for CI jobs:** a job
+  that did not pass `--build-target` now gets the `non-root` image (and the
+  `automated-security-helper:non-root` tag, and its own layer-cache scope on GitHub
+  Actions). A job that runs as root (AWS CodeBuild, container-based GitLab or Jenkins
+  jobs) cannot build `non-root`, whose user would get UID 0, and is refused before the
+  build with that explanation: pass `--build-target ci` there. This repository's
+  validate-container action now passes `--build-target ci` to every build and scan.
 - **A repository-written config file can no longer choose what ASH installs,
   imports or hands a scanner as its own configuration.** It applies to a discovered
   `.ash/.ash.yaml`, a `--config` path, an `extends` base, or `ASH_CONFIG`, when the
