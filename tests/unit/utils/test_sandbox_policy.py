@@ -46,6 +46,10 @@ def layout(tmp_path, monkeypatch):
     # Path.home() reads USERPROFILE on Windows, where these tests run too: the
     # policy builder is path logic, independent of the platform it runs on.
     monkeypatch.setenv("USERPROFILE", str(home))
+    # uv's directories follow these before $HOME, so a value from the environment
+    # running the tests would move them away from the ones planted under home.
+    for variable in ("XDG_DATA_HOME", "UV_TOOL_DIR", "UV_PYTHON_INSTALL_DIR"):
+        monkeypatch.delenv(variable, raising=False)
     source = tmp_path / "src"
     source.mkdir()
     output = source / ".ash" / "ash_output"
