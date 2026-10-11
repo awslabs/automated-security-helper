@@ -326,11 +326,12 @@ directory that `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, whether `workspace_config` 
 ASH finds it beside the workspace file. Any other policy file, including one an MCP client
 delivered, refuses the workspace with exit code 4. In a workspace inside source an MCP
 client delivered, each project's config file is a delivered config: if one sets a field the
-server's policy denies, both tools fail with exit code 3 and name the project (see [What a
-delivered config cannot set](mcp-server.md#what-a-delivered-config-cannot-set)). Over MCP
-there are no changed-files, sharding, or fail-gate parameters. Leave `config_overrides` and
-`profile` unset: `ash mcp` has no option that registers profiles, so a call that sets
-either is refused with exit code 3.
+server's policy denies, both tools fail with exit code 3, with `error_type`
+`ASHConfigValidationError` and a message that names the project (see [What a delivered
+config cannot set](mcp-server.md#what-a-delivered-config-cannot-set)). Over MCP there are
+no changed-files, sharding, or fail-gate parameters. Leave `config_overrides` and `profile`
+unset: `ash mcp` has no option that registers profiles, so a call that sets either is
+refused with exit code 3.
 
 What workspace scans do not do:
 

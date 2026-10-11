@@ -127,9 +127,13 @@ ERROR (1) Exiting because conversion was incomplete: 1 converter(s) did not proc
 Cause: ASH converts Jupyter notebooks to Python, and extracts `.zip`, `.tar`, and `.gz`
 archives, before it scans them. A notebook that `nbconvert` could not convert, or an
 archive that cannot be read, fails the scan so that its content is not silently left
-unscanned. The lines after the message name each file and the reason. For a notebook,
-the reason says that nbconvert exited with a non-zero code, did not finish within 60
-seconds, or wrote no output.
+unscanned. The lines after the message name each converter and up to five of the files
+it could not convert. `ash.log` has a line for each file with the reason,
+`Could not convert '<file>': <reason>` (the console shows it too when the progress
+display is off), and each converter's `failed_inputs` in `ash_aggregated_results.json`
+records the same reason. For a notebook, the reason says that nbconvert exited with a
+non-zero code, did not finish within 60 seconds, or wrote no output, or that uv could not
+run nbconvert and no `jupyter-nbconvert` was found.
 
 Fix: for notebooks, make sure `uv` is on your `PATH` so ASH can run `nbconvert`, or
 install it ahead of time with `ash dependencies install --tool jupyter`. To see
@@ -209,24 +213,27 @@ modules, reporter destinations and credentials, and options that name a scanner'
 configuration or ignore file. A config file inside the scanned directory, or inside
 any git checkout, could have been written by someone other than you, so ASH ignores
 those settings from it. The warning names each setting and says why. For a plugin
-module, it also gives where Python found the module and the git checkout or scanned
-directory that location is in.
+module found inside a git checkout or the scanned directory, the warning also gives where
+Python found it and which checkout or directory that is. For other modules, it says that
+the module is not importable, or what ASH's AWS or Snyk plugin package would send off the
+host.
 
-Under `ash mcp`, a config file an MCP client delivered is held to the server's policy.
-With the default policy, a delivered file that asks for more sandbox access or plugin
-modules than the server's own config is refused as a whole with `config_field_denied`,
-not ignored; see
+Under `ash mcp`, for sandbox settings in a config file that an MCP client names as a
+scan's `config_path`, outside the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, the
+reason reads `an MCP client supplied the file, not the operator`. A config file an MCP
+client delivered is refused instead when it gives a scanner network or read access the
+server's sandbox settings do not, turns the sandbox off or switches its backend, or adds
+a plugin module this check would drop; see
 [What a delivered config cannot set](mcp-server.md#what-a-delivered-config-cannot-set).
-When a delivered file's sandbox settings are ignored instead, the reason in the warning
-reads `an MCP client supplied the file, not the operator`.
 
 Fix: pass the setting with `--config-overrides`, or put it in a config file outside the
 scanned directory and outside every git checkout and name that file with `--config`.
 Name a plugin module with `--ash-plugin-modules`, or install it outside every git
-checkout and the scanned directory. For some scanners, the file such an option names
-must also be outside the scanned directory;
-[Options only the operator can set](choose-scanners.md#operator-only) says which. See
-[Configuration trust model](../concepts/trust-model.md).
+checkout and the scanned directory. Such a config cannot add ASH's AWS or Snyk plugin
+package at all, so name those with `--ash-plugin-modules` or one of the two ways above.
+For some scanners, the file such an option names must also be outside the scanned
+directory; [Options only the operator can set](choose-scanners.md#operator-only) says
+which. See [Configuration trust model](../concepts/trust-model.md).
 
 ### The scan exits 4
 
@@ -258,7 +265,7 @@ ERROR (1) /home/me/out/reports is a symlink. ...
 Cause: the output directory, a directory on the way to it inside the scanned
 directory, or something ASH writes inside it, such as `reports`, is a symbolic link.
 ASH clears and writes its output directory, so it does not do that through a link. This
-check applies whether or not the sandbox is on. In a workspace scan, a link at
+check applies whether or not the sandbox is on. In an `ash --workspace` scan, a link at
 `projects/<project>` fails only that project, and a link at `projects` or
 `.workspace-spool` stops the whole run. [Output files](../reference/output-files.md#links)
 lists every path ASH checks.
@@ -268,7 +275,8 @@ replace the link with a directory. Turning the sandbox off does not change this.
 
 ### The scan stops because a report file is a link
 
-Symptom: the run exits 1 before any reporter writes, with:
+Symptom: the run exits 1 before any reporter writes, with this message (`ash merge`
+prints the same text after `Refusing to write reports:`):
 
 ```text
 ERROR (1) /home/me/out/reports/ash.sarif is a symlink. ASH does not write a report through a link. Remove the link and run ASH again.

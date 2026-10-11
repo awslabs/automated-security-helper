@@ -179,7 +179,8 @@ The ASH image sets `UV_CONSTRAINT=/etc/ash/uv-constraints.txt`, which holds pygi
 GuardDog dependency, to the release its license files describe. A Dockerfile that builds
 on the image inherits the variable, so a `uv` install in it is constrained the same way.
 Unset it, or point it at your own constraints file, for installs that should resolve
-pygit2 freely.
+pygit2 freely. If such an install changes GuardDog's pygit2, the files in
+`/usr/share/doc/ash/third-party/pygit2/` no longer describe the copy in your image.
 
 To run your image in CI with your own configuration, run ASH inside it in local mode and
 mount the files it needs. [Roll out ASH across repositories](../getting-started/platform-teams.md)
@@ -190,28 +191,31 @@ vulnerability databases, so it ages; see [Run ASH offline](run-offline.md#refres
 
 ### Third-party license files {#third-party-licenses}
 
-The image carries the license and notice files of each third-party program it bundles,
-taken from the release it carries, in `/usr/share/doc/ash/third-party/<tool>/`. That
-covers actionlint, cfn-guard and the AWS Guard Rules Registry rules it reads, gitleaks,
-grype, hadolint, opengrep, syft, trivy, and uv; the Python scanners bandit, checkov,
-cfn-lint, GuardDog, semgrep, and zizmor; and pygit2, which GuardDog depends on, with the
-libgit2, libssh2, OpenSSL, and PCRE libraries its wheel bundles, and the OpenSSL 1.1 that
-the yara-python wheel bundles. hadolint and GuardDog status: pending licensing review;
-[Community plugins](../docs/plugins/community/index.md) says which components the review
-covers.
+The image carries license and notice files for these third-party components, taken from
+the release it carries, in `/usr/share/doc/ash/third-party/<tool>/`: actionlint, cfn-guard
+and the AWS Guard Rules Registry rules it reads, gitleaks, grype, hadolint, opengrep, syft,
+trivy, and uv; the scanners installed from PyPI, bandit, checkov, cfn-lint, GuardDog,
+semgrep, and zizmor; and pygit2, which GuardDog depends on, with the libgit2, libssh2,
+OpenSSL, and PCRE libraries its wheel bundles, and the OpenSSL 1.1 that the yara-python
+wheel bundles. hadolint and GuardDog status: pending licensing review;
+[Community plugins](../docs/plugins/community/index.md) says which of these components the
+review covers.
 
 Beside each program's files, a `SOURCE` file names the upstream repository, release tag,
-and commit. For the copyleft components, hadolint (GPL-3.0), opengrep and semgrep
-(LGPL-2.1), and pygit2 and libgit2 (GPL-2.0 with the GCC linking exception), `SOURCE` also
-gives the git commands that check out the corresponding source. `index.json` in
-`/usr/share/doc/ash/third-party` lists every bundled program with its version, license,
+and commit. For the copyleft components, hadolint (GPL-3.0-only), opengrep and semgrep
+(LGPL-2.1-only), and pygit2 and libgit2 (GPL-2.0-only WITH GCC-exception-2.0), `SOURCE`
+also gives the git commands that check out the corresponding source. `index.json` in
+`/usr/share/doc/ash/third-party` lists each of these components with its version, license,
 repository, commit, and files. The build writes it only after checking each entry
 against the built image.
 
 Other Python packages in the image, such as the scanners' dependencies and nbconvert,
 keep their license files in their `.dist-info` directories, and Debian packages keep
-theirs in `/usr/share/doc/<package>/`. The licenses of the modules statically linked into
-the Go and Rust programs are not reproduced.
+theirs in `/usr/share/doc/<package>/`. cfn-nag and the Ruby gems it depends on, and the
+yarn and pnpm that corepack prepares, have no entry in this directory. Apart from
+hadolint's `ThirdPartyNotices.txt`, the licenses of libraries built into the bundled
+programs, such as the modules statically linked into the Go and Rust programs, are not
+reproduced.
 
 ## Windows and macOS {#platforms}
 

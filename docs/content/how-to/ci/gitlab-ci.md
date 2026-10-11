@@ -137,8 +137,9 @@ databases during the scan, as they do in the first example. An image built with
 trivy's 24-hour bound its scans still pass, and the reports record the stale database.
 grype's database and the offline rulesets still fail the scan past their bounds, so rebuild
 the image within them; see [Refresh cadence](../run-offline.md#refresh).
-`--no-allow-stale-content-db`, as in the job above, holds trivy's database to its bound too,
-so with that flag the image fails every scan that includes trivy within a day of its build.
+`--no-allow-stale-content-db`, as in the job above, holds trivy's database to its bound too.
+The bound counts from when the database was built upstream, so with that flag scans that
+include trivy start failing less than a day after the image build.
 
 ## Scan only what a merge request changes
 

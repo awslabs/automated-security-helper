@@ -37,9 +37,9 @@ Module names are short here; the full name is `automated_security_helper.plugin_
 | [`hadolint`](hadolint-plugin.md) | `ash_hadolint_plugins` | problems in Dockerfiles and Containerfiles | hadolint, pinned release | none | yes | pending licensing review |
 | [`guarddog`](guarddog-plugin.md) | `ash_guarddog_plugins` | the patterns malicious packages use | GuardDog, from PyPI | downloads GuardDog from PyPI during an online scan if it is not installed; with `verify` on, also contacts the package registries | yes | pending licensing review |
 
-hadolint status: pending licensing review. The review covers the third-party components that ASH's container image would redistribute for this plugin: the hadolint binary and the libraries statically linked into it.
+hadolint status: pending licensing review. The review covers the third-party components that ASH's container image includes for this plugin: the hadolint binary and the Haskell libraries statically linked into it.
 
-GuardDog status: pending licensing review. The review covers the third-party components that ASH's container image would redistribute for this plugin: GuardDog and its pygit2 dependency, with the libgit2 library bundled in pygit2's package.
+GuardDog status: pending licensing review. The review covers the third-party components that ASH's container image includes for this plugin: GuardDog; its pygit2 dependency, with the libgit2, libssh2, OpenSSL, and PCRE libraries the pygit2 wheel bundles; and the OpenSSL 1.1 that the wheel of yara-python, another GuardDog dependency, bundles.
 
 ## trivy-repo and the built-in trivy scanner
 

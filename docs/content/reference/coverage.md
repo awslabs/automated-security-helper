@@ -105,8 +105,9 @@ cdk-nag applies its AWS Solutions rule pack. With no templates, all four report
 cfn-nag reads a copy of each template that ASH writes in the scanner's results
 directory, named `template.json`, `template.yaml`, or `template.yml` after the
 template's extension, and removes it after the run. Findings name the original
-template. On Windows, where `cfn_nag_scan` is a batch file, a template whose name
-contains `&` or `|` is scanned too.
+template. On Windows, where `cfn_nag_scan` is a batch file, the template's own name
+never reaches its command line, so characters such as `&` and `|` in it are not read as
+command syntax.
 
 ### Dependencies {#dependencies}
 
@@ -192,19 +193,22 @@ output in `converted/` as a second target:
   members with a file extension ASH knows how to scan, compared case-sensitively, so
   files such as `Dockerfile` or `go.mod` inside an archive, and archives inside
   archives, are not extracted. `.tgz`, `.bz2`, `.xz`, `.jar`, and `.whl` files are not
-  opened. A `.gz` file that holds one compressed file rather than a tar archive, such as
-  `data.json.gz`, is skipped and does not count as a failed input. Any other file with
-  one of the three extensions that Python cannot read as a zip or tar archive is a
-  failed input.
+  opened. A `.gz` file whose name does not end in `.tar.gz` and that holds one compressed
+  file rather than a tar archive, such as `data.json.gz`, is skipped and does not count as
+  a failed input. Any other file with one of the three extensions that Python cannot read
+  as a zip or tar archive is a failed input.
 - `jupyter` converts each `.ipynb` notebook to a script with nbconvert. ASH runs
   nbconvert on a copy of the notebook named `notebook.ipynb`, in a temporary directory
   that holds nothing else, so nbconvert does not pick up a Python module or template
   directory from the repository through its working directory, and a notebook whose
   name contains characters such as `[` or `{` still converts. The copy drops
   `language_info.nbconvert_exporter`, and keeps `language_info.file_extension` only when
-  it is a plain extension such as `.r`. The converted file is named after the original
-  notebook.
+  it is a plain extension such as `.r`. The converted file, in `converted/jupyter/`, is
+  named after the notebook's path with characters other than letters, digits, and `_`
+  replaced, and ends in `-converted.py`, or in `-converted` plus the notebook's plain
+  extension, such as `-converted.r`, for a notebook in another language.
 
-semgrep and opengrep exclude `*-converted.py`, so they do not scan converted notebooks.
-Findings in converted files point into the output directory, not into the original
-archive or notebook.
+semgrep and opengrep exclude `*-converted.py` by default (their `exclude` option), so they
+do not scan notebooks converted to Python. A notebook converted to another language, such
+as one ending in `-converted.r`, is not excluded. Findings in converted files point into
+the output directory, not into the original archive or notebook.

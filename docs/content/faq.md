@@ -7,13 +7,14 @@ file without it they report an error and exit 1, although a scan accepts the fil
 
 ## Why does my first scan exit 1?
 
-At least one scanner is MISSING: its tool is not installed. MISSING can also mean ASH found
-the tool only inside the scanned directory, such as in the project's `.venv`, and did not
-run it; see [Tools inside the scanned directory](docs/advanced-usage.md#tools-inside-the-scanned-directory).
-A scan with a MISSING scanner is incomplete, and an incomplete scan exits 1 even when it also found something. Run
-`ash dependencies install` to install the tools it can install. npm-audit and cdk-nag also
-need Node.js, and cfn-nag needs Ruby with a C compiler. To scan without a tool you cannot
-install, leave its scanner out with `ash --exclude-scanners cdk-nag,npm-audit`. See
+At least one scanner is MISSING: its tool is not installed, or ASH found the tool only
+inside the scanned directory, such as in the project's `.venv`, and did not run it (see
+[Tools inside the scanned directory](docs/advanced-usage.md#tools-inside-the-scanned-directory)).
+A scan with a MISSING scanner is incomplete, and an incomplete scan exits 1 even when it
+also found something. Run `ash dependencies install` to install the tools it can install.
+npm-audit and cdk-nag also need Node.js, and cfn-nag needs Ruby with a C compiler. To scan
+without a tool you cannot install, leave its scanner out with
+`ash --exclude-scanners cdk-nag,npm-audit`. See
 [A scanner shows MISSING](how-to/troubleshoot.md#a-scanner-shows-missing) and
 [Exit codes](reference/exit-codes.md).
 
@@ -145,8 +146,9 @@ Yes. With `--offline`, ASH runs every scanner in its offline mode and installs n
 Some scanners still make requests; only the scanner sandbox, or container mode with
 `--offline`, removes the network itself. The rules and vulnerability databases must be in
 place first; an image built with `ash build-image --offline` contains them. Each database
-has an age bound, from a day to a month, and by default a scan fails when one is past it,
-so plan to rebuild offline images often. See [Run ASH offline](how-to/run-offline.md) and
+has an age bound, from a day to a month, and by default a scan fails when one is past it
+(an image built with `OFFLINE=YES` only warns for trivy's database), so plan to rebuild
+offline images often. See [Run ASH offline](how-to/run-offline.md) and
 [Content databases](concepts/content-databases.md).
 
 ## What does a scan send over the network?

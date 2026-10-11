@@ -49,16 +49,16 @@ Three things in this file are required, not optional:
 - Grant the scan job `contents: read`, `checks: write`, and `pull-requests: write`. The
   called workflow declares all three, and GitHub refuses to start the run when the calling
   job grants less, even if you turn off the comment and the check.
-- Set `install-grype`, `install-syft`, `install-opengrep`, and `install-cfn-nag` to `true`.
-  They default to `false`, while the scanners that need those tools are on by default. A
+- In the default `ash-mode: local`, set `install-grype`, `install-syft`,
+  `install-opengrep`, and `install-cfn-nag` to `true`. They default to `false`, while the scanners that need those tools are on by default. A
   caller that leaves them out gets those scanners reported as MISSING, and the job fails
   with exit code 1 even when nothing was found. The inputs for actionlint, cfn-guard,
   gitleaks, and trivy default to `true`, so the example leaves them out.
 
 To leave a tool out, turn its scanner off and do not install the tool, for example with
-`--exclude-scanners trivy` in `ash-args` and `install-trivy: false`. An input set to
-`false` while its scanner is on leaves that scanner MISSING, and the incomplete-scan gate
-fails the job with exit code 1.
+`--exclude-scanners trivy` in `ash-args` and `install-trivy: false`. In local mode, an
+input set to `false` while its scanner is on leaves that scanner MISSING, and the
+incomplete-scan gate fails the job with exit code 1.
 
 ASH's zizmor scanner reports each `uses:` line that names a tag as `zizmor/unpinned-uses` at
 HIGH, so a scan of a repository that holds this file fails until you pin both lines to a
@@ -339,9 +339,10 @@ job succeeds, and a scan with findings fails the job. Do not add `restore-keys` 
 database cache: a database past its bound only makes grype download a new one.
 
 Do not cache trivy's database. Its bound is 24 hours, and ASH declares it not cacheable in
-CI. Before each online scan, ASH updates it in `$TRIVY_CACHE_DIR`, or in `~/.cache/trivy`
-when that variable is not set (`~/Library/Caches/trivy` on macOS), and passes that
-directory to trivy with `trivy --cache-dir`. Leave it out of your cache steps.
+CI. Before each online scan that runs trivy, ASH updates it in `$TRIVY_CACHE_DIR`, or,
+when that is not set, in `trivy` under the user cache directory (`$XDG_CACHE_HOME` or
+`~/.cache` on Linux, `~/Library/Caches` on macOS, `%LOCALAPPDATA%` on Windows), and passes
+that directory to trivy with `trivy --cache-dir`. Leave it out of your cache steps.
 
 [Content databases](../../concepts/content-databases.md) explains the bounds and what
 happens when a database is past one.

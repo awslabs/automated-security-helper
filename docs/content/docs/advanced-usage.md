@@ -182,16 +182,17 @@ Found only inside the scanned tree, so not run: grype (/home/me/repo/.venv/bin/g
 The fix is to install the tool outside the repository, for example with
 `ash dependencies install` or `uv tool install`.
 
-This applies to the programs ASH starts. ASH also removes the scanned directory's
-entries, and any empty or relative entries, from the `PATH` it gives those programs, so
-a scanner that starts another program by name, such as `git` or `node`, does not find
-a copy inside the repository through `PATH`. None of this applies to ASH itself: if you
-run ASH from a virtual environment inside the repository, ASH's own code comes from the
-repository, so install ASH outside it (see [Install ASH](../how-to/install.md)). It
-also does not stop a correctly installed tool from reading files in the repository,
-such as detect-secrets' `.secrets.baseline` or a `.semgrepignore`
-([what the trust model does not protect](../concepts/trust-model.md#not-protected) lists
-the tool config files ASH keeps out).
+This applies to the programs ASH starts. Unless in-tree tools are allowed (see below),
+ASH also removes the scanned directory's entries, and any empty or relative entries,
+from the `PATH` it gives those programs, so a scanner that starts another program by
+name, such as `git` or `node`, does not find a copy inside the repository through
+`PATH`. None of this applies to ASH itself: if you run ASH from a virtual environment
+inside the repository, ASH's own code comes from the repository, so install ASH
+outside it (see [Install ASH](../how-to/install.md)). It also does not stop a
+correctly installed tool from reading files in the repository, such as detect-secrets'
+`.secrets.baseline` or a `.semgrepignore` ([what the trust model does not
+protect](../concepts/trust-model.md#not-protected) lists the tool config files ASH
+keeps out).
 
 To let ASH use tools from inside the scanned directory for one scan, pass
 `--allow-in-tree-tools` to `ash` or `ash scan`, or set `ASH_ALLOW_IN_TREE_TOOLS=1` in
