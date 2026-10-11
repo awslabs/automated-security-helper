@@ -212,6 +212,108 @@ def test_an_outside_config_extending_a_base_in_the_tree_loses_the_bases_grants(
     assert _network(sandbox, "checkov", False, tmp_path) is False
 
 
+OPERATOR_OWN = """project_name: operator
+extends: repo/.ash/base.yaml
+sandbox:
+  network_scanners: [checkov]
+  read_path_scanners: [detect-secrets]
+"""
+
+BASE_GRANTS = """project_name: scanned
+sandbox:
+  extra_read_paths: ["~"]
+  env_scanners: [checkov]
+"""
+
+
+def _checkout_with_base(tmp_path: Path, base: str = BASE_GRANTS) -> Path:
+    source = tmp_path / "repo"
+    (source / ".git").mkdir(parents=True)
+    (source / ".ash").mkdir()
+    (source / ".ash" / "base.yaml").write_text(base)
+    return source
+
+
+def _grant_warnings(caplog) -> list:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("Ignoring sandbox.")
+    ]
+
+
+def test_an_operator_config_keeps_its_own_grants_when_its_base_is_in_a_checkout(
+    tmp_path, caplog
+):
+    # The operator's --config is outside every checkout and extends the scanned
+    # repository's config, which is inside one. The settings the operator's file
+    # writes hold; the ones only the base sets do not, and the warning names the
+    # base and those settings alone.
+    source = _checkout_with_base(tmp_path)
+    operator = tmp_path / "ash.yaml"
+    operator.write_text(OPERATOR_OWN)
+    caplog.set_level("WARNING")
+    sandbox = resolve_config(config_path=operator, source_dir=source).sandbox
+    assert sandbox.network_scanners == ["checkov"]
+    assert sandbox.read_path_scanners == ["detect-secrets"]
+    assert sandbox.extra_read_paths == []
+    assert sandbox.env_scanners == []
+    assert _network(sandbox, "checkov", False, tmp_path) is True
+    (warning,) = _grant_warnings(caplog)
+    assert _ignored_keys(warning) == {
+        "sandbox.extra_read_paths",
+        "sandbox.env_scanners",
+    }
+    assert "base.yaml" in warning and operator.as_posix() not in warning
+
+
+def test_a_trusted_file_a_repository_base_extends_cannot_grant(tmp_path):
+    # operator.yaml (trusted) -> repo/.ash/base.yaml (in a checkout) -> shared.yaml
+    # (outside every checkout). shared.yaml was chosen by the repository's file, so
+    # its grants are the repository's choice and are dropped, while the operator's
+    # own still hold.
+    source = _checkout_with_base(
+        tmp_path, "project_name: scanned\nextends: ../../shared.yaml\n"
+    )
+    (tmp_path / "shared.yaml").write_text(
+        "project_name: shared\nsandbox:\n  extra_read_paths: ['~']\n"
+    )
+    operator = tmp_path / "ash.yaml"
+    operator.write_text(OPERATOR_OWN)
+    sandbox = resolve_config(config_path=operator, source_dir=source).sandbox
+    assert sandbox.network_scanners == ["checkov"]
+    assert sandbox.extra_read_paths == []
+
+
+def test_ash_config_keeps_its_own_grants_when_its_base_is_in_a_checkout(
+    tmp_path, monkeypatch
+):
+    source = _checkout_with_base(tmp_path)
+    operator = tmp_path / "ash.yaml"
+    operator.write_text(OPERATOR_OWN)
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    sandbox = resolve_config(source_dir=source).sandbox
+    assert sandbox.network_scanners == ["checkov"]
+    assert sandbox.read_path_scanners == ["detect-secrets"]
+    assert sandbox.extra_read_paths == []
+    assert sandbox.env_scanners == []
+
+
+def test_an_operator_config_in_a_checkout_keeps_no_grants_of_its_own(tmp_path):
+    # The rule above is for a file that may grant: one inside a checkout may not,
+    # whatever its base is.
+    ops = tmp_path / "ops"
+    _checkout_with_base(ops)
+    (ops / ".git").mkdir()
+    operator = ops / "ash.yaml"
+    operator.write_text(OPERATOR_OWN)
+    target = tmp_path / "target"
+    target.mkdir()
+    sandbox = resolve_config(config_path=operator, source_dir=target).sandbox
+    assert _confined(sandbox)
+    assert sandbox.read_path_scanners == []
+
+
 def test_a_symlinked_source_dir_does_not_hide_the_config(tmp_path):
     real = _repo(tmp_path)
     link = tmp_path / "link"
@@ -717,7 +819,9 @@ def test_an_operator_config_extending_into_the_tree_still_sets_the_mode_floor(
     )
     sandbox = _project_config_with_policy(project, settings).sandbox
     assert sandbox.mode == "bwrap"
-    assert sandbox.network_scanners is None
+    # The operator's file is outside the workspace and writes this grant itself;
+    # only what its base in the workspace would add is dropped.
+    assert sandbox.network_scanners == ["checkov"]
 
 
 def test_an_invalid_operator_config_is_refused_like_any_config(tmp_path):

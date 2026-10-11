@@ -5,13 +5,14 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from pydantic import ValidationError
 import yaml
-from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.ash_config import AshConfig, SandboxConfig
 from automated_security_helper.config.config_sources import (
     _resolve_dict_key,
     default_confinement_root,
     describe_config_path,
     discover_config_source,
     log_config_discovery,
+    read_config_file,
     resolve_config_document,
 )
 from automated_security_helper.config.default_config import (
@@ -279,6 +280,20 @@ def resolve_config(
         trusted = operator[0]
     else:
         trusted = AshConfig() if default_in_tree else get_default_config()
+        # A file that may grant, made untrusted only by a base it extends, keeps
+        # the sandbox settings it writes itself.
+        if default_in_tree and default_config_chain():
+            trusted = _with_own_sandbox(
+                trusted, default_config_chain()[-1], root, ash_config_named
+            )
+        if operator is not None:
+            trusted = _with_own_sandbox(
+                trusted, operator[1][-1], root, [Path(trusted_config_path)]
+            )
+    # The same for the config file the scan selected: an operator's --config
+    # outside every checkout that extends a base inside one.
+    if chain and not untrusted_config:
+        trusted = _with_own_sandbox(trusted, chain[-1], root, named)
     # The operator's mode is a floor wherever its file lives: a mode other than off
     # grants nothing, so an operator file in the tree may still turn the sandbox on.
     # Before the overrides, so `--sandbox off` still turns it off.
@@ -308,6 +323,43 @@ def resolve_config(
         config, trusted, config_overrides, Path(scanned_root), in_tree
     )
     return config
+
+
+def _own_sandbox_settings(path: Path) -> Dict[str, Any]:
+    """The ``sandbox`` settings ``path`` writes itself, without its ``extends`` bases.
+
+    Read from the file alone, so neither a base nor the file's own ``patch``
+    operations, which edit what its bases gave it, contribute.
+    """
+    try:
+        data = read_config_file(path)
+    except Exception:  # noqa: BLE001 - the chain was read already; nothing to add
+        return {}
+    section = data.get("sandbox") if isinstance(data, dict) else None
+    return dict(section) if isinstance(section, dict) else {}
+
+
+def _with_own_sandbox(
+    trusted: AshConfig, path: Path, scan_root: Path, lexical: List[Path]
+) -> AshConfig:
+    """``trusted`` with the sandbox settings ``path`` writes, when ``path`` may grant.
+
+    ``path`` is one file of a chain that ``repository_written`` found untrusted
+    because of a base: an operator's file outside every checkout that extends one
+    inside. Its own settings are the operator's, and the base's are not, so only
+    the file's own ``sandbox`` section joins the trusted settings. Judged by its
+    resolved path and by ``lexical``, the names it was given.
+    """
+    if repository_written([path], scan_root, lexical):
+        return trusted
+    own = _own_sandbox_settings(path)
+    if not own:
+        return trusted
+    updated = trusted.model_copy()
+    updated.sandbox = SandboxConfig.model_validate(
+        {**trusted.sandbox.model_dump(), **own}, strict=True
+    )
+    return updated
 
 
 def _load_operator_config(
