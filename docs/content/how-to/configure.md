@@ -118,7 +118,7 @@ global_settings:
 - Always write the colon. `${NAME}` without one is never replaced, even when the variable is set; write `${NAME:}` for an empty default.
 - The result is a string. That works for string and threshold values, but a boolean or number key such as `fail_on_findings` fails validation (exit 3).
 - The resolved config is written into the scan's results (`ash_aggregated_results.json`), so do not read secrets into it.
-- A config file that an MCP client delivered to the ASH MCP server, or names outside the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, may not use a reference at all: the server refuses it ([What a delivered config cannot set](mcp-server.md#what-a-delivered-config-cannot-set)).
+- A config file under the ASH MCP server's workspace root, where delivered source is kept, or one an MCP client names outside the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, may not use a reference at all. ASH refuses it, on the CLI too, with exit code 3 ([What a delivered config cannot set](mcp-server.md#what-a-delivered-config-cannot-set)).
 - An editor that checks the file against ASH's schema marks a reference in a field with fixed values, such as `severity_threshold`, as an error. ASH accepts it.
 
 ## Get completion in your editor {#schema}

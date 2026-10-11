@@ -129,7 +129,7 @@ content_db_staleness: fail
 content_db_staleness_overrides:
   - database: trivy-db
     policy: warn
-    expiration: "2026-11-15"
+    expiration: "2027-06-30"
     reason: Air-gapped runners get a new image weekly until the mirror is ready.
 ```
 

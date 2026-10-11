@@ -191,7 +191,7 @@ installed rules either: it may read `$ASH_CFN_GUARD_RULES_DIR`, or `share/cfn-gu
 beside ASH's bin directory.
 
 A file that a scanner option names outside the source directory, such as a `config_file`
-of actionlint, gitleaks, trivy, or zizmor, gitleaks' `baseline_path`, trivy's `ignore_file`
+of actionlint, gitleaks, hadolint, trivy, or zizmor, gitleaks' `baseline_path`, trivy's `ignore_file`
 or `secret_config_file`, or a path for actionlint's `shellcheck` or `pyflakes`, is not mounted
 for the scanner. Unless it is under a system directory the sandbox already reads, such as
 `/etc` or `/opt`, add it to `extra_read_paths`. cfn-guard's `rules_paths` need no entry: ASH
@@ -238,9 +238,12 @@ sandbox:
 
 detect-secrets needs a network only when its verification filter is on, and gets one
 only when `network_scanners` names it. Naming it gives it a network on every online scan,
-whether or not the filter is on, so name it only when you use verification. It reads a `baseline_file` outside the source tree
-only when `read_path_scanners` names it; without that, ASH logs a warning, ignores the
-baseline, and reports the findings the baseline would have marked.
+whether or not the filter is on, so name it only when you use verification. ASH takes a
+relative `baseline_file`, and the `.secrets.baseline` it looks for by name, from the source
+directory. It reads a `baseline_file` outside the source tree only when `read_path_scanners`
+names it; without that, ASH logs a warning, ignores the baseline, and reports the findings
+the baseline would have marked. A baseline that is not a regular file is skipped the same way,
+with a warning.
 
 ## Who may grant {#who-may-grant}
 

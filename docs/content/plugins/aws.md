@@ -26,9 +26,9 @@ which belong to the operator:
 - `ash_plugin_modules` in a config file outside every git checkout and outside the
   directory you scan
 
-When a config file inside the scanned repository, or one an MCP client delivered, names
-the package, ASH drops that entry, logs a warning that says why, and runs the scan
-without it.
+When a config file inside the scanned repository names the package, or a module inside
+it, ASH drops that entry, logs a warning that says why, and runs the scan without it. The
+MCP server refuses a config an MCP client delivered that names it.
 
 Turn off the reporters you do not use in the same operator config. This one sends to S3
 and CloudWatch Logs only:
@@ -77,11 +77,11 @@ operator sources: the defaults below, an operator config file, or `--config-over
 | `bedrock-summary-reporter` | `aws_region`, `aws_profile`, `model_id`, `output_file`, `output_executive_file`, `output_technical_file` | `AWS_REGION`, then `AWS_DEFAULT_REGION`, then `us-east-1`; `AWS_PROFILE`; `ASH_BEDROCK_MODEL_ID`, then `us.anthropic.claude-3-7-sonnet-20250219-v1:0` |
 | `aws-security-hub` | `aws_region`, `aws_profile`, `account_id` | `AWS_REGION`, then `AWS_DEFAULT_REGION`; `AWS_PROFILE`; the caller's account |
 
-When a config file inside the scanned repository sets one of these options, ASH ignores
-it, logs a warning that names the option, and uses the operator's value. Under an MCP
-server's default policy, a delivered config that sets a `cloudwatch-logs` option or a
-Bedrock `aws_*` option is refused, and S3 and Security Hub destinations in it are
-replaced by the operator's values.
+When a config file inside the scanned repository sets one of these options, under any
+spelling of the reporter's section, ASH ignores it, logs a warning that names the option,
+and uses the operator's value. Under an MCP server's default policy, a delivered config
+that sets one of them, or any `cloudwatch-logs` option, to a value other than the server's
+is refused.
 
 Credentials come from the AWS SDK's default chain: environment variables, the shared
 config and credentials files (with `aws_profile` where the reporter has it), and the
@@ -131,7 +131,9 @@ IAM: `logs:CreateLogStream` and `logs:PutLogEvents` on the log group.
 Asks a Bedrock model, through the Converse API, for an executive summary, a risk
 assessment, recommendations, and a technical analysis, and writes them to
 `reports/ash.bedrock.summary.md`, `reports/bedrock-executive.md`, and
-`reports/bedrock-technical.md`. A test scan of a small project with one finding made six
+`reports/bedrock-technical.md`. `output_file`, `output_executive_file`, and
+`output_technical_file` change those names, and must be plain file names in `reports/`:
+ASH does not write a file whose name leads anywhere else, and logs a warning. A test scan of a small project with one finding made six
 Converse calls; more severity levels in the results mean more calls.
 
 The prompts contain the names of every scanner in the results, severity counts, and, for

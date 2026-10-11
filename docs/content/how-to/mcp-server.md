@@ -19,6 +19,13 @@ reach, serving it over HTTP, and cleaning up after clients. Every option is list
 - A scan uses the config ASH discovers in the scanned directory, or the file a client names
   with `config_path`. When there is neither, it uses the file `ASH_CONFIG` names in the
   server's environment, or the built-in defaults.
+- If `.ash` or `.ash/ash_output` in the scanned directory is a symbolic link, `run_ash_scan`
+  refuses before the scan starts, with `error_type` `output_dir_not_permitted`. A link deeper
+  in the output directory, such as `reports` or `ash.log`, fails the scan, and
+  `get_scan_progress` names the link in `error_message` and says to replace it in
+  `.ash/ash_output` with a directory. `run_ash_workspace_scan` refuses an `output_dir` that is
+  a link, or has a link inside it or at `projects/<project>`, and asks for a directory that is
+  not a link. [Output files](../reference/output-files.md#links) lists every path ASH checks.
 - MCP scans never run a tool found inside a scanned or delivered tree, whatever
   `ASH_ALLOW_IN_TREE_TOOLS` says, and `ash mcp` has no option to allow it. A scanner installed
   only inside the project, for example in its `.venv`, is reported as MISSING. See
@@ -280,9 +287,9 @@ If the policy itself cannot be loaded, because the file `ASH_CONFIG` names exist
 load, or has two sections that ASH reads as the same plugin, a config with an MCP-client file is
 refused with `config_policy_unreadable`. A scan that reads no such file is unaffected.
 
-A delivered config's sandbox settings and plugin modules may restrict the server's own but not
-widen them. A file that asks for more is refused with `config_field_denied`, naming the
-setting; an equal or tighter value scans:
+Under the default `denied_paths`, a delivered config's sandbox settings and plugin modules may
+restrict the server's own but not widen them. A file that asks for more is refused with
+`config_field_denied`, naming the setting; an equal or tighter value scans:
 
 - `sandbox.network_scanners` may list only scanners the server's settings give a network. A
   shorter list takes the network away from the scanners it leaves out.
@@ -300,8 +307,9 @@ when it is inside a git checkout, so keep it outside every checkout. A delivered
 An MCP-client file reads no environment variables, since the environment it would read is the
 server's. A file that uses a `${VAR:default}` reference or an `!ENV` tag is refused with
 `error_type` `config_env_not_resolved` by `run_ash_scan`, which does not start the scan, and by
-`get_config` and `validate_config`. A base it `extends` is judged on its own location, so a base
-of yours keeps its references, and so does a file in a directory
+`get_config` and `validate_config`. The rule follows where the file is, so a CLI scan of a
+delivered tree refuses such a config too, with exit code 3. A base it `extends` is judged on its
+own location, so a base of yours keeps its references, and so does a file in a directory
 `ASH_MCP_ALLOWED_CONFIG_ROOTS` names.
 
 Suppressions and ignore paths in a delivered config are applied, and marked as coming from the
@@ -342,8 +350,11 @@ A list of your own replaces the default list and is applied exactly as written, 
 default entry, start each one with `/`, and compare your list with the default again after you
 upgrade ASH. A list equal to a default that ASH has shipped, such as the one an earlier
 `ash config init` wrote, still counts as the default, and gets every entry of the current
-default list. With a list of your own, a delivered config that sets `sandbox` or
-`ash_plugin_modules` to a value other than the server's is refused too.
+default list. With a list of your own that keeps the `/sandbox` and `/ash_plugin_modules`
+entries, a delivered config that sets either to any value other than the server's is refused,
+even a tighter one. If your list leaves those entries out, ASH no longer refuses a delivered file
+that asks for more: it drops the grants and modules instead, as it does for a repository's
+config.
 
 An entry matches a key spelled with `-` or `_`. Under `/scanners`, `/reporters`, and
 `/converters`, an entry for a plugin's section also matches every spelling ASH reads as that
