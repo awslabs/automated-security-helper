@@ -74,7 +74,10 @@ errors.
 
 A scanner whose workflow does not fit the template — one that calls a Python API
 instead of a subprocess, for example — overrides `scan()` and returns a
-`SarifReport`. Because `_execute_scan()` is abstract, such a plugin still has to
+`SarifReport`. The executor also grades a dict with a `status`, `severity_counts` or
+`findings` list, a `CycloneDXReport` (an SBOM, which has no findings), and `True`; a
+falsy result is `MISSING`, and anything else (a list, a string, a dict with none of
+those keys) is `ERROR`, because it has nothing the executor can grade. Because `_execute_scan()` is abstract, such a plugin still has to
 declare it, so give it a stub that says why it is unreachable:
 
 ```python

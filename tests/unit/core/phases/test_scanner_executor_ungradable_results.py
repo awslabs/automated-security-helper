@@ -241,3 +241,41 @@ def test_a_post_processing_failure_is_not_reported_as_unreadable_sarif(
     errors = " ".join(str(e) for e in row.errors)
     assert "post-processing defect" in errors
     assert "not SARIF" not in errors, errors
+
+
+class TestAResultOfAnotherTypeIsAnError:
+    """A ``scan()`` override can return anything; only some of it can be graded.
+
+    The executor grades a SARIF report, a dict, a CycloneDX report (an SBOM, which
+    has no findings) and ``True``. Anything else (a list of findings, a string, a
+    number) used to fall through every branch and be graded on its zero findings,
+    PASSED. The controls are the two non-dict types it does accept.
+    """
+
+    @pytest.mark.parametrize(
+        "returned",
+        [[{"severity": "high", "message": "a finding"}], "a report", 7, ("x",)],
+        ids=["list", "string", "number", "tuple"],
+    )
+    def test_the_row_is_error(self, plugin_context, returned):
+        row = _override_row(plugin_context, returned)
+
+        assert row.status == ScannerStatus.ERROR, (
+            f"{type(returned).__name__} was graded {row.status.value} with "
+            f"{row.finding_count} findings"
+        )
+        assert _says_why(row), row.errors
+
+    def test_a_cyclonedx_report_is_graded_as_before(self, plugin_context):
+        from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
+            CycloneDXReport,
+        )
+
+        row = _override_row(plugin_context, CycloneDXReport())
+
+        assert row.status == ScannerStatus.PASSED, row.errors
+
+    def test_true_is_graded_as_before(self, plugin_context):
+        row = _override_row(plugin_context, True)
+
+        assert row.status == ScannerStatus.PASSED, row.errors

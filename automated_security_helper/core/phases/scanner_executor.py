@@ -543,6 +543,9 @@ class ScannerExecutor:
                         )
                     container.raw_results = raw_results
 
+                    from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
+                        CycloneDXReport,
+                    )
                     from automated_security_helper.schemas.sarif_schema_model import (
                         SarifReport,
                     )
@@ -612,6 +615,19 @@ class ScannerExecutor:
                                         except ValueError:
                                             container.severity_counts.increment("info")
                                 container.finding_count = len(raw_results["findings"])
+                    elif raw_results and not (
+                        raw_results is True or isinstance(raw_results, CycloneDXReport)
+                    ):
+                        # Nothing the executor reads: a scan() override's own list,
+                        # string or number. Graded on its zero findings it read as a
+                        # clean scan. A falsy result is MISSING, above.
+                        container.status = ScannerStatus.ERROR
+                        container.add_error(
+                            f"{scanner_config_name} returned a result on "
+                            f"{target_type} that could not be graded: a "
+                            f"{type(raw_results).__name__}, not SARIF, CycloneDX or "
+                            "a dict"
+                        )
 
                     container.exit_code = getattr(scanner_plugin, "exit_code", 0)
 

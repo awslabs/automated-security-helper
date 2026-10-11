@@ -637,7 +637,8 @@
   returned as it was and graded `PASSED` with no findings; a scanner that overrides
   `scan()` could return its tool's JSON the same way (ferret-scan and syft do when it
   does not parse). A result with no `status`, `severity_counts` or `findings` is no
-  longer graded. A results file whose SARIF ASH's schema rejects is affected too: its
+  longer graded, nor is a result of a type the executor does not read (a list, a
+  string or a number from a `scan()` override). A results file whose SARIF ASH's schema rejects is affected too: its
   findings were dropped silently, and the scanner is now `ERROR` and says so.
 
   A scanner whose tool reports that its content database does not exist (grype's
