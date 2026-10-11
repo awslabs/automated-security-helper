@@ -72,9 +72,9 @@ it needs.
 - The config files ASH writes for a scanner's tool (the empty config bandit, grype,
   syft and ferret-scan get when you name none, and trivy-repo's empty ignore file
   and secret config) are in a directory of that scanner run's own, outside the
-  scanned tree (normally in the system temporary directory), made with mode 0700
-  and removed when the run ends. The scanner can read it and cannot write to it or
-  run programs from it.
+  scanned tree (normally in the system temporary directory, never under one another
+  account can change), made with mode 0700 and removed when the run ends. The
+  scanner can read it and cannot write to it or run programs from it.
 - System directories (`/usr`, `/etc`, `/opt`, `/nix`) and the directories on `PATH`
   are read-only. Inside `$HOME` only `PATH` entries named `bin`, `sbin` or `Scripts`
   are mounted, and a tool's install prefix only when it is deeper than a directory

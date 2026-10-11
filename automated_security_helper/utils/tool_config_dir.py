@@ -24,6 +24,11 @@ Each scanner run has a directory of its own for these files
   and its mode is 0700. It is in the system temporary directory, or under the
   output directory when the temporary directory is inside the scanned tree and the
   output directory is not;
+* never under a directory another local account could change: one it owns, or
+  one its group or everyone can write without the sticky bit, anywhere from the
+  candidate up to ``/``. Such an account could otherwise rename the new directory
+  and put its own in its place between ``mkdtemp`` and the writes, since
+  ``O_NOFOLLOW`` covers only the last component. A sticky ``/tmp`` is fine;
 * made only when the run writes its first file, and each file in it is created
   with ``O_EXCL`` and ``O_NOFOLLOW``, so it is a new file ASH wrote;
 * readable, and not writable, by that scanner under ``--sandbox``:
@@ -33,11 +38,18 @@ Each scanner run has a directory of its own for these files
 
 Failure modes and known limitations
 -----------------------------------
-* When the temporary directory and the output directory are both inside the
-  scanned tree (a scan of a whole filesystem), the directory is made in the
-  temporary directory anyway, and a warning says so. It is still new and private,
-  so nothing in the repository can be at its path, but a tool that walks the tree
-  may come across it.
+* When neither the temporary directory nor the output directory is both private
+  and outside the scanned tree (a scan of a whole filesystem, or a ``TMPDIR``
+  other accounts can write with the output directory in its default place), the
+  directory is made in the first private one inside the tree, and a warning names
+  each candidate passed over and why. It is still new and private, so nothing in
+  the repository can be at its path, but a tool that walks the tree may come
+  across it.
+* When neither is private, nothing is written: the scanner run fails with an
+  ``OSError`` that names each directory and says to set ``TMPDIR`` to one only
+  this account can write.
+* The check is POSIX only. On Windows, where these modes do not exist, the
+  directory is made as before.
 * A scanner run outside the scanner executor (a test, a scanner module run as a
   script) has no scope. Each file it writes gets a directory of its own, removed
   when the process exits.
@@ -49,6 +61,7 @@ import atexit
 import contextvars
 import os
 import shutil
+import stat
 import tempfile
 import threading
 from contextlib import contextmanager
@@ -131,30 +144,87 @@ def _inside_tree(path: Path, scan_root: Optional[Path]) -> bool:
     return scan_root is not None and in_scanned_tree(path, scan_root)
 
 
-def _new_directory(scan_root: Optional[Path], output_dir: Optional[Path]) -> Path:
-    """A new 0700 directory, outside the scanned tree wherever one can be made."""
-    parents = [Path(tempfile.gettempdir())]
-    if (
-        output_dir is not None
-        and output_dir.is_dir()
-        and not _inside_tree(output_dir, scan_root)
-    ):
-        parents.append(output_dir)
-    for parent in parents:
+def _changeable_by_others(path: Path) -> Optional[str]:
+    """Why another local account could change what ``path`` names, or None.
+
+    Every directory from ``path`` up to ``/``, on its resolved path, is checked. One
+    that another account owns (root aside), or that its group or everyone can write
+    without the sticky bit, lets someone else rename an entry in it, and so put a
+    directory of their own where ASH made one, after the ``mkdtemp`` and before the
+    files are written or the tool reads them. ``O_NOFOLLOW`` protects only the last
+    component of a path. A sticky directory such as ``/tmp`` is fine: only an
+    entry's owner may rename it there. POSIX only; Windows has no such modes.
+    """
+    if not hasattr(os, "geteuid"):
+        return None
+    me = os.geteuid()
+    resolved = Path(os.path.realpath(path))
+    for directory in (resolved, *resolved.parents):
         try:
-            made = Path(tempfile.mkdtemp(prefix=TOOL_CONFIG_DIR_PREFIX, dir=parent))
-        except OSError:
+            st = os.stat(directory)
+        except OSError as e:
+            return f"{directory.as_posix()} cannot be checked ({e.strerror})"
+        if st.st_uid not in (0, me):
+            return f"{directory.as_posix()} belongs to another account"
+        shared = st.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+        if shared and not st.st_mode & stat.S_ISVTX:
+            return (
+                f"{directory.as_posix()} can be written by other accounts and does "
+                "not have the sticky bit"
+            )
+    return None
+
+
+def _make(parent: Path) -> Optional[Path]:
+    try:
+        return Path(tempfile.mkdtemp(prefix=TOOL_CONFIG_DIR_PREFIX, dir=parent))
+    except OSError:
+        return None
+
+
+def _new_directory(scan_root: Optional[Path], output_dir: Optional[Path]) -> Path:
+    """A new 0700 directory on a path only this account can change.
+
+    Outside the scanned tree where possible: the temporary directory, then the
+    output directory. Then, with a warning, inside it: the same two in that order.
+    A candidate that another account could change (:func:`_changeable_by_others`)
+    is never used, and with no other candidate nothing is written.
+    """
+    candidates = [Path(tempfile.gettempdir())]
+    if output_dir is not None and output_dir.is_dir():
+        candidates.append(output_dir)
+    private: List[Path] = []
+    passed_over: List[str] = []
+    for parent in candidates:
+        reason = _changeable_by_others(parent)
+        if reason is None:
+            private.append(parent)
+        else:
+            passed_over.append(f"{parent.as_posix()}: {reason}")
+    for parent in private:
+        if _inside_tree(parent, scan_root):
+            passed_over.append(f"{parent.as_posix()}: inside the scanned tree")
+            continue
+        made = _make(parent)
+        if made is None:
             continue
         if not _inside_tree(made, scan_root):
             return made
         os.rmdir(made)
-    made = Path(tempfile.mkdtemp(prefix=TOOL_CONFIG_DIR_PREFIX))
-    ASH_LOGGER.warning(
-        f"The temporary directory and the output directory are inside the scanned "
-        f"tree, so the config files ASH writes for the scanner's tool are in "
-        f"{made.as_posix()}, inside it too."
+    for parent in private:
+        made = _make(parent)
+        if made is not None:
+            ASH_LOGGER.warning(
+                f"The config files ASH writes for the scanner's tool are in "
+                f"{made.as_posix()}, inside the scanned tree, because no private "
+                f"directory outside it is available ({'; '.join(passed_over)})."
+            )
+            return made
+    raise OSError(
+        "No private directory for the config files ASH writes for the scanner's "
+        f"tool ({'; '.join(passed_over)}). Set TMPDIR to a directory only this "
+        "account can write."
     )
-    return made
 
 
 @contextmanager

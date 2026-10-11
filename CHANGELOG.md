@@ -309,7 +309,12 @@
     removed when the run ends, instead of in `<output>/scanners/<name>/`, which
     is inside the tree with the default output directory. What the tools report
     is unchanged. Under `--sandbox`, the scanner can read that directory and
-    cannot write to it.
+    cannot write to it. It is never made under a directory another local
+    account could change (one that account owns, or one other accounts can
+    write without the sticky bit, anywhere up to `/`). With such a `TMPDIR` it
+    goes under the output directory, with a warning when that is inside the
+    tree, and when the output directory is no better the scanner fails with an
+    error saying to set `TMPDIR` to a directory only you can write.
   - ferret-scan's `tool_version` no longer accepts a bare version or `latest`;
     write `==1.2.3`, or leave it unset for the supported range.
   - The AWS reporters' destinations and credentials come only from the defaults,

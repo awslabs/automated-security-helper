@@ -5,7 +5,8 @@
 
 tests/unit/config/test_generated_tool_configs_are_outside_the_tree.py runs the
 scanners that use it through the scanner executor; these cover the directory's
-placement when the temporary directory is inside the scanned tree, and the writes.
+placement when the temporary directory is inside the scanned tree or is one
+another account could change, and the writes.
 """
 
 from __future__ import annotations
@@ -24,6 +25,20 @@ from automated_security_helper.utils.tool_config_dir import (
     tool_config_scope,
     write_tool_config,
 )
+
+
+@pytest.fixture(autouse=True)
+def _private_umask():
+    """The directories the tests make are 0755 whatever the host's umask.
+
+    A umask of 002 would make them group-writable, which the placement rule
+    treats as a directory another account could change.
+    """
+    previous = os.umask(0o022)
+    try:
+        yield
+    finally:
+        os.umask(previous)
 
 
 @pytest.fixture
@@ -112,3 +127,106 @@ def test_outside_a_scope_each_file_gets_its_own_directory(tree) -> None:
     second = write_tool_config("x.yaml", "{}\n", context=context)
     assert first.parent != second.parent
     assert not in_scanned_tree(first, tree.source)
+
+
+# A directory another local account can change: it could rename the directory ASH
+# made there and put its own in its place before the file is written or read.
+
+posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX modes and owners")
+
+
+def _temp_dir(monkeypatch: pytest.MonkeyPatch, path: Path, mode: int) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    os.chmod(path, mode)
+    monkeypatch.setattr(tempfile, "tempdir", str(path))
+    return path
+
+
+@posix_only
+def test_a_temporary_directory_others_can_write_is_not_used(
+    tree, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shared = _temp_dir(monkeypatch, tmp_path / "shared", 0o777)
+    with tool_config_scope(_context(tree.source, tree.outside)):
+        written = write_tool_config("x.yaml", "{}\n")
+        assert written.parent.parent == tree.outside
+    assert list(shared.iterdir()) == []
+
+
+@posix_only
+def test_a_directory_above_it_that_others_can_write_is_not_used_either(
+    tree, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _temp_dir(monkeypatch, tmp_path / "shared", 0o777)
+    mine = _temp_dir(monkeypatch, tmp_path / "shared" / "mine", 0o700)
+    with tool_config_scope(_context(tree.source, tree.outside)):
+        written = write_tool_config("x.yaml", "{}\n")
+        assert written.parent.parent == tree.outside
+    assert list(mine.iterdir()) == []
+
+
+@posix_only
+def test_a_sticky_temporary_directory_like_tmp_is_used(
+    tree, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sticky = _temp_dir(monkeypatch, tmp_path / "sticky", 0o1777)
+    with tool_config_scope(_context(tree.source, tree.outside)):
+        written = write_tool_config("x.yaml", "{}\n")
+        assert written.parent.parent == sticky
+        assert (written.parent.stat().st_mode & 0o777) == 0o700
+    assert list(sticky.iterdir()) == []
+
+
+@posix_only
+def test_with_only_a_shared_temporary_directory_the_output_directory_is_used(
+    tree,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The output directory inside the tree beats a directory another account controls."""
+    shared = _temp_dir(monkeypatch, tmp_path / "shared", 0o777)
+    with caplog.at_level(logging.WARNING):
+        with tool_config_scope(_context(tree.source, tree.inside)):
+            written = write_tool_config("x.yaml", "{}\n")
+            assert written.parent.parent == tree.inside
+    assert "inside the scanned tree" in caplog.text
+    assert shared.as_posix() in caplog.text
+    assert not written.parent.exists()
+    assert list(shared.iterdir()) == []
+
+
+@posix_only
+def test_with_no_private_directory_nothing_is_written(
+    tree, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shared = _temp_dir(monkeypatch, tmp_path / "shared", 0o777)
+    os.chmod(tree.outside, 0o777)
+    with tool_config_scope(_context(tree.source, tree.outside)):
+        with pytest.raises(OSError, match="TMPDIR") as refused:
+            write_tool_config("x.yaml", "{}\n")
+        assert active_tool_config_dir() is None
+    assert shared.as_posix() in str(refused.value)
+    assert tree.outside.as_posix() in str(refused.value)
+    assert list(shared.iterdir()) == []
+    assert list(tree.outside.iterdir()) == []
+
+
+@posix_only
+def test_a_directory_another_account_owns_is_not_used(
+    tree, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Its owner can rename what is in it whatever its mode says.
+
+    The test account cannot give a directory away, so it is the one that looks
+    foreign: with geteuid answering another id, every directory it owns is
+    another account's, and neither candidate is used.
+    """
+    owned = _temp_dir(monkeypatch, tmp_path / "owned", 0o700)
+    me = os.geteuid()
+    monkeypatch.setattr(os, "geteuid", lambda: me + 1)
+    with tool_config_scope(_context(tree.source, tree.outside)):
+        with pytest.raises(OSError, match="another account"):
+            write_tool_config("x.yaml", "{}\n")
+    assert list(owned.iterdir()) == []
+    assert list(tree.outside.iterdir()) == []
