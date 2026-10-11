@@ -1956,11 +1956,35 @@ Focus on actionable insights and practical remediation steps."""
 MCP_HONORS_IN_TREE_OPT_IN = False
 
 
+def _end_stdio_session() -> None:
+    """Remove the stdio session's workspace and bound profile: its client is gone."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        DEFAULT_SESSION_ID,
+    )
+    from automated_security_helper.cli.mcp.sessions import end_session
+
+    try:
+        end_session(DEFAULT_SESSION_ID)
+    except Exception as e:  # noqa: BLE001 -- shutdown must not fail on cleanup
+        logger.warning(f"Could not remove the stdio session workspace: {e}")
+
+
 def run_mcp_server():
-    """Run the MCP server with improved error handling."""
+    """Run the MCP server with improved error handling.
+
+    stdio serves one client for the life of the process, so its session ends
+    when the server does, and the session's workspace goes with it.
+    """
     from automated_security_helper.utils.subprocess_utils import honor_in_tree_opt_in
 
     honor_in_tree_opt_in(MCP_HONORS_IN_TREE_OPT_IN)
+    try:
+        _run_stdio_until_closed()
+    finally:
+        _end_stdio_session()
+
+
+def _run_stdio_until_closed() -> None:
     try:
         mcp.run()
     except KeyboardInterrupt:

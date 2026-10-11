@@ -142,8 +142,20 @@ def _query_value(scope: Scope, name: str) -> Optional[str]:
     return values[0] if values else None
 
 
+#: How long a session workspace may go unused before the sweep removes it, by
+#: default. Long enough that no live session loses its tree: a stateful session
+#: the SDK keeps is idle for at most 30 minutes, and every request naming a
+#: session refreshes its workspace.
+DEFAULT_SESSION_WORKSPACE_TTL_SECONDS = 24 * 60 * 60
+
+#: How often, at most, the sweep runs after the first request.
+_SWEEP_INTERVAL_SECONDS = 5 * 60
+
+_LIFESPAN_SHUTDOWN_DONE = ("lifespan.shutdown.complete", "lifespan.shutdown.failed")
+
+
 class SessionBoundary:
-    """ASGI middleware that stamps each request with the caller the server decided.
+    """ASGI middleware that decides each request's session and sees sessions end.
 
     Args:
         app: The SDK's Starlette app, or the next middleware.
@@ -151,6 +163,16 @@ class SessionBoundary:
         trust_upstream_session_id: Stateless only. Take the ``Mcp-Session-Id``
             header as the caller's identity, because the operator declared that a
             platform in front of ASH issues and authenticates it.
+        session_workspace_ttl: Seconds a session workspace may go unused before
+            the sweep removes it.
+
+    A session's workspace and bound profile are removed
+    (``sessions.end_session``) when this app sees the session end: a stateful
+    session's ``DELETE``, answered only after the removal is complete; an sse
+    event stream finishing; and every session this app issued when it shuts
+    down. Sessions whose end it cannot see -- every stateless one, and a stateful
+    one the SDK closed for being idle -- are removed by the TTL sweep, which runs
+    before the first request is answered and then at most every five minutes.
     """
 
     def __init__(
@@ -159,18 +181,24 @@ class SessionBoundary:
         *,
         mode: str,
         trust_upstream_session_id: bool = False,
+        session_workspace_ttl: float = DEFAULT_SESSION_WORKSPACE_TTL_SECONDS,
     ) -> None:
         if mode not in (MODE_SSE, MODE_STATEFUL, MODE_STATELESS):
             raise ValueError(f"unknown session boundary mode: {mode!r}")
+        if session_workspace_ttl <= 0:
+            raise ValueError("session_workspace_ttl must be a positive number")
         self.app = app
         self.mode = mode
         self.trust_upstream_session_id = (
             trust_upstream_session_id and mode == MODE_STATELESS
         )
+        self.session_workspace_ttl = session_workspace_ttl
         # Sessions this app issued and has not seen end. Stateful: ids seen on
         # the app's own responses. sse: ids read from the endpoint event of an
         # event stream that is still open.
         self._issued: Set[str] = set()
+        self._next_sweep = 0.0
+        self._sweep_lock: Optional[Any] = None
 
     # -- identity --------------------------------------------------------------
 
@@ -187,30 +215,106 @@ class SessionBoundary:
             return HttpCaller(STREAMABLE_HTTP, header.strip())
         return HttpCaller(STREAMABLE_HTTP, None)
 
+    # -- session end -------------------------------------------------------------
+
+    async def _end(self, session_id: str) -> None:
+        import anyio
+
+        from automated_security_helper.cli.mcp.sessions import end_session
+
+        self._issued.discard(session_id)
+        try:
+            # Shielded: an sse stream ends by being cancelled, and the removal
+            # has to complete anyway.
+            with anyio.CancelScope(shield=True):
+                await anyio.to_thread.run_sync(end_session, session_id)
+        except Exception as exc:  # noqa: BLE001 -- cleanup must not fail a response
+            _logger().warning(f"MCP session {session_id}: could not remove: {exc}")
+
+    async def _sweep_if_due(self) -> None:
+        import time
+
+        import anyio
+
+        from automated_security_helper.cli.mcp.sessions import sweep_stale_workspaces
+
+        if time.monotonic() < self._next_sweep:
+            return
+        if self._sweep_lock is None:
+            self._sweep_lock = anyio.Lock()
+        async with self._sweep_lock:
+            if time.monotonic() < self._next_sweep:
+                return
+            try:
+                await anyio.to_thread.run_sync(
+                    sweep_stale_workspaces, self.session_workspace_ttl
+                )
+            except Exception as exc:  # noqa: BLE001 -- a sweep must not fail a request
+                _logger().warning(f"MCP session workspace sweep failed: {exc}")
+            self._next_sweep = time.monotonic() + min(
+                self.session_workspace_ttl, _SWEEP_INTERVAL_SECONDS
+            )
+
     # -- ASGI ------------------------------------------------------------------
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope.get("type") != "http":
+        kind = scope.get("type")
+        if kind == "lifespan":
+            await self.app(scope, receive, self._end_all_on_shutdown(send))
+            return
+        if kind != "http":
             await self.app(scope, receive, send)
             return
 
-        scope[CALLER_SCOPE_KEY] = self._identify(scope)
+        caller = self._identify(scope)
+        scope[CALLER_SCOPE_KEY] = caller
+        if caller.session_id:
+            from automated_security_helper.cli.mcp.sessions import (
+                touch_session_workspace,
+            )
+
+            # Before the sweep, so the session this request belongs to counts as
+            # in use however long ago it was last called.
+            touch_session_workspace(caller.session_id)
+        await self._sweep_if_due()
 
         if self.mode == MODE_SSE and scope.get("method") == "GET":
             await self._serve_event_stream(scope, receive, send)
             return
         if self.mode == MODE_STATEFUL:
-            await self.app(scope, receive, self._watch_issued_session(send))
+            await self.app(scope, receive, self._watch_stateful(scope, send))
             return
         await self.app(scope, receive, send)
 
-    def _watch_issued_session(self, send: Send) -> Send:
-        """Record the session id a stateful app hands out on its responses."""
+    def _end_all_on_shutdown(self, send: Send) -> Send:
+        """End every session this app issued before reporting shutdown complete."""
+
+        async def watched(message: Message) -> None:
+            if message.get("type") in _LIFESPAN_SHUTDOWN_DONE:
+                for session_id in sorted(self._issued):
+                    await self._end(session_id)
+            await send(message)
+
+        return watched
+
+    def _watch_stateful(self, scope: Scope, send: Send) -> Send:
+        """Record the ids a stateful app issues, and end one its DELETE ends."""
+
+        header = _header(scope, _SESSION_HEADER)
+        ending = (
+            header
+            if scope.get("method") == "DELETE" and header in self._issued
+            else None
+        )
 
         async def watched(message: Message) -> None:
             if message.get("type") == "http.response.start":
                 issued = _response_header(message.get("headers"), _SESSION_HEADER)
-                if issued:
+                if ending and 200 <= int(message.get("status", 0)) < 300:
+                    # Before the response leaves: a client that has its DELETE
+                    # answered can rely on the workspace being gone.
+                    await self._end(ending)
+                elif issued:
                     self._issued.add(issued)
             await send(message)
 
@@ -219,7 +323,7 @@ class SessionBoundary:
     async def _serve_event_stream(
         self, scope: Scope, receive: Receive, send: Send
     ) -> None:
-        """Serve one sse stream, recording the session it carries while it is open."""
+        """Serve one sse stream; the session it carries ends when it finishes."""
 
         opened: Dict[str, str] = {}
 
@@ -239,11 +343,18 @@ class SessionBoundary:
         finally:
             session = opened.get("session")
             if session:
-                self._issued.discard(session)
+                await self._end(session)
+
+
+def _logger():
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    return ASH_LOGGER
 
 
 __all__ = [
     "CALLER_SCOPE_KEY",
+    "DEFAULT_SESSION_WORKSPACE_TTL_SECONDS",
     "HttpCaller",
     "MODE_SSE",
     "MODE_STATEFUL",

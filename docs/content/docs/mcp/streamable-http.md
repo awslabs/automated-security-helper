@@ -41,6 +41,7 @@ Flags:
 - `--auth-header-name` / `--auth-header-value` — single-tenant header gate. Connections missing this header (or carrying a wrong value) are rejected before any tool dispatch. See [Auth](#auth).
 - `--stateless-http` — handle each request on its own instead of binding it to a server-held session, for a load balancer or a platform such as AgentCore. A stateless server issues no session; see [Session identity](#session-identity).
 - `--trust-upstream-session-id` — stateless only: a platform in front of ASH issues and authenticates `Mcp-Session-Id`, so the header names the caller's session. See [Session identity](#session-identity).
+- `--session-workspace-ttl SECONDS` — how long a session workspace may go unused before the server removes it (default 86400). See [Session lifecycle](#session-lifecycle).
 - `--profile NAME=path/to/ash.yaml` — register a config profile under `NAME`. Repeatable. The YAML is loaded and validated through `AshConfig.from_file` at startup; bad profiles fail fast and the server refuses to start. See [Config profiles](#config-profiles).
 
 The server logs the bound address and the registered profile names on startup. It does not log header values or profile contents.
@@ -330,7 +331,18 @@ MCPSession {
 }
 ```
 
-Workspaces live under `ASH_MCP_WORKSPACE_ROOT` (defaults to `$XDG_CACHE_HOME/ash-mcp/<session_id>/`). On disconnect, the workspace is `rmtree`'d and the session entry is dropped — no state survives a disconnect.
+Workspaces live under `ASH_MCP_WORKSPACE_ROOT` (defaults to `$XDG_CACHE_HOME/ash-mcp/<session_id>/`). A session's workspace (its delivered tree, uploads in progress and the config `select_profile` materialized) and its bound profile are removed when the session ends:
+
+| Transport | The session ends |
+| --- | --- |
+| streamable-HTTP, stateful | when the client's `DELETE` is answered (the removal is complete before the response is sent), and for every session the server issued when the server shuts down |
+| sse | when the event stream closes |
+| stdio | when the server exits |
+| streamable-HTTP, `--stateless-http` | never visibly: see the sweep below |
+
+A session that ends while one of its scans runs keeps its tree until that scan returns.
+
+The server cannot see every end: a stateless server has no session at all, and a stateful session the MCP SDK closes for being idle (after 30 minutes) sends nothing ASH observes. So every HTTP server also sweeps the workspace root, before it answers its first request and then at most every five minutes, and removes the workspace of any session nobody used for longer than `--session-workspace-ttl` seconds (default 86400, 24 hours). Each request that names a session counts as a use. The sweep never removes the stdio session's workspace (its own server removes it), a symlink, or a workspace a running scan holds. Servers that share one `ASH_MCP_WORKSPACE_ROOT` sweep each other's idle workspaces by the same rule.
 
 Concurrency:
 
@@ -424,7 +436,7 @@ The streamable-HTTP transport puts the MCP server on the network. A few invarian
 - **The runtime-override allowlist defaults to disabled.** A profile must explicitly set `mcp.runtime_overrides.enabled: true` and enumerate `allowed_paths` for any client patching to succeed, through `patch_ops` or `override_yaml`. Leaving it off is the safe default — clients can still pick profiles, just not modify them.
 - **`set_source_git` clones only from hosts in `ASH_MCP_GIT_ALLOWED_HOSTS`**, which is empty by default, and never with the server account's credentials or git configuration. See [Git ref](#git-ref).
 - **Source-upload limits are per-session, not per-tenant.** A misbehaving tenant can still consume their session quota. Pair the transport with upstream rate limits if untrusted clients can connect.
-- **Workspaces are wiped on disconnect.** Don't rely on session-resident state to survive reconnects; persisted state across server restarts is explicitly out of scope (Track 10.8).
+- **Workspaces are removed when the session ends, or after `--session-workspace-ttl` unused.** Don't rely on session-resident state to survive reconnects; persisted state across server restarts is explicitly out of scope (Track 10.8). See [Session lifecycle](#session-lifecycle).
 
 ## Cross-references
 

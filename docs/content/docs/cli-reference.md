@@ -1120,6 +1120,7 @@ honored by `ash mcp`. See
 | `--stateless-http` / `--no-stateless-http`  | Handle each streamable-HTTP request independently instead of binding it to a server-held session | `--no-stateless-http` |
 | `--trust-upstream-session-id`               | Stateless streamable-HTTP only: a platform in front of ASH issues and authenticates `Mcp-Session-Id`, so the header names the caller's session | `False` |
 | `--allowed-host`                            | Host header value to accept. Repeatable. Required with a non-loopback `--host` unless `--trust-upstream-host-check` is given | None |
+| `--session-workspace-ttl`                   | Seconds a session workspace may go unused before it is removed. HTTP transports only | `86400` |
 | `--trust-upstream-host-check`               | A proxy or platform in front of ASH checks Host and Origin, so ASH checks neither. HTTP transports only; not with `--allowed-host` | `False` |
 | `--log-level`                               | Set the log level                                                                   | `INFO`                 |
 | `--verbose`, `-v`                           | Enable verbose logging                                                              | `False`                |

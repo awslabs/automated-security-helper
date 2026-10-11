@@ -523,6 +523,16 @@ async def _run_scan_async(
         _logger.error(f"Scan {scan_id} failed: {error_message}")
         raise
 
+    finally:
+        if session_lock is not None:
+            # A session that ended while this scan held its lock has its
+            # workspace removed now that the scan no longer reads it.
+            from automated_security_helper.cli.mcp.sessions import (
+                finish_ended_session,
+            )
+
+            finish_ended_session(session_id)
+
 
 async def mcp_get_scan_progress(
     scan_id: str, session_id: Optional[str] = None

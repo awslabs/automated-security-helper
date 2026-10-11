@@ -38,6 +38,7 @@ _VARIABLES = (
     "ASH_MCP_ALLOWED_HOSTS",
     "ASH_MCP_TRUST_UPSTREAM_SESSION_ID",
     "ASH_MCP_TRUST_UPSTREAM_HOST_CHECK",
+    "ASH_MCP_SESSION_WORKSPACE_TTL",
 )
 
 
@@ -129,3 +130,16 @@ class TestTrustUpstreamHostCheck:
         result = CliRunner().invoke(ash_app, argv[1:])
         assert result.exit_code == 3, result.output
         assert bound["bound"] is False
+
+
+class TestSessionWorkspaceTtl:
+    def test_unset_leaves_ash_its_default(self, monkeypatch) -> None:
+        assert "--session-workspace-ttl" not in _argv(monkeypatch, {})
+
+    def test_set_is_passed_through(self, monkeypatch, bound) -> None:
+        argv = _argv(monkeypatch, {"ASH_MCP_SESSION_WORKSPACE_TTL": "7200"})
+
+        at = argv.index("--session-workspace-ttl")
+        assert argv[at + 1] == "7200"
+        _starts(argv)
+        assert bound["kwargs"]["session_workspace_ttl"] == 7200

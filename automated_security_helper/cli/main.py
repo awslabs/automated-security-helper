@@ -118,6 +118,14 @@ def _mcp_wrapper(
         "hostname. Required with a non-loopback --host unless "
         "--trust-upstream-host-check is given.",
     ),
+    session_workspace_ttl: int | None = typer.Option(
+        None,
+        "--session-workspace-ttl",
+        help="HTTP transports only. Seconds a session workspace (delivered source, "
+        "uploads, bound profile) may go unused before it is removed. Covers "
+        "sessions whose end the server cannot see, such as every stateless one. "
+        "Default: 86400 (24 hours).",
+    ),
     trust_upstream_host_check: bool = typer.Option(
         False,
         "--trust-upstream-host-check",
@@ -147,6 +155,7 @@ def _mcp_wrapper(
         trust_upstream_session_id=trust_upstream_session_id,
         allowed_host=allowed_host,
         trust_upstream_host_check=trust_upstream_host_check,
+        session_workspace_ttl=session_workspace_ttl,
     )
 
 

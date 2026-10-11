@@ -23,6 +23,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from automated_security_helper.cli.mcp.http_sessions import (
+    DEFAULT_SESSION_WORKSPACE_TTL_SECONDS,
     MODE_SSE,
     MODE_STATEFUL,
     MODE_STATELESS,
@@ -228,6 +229,22 @@ def _transport_security(
     return None
 
 
+def _workspace_ttl(session_workspace_ttl: Optional[int]) -> int:
+    """The session workspace TTL to build with: the given one, or the default.
+
+    Raises:
+        ASHValidationError: for a value that is not a positive integer.
+    """
+    if session_workspace_ttl is None:
+        return DEFAULT_SESSION_WORKSPACE_TTL_SECONDS
+    if isinstance(session_workspace_ttl, bool) or session_workspace_ttl <= 0:
+        raise ASHValidationError(
+            f"--session-workspace-ttl must be a positive number of seconds, got "
+            f"{session_workspace_ttl!r}"
+        )
+    return int(session_workspace_ttl)
+
+
 def _build_auth_middleware(header_name: str, header_value: str):
     """Build a Starlette middleware class that enforces a static header.
 
@@ -286,6 +303,7 @@ def build_streamable_http_app(
     allowed_hosts: Optional[List[str]] = None,
     trust_upstream_session_id: bool = False,
     trust_upstream_host_check: bool = False,
+    session_workspace_ttl: Optional[int] = None,
 ):
     """Build the MCPServer streamable-HTTP ASGI app, optionally guarded by auth.
 
@@ -314,6 +332,9 @@ def build_streamable_http_app(
         trust_upstream_host_check: A proxy or platform in front of ASH checks
             Host and Origin, so the app checks neither. Required for a
             non-loopback ``host`` without ``allowed_hosts``; refused with them.
+        session_workspace_ttl: Seconds a session workspace may go unused before
+            it is swept; None is the default, 24 hours. See
+            ``http_sessions.SessionBoundary`` for when sessions end.
 
     The host argument is load-bearing, not cosmetic
     ----------------------------------------------
@@ -371,6 +392,7 @@ def build_streamable_http_app(
         SessionBoundary,
         mode=MODE_STATELESS if stateless_http else MODE_STATEFUL,
         trust_upstream_session_id=trust_upstream_session_id,
+        session_workspace_ttl=_workspace_ttl(session_workspace_ttl),
     )
 
     if auth_header_name and auth_header_value:
@@ -387,6 +409,7 @@ def build_sse_app(
     host: str = "127.0.0.1",
     allowed_hosts: Optional[List[str]] = None,
     trust_upstream_host_check: bool = False,
+    session_workspace_ttl: Optional[int] = None,
 ):
     """Build the MCPServer SSE ASGI app (legacy).
 
@@ -401,6 +424,7 @@ def build_sse_app(
             protection stays on and accepts exactly these hosts.
         trust_upstream_host_check: A proxy or platform in front of ASH checks
             Host and Origin; as on the streamable-HTTP path.
+        session_workspace_ttl: As on the streamable-HTTP path.
 
     Why sse_app gets host and allowed_hosts too
     -------------------------------------------
@@ -446,7 +470,11 @@ def build_sse_app(
     app = _mcp_instance.sse_app(**app_kwargs)
     # The session of an sse request is the one the server issued for its event
     # stream; a header on a message POST is ignored.
-    app.add_middleware(SessionBoundary, mode=MODE_SSE)
+    app.add_middleware(
+        SessionBoundary,
+        mode=MODE_SSE,
+        session_workspace_ttl=_workspace_ttl(session_workspace_ttl),
+    )
 
     if auth_header_name and auth_header_value:
         middleware_cls = _build_auth_middleware(auth_header_name, auth_header_value)
@@ -567,6 +595,16 @@ def mcp_command(
             "--trust-upstream-host-check is given.",
         ),
     ] = None,
+    session_workspace_ttl: Annotated[
+        Optional[int],
+        typer.Option(
+            "--session-workspace-ttl",
+            help="HTTP transports only. Seconds a session workspace (delivered "
+            "source, uploads, bound profile) may go unused before it is removed. "
+            "Covers sessions whose end the server cannot see, such as every "
+            "stateless one. Default: 86400 (24 hours).",
+        ),
+    ] = None,
     trust_upstream_host_check: Annotated[
         bool,
         typer.Option(
@@ -670,7 +708,13 @@ def mcp_command(
                     "--trust-upstream-host-check only applies to the HTTP "
                     "transports; stdio has no Host header to check."
                 )
+            if session_workspace_ttl is not None:
+                raise ASHValidationError(
+                    "--session-workspace-ttl only applies to the HTTP transports; "
+                    "a stdio server removes its session workspace when it exits."
+                )
         else:
+            _workspace_ttl(session_workspace_ttl)
             # Before anything is built or bound: a refused bind must never
             # reach the socket.
             _validate_bind(host, allowed_host, trust_upstream_host_check)
@@ -747,6 +791,7 @@ def mcp_command(
                 allowed_hosts=allowed_host,
                 trust_upstream_session_id=trust_upstream_session_id,
                 trust_upstream_host_check=trust_upstream_host_check,
+                session_workspace_ttl=session_workspace_ttl,
             )
             if not quiet:
                 _stderr.print(
@@ -770,6 +815,7 @@ def mcp_command(
                 host=host,
                 allowed_hosts=allowed_host,
                 trust_upstream_host_check=trust_upstream_host_check,
+                session_workspace_ttl=session_workspace_ttl,
             )
             if not quiet:
                 _stderr.print(

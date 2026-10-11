@@ -142,6 +142,11 @@ def build_argv() -> list[str]:
     ):
         argv.append("--trust-upstream-host-check")
 
+    # Unset keeps ash's own default (24 hours).
+    ttl = _env("ASH_MCP_SESSION_WORKSPACE_TTL", "")
+    if ttl and transport != "stdio":
+        argv += ["--session-workspace-ttl", ttl]
+
     return argv
 
 

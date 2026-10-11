@@ -433,8 +433,8 @@ def resolve_session_config_path(session_id: Optional[str] = None) -> Optional[st
 def clear_session_state(session_id: Optional[str] = None) -> None:
     """Drop the SessionState for ``session_id`` (or every state if None).
 
-    Track 10.5 will hook this into ``on_disconnect``; for Track 10.3 it
-    exists so tests can scrub between cases.
+    ``sessions.end_session`` calls this when a session ends, so its bound
+    profile goes with its workspace; tests also use it to scrub between cases.
     """
     with _session_lock:
         if session_id is None:

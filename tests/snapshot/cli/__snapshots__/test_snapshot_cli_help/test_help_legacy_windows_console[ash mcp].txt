@@ -56,6 +56,14 @@
 │                                                              non-loopback --host unless         │
 │                                                              --trust-upstream-host-check is     │
 │                                                              given.                             │
+│ --session-workspace-ttl                               <int>  HTTP transports only. Seconds a    │
+│                                                              session workspace (delivered       │
+│                                                              source, uploads, bound profile)    │
+│                                                              may go unused before it is         │
+│                                                              removed. Covers sessions whose end │
+│                                                              the server cannot see, such as     │
+│                                                              every stateless one. Default:      │
+│                                                              86400 (24 hours).                  │
 │ --trust-upstream-host-check                                  HTTP transports only. Declare that │
 │                                                              a proxy or platform in front of    │
 │                                                              ASH checks the Host and Origin     │

@@ -18,25 +18,39 @@ The module exposes:
   guarded by an ``RLock``, plus ``disconnect()`` which rmtrees the workspace
   and drops the entry.
 * ``get_default_registry`` — module-level singleton getter.
+* :func:`end_session` — remove everything the server holds for a session that
+  has ended, and :func:`sweep_stale_workspaces`, the TTL sweep for sessions
+  whose end the server never sees.
 
 Cross-session scans don't share locks, so two distinct sessions can scan in
 parallel; same-session scans serialize on the per-session lock.
 
-Notes on FastMCP integration: FastMCP does not (as of writing) expose an
-``on_disconnect`` callback in a stable way. Until it does, the wiring strategy
-in ``cli/mcp/__init__.py`` should call ``registry.disconnect(connection_id)``
-from whatever lifecycle hook is available, and ``MCPSession.__del__`` provides
-a best-effort fallback for orphaned sessions. Real cleanup needs an upstream
-FastMCP feature.
+When a session ends
+-------------------
+The MCP SDK exposes no stable session-end callback, so the ends are observed
+where ASH can see them: ``http_sessions.SessionBoundary`` calls
+:func:`end_session` when a stateful session's ``DELETE`` is answered, when the
+SDK answers 404 for a session this app issued (it discarded it), when an sse
+event stream closes, and for every session an app issued when the app shuts
+down; ``mcp_server.run_mcp_server`` calls it for the stdio session when the
+server exits. A stateless server sees no end at all, and a stateful session the
+SDK closed for being idle sends no request that ASH could see, so
+:func:`sweep_stale_workspaces` removes workspaces nobody used for longer than a
+TTL, on every HTTP transport.
+
+The registry's workspace directory is the session's sandbox under
+``source_delivery.resolve_workspace_root()``, the directory source delivery
+writes, so ending a session removes the tree that was delivered to it.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
@@ -134,18 +148,26 @@ class MCPSessionRegistry:
 
         Args:
             workspace_parent: Optional parent directory for per-session
-                workspace_roots. When None, a sane default is computed
-                under the OS temp dir at construct-time. Tests should
-                pass an explicit ``tmp_path`` to keep all I/O scoped.
+                workspace_roots. When None, each session's workspace is its
+                sandbox under ``source_delivery.resolve_workspace_root()``,
+                resolved when the session is created, so the registry and
+                source delivery name one directory.
         """
         self._sessions: Dict[str, MCPSession] = {}
         self._lock = threading.RLock()
-        if workspace_parent is None:
-            import tempfile
+        self._explicit_parent = workspace_parent
+        if workspace_parent is not None:
+            workspace_parent.mkdir(parents=True, exist_ok=True)
 
-            workspace_parent = Path(tempfile.gettempdir()) / "ash-mcp-sessions"
-        self._workspace_parent = workspace_parent
-        self._workspace_parent.mkdir(parents=True, exist_ok=True)
+    @property
+    def _workspace_parent(self) -> Path:
+        if self._explicit_parent is not None:
+            return self._explicit_parent
+        from automated_security_helper.cli.mcp.source_delivery import (
+            resolve_workspace_root,
+        )
+
+        return resolve_workspace_root()
 
     def get_or_create(self, session_id: str) -> MCPSession:
         """Return the session for ``session_id``, creating one if needed.
@@ -221,6 +243,11 @@ class MCPSessionRegistry:
 _default_registry: Optional[MCPSessionRegistry] = None
 _default_registry_lock = threading.Lock()
 
+#: Sessions that ended while a scan of theirs held the session lock. Their
+#: removal waits for the scan, so a scan's tree is never removed under it.
+_ended_while_scanning: Set[str] = set()
+_ended_lock = threading.Lock()
+
 
 def get_default_registry() -> MCPSessionRegistry:
     """Return the process-wide default ``MCPSessionRegistry``.
@@ -242,9 +269,143 @@ def reset_default_registry_for_tests() -> None:
         _default_registry = None
 
 
+def _remove_session_state(session_id: str) -> None:
+    """Remove the workspace, delivered-source record, bound profile and entry."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        clear_session_state,
+    )
+    from automated_security_helper.cli.mcp.source_delivery import clear_source
+
+    try:
+        clear_source(session_id)
+    except ValueError:
+        # An id that cannot name a directory never had a workspace.
+        pass
+    clear_session_state(session_id)
+    get_default_registry().disconnect(session_id)
+
+
+def end_session(session_id: str) -> bool:
+    """Remove everything the server holds for ``session_id``, which has ended.
+
+    The session's sandbox (``<workspace root>/<session id>``: the delivered
+    tree, uploads in progress, the config ``select_profile`` materialized), its
+    delivered-source record, its bound profile, and its registry entry. If a
+    scan of the session is running, the removal waits until that scan returns
+    (:func:`finish_ended_session`), because removing the tree a scan is reading
+    can turn its result into a clean one.
+
+    Idempotent.
+
+    Returns:
+        True when everything was removed now, False when it waits for a scan.
+    """
+    session = get_default_registry().get(session_id)
+    if session is not None and not session.lock.acquire(blocking=False):
+        with _ended_lock:
+            _ended_while_scanning.add(session_id)
+        return False
+    try:
+        _remove_session_state(session_id)
+    finally:
+        if session is not None:
+            session.lock.release()
+    with _ended_lock:
+        _ended_while_scanning.discard(session_id)
+    return True
+
+
+def finish_ended_session(session_id: Optional[str]) -> None:
+    """Complete the removal of a session that ended while its scan ran."""
+    if session_id is None:
+        return
+    with _ended_lock:
+        pending = session_id in _ended_while_scanning
+    if pending:
+        end_session(session_id)
+
+
+def _last_used(sandbox: Path) -> float:
+    """The newest mtime of the sandbox directory and its direct children."""
+    newest = sandbox.lstat().st_mtime
+    for child in sandbox.iterdir():
+        try:
+            newest = max(newest, child.lstat().st_mtime)
+        except OSError:
+            continue
+    return newest
+
+
+def touch_session_workspace(session_id: str) -> None:
+    """Record that ``session_id`` was used now, for :func:`sweep_stale_workspaces`."""
+    from automated_security_helper.cli.mcp.source_delivery import (
+        resolve_workspace_root,
+    )
+
+    try:
+        sandbox = session_directory(resolve_workspace_root(), session_id)
+        if sandbox.is_dir() and not sandbox.is_symlink():
+            os.utime(sandbox)
+    except (OSError, ValueError, RuntimeError):
+        pass
+
+
+def sweep_stale_workspaces(
+    ttl_seconds: float, now: Optional[float] = None
+) -> List[str]:
+    """Remove session workspaces nobody used for longer than ``ttl_seconds``.
+
+    "Used" is the newest modification time of the sandbox directory and its
+    direct children; every HTTP request that names a session refreshes it
+    (:func:`touch_session_workspace`), and every delivery writes there. A
+    session whose scan is running is skipped, and so is the stdio session,
+    which its own server removes when it exits. Entries that are not
+    directories, are symlinks, or do not name a single directory are left
+    alone.
+
+    Returns:
+        The session ids whose workspaces were removed.
+    """
+    import time
+
+    from automated_security_helper.cli.mcp.profile_registry import (
+        DEFAULT_SESSION_ID,
+    )
+    from automated_security_helper.cli.mcp.source_delivery import (
+        resolve_workspace_root,
+    )
+
+    try:
+        root = resolve_workspace_root()
+        entries = list(root.iterdir()) if root.is_dir() else []
+    except (OSError, RuntimeError):
+        return []
+    cutoff = (time.time() if now is None else now) - ttl_seconds
+    removed: List[str] = []
+    for entry in entries:
+        session_id = entry.name
+        if session_id == DEFAULT_SESSION_ID:
+            continue
+        try:
+            validated_path_component(session_id)
+            if entry.is_symlink() or not entry.is_dir():
+                continue
+            if _last_used(entry) >= cutoff:
+                continue
+        except (OSError, ValueError):
+            continue
+        if end_session(session_id):
+            removed.append(session_id)
+    return removed
+
+
 __all__ = [
     "MCPSession",
     "MCPSessionRegistry",
+    "end_session",
+    "finish_ended_session",
     "get_default_registry",
     "reset_default_registry_for_tests",
+    "sweep_stale_workspaces",
+    "touch_session_workspace",
 ]

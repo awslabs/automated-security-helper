@@ -1082,3 +1082,21 @@ def no_cdk_kernel(monkeypatch):
     )
     ns.newly_imported_cdk = newly_imported_cdk
     return ns
+
+
+@pytest.fixture(autouse=True)
+def _mcp_workspace_root_outside_home(monkeypatch, tmp_path_factory):
+    """Keep MCP session workspaces out of the developer's own cache directory.
+
+    An MCP HTTP app removes a session's workspace when the session ends, and
+    sweeps workspaces nobody used for a day, under ``ASH_MCP_WORKSPACE_ROOT``,
+    which otherwise resolves to ``$XDG_CACHE_HOME/ash-mcp`` or
+    ``~/.cache/ash-mcp``. A test that builds an app without naming a root would
+    act on that real directory. Set only when the environment names none, so a
+    run or a test that sets its own keeps it.
+    """
+    if not os.environ.get("ASH_MCP_WORKSPACE_ROOT"):
+        monkeypatch.setenv(
+            "ASH_MCP_WORKSPACE_ROOT",
+            str(tmp_path_factory.getbasetemp() / "mcp-workspace-root"),
+        )
