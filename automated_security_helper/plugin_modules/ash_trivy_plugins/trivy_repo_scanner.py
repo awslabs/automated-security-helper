@@ -77,8 +77,10 @@ def trivy_default_misconfig_scanners(
     Read from ``<binary> <subcommands> --help`` (the "(default [...])" of that flag)
     rather than written down here, because the list differs between trivy releases
     and trivy given a value it does not know runs every misconfiguration scanner
-    instead (measured with trivy 0.74.0). None when the list cannot be read. Read once
-    per binary and subcommand.
+    instead (measured with trivy 0.74.0). None when the list cannot be read. A list
+    that was read is kept per binary and subcommand; a failed read is not, so the next
+    scan tries again rather than every later scan in the process (a long-running MCP
+    server, a workspace's projects) leaving out every misconfiguration check.
     """
     key = (binary, *subcommands)
     with _DEFAULT_MISCONFIG_SCANNERS_LOCK:
@@ -105,8 +107,9 @@ def trivy_default_misconfig_scanners(
         else None
     )
     listed = listed or None
-    with _DEFAULT_MISCONFIG_SCANNERS_LOCK:
-        _DEFAULT_MISCONFIG_SCANNERS[key] = listed
+    if listed is not None:
+        with _DEFAULT_MISCONFIG_SCANNERS_LOCK:
+            _DEFAULT_MISCONFIG_SCANNERS[key] = listed
     return listed
 
 
