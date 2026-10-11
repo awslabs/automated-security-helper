@@ -102,6 +102,24 @@ def test_an_in_tree_config_does_not_choose_a_reporters_destination(
         assert f"reporters.{reporter}.options.{name}" in warnings, warnings
 
 
+@pytest.mark.parametrize("name", ["archive_resolved_findings", "findings_scope"])
+def test_security_hubs_import_scope_and_archiving_are_the_operators(
+    tmp_path, ash_log, name
+):
+    """Which findings the reporter imports and archives decides what the account sees."""
+    source = tmp_path / "repo"
+    _write_config(
+        source / ".ash" / ".ash.yaml",
+        {"aws-security-hub": {"options": {name: "repo-value"}}},
+    )
+
+    config = resolve_config(source_dir=source)
+
+    assert name not in _options(config, "aws-security-hub")
+    warnings = "\n".join(_warnings(ash_log))
+    assert f"reporters.aws-security-hub.options.{name}" in warnings, warnings
+
+
 @pytest.mark.parametrize(
     "spelling", ["BedrockSummary", "bedrocksummaryreporter", "Bedrock_Summary_Reporter"]
 )
@@ -647,6 +665,16 @@ print(json.dumps(out))
 #: filename suffix from every source (base/reporter_plugin.py).
 _REVIEWED_SECTION_FIELDS = {"name", "enabled", "options", "extension"}
 
+#: Options listed before the reporter's own model defines them. They are added to
+#: the model on another branch, and listing them first keeps a repository's or a
+#: client's config from setting them in between. When the model gains one, the
+#: tests below fail until it is removed from here and added to the reporter's
+#: ``destination_options``.
+_LISTED_BEFORE_DEFINED = {
+    ("aws-security-hub", "archive_resolved_findings"),
+    ("aws-security-hub", "findings_scope"),
+}
+
 #: Options whose names look like a destination but are not one.
 _REVIEWED_NOT_DESTINATIONS = {
     ("s3", "file_format"): "picks JSON or YAML for the object's content",
@@ -699,7 +727,17 @@ def test_every_destination_like_option_of_a_built_in_reporter_is_listed(
     for reporter, names in REPORTER_DESTINATION_OPTIONS.items():
         assert reporter in reporter_fields, reporter
         paths = {f["path"] for f in reporter_fields[reporter]["options"]}
-        assert set(names) <= paths, (reporter, names)
+        defined = {
+            name for name in names if (reporter, name) not in _LISTED_BEFORE_DEFINED
+        }
+        assert defined <= paths, (reporter, names)
+        # One the model now defines has to leave the not-yet-defined list.
+        pending = {name for name in names if (reporter, name) in _LISTED_BEFORE_DEFINED}
+        assert not pending & paths, (reporter, pending & paths)
+    assert all(
+        name in REPORTER_DESTINATION_OPTIONS.get(r, ())
+        for r, name in _LISTED_BEFORE_DEFINED
+    )
 
 
 def test_each_built_in_reporter_declares_the_options_listed_for_it(reporter_fields):
@@ -713,8 +751,13 @@ def test_each_built_in_reporter_declares_the_options_listed_for_it(reporter_fiel
         reporter: fields["destination_options"]
         for reporter, fields in reporter_fields.items()
     }
+    # An option the model does not define yet cannot be declared on the class.
     assert {
-        reporter: list(REPORTER_DESTINATION_OPTIONS.get(reporter, ()))
+        reporter: [
+            name
+            for name in REPORTER_DESTINATION_OPTIONS.get(reporter, ())
+            if (reporter, name) not in _LISTED_BEFORE_DEFINED
+        ]
         for reporter in declared
     } == declared
     assert set(REPORTER_DESTINATION_OPTIONS) <= set(declared)

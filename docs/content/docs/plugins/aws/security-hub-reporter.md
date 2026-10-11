@@ -52,7 +52,9 @@ reporters:
 ### Where these options can be set
 
 `aws_region`, `aws_profile` and `account_id` choose where findings are sent and which
-credentials send them, so they are the operator's. They take effect only from the
+credentials send them, and `findings_scope` and `archive_resolved_findings` choose
+which findings the reporter imports and whether it archives the ones that are
+resolved, so they are the operator's. They take effect only from the
 defaults (`AWS_REGION`, `AWS_DEFAULT_REGION` and `AWS_PROFILE`), `--config-overrides`,
 or a config file outside the scanned tree. A config file inside the scanned tree, or
 one an MCP client delivered, cannot set them: from the tree they are ignored with a

@@ -82,9 +82,19 @@ if TYPE_CHECKING:
 
 #: The options of each built-in reporter that pick where findings go or which
 #: credentials send them: each reporter's ``destination_options``. Where each is
-#: used is listed in the PR that added this.
+#: used is listed in the PR that added this. Security Hub's ``findings_scope``
+#: (which findings it imports and may archive) and ``archive_resolved_findings``
+#: are listed before its options model defines them, so that no repository's or
+#: client's config can set them once it does; the reporter declares each when its
+#: model gains it.
 REPORTER_DESTINATION_OPTIONS: Dict[str, Tuple[str, ...]] = {
-    "aws-security-hub": ("aws_region", "aws_profile", "account_id"),
+    "aws-security-hub": (
+        "aws_region",
+        "aws_profile",
+        "account_id",
+        "archive_resolved_findings",
+        "findings_scope",
+    ),
     "bedrock-summary-reporter": (
         "aws_region",
         "aws_profile",

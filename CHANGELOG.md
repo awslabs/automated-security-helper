@@ -241,9 +241,11 @@
   - The AWS reporters' destinations and credentials come only from the defaults,
     `--config-overrides` or a config file outside the tree: `aws_region` and
     `aws_profile` of the Security Hub, Bedrock summary and S3 reporters, Security
-    Hub's `account_id`, the Bedrock reporter's `model_id` and its three output
-    files, S3's `bucket_name` and `key_prefix`, and CloudWatch Logs' `aws_region`,
-    `log_group_name` and `log_stream_name`. This covers the section under any
+    Hub's `account_id`, `findings_scope` and `archive_resolved_findings` (which
+    findings it imports and whether it archives resolved ones), the Bedrock
+    reporter's `model_id` and its three output files, S3's `bucket_name` and
+    `key_prefix`, and CloudWatch Logs' `aws_region`, `log_group_name` and
+    `log_stream_name`. This covers the section under any
     spelling ASH reads as that reporter's, such as `BedrockSummary`. The reporters'
     other options still apply from the tree.
   - A reporter names the options that choose where it sends or writes findings, or

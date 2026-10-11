@@ -128,6 +128,8 @@
             "/reporters/aws-security-hub/options/aws_region",
             "/reporters/aws-security-hub/options/aws_profile",
             "/reporters/aws-security-hub/options/account_id",
+            "/reporters/aws-security-hub/options/archive_resolved_findings",
+            "/reporters/aws-security-hub/options/findings_scope",
             "/reporters/bedrock-summary-reporter/options/model_id",
             "/reporters/bedrock-summary-reporter/options/output_file",
             "/reporters/bedrock-summary-reporter/options/output_executive_file",

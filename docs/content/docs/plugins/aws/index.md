@@ -48,12 +48,12 @@ profile with `select_profile` load it. A config an MCP client delivered cannot a
 
 ## Settings only the operator can set
 
-These reporter options choose where findings are sent or written and which
-credentials send them:
+These reporter options choose where findings are sent or written, which
+credentials send them, and which findings Security Hub imports and archives:
 
 | Reporter section           | Options                                                                                                 |
 |----------------------------|---------------------------------------------------------------------------------------------------------|
-| `aws-security-hub`         | `aws_region`, `aws_profile`, `account_id`                                                               |
+| `aws-security-hub`         | `aws_region`, `aws_profile`, `account_id`, `findings_scope`, `archive_resolved_findings`                |
 | `bedrock-summary-reporter` | `aws_region`, `aws_profile`, `model_id`, `output_file`, `output_executive_file`, `output_technical_file` |
 | `cloudwatch-logs`          | `aws_region`, `log_group_name`, `log_stream_name`                                                       |
 | `s3`                       | `aws_region`, `aws_profile`, `bucket_name`, `key_prefix`                                                |
