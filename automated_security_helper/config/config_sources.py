@@ -124,7 +124,9 @@ file: a dangling symbolic link or a directory at ``.ash/.ash.yaml`` is selected
 and then refused when it is read, rather than skipped as though the repository
 had no config. A ``pyproject.toml`` that cannot be read refuses the same way
 when it would be the selected source, because whether it holds a ``[tool.ash]``
-table cannot be told.
+table cannot be told. Discovery opens ``pyproject.toml`` to look for that table
+only when it is a regular file; one that is not is told by its type and never
+opened (``_pyproject_is_a_source``).
 """
 
 from __future__ import annotations
@@ -249,12 +251,19 @@ def read_config_bytes(path: Path) -> bytes:
     """A config file's bytes; see "Bounds" in the module docstring.
 
     Opened with ``O_NONBLOCK``, so opening a FIFO does not wait for a writer, and
-    checked with ``fstat`` on the open descriptor, so what is read is the regular
-    file that was opened and not whatever the name pointed at when a caller
-    checked it. Raises ``OSError`` for anything else, and
-    ``ASHConfigSourceError`` for a file longer than ``ASH_CONFIG_MAX_FILE_BYTES``.
+    ``O_NOCTTY``, so a tty swapped in at the name cannot become the controlling
+    terminal of a process that has none (a daemonized MCP server). Checked with
+    ``fstat`` on the open descriptor, so what is read is the regular file that was
+    opened and not whatever the name pointed at when a caller checked it. Raises
+    ``OSError`` for anything else, and ``ASHConfigSourceError`` for a file longer
+    than ``ASH_CONFIG_MAX_FILE_BYTES``.
     """
-    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NONBLOCK", 0)
+        | getattr(os, "O_NOCTTY", 0)
+        | getattr(os, "O_BINARY", 0)
+    )
     fd = os.open(path, flags)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
@@ -371,6 +380,28 @@ def pyproject_has_ash_table(path: Path) -> bool:
     return True
 
 
+def _unreadable_pyproject(
+    path: Path, found_before: List[ConfigSource], exc: OSError
+) -> bool:
+    """Refuse a pyproject.toml that could not be read, or ignore it behind a source."""
+    if not found_before:
+        refusal = (
+            ASHConfigFileNotFoundError
+            if isinstance(exc, FileNotFoundError)
+            else ASHConfigSourceError
+        )
+        raise refusal(
+            f"Could not read {path.as_posix()} ({exc}), so ASH cannot tell "
+            "whether it holds a [tool.ash] table. Make it readable, remove "
+            "it, or name a config file with --config."
+        ) from exc
+    ASH_LOGGER.warning(
+        f"Could not read {path.as_posix()} ({exc}); it is not used as an ASH "
+        "config source."
+    )
+    return False
+
+
 def _pyproject_is_a_source(path: Path, found_before: List[ConfigSource]) -> bool:
     """Probe pyproject.toml without letting it break an unrelated config.
 
@@ -382,28 +413,32 @@ def _pyproject_is_a_source(path: Path, found_before: List[ConfigSource]) -> bool
     cannot be read at all (a dangling link, a directory, no permission): there
     is no way to tell whether it configures ASH, and skipping it would scan with
     the defaults while its [tool.ash] table, if it has one, sat unread.
+
+    Only a regular file is opened. Discovery runs on whatever a cloned
+    repository holds, and opening a device can act on it even when nothing is
+    read: a watchdog arms, a tape rewinds. So a FIFO, a device or a directory at
+    this name is told by its type, from ``stat``, and refused or ignored unopened.
     """
     try:
-        # read_config_bytes refuses a FIFO, a directory or a device unread.
+        regular = path.is_file()
+    except OSError as exc:
+        return _unreadable_pyproject(path, found_before, exc)
+    if not regular:
+        if not os.path.exists(path):
+            # A name that exists but leads nowhere: a symbolic link to nothing.
+            missing = FileNotFoundError(
+                errno.ENOENT, "a symbolic link to nothing", os.fspath(path)
+            )
+            return _unreadable_pyproject(path, found_before, missing)
+        return _unreadable_pyproject(
+            path,
+            found_before,
+            OSError(errno.EINVAL, "not a regular file", os.fspath(path)),
+        )
+    try:
         return pyproject_has_ash_table(path)
     except OSError as exc:
-        if not found_before:
-            # A name that exists but leads nowhere: a symbolic link to nothing.
-            refusal = (
-                ASHConfigFileNotFoundError
-                if isinstance(exc, FileNotFoundError)
-                else ASHConfigSourceError
-            )
-            raise refusal(
-                f"Could not read {path.as_posix()} ({exc}), so ASH cannot tell "
-                "whether it holds a [tool.ash] table. Make it readable, remove "
-                "it, or name a config file with --config."
-            ) from exc
-        ASH_LOGGER.warning(
-            f"Could not read {path.as_posix()} ({exc}); it is not used as an ASH "
-            "config source."
-        )
-        return False
+        return _unreadable_pyproject(path, found_before, exc)
     except ASHConfigSourceError as exc:
         if not found_before:
             raise

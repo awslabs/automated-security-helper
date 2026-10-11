@@ -1048,7 +1048,9 @@
   file is now opened without blocking and read only when it is a regular file, up
   to 16 MiB, so a FIFO or a device at a config name is refused at once instead of
   stalling the scan or exhausting memory, and a JSON config with a UTF-8 byte order
-  mark is read as YAML and TOML already were. The same
+  mark is read as YAML and TOML already were. Discovery tells a `pyproject.toml`
+  that is not a regular file by its type and does not open it, and no config file
+  is opened in a way that could make a tty the controlling terminal. The same
   refusal applies to `ash report`, `ash plugin list` and `ash dependencies install`
   (each exits 3), to workspace mode (planning, `--dry-run` included, and execution;
   `--config` is now passed to planning and must name an existing file even when

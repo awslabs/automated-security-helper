@@ -38,6 +38,9 @@ needs_fifo = pytest.mark.skipif(
 needs_dev_zero = pytest.mark.skipif(
     not os.path.exists("/dev/zero"), reason="needs a /dev/zero character device"
 )
+needs_dev_null = pytest.mark.skipif(
+    not os.path.exists("/dev/null"), reason="needs a /dev/null character device"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -145,6 +148,91 @@ class TestSpecialFilesAreNotRead:
             resolve_config(config_path=path, source_dir=tmp_path)
 
         assert f'in "{path}", line 2' in str(excinfo.value)
+
+
+def _record_opens(monkeypatch) -> list:
+    """Every ``os.open`` made while the test runs, as (path, flags)."""
+    opened: list = []
+    real_open = os.open
+
+    def recording_open(path, flags, *args, **kwargs):
+        opened.append((Path(os.fspath(path)), flags))
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", recording_open)
+    return opened
+
+
+def _special_pyproject(kind: str, directory: Path) -> Path:
+    path = directory / "pyproject.toml"
+    if kind == "fifo":
+        os.mkfifo(path)
+    else:
+        path.symlink_to("/dev/null")
+    return path
+
+
+SPECIAL_PYPROJECTS = [
+    pytest.param("fifo", marks=needs_fifo, id="fifo"),
+    pytest.param("dev-null", marks=needs_dev_null, id="link-to-dev-null"),
+]
+
+
+class TestDiscoveryOpensOnlyRegularFiles:
+    """Discovery opens a pyproject.toml only when it is a regular file.
+
+    Opening a device can act on it even when nothing is read: a watchdog arms,
+    a tape rewinds, and a tty opened by a process with no controlling terminal
+    can become its controlling terminal. A pyproject.toml that is not a regular
+    file is therefore refused, or ignored behind a higher-precedence source,
+    by its file type and without being opened.
+    """
+
+    @pytest.mark.parametrize("kind", SPECIAL_PYPROJECTS)
+    def test_one_that_would_be_selected_is_refused_unopened(
+        self, tmp_path, monkeypatch, kind
+    ):
+        pyproject = _special_pyproject(kind, tmp_path)
+        opened = _record_opens(monkeypatch)
+
+        with pytest.raises(ASHConfigSourceError, match="not a regular file"):
+            config_sources.discover_config_source(tmp_path)
+
+        assert [p for p, _ in opened if p.name == pyproject.name] == []
+
+    @pytest.mark.parametrize("kind", SPECIAL_PYPROJECTS)
+    def test_one_behind_a_dedicated_file_is_ignored_unopened(
+        self, tmp_path, monkeypatch, kind
+    ):
+        (tmp_path / ".ash.yaml").write_text("project_name: x\n", encoding="utf-8")
+        pyproject = _special_pyproject(kind, tmp_path)
+        opened = _record_opens(monkeypatch)
+
+        discovery = config_sources.discover_config_source(tmp_path)
+
+        assert discovery.selected.path == tmp_path / ".ash.yaml"
+        assert discovery.ignored == []
+        assert [p for p, _ in opened if p.name == pyproject.name] == []
+
+    def test_control_a_regular_pyproject_is_read(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.ash]\nproject_name = "from-pyproject"\n', encoding="utf-8"
+        )
+
+        assert resolve_config(source_dir=tmp_path).project_name == "from-pyproject"
+
+    def test_a_config_file_is_opened_without_becoming_a_controlling_terminal(
+        self, tmp_path, monkeypatch
+    ):
+        path = tmp_path / "cfg.yaml"
+        path.write_text("project_name: x\n", encoding="utf-8")
+        opened = _record_opens(monkeypatch)
+
+        read_config_file(path)
+
+        noctty = getattr(os, "O_NOCTTY", 0)
+        flags = [f for p, f in opened if p == path]
+        assert flags and all(f & noctty == noctty for f in flags), flags
 
 
 class TestEncodings:
