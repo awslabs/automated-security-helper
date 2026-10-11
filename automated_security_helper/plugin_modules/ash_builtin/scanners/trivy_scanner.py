@@ -67,14 +67,22 @@ measured and the offline database check is skipped.
 Severity
 --------
 Each result's ASH severity is trivy's own severity for it (CRITICAL, HIGH, MEDIUM,
-LOW), read from the severity tag trivy writes on the result's rule. It is the
-value trivy's ``--severity`` filter uses, which is how ASH's
+LOW), read from the ``Severity:`` line trivy writes in the result's message. It is
+the value trivy's ``--severity`` filter uses, which is how ASH's
 ``severity_threshold`` is passed to trivy, so the threshold and the reported
 severity cannot disagree. Without this, ASH would bucket the rule's
 ``security-severity`` (a CVSS base score), and a finding trivy rates HIGH with a
 6.5 CVSS score would pass trivy's HIGH filter and be reported MEDIUM. A result
 whose severity is UNKNOWN keeps ASH's generic SARIF mapping (the CVSS score, then
 the SARIF level).
+
+Per result, not per rule: trivy writes one SARIF rule per CVE and rewrites its
+severity tag (and ``security-severity``) for each result, so the rule ends up with
+the last result's. One CVE can be rated differently for two packages in one scan:
+measured with 0.75.0 on a Debian tree, CVE-2014-9939 is CRITICAL for binutils and
+LOW for gdb, and its rule says LOW. Only a result with no severity line of its own
+(trivy writes none for a license finding, whose rule is per package and license)
+takes its rule's tag, and only when the result's own SARIF level agrees with it.
 
 trivy configuration in the scanned repository
 ---------------------------------------------
@@ -145,6 +153,14 @@ from automated_security_helper.schemas.sarif_schema_model import (
 #: trivy's severities that ASH reports as the same name. trivy's fifth, UNKNOWN,
 #: is left to ASH's generic SARIF mapping.
 TRIVY_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
+
+#: The SARIF level trivy gives a result of each severity (``toSarifErrorLevel``).
+_SARIF_LEVEL = {
+    "CRITICAL": "error",
+    "HIGH": "error",
+    "MEDIUM": "warning",
+    "LOW": "note",
+}
 
 #: Characters trivy's ``--skip-dirs`` reads as glob syntax.
 _GLOB_SPECIAL = frozenset("*?[]{}\\")
@@ -488,7 +504,15 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
     def _trivy_severity(
         result: Any, rules: List[Any], by_id: Dict[str, Any]
     ) -> Optional[str]:
-        """trivy's severity for *result*, from its rule's tags; see "Severity" above."""
+        """trivy's severity for *result*; see "Severity" above.
+
+        The ``Severity:`` line of its message when it has one, else its rule's tag.
+        """
+        message = result.message.root.text if result.message else None
+        for line in (message or "").splitlines():
+            if line.startswith("Severity: "):
+                own = line[len("Severity: ") :].strip()
+                return own if own in TRIVY_SEVERITIES else None
         rule = None
         if result.ruleIndex is not None and 0 <= result.ruleIndex < len(rules):
             rule = rules[result.ruleIndex]
@@ -500,4 +524,12 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         found = [tag for tag in tags if tag in TRIVY_SEVERITIES]
         # Exactly one, or no verdict: two severity tags would be a shape trivy
         # does not write, and guessing between them could under-rate a finding.
-        return found[0] if len(found) == 1 else None
+        if len(found) != 1:
+            return None
+        # The tag is the rating of the last result trivy wrote for the rule. A
+        # result whose own level differs is rated otherwise, and is left to the
+        # generic mapping rather than given another package's severity.
+        level = getattr(result.level, "value", result.level)
+        if level is not None and level != _SARIF_LEVEL[found[0]]:
+            return None
+        return found[0]

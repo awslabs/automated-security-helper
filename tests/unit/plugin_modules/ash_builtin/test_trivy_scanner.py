@@ -23,12 +23,27 @@ than an exact match.
 Every parser assertion goes through ``_assert_expected``, and
 ``test_the_parser_assertions_fail_on_a_mutated_finding`` shows it fails when a
 rule id, severity or location is wrong.
+
+``trivy-0.75.0.shared-cve.sarif`` was written by trivy v0.75.0 for one CVE rated
+differently in two packages. It scanned, from inside the directory, a Debian 11
+tree whose ``var/lib/dpkg/status`` lists only ``binutils`` and ``gdb`` at version
+``0.0.1-1``::
+
+    trivy fs --format sarif --scanners vuln --skip-db-update --offline-scan . \
+        --output trivy-0.75.0.shared-cve.sarif
+
+against the database published 2026-10-10T18:59:50Z, and was trimmed to the two
+rules both packages share (CVE-2014-9939, CVE-2014-8501) and their four results,
+``ruleIndex`` renumbered and ``originalUriBaseIds.ROOTPATH`` rewritten as above.
+Debian rates each CVE CRITICAL or HIGH for binutils and LOW for gdb; trivy writes
+one rule per CVE, whose severity tag is the last result's (gdb's).
 """
 
 from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -62,6 +77,7 @@ PluginContext.model_rebuild()
 DATA = Path(__file__).parents[3] / "test_data" / "scanners" / "trivy"
 VULN_SARIF = DATA / "trivy-0.69.3.vuln.sarif"
 ALL_SARIF = DATA / "trivy-0.69.3.all.sarif"
+SHARED_CVE_SARIF = DATA / "trivy-0.75.0.shared-cve.sarif"
 
 #: What trivy v0.69.3 reports for the fixture's two manifests, as
 #: (rule id, uri, start line, ASH severity, package, package_path). The negatives,
@@ -627,6 +643,37 @@ def _set_rule_tag(raw: dict, rule_id: str, severity: str) -> None:
             ] + [severity]
 
 
+_SARIF_LEVEL = {
+    "CRITICAL": "error",
+    "HIGH": "error",
+    "MEDIUM": "warning",
+    "LOW": "note",
+}
+
+
+def _set_severity(raw: dict, rule_id: str, severity: str) -> None:
+    """Rate *rule_id* as trivy would write it: each result's message line and level,
+    and the rule's tag."""
+    _set_rule_tag(raw, rule_id, severity)
+    for result in raw["runs"][0]["results"]:
+        if result["ruleId"] == rule_id:
+            text = result["message"]["text"]
+            result["message"]["text"] = re.sub(
+                r"^Severity: \S+$", f"Severity: {severity}", text, flags=re.MULTILINE
+            )
+            result["level"] = _SARIF_LEVEL.get(severity, "note")
+
+
+def _strip_result_severity(raw: dict, rule_id: str) -> None:
+    """A result with no severity line of its own, leaving only its rule's tag."""
+    for result in raw["runs"][0]["results"]:
+        if result["ruleId"] == rule_id:
+            text = result["message"]["text"]
+            result["message"]["text"] = re.sub(
+                r"^Severity: \S+\n", "", text, flags=re.MULTILINE
+            )
+
+
 def _mutate_rule_id(raw):
     raw["runs"][0]["results"][0]["ruleId"] = "CVE-0000-0000"
 
@@ -642,7 +689,7 @@ def _mutate_uri(raw):
 
 
 def _mutate_severity(raw):
-    _set_rule_tag(raw, "CVE-2018-18074", "LOW")
+    _set_severity(raw, "CVE-2018-18074", "LOW")
 
 
 @pytest.mark.parametrize(
@@ -658,7 +705,7 @@ def test_the_parser_assertions_fail_on_a_mutated_finding(tmp_path, mutate):
 def test_trivys_severity_wins_over_the_cvss_score(tmp_path):
     """CVE-2023-32681 has CVSS 6.1 (MEDIUM band); rated CRITICAL by trivy, it is CRITICAL."""
     raw = _raw()
-    _set_rule_tag(raw, "CVE-2023-32681", "CRITICAL")
+    _set_severity(raw, "CVE-2023-32681", "CRITICAL")
     report = _parse(_scanner(tmp_path), raw)
     severities = {
         r.ruleId: r.properties.issue_severity for r in report.get_all_results()
@@ -670,7 +717,7 @@ def test_trivys_severity_wins_over_the_cvss_score(tmp_path):
 
 def test_unknown_severity_falls_back_to_the_generic_mapping(tmp_path):
     raw = _raw()
-    _set_rule_tag(raw, "CVE-2023-32681", "UNKNOWN")
+    _set_severity(raw, "CVE-2023-32681", "UNKNOWN")
     report = _parse(_scanner(tmp_path), raw)
     result = next(r for r in report.get_all_results() if r.ruleId == "CVE-2023-32681")
     assert getattr(result.properties, "issue_severity", None) is None
@@ -687,6 +734,53 @@ def test_misconfiguration_results_take_trivys_severity_too(tmp_path):
         "HIGH",
         "LOW",
     )
+
+
+def test_each_result_takes_its_own_severity_not_its_rules(tmp_path):
+    """One CVE, two packages, two ratings: trivy's rule carries only the last."""
+    report = _parse(_scanner(tmp_path), _raw(SHARED_CVE_SARIF))
+    rated = {
+        (r.ruleId, r.properties.package_name): r.properties.issue_severity
+        for r in report.get_all_results()
+    }
+    assert rated == {
+        ("CVE-2014-9939", "binutils"): "CRITICAL",
+        ("CVE-2014-9939", "gdb"): "LOW",
+        ("CVE-2014-8501", "binutils"): "HIGH",
+        ("CVE-2014-8501", "gdb"): "LOW",
+    }
+    rules = _raw(SHARED_CVE_SARIF)["runs"][0]["tool"]["driver"]["rules"]
+    assert [r["properties"]["tags"][-1] for r in rules] == ["LOW", "LOW"]
+    counts = get_severity_metrics_from_sarif(report, _scanner(tmp_path).context)
+    assert (counts.critical, counts.high, counts.low) == (1, 1, 2)
+
+
+def test_a_result_without_its_own_severity_takes_the_rules_tag(tmp_path):
+    """License results carry no severity line; their rule is per package and license."""
+    raw = _raw()
+    _strip_result_severity(raw, "CVE-2018-18074")
+    report = _parse(_scanner(tmp_path), raw)
+    found = next(r for r in report.get_all_results() if r.ruleId == "CVE-2018-18074")
+    assert found.properties.issue_severity == "HIGH"
+
+
+def test_a_rule_tag_the_results_level_contradicts_gives_no_verdict(tmp_path):
+    """The tag is the last result's rating; a result whose own level differs is not it."""
+    raw = _raw(SHARED_CVE_SARIF)
+    for result in raw["runs"][0]["results"]:
+        _strip = re.sub(
+            r"^Severity: \S+\n", "", result["message"]["text"], flags=re.MULTILINE
+        )
+        result["message"]["text"] = _strip
+    report = _parse(_scanner(tmp_path), raw)
+    rated = {
+        (r.ruleId, r.properties.package_name): getattr(
+            r.properties, "issue_severity", None
+        )
+        for r in report.get_all_results()
+    }
+    assert rated[("CVE-2014-9939", "gdb")] == "LOW"
+    assert rated[("CVE-2014-9939", "binutils")] is None
 
 
 def test_the_severity_counts_match_trivys_ratings(tmp_path):
@@ -929,6 +1023,7 @@ def test_a_rule_index_that_points_at_another_rule_falls_back_to_the_rule_id(
     rules = raw["runs"][0]["tool"]["driver"]["rules"]
     medium = next(i for i, r in enumerate(rules) if "MEDIUM" in r["properties"]["tags"])
     result["ruleIndex"] = medium
+    _strip_result_severity(raw, "CVE-2018-18074")
     report = _parse(_scanner(tmp_path), raw)
     found = next(r for r in report.get_all_results() if r.ruleId == "CVE-2018-18074")
     assert found.properties.issue_severity == "HIGH"
@@ -939,6 +1034,7 @@ def test_two_severity_tags_give_no_verdict(tmp_path):
     for rule in raw["runs"][0]["tool"]["driver"]["rules"]:
         if rule["id"] == "CVE-2018-18074":
             rule["properties"]["tags"] = ["vulnerability", "LOW", "HIGH"]
+    _strip_result_severity(raw, "CVE-2018-18074")
     report = _parse(_scanner(tmp_path), raw)
     found = next(r for r in report.get_all_results() if r.ruleId == "CVE-2018-18074")
     assert getattr(found.properties, "issue_severity", None) is None

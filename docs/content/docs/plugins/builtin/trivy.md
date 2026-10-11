@@ -77,6 +77,8 @@ To accept a finding, prefer an ASH suppression, which is recorded in the reports
 
 Each finding is reported at trivy's own severity for it (CRITICAL, HIGH, MEDIUM, LOW). That is the severity the `trivy --severity` filter uses, which is how `severity_threshold` reaches trivy, so a finding cannot pass the filter as HIGH and be reported as MEDIUM. A finding below the threshold is dropped by trivy itself: it is not reported, suppressed or counted, unlike a scanner whose threshold ASH applies after the scan. A finding trivy rates UNKNOWN falls back to ASH's usual SARIF mapping: the rule's CVSS score (`security-severity`), then the SARIF level.
 
+The severity is read per finding, from the `Severity:` line trivy writes in each result's message, not from the result's SARIF rule. trivy writes one rule per advisory, and one advisory can be rated differently for two packages in the same scan (Debian, for example, rates some binutils advisories CRITICAL for `binutils` and LOW for `gdb`); the rule carries only one of those ratings.
+
 ## Suppressions
 
 ASH suppressions apply as for any scanner:

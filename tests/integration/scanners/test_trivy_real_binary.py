@@ -244,6 +244,44 @@ def test_an_unbounded_scan_timeout_scans(tmp_path, trivy_env):
     assert STABLE <= _pairs(report)
 
 
+def _debian_tree(root: Path, packages: tuple) -> Path:
+    """A Debian 11 tree whose dpkg status lists *packages*, each at 0.0.1-1."""
+    (root / "etc").mkdir(parents=True)
+    (root / "var" / "lib" / "dpkg").mkdir(parents=True)
+    (root / "etc" / "os-release").write_text(
+        'ID=debian\nVERSION_ID="11"\nPRETTY_NAME="Debian GNU/Linux 11 (bullseye)"\n',
+        encoding="utf-8",
+    )
+    (root / "etc" / "debian_version").write_text("11.0\n", encoding="utf-8")
+    (root / "var" / "lib" / "dpkg" / "status").write_text(
+        "".join(
+            f"Package: {name}\nStatus: install ok installed\nArchitecture: amd64\n"
+            f"Version: 0.0.1-1\nDescription: {name}\n\n"
+            for name in packages
+        ),
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_each_result_is_rated_at_its_own_severity(tmp_path, trivy_env):
+    """trivy writes one rule per CVE, tagged with the last result's severity; Debian
+    rates the binutils CVEs gdb also carries LOW for gdb and higher for binutils."""
+    source = _debian_tree(tmp_path / "src", ("binutils", "gdb"))
+    scanner, report = _scan_direct(source, tmp_path / "out")
+    assert scanner.exit_code == 0
+    per_rule: dict[str, set] = {}
+    for result in report.get_all_results():
+        match = re.search(r"^Severity: (\S+)$", result.message.root.text, re.MULTILINE)
+        assert match, result.message.root.text
+        own = match.group(1)
+        per_rule.setdefault(result.ruleId, set()).add(own)
+        if own != "UNKNOWN":
+            assert result.properties.issue_severity == own, result.ruleId
+    # Not vacuous: at least one CVE is rated two ways in this one scan.
+    assert any(len(rated) > 1 for rated in per_rule.values()), per_rule
+
+
 @pytest.mark.parametrize("where", ["env", "config"])
 def test_an_operators_exit_code_setting_keeps_the_report(
     tmp_path, trivy_env, monkeypatch, where
