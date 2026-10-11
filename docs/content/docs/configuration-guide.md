@@ -495,6 +495,7 @@ and module checks below: everything under the MCP workspace root
 | `scanners.trivy.options.config_file`, `scanners.trivy-repo.options.config_file` and `module_dir`, `scanners.cfn-lint.options.config_file` | Ignored with a warning. Honored only from `--config-overrides` or a config file outside the scanned tree, and only for a path outside the tree, because these files can make the tool load code (trivy modules, cfn-lint `append_rules`). Without them the tool gets an empty config of ASH's. |
 | `scanners.actionlint.options.config_file`, `scanners.gitleaks.options.config_file` and `baseline_path`, `scanners.zizmor.options.config_file`, `scanners.cfn-guard.options.rules_paths` | Ignored with a warning, and the tool runs without it: on ASH's own empty or default-rules config, or for cfn-guard on the bundled rule sets. Honored from `--config-overrides` or a config file outside the scanned tree, where the file named may also be inside the tree. |
 | `scanners.actionlint.options.shellcheck` and `pyflakes` | Only the option's own name (`shellcheck`, `pyflakes`), looked up on `PATH`. Another program, or a path, only from the operator. A program that resolves inside the scanned tree is refused whoever set it. |
+| `scanners.trivy.options.scanners` | Ignored with a warning unless it is the default, `[vuln]`: a repository could otherwise turn vulnerability scanning off. Another set only from `--config-overrides` or a config file outside the scanned tree. |
 | `scanners.zizmor.options.online_audits` | Ignored with a warning: zizmor runs `--offline` without GitHub tokens. Only the operator turns online audits on. |
 | `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.mode` | See [Scanner sandbox](scanner-sandbox.md). |
 
@@ -805,7 +806,7 @@ scanners:
   trivy:
     enabled: true
     options:
-      scanners: [vuln]           # vuln, misconfig, secret, license
+      scanners: [vuln]           # vuln, misconfig, secret, license; operator-only
       ignore_unfixed: false
       license_full: false
       disable_telemetry: true

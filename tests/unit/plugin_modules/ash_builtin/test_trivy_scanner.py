@@ -451,6 +451,7 @@ def test_both_scanners_install_the_pinned_trivy(tmp_path, cls):
 def test_options_become_flags(tmp_path):
     scanner = _scanner(
         tmp_path,
+        operator=True,
         scanners=["vuln", "license"],
         license_full=True,
         ignore_unfixed=True,
@@ -477,6 +478,41 @@ def test_a_severity_threshold_is_never_a_trivy_filter(tmp_path, kind, threshold)
         scanner = _repo_scanner(tmp_path, severity_threshold=threshold)
     args = scanner._resolve_arguments(target="/t", results_file="/r.sarif")
     assert not [a for a in args if a.startswith("--severity")]
+
+
+@pytest.mark.parametrize("chosen", [["license"], ["secret"], ["vuln", "secret"]])
+def test_a_scanner_set_from_the_scanned_tree_is_ignored(tmp_path, caplog, chosen):
+    """``scanners: [license]`` in the tree's config turned vuln off: no vulnerability
+    findings and no database measured, with nothing in the report saying so."""
+    caplog.set_level("WARNING")
+    scanner = _scanner(tmp_path, scanners=chosen)
+    argv = _argv(scanner, scanner.context.source_dir)
+    assert argv[argv.index("--scanners") + 1] == "vuln"
+    assert [e.name for e in scanner.content_databases_in_use()] == ["trivy-db"]
+    assert "scanners.trivy.options.scanners" in caplog.text
+
+
+@pytest.mark.parametrize("how", ["operator", "override"])
+def test_the_operator_chooses_the_scanner_set(tmp_path, how):
+    if how == "operator":
+        scanner = _scanner(tmp_path, operator=True, scanners=["license"])
+    else:
+        scanner = _scanner(
+            tmp_path,
+            overrides=('scanners.trivy.options.scanners=["license"]',),
+            scanners=["license"],
+        )
+    argv = _argv(scanner, scanner.context.source_dir)
+    assert argv[argv.index("--scanners") + 1] == "license"
+    assert scanner.content_databases_in_use() == []
+
+
+def test_the_default_scanner_set_needs_no_operator(tmp_path, caplog):
+    caplog.set_level("WARNING")
+    scanner = _scanner(tmp_path, scanners=["vuln"])
+    argv = _argv(scanner, scanner.context.source_dir)
+    assert argv[argv.index("--scanners") + 1] == "vuln"
+    assert "scanners.trivy.options.scanners" not in caplog.text
 
 
 def test_ignore_unfixed_is_warned_about(tmp_path, caplog):
@@ -615,7 +651,7 @@ def test_offline_without_vuln_needs_no_database(tmp_path, monkeypatch):
         raise AssertionError("probed a database the scan does not read")
 
     monkeypatch.setattr(staleness, "_built_from_trivy", boom)
-    scanner = _scanner(tmp_path, offline=True, scanners=["misconfig"])
+    scanner = _scanner(tmp_path, operator=True, offline=True, scanners=["misconfig"])
     assert scanner.validate_plugin_dependencies() is True
 
 
@@ -641,7 +677,8 @@ def test_the_vulnerability_database_is_measured_when_vuln_runs(tmp_path):
     assert [e.name for e in _scanner(tmp_path).content_databases_in_use()] == [
         "trivy-db"
     ]
-    assert _scanner(tmp_path, scanners=["secret"]).content_databases_in_use() == []
+    secret_only = _scanner(tmp_path, operator=True, scanners=["secret"])
+    assert secret_only.content_databases_in_use() == []
 
 
 def test_the_registry_declares_the_database_for_both_trivy_scanners():

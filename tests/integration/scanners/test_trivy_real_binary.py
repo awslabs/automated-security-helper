@@ -147,13 +147,25 @@ def _copy_fixture(tmp_path: Path) -> Path:
     return source
 
 
-def _scan_direct(source: Path, output: Path, *, operator: bool = False, **options):
-    """A direct scan whose config is the scanned tree's, or the operator's."""
+def _scan_direct(
+    source: Path,
+    output: Path,
+    *,
+    operator: bool = False,
+    overrides: tuple = (),
+    **options,
+):
+    """A direct scan whose config is the scanned tree's, or the operator's.
+
+    ``overrides`` are ``--config-overrides`` entries, the operator's even when the
+    rest of the config is the tree's.
+    """
     config = AshConfig()
     record_provenance(
         config,
         in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
         trusted=AshConfig(),
+        config_overrides=list(overrides),
     )
     context = PluginContext(
         source_dir=source,
@@ -215,7 +227,9 @@ def test_the_capture_still_describes_the_pinned_binary(tmp_path, trivy_env):
 
 def test_misconfig_runs_when_enabled(tmp_path, trivy_env):
     source = _copy_fixture(tmp_path)
-    _, report = _scan_direct(source, tmp_path / "out", scanners=["vuln", "misconfig"])
+    _, report = _scan_direct(
+        source, tmp_path / "out", operator=True, scanners=["vuln", "misconfig"]
+    )
     assert ("DS-0002", "Dockerfile") in _pairs(report)
 
 
@@ -238,7 +252,11 @@ def test_an_unbounded_scan_timeout_scans(tmp_path, trivy_env):
     analyzer that takes files one by one) then fails with "context deadline exceeded"."""
     source = _copy_fixture(tmp_path)
     scanner, report = _scan_direct(
-        source, tmp_path / "out", scan_timeout=None, scanners=["vuln", "secret"]
+        source,
+        tmp_path / "out",
+        operator=True,
+        scan_timeout=None,
+        scanners=["vuln", "secret"],
     )
     assert scanner.exit_code == 0
     assert STABLE <= _pairs(report)
@@ -758,19 +776,25 @@ def test_the_scanned_repos_secret_config_cannot_disable_rules(tmp_path, trivy_en
         f"AWS_ACCESS_KEY_ID={key_id}\nAWS_SECRET_ACCESS_KEY={secret}\n",
         encoding="utf-8",
     )
-    _, baseline = _scan_direct(source, tmp_path / "out0", scanners=["secret"])
+    _, baseline = _scan_direct(
+        source, tmp_path / "out0", operator=True, scanners=["secret"]
+    )
     assert baseline.get_all_results(), "the control: trivy finds the credential"
     repo_rules_file = "trivy-secret.yaml"
     (source / repo_rules_file).write_text(
         "disable-rules:\n  - aws-access-key-id\n  - aws-secret-access-key\n",
         encoding="utf-8",
     )
-    _, report = _scan_direct(source, tmp_path / "out1", scanners=["secret"])
+    _, report = _scan_direct(
+        source, tmp_path / "out1", operator=True, scanners=["secret"]
+    )
     assert _pairs(report) == _pairs(baseline)
-    # Named by the tree's ASH config, it is still not passed.
+    # Named by the tree's ASH config, it is still not passed. The scanner set is
+    # the operator's, so that secret scanning runs.
     _, named = _scan_direct(
         source,
         tmp_path / "out2",
+        overrides=('scanners.trivy.options.scanners=["secret"]',),
         scanners=["secret"],
         secret_config_file=repo_rules_file,
     )

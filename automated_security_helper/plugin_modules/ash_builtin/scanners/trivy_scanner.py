@@ -31,7 +31,13 @@ own data:
   (scan source headers too) is off with it, since it slows a scan for findings
   nobody asked for.
 
-Any of the four can be turned on with ``scanners.trivy.options.scanners``.
+Any of the four can be turned on with ``scanners.trivy.options.scanners``, by the
+operator: ``--config-overrides`` or a config file outside the scanned tree
+(``utils/config_trust.set_by_operator``). Set from a config in the scanned tree,
+any set but the default is ignored with a warning, and trivy runs ``vuln``: a
+repository could otherwise turn ``vuln`` off (``scanners: [license]``) and its
+vulnerability findings, and the database check, would vanish with nothing in the
+report saying so.
 
 ``ignore_unfixed`` defaults to False, unlike ``trivy-repo``: a vulnerability with
 no fixed version is still a vulnerability, and grype reports them by default. ASH
@@ -149,6 +155,10 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanne
     TrivyScannerBase,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
+from automated_security_helper.utils.config_trust import (
+    NOT_THE_OPERATORS,
+    set_by_operator,
+)
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -213,7 +223,10 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
                 "scanners already cover secrets (detect-secrets) and IaC "
                 "misconfigurations (checkov, cfn-nag, cdk-nag), and license findings "
                 "are a compliance question. Add secret, misconfig or license to run "
-                "trivy's checks for them as well."
+                "trivy's checks for them as well. Honored only when set by "
+                "--config-overrides or a config file outside the scanned tree; set "
+                "by a config in the tree, any set but the default is ignored with a "
+                "warning."
             ),
             min_length=1,
         ),
@@ -344,6 +357,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         return "vuln" in self._options().scanners
 
     def _process_config_options(self) -> None:
+        self._honor_scanner_set()
         self._append_trivy_options()
         if self._options().ignore_unfixed:
             self._plugin_log(
@@ -353,6 +367,24 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                 level=logging.WARNING,
             )
         return super()._process_config_options()
+
+    def _honor_scanner_set(self) -> None:
+        """Keep ``scanners`` only when the operator chose it; see the module docstring."""
+        options = self._options()
+        default = list(TrivyScannerConfigOptions.model_fields["scanners"].default)
+        chosen = list(options.scanners)
+        if chosen == default:
+            return
+        config = self.context.config if self.context is not None else None
+        if set_by_operator(config, "scanners.trivy.options.scanners", chosen):
+            return
+        self._plugin_log(
+            f"Ignoring scanners.trivy.options.scanners ({chosen}): {NOT_THE_OPERATORS}. "
+            f"trivy runs the default set, {default}.",
+            level=logging.WARNING,
+        )
+        if self.config is not None:
+            self.config.options = options.model_copy(update={"scanners": default})
 
     def validate_plugin_dependencies(self) -> bool:
         """The binary, and offline, a vulnerability database for it to read.

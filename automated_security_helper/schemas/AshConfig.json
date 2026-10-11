@@ -5024,7 +5024,7 @@
           "default": [
             "vuln"
           ],
-          "description": "Which trivy scanners to run. Defaults to vuln only: ASH's default scanners already cover secrets (detect-secrets) and IaC misconfigurations (checkov, cfn-nag, cdk-nag), and license findings are a compliance question. Add secret, misconfig or license to run trivy's checks for them as well.",
+          "description": "Which trivy scanners to run. Defaults to vuln only: ASH's default scanners already cover secrets (detect-secrets) and IaC misconfigurations (checkov, cfn-nag, cdk-nag), and license findings are a compliance question. Add secret, misconfig or license to run trivy's checks for them as well. Honored only when set by --config-overrides or a config file outside the scanned tree; set by a config in the tree, any set but the default is ignored with a warning.",
           "items": {
             "enum": [
               "vuln",

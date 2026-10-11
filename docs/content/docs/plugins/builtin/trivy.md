@@ -15,7 +15,7 @@ The `trivy` scanner is a builtin scanner, enabled by default: a default scan run
 
 ## What it scans by default, and why
 
-trivy has four scanners. This scanner runs one of them unless you ask for more:
+trivy has four scanners. This scanner runs one of them unless you, as the operator, ask for more:
 
 | trivy scanner | By default | Why |
 |---------------|---------|-----|
@@ -29,7 +29,9 @@ scanners:
   trivy:
     enabled: true
     options:
-      # Any of vuln, secret, misconfig, license. At least one.
+      # Any of vuln, secret, misconfig, license. At least one. Honored only from
+      # the operator (--config-overrides or a config file outside the scanned
+      # tree); set by a config in the tree, it is ignored with a warning.
       scanners: ["vuln"]
       # Report only vulnerabilities with a fixed version. Off: an unfixed
       # vulnerability is still a vulnerability. ASH logs a warning when it is on.
