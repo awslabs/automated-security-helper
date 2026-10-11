@@ -1062,7 +1062,11 @@
   `"ash_config": null`, and a recorded configuration with no settings set is sent
   as `{}`, never as the defaults. `ash merge` refuses a shard whose results record
   no configuration (exit 1), since the merged verdict and suppressions are read
-  from it.
+  from it. The per-scanner severity threshold in reports and summary tables is
+  read from the recorded configuration only; with none recorded, or one that
+  cannot be read, it is the built-in threshold and its source is shown as
+  `unavailable` (workspace results show `MEDIUM (unavailable)` where they showed
+  `MEDIUM (global)`), never the threshold of the file `ASH_CONFIG` names.
 
 - **A `**` at either end of a multi-segment `ignore_paths` or `suppressions` pattern
   now takes effect.** The matcher anchored the first and last segments of a pattern

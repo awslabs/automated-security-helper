@@ -51,10 +51,10 @@ The table below shows findings by scanner, with status based on severity thresho
 
 | Scanner | Suppressed | Critical | High | Medium | Low | Info | Actionable | Result | Threshold |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| bandit | 0 | 0 | 1 | 0 | 0 | 0 | 1 | FAILED | MEDIUM (global) |
-| checkov | 0 | 0 | 1 | 0 | 0 | 0 | 1 | FAILED | MEDIUM (global) |
-| npm-audit | 0 | 0 | 0 | 0 | 0 | 0 | 0 | MISSING | MEDIUM (global) |
-| semgrep | 0 | 0 | 0 | 1 | 0 | 0 | 1 | FAILED | MEDIUM (global) |
+| bandit | 0 | 0 | 1 | 0 | 0 | 0 | 1 | FAILED | MEDIUM (unavailable) |
+| checkov | 0 | 0 | 1 | 0 | 0 | 0 | 1 | FAILED | MEDIUM (unavailable) |
+| npm-audit | 0 | 0 | 0 | 0 | 0 | 0 | 0 | MISSING | MEDIUM (unavailable) |
+| semgrep | 0 | 0 | 0 | 1 | 0 | 0 | 1 | FAILED | MEDIUM (unavailable) |
 
 ### Top 2 Hotspots
 

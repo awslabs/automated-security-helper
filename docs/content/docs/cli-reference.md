@@ -853,6 +853,14 @@ ash report [options]
 | `--verbose`, `-v`    | Enable verbose logging            | `False`           | `ASH_VERBOSE`        |
 | `--no-color`         | Disable colored output            | `False`           |                       |
 
+The severity threshold shown for each scanner, and used to count its actionable
+findings, comes from the configuration the results record: `global` for
+`global_settings.severity_threshold`, `config` for the scanner's own option. When
+the results record no configuration (a workspace's combined results, for
+example), the threshold is the built-in `MEDIUM` (or `ASH_DEFAULT_SEVERITY_LEVEL`)
+and its source is shown as `unavailable`; the configuration of the machine
+running `ash report` is not used in its place.
+
 ### Examples
 
 ```bash
