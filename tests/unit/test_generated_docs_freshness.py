@@ -61,10 +61,8 @@ when they compare a prose table with these pages: each options table carries
 ``<!-- doctest: options of=<section>.<name> -->`` directly above it, and each
 Default cell has one of the forms in ``generate_config_reference.py``.
 
-Two generators own files outside ``docs/content/reference/`` as well, and their
-``--check`` covers those too. ``generate_reporter_docs.py`` rewrites the marker
-regions in the older docs pages listed in its ``REGIONS``.
-``generate_mcp_tool_reference.py`` writes the agentic-plugins
+One generator owns a file outside ``docs/content/reference/`` as well, and its
+``--check`` covers it too: ``generate_mcp_tool_reference.py`` writes the agentic-plugins
 ``_base/references/tool-reference.md``, which closes a gap the ``agentic-plugins
 check`` gate structurally cannot see: that gate rebuilds each plugin backend and
 byte-compares the output trees against ``_base/``, proving the copies match the
@@ -98,9 +96,8 @@ SCRIPTS = REPO_ROOT / "scripts"
 REFERENCE_DIR = REPO_ROOT / "docs" / "content" / "reference"
 
 #: Every generated reference page: generator script -> the page it writes.
-#: generate_reporter_docs.py also owns the marker regions listed in its REGIONS, and
-#: generate_mcp_tool_reference.py also owns the agentic-plugins tool-reference.md;
-#: each one's --check covers everything it writes.
+#: generate_mcp_tool_reference.py also owns the agentic-plugins tool-reference.md, and
+#: its --check covers both files.
 REFERENCE_PAGES = {
     "generate_cli_docs.py": "cli.md",
     "generate_config_reference.py": "configuration.md",
@@ -208,6 +205,21 @@ def test_docs_root_decides_where_pages_go_and_what_they_link(tmp_path: Path) -> 
         "snyk-code": "../docs/plugins/community/snyk-plugin.md",
     }
     assert "automated_security_helper" in result.stderr.split("Documenting ", 1)[1]
+
+
+def test_reporter_page_needs_no_other_page(tmp_path: Path) -> None:
+    """The reporter generator writes its page into a docs tree that holds nothing else.
+
+    It used to rewrite generated regions in output-formats.md and three plugin
+    pages, and stopped with an error when one was missing; the docs rewrite deletes
+    those pages, so the reference page must be all it reads or writes.
+    """
+    result = _run_generator("generate_reporter_docs.py", "--docs-root", str(tmp_path))
+    assert result.returncode == 0, result.stdout + result.stderr
+    written = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*.md"))
+    assert written == ["docs/content/reference/reporters.md"]
+    committed = (REFERENCE_DIR / "reporters.md").read_text(encoding="utf-8")
+    assert (tmp_path / written[0]).read_text(encoding="utf-8") == committed
 
 
 def _cells(row: str) -> list[str]:

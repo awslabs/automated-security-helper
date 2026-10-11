@@ -228,7 +228,7 @@ _MCP_TOOL_REFERENCE = (
         ("tests/snapshot/__snapshots__/test_cli/summary.md", True),
         (".github/actions/validate-mcp/tool_surface.golden.json", True),
         ("automated_security_helper/schemas/AshConfig.json", True),
-        ("docs/content/docs/cli-reference-generated.md", True),
+        ("docs/content/docs/cli-reference-generated.md", False),
         ("docs/content/reference/cli.md", True),
         ("docs/content/reference/environment-variables.md", True),
         ("docs/content/reference/configuration.md", True),
