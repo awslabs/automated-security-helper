@@ -129,6 +129,9 @@
   of the ASH source tree the running package was installed from, found from the
   package itself or from the installer's `direct_url.json`; an installation with no
   such tree (for example, one from a wheel file) is refused with what to do instead.
+  An installed package (in `site-packages`, or with its dist-info beside it) is no
+  longer taken for a clone because a scanned repository committed a `Dockerfile`,
+  `docs/`, `tests/` and the like into its own virtual environment.
   See [Which Dockerfile ASH builds](docs/content/docs/building-your-own-image.md#which-dockerfile-ash-builds).
 - **Container mode always mounts the source directory read-only.** `ash --mode
   container`, `./ash` and `Invoke-ASH` used to mount `/src` read-write whenever the

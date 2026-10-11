@@ -104,7 +104,9 @@ used depends on how ASH was installed:
   `uvx --from <dir>`; the revision is `LOCAL`). The `Dockerfile` at the root of that
   source tree, with the tree as the build context. ASH finds the tree from where the
   running package is installed, so `ash` run from a subdirectory of the checkout, or
-  from another project, builds the same image.
+  from another project, builds the same image. A package an installer put in a
+  `site-packages` directory, with its dist-info beside it, is never taken for a clone,
+  whatever other files sit next to it.
 
 A `LOCAL` revision for an installation with no source tree beside it or recorded for
 it (for example, ASH installed from a wheel file) is refused before anything is

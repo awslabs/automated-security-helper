@@ -124,7 +124,23 @@ def _checkout_root() -> Path:
     return Path(__file__).parent.parent.parent
 
 
+#: Directory names an installer puts packages in; a clone is never one of them.
+_INSTALL_DIR_NAMES = ("site-packages", "dist-packages")
+
+
 def _is_checkout(root: Path) -> bool:
+    """Whether *root*, the directory holding the package, is a clone of the repository.
+
+    The markers alone are not enough: a scanned repository can commit them into its
+    own ``.venv/.../site-packages`` and have ASH installed there. A package an
+    installer put in place sits in a site-packages (or dist-packages) directory with
+    its distribution's dist-info beside it, and a clone has neither, so either one
+    rules a clone out.
+    """
+    if root.name in _INSTALL_DIR_NAMES:
+        return False
+    if any(root.glob("automated_security_helper-*.dist-info")):
+        return False
     return all(root.joinpath(marker).exists() for marker in _CHECKOUT_MARKERS)
 
 
