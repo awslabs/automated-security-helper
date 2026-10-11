@@ -967,6 +967,7 @@ class ConfigLinter:
             SYMBOLS_EXTRA,
             is_valid_symbol,
             symbols_extra_available,
+            symbols_extra_install_command,
         )
 
         symbol = suppression.get("symbol")
@@ -1017,8 +1018,8 @@ class ConfigLinter:
                         f"Suppressions that set 'symbol' need the optional "
                         f"'{SYMBOLS_EXTRA}' extra, which is not installed here. "
                         f"Until it is, they match nothing and the findings they "
-                        f"name stay visible. Install "
-                        f"automated-security-helper[{SYMBOLS_EXTRA}]"
+                        f"name stay visible. Install it with "
+                        f"`{symbols_extra_install_command()}`"
                     ),
                     path=path_prefix,
                 )

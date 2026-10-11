@@ -47,10 +47,25 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
+from automated_security_helper.utils.ash_install import ash_git_requirement
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
 #: The optional-dependency extra that provides tree-sitter and its grammars.
 SYMBOLS_EXTRA = "symbols"
+
+
+def symbols_extra_install_command() -> str:
+    """The pip command that installs the symbols extra.
+
+    Used by the scan warning and by the config lint, so ``ash config lint`` and
+    a scan never name different installs. pipx and uv take the same
+    requirement; the suppressions docs page shows those forms.
+    """
+    # Names ASH's git source pinned to the running version. This hint used to
+    # read "install automated-security-helper[symbols]", which PyPI resolves to
+    # an unrelated project that has no such extra.
+    return f"pip install '{ash_git_requirement(SYMBOLS_EXTRA)}'"
+
 
 #: One identifier. ``\w`` is Unicode-aware, so non-ASCII Python identifiers are
 #: allowed; ``$`` covers JavaScript and ``#`` a JavaScript private member.
@@ -390,7 +405,7 @@ def _index_file(path: Path) -> Any:
                 result = _Unresolvable(
                     f"the {grammar.language} grammar is not available ({exc}). "
                     f"Symbol suppressions need the optional '{SYMBOLS_EXTRA}' extra: "
-                    f"install automated-security-helper[{SYMBOLS_EXTRA}]"
+                    f"install it with `{symbols_extra_install_command()}`"
                 )
             except SymbolParseError as exc:
                 result = _Unresolvable(f"the file does not parse cleanly: {exc}")

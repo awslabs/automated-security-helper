@@ -27,6 +27,8 @@ Nix mode supplies every scanner from a pinned flake, so nothing else needs insta
 
 ## Installation Options
 
+ASH is not published on PyPI under the name `automated-security-helper`, which belongs to an unrelated project there; install ASH from git, as the commands below do.
+
 ### Standard Installation
 
 #### 1. Using `uvx` (Recommended)

@@ -25,9 +25,9 @@ from automated_security_helper.cli.mcp.profile_registry import (
     register_profiles,
     set_profile_registry,
 )
-from automated_security_helper.core.constants import ASH_REPO_URL
 from automated_security_helper.core.enums import AshLogLevel
 from automated_security_helper.core.exceptions import ScannerError, ASHValidationError
+from automated_security_helper.utils.ash_install import ash_git_requirement
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import set_environ
 
@@ -478,12 +478,17 @@ def mcp_command(
         _stderr.print(
             "MCP support is included by default in ASH v3. Try reinstalling ASH:"
         )
-        # Reinstall from git, which is how ASH is distributed. This hint used to
-        # read "pip install --force-reinstall automated-security-helper", which
-        # is an unrelated project's name on PyPI -- so following it replaced the
-        # user's working ASH install with a stranger's package.
+        # Reinstall from git, which is how ASH is distributed, at the tag of the
+        # running version. This hint used to read "pip install --force-reinstall
+        # automated-security-helper", which is an unrelated project's name on
+        # PyPI -- so following it replaced the user's working ASH install with a
+        # stranger's package. The requirement carries no extra, so it holds no
+        # "[" for rich to read as markup. soft_wrap keeps the command on one line:
+        # stderr is rarely a terminal here, rich then wraps at 80 columns, and a
+        # command split before its URL is a pip install with no requirement.
         _stderr.print(
-            f"  [cyan]pip install --force-reinstall 'git+{ASH_REPO_URL}.git'[/cyan]"
+            f"  [cyan]pip install --force-reinstall '{ash_git_requirement()}'[/cyan]",
+            soft_wrap=True,
         )
         _stderr.print("  [cyan]uv sync --reinstall[/cyan]")
         _stderr.print()

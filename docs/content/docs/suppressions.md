@@ -170,15 +170,23 @@ method of `Deployer`, or at module level, is still reported.
 
 Symbol suppressions parse source files with
 [tree-sitter](https://tree-sitter.github.io/), which ASH installs as an optional
-extra:
+extra. ASH installs from git, so the extra goes on a git requirement pinned to the
+release you run:
 
 ```bash
-pip install "automated-security-helper[symbols]"
-# or
-uv tool install "automated-security-helper[symbols]"
+pip install "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+# or, for ASH installed as a uv tool
+uv tool install "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+# or, for the uvx alias from the installation guide
+alias ash="uvx --from 'automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0' ash"
 ```
 
-The ASH container image includes it. Without it, an entry that sets `symbol`
+Keep the `@ git+...` part. ASH is not published on PyPI, and the PyPI project with
+ASH's name is unrelated and has no `symbols` extra, so asking for the extra by the
+bare name installs that project instead. `ash config lint` and the scan warning
+print the same requirement for the version you run.
+
+The ASH container image includes the extra. Without it, an entry that sets `symbol`
 matches nothing: the findings it names stay visible, the scan logs a warning
 naming the missing extra, the entry shows up in the unused-suppressions report,
 and `ash config lint` warns about it.

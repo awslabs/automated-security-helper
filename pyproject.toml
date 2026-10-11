@@ -284,6 +284,9 @@ version_files = [
     "docs/content/docs/cli-reference.md:automated-security-helper@",
     "docs/content/docs/mcp-performance-scalability.md:automated-security-helper@",
     "docs/content/docs/plugins/community/trivy-plugin.md:automated-security-helper.git@",
+    "docs/content/docs/building-your-own-image.md:automated-security-helper.git@",
+    "docs/content/docs/suppressions.md:automated-security-helper.git@",
+    "examples/ash_plugins_example/pyproject.toml:automated-security-helper.git",
 ]
 # Rewriting _base/ is only half the chain: the 17 generated trees are still on
 # the old tag until the transpiler reruns, and `agentic-plugins check` byte-

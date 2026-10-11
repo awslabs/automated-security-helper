@@ -43,6 +43,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
+from automated_security_helper.utils.ash_install import ash_git_requirement
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -50,14 +51,23 @@ from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 from automated_security_helper.models.core import IgnorePathWithReason
 
-#: Why this scanner cannot run when its library is absent. One string, used for
-#: the recorded reason and for the log line, so the two cannot drift.
-_MISSING_LIBRARY_REASON = (
-    "detect-secrets is not importable, so the detect-secrets scanner cannot run. "
-    "It ships as a dependency of ASH; reinstall ASH (`pip install --force-reinstall "
-    "automated-security-helper`) or install the library directly with "
-    "`pip install detect-secrets`."
-)
+
+def _missing_library_reason() -> str:
+    """Why this scanner cannot run when its library is absent.
+
+    Built once per scanner and used for both the recorded reason and the log
+    line, so the two cannot drift. A function rather than a module constant
+    because the reinstall it names is pinned to the running ASH version.
+    """
+    # The reinstall names ASH's git source. It used to read
+    # "pip install --force-reinstall automated-security-helper", and PyPI
+    # resolves that name to an unrelated project, so following it replaced ASH.
+    return (
+        "detect-secrets is not importable, so the detect-secrets scanner cannot run. "
+        "It ships as a dependency of ASH; reinstall ASH (`pip install "
+        f"--force-reinstall '{ash_git_requirement()}'`) or install the library "
+        "directly with `pip install detect-secrets`."
+    )
 
 
 def _detect_secrets_api():
@@ -193,8 +203,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         try:
             secrets_collection_cls, _, _ = _detect_secrets_api()
         except ImportError as exc:
-            self.dependency_unavailable_reason = _MISSING_LIBRARY_REASON
-            ASH_LOGGER.warning(f"{_MISSING_LIBRARY_REASON} ({exc})")
+            reason = _missing_library_reason()
+            self.dependency_unavailable_reason = reason
+            ASH_LOGGER.warning(f"{reason} ({exc})")
             self._secrets_collection = None
         else:
             self._secrets_collection = secrets_collection_cls()

@@ -943,16 +943,18 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     def get_installation_commands(self, platform: str, arch: str) -> List[List[str]]:
         """Install the third-party packages behind ASH's ``cdk`` extra.
 
-        Names aws-cdk-lib, cdk-nag and constructs directly. This method used to
-        install ``automated-security-helper[cdk]`` instead, which made
-        ``ash dependencies install`` resolve a distribution by that name from
-        whatever index pip is pointed at. ASH is not published to any index --
-        it installs from git, as the README documents -- so that name resolves to
-        an unrelated third party's package, and it was being installed by a
-        security scanner running inside CI with repository access. Naming the
-        extra's real contents means this command cannot resolve ASH by name at
-        all, whoever ends up owning that name.
+        Names aws-cdk-lib, cdk-nag and constructs directly rather than asking an
+        index for ASH's own distribution with the extra. ASH is not published to
+        any index -- it installs from git, as the README documents -- so its
+        distribution name resolves to an unrelated third party's package there.
+        Naming the extra's real contents means this command cannot resolve ASH
+        by name at all, whoever ends up owning that name.
         """
+        # This method used to install "automated-security-helper[cdk]", which
+        # made `ash dependencies install` resolve a distribution by that name
+        # from whatever index pip is pointed at, so an unrelated project's
+        # package was installed by a security scanner running inside CI with
+        # repository access.
         import sys
 
         commands = super().get_installation_commands(platform, arch)

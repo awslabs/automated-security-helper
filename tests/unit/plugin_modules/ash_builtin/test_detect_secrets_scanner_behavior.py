@@ -22,11 +22,14 @@ property of the code, not a test artifact.
 import json
 import logging
 import multiprocessing
+import re
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from tests.utils.bare_install_names import find_bare_installs
 from tests.utils.detect_secrets_worker import (
     capturing_worker_command,
     failing_worker_command,
@@ -35,9 +38,11 @@ from tests.utils.detect_secrets_worker import (
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.core.constants import ASH_REPO_URL
 from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     detect_secrets_scanner,
 )
@@ -110,6 +115,34 @@ def test_scanner_metadata_is_wired(scanner):
 def test_dependencies_are_always_satisfied_because_the_import_succeeded(scanner):
     """detect-secrets is used in-process, so the import is the only requirement."""
     assert scanner.validate_plugin_dependencies() is True
+
+
+def test_missing_library_reason_names_installs_that_resolve_to_ash(
+    plugin_context, monkeypatch
+):
+    """Without the library, the recorded reason's install advice resolves to ASH.
+
+    PyPI resolves the bare name ``automated-security-helper`` to an unrelated
+    project, so "pip install --force-reinstall automated-security-helper" would
+    replace ASH with that project. Reinstalling ASH has to name its git source,
+    pinned to the running version; installing detect-secrets by name is fine.
+    """
+    # A None entry in sys.modules makes `from detect_secrets import ...` raise
+    # ImportError, which is what an environment without the library does.
+    monkeypatch.setitem(sys.modules, "detect_secrets", None)
+    scanner = DetectSecretsScanner(
+        context=plugin_context, config=DetectSecretsScannerConfig()
+    )
+    reason = scanner.dependency_unavailable_reason or ""
+
+    assert "detect-secrets is not importable" in reason
+    assert find_bare_installs(reason) == []
+    if re.search(r"reinstall", reason, re.IGNORECASE) and "ASH" in reason:
+        pinned = re.compile(
+            rf"git\+{re.escape(ASH_REPO_URL)}(?:\.git)?@v{re.escape(get_ash_version())}"
+            r"(?![\w.+-])"
+        )
+        assert pinned.search(reason), reason
 
 
 def test_default_config_enables_every_detect_secrets_plugin(scanner):
