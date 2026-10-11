@@ -57,6 +57,8 @@ class IgnorePathWithReason(BaseModel):
 
 def ignore_paths_that_skip_scanning(
     ignore_paths: "List[IgnorePathWithReason] | None",
+    *,
+    ignore_suppressions: bool,
 ) -> "List[IgnorePathWithReason]":
     """The ignore paths that keep a file from being converted or scanned at all.
 
@@ -65,7 +67,17 @@ def ignore_paths_that_skip_scanning(
     under it as a marked, suppressed result, so the results show what the
     client's config hid. Applying it before the scan as well would mean no
     finding to keep. The cost is that those files are scanned.
+
+    None under ``--ignore-suppressions``. An ignore path is a suppression, and the
+    flag lifts every suppression for every scanner: the files under one are
+    converted and scanned, and their findings are reported. Without this the
+    flag's effect would depend on the scanner, since a scanner that reads the
+    whole directory reports those findings anyway and one that is handed only the
+    files left after this filter never sees them. The cost is a slower scan.
+    Keyword-only and required, so every caller states the flag.
     """
+    if ignore_suppressions:
+        return []
     return [path for path in ignore_paths or [] if path.client_supplied is not True]
 
 

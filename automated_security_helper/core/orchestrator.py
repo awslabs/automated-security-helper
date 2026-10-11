@@ -390,7 +390,8 @@ class ASHScanOrchestrator(BaseModel):
             show_progress=self.show_progress,
             show_summary=self.show_summary,
             global_ignore_paths=ignore_paths_that_skip_scanning(
-                self.config.global_settings.ignore_paths
+                self.config.global_settings.ignore_paths,
+                ignore_suppressions=self.ignore_suppressions,
             ),
             color_system=self.color_system,  # type: ignore[arg-type]
             verbose=self.verbose,

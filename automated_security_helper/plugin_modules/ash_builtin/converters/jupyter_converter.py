@@ -433,7 +433,8 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     skip_item = True
                 else:
                     for ignore_path in ignore_paths_that_skip_scanning(
-                        self.context.config.global_settings.ignore_paths
+                        self.context.config.global_settings.ignore_paths,
+                        ignore_suppressions=self.context.ignore_suppressions,
                     ):
                         rel_path = (
                             Path(ipynb_file)

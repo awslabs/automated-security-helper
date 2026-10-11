@@ -164,6 +164,33 @@ class TestArchiveConverter:
         assert len(results) == 1
         assert (results[0] / "client.py").exists()
 
+    def test_ignore_suppressions_extracts_an_archive_under_an_ignore_path(
+        self, temp_dir, test_plugin_context, monkeypatch
+    ):
+        """With --ignore-suppressions an ignore path skips nothing."""
+        from automated_security_helper.models.core import IgnorePathWithReason
+
+        (temp_dir / "vendor").mkdir()
+        archive = temp_dir / "vendor" / "vendor.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("vendor.py", "x = 1\n")
+        test_plugin_context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/*", reason="operator"),
+        ]
+        test_plugin_context.ignore_suppressions = True
+        monkeypatch.setattr(
+            "automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter.scan_set",
+            lambda *args, **kwargs: [str(archive)],
+        )
+        converter = ArchiveConverter(
+            context=test_plugin_context, config=ArchiveConverterConfig()
+        )
+
+        results = converter.convert()
+
+        assert len(results) == 1
+        assert (results[0] / "vendor.py").exists()
+
     def test_archive_converter_convert_tar(
         self, temp_dir, sample_tar_file, test_plugin_context, monkeypatch
     ):
