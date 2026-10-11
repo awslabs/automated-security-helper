@@ -350,6 +350,24 @@ class TestScan:
         assert scanner.targets_attempted == 2 and scanner.targets_failed == 0
         _assert_parses_to(report, EXPECTED_INSECURE)
 
+    def test_no_location_refers_to_a_uri_base_the_report_does_not_define(self, repo):
+        """cfn-lint tags every location with ``uriBaseId: EXECUTIONROOT``.
+
+        Its own run declares that base (with a description and no uri), but ASH
+        builds its own run and the merged ``ash.sarif`` never defines it, so the
+        reference dangled. The URI is already relative to the source directory,
+        where cfn-lint ran, which is what an ASH location without a base means.
+        """
+        captured = CAPTURED_INSECURE.read_text()
+        assert captured.count('"uriBaseId": "EXECUTIONROOT"') == 3  # the control
+        fake = FakeCfnLint({"templates/insecure.yaml": CAPTURED_INSECURE})
+        report = self._run(_scanner(repo), fake)
+
+        dumped = report.model_dump_json(exclude_none=True)
+        assert "EXECUTIONROOT" not in dumped
+        assert "uriBaseId" not in dumped
+        _assert_parses_to(report, EXPECTED_INSECURE)
+
     def test_the_recorded_invocation_carries_no_host_path(self, repo):
         fake = FakeCfnLint({}, returncode=0)
         report = self._run(_scanner(repo), fake)

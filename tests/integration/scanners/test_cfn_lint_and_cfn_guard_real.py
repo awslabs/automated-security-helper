@@ -170,6 +170,12 @@ def test_both_scanners_report_the_known_positives_and_nothing_else(tmp_path):
     lint = _results(output, "cfn-lint")
     assert {(r["ruleId"], _where(r)[1]) for r in lint} == CFN_LINT_EXPECTED, log
     assert {_where(r)[0] for r in lint} == {"templates/insecure.yaml"}
+    # ash.sarif defines no uriBaseId, so no location may name one.
+    assert not any(
+        "uriBaseId" in location["physicalLocation"]["artifactLocation"]
+        for r in lint
+        for location in r["locations"]
+    ), log
 
     guard = _results(output, "cfn-guard")
     assert {r["ruleId"] for r in guard} == CFN_GUARD_EXPECTED_RULES, log

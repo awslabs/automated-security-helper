@@ -483,13 +483,29 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         return out
 
     def normalize_report(self, report: SarifReport) -> SarifReport:
-        """Apply the severity mapping and sort rules, in place.
+        """Apply the severity mapping, drop location bases, sort rules, in place.
+
+        cfn-lint tags every location with ``uriBaseId: EXECUTIONROOT``, a base
+        its own run declares with a description and no uri. ASH builds its own
+        run and the merged SARIF never defines that base, so the reference is
+        dropped, as cfn-guard's ``normalize_results`` drops its own: an ASH
+        location without a base is relative to the source directory.
 
         cfn-lint lists driver rules in a different order from run to run (a set
         iteration), so they are sorted by id to keep reports reproducible.
         """
         for run in report.runs or []:
             for result in run.results or []:
+                for location in [
+                    *(result.locations or []),
+                    *(result.relatedLocations or []),
+                ]:
+                    physical = location.physicalLocation
+                    if (
+                        physical is not None
+                        and physical.root.artifactLocation is not None
+                    ):
+                        physical.root.artifactLocation.uriBaseId = None
                 severity, level = severity_for_rule(result.ruleId)
                 result.level = Level(level)
                 if result.properties is None:
