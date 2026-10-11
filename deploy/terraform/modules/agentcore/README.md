@@ -83,11 +83,11 @@ against the API's own pattern (`[A-Za-z][A-Za-z0-9_-]{0,255}`, max 20 entries).
 | `mcp_auth_header_value` | `McpAuthHeaderValue` | `string` (sensitive) | `null` | Stored in Secrets Manager, read at container start. |
 | `mcp_allowed_host` | `McpAllowedHost` | `list(string)` | `[]` | Empty by design. See limitations. |
 | `ash_offline_mode` | `AshOfflineMode` | `bool` | `false` | Sets `ASH_OFFLINE`. Needs an offline-built image. |
-| `base_config_ssm_parameter_name` | `AshBaseConfigYaml` (indirect) | `string` | `null` | From the image module's output. |
+| `base_config_ssm_parameter_name` | `AshBaseConfigYaml` (indirect) | `string` | `null` | From the image module's output. A scan uses it only when the scanned directory has no config file and the client names none. |
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash"` | Underscores only, no hyphens. |
 | `agent_runtime_name` | — | `string` | `null` | Defaults to `<name_prefix>_mcp`. |
-| `ecr_pull_resource_arns` | — `list(string)` | | `null` | Defaults to all repositories in this account and Region. |
+| `ecr_pull_resource_arns` | — | `list(string)` | `null` | Defaults to all repositories in this account and Region. |
 | `network_mode` | — | `string` | `"PUBLIC"` | `PUBLIC` or `VPC`. |
 | `vpc_subnet_ids` | — | `list(string)` | `[]` | Required for `VPC`. |
 | `vpc_security_group_ids` | — | `list(string)` | `[]` | Required for `VPC`. |

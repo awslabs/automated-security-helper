@@ -3,8 +3,14 @@
 Builds the ASH image, then runs a pipeline that fans a scan out across 8 shards
 and merges the results into a single verdict.
 
+Before you apply, change `ash_version` in `main.tf`. The example pins `v3.6.0`, which
+has no `ash merge` and no `--shard-index` or `--shard-count` option on `ash scan`.
+With it, each shard scans with every scanner and the Merge action fails. Set it to a
+tag or commit whose ASH has them; v3.7.1 and earlier do not.
+
 ## Run it
 
+<!-- doctest: illustrative reason="needs Terraform, network access and AWS credentials" -->
 ```console
 terraform init
 terraform plan -var 'codecommit_repository_arn=arn:aws:codecommit:<region>:<account>:<repo>'
@@ -14,6 +20,7 @@ terraform apply -var 'codecommit_repository_arn=arn:aws:codecommit:<region>:<acc
 Then build the image. The shard and merge actions use it as their CodeBuild
 environment image, so they cannot start until it exists:
 
+<!-- doctest: illustrative reason="needs an applied Terraform state" -->
 ```console
 terraform output -raw run_the_first_build
 ```
@@ -25,6 +32,7 @@ by hand) and the scan runs.
 
 The verdict is printed in the merge build's log, not in any shard's:
 
+<!-- doctest: illustrative reason="needs an applied Terraform state" -->
 ```console
 terraform output -raw where_the_verdict_is_printed
 ```
@@ -47,7 +55,7 @@ therefore report a clean scan whenever the findings landed in a different shard.
 Shards run with `--no-fail-on-findings` and fail only on a real crash.
 
 The verdict is `ash merge`'s own exit code, propagated unchanged: 0 clean, 2
-findings at or above `min_severity`, 1 refused because shard coverage was
-incomplete. Nothing in the module recomputes it — ASH shares that calculation with
-`ash scan`, so the pipeline cannot reach a different conclusion than a plain scan
+findings at or above `min_severity`, 1 when the result is incomplete (for example
+a gap in shard coverage, or a scanner that did not finish). Nothing in the module
+recomputes it — ASH shares that calculation with `ash scan`, so the pipeline cannot reach a different conclusion than a plain scan
 about the same findings.

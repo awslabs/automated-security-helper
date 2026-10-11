@@ -12,7 +12,8 @@ rule.
 `codecommit_repository_arn` names a repository you already have. There is no
 `aws_codecommit_repository` resource in this module and there will not be one.
 Every CodeCommit permission on the gate's role is scoped to that single ARN, and
-the actions are reads plus `PostCommentForPullRequest`.
+the actions are reads plus `PostCommentForPullRequest`, and
+`UpdatePullRequestApprovalState` when `manage_approval_state` is true.
 
 The one thing that touches your repository's configuration is the optional
 approval rule template association, behind `create_approval_rule_template`, which
@@ -31,7 +32,11 @@ onto the shared image:
 
 - `awslambdaric`, the runtime interface client, which becomes the entrypoint. The
   shared `ash-container-init` entrypoint still runs first, so the base config
-  from SSM is on disk before the client starts accepting invocations.
+  from SSM is on disk, and `ASH_CONFIG` points at it, before the client starts
+  accepting invocations. With a base config set, every `ash scan` the gate runs
+  uses it and never reads the pull request's own `.ash.yaml`. Without one, each
+  scan uses the config file in the pull request's tree, if there is one, so set a
+  base config for the gate.
 - `git-remote-codecommit`, so `git clone codecommit::<region>://<repo>` signs with
   the Lambda role's own credentials. The alternative is long-lived Git credentials
   or the AWS CLI credential helper, and the ASH image ships neither the CLI nor a
@@ -71,13 +76,19 @@ table. A missing table never downgrades a clean verdict.
 ### `min_severity` is a floor, so lower is stricter
 
 The name reads like a tolerance, but ASH tests
-`rank(finding) >= rank(min_severity)`, which inverts the direction:
+`rank(finding) >= rank(min_severity)`, which inverts the direction. It is also not
+the only floor. A finding first has to be at or above the config's
+`global_settings.severity_threshold`, which defaults to `MEDIUM`, and it fails the
+gate only when it clears both. With the default threshold:
 
 | `min_severity` | Fails the gate on | |
 |---|---|---|
-| `low` | low, medium, high | strictest |
+| `low` | medium, high | strictest |
 | `medium` | medium, high | |
 | `high` | high only | laxest |
+
+To fail the gate on low findings too, set `severity_threshold: LOW` under
+`global_settings` in the base config.
 
 `critical` and `high` share a rank in ASH's ladder, so they cannot be
 distinguished here. Findings below the threshold still appear in the comment; they
@@ -113,9 +124,9 @@ and grype `PASSED` with zero findings.
 
 So the handler builds the scan's environment itself, redirecting all of those into
 `/tmp` and then seeding each redirected path from the location the image recorded
-at build time. The `ash-image-pipeline` module bakes those locations into the
-shared image as `ASH_IMAGE_PATH` and four `ASH_BAKED_*` variables; read off the
-build stage rather than hardcoded, because `ash_image_target` decides which ASH
+at build time. The `ash-image-pipeline` module records those locations, and the
+image's original `PATH`, as environment variables in the shared image. They are read
+off the build stage rather than hardcoded, because `ash_image_target` decides which ASH
 stage is wrapped and the stages do not agree on `HOME`. Baked directories are
 symlinked and baked files are copied, so a scanner that rewrites its own rules
 file writes to `/tmp` rather than failing against the read-only layer.
@@ -145,18 +156,18 @@ fetch what it needs.
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash-pr-gate"` | |
 | `trigger_events` | — | `list(string)` | created + source branch updated | The two that change what would merge. |
-| `min_severity` | — | `string` | `"low"` | Passed to `ash scan --min-severity`. A floor, so lower is stricter — see below. |
+| `min_severity` | — | `string` | `"low"` | Passed to `ash scan --min-severity`. A floor, so lower is stricter, applied after `global_settings.severity_threshold`; see above. |
 | `fail_on_findings` | — | `bool` | `true` | Passed explicitly so a base config cannot disable the gate. |
 | `create_approval_rule_template` | — | `bool` | `false` | Changes your repository's settings. |
-| `manage_approval_state` | — | `bool` | `false` | Only ever approves, only on a clean scan. |
+| `manage_approval_state` | — | `bool` | `false` | Approves on `pass`; revokes on `findings` and on `error`. |
 | `approval_rule_approvals_required` | — | `number` | `1` | Template only. |
 | `lambda_timeout_seconds` | — | `number` | `900` | Lambda's hard maximum. See limitations. |
 | `lambda_memory_mb` | — | `number` | `4096` | Also sets CPU share; ASH is CPU-bound. |
 | `lambda_ephemeral_storage_mb` | — | `number` | `4096` | `/tmp` holds the clone and the output. |
 | `lambda_architecture` | — | `string` | `"x86_64"` | Must match the base image. |
 | `reserved_concurrent_executions` | — | `number` | `-1` | Worth setting on a busy repository. |
-| `ash_scan_extra_args` | — | `string` | `""` | `--changed-files-only --base-ref ...` recommended. |
-| `max_comment_chars` | — | `number` | `10000` | Defensive; the API documents no limit. |
+| `ash_scan_extra_args` | — | `string` | `""` | Appended to `ash scan`. Options the gate sets itself, or that narrow the scan (including `--changed-files-only` and `--base-ref`), are refused and the run reports `error`. |
+| `max_comment_chars` | — | `number` | `10000` | Keep it at or below 10,240, the most characters the CodeCommit API accepts in a comment. |
 | `image_tag` | — | `string` | `"latest"` | |
 | `ecr_image_tag_mutability` | — | `string` | `"MUTABLE"` | Needed for the chained rebuild. |
 | `ecr_force_delete` | — | `bool` | `false` | |
@@ -178,14 +189,13 @@ fetch what it needs.
 ## Constraints and known limitations
 
 **Lambda's 900 second ceiling is the real constraint on this target, and it is
-not adjustable.** The clone plus the scan has to fit. Two things make that
-reachable, and a third is the fallback:
+not adjustable.** The clone plus a full scan has to fit: the gate refuses
+`--changed-files-only` and every other option that narrows the scan. One thing makes
+that reachable, and the other is the fallback:
 
-1. `ash_scan_extra_args = "--changed-files-only --base-ref origin/<default>"`,
-   so scan time scales with the change rather than the repository.
-2. More `lambda_memory_mb`, since Lambda allocates CPU in proportion to memory
+1. More `lambda_memory_mb`, since Lambda allocates CPU in proportion to memory
    and ASH is CPU-bound.
-3. For repositories where neither is enough, use the `codepipeline-executor`
+2. For repositories where that is not enough, use the `codepipeline-executor`
    module instead. CodeBuild's action timeout is measured in hours, not minutes.
 
 **The clone is not shallow.** CodeCommit does not reliably permit fetching an
@@ -202,10 +212,10 @@ build offline.
 tree at the start of each run, because otherwise a previous pull request's
 checkout would be scanned alongside the current one.
 
-**The comment length cap is defensive, not documented.** The
-`PostCommentForPullRequest` API reference states no maximum for `content`, so
-`max_comment_chars` is a guard against a rejected call losing the result, not
-enforcement of a published limit.
+**The comment length cap keeps the comment under the API's limit.** CodeCommit
+rejects a pull-request comment longer than 10,240 characters, and a rejected call
+would lose the result. The default `max_comment_chars` of 10,000 is below that limit;
+the module does not check a higher value against it.
 
 **The severity-count parse is display-only and tolerates two shapes.** ASH's
 results model permits extra fields and has carried severity counts both nested

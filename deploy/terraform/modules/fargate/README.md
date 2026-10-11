@@ -77,7 +77,7 @@ requires Terraform >= 1.9.0. Note that it fires at **plan** time —
 | `mcp_auth_header_value` | `McpAuthHeaderValue` | `string` (sensitive) | `null` | Secrets Manager. Requires TLS or an explicit opt-out. |
 | `mcp_allowed_host` | `McpAllowedHost` | `list(string)` | `[]` | *Additional* hosts; the ALB DNS name is added automatically. |
 | `ash_offline_mode` | `AshOfflineMode` | `bool` | `false` | Sets `ASH_OFFLINE`. |
-| `base_config_ssm_parameter_name` | `AshBaseConfigYaml` (indirect) | `string` | `null` | From the image module. |
+| `base_config_ssm_parameter_name` | `AshBaseConfigYaml` (indirect) | `string` | `null` | From the image module. A scan uses it only when the scanned directory has no config file and the client names none. |
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash-mcp"` | Max 25 characters; ALB and target group names derive from it. |
 | `container_command` | — | `list(string)` | MCP launcher | Override for an image not built by `ash-image-pipeline`. |

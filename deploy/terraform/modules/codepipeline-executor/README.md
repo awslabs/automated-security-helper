@@ -7,7 +7,7 @@ Consumes the `image_uri` output of `ash-image-pipeline`.
 
 ## Stage layout
 
-```
+```text
 Source  ->  CodeCommit (existing repository, read only)
 Scan    ->  N CodeBuild actions, all at run_order 1 (parallel)
             each: ash scan --shard-index <i> --shard-count <n>
@@ -43,7 +43,7 @@ The verdict is `ash merge`'s exit code, propagated unchanged:
 | Exit | Meaning |
 |---|---|
 | 0 | No actionable findings at or above `min_severity` |
-| 1 | Refused to merge — shard coverage incomplete, so findings are **unknown** |
+| 1 | The result is incomplete, so findings are **unknown**: shard coverage has a gap, a scanner in the merged result did not finish, a rule could not be evaluated, or a content database is past its age limit |
 | 2 | Actionable findings at or above `min_severity` |
 
 **Nothing in this module re-derives that judgment**, and that is deliberate. ASH
@@ -61,13 +61,19 @@ one implementation of "does this breach".
 ### `min_severity` is a floor, so lower is stricter
 
 The name reads like a tolerance, but ASH tests
-`rank(finding) >= rank(min_severity)`, which inverts the direction:
+`rank(finding) >= rank(min_severity)`, which inverts the direction. It is also not
+the only floor. A finding first has to be at or above the scan config's
+`global_settings.severity_threshold`, which defaults to `MEDIUM`, and it fails the
+pipeline only when it clears both. With the default threshold:
 
 | `min_severity` | Fails the pipeline on | |
 |---|---|---|
-| `low` | low, medium, high | strictest |
+| `low` | medium, high | strictest |
 | `medium` | medium, high | |
 | `high` | high only | laxest |
+
+To fail the pipeline on low findings too, set `severity_threshold: LOW` under
+`global_settings` in the base config.
 
 `critical` and `high` share a rank in ASH's ladder, so they cannot be
 distinguished here.
@@ -133,15 +139,23 @@ image with its own entrypoint can run a buildspec at all. So
 `ash-container-init`, which materializes the base config from SSM, would never
 execute here. Both buildspecs therefore invoke it explicitly:
 
-```
-/usr/local/bin/ash-container-init ash scan ...
-/usr/local/bin/ash-container-init ash merge ...
+<!-- doctest: illustrative reason="excerpt of the two buildspecs; runs inside the ASH image in CodeBuild" -->
+```bash
+/usr/local/bin/ash-container-init ash scan --source-dir . --output-dir ash_output \
+  --shard-index "$SHARD_INDEX" --shard-count "$SHARD_COUNT" --no-fail-on-findings
+# The merge passes one --results per shard, and --fail-on-findings when
+# fail_on_findings is true.
+/usr/local/bin/ash-container-init ash merge --output-dir merged \
+  --min-severity "$MIN_SEVERITY" --fail-on-findings --results shard-results/shard-0
 ```
 
-Without that, every shard would silently scan with ASH's defaults instead of the
-configuration you supplied — a wrong result with no error. Invoking it explicitly
-is also correct if a future CodeBuild release did run the entrypoint, since the
-work it does is idempotent.
+Without that, `ASH_CONFIG` would not be set, and each shard would use the
+repository's own config file if it has one, or ASH's defaults, instead of the
+configuration you supplied: a wrong result with no error. With it, every shard uses
+the base config and never reads the repository's own `.ash.yaml`. `ash merge` takes
+the scan config from the shard results rather than from a file. Invoking it
+explicitly is also correct if a future CodeBuild release did run the entrypoint,
+since the work it does is idempotent.
 
 ## Variables
 
@@ -155,7 +169,7 @@ work it does is idempotent.
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash-scan"` | |
 | `source_branch` | — | `string` | `"main"` | |
-| `min_severity` | — | `string` | `"low"` | Passed to `ash merge --min-severity`. A floor, so lower is stricter — see below. |
+| `min_severity` | — | `string` | `"low"` | Passed to `ash merge --min-severity`. A floor, so lower is stricter, applied after `global_settings.severity_threshold`; see above. |
 | `fail_on_findings` | — | `bool` | `true` | Passed explicitly so a base config cannot disable the gate. |
 | `enable_eventbridge_trigger` | — | `bool` | `true` | Preferred over polling. |
 | `build_compute_type` | — | `string` | `BUILD_GENERAL1_LARGE` | Scanners are CPU-bound. |
@@ -205,13 +219,12 @@ makes sense if the shards agreed on what to scan. Both projects therefore receiv
 the same `base_config_ssm_parameter_name`. Overriding the configuration per shard
 would make the merged verdict meaningless.
 
-**`ash merge` and the shard CLI flags are a cross-lane dependency.** At the commit
-this module was written against, `automated_security_helper/core/sharding.py` and
-the scan-phase shard selection exist, but `--shard-index` / `--shard-count` are
-not yet wired onto `ash scan`, and there is no `ash merge` command or `--results`
-flag. This module is written against the stated contract for both. It will plan
-and apply against an image that lacks them; the shard and merge actions will fail
-at run time until the image is built from a revision that has them.
+**`ash merge` and the shard options need a recent ASH.** `ash merge` and the
+`--shard-index` and `--shard-count` options of `ash scan` are on ASH's main branch
+but in no release up to v3.7.1, and the example pins `v3.6.0`. The module plans and
+applies against an image that lacks them. With such an image, each shard ignores
+the shard options and scans with every scanner, and the Merge action fails because
+there is no `ash merge`. Build the image from a tag or commit that has them.
 
 ## What is first-party and what is not
 

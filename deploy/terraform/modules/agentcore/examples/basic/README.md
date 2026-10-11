@@ -3,8 +3,14 @@
 Builds an arm64 ASH image and runs it as a Bedrock AgentCore Runtime speaking
 MCP.
 
+Before you apply, change `ash_version` in `main.tf`. The example pins `v3.6.0`, whose
+`ash mcp` has no `--stateless-http` option, and the image's launcher always passes
+it or `--no-stateless-http`, so the container exits at startup. Set it to a tag or
+commit whose ASH has `ash mcp --stateless-http`; v3.7.1 and earlier do not.
+
 ## Run it
 
+<!-- doctest: illustrative reason="needs Terraform, network access and AWS credentials" -->
 ```console
 terraform init
 terraform plan
@@ -13,6 +19,7 @@ terraform apply
 
 Then run the first image build, which the runtime cannot start without:
 
+<!-- doctest: illustrative reason="needs an applied Terraform state" -->
 ```console
 terraform output -raw run_the_first_build
 ```
