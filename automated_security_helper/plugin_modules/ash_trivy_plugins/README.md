@@ -98,8 +98,9 @@ scanners:
 trivy-repo always passes `--ignorefile` and `--secret-config`, so a `.trivyignore` or
 `trivy-secret.yaml` committed to the scanned repository is not read. Without the
 options (or `TRIVY_IGNOREFILE` / `TRIVY_SECRET_CONFIG`), trivy gets files that set
-nothing. Under `--sandbox`, an operator file outside the system paths also has to be
-in `sandbox.extra_read_paths`.
+nothing, which ASH writes in a directory outside the scanned tree and removes when
+the scan ends. Under `--sandbox`, an operator file outside the system paths also has
+to be in `sandbox.extra_read_paths`.
 
 ## Usage Examples
 

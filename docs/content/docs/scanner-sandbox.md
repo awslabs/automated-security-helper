@@ -69,6 +69,12 @@ it needs.
   staleness check still holds the database to its bound. trivy's Java database
   (about 935 MiB) is not updated and trivy-repo runs with `--skip-java-db-update`:
   `trivy repository` does not analyze JAR, WAR or EAR files and never reads it.
+- The config files ASH writes for a scanner's tool (the empty config bandit, grype,
+  syft and ferret-scan get when you name none, and trivy-repo's empty ignore file
+  and secret config) are in a directory of that scanner run's own, outside the
+  scanned tree (normally in the system temporary directory), made with mode 0700
+  and removed when the run ends. The scanner can read it and cannot write to it or
+  run programs from it.
 - System directories (`/usr`, `/etc`, `/opt`, `/nix`) and the directories on `PATH`
   are read-only. Inside `$HOME` only `PATH` entries named `bin`, `sbin` or `Scripts`
   are mounted, and a tool's install prefix only when it is deeper than a directory

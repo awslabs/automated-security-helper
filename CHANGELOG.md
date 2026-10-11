@@ -250,6 +250,13 @@
     now sees those findings, with a warning naming the file. Under `--sandbox`, an
     operator file outside the system paths also has to be listed in
     `sandbox.extra_read_paths`.
+  - The empty config files ASH passes bandit, grype, syft, ferret-scan and
+    trivy-repo when the operator names none are written in a new directory
+    outside the scanned tree, one per scanner run, made with mode 0700 and
+    removed when the run ends, instead of in `<output>/scanners/<name>/`, which
+    is inside the tree with the default output directory. What the tools report
+    is unchanged. Under `--sandbox`, the scanner can read that directory and
+    cannot write to it.
   - ferret-scan's `tool_version` no longer accepts a bare version or `latest`;
     write `==1.2.3`, or leave it unset for the supported range.
   - The AWS reporters' destinations and credentials come only from the defaults,
