@@ -5,14 +5,15 @@
 
 ``BanditScannerConfigOptions.config_file`` says: a file named ``.bandit`` is
 passed with ``bandit --ini`` and any other with ``bandit --configfile``; unless
-the operator names a ``.bandit`` file, ASH passes an empty config file with
-``bandit --ini``; a path that does not exist is a warning, and bandit runs
-without a config file. ``test_bandit_scanner_behavior.py`` checks the flags
-recorded when the options are processed; these check the argv of the scan.
+``config_file`` names a ``.bandit`` file that exists, ASH passes an empty config
+file with ``bandit --ini``; a path that does not exist is logged as a warning
+and ignored. ``test_bandit_scanner_behavior.py`` checks the flags recorded when
+the options are processed; these check the argv of the scan.
 """
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import List, Optional
 
@@ -90,12 +91,17 @@ def test_another_file_is_a_configfile_beside_the_empty_ini(
 
 @pytest.mark.parametrize("named", [False, True], ids=["unset", "missing"])
 def test_without_a_usable_file_only_the_empty_ini_is_passed(
-    plugin_context, tmp_path, named: bool
+    plugin_context, tmp_path, named: bool, caplog
 ) -> None:
-    argv, results_dir = _argv(
-        plugin_context, tmp_path / "nowhere" / ".bandit" if named else None
-    )
+    missing = tmp_path / "nowhere" / ".bandit"
+    with caplog.at_level(logging.WARNING):
+        argv, results_dir = _argv(plugin_context, missing if named else None)
 
     assert _after(argv, "--configfile") == []
     (ini,) = _after(argv, "--ini")
     assert _is_the_empty_ini(ini, results_dir), ini
+    if named:
+        (warning,) = [
+            r.getMessage() for r in caplog.records if str(missing) in r.getMessage()
+        ]
+        assert "is ignored" in warning and "empty config file" in warning, warning
