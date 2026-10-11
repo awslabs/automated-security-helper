@@ -6,6 +6,7 @@ local mode when Nix is absent all produce a scan that looks like it worked. Each
 gets an explicit test rather than being left to an end-to-end run to notice.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -153,11 +154,50 @@ class TestBuildNixCommand:
         # makes every first run fail with "experimental Nix feature ... is disabled".
         assert cmd.index("--extra-experimental-features") < cmd.index("develop")
 
-    def test_runs_ash_inside_the_shell_with_the_forwarded_args(self):
+    def test_runs_this_ash_inside_the_shell_with_the_forwarded_args(self):
+        """This ASH's interpreter, not the first `ash` on the shell's PATH."""
+        from automated_security_helper.interactions.run_ash_nix import (
+            INNER_ASH_BOOTSTRAP,
+        )
+
         cmd = build_nix_command("path:/repo", ["scan", "--mode", "local"], "nix")
-        assert cmd[-4:] == ["ash", "scan", "--mode", "local"]
-        assert "--command" in cmd
-        assert cmd[cmd.index("--command") + 1] == "ash"
+        start = cmd.index("--command") + 1
+        assert cmd[start:] == [
+            sys.executable,
+            "-c",
+            INNER_ASH_BOOTSTRAP,
+            "scan",
+            "--mode",
+            "local",
+        ]
+
+    def test_the_inner_command_runs_this_ash_and_not_one_in_the_scanned_tree(
+        self, tmp_path
+    ):
+        """-c puts the working directory, the scanned tree, first on sys.path."""
+        from automated_security_helper.interactions.run_ash_nix import (
+            inner_ash_command,
+        )
+        from tests.utils.helpers import REPO_ROOT
+
+        planted = tmp_path / "automated_security_helper"
+        planted.mkdir()
+        (planted / "__init__.py").write_text(
+            "raise SystemExit('imported from the scanned tree')\n", encoding="utf-8"
+        )
+        env = dict(os.environ, PYTHONPATH=str(REPO_ROOT))
+
+        completed = subprocess.run(  # nosec B603 - the command under test
+            [*inner_ash_command(), "--version"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        assert "imported from the scanned tree" not in completed.stderr
+        assert completed.returncode == 0, completed.stderr[-2000:]
 
     def test_flake_ref_is_passed_to_develop(self):
         cmd = build_nix_command("github:owner/repo/v1", ["scan"], "nix")
@@ -310,7 +350,9 @@ class TestRunAshNix:
 
         run_ash_nix()
         # sys.argv[0] is the executable and must not be forwarded as a scan argument.
-        assert "ash" == captured["cmd"][captured["cmd"].index("--command") + 1]
+        start = captured["cmd"].index("--command") + 1
+        assert captured["cmd"][start] == sys.executable
+        assert "ash" not in captured["cmd"][start:]
         assert "--quiet" in captured["cmd"]
 
 

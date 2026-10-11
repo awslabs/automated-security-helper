@@ -139,12 +139,37 @@ def rewrite_mode_args(argv: List[str]) -> List[str]:
     return out
 
 
+#: What the inner run executes: this ASH's command line, started by this ASH's own
+#: interpreter. Python puts the working directory first on ``sys.path`` for ``-c``,
+#: and the working directory is usually the scanned repository, so it is removed
+#: before anything is imported.
+INNER_ASH_BOOTSTRAP = (
+    "import sys; "
+    "sys.path[:] = [entry for entry in sys.path if entry not in ('', '.')]; "
+    "sys.argv[0] = 'ash'; "
+    "from automated_security_helper.cli.entrypoint import main; "
+    "main()"
+)
+
+
+def inner_ash_command() -> List[str]:
+    """The command that starts this ASH inside the shell.
+
+    This ASH's interpreter rather than whichever ``ash`` comes first on the shell's
+    PATH, so the inner run is the same ASH as the outer one: the flake supplies
+    scanners, not ASH, and an older ``ash`` earlier on PATH would scan without
+    writing the completion record the outer process reads back
+    (utils/inner_run_outcome.py).
+    """
+    return [sys.executable, "-c", INNER_ASH_BOOTSTRAP]
+
+
 def build_nix_command(
     flake_ref: str,
     inner_args: List[str],
     nix_executable: str,
 ) -> List[str]:
-    """Assemble the `nix develop ... --command ash ...` invocation."""
+    """Assemble the `nix develop ... --command <this ASH> ...` invocation."""
     return [
         nix_executable,
         "--extra-experimental-features",
@@ -152,7 +177,7 @@ def build_nix_command(
         "develop",
         flake_ref,
         "--command",
-        "ash",
+        *inner_ash_command(),
         *inner_args,
     ]
 

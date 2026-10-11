@@ -1227,14 +1227,14 @@ def _refuse_an_inner_run_that_did_not_complete(
         found = "holds only records an earlier run wrote"
     else:
         found = "holds no record that the run completed"
-    # The inner ASH is the image's in container mode, and the first `ash` on PATH
-    # inside the Nix shell in nix mode; either can be older than this one.
+    # In container mode the inner ASH is the image's, which can be older than this
+    # one. In nix mode it is started with this ASH's own interpreter
+    # (run_ash_nix.inner_ash_command), so the message names that instead.
     older = (
         " An ASH older than this one does not write that record: rebuild the image "
         "from this ASH."
         if mode == "container"
-        else " An ASH older than this one does not write that record: make this ASH "
-        "the first `ash` on PATH."
+        else f" The inner run was started with this ASH's interpreter, {sys.executable}."
     )
     logger.error(
         f"The {mode} run did not complete, so its results are not read back: "

@@ -105,10 +105,30 @@ def scan(run_cli, monkeypatch):
     return _scan
 
 
+def _command(cmd: list[str]) -> list[str]:
+    """The recorded command, with this machine's interpreter path made constant.
+
+    The inner run is started with the host ASH's own interpreter
+    (run_ash_nix.inner_ash_command), whose path is the machine's.
+    """
+    from automated_security_helper.interactions.run_ash_nix import (
+        INNER_ASH_BOOTSTRAP,
+    )
+
+    replaced = {sys.executable: "<python>", INNER_ASH_BOOTSTRAP: "<start this ASH>"}
+    return [replaced.get(part, part) for part in cmd]
+
+
 def _seen(result, shell: FakeNixShell) -> dict:
+    printed = {
+        stream: result[stream].replace(sys.executable, "<python>")
+        for stream in ("stdout", "stderr")
+        if isinstance(result.get(stream), str)
+    }
     return {
         **result,
-        "nix_commands": shell.commands,
+        **printed,
+        "nix_commands": [_command(cmd) for cmd in shell.commands],
         "ASH_IN_NIX": [env.get("ASH_IN_NIX") for env in shell.environments],
         "ASH_OFFLINE": [env.get("ASH_OFFLINE") for env in shell.environments],
     }

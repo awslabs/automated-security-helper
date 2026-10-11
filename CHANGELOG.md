@@ -876,8 +876,8 @@
   older ASH, for example with `--ash-revision-to-install` naming an older release,
   or a `--no-build` run of an older image, now exits 1 with an error that says the
   inner run did not complete and names the results file. Build the image from this
-  ASH. In nix mode the inner run is the first `ash` on `PATH` inside the Nix shell,
-  normally this one.
+  ASH. Nix mode now starts the inner run with this ASH's own interpreter rather than
+  the first `ash` on `PATH` inside the Nix shell, so the two are the same ASH.
 
 - **A `reports/` directory that is a symlink is refused.** `ash merge`,
   `ash scan --use-existing` and workspace runs used to write their reports through a

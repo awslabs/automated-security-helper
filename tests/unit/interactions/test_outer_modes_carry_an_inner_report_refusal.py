@@ -427,7 +427,12 @@ def test_a_results_file_without_a_completion_marker_is_not_read_back(tmp_path, o
     assert refused.value.code == 1
     errors = _errors(logger)
     assert "did not complete" in errors, errors
-    assert "older" in errors, errors
+    if outer is _container:
+        # The image can hold an older ASH.
+        assert "older" in errors, errors
+    else:
+        # The shell runs this ASH's own interpreter, which the message names.
+        assert sys.executable in errors, errors
 
 
 @OUTER
@@ -525,8 +530,9 @@ def test_ash_scan_in_nix_mode_exits_1_when_the_inner_run_refuses_a_name(tmp_path
     env.pop(RUN_ID_ENV, None)
     env.update(
         {
-            # The inner `ash` is the entry point beside this interpreter; this
-            # checkout first on its path, then the plugin.
+            # The inner run is started with the outer ASH's interpreter, the one
+            # beside its entry point; this checkout first on its path, then the
+            # plugin.
             "PATH": os.pathsep.join([str(bin_dir), str(ASH.parent), env["PATH"]]),
             "PYTHONPATH": os.pathsep.join([str(REPO_ROOT), str(plugins.parent)]),
             "ASH_NIX_FLAKE_REF": "path:/nonexistent",
