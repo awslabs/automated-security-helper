@@ -166,8 +166,7 @@ Build arguments:
 
 Scanner tool versions are pinned in
 [`tool_downloads.py`](https://github.com/awslabs/automated-security-helper/blob/main/automated_security_helper/utils/tool_downloads.py),
-and the build checks each tool against its pin. The license files of the bundled tools
-are in the image under `/usr/share/doc/ash/third-party`.
+and the build checks each tool against its pin.
 
 To add tools, write a Dockerfile that builds on the ASH image and pass it with
 `--custom-containerfile`; ASH passes the base image's name to that build as a build
@@ -176,12 +175,41 @@ ASH then builds its base image from the root `ci` target and tags the result
 `automated-security-helper:custom`. The final image runs as root unless your Dockerfile
 sets another user, so secure it yourself.
 
+The ASH image sets `UV_CONSTRAINT=/etc/ash/uv-constraints.txt`, which holds pygit2, a
+GuardDog dependency, to the release its license files describe. A Dockerfile that builds
+on the image inherits the variable, so a `uv` install in it is constrained the same way.
+Unset it, or point it at your own constraints file, for installs that should resolve
+pygit2 freely.
+
 To run your image in CI with your own configuration, run ASH inside it in local mode and
 mount the files it needs. [Roll out ASH across repositories](../getting-started/platform-teams.md)
 shows the full setup.
 
 Rebuild on a schedule. The image holds the scanner tools and, for an offline image, the
 vulnerability databases, so it ages; see [Run ASH offline](run-offline.md#refresh).
+
+### Third-party license files {#third-party-licenses}
+
+The image carries the license and notice files of each third-party program it bundles,
+taken from the release it carries, in `/usr/share/doc/ash/third-party/<tool>/`. That
+covers actionlint, cfn-guard and the AWS Guard Rules Registry rules it reads, gitleaks,
+grype, hadolint, opengrep, syft, trivy, and uv; the Python scanners bandit, checkov,
+cfn-lint, GuardDog, semgrep, and zizmor; and pygit2, which GuardDog depends on, with the
+libgit2, libssh2, OpenSSL, and PCRE libraries its wheel bundles, and the OpenSSL 1.1 that
+the yara-python wheel bundles.
+
+Beside each program's files, a `SOURCE` file names the upstream repository, release tag,
+and commit. For the copyleft components, hadolint (GPL-3.0), opengrep and semgrep
+(LGPL-2.1), and pygit2 and libgit2 (GPL-2.0 with the GCC linking exception), `SOURCE` also
+gives the git commands that check out the corresponding source. `index.json` in
+`/usr/share/doc/ash/third-party` lists every bundled program with its version, license,
+repository, commit, and files. The build writes it only after checking each entry
+against the built image.
+
+Other Python packages in the image, such as the scanners' dependencies and nbconvert,
+keep their license files in their `.dist-info` directories, and Debian packages keep
+theirs in `/usr/share/doc/<package>/`. The licenses of the modules statically linked into
+the Go and Rust programs are not reproduced.
 
 ## Windows and macOS {#platforms}
 

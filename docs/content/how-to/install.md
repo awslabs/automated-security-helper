@@ -219,6 +219,11 @@ ASH's `flake.nix`. It needs Nix with flakes enabled, on Linux or macOS (on Windo
 inside WSL2). It does not install ASH itself: install ASH with one of the methods
 above first.
 
+The Nix shell supplies the tools of every built-in scanner except cdk-nag, which runs on
+the Python environment ASH is installed in, so install ASH with the `cdk` extra for it.
+It also supplies hadolint for the hadolint community plugin, but not GuardDog,
+ferret-scan, or the Snyk CLI.
+
 Nix mode is not in any release: v3.7.x rejects `--mode nix`. Use it from a source
 checkout or from an install of `main`:
 
