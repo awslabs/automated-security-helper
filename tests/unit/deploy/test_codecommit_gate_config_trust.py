@@ -390,3 +390,88 @@ def test_the_operator_config_is_also_what_ash_config_names(gate, monkeypatch, tm
 
     [call] = capture.calls
     assert call["env"]["ASH_CONFIG"] == call["config"]
+
+
+# ---------------------------------------------------------------------------
+# The base config is read on every invocation, not trusted from disk
+# ---------------------------------------------------------------------------
+
+
+class _FakeSsm:
+    """Answers get_parameter with whatever ``value`` holds when it is called."""
+
+    def __init__(self, value: Optional[str]) -> None:
+        self.value = value
+        self.calls: List[Dict[str, Any]] = []
+
+    def get_parameter(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.value is None:
+            raise RuntimeError("ParameterNotFound")
+        return {"Parameter": {"Name": kwargs.get("Name"), "Value": self.value}}
+
+
+def _with_base_config_parameter(gate, monkeypatch, value: Optional[str]) -> _FakeSsm:
+    ssm = _FakeSsm(value)
+    monkeypatch.setenv("ASH_BASE_CONFIG_SSM_PARAMETER", "/ash/base-config")
+    monkeypatch.setattr(
+        gate.boto3,
+        "client",
+        lambda service, *a, **k: (
+            ssm if service == "ssm" else pytest.fail(f"unexpected client {service}")
+        ),
+    )
+    return ssm
+
+
+def test_a_base_config_rewritten_on_disk_does_not_reach_the_next_scan(
+    gate, monkeypatch, tmp_path
+):
+    """ash-container-init writes the base config once per sandbox, where the scan's
+    own user can rewrite it. The gate reads the parameter again for every scan."""
+    source = _pull_request_tree(tmp_path)
+    on_disk = tmp_path / "ash-config" / ".ash" / ".ash.yaml"
+    on_disk.parent.mkdir(parents=True)
+    on_disk.write_text("project_name: rewritten-by-an-earlier-scan\n", encoding="utf-8")
+    monkeypatch.setenv("ASH_CONFIG", str(on_disk))
+    ssm = _with_base_config_parameter(
+        gate, monkeypatch, "project_name: operator-base-config\n"
+    )
+    capture = _ScanCapture()
+    monkeypatch.setattr(gate, "_run", capture)
+
+    gate.run_scan(source, "low", True)
+
+    [call] = capture.calls
+    assert call["content"] == "project_name: operator-base-config\n"
+    assert not _is_inside(call["config"], source)
+    assert [c["Name"] for c in ssm.calls] == ["/ash/base-config"]
+
+
+def test_an_edit_to_the_parameter_reaches_the_next_scan(gate, monkeypatch, tmp_path):
+    source = _pull_request_tree(tmp_path)
+    ssm = _with_base_config_parameter(gate, monkeypatch, "project_name: first\n")
+    capture = _ScanCapture()
+    monkeypatch.setattr(gate, "_run", capture)
+
+    gate.run_scan(source, "low", True)
+    ssm.value = "project_name: second\n"
+    gate.run_scan(source, "low", True)
+
+    assert [c["content"] for c in capture.calls] == [
+        "project_name: first\n",
+        "project_name: second\n",
+    ]
+
+
+def test_a_base_config_parameter_that_cannot_be_read_refuses_the_scan(
+    gate, monkeypatch, tmp_path
+):
+    source = _pull_request_tree(tmp_path)
+    _with_base_config_parameter(gate, monkeypatch, None)
+    capture = _ScanCapture()
+    monkeypatch.setattr(gate, "_run", capture)
+
+    with pytest.raises(RuntimeError, match="/ash/base-config"):
+        gate.run_scan(source, "low", True)
+    assert capture.calls == []

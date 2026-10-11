@@ -639,19 +639,45 @@ def scan_config(source_dir: pathlib.Path) -> pathlib.Path:
     """The config file the scan is given: the operator's, never the pull request's.
 
     Without ``--config`` or ``ASH_CONFIG``, ASH looks for a config INSIDE the scanned
-    tree, so the pull request under judgment would choose the rules it is judged by:
-    measured during the deploy audit, a pull request adding
-    ``global_settings.ignore_paths`` turned a failing scan into exit 0, "pass" and
-    an APPROVE. ash-container-init exports ``ASH_CONFIG`` only after writing a base
-    config, so a gate deployed without one had nothing to say.
+    tree, so the pull request under judgment would choose the ASH config it is judged
+    by: a pull request adding ``global_settings.ignore_paths`` turned a failing scan
+    into exit 0, "pass" and an APPROVE. ash-container-init exports ``ASH_CONFIG``
+    only after writing a base config, so a gate deployed without one had nothing to
+    say.
 
-    So the scan always gets ``--config``: the base config ash-container-init wrote
-    when there is one, and otherwise ``{}`` written beside the clone, which is ASH's
-    defaults. ``{}`` and not an empty file, which ASH refuses as a config. A base
-    config that is missing, or that resolves inside the clone, refuses the scan.
+    So the scan always gets ``--config``:
+
+    *   With ``ASH_BASE_CONFIG_SSM_PARAMETER`` set, the parameter is read again for
+        every scan and written beside the clone. The copy ash-container-init wrote
+        is not used: it is written once per execution environment, to a path the
+        scan's own user can write, so an earlier scan in a warm sandbox could have
+        rewritten it for every later pull request. Reading per scan also means an
+        edit to the parameter reaches the next pull request without a cold start.
+    *   Otherwise a path in ``ASH_CONFIG`` the operator set is used as is.
+    *   Otherwise ``{}`` is written beside the clone, which is ASH's defaults; ``{}``
+        and not an empty file, which ASH refuses as a config.
+
+    A parameter that cannot be read, an ``ASH_CONFIG`` that names no file, or a path
+    that resolves inside the clone refuses the scan.
     """
+    parameter = os.environ.get("ASH_BASE_CONFIG_SSM_PARAMETER", "").strip()
     base = os.environ.get("ASH_CONFIG", "").strip()
-    if base:
+    if parameter:
+        try:
+            # WithDecryption covers SecureString parameters, as ash-container-init does.
+            response = boto3.client("ssm").get_parameter(
+                Name=parameter, WithDecryption=True
+            )
+            document = response["Parameter"]["Value"]
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not read the base config parameter {parameter}, so this scan is "
+                "refused rather than run with a configuration the operator did not "
+                f"choose: {exc}"
+            ) from exc
+        path = WORK_ROOT / "ash-config.yaml"
+        path.write_text(document, encoding="utf-8")
+    elif base:
         path = pathlib.Path(base)
         if not path.is_file():
             raise RuntimeError(
@@ -665,7 +691,8 @@ def scan_config(source_dir: pathlib.Path) -> pathlib.Path:
     if path.resolve().is_relative_to(source_dir.resolve()):
         raise RuntimeError(
             f"The scan config {path} is inside the cloned pull request, which would "
-            "let the pull request choose the rules it is judged by. Refusing to scan."
+            "let the pull request choose the ASH config it is judged by. Refusing to "
+            "scan."
         )
     return path
 

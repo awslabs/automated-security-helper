@@ -57,10 +57,14 @@ schedule exists to prevent.
 Without `--config` or `ASH_CONFIG`, ASH looks for a config inside the scanned tree,
 which here is the pull request, so a pull request could choose the rules it is
 judged by. The handler always passes `--config`: the base config
-`ash-container-init` wrote from `base_config_ssm_parameter_name`, or, with none set,
+from `base_config_ssm_parameter_name`, read again for every scan, or, with none set,
 a `{}` document beside the clone, which is ASH's defaults. A pull request's own
-`.ash/.ash.yaml` is never read. A base config that names no file, or resolves inside
-the clone, refuses the scan (outcome `error`, approval revoked).
+`.ash/.ash.yaml` is never read. The copy `ash-container-init` writes at a cold start
+is not used, because the scan's own user can write it and a warm sandbox serves
+later pull requests too; reading the parameter per scan also means an edit reaches
+the next pull request without a cold start. A parameter that cannot be read, or a
+config path that names no file or resolves inside the clone, refuses the scan
+(outcome `error`, approval revoked).
 
 ## The image's ASH must be able to fail an incomplete scan
 

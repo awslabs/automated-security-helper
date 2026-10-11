@@ -142,12 +142,16 @@ def test_the_probe_runs_once_per_execution_environment(gate, monkeypatch, tmp_pa
     assert (len(ash.probes), len(ash.scans)) == (1, 2)
 
 
-class _FakeCodeCommit:
-    class exceptions:  # noqa: N801 - mirrors the boto3 client attribute
-        class PullRequestCannotBeApprovedByAuthorException(Exception):
-            pass
+class _AuthorCannotApprove(Exception):
+    pass
 
+
+class _FakeCodeCommit:
     def __init__(self) -> None:
+        # The handler reaches the exception through the client, as boto3 exposes it.
+        self.exceptions = SimpleNamespace(
+            PullRequestCannotBeApprovedByAuthorException=_AuthorCannotApprove
+        )
         self.comments: List[Dict[str, Any]] = []
         self.approvals: List[Dict[str, Any]] = []
 
