@@ -45,8 +45,33 @@ def online(monkeypatch):
     return monkeypatch
 
 
+#: What offline mode must set, written out rather than read from the module, so that
+#: dropping an entry there fails here. Each is a measured network contact or a
+#: setting that can turn one on; see utils/offline_tool_env.py for which.
+EXPECTED_OFFLINE_ENVIRONMENT = {
+    "SEMGREP_ENABLE_VERSION_CHECK": "0",
+    "SEMGREP_SEND_METRICS": "off",
+    "CKV_SKIP_PACKAGE_UPDATE_CHECK": "true",
+    "npm_config_update_notifier": "false",
+    "TRIVY_SKIP_VERSION_CHECK": "true",
+    "TRIVY_DISABLE_TELEMETRY": "true",
+    "SYFT_CHECK_FOR_APP_UPDATE": "false",
+    "SYFT_GOLANG_SEARCH_REMOTE_LICENSES": "false",
+    "SYFT_JAVA_USE_NETWORK": "false",
+    "SYFT_JAVASCRIPT_SEARCH_REMOTE_LICENSES": "false",
+    "SYFT_PYTHON_SEARCH_REMOTE_LICENSES": "false",
+    "SYFT_CPP_VCPKG_ALLOW_GIT_CLONE": "false",
+    "SYFT_GOLANG_USE_PACKAGES_LIB": "false",
+    "GRYPE_CHECK_FOR_APP_UPDATE": "false",
+    "GRYPE_DB_AUTO_UPDATE": "false",
+    "GRYPE_EXTERNAL_SOURCES_ENABLE": "false",
+    "GOPROXY": "off",
+    "GOTOOLCHAIN": "local",
+}
+
+
 def test_offline_adds_every_variable(offline):
-    assert offline_tool_environment() == dict(OFFLINE_TOOL_ENVIRONMENT)
+    assert offline_tool_environment() == EXPECTED_OFFLINE_ENVIRONMENT
 
 
 def test_online_adds_nothing(online):
@@ -73,7 +98,7 @@ def _print_variables(names):
 def test_every_spawn_gets_them_offline(offline, tmp_path):
     """A real child started through run_command_with_output_handling, the helper
     behind scanner commands, version probes and the detect-secrets worker."""
-    names = sorted(OFFLINE_TOOL_ENVIRONMENT)
+    names = sorted(EXPECTED_OFFLINE_ENVIRONMENT)
     response = subprocess_utils.run_command_with_output_handling(
         command=[
             sys.executable,
@@ -87,11 +112,11 @@ def test_every_spawn_gets_them_offline(offline, tmp_path):
     )
 
     seen = json.loads(response["stdout"])
-    assert seen == dict(OFFLINE_TOOL_ENVIRONMENT)
+    assert seen == EXPECTED_OFFLINE_ENVIRONMENT
 
 
 def test_spawn_run_gets_them_offline(offline, tmp_path):
-    names = sorted(OFFLINE_TOOL_ENVIRONMENT)
+    names = sorted(EXPECTED_OFFLINE_ENVIRONMENT)
     result = subprocess_utils.spawn_run(
         [
             sys.executable,
@@ -103,7 +128,7 @@ def test_spawn_run_gets_them_offline(offline, tmp_path):
         cwd=tmp_path,
     )
 
-    assert json.loads(result.stdout) == dict(OFFLINE_TOOL_ENVIRONMENT)
+    assert json.loads(result.stdout) == EXPECTED_OFFLINE_ENVIRONMENT
 
 
 def test_spawns_are_unchanged_online(online, tmp_path):
@@ -153,7 +178,7 @@ def test_a_scanner_forced_offline_by_its_own_option_gets_them(
     env = _recorded_scanner_env(_syft(tmp_path, offline=True), monkeypatch)
 
     assert env is not None
-    for name, value in OFFLINE_TOOL_ENVIRONMENT.items():
+    for name, value in EXPECTED_OFFLINE_ENVIRONMENT.items():
         assert env.get(name) == value, name
 
 
