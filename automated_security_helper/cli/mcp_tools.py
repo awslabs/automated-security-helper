@@ -1437,7 +1437,13 @@ def mcp_get_config(
         path = None
         if refusal is None:
             try:
-                path = find_config_file(search_dir=search)
+                # Under the session's gate, so a source in the directory that is a
+                # link out of the grant is refused before discovery opens it.
+                path = find_config_file(
+                    search_dir=search, permit=config_base_gate(session_id)
+                )
+            except ASHConfigInputNotPermittedError as exc:
+                return _config_refusal(config_chain_refusal(search, exc), "get_config")
             except ASHConfigValidationError as exc:
                 # Discovery refused a source it could not read.
                 return _config_load_failure(exc, None)

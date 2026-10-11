@@ -221,6 +221,55 @@ class TestResolutionDiscoversUnderTheGate:
         assert not any("pyproject" in str(w) for w in config._resolution_warnings)
 
 
+def _ctx(session_id: str = _SESSION) -> MagicMock:
+    from unittest.mock import AsyncMock
+
+    ctx = MagicMock()
+    ctx.headers = {"mcp-session-id": session_id}
+    for name in ("info", "debug", "warning", "error", "report_progress"):
+        setattr(ctx, name, AsyncMock())
+    return ctx
+
+
+class TestGetConfigDiscoversUnderTheGate:
+    """get_config with no config_path discovers in the server's working directory."""
+
+    @pytest.mark.parametrize("raw", [True, False])
+    def test_the_response_is_the_same_whatever_the_target_is(
+        self, tree, monkeypatch, raw
+    ):
+        from automated_security_helper.cli import mcp_server
+
+        monkeypatch.chdir(tree.scan)
+        opened = _record_opens(monkeypatch)
+        responses = []
+        for target in TARGETS:
+            link = tree.link(target)
+            opened.clear()
+            result = _run(mcp_server.get_config(_ctx(), raw=raw))
+            assert link not in opened, target
+            responses.append(json.dumps(result, sort_keys=True, default=str))
+
+        assert len(set(responses)) == 1, responses
+        result = json.loads(responses[0])
+        assert result["success"] is False
+        assert result["error_type"] == _REFUSED
+        assert _MARKER not in responses[0]
+        assert "Errno" not in responses[0]
+
+    def test_control_a_source_inside_the_grant_is_returned(self, tree, monkeypatch):
+        from automated_security_helper.cli import mcp_server
+
+        (tree.scan / "pyproject.toml").write_text(
+            '[tool.ash]\nproject_name = "in-tree"\n', encoding="utf-8"
+        )
+        monkeypatch.chdir(tree.scan)
+
+        result = _run(mcp_server.get_config(_ctx(), raw=True))
+
+        assert result["project_name"] == "in-tree", result
+
+
 class TestScanDirectoryRefusesBeforeTheScanStarts:
     def _scan(self, tree) -> Dict[str, Any]:
         from automated_security_helper.cli.mcp_tools import mcp_scan_directory
