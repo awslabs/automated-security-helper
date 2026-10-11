@@ -165,8 +165,11 @@
   tar extraction path; a sparse tar member whose map reaches past its size is
   refused. A config file in the scanned tree, a workspace project's own config and a
   config an MCP client supplied can lower these limits but not raise them (a higher
-  value is replaced by the trusted one, with a warning), and the default
-  `runtime_overrides.denied_paths` refuses MCP runtime overrides of them. Raise them
+  value is replaced by the trusted one, with a warning), and MCP runtime overrides
+  of them are refused: they are in the default `runtime_overrides.denied_paths`,
+  and refused on top of it when a profile sets its own `denied_paths`, so a
+  profile's list no longer lets a client raise them and a whole-config write at the
+  root pointer is refused even with an empty list. Raise them
   with `--config-overrides` or a config file outside the tree.
 
 - **A workspace project counts incomplete conversion as a single-directory scan

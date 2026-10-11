@@ -102,7 +102,8 @@ lower a limit but not raise it: a higher value is replaced by the trusted one, w
 a warning naming the option. A repository's own config file replaces `ASH_CONFIG`
 as any selected config file does, so a limit it leaves out is the default. MCP
 runtime overrides of the four options, or of a section holding them, are refused by
-the default `global_settings.mcp.runtime_overrides.denied_paths`.
+the default `global_settings.mcp.runtime_overrides.denied_paths`, and still refused
+when a profile sets its own `denied_paths` list.
 
 **Use Cases**:
 - Scanning packaged applications

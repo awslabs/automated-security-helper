@@ -10,7 +10,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from typing import Annotated, Any, Callable, List, Dict, Literal, Optional
+from typing import Annotated, Any, Callable, List, Dict, Literal, Optional, Tuple
 
 import yaml
 from automated_security_helper.base.converter_plugin import ConverterPluginConfigBase
@@ -21,6 +21,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
+    EXTRACTION_LIMIT_OPTIONS,
     ArchiveConverterConfig,
 )
 from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
@@ -630,6 +631,17 @@ class MCPResourceManagementConfig(BaseModel):
     ] = False
 
 
+#: Runtime-override pointers refused whatever ``RuntimeOverridesConfig.denied_paths``
+#: lists. The archive converter's extraction limits bound what extracting an archive
+#: in the scanned tree may write, and an operator's profile that sets its own
+#: ``denied_paths`` replaces the shipped list, so they are checked on top of it
+#: (``runtime_patch._check_op_paths``). A write at an ancestor (``/converters/archive``,
+#: ``/converters``) is refused too, as for any denied_paths entry.
+ALWAYS_DENIED_RUNTIME_PATHS: Tuple[str, ...] = tuple(
+    f"/converters/archive/options/{name}" for name in EXTRACTION_LIMIT_OPTIONS
+)
+
+
 class RuntimeOverridesConfig(BaseModel):
     """Allowlist + denylist controlling which JSON-Patch ops the MCP server accepts.
 
@@ -704,10 +716,9 @@ class RuntimeOverridesConfig(BaseModel):
         # The archive converter's extraction limits bound what extracting an
         # archive in the scanned tree may write, so a client may not raise them.
         # A write at an ancestor (/converters/archive, /converters) is refused too.
-        "/converters/archive/options/max_members",
-        "/converters/archive/options/max_member_bytes",
-        "/converters/archive/options/max_total_bytes",
-        "/converters/archive/options/max_compression_ratio",
+        # Listed for the operator reading the default; refused even when a profile
+        # replaces this list (ALWAYS_DENIED_RUNTIME_PATHS).
+        *ALWAYS_DENIED_RUNTIME_PATHS,
     ]
 
     denied_value_patterns: Annotated[

@@ -596,10 +596,14 @@ class TestRootPointerRefused:
             )
         assert "root pointer" in excinfo.value.rule
 
-    def test_root_replace_allowed_when_allowlist_names_root_explicitly(self) -> None:
-        """The refusal is an escape-hatch, not a wall: an operator who writes
-        the root pointer into `allowed_paths` has asked for a whole-config
-        swap, and with an empty denylist there is nothing left to constrain.
+    def test_root_replace_refused_for_the_archive_limits_with_an_empty_denylist(
+        self,
+    ) -> None:
+        """Naming the root in `allowed_paths` with an empty denylist still leaves
+        ALWAYS_DENIED_RUNTIME_PATHS: a whole-config swap writes the archive
+        extraction limits, which no runtime override may set, so it is refused
+        and names the limit. Before those were always denied, this swap was
+        allowed; a field below the root (`/project_name`) still is.
         """
         base = _base_config()
         allowlist = RuntimeOverridesConfig(
@@ -609,10 +613,21 @@ class TestRootPointerRefused:
         )
         swapped = base.model_dump(mode="json", by_alias=False)
         swapped["project_name"] = "swapped"
-        result = apply_runtime_patch(
-            base, [{"op": "replace", "path": "", "value": swapped}], allowlist=allowlist
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_patch(
+                base,
+                [{"op": "replace", "path": "", "value": swapped}],
+                allowlist=allowlist,
+            )
+        assert "/converters/archive/options/max_members" in excinfo.value.rule
+        renamed = apply_runtime_patch(
+            base,
+            [{"op": "replace", "path": "/project_name", "value": "swapped"}],
+            allowlist=RuntimeOverridesConfig(
+                enabled=True, allowed_paths=["/project_name"], denied_paths=[]
+            ),
         )
-        assert result.project_name == "swapped"
+        assert renamed.project_name == "swapped"
 
     def test_root_replace_still_denied_by_denylist_when_root_is_allowed(self) -> None:
         """Naming the root in `allowed_paths` clears the structural refusal but
