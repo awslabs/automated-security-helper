@@ -1454,7 +1454,7 @@
         },
         "regions": {
           "default": [],
-          "description": "AWS regions to validate templates against, e.g. ['us-east-1', 'eu-west-1'], or ['ALL_REGIONS']. Empty uses cfn-lint's default (us-east-1).",
+          "description": "AWS regions to validate templates against, e.g. ['us-east-1', 'eu-west-1'], or ['ALL_REGIONS']. Empty validates against us-east-1, or the regions a template names in its own cfn-lint metadata or config_file names; AWS_REGION and AWS_DEFAULT_REGION are not read.",
           "items": {
             "type": "string"
           },

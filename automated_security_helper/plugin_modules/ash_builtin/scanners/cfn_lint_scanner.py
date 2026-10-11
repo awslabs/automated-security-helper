@@ -35,6 +35,9 @@ already the repository-relative paths ASH reports.
 * Templates are batched under ``_ARGV_CHAR_BUDGET`` characters per invocation, so a
   repository with thousands of templates stays inside Windows' 32767-character
   command-line limit.
+* ``AWS_REGION`` and ``AWS_DEFAULT_REGION`` are set to us-east-1 in cfn-lint's
+  environment, so the region it falls back to does not depend on the host
+  (``CfnLintScanner._child_env``).
 
 Network
 -------
@@ -60,6 +63,7 @@ from __future__ import annotations
 import glob
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Tuple
@@ -132,6 +136,10 @@ _CONFIG_ERROR_RULE = "E0003"
 #: The executable this scanner runs.
 _COMMAND = "cfn-lint"
 
+#: The region cfn-lint validates against when neither ``regions``, the template's
+#: own metadata nor an operator's ``.cfnlintrc`` names one. See ``_child_env``.
+DEFAULT_REGION = "us-east-1"
+
 # Under Windows' 32767-character CreateProcess limit with room for the interpreter
 # path, uv's own arguments and the options above.
 _ARGV_CHAR_BUDGET = 24000
@@ -180,8 +188,10 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "AWS regions to validate templates against, e.g. ['us-east-1', "
-                "'eu-west-1'], or ['ALL_REGIONS']. Empty uses cfn-lint's default "
-                "(us-east-1)."
+                "'eu-west-1'], or ['ALL_REGIONS']. Empty validates against "
+                "us-east-1, or the regions a template names in its own cfn-lint "
+                "metadata or config_file names; AWS_REGION and AWS_DEFAULT_REGION "
+                "are not read."
             ),
         ),
     ] = []
@@ -372,6 +382,33 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         if options.include_checks:
             args.extend(["--include-checks", *options.include_checks])
         return args
+
+    @staticmethod
+    def _child_env() -> Dict[str, str]:
+        """ASH's environment for cfn-lint, with its last-resort region pinned.
+
+        cfn-lint takes its regions from ``--regions``, then from the template's
+        ``Metadata: cfn-lint: config: regions``, then from the config file, and
+        only then from ``AWS_REGION``, ``AWS_DEFAULT_REGION`` and finally
+        us-east-1 (cfnlint/config.py, ``regions``, at 1.57.2). Inherited as is,
+        that last step made a scan's findings depend on the host. Measured with
+        1.57.2: ``AWS_REGION=``, which CI gets from an unset variable, makes
+        cfn-lint exit 32 ("Regions [''] are unsupported") on every template, and
+        ``AWS_REGION=af-south-1`` reports an ``AWS::Bedrock::Agent`` as E3006, a
+        resource type that region lacks.
+
+        Both variables are pinned rather than passing ``--regions us-east-1``,
+        because ``--regions`` also overrides the regions a template declares in
+        its own metadata and the ones an operator's config file names (measured:
+        a template declaring af-south-1 lost its E3006 under ``--regions``).
+        ASH's own environment is not changed. Under ``--sandbox`` the variables
+        are not passed at all, which leaves cfn-lint at the same us-east-1.
+        """
+        return {
+            **os.environ,
+            "AWS_REGION": DEFAULT_REGION,
+            "AWS_DEFAULT_REGION": DEFAULT_REGION,
+        }
 
     def _operator_config_file(self, configured: Path | str) -> Optional[Path]:
         """The ``config_file`` to pass, or None when it must not be used.
@@ -574,6 +611,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             merged: List[Result] = []
             rules: Dict[str, ReportingDescriptor] = {}
             driver = report.runs[0].tool.driver
+            child_env = self._child_env()
 
             for index, batch in enumerate(self.batches(displayed)):
                 self.targets_attempted += len(batch)
@@ -592,6 +630,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                     results_dir=results_dir,
                     stdout_preference="write",
                     stderr_preference="both",
+                    env=child_env,
                     timeout=self._effective_scan_timeout(),
                 )
                 failure = self._batch_failure(response, batch_file)

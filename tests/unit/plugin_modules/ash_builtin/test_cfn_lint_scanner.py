@@ -24,6 +24,7 @@ all run for real.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 from unittest.mock import patch
@@ -463,6 +464,69 @@ class TestScan:
         self._run(scanner, fake)
         assert fake.calls == []
         assert scanner.targets_attempted == 0
+
+    @pytest.mark.parametrize(
+        "environment",
+        [
+            # What CI gets from `AWS_REGION: ${{ vars.UNSET }}`: set, but empty.
+            {"AWS_REGION": ""},
+            {"AWS_REGION": "af-south-1"},
+            {"AWS_DEFAULT_REGION": "ap-southeast-4"},
+        ],
+    )
+    def test_an_unset_regions_option_validates_against_us_east_1_whatever_the_host(
+        self, repo, monkeypatch, environment
+    ):
+        """``regions: []`` means us-east-1, not whatever region the host is set to.
+
+        cfn-lint 1.57.2 falls back to ``AWS_REGION``, then ``AWS_DEFAULT_REGION``,
+        then us-east-1 when neither ``--regions``, the template's metadata nor a
+        config file names a region (cfnlint/config.py, ``regions``). Measured:
+        ``AWS_REGION=`` makes it exit 32, "Regions [''] are unsupported", for every
+        template, and ``AWS_REGION=af-south-1`` reports an
+        ``AWS::Bedrock::Agent`` as E3006, a resource type that region lacks.
+        """
+        for name in ("AWS_REGION", "AWS_DEFAULT_REGION"):
+            monkeypatch.delenv(name, raising=False)
+        for name, value in environment.items():
+            monkeypatch.setenv(name, value)
+        fake = FakeCfnLint({}, returncode=0)
+        seen = []
+
+        def cfn_lint(command, **kwargs):
+            env = kwargs.get("env")
+            child = dict(os.environ if env is None else env)
+            if "--regions" in command:
+                region = command[command.index("--regions") + 1]
+            else:
+                region = child.get(
+                    "AWS_REGION", child.get("AWS_DEFAULT_REGION", "us-east-1")
+                )
+            seen.append(region)
+            if region == "":
+                return {
+                    "stdout": "",
+                    "stderr": "Regions [''] are unsupported.",
+                    "returncode": 32,
+                }
+            return fake(command, **kwargs)
+
+        scanner = _scanner(repo)
+        self._run(scanner, cfn_lint)
+
+        assert seen == ["us-east-1"]
+        assert scanner.targets_failed == 0, scanner.errors
+        # ASH's own environment is left as it was; only cfn-lint's is pinned.
+        for name, value in environment.items():
+            assert os.environ[name] == value
+
+    def test_regions_set_in_the_config_are_passed_as_given(self, repo, monkeypatch):
+        monkeypatch.setenv("AWS_REGION", "af-south-1")
+        fake = FakeCfnLint({}, returncode=0)
+        self._run(_scanner(repo, regions=["eu-west-1", "us-west-2"]), fake)
+        argv = fake.calls[0]
+        start = argv.index("--regions") + 1
+        assert argv[start : start + 2] == ["eu-west-1", "us-west-2"]
 
     def test_missing_dependencies_return_false_without_running(self, repo):
         scanner = _scanner(repo)

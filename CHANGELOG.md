@@ -116,7 +116,9 @@
   - cfn-lint (`>=1.43.3,<2.0.0`, uv tool; E to MEDIUM, W to LOW,
     I to INFO) and cfn-guard 3.2.1 against the AWS Guard Rules Registry 1.0.2,
     default rule set `wa-Security-Pillar`, every violation HIGH. Both read the
-    templates cfn-nag reads, and neither needs the network.
+    templates cfn-nag reads, and neither needs the network. cfn-lint checks
+    against us-east-1 unless `regions`, the template or the operator's
+    `.cfnlintrc` names other regions; it does not read `AWS_REGION`.
   - gitleaks 8.30.1 (`gitleaks dir`, working tree only),
     CRITICAL findings with values redacted (`--redact=100`), beside detect-secrets,
     which stays on and unchanged. Inline `gitleaks:allow` comments apply, and so

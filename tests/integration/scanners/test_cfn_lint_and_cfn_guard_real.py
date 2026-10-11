@@ -193,6 +193,58 @@ def test_a_repository_cfnlintrc_cannot_switch_cfn_lint_off(tmp_path):
     assert {(r["ruleId"], _where(r)[1]) for r in lint} == CFN_LINT_EXPECTED, log
 
 
+#: A resource type that us-east-1 has and af-south-1 lacks in cfn-lint 1.57.2's
+#: schemas, so an E3006 on it says which region cfn-lint validated against.
+_BEDROCK_AGENT = """AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  Agent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: a
+"""
+
+
+@pytest.mark.parametrize("aws_region", ["", "af-south-1"])
+def test_the_default_region_is_us_east_1_whatever_the_environment_says(
+    tmp_path, aws_region
+):
+    """``regions`` unset validates against us-east-1, not ``AWS_REGION``.
+
+    An empty ``AWS_REGION``, which CI gets from an unset variable, made cfn-lint exit
+    32 on every template, and another region changed the findings. A template that
+    names its own regions in ``Metadata: cfn-lint: config`` still gets them.
+    """
+    _require_cfn_lint()
+    source = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, source)
+    (source / "templates" / "bedrock.yaml").write_text(_BEDROCK_AGENT)
+    (source / "templates" / "names-its-region.yaml").write_text(
+        _BEDROCK_AGENT.replace(
+            "Resources:",
+            "Metadata:\n  cfn-lint:\n    config:\n      regions: [af-south-1]\n"
+            "Resources:",
+        )
+    )
+
+    proc, output, log = _scan(
+        tmp_path,
+        "cfn-lint",
+        env={"AWS_REGION": aws_region, "AWS_DEFAULT_REGION": aws_region},
+    )
+
+    assert proc.returncode == 0, log
+    assert _scanner_results(output)["cfn-lint"]["status"] == "FAILED", log
+    lint = _results(output, "cfn-lint")
+    assert {
+        (r["ruleId"], _where(r)[1])
+        for r in lint
+        if _where(r)[0] == "templates/insecure.yaml"
+    } == CFN_LINT_EXPECTED, log
+    assert {_where(r)[0] for r in lint if r["ruleId"] == "E3006"} == {
+        "templates/names-its-region.yaml"
+    }, log
+
+
 def test_ash_suppressions_apply_by_rule_path_and_line(tmp_path):
     _require_tools()
     suppressions = [

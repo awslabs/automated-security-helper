@@ -35,8 +35,8 @@ scanners:
       # A .cfnlintrc to use, outside the scanned tree. When unset, ASH gives
       # cfn-lint an empty configuration (see "Configuration files" below).
       config_file: /etc/ash/cfnlintrc
-      # Regions to validate against, or [ALL_REGIONS]. Defaults to cfn-lint's own
-      # default (us-east-1).
+      # Regions to validate against, or [ALL_REGIONS]. When unset, us-east-1 (see
+      # "Regions" below).
       regions: [us-east-1, eu-west-1]
       # Rule ids or prefixes to skip everywhere, or to enable (e.g. "I" for
       # informational rules, which cfn-lint does not run by default).
@@ -52,6 +52,10 @@ scanners:
 ```
 
 Region names, rule ids and prefixes are validated when the config is loaded, so a value cannot be passed through to cfn-lint as an option of its own.
+
+#### Regions
+
+Some of cfn-lint's checks depend on the region, for example whether a resource type exists there (rule `E3006`). `regions` names the regions to check against. When it is unset, cfn-lint uses the regions a template names in its own `Metadata: cfn-lint: config: regions`, then those in the `config_file` you named, and otherwise us-east-1. On its own, cfn-lint would read `AWS_REGION` and `AWS_DEFAULT_REGION` before falling back to us-east-1. ASH does not let it, so a template gives the same findings on every host: an empty `AWS_REGION`, which a CI job gets from an unset variable, would otherwise make cfn-lint fail on every template.
 
 #### Configuration files
 
