@@ -140,9 +140,21 @@ _SECRET_CWE = re.compile(r"(?i)(?:^|[^0-9a-z])cwe-(?:798|259|321)(?![0-9])")
 _SECRET_RULE_ID = re.compile(r"(?i)(?:^|\.)secrets?\.")
 
 
+#: The CWEs of a detected credential or key, as opposed to a hard-coded password
+#: check (CWE-259), which a linter raises on a name such as ``password`` whatever
+#: the value is.
+_DETECTION_CWE = re.compile(r"(?i)(?:^|[^0-9a-z])cwe-(?:798|321)(?![0-9])")
+
+
 def _is_secret_tag(tag: Any) -> bool:
     return isinstance(tag, str) and (
         tag.lower() in _SECRET_TAGS or bool(_SECRET_CWE.search(tag))
+    )
+
+
+def _is_detection_tag(tag: Any) -> bool:
+    return isinstance(tag, str) and (
+        tag.lower() in _SECRET_TAGS or bool(_DETECTION_CWE.search(tag))
     )
 
 
@@ -192,13 +204,7 @@ def _physical_locations_of(result: Any) -> Iterable[Any]:
             yield physical
 
 
-def secret_rule_ids(sarif_report: Any) -> Set[str]:
-    """IDs of rules a tool's rule metadata marks as secret rules.
-
-    A rule is a secret rule when its tags include ``secret``/``secrets`` (trivy's)
-    or a hard-coded credential CWE (``_SECRET_CWE``: semgrep's and opengrep's
-    ``generic.secrets.*`` rules, whose results carry no tags of their own).
-    """
+def _rule_ids_tagged(sarif_report: Any, is_tag) -> Set[str]:
     found: Set[str] = set()
     for run in getattr(sarif_report, "runs", None) or []:
         tool = getattr(run, "tool", None)
@@ -207,10 +213,54 @@ def secret_rule_ids(sarif_report: Any) -> Set[str]:
         for component in components:
             for rule in getattr(component, "rules", None) or []:
                 tags = getattr(getattr(rule, "properties", None), "tags", None) or []
-                if any(_is_secret_tag(tag) for tag in tags):
-                    if getattr(rule, "id", None):
-                        found.add(rule.id)
+                if any(is_tag(tag) for tag in tags) and getattr(rule, "id", None):
+                    found.add(rule.id)
     return found
+
+
+def secret_detection_rule_ids(sarif_report: Any) -> Set[str]:
+    """IDs of rules whose metadata marks them as detecting a credential or key.
+
+    Tagged ``secret``/``secrets``, CWE-798 or CWE-321; see ``is_secret_detection``.
+    """
+    return _rule_ids_tagged(sarif_report, _is_detection_tag)
+
+
+def is_secret_detection(
+    result: Any, detection_rule_ids: Set[str] = frozenset()
+) -> bool:
+    """Whether ``result`` comes from a rule that detects a credential or key.
+
+    The narrower question the Bedrock summary reporter asks: a secrets scanner's
+    finding, one from a ``secrets`` rule (``generic.secrets.*``, ``CKV_SECRET_*``),
+    or one whose tags, or its rule's, carry ``secret``, ``secrets``, CWE-798 or
+    CWE-321. A hard-coded password check (bandit B105-B107, CWE-259) is a secret
+    finding for masking (``is_secret_finding``) but not a detection.
+    """
+    from automated_security_helper.utils.scanner_tool_types import (
+        SECRETS_TOOL_TYPE,
+        result_tags,
+        result_tool_types,
+    )
+
+    rule_id = getattr(result, "ruleId", None) or ""
+    if rule_id in detection_rule_ids:
+        return True
+    if rule_id.startswith(_SECRET_RULE_PREFIXES) or _SECRET_RULE_ID.search(rule_id):
+        return True
+    if any(_is_detection_tag(tag) for tag in result_tags(result)):
+        return True
+    return SECRETS_TOOL_TYPE in result_tool_types(result)
+
+
+def secret_rule_ids(sarif_report: Any) -> Set[str]:
+    """IDs of rules a tool's rule metadata marks as secret rules.
+
+    A rule is a secret rule when its tags include ``secret``/``secrets`` (trivy's)
+    or a hard-coded credential CWE (``_SECRET_CWE``: semgrep's and opengrep's
+    ``generic.secrets.*`` rules, whose results carry no tags of their own).
+    """
+    return _rule_ids_tagged(sarif_report, _is_secret_tag)
 
 
 def is_secret_finding(result: Any, secret_rule_ids: Set[str] = frozenset()) -> bool:

@@ -20,8 +20,13 @@ from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.output_dir_links import open_no_follow
 from automated_security_helper.utils.scanner_tool_types import (
+    SECRETS_TOOL_TYPE,
     normalize_tool_type,
     result_tool_types,
+)
+from automated_security_helper.utils.secret_masking import (
+    is_secret_detection,
+    secret_detection_rule_ids,
 )
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     get_fallback_model,
@@ -490,6 +495,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         sarif_results = model.sarif.get_all_results()
         if not sarif_results:
             return all_findings, secret_findings, indexed_findings
+        detection_rule_ids = secret_detection_rule_ids(model.sarif)
 
         for i, result in enumerate(sarif_results):
             finding_dict = result.model_dump(
@@ -502,7 +508,10 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             finding_dict["index"] = i + 1
             indexed_findings.append(self._make_indexed_finding(i + 1, finding_dict))
 
-            is_secret = self._is_secret_scanner(finding_dict)
+            is_secret = self._is_secret_scanner(finding_dict) or (
+                self._excludes_secrets()
+                and is_secret_detection(result, detection_rule_ids)
+            )
             is_actionable = self._is_actionable(finding_dict)
 
             if is_secret:
@@ -560,6 +569,20 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         }
         excluded.discard(None)
         return bool(result_tool_types(finding_dict) & excluded)
+
+    def _excludes_secrets(self) -> bool:
+        """Whether ``exclude_scanner_types`` names the secrets type.
+
+        Then a finding from any rule that detects a credential or key is counted,
+        not sent: semgrep's and opengrep's ``generic.secrets.*`` findings come from
+        SAST scanners, so only the finding's rule says what it is
+        (utils/secret_masking.is_secret_detection). A hard-coded password check
+        such as bandit's B105 is sent, its value masked like every other.
+        """
+        return SECRETS_TOOL_TYPE in {
+            normalize_tool_type(name)
+            for name in self.config.options.exclude_scanner_types
+        }
 
     def _is_actionable(self, finding_dict: Dict[str, Any]) -> bool:
         if not self.config.options.actionable_only:

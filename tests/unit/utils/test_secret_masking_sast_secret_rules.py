@@ -222,3 +222,47 @@ class TestWhatCountsAsASecretRule:
         result = model.sarif.get_all_results()[0]
 
         assert not is_secret_finding(result, secret_rule_ids(model.sarif))
+
+
+class TestSecretDetectionIsTheNarrowerQuestion:
+    """``is_secret_detection``: what the Bedrock summary reporter counts, not sends.
+
+    A hard-coded password check (bandit B105-B107, tagged CWE-259) is a secret
+    finding for masking, because its message quotes the value, but it is not a
+    detection of a credential: its masked message is still useful to a summary.
+    """
+
+    def test_a_p_ci_secret_rule_is_a_detection(self):
+        from automated_security_helper.utils.secret_masking import (
+            is_secret_detection,
+            secret_detection_rule_ids,
+        )
+
+        model = _model("semgrep", "Semgrep OSS")
+        ids = secret_detection_rule_ids(model.sarif)
+        detections = [
+            result.ruleId
+            for result in model.sarif.get_all_results()
+            if is_secret_detection(result, ids)
+        ]
+
+        assert sorted(detections) == sorted(
+            result.ruleId
+            for result in model.sarif.get_all_results()
+            if result.ruleId.startswith("generic.secrets.")
+        )
+
+    def test_a_hard_coded_password_check_is_a_secret_finding_but_not_a_detection(
+        self,
+    ):
+        from automated_security_helper.utils.secret_masking import (
+            is_secret_detection,
+            secret_detection_rule_ids,
+            secret_rule_ids,
+        )
+
+        model = _tagged("B105", ["security", "external/cwe/cwe-259"], scanner="bandit")
+        result = model.sarif.get_all_results()[0]
+
+        assert is_secret_finding(result, secret_rule_ids(model.sarif))
+        assert not is_secret_detection(result, secret_detection_rule_ids(model.sarif))

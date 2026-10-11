@@ -1773,8 +1773,10 @@
   detect-secrets and ferret-scan findings were sent to the model as ordinary
   findings. A finding's type is now its scanner's tool type, looked up from the
   scanner's name, or a `tool_type::` tag in either spelling, and `SECRET` and
-  `SECRETS` both match. A finding whose scanner type cannot be determined is sent
-  without its snippets. With `include_code_snippets` off (the default),
+  `SECRETS` both match. With the secrets type excluded, findings from rules that
+  detect a credential or key are counted too, such as semgrep's and opengrep's
+  `generic.secrets.*` (CWE-798). A finding whose scanner type cannot be determined
+  is sent without its snippets. With `include_code_snippets` off (the default),
   `reports/ash.bedrock.summary.md` no longer carries snippets in its "Raw JSON"
   blocks.
 

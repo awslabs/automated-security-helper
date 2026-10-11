@@ -382,3 +382,37 @@ class TestLocalSummaryFollowsIncludeCodeSnippets:
         reporter.report(load_results(scan_output))
 
         assert RUN_LINE.strip() in self._summary(tmp_path)
+
+
+class TestSastSecretFindingsAreCountedNotSent:
+    """A semgrep or opengrep secret finding is a secret finding to Bedrock too.
+
+    The scanner is SAST, so its tool type does not name it; its rule does
+    (``generic.secrets.*``, tagged CWE-798). The fixture is the SARIF opengrep
+    writes for two p/ci AWS rules (``secret_bearing_scan.opengrep_secret_sarif``).
+    """
+
+    @pytest.mark.parametrize("scanner_name", ["opengrep", "semgrep"])
+    def test_grep_secret_findings_are_counted_and_not_sent(
+        self, runtime, tmp_path, scanner_name
+    ):
+        from automated_security_helper.schemas.sarif_schema_model import SarifReport
+        from automated_security_helper.utils.sarif_utils import (
+            attach_scanner_details,
+        )
+        from tests.utils.secret_bearing_scan import opengrep_secret_sarif
+
+        grep = attach_scanner_details(
+            SarifReport.model_validate(opengrep_secret_sarif()),
+            scanner_name=scanner_name,
+            scanner_version="1.0.0",
+        )
+        reporter = make_reporter(tmp_path)
+
+        reporter.report(model_of(bandit_report(), grep))
+
+        sent = runtime.sent()
+        assert "AWS Secret Access Key detected" not in sent
+        assert "AWS Access Key ID Value detected" not in sent
+        assert "Secret findings: 2" in sent
+        assert BANDIT_MESSAGE in sent
