@@ -2903,6 +2903,8 @@ OPTION_TABLE_HEADERS = frozenset(
         "param",
         "parameter",
         "parameters",
+        "prop",
+        "props",
     }
 )
 #: Headers of the column a table states defaults in. Renaming the column does not take
@@ -2956,10 +2958,16 @@ class KeySpec:
 
 
 @dataclass(frozen=True)
-class PythonSource:
-    """A Python default that is not a literal, compared by its source text."""
+class Expression:
+    """A default that is an expression in the code rather than a literal
+    (ExecutionStrategy.PARALLEL), compared by its text. A cell may name the member
+    alone: PARALLEL for ExecutionStrategy.PARALLEL."""
 
     text: str
+
+    def matches(self, written: str) -> bool:
+        written = re.sub(r"\s+", "", written)
+        return written == self.text or self.text.endswith("." + written)
 
 
 @dataclass
@@ -3176,6 +3184,8 @@ def options_section(
         return cloudformation_section(of, code)
     if of == "github-inputs" or of.startswith("github-inputs:"):
         return github_inputs_section(of, code)
+    if of == "typescript" or of.startswith("typescript:"):
+        return typescript_section(of, code)
     if of == "config":
         keys = _model_keys(models.ash_config)
         keys.update({key: KeySpec((key,), default=None) for key in LOADER_KEYS})
@@ -3384,7 +3394,7 @@ def python_section(of: str, code: Path) -> tuple[Section | None, str | None]:
             try:
                 value: Any = ast.literal_eval(default)
             except (ValueError, SyntaxError, TypeError):
-                value = PythonSource(re.sub(r"\s+", "", ast.unparse(default)))
+                value = Expression(re.sub(r"\s+", "", ast.unparse(default)))
             spec = KeySpec((argument.arg,), default=value, syntax="python")
         keys[argument.arg] = spec
     label = f"of={of} ({rel_path(module_file, code)}:{node.lineno})"
@@ -3563,6 +3573,71 @@ def github_inputs_section(of: str, code: Path) -> tuple[Section | None, str | No
     return Section(f"of={of} (the {kind}'s inputs)", keys), None
 
 
+#: A JSDoc comment, or the start of an interface property (``readonly name?:``).
+_TS_TOKEN = re.compile(
+    r"/\*\*(?P<doc>.*?)\*/"
+    r"|^[ \t]*(?:readonly[ \t]+)?(?P<name>[A-Za-z_$][\w$]*)(?P<optional>\?)?[ \t]*:",
+    re.DOTALL | re.MULTILINE,
+)
+
+
+def typescript_section(of: str, code: Path) -> tuple[Section | None, str | None]:
+    """The properties of a TypeScript interface, with the defaults their JSDoc states.
+
+    of=typescript:<file>:<Interface>. A property without ? is required. A default is
+    the text after @default, compared as written; "@default - <words>" describes a
+    default in prose, so it is not compared. Properties inherited with extends are not
+    listed.
+    """
+    rel, _, interface = of.partition(":")[2].rpartition(":")
+    problem = save_as_problem(rel) if rel and interface else "a path or name is missing"
+    if problem:
+        return None, (
+            f"of={of}: name a file in the code tree and an interface in it, as "
+            f"of=typescript:<file>.ts:<Interface> ({problem})"
+        )
+    path = code / rel
+    if not path.is_file():
+        return None, f"of={of}: {rel} is not in the code tree"
+    text = path.read_text(encoding="utf-8")
+    start = re.search(rf"\binterface\s+{re.escape(interface)}\b[^{{]*{{", text)
+    if start is None:
+        return None, f"of={of}: {rel} declares no interface {interface}"
+    depth, index = 1, start.end()
+    while index < len(text) and depth:
+        depth += {"{": 1, "}": -1}.get(text[index], 0)
+        index += 1
+    body = text[start.end() : index - 1]
+    keys: dict[str, KeySpec] = {}
+    doc: str | None = None
+    for token in _TS_TOKEN.finditer(body):
+        if token.group("doc") is not None:
+            doc = token.group("doc")
+            continue
+        tag = re.search(r"@default[ \t]+(.+)", doc) if doc else None
+        doc = None
+        name = token.group("name")
+        if not token.group("optional"):
+            keys[name] = KeySpec((name,), required=True, syntax="text")
+        elif tag is None:
+            keys[name] = KeySpec((name,), default=None, syntax="text")
+        elif tag.group(1).startswith("-"):
+            keys[name] = KeySpec((name,), compare=False, syntax="text")
+        else:
+            value = tag.group(1).strip()
+            quoted = re.fullmatch(r"(['\"])(.*)\1", value)
+            if quoted:
+                default: Any = quoted.group(2)
+            elif re.fullmatch(r"[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+", value):
+                default = Expression(value)  # ASHInstallMode.PIP
+            else:
+                default = value
+            keys[name] = KeySpec((name,), default=default, syntax="text")
+    if not keys:
+        return None, f"of={of}: interface {interface} declares no properties"
+    return Section(f"of={of}", keys), None
+
+
 _SPAN = re.compile(r"(`+)(.+?)\1")
 _ENV_FORM = re.compile(r"^(?:from `([A-Za-z_][A-Za-z0-9_]*)`, else )+")
 _ENV_NAMES = re.compile(r"from `([A-Za-z_][A-Za-z0-9_]*)`, else ")
@@ -3588,7 +3663,7 @@ def _cell_value(text: str, syntax: str = "yaml") -> tuple[bool, Any]:
         try:
             return True, ast.literal_eval(content)
         except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
-            return True, PythonSource(re.sub(r"\s+", "", content))
+            return True, Expression(re.sub(r"\s+", "", content))
     try:
         return True, yaml.safe_load(content) if content else ""
     except yaml.YAMLError:
@@ -3596,9 +3671,11 @@ def _cell_value(text: str, syntax: str = "yaml") -> tuple[bool, Any]:
 
 
 def _same_default(written: Any, actual: Any) -> bool:
-    if isinstance(written, PythonSource) and isinstance(actual, str):
+    if isinstance(written, Expression) and isinstance(actual, str):
         # A Python string written without quotes: `t3.medium` for "t3.medium".
         return written.text == re.sub(r"\s+", "", actual)
+    if isinstance(actual, Expression) and isinstance(written, (str, Expression)):
+        return actual.matches(written if isinstance(written, str) else written.text)
     if isinstance(written, str) and isinstance(actual, str):
         if written.startswith("<repository>/"):
             return actual.endswith(written[len("<repository>") :])
@@ -3678,7 +3755,7 @@ def default_problem(cell: str, spec: KeySpec) -> str | None:
 def _shown(value: Any, syntax: str = "yaml") -> str:
     if value is SECTION:
         return "a section"
-    if isinstance(value, PythonSource):
+    if isinstance(value, Expression):
         return f"`{value.text}`"
     if syntax == "python":
         return f"`{value!r}`"
@@ -3803,8 +3880,9 @@ def check_option_tables(
                             "<!-- doctest: options of=<section> --> on the line above its header, "
                             "for example of=scanners.bandit, of=cli.scan, of=mcp.run_ash_scan, "
                             "of=python.<module>.<function>, of=dockerfile, "
-                            "of=cloudformation:<template or directory> or "
-                            "of=github-inputs:<action or workflow>",
+                            "of=cloudformation:<template or directory>, "
+                            "of=github-inputs:<action or workflow> or "
+                            "of=typescript:<file>:<Interface>",
                         )
                     )
                 continue

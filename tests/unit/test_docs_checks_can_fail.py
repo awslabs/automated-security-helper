@@ -1847,6 +1847,29 @@ on:
       ash-version: {type: string, default: main}
 jobs: {}
 """,
+    "src/step.ts": """export interface StepProps {
+  /** The file set to scan. */
+  readonly input: string;
+
+  /**
+   * How many shards.
+   *
+   * @default 1
+   */
+  readonly shardCount?: number;
+
+  /** @default InstallMode.PIP */
+  readonly installMode?: InstallMode;
+
+  /** @default '.ash/ash_output' */
+  readonly outputDirectory?: string;
+
+  /** @default - a pinned release */
+  readonly version?: string;
+
+  readonly extra?: string[];
+}
+""",
     "actions/setup/action.yml": """name: setup
 inputs:
   python-version: {default: "3.12"}
@@ -1948,6 +1971,16 @@ CLEAN_SECTIONS = """# Sections read from code
 |-------|------------|
 | `python-version` | `3.12` |
 | `install-ash` | `false` |
+
+<!-- doctest: options of=typescript:src/step.ts:StepProps -->
+| Prop | Type | Default |
+|------|------|---------|
+| `input` | `string` | required |
+| `shardCount` | `number` | `1` |
+| `installMode` | `InstallMode` | `PIP` |
+| `outputDirectory` | `string` | `.ash/ash_output` |
+| `version` | `string` | a pinned release |
+| `extra` | `string[]` | not set |
 
 <!-- doctest: options of=cli.scan -->
 | Option | Effect |
@@ -2234,6 +2267,58 @@ SECTION_DEFECTS = [
         "unmarked table whose Default column has another name",
         "| Input | Defaults to |\n|---|---|\n| `ash-version` | `main` |\n",
         "documents options or keys but names no section",
+        1,
+    ),
+    (
+        "wrong TypeScript default",
+        _table(
+            "typescript:src/step.ts:StepProps",
+            "| Prop | Default |",
+            "| `shardCount` | `2` |",
+        ),
+        "'shardCount' default says `2`, but the default is `1`",
+        4,
+    ),
+    (
+        "wrong enum member by its short name",
+        _table(
+            "typescript:src/step.ts:StepProps",
+            "| Prop | Default |",
+            "| `installMode` | `UVX` |",
+        ),
+        "'installMode' default says `UVX`, but the default is `InstallMode.PIP`",
+        4,
+    ),
+    (
+        "required TypeScript property given a default",
+        _table(
+            "typescript:src/step.ts:StepProps",
+            "| Prop | Default |",
+            "| `input` | `x` |",
+        ),
+        "but the key is required",
+        4,
+    ),
+    (
+        "property the interface lacks",
+        _table(
+            "typescript:src/step.ts:StepProps",
+            "| Prop | Default |",
+            "| `region` | `x` |",
+        ),
+        "'region' is not a key of of=typescript:src/step.ts:StepProps",
+        4,
+    ),
+    (
+        "unknown interface",
+        _table("typescript:src/step.ts:Nope", "| Prop | Default |", "| `x` | `1` |"),
+        "src/step.ts declares no interface Nope",
+        1,
+    ),
+    (
+        "TypeScript marker without an interface",
+        _table("typescript:src/step.ts", "| Prop | Default |", "| `x` | `1` |"),
+        "name a file in the code tree and an interface in it",
         1,
     ),
     (
