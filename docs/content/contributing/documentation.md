@@ -61,7 +61,7 @@ Values with spaces go in double quotes. Unknown modes and keys are errors.
 | Marker | Meaning |
 |--------|---------|
 | `<!-- doctest: run expect-exit=2 -->` | the block must exit with code 2 |
-| `<!-- doctest: run expect-exit=nonzero -->` | the block must fail |
+| `<!-- doctest: run expect-exit=nonzero -->` | the block must fail, with a code other than 126 or 127 (a command not executable or not found) |
 | `<!-- doctest: run expect-exit=any -->` | the exit code is not checked |
 | `<!-- doctest: run timeout=300 -->` | allow 300 seconds instead of 60 |
 | `<!-- doctest: run env="ASH_OFFLINE=YES,LANG=C" -->` | set these variables for this block only |
@@ -86,9 +86,11 @@ The runner treats a page as one session, the way a reader follows a tutorial:
   environment, with that directory on its import path. It cannot change the session,
   except through `save-as` (below).
 - `HOME` is private to the session, `ash` is the one in the project's virtual
-  environment, and the network is unreachable: proxies point at a port that refuses
-  connections, and uv, pip, and npm run offline. A block that needs the network must be
-  `illustrative`.
+  environment, and downloads fail at once: every proxy variable points at a port that
+  refuses connections, and uv, pip, and npm run offline. A block that needs the network
+  must be `illustrative`. This is not a sandbox: a program that ignores the proxy
+  variables can still connect, and blocks run as you, so run the examples only on docs
+  you trust.
 
 This block runs in CI. The default fixture has one finding, so the scan exits with 2:
 

@@ -16,7 +16,8 @@ commands (echo, false, exit) so the whole file runs in a few seconds:
 
 It also pins the session semantics the docs rely on (files, directory and variables
 carry between blocks; env= applies to one block; fixture= and fresh start over) and
-the isolation the job relies on (private HOME, the venv's ash, no network).
+the isolation the job relies on (private HOME, the venv's ash, downloads refused at
+once).
 """
 
 from __future__ import annotations
@@ -59,6 +60,16 @@ def _run(tmp_path: Path, text: str):
 FENCE = "```"
 
 
+def _assert_all_ok(results, count: int) -> None:
+    """Every block passed, and as many ran as the page has: all([]) is true, so a
+    runner that ran nothing would otherwise pass every clean control."""
+    assert len(results) == count, (
+        f"expected {count} blocks to run, got {len(results)}: "
+        + runner.failure_report(results)
+    )
+    assert all(r.ok for r in results), runner.failure_report(results)
+
+
 def test_a_clean_page_passes_and_carries_its_session(tmp_path):
     """Control: files, the directory and variables carry from block to block."""
     results = _run(
@@ -91,7 +102,7 @@ assert Path("../greeting.txt").read_text().strip() == "hello"
 """,
     )
     assert [r.lang for r in results] == ["bash", "console", "python"]
-    assert all(r.ok for r in results), runner.failure_report(results)
+    _assert_all_ok(results, 3)
 
 
 def test_a_failing_command_is_reported_with_its_context(tmp_path):
@@ -183,6 +194,35 @@ raise RuntimeError("planted failure")
     assert "planted failure" in result.report()
 
 
+def test_expect_exit_nonzero_does_not_accept_a_missing_command(tmp_path):
+    """126 and 127 mean the command could not run at all (not executable, not
+    found): a broken example, not the failure the marker says the block shows."""
+    results = _run(
+        tmp_path,
+        f"""<!-- doctest: run expect-exit=nonzero -->
+{FENCE}bash
+false
+{FENCE}
+
+<!-- doctest: run expect-exit=nonzero -->
+{FENCE}bash
+no-such-command-in-the-docs
+{FENCE}
+
+<!-- doctest: run expect-exit=nonzero -->
+{FENCE}bash
+printf 'echo hi\\n' > not-executable.sh
+./not-executable.sh
+{FENCE}
+""",
+    )
+    assert [r.exit_code for r in results] == [1, 127, 126], runner.failure_report(
+        results
+    )
+    assert [r.ok for r in results] == [True, False, False]
+    assert "not found or not executable" in results[1].report()
+
+
 def test_an_illustrative_block_is_not_run(tmp_path):
     results = _run(
         tmp_path,
@@ -217,7 +257,7 @@ test -z "${{ONLY_HERE:-}}"
 {FENCE}
 """,
     )
-    assert all(r.ok for r in results), runner.failure_report(results)
+    _assert_all_ok(results, 2)
 
 
 def test_fixture_and_fresh_start_a_new_session(tmp_path):
@@ -240,7 +280,7 @@ test -z "$(ls -A | grep -v '^.git$')"
 {FENCE}
 """,
     )
-    assert all(r.ok for r in results), runner.failure_report(results)
+    _assert_all_ok(results, 3)
 
 
 def test_the_session_is_isolated_and_offline(tmp_path):
@@ -268,7 +308,7 @@ assert time.monotonic() - started < 5, "the network failed slowly"
 {FENCE}
 """,
     )
-    assert all(r.ok for r in results), runner.failure_report(results)
+    _assert_all_ok(results, 2)
 
 
 def test_fixtures_come_from_the_docs_root(tmp_path):
@@ -281,7 +321,7 @@ def test_fixtures_come_from_the_docs_root(tmp_path):
     scratch.mkdir()
     page = _page(tmp_path, f"{FENCE}bash\ntest -f only-in-the-docs-tree.txt\n{FENCE}\n")
     results = runner.PageRunner(page, scratch, docs_root=docs_root).run()
-    assert all(r.ok for r in results), runner.failure_report(results)
+    _assert_all_ok(results, 1)
 
 
 SAVED_PAGE = f"""# A plugin tutorial
@@ -323,7 +363,7 @@ def test_saved_files_are_there_for_later_blocks(tmp_path):
         "save-as=my_plugins/greeting.py",
         "save-as=.ash/settings.yaml",
     ]
-    assert all(r.ok for r in results), runner.failure_report(results)
+    _assert_all_ok(results, 5)
 
 
 def test_a_later_block_fails_when_the_save_as_is_dropped(tmp_path):

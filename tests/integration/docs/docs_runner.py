@@ -15,13 +15,21 @@ every variable the block exported or assigned (blocks run under ``set -a``, so a
 ``FOO=bar`` is exported too). A python block runs in a fresh interpreter, in the
 session's directory and environment, and changes neither.
 
-Nothing a block does can reach the network or the developer's machine. HOME and the XDG
-directories are private to the session, every proxy variable points at a local port
-that refuses connections, the container clients point at a socket that does not exist,
-and uv, pip and npm are told they are offline, so anything that tries to download fails
-at once instead of after a retry budget. Measured: a
+What a block can reach is narrowed, not sandboxed. HOME and the XDG directories are
+private to the session. Every proxy variable points at a local port that refuses
+connections, so a client that honors them (uv, pip, npm, curl, requests, urllib) fails
+at once instead of after a retry budget; uv, pip and npm are also told they are
+offline, and the container clients point at a socket that does not exist. Measured: a
 default ``ash`` scan of the sample fixture took 134 s with only the proxies set (uv
 retried each tool install) and 12.6 s with UV_OFFLINE added.
+
+Not covered: a program that opens a socket itself, ignoring the proxy variables,
+reaches the network; and every block runs as the invoking user, with that user's
+access to the filesystem outside the session. A network namespace (``unshare -rn``)
+would close the first, but it maps the user to root inside the namespace, which
+changes what the commands under test do, starts with loopback down, and needs the
+AppArmor user-namespace restriction lifted on Ubuntu 24.04 runners. Run the examples
+where a doc's commands are trusted, as CI does.
 """
 
 from __future__ import annotations
@@ -57,6 +65,10 @@ def load_docs_checks():
     return module
 
 
+#: Shell exit codes for a command that could not run: not executable, not found.
+COULD_NOT_RUN = (126, 127)
+
+
 @dataclass
 class BlockResult:
     page: str
@@ -78,7 +90,9 @@ class BlockResult:
         if self.expected == "any":
             return True
         if self.expected == "nonzero":
-            return self.exit_code != 0
+            # 126 and 127: the command could not run at all, which is a broken
+            # example, not the failure the block is meant to show.
+            return self.exit_code not in (0, *COULD_NOT_RUN)
         return self.exit_code == int(self.expected)
 
     def report(self) -> str:
@@ -90,6 +104,11 @@ class BlockResult:
             verdict = self.refused
         elif self.timed_out:
             verdict = f"timed out after {self.seconds:.0f} s"
+        elif self.exit_code in COULD_NOT_RUN:
+            verdict = (
+                f"exit code {self.exit_code}: a command was not found or not "
+                f"executable (expected {self.expected})"
+            )
         else:
             verdict = f"exit code {self.exit_code}, expected {self.expected}"
         return (
