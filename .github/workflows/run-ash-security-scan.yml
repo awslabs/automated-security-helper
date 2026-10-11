@@ -264,6 +264,18 @@ jobs:
       # only on other events. On these two each is downloaded and verified as on a
       # miss; the saves are unchanged (push to the default branch only).
       RESTORE_CACHES: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
+      # WITH CONFIG-REF, THE INSTALLED ASH SKIPS TOOLS IT DOES NOT HAVE
+      #
+      # config-ref is set when the ASH installed here comes from an older commit than
+      # the workflow files (ASH's own required check installs the pull request's base
+      # commit). A pull request that adds support for a tool and asks this job to
+      # install it then runs `ash dependencies install --tool <new tool>` against an
+      # ASH that refuses the name. That ASH has no scanner for the tool, and the base
+      # config cannot enable one, so the scan needs nothing from it: with this set,
+      # `ash dependencies install` names each such tool, skips it and installs the
+      # rest. Job level, so an install step added later gets it without saying so.
+      # Without config-ref it stays unset and an unknown name is refused as before.
+      ASH_DEPENDENCIES_UNKNOWN_TOOLS: ${{ inputs.config-ref != '' && 'skip' || '' }}
     steps:
       # THE ASH REF IS RESOLVED TO ONE COMMIT, ONCE, BEFORE ANYTHING INSTALLS ASH
       #

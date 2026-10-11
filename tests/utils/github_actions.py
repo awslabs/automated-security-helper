@@ -678,6 +678,7 @@ PASS_THROUGH_TOOLS = ("python", "python3")
 #: Variables each stub records, so a test can tell "unset" (None) from "empty".
 WATCHED_ENV = (
     "ASH_CONFIG",
+    "ASH_DEPENDENCIES_UNKNOWN_TOOLS",
     "UV_NO_CONFIG",
     "BUNDLE_GEMFILE",
     "PYTHONPATH",

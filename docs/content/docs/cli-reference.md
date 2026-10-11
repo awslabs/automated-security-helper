@@ -883,6 +883,8 @@ ash dependencies install --plugin-type scanner
 ash dependencies install --bin-path ~/tools/ash-bin
 ```
 
+A `--tool` name that no loaded plugin has is refused with exit 2 and nothing is installed, so a typo cannot report success. With `ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip` (exactly that value), such names are listed as skipped and the known tools are installed; a run that names only unknown tools installs nothing and exits 0. The refusal stands while any plugin failed to load, because the unknown name may be that plugin's. ASH's reusable CI workflow sets the variable when it installs ASH from an older commit than the workflow (`config-ref`), so a workflow can ask for a tool that ASH release does not have yet.
+
 ## Inspect Command
 
 The `inspect` command allows you to analyze ASH outputs and reports.

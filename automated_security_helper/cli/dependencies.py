@@ -4,6 +4,7 @@
 """CLI command for installing dependencies for ASH plugins."""
 
 import logging
+import os
 import platform
 import sys
 from dataclasses import dataclass, field
@@ -66,6 +67,13 @@ EXIT_INSTALL_FAILED = 1
 EXIT_BAD_SELECTION = 2
 # The code every ASH command uses for a configuration that cannot be used.
 EXIT_INVALID_CONFIG = 3
+
+# Set to exactly `skip`, an unknown `--tool` name is named and skipped rather than
+# refused. ASH's own CI sets it for a scan that installs ASH from an older commit than
+# the workflow that asks for the tools: a tool that ASH does not know has no scanner in
+# it either, so the scan needs nothing from that tool. Unset, the refusal stands, which
+# is what catches a typo.
+UNKNOWN_TOOLS_SETTING = "ASH_DEPENDENCIES_UNKNOWN_TOOLS"
 
 # `--tool` names that stopped working when this command began building each plugin
 # from its own config section (#766), mapped to the config key that replaced them.
@@ -432,6 +440,28 @@ def install_dependencies(
             for typed, resolved_name in tool_resolution.items()
             if resolved_name not in available
         ]
+        skip_unknown = os.environ.get(UNKNOWN_TOOLS_SETTING, "").strip() == "skip"
+        if unknown and skip_unknown and not construction_failures:
+            # Named, not silent: the reader sees which requested tools this ASH lacks.
+            # Not when a plugin failed to load: the unknown name could be that plugin's,
+            # and skipping it would skip a tool this ASH does have.
+            console.print(
+                Panel(
+                    f"[yellow]Not known to this ASH, so not installed:[/yellow] "
+                    f"{escape(', '.join(sorted(unknown)))}\n"
+                    f"{UNKNOWN_TOOLS_SETTING}=skip is set. This ASH has no scanner for "
+                    "these tools, so nothing it runs needs them.",
+                    title="Skipped",
+                    expand=False,
+                )
+            )
+            requested_names = [name for name in requested_names if name in available]
+            if not requested_names:
+                print(
+                    "Nothing to install: none of the requested tools is known to this ASH."
+                )
+                raise typer.Exit(EXIT_OK)
+            unknown = []
         if unknown:
             # A plugin that failed to construct has no config, so its declared name is
             # unknowable here -- only its class name is. Rather than claim a match that
