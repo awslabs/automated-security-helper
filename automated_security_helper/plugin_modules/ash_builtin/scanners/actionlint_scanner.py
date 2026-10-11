@@ -56,6 +56,15 @@ Decisions, and why
    Whoever sets it, a program that resolves inside the scanned tree is
    refused. A refused value is logged and the integration stays off.
 
+   Names are looked up only in PATH's absolute entries and ASH's bin directory, and
+   actionlint is handed the absolute path ASH checked; actionlint itself is started
+   by its absolute path too. A relative PATH entry (``.``, ``bin``) is relative to
+   the working directory, which is ASH's when it looks and the scan target when the
+   program runs, so it could name a file the repository committed. With every
+   program it starts given by absolute path, nothing actionlint runs depends on
+   its working directory, which stays the scan target so workflow paths in the
+   findings are relative to it.
+
 3. The config file is always explicit, and it is never the scanned repository's.
    actionlint discovers ``.github/actionlint.yaml`` by walking up to the nearest
    ``.git`` directory, and a config's ``paths`` section can ``ignore`` findings,
@@ -136,6 +145,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
@@ -167,7 +177,7 @@ from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.subprocess_utils import path_independent_dirs
 from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 
 #: The version the severity mapping below was written against.
@@ -268,6 +278,28 @@ def is_workflow_file(relative_path: str, scan_root: Optional[Path] = None) -> bo
         and parts[-2] == "workflows"
         and parts[-1].lower().endswith(_WORKFLOW_SUFFIXES)
     )
+
+
+def find_absolute_executable(name: str) -> Optional[str]:
+    """``name`` as an absolute path, from PATH's absolute entries or ASH's bin dirs.
+
+    A relative PATH entry (``.``, ``bin``) names a directory relative to the
+    working directory: ASH's when it looks, the scan target when the program runs,
+    since actionlint runs from the target and starts shellcheck and pyflakes from
+    there. ``find_executable`` honors such entries and returns the relative path
+    they produce, so this lookup skips them and returns an absolute path: what ASH
+    checked is then the file that runs. None when ``name`` is in none of them.
+    """
+    directories = [entry for entry in os.get_exec_path() if os.path.isabs(entry)]
+    directories += [
+        str(directory)
+        for directory in path_independent_dirs()
+        if Path(directory).is_absolute()
+    ]
+    if not directories:
+        return None
+    found = shutil.which(name, path=os.pathsep.join(directories))
+    return Path(found).absolute().as_posix() if found else None
 
 
 def config_ignore_patterns(config_path: Path) -> List[str]:
@@ -498,6 +530,9 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
     # Integrations already reported as refused, so each is logged once per scan.
     _refused_integrations: Set[str] = PrivateAttr(default_factory=set)
+    # actionlint's absolute path, from validate_plugin_dependencies; see
+    # find_absolute_executable for why it is never looked up by name at run time.
+    _executable: Optional[str] = PrivateAttr(default=None)
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -564,11 +599,13 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         actionlint pipes every ``run:`` script (or ``shell: python`` step) to this
         program, so choosing it is choosing what runs the repository's scripts:
         ``shellcheck: sh`` would execute them. A value from the scanned tree's config
-        is therefore accepted only when it is the flag's own name, looked up on PATH.
-        The operator (``--config-overrides`` or a config file outside the tree) may
-        name another program or an absolute path. Either way, the program must not
-        resolve inside the scanned tree: a relative PATH entry such as ``.``
-        would otherwise find one the repository committed.
+        is therefore accepted only when it is the flag's own name, looked up on
+        PATH's absolute entries (``find_absolute_executable``). The operator
+        (``--config-overrides`` or a config file outside the tree) may name another
+        program or an absolute path. Either way, the program must not resolve
+        inside the scanned tree: an absolute PATH entry inside it would otherwise
+        find one the repository committed. actionlint is always handed an absolute
+        path, so it never looks the program up itself.
 
         Raises:
             _RefusedIntegration: the value is not one this config source may set.
@@ -585,7 +622,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 "--config-overrides or a config file outside the scanned tree"
             )
         if not any(sep and sep in configured for sep in ("/", os.sep, os.altsep)):
-            found = find_executable(configured)
+            found = find_absolute_executable(configured)
             if found is not None and in_scanned_tree(found, root):
                 raise _RefusedIntegration(
                     f"it resolves to {found}, inside the scanned tree"
@@ -622,7 +659,8 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             )
             self._plugin_log(self.dependency_unavailable_reason, level=logging.WARNING)
             return False
-        found = find_executable(self.command or "actionlint")
+        found = find_absolute_executable(self.command or "actionlint")
+        self._executable = found
         if not found:
             ASH_LOGGER.warning(
                 "actionlint executable not found. Install it with "
@@ -828,7 +866,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
 
             integrations = self._integration_executables()
             final_args: List[str] = [
-                self.command or "actionlint",
+                self._executable or self.command or "actionlint",
                 "-no-color",
                 f"-shellcheck={integrations.get('shellcheck') or ''}",
                 f"-pyflakes={integrations.get('pyflakes') or ''}",

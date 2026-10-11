@@ -59,6 +59,7 @@ from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
+from automated_security_helper.utils import subprocess_utils
 
 FIXTURES = Path(__file__).resolve().parents[3] / "test_data" / "scanners" / "actionlint"
 FIXTURE_REPO = FIXTURES / "repo"
@@ -174,7 +175,7 @@ def on_path(monkeypatch):
     """actionlint (and nothing else) is installed."""
     monkeypatch.setattr(
         module,
-        "find_executable",
+        "find_absolute_executable",
         lambda name: FAKE_ACTIONLINT if name == "actionlint" else None,
     )
 
@@ -424,10 +425,12 @@ def test_argv_disables_shellcheck_and_pyflakes_and_passes_workflows_explicitly(
 ):
     """Determinism: the integrations stay off even with shellcheck on PATH.
 
-    ``find_executable`` here answers for shellcheck and pyflakes too, so the only
+    ``find_absolute_executable`` here answers for shellcheck and pyflakes too, so the only
     reason they are absent from the argv is that ASH disabled them.
     """
-    monkeypatch.setattr(module, "find_executable", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        module, "find_absolute_executable", lambda name: f"/usr/bin/{name}"
+    )
     scanner = _scanner(repo)
     stdout = (FIXTURES / "actionlint-1.7.12-default.json").read_text()
     fake = _run(scanner, monkeypatch, stdout, 1)
@@ -436,7 +439,7 @@ def test_argv_disables_shellcheck_and_pyflakes_and_passes_workflows_explicitly(
 
     ((argv, kwargs),) = fake.calls
     separator = argv.index("--")
-    assert argv[0] == "actionlint"
+    assert argv[0] == "/usr/bin/actionlint"
     assert "-shellcheck=" in argv[:separator]
     assert "-pyflakes=" in argv[:separator]
     assert argv[argv.index("-format") + 1] == ACTIONLINT_FORMAT
@@ -454,7 +457,9 @@ def test_argv_disables_shellcheck_and_pyflakes_and_passes_workflows_explicitly(
 
 
 def test_configured_shellcheck_is_passed_by_resolved_path(repo, monkeypatch):
-    monkeypatch.setattr(module, "find_executable", lambda name: f"/opt/bin/{name}")
+    monkeypatch.setattr(
+        module, "find_absolute_executable", lambda name: f"/opt/bin/{name}"
+    )
     scanner = _scanner(repo, shellcheck="shellcheck")
     fake = _run(scanner, monkeypatch, '{"version":"1.7.12","errors":[]}', 0)
 
@@ -487,7 +492,7 @@ def test_configured_pyflakes_path_that_does_not_exist_is_missing(
 
 
 def test_missing_actionlint_is_missing(repo, monkeypatch):
-    monkeypatch.setattr(module, "find_executable", lambda name: None)
+    monkeypatch.setattr(module, "find_absolute_executable", lambda name: None)
     scanner = _scanner(repo)
     fake = _run(scanner, monkeypatch, "", 0)
 
@@ -1021,7 +1026,7 @@ def test_the_scanned_tree_cannot_choose_another_program_by_name(
         looked_up.append(name)
         return FAKE_ACTIONLINT if name == "actionlint" else f"/usr/bin/{name}"
 
-    monkeypatch.setattr(module, "find_executable", find)
+    monkeypatch.setattr(module, "find_absolute_executable", find)
     scanner = _scanner(repo, **{flag: value})
 
     with caplog.at_level(logging.WARNING):
@@ -1071,7 +1076,7 @@ def test_a_name_that_resolves_inside_the_scanned_tree_is_refused(repo, monkeypat
     inside = (repo / "shellcheck").as_posix()
     monkeypatch.setattr(
         module,
-        "find_executable",
+        "find_absolute_executable",
         lambda name: FAKE_ACTIONLINT if name == "actionlint" else inside,
     )
     scanner = _scanner(repo, shellcheck="shellcheck")
@@ -1082,8 +1087,81 @@ def test_a_name_that_resolves_inside_the_scanned_tree_is_refused(repo, monkeypat
     assert inside not in " ".join(argv)
 
 
+def _only_path(monkeypatch, *entries) -> None:
+    """PATH is exactly ``entries``, nothing is cached and ASH's bin dirs are empty."""
+    monkeypatch.setenv("PATH", os.pathsep.join(str(entry) for entry in entries))
+    monkeypatch.setattr(subprocess_utils, "_find_executable_cache", {})
+    monkeypatch.setattr(subprocess_utils, "path_independent_dirs", list)
+    monkeypatch.setattr(module, "path_independent_dirs", list, raising=False)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+@pytest.mark.parametrize("flag", ["shellcheck", "pyflakes"])
+def test_a_relative_path_entry_never_chooses_an_integration(
+    repo, tmp_path, monkeypatch, flag
+):
+    """A relative PATH entry is relative to the working directory: ASH's when it
+    looks, the scan target when actionlint starts the program. So it is skipped,
+    and actionlint is handed the absolute path ASH checked."""
+    elsewhere = tmp_path / "elsewhere"
+    _plant(elsewhere / "bin", flag)
+    _plant(repo / "bin", flag)
+    absolute = _plant(tmp_path / "abs-bin", flag)
+    _plant(tmp_path / "abs-bin", "actionlint")
+    monkeypatch.chdir(elsewhere)
+    _only_path(monkeypatch, "bin", tmp_path / "abs-bin")
+    scanner = _scanner(repo, **{flag: flag})
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert f"-{flag}={absolute.as_posix()}" in argv
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+def test_an_integration_reachable_only_through_a_relative_path_entry_is_missing(
+    repo, tmp_path, monkeypatch
+):
+    elsewhere = tmp_path / "elsewhere"
+    _plant(elsewhere / "bin", "shellcheck")
+    _plant(tmp_path / "abs-bin", "actionlint")
+    monkeypatch.chdir(elsewhere)
+    _only_path(monkeypatch, "bin", tmp_path / "abs-bin")
+    scanner = _scanner(repo, shellcheck="shellcheck")
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert "shellcheck" in scanner.dependency_unavailable_reason
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX shebang scripts")
+def test_actionlint_itself_is_started_by_its_absolute_path(repo, tmp_path, monkeypatch):
+    """actionlint runs from the scan target. Started by a path a relative PATH entry
+    produced, it would be the repository's own ``bin/actionlint``."""
+    elsewhere = tmp_path / "elsewhere"
+    _plant(elsewhere / "bin", "actionlint")
+    marker = repo / "bin" / "actionlint.ran"
+    planted = repo / "bin" / "actionlint"
+    planted.parent.mkdir()
+    # A shell builtin, so the script works with a PATH that has no /usr/bin.
+    planted.write_text(f"#!/bin/sh\n: > '{marker}'\n")
+    planted.chmod(0o755)
+    real = tmp_path / "abs-bin" / "actionlint"
+    real.parent.mkdir()
+    real.write_text(f"#!/bin/sh\necho '{_EMPTY_RUN}'\n")
+    real.chmod(0o755)
+    monkeypatch.chdir(elsewhere)
+    _only_path(monkeypatch, "bin", tmp_path / "abs-bin")
+    scanner = _scanner(repo)
+
+    report = scanner.scan(target=repo, target_type="source")
+
+    assert not marker.exists()
+    assert report.runs[0].invocations[0].executionSuccessful is True
+
+
 def test_the_scanned_tree_may_turn_shellcheck_on_by_its_own_name(repo, monkeypatch):
-    monkeypatch.setattr(module, "find_executable", lambda name: f"/opt/bin/{name}")
+    monkeypatch.setattr(
+        module, "find_absolute_executable", lambda name: f"/opt/bin/{name}"
+    )
     scanner = _scanner(repo, shellcheck="shellcheck", pyflakes="pyflakes")
 
     argv = _argv(scanner, monkeypatch, repo)
@@ -1093,7 +1171,9 @@ def test_the_scanned_tree_may_turn_shellcheck_on_by_its_own_name(repo, monkeypat
 
 
 def test_an_operator_override_may_name_another_program(repo, monkeypatch):
-    monkeypatch.setattr(module, "find_executable", lambda name: f"/opt/bin/{name}")
+    monkeypatch.setattr(
+        module, "find_absolute_executable", lambda name: f"/opt/bin/{name}"
+    )
     scanner = _scanner(
         repo,
         overrides=("scanners.actionlint.options.shellcheck=shellcheck-0.10",),

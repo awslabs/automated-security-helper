@@ -49,7 +49,7 @@ A `.github/actionlint.yaml` or `.github/actionlint.yml` in the scanned repositor
 
 actionlint runs `shellcheck` on `run:` scripts and `pyflakes` on `shell: python` steps when they are on `PATH`, and skips them silently when they are not. Results would then depend on what a host happens to have installed, so ASH disables both by default (`-shellcheck= -pyflakes=`).
 
-To use them, set the option to `shellcheck` or `pyflakes`, which is looked up on `PATH` and in ASH's bin directory. If the configured tool cannot be found or is not executable, the scanner reports `MISSING` rather than running without it. shellcheck and pyflakes findings are LOW severity. Neither is installed in the ASH container image.
+To use them, set the option to `shellcheck` or `pyflakes`, which is looked up in the absolute directories on `PATH` and in ASH's bin directory, and handed to actionlint as an absolute path. If the configured tool cannot be found or is not executable, the scanner reports `MISSING` rather than running without it. shellcheck and pyflakes findings are LOW severity. Neither is installed in the ASH container image.
 
 Each option names the program actionlint pipes every `run:` script to, started from the root of the scanned tree. Set to a shell or an interpreter, that program runs the repository's code. ASH's config usually comes from the repository being scanned (`.ash/.ash.yaml`), so from a config file inside the scanned tree each option accepts only its own name. Another program, or any path, is honored only from `--config-overrides` or a config file outside the scanned tree:
 
@@ -59,6 +59,8 @@ ash scan --config-overrides 'scanners.actionlint.options.shellcheck=/opt/shellch
 ```
 
 Whoever sets it, a program that resolves inside the scanned tree is refused. An operator's relative path is resolved against the source directory and must land outside the tree. A refused value is logged as a warning and actionlint runs with that integration off.
+
+A relative `PATH` entry, such as `.` or `bin`, is never searched, for actionlint itself or for these programs. actionlint runs from the scanned directory, where such an entry could name a program the repository committed, so ASH starts actionlint, and passes it shellcheck and pyflakes, by absolute path only. A tool reachable only through a relative entry is `MISSING`.
 
 ## Severity mapping
 
