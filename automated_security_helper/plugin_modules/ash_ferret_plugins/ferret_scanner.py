@@ -830,9 +830,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         # Show match (tool-specific behavior option)
         if options.show_match:
             self._plugin_log(
-                "show_match is enabled — matched sensitive data (credit cards, SSNs, "
-                "API keys, etc.) will appear in SARIF output and log files. "
-                "Disable this option in production environments.",
+                "show_match is enabled: ferret-scan writes each matched value into "
+                "its own results file under scanners/ferret-scan/ and its log output. "
+                "ASH masks the values in its reports. Disable this option unless "
+                "that directory is protected.",
                 level=logging.WARNING,
             )
             self.args.extra_args.append(ToolExtraArg(key="--show-match", value=None))

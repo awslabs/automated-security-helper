@@ -1650,6 +1650,14 @@
   without masking (by an earlier ASH or another producer) no longer passes its
   values on to the reports and responses rendered from it.
 
+- **ferret-scan's bundled profiles no longer turn on `show_match`.** The
+  `comprehensive`, `json-api`, `debug`, `person-name`, `enhanced-metadata` and
+  `social-media` profiles in the bundled `ferret-config.yaml` set it to `true`, so
+  choosing one of them wrote every matched value into ferret-scan's own results
+  file. All of them now set it to `false`. With `show_match` turned on explicitly,
+  the matched values are still masked in ASH's reports (see above); they remain in
+  ferret-scan's own output under `scanners/ferret-scan/`.
+
 ### Configuration sources
 
 - **`pyproject.toml [tool.ash]` and `ashrc` files are config sources (#313).**
