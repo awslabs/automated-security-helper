@@ -64,7 +64,7 @@ def git_env(tmp_path, monkeypatch) -> Dict[str, Any]:
 
         return _Done()
 
-    monkeypatch.setattr(sd.subprocess, "run", _record)
+    monkeypatch.setattr(sd, "_run_git", _record)
     sd.set_source_git(
         url="https://git.example.invalid/team/repo.git",
         workspace_root=workspace,

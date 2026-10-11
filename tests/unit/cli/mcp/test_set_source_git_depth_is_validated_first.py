@@ -31,7 +31,7 @@ def workspace(tmp_path, monkeypatch) -> Iterator[Path]:
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
     monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", "git.example.invalid")
     monkeypatch.setattr(
-        sd.subprocess, "run", lambda *a, **k: pytest.fail("git ran for a refused depth")
+        sd, "_run_git", lambda *a, **k: pytest.fail("git ran for a refused depth")
     )
     # A session already in the registry has its workspace already; each case
     # starts with none, so a refusal that takes the session is seen.
@@ -69,7 +69,7 @@ def test_a_positive_depth_reaches_git(workspace, monkeypatch) -> None:
         calls.append(list(cmd))
         return _Done()
 
-    monkeypatch.setattr(sd.subprocess, "run", _record)
+    monkeypatch.setattr(sd, "_run_git", _record)
 
     sd.set_source_git(url=URL, depth=3, session_id=SESSION)
 

@@ -150,7 +150,7 @@ class TestSetSourceGit:
             res.stderr = ""
             return res
 
-        with patch.object(sd.subprocess, "run", side_effect=fake_run):
+        with patch.object(sd, "_run_git", side_effect=fake_run):
             target = sd.set_source_git(
                 url="https://example.com/foo.git",
                 workspace_root=tmp_path,
@@ -181,7 +181,7 @@ class TestSetSourceGit:
             res.stdout = ""
             return res
 
-        with patch.object(sd.subprocess, "run", side_effect=fake_run):
+        with patch.object(sd, "_run_git", side_effect=fake_run):
             with pytest.raises(RuntimeError, match="git clone failed"):
                 sd.set_source_git(
                     url="https://bogus/repo.git",
@@ -210,7 +210,7 @@ class TestSetSourceGit:
                 res.returncode = 1
             return res
 
-        with patch.object(sd.subprocess, "run", side_effect=fake_run):
+        with patch.object(sd, "_run_git", side_effect=fake_run):
             with pytest.raises(RuntimeError, match="git checkout"):
                 sd.set_source_git(
                     url="https://example.com/foo.git",
@@ -231,7 +231,7 @@ class TestSetSourceGit:
             res.stderr = ""
             return res
 
-        with patch.object(sd.subprocess, "run", side_effect=fake_run):
+        with patch.object(sd, "_run_git", side_effect=fake_run):
             sd.set_source_git(
                 url="https://example.com/foo.git",
                 ref="v1.2.3",
@@ -255,7 +255,7 @@ class TestSetSourceGit:
         subprocess_utils.clear_find_executable_cache()
         try:
             with (
-                patch.object(sd.subprocess, "run") as run,
+                patch.object(sd, "_run_git") as run,
                 pytest.raises(RuntimeError, match="git was not found on PATH"),
             ):
                 sd.set_source_git(
@@ -354,7 +354,7 @@ class TestGitArgumentInjectionDefenses:
     )
     def test_option_like_url_is_rejected_before_spawning_git(self, tmp_path, bad_url):
         with (
-            patch.object(sd.subprocess, "run") as run,
+            patch.object(sd, "_run_git") as run,
             pytest.raises(ValueError, match="must not begin with"),
         ):
             sd.set_source_git(url=bad_url, workspace_root=tmp_path, session_id=_SESSION)
@@ -364,7 +364,7 @@ class TestGitArgumentInjectionDefenses:
     def test_command_executing_transport_is_rejected(self, tmp_path, bad_url):
         """ext:: is matched case-insensitively; git accepts either casing."""
         with (
-            patch.object(sd.subprocess, "run") as run,
+            patch.object(sd, "_run_git") as run,
             pytest.raises(ValueError, match="transport"),
         ):
             sd.set_source_git(url=bad_url, workspace_root=tmp_path, session_id=_SESSION)
@@ -373,7 +373,7 @@ class TestGitArgumentInjectionDefenses:
     @pytest.mark.parametrize("bad_ref", ["--upload-pack=touch /tmp/pwned", "-x"])
     def test_option_like_ref_is_rejected_before_spawning_git(self, tmp_path, bad_ref):
         with (
-            patch.object(sd.subprocess, "run") as run,
+            patch.object(sd, "_run_git") as run,
             pytest.raises(ValueError, match="must not begin with"),
         ):
             sd.set_source_git(
@@ -387,7 +387,7 @@ class TestGitArgumentInjectionDefenses:
     def test_rejection_leaves_no_session_directory_behind(self, tmp_path):
         """Validation runs before any mkdir, so a rejected call is inert."""
         with (
-            patch.object(sd.subprocess, "run") as run,
+            patch.object(sd, "_run_git") as run,
             pytest.raises(ValueError),
         ):
             sd.set_source_git(

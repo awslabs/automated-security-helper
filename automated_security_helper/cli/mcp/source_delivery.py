@@ -58,10 +58,11 @@ import inspect
 import os
 import re
 import shutil
+import signal
 import subprocess  # nosec B404 - git is invoked as a subprocess; see _validate_clone_url
 import zipfile
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, Optional, TypeVar, cast
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
 
 from automated_security_helper.cli.mcp.session_identity import (
     UNIDENTIFIED_SESSION_ID,
@@ -342,6 +343,79 @@ _GIT_CONFIG = (
     "http.followRedirects=false",
 )
 
+#: The program a delivery runs as git. A tuple so a test can name a stand-in.
+_GIT_ARGV: Tuple[str, ...] = ("git",)
+
+#: Seconds each git command of a delivery (the clone, and for a ref the fetch
+#: and the checkout) may run. A command still running then is stopped together
+#: with every process it started, and the delivery fails with
+#: :class:`GitTimeoutError`.
+GIT_TIMEOUT_SECONDS = 600
+
+#: ``error_type`` the MCP tool returns for :class:`GitTimeoutError`.
+CLONE_TIMED_OUT = "clone_timed_out"
+
+
+class GitTimeoutError(RuntimeError):
+    """A git command of a delivery ran past ``GIT_TIMEOUT_SECONDS`` and was stopped."""
+
+
+def _stop_process_group(process: "subprocess.Popen[str]") -> None:
+    """Kill ``process`` and every process in the group it leads."""
+
+    if os.name == "nt":
+        with contextlib.suppress(OSError, ValueError):
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+        with contextlib.suppress(OSError):
+            process.kill()
+        return
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(process.pid, signal.SIGKILL)
+
+
+def _run_git(cmd: List[str], *, env: Dict[str, str]) -> subprocess.CompletedProcess:
+    """Run one git command of a delivery, for at most ``GIT_TIMEOUT_SECONDS``.
+
+    git runs in a process group of its own, with no stdin, so that on expiry the
+    helpers it started (ssh, ``git-remote-https``) are stopped with it.
+
+    Raises:
+        GitTimeoutError: when the command runs past the timeout.
+    """
+
+    group: Dict[str, Any] = (
+        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        if os.name == "nt"
+        else {"start_new_session": True}
+    )
+    process = subprocess.Popen(  # nosec B603 - list-form argv, git from _GIT_ARGV, url and ref validated before any call; see set_source_git
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        **group,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=GIT_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        _stop_process_group(process)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.communicate(timeout=10)
+        subcommand = next(
+            (part for part in cmd if part in ("clone", "fetch", "checkout")), "command"
+        )
+        raise GitTimeoutError(
+            f"git {subcommand} did not finish within {GIT_TIMEOUT_SECONDS} seconds and "
+            f"was stopped"
+        ) from None
+    except BaseException:
+        _stop_process_group(process)
+        process.wait()
+        raise
+    return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+
 
 def _git_environment(home: Path) -> Dict[str, str]:
     """The environment git runs with for a delivery.
@@ -559,18 +633,19 @@ def local_clone_path(url: str) -> Optional[Path]:
 
 
 def _git_executable() -> str:
-    """The git to clone with, as an absolute path.
+    """The git to clone with, as an absolute path: ``_GIT_ARGV``'s program.
 
     Not the bare name: on Windows a program started by name is looked for in the
     working directory before PATH, and ``find_executable`` does not answer from the
-    working directory.
+    working directory. A program ``_GIT_ARGV`` names by absolute path is used as is.
 
     Raises:
         RuntimeError: git was not found, so nothing is run.
     """
     from automated_security_helper.utils.subprocess_utils import find_executable
 
-    git = find_executable("git")
+    program = _GIT_ARGV[0]
+    git = program if os.path.isabs(program) else find_executable(program)
     if git is None:
         raise RuntimeError(
             "git was not found on PATH, so the repository cannot be cloned"
@@ -667,9 +742,37 @@ def _clone_into_session(
     _ensure_dir(target)
 
     env = _git_environment(session_dir)
+    try:
+        _clone(url, ref, git=git, depth=depth, target=target, env=env)
+    except GitTimeoutError:
+        shutil.rmtree(target, ignore_errors=True)
+        raise
 
+    _set_session_source_dir(session_id, target)
+    return target
+
+
+def _clone(
+    url: str,
+    ref: Optional[str],
+    *,
+    git: str,
+    depth: int,
+    target: Path,
+    env: Dict[str, str],
+) -> None:
+    """Run the clone, and for a ref the fetch and checkout, into ``target``.
+
+    ``git`` is ``_git_executable()``'s answer; the rest of ``_GIT_ARGV`` follows it.
+
+    Raises:
+        RuntimeError: when the clone or the checkout fails; ``target`` is removed.
+        GitTimeoutError: when a command runs past ``GIT_TIMEOUT_SECONDS``.
+    """
+
+    argv = [git, *_GIT_ARGV[1:]]
     cmd = [
-        git,
+        *argv,
         *_GIT_CONFIG,
         "clone",
         "--depth",
@@ -680,24 +783,22 @@ def _clone_into_session(
         url,
         str(target),
     ]
-    result = subprocess.run(  # nosec B603 - list-form argv, git resolved by _git_executable, url validated by _validate_clone_url and fenced behind "--"
-        cmd,
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
-    )
+    result = _run_git(cmd, env=env)
     if result.returncode != 0:
         shutil.rmtree(target, ignore_errors=True)
         raise RuntimeError(
             f"git clone failed (exit {result.returncode}): {result.stderr.strip() or result.stdout.strip()}"
         )
+    if not ref:
+        return
 
-    if ref:
-        # ``--depth 1`` may not have fetched the requested ref. Fetch it
-        # explicitly before checking out so non-default refs work reliably.
-        fetch_cmd = [
-            git,
+    # ``--depth 1`` may not have fetched the requested ref. Fetch it explicitly
+    # before checking out so non-default refs work reliably. Not all refs need it
+    # (a tag already in the initial clone), so a failed fetch is left to the
+    # checkout to diagnose.
+    _run_git(
+        [
+            *argv,
             *_GIT_CONFIG,
             "-C",
             str(target),
@@ -706,37 +807,19 @@ def _clone_into_session(
             str(depth),
             "origin",
             ref,
-        ]
-        fetch_res = subprocess.run(  # nosec B603 - list-form argv, git resolved by _git_executable, ref validated by _reject_option_like
-            fetch_cmd, capture_output=True, text=True, env=env, check=False
+        ],
+        env=env,
+    )
+    checkout = _run_git(
+        [*argv, *_GIT_CONFIG, "-C", str(target), "checkout", "--detach", ref],
+        env=env,
+    )
+    if checkout.returncode != 0:
+        shutil.rmtree(target, ignore_errors=True)
+        raise RuntimeError(
+            f"git checkout {ref!r} failed (exit {checkout.returncode}): "
+            f"{checkout.stderr.strip() or checkout.stdout.strip()}"
         )
-        if fetch_res.returncode != 0:
-            # Not all refs need an explicit fetch (e.g. a tag already in the
-            # initial clone). Don't fail here; let checkout produce the
-            # diagnostic.
-            pass
-
-        checkout_cmd = [
-            git,
-            *_GIT_CONFIG,
-            "-C",
-            str(target),
-            "checkout",
-            "--detach",
-            ref,
-        ]
-        co_res = subprocess.run(  # nosec B603 - list-form argv, git resolved by _git_executable, ref validated by _reject_option_like
-            checkout_cmd, capture_output=True, text=True, env=env, check=False
-        )
-        if co_res.returncode != 0:
-            shutil.rmtree(target, ignore_errors=True)
-            raise RuntimeError(
-                f"git checkout {ref!r} failed (exit {co_res.returncode}): "
-                f"{co_res.stderr.strip() or co_res.stdout.strip()}"
-            )
-
-    _set_session_source_dir(session_id, target)
-    return target
 
 
 # ---------------------------------------------------------------------------

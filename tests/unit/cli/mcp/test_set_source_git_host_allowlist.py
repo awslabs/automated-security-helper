@@ -44,7 +44,7 @@ def git(monkeypatch) -> List[Dict[str, Any]]:
 
         return _Done()
 
-    monkeypatch.setattr(sd.subprocess, "run", _run)
+    monkeypatch.setattr(sd, "_run_git", _run)
     return calls
 
 

@@ -105,7 +105,7 @@ def test_a_clone_is_refused_while_the_sessions_scan_runs(
     delivered, scan_running, monkeypatch
 ) -> None:
     monkeypatch.setattr(
-        sd.subprocess, "run", lambda *a, **k: pytest.fail("git ran during the scan")
+        sd, "_run_git", lambda *a, **k: pytest.fail("git ran during the scan")
     )
 
     result = mcp_tools.mcp_set_source_git(

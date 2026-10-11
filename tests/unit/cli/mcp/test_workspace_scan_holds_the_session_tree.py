@@ -54,7 +54,7 @@ def _environment(tmp_path, monkeypatch):
         scan_registry_module, "_scan_registry", scan_registry_module.ScanRegistry()
     )
     monkeypatch.setattr(
-        sd.subprocess, "run", lambda *a, **k: pytest.fail("git ran during the scan")
+        sd, "_run_git", lambda *a, **k: pytest.fail("git ran during the scan")
     )
     reset_default_registry_for_tests()
     profile_registry.clear_session_state()

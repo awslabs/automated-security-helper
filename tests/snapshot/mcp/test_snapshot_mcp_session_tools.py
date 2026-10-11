@@ -93,7 +93,7 @@ def fake_git(monkeypatch):
             cmd, behavior["returncode"], "", behavior["stderr"]
         )
 
-    monkeypatch.setattr(source_delivery.subprocess, "run", fake_run)
+    monkeypatch.setattr(source_delivery, "_run_git", fake_run)
     behavior["calls"] = calls
     return behavior
 

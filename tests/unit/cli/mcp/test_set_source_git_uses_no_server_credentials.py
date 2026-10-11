@@ -78,7 +78,7 @@ PLANTED_ENV = {
 
 
 class GitRecorder:
-    """Stands in for ``subprocess.run`` and records each git invocation."""
+    """Stands in for ``source_delivery._run_git`` and records each git invocation."""
 
     def __init__(self) -> None:
         self.calls: List[Dict[str, Any]] = []
@@ -104,7 +104,7 @@ class GitRecorder:
 @pytest.fixture
 def git(monkeypatch) -> GitRecorder:
     recorder = GitRecorder()
-    monkeypatch.setattr(sd.subprocess, "run", recorder)
+    monkeypatch.setattr(sd, "_run_git", recorder)
     return recorder
 
 

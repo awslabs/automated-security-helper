@@ -1978,6 +1978,8 @@ def mcp_set_source_git(
     from automated_security_helper.cli.mcp.source_delivery import (
         ASH_MCP_GIT_ALLOWED_HOSTS_ENV,
         SOURCE_DELIVERY_BUSY,
+        CLONE_TIMED_OUT,
+        GitTimeoutError,
         SourceDeliveryBusyError,
         _refuse_ssh_key_id,
         _validate_clone_url,
@@ -2047,6 +2049,8 @@ def mcp_set_source_git(
         )
     except SourceDeliveryBusyError as e:
         return {"success": False, "error": str(e), "error_type": SOURCE_DELIVERY_BUSY}
+    except GitTimeoutError as e:
+        return {"success": False, "error": str(e), "error_type": CLONE_TIMED_OUT}
     except (RuntimeError, ValueError) as e:
         return {"success": False, "error": str(e)}
 

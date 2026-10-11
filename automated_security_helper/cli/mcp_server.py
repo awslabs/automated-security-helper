@@ -1562,6 +1562,10 @@ async def set_source_git(
     Refused while a scan of this session runs (error_type source_delivery_busy),
     because the clone replaces the tree the scan is reading.
 
+    Each git command (the clone, and for a ref the fetch and the checkout) has
+    10 minutes. One that runs longer is stopped, nothing is kept, and the call
+    fails with error_type clone_timed_out.
+
     Returns:
         Dict with success and source_dir, or success=False and error.
     """
