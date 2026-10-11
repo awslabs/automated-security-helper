@@ -787,3 +787,38 @@ def test_a_failed_rebind_leaves_the_previous_binding_and_its_trusted_base(
     assert result["success"] is False
     assert {path: path.read_text("utf-8") for path in before} == before
     assert resolve_session_config_path(SESSION) == bound
+
+
+def test_session_config_was_patched_is_decided_by_location(_server) -> None:
+    """True for a patched binding's file, as named or through a link, and nothing else.
+
+    Decided from where the file is, not from the session state, so the answer
+    holds after the state is cleared, and agrees with config_is_client_supplied
+    for a session's profiles.
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        session_config_was_patched,
+    )
+
+    _register(
+        _server, {"project_name": "operator", "global_settings": _policy(["/**"])}
+    )
+    unpatched = _bind("unpatched")
+    patched = _bind(
+        SESSION, patch_ops=[{"op": "replace", "path": "/project_name", "value": "x"}]
+    )
+    link = _server["tmp"] / "elsewhere" / "ash.yaml"
+    link.parent.mkdir()
+    link.symlink_to(patched)
+    arbitrary = _server["operator"] / "op.yaml"
+
+    clear_session_state()
+
+    assert session_config_was_patched(patched)
+    assert session_config_was_patched(Path(patched))
+    assert session_config_was_patched(link)
+    assert not session_config_was_patched(unpatched)
+    assert not session_config_was_patched(_operator_copy(SESSION))
+    assert not session_config_was_patched(arbitrary)
+    for path in (patched, unpatched):
+        assert session_config_was_patched(path) == config_is_client_supplied(path)

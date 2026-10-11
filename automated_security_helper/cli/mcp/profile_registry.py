@@ -22,10 +22,11 @@ prefer a session-bound config over an explicit ``config_path``.
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 import yaml
 
@@ -462,6 +463,40 @@ def resolve_session_config_path(session_id: Optional[str] = None) -> Optional[st
     if recorded is None:
         return None
     return recorded if Path(recorded).is_file() else None
+
+
+def session_config_was_patched(config_path: Union[str, Path]) -> bool:
+    """Whether ``config_path`` is a session's profile after a client's patch.
+
+    True for a file in a session's ``client-config/`` directory under the MCP
+    workspace root, where ``materialize_session_binding`` writes a profile after
+    ``patch_ops`` or ``override_yaml``. False for the registered profile in
+    ``config/`` and for any path outside a session's ``client-config/``.
+
+    Decided by where the file is, not by the recorded session state, so the
+    answer is the same after the state is cleared, and it agrees with
+    ``sandbox.config_is_client_supplied`` for a session's profiles. Judged as
+    named and as resolved, as that function is: a link to a patched profile
+    counts, wherever the link is. The unit is the file: a profile any client
+    patch touched is the client's as a whole.
+    """
+    from automated_security_helper.cli.mcp.sandbox import (
+        CLIENT_CONFIG_DIR_NAME,
+        _parts_below,
+        shared_workspace_root,
+    )
+
+    shared = shared_workspace_root()
+    if shared is None:
+        return False
+    for candidate in (
+        Path(os.path.abspath(config_path)),
+        Path(config_path).resolve(),
+    ):
+        parts = _parts_below(candidate, shared)
+        if parts is not None and len(parts) >= 3 and parts[1] == CLIENT_CONFIG_DIR_NAME:
+            return True
+    return False
 
 
 def resolve_session_trusted_config_path(
