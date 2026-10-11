@@ -231,6 +231,16 @@ uv run python scripts/version_template_manager.py list       # the templates it 
 uv run python scripts/version_template_manager.py generate   # render them over their pages
 ```
 
+The docs site renders these templates as well, through the mkdocs hook
+`docs/hooks/install_refs.py`. When it builds a release's docs it renders them with that
+release's version, which gives the committed page. When it builds the `main` version it
+renders them with `main`: `v{{VERSION}}` becomes `main`, so `@v{{VERSION}}` becomes
+`@main`, `git clone --branch v{{VERSION}}` becomes `git clone --branch main` and
+`rev: v{{VERSION}}` becomes `rev: main`; `refs/tags/v{{VERSION}}` becomes `refs/heads/main`;
+and a bare `{{VERSION}}` becomes `main`. So write every sentence around a placeholder to
+read correctly with either a release or `main` in its place. Any other build, such as
+`mkdocs serve`, shows the committed pages.
+
 Edit the template, not the rendered page: `generate` overwrites the page, so an edit made
 only to the page is lost at the next release. `tests/unit/test_version_template_round_trip.py`
 renders every template with the current version on each pull request and fails when the

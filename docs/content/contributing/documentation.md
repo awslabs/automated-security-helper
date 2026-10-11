@@ -377,7 +377,10 @@ version is a directory of the `gh-pages` branch, and `versions.json` at the root
 branch lists them for the version selector in the site header.
 
 - Every push to `main` publishes the version `main`, titled "main (unreleased)". Its
-  pages say that they describe unreleased code, and link to the latest release.
+  pages say that they describe unreleased code, and link to the latest release. Its
+  [version-pinned pages](releases.md#version-pinned-pages) are built from their
+  templates with `main` for the version, so their install commands install `main`
+  (`@main`, `git clone --branch main`, `rev: main`), and the notice says so.
 - Every release tag `vX.Y.Z` publishes the version `X.Y.Z` (see
   [Releases and versions](releases.md#the-documentation-site)). The newest release also
   gets the `latest` alias. `latest/` is a full copy of it rather than a redirect, and
@@ -435,6 +438,10 @@ of the branch: a stylesheet, a sitemap, a page no version has, and an old page f
 - every page of a release carries the outdated notice, every page of `main` carries the
   unreleased one, and no page carries the other;
 - `latest/` is a copy of 0.0.1, and the other versions name `latest/` as canonical;
+- the version-pinned pages of each release pin that release and no other, and those of
+  `main` pin no release and install `@main`. The committed pages pin the current
+  version, which is neither 0.0.1 nor 0.0.0, so this fails unless every build rendered
+  the pages from their templates;
 - the root redirects every page of `latest/`, the old page redirects to its place under
   `latest/`, and the stand-ins are gone.
 
@@ -442,7 +449,8 @@ It deletes the branch afterwards and never pushes. It prints how many versions, 
 and redirects it checked. `tests/unit/test_docs_versions.py` plants each defect the
 check exists for (a missing setting in `mkdocs.yml`, a template without the notices,
 aliases that are not copies, a root left unversioned, an older release that takes
-`latest`) on a small site, and requires the check to report it.
+`latest`, pinned pages left as committed) on a small site, and requires the check to
+report it.
 
 ## What a failure means
 
