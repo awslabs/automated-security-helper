@@ -104,7 +104,7 @@ Each object in the `findings` array has these fields:
 | `cve_id` | string or null | CVE identifier, if applicable |
 | `cwe_id` | string or null | CWE identifier, if applicable |
 | `fix_available` | boolean or null | Whether a known fix exists |
-| `is_suppressed` | boolean | `true` if the finding was suppressed via configuration or inline annotation |
+| `is_suppressed` | boolean | `true` if the finding was suppressed via configuration or inline annotation, including by an entry an MCP client's config supplied (see [SARIF](#sarif)) |
 | `suppression_kind` | string or null | `"inSource"` or `"external"`, depending on how it was suppressed |
 | `suppression_justification` | string or null | Reason text provided with the suppression |
 | `detected_at` | string or null | ISO 8601 timestamp of detection |
@@ -224,6 +224,28 @@ reporters:
 ```
 
 **Output file:** `reports/ash.sarif`
+
+### Suppressions from an MCP client's config
+
+When the suppression, ignore path or scanner exclusion that hid a finding came from a
+config an MCP client delivered, the finding's SARIF suppression is marked: its
+`justification` starts with `(ASH, client-supplied config)` and names the entry, its
+`kind` is `inSource` for a suppression entry and `external` for an ignore path or a
+scanner exclusion, and it carries `properties.clientSupplied: true`:
+
+```json
+"suppressions": [
+  {
+    "kind": "external",
+    "justification": "(ASH, client-supplied config) Ignoring finding under ignore path 'vendor/**' with reason: third-party code",
+    "properties": {"clientSupplied": true}
+  }
+]
+```
+
+The flat-json and CSV reports show such a finding with `is_suppressed: true` and that
+justification in `suppression_justification`. See
+[Suppressions an MCP client's config supplied](suppressions.md#suppressions-an-mcp-clients-config-supplied).
 
 ---
 

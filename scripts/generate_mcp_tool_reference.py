@@ -160,6 +160,32 @@ TOOL_NOTES: dict[str, dict] = {
                 "`is_complete` stays `False` for cancelled scans. Always check `status` "
                 "independently. (See `get_scan_progress` below.)"
             ),
+            (
+                "**A refused config keeps its own `error_type`.** The scan does not start, "
+                "and the response is `success: false` with one of these `error_type` values "
+                "and the reason in `error`:"
+            ),
+            (
+                "- `config_input_not_permitted`: `config_path`, or a base its `extends` "
+                "chain names, is outside the directories this session may read a config from.\n"
+                "- `config_field_denied`: a config file an MCP client delivered or named "
+                "sets a field the session's runtime-override policy denies. `error` names "
+                "each field and why.\n"
+                "- `config_policy_unreadable`: that policy cannot be established, for "
+                "example because the profile the session bound is no longer registered. "
+                "`error` starts with `A config an MCP client delivered cannot be checked:`.\n"
+                "- `config_env_not_resolved`: such a file uses `!ENV`. `error` names the "
+                "file and the line or key."
+            ),
+            (
+                "The target and source checks have their own `error_type` values too "
+                "(`scan_target_not_permitted`, `output_dir_not_permitted`, "
+                "`no_source_delivered`, `session_source_mismatch`, "
+                "`delivered_source_missing`, `invalid_session_id`). Any other reason the "
+                "scan could not be started returns `error_type: scan_start_failure`, and an "
+                "unexpected error returns the exception's class name. Branch on "
+                "`error_type`, not on the text of `error`."
+            ),
         ],
     },
     "get_scan_progress": {
@@ -328,6 +354,55 @@ TOOL_NOTES: dict[str, dict] = {
             },
             "depth": {"notes": "Clone depth; `0` for a full clone"},
         },
+        "caveats": [
+            (
+                "Refused while a scan of this session is running, because the clone "
+                "would replace the tree and config files that scan is reading. The "
+                "response is `success: false` with `error` set to `a scan of this session "
+                "is running; deliver the source after it finishes`, and no `error_type`. "
+                "Deliver the source again once `get_scan_progress` reports a terminal "
+                "status."
+            ),
+        ],
+    },
+    "set_source_zip_finalize": {
+        "caveats": [
+            (
+                "Refused while a scan of this session is running, for the same reason as "
+                "`set_source_git`: `success: false`, `error_type: SourceDeliveryBusyError`, "
+                "and `error` set to `Error finalizing source upload: a scan of this session "
+                "is running; deliver the source after it finishes`. "
+                "`set_source_zip_chunk` is not refused, so the chunks can be sent while the "
+                "scan runs and the upload finalized after it ends."
+            ),
+        ],
+    },
+    "get_config": {
+        "caveats": [
+            (
+                "A config this session may not read, or one a client delivered that the "
+                "server refuses, returns `success: false` with `error_type` "
+                "`config_input_not_permitted`, `config_field_denied`, "
+                "`config_policy_unreadable` or `config_env_not_resolved`, as `run_ash_scan` "
+                "does for the same file."
+            ),
+        ],
+    },
+    "validate_config": {
+        "caveats": [
+            (
+                "Each error is `{field, message, type}`. Besides schema and parse errors, "
+                "`type` can be `config_input_not_permitted` (a `config_path` this session "
+                "may not read), `config_env_not_resolved` (a client's file that uses "
+                "`!ENV`), `config_policy_unreadable` (the session's runtime-override policy "
+                "cannot be established), or `denied_by_runtime_policy`: a field that policy "
+                "denies, named in `field`, with the message `<field> may not be set by a "
+                "config an MCP client delivers: <reason>`. A `config_path` is checked "
+                "against the policy unless it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` "
+                "names or in the session's own `config/` directory, and `config_content` "
+                "only when the caller is remote: on stdio the caller started the server."
+            ),
+        ],
     },
     "list_scanners": {
         "no_params_sentence": (

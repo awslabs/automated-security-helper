@@ -65,6 +65,31 @@ export ASH_BEDROCK_MAX_TOKENS="3000"
 export ASH_BEDROCK_TEMPERATURE="0.2"
 ```
 
+### Output files
+
+With `output_markdown` on (the default), the reporter writes its summary to
+`output_file` (default `ash.bedrock.summary.md`), and the executive summary and
+technical analysis to `output_executive_file` and `output_technical_file` (defaults
+`bedrock-executive.md` and `bedrock-technical.md`), in the reports directory. Each must
+be a plain file name. A value with a directory in it, or one that resolves outside the
+reports directory, such as `../summary.md`, is refused with a warning naming it, and
+that file is not written.
+
+### Where these options can be set
+
+`aws_region`, `aws_profile`, `model_id`, `output_file`, `output_executive_file` and
+`output_technical_file` choose where findings are sent or written and which
+credentials send them, so they are the operator's. They take effect only from the
+defaults (`AWS_REGION`, `AWS_DEFAULT_REGION`, `AWS_PROFILE` and `ASH_BEDROCK_MODEL_ID`),
+`--config-overrides`, or a config file outside the scanned tree. A config file inside
+the scanned tree, or one an MCP client delivered, cannot set them: from the tree they
+are ignored with a warning, and under the MCP server they are default `denied_paths`
+entries, so a delivered config that changes one is refused.
+
+The reporter is in the `ash_aws_plugins` package, which only the operator can load,
+with `--ash-plugin-modules`, `ASH_PLUGIN_MODULES` or the operator's own config, never
+a repository's. See [Loading the plugins](index.md#loading-the-plugins).
+
 ## Prerequisites
 
 ### Amazon Bedrock Setup

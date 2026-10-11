@@ -347,8 +347,11 @@ the client's config hid:
 - The flat-json and CSV reports show the finding with `is_suppressed: true` and
   that justification in `suppression_justification`, and the GitLab SAST report
   includes it in the finding's solution.
-- Like any suppressed finding, it does not count toward `fail_on_findings`, and
-  `--ignore-suppressions` turns it back into an ordinary finding.
+- Like any suppressed finding, it does not count toward `fail_on_findings`.
+  `--ignore-suppressions` turns it back into an ordinary, unmarked finding, whether
+  a suppression entry, an ignore path or a scanner exclusion hid it: the files under
+  a client-supplied ignore path or exclusion were scanned, and the flag skips the
+  step that suppresses and marks their findings.
 
 ## Temporarily Disabling Suppressions
 
@@ -364,7 +367,7 @@ This is useful when you want to:
 - Get a complete view of all security findings in your codebase
 - Perform a comprehensive security review
 
-When this flag is used, ASH will process all findings as if no suppressions were defined, but will still respect the `ignore_paths` settings.
+When this flag is used, ASH will process all findings as if no suppressions were defined, but will still respect the `ignore_paths` settings. An ignore path or scanner exclusion an MCP client's config supplied is the exception: its files were scanned, so their findings are reported as ordinary findings too (see [Suppressions an MCP client's config supplied](#suppressions-an-mcp-clients-config-supplied)).
 
 ## Expiring Suppressions
 

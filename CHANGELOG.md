@@ -170,7 +170,8 @@
   runs, and each finding of that scanner the entry would have left out is
   reported suppressed and marked client-supplied, like a finding under a
   client-supplied ignore path. syft lists every component and marks the ones an
-  entry would have dropped. A `scanners.trivy-repo.options.ignore_file` from a
+  entry would have dropped with an `ash:clientSuppliedExclusion` property. A
+  `scanners.trivy-repo.options.ignore_file` from a
   delivered config is not passed to trivy; the IDs in it are applied the same
   way when the file is a regular file inside the scanned tree, read without
   following a link. The operator's own entries apply as before. The scanner
@@ -238,8 +239,8 @@
   - Such a file can no longer add `automated_security_helper.plugin_modules.ash_aws_plugins`
     (or a module inside it) to `ash_plugin_modules`. Its reporters are enabled by
     default and send findings to AWS with the operator's credentials, so only
-    `--ash-plugin-modules`, `--config-overrides` or a config file outside the tree
-    can add it.
+    `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`, `--config-overrides` or a config
+    file outside the tree can add it.
   - The same applies to `automated_security_helper.plugin_modules.ash_snyk_plugins`
     (or a module inside it). Its Snyk Code scanner is enabled by default and sends
     the scanned source to Snyk with the operator's Snyk token, so only
@@ -305,7 +306,8 @@
     manifest are written only when the resolved file is directly inside the
     reports directory, and a symlink at the file's name is replaced rather than
     written through. A file that cannot be written is logged and does not stop
-    the reporter's main report or the other reporters. The Bedrock summary
+    the reporter's main report or the other reporters; the S3 reporter's receipt
+    then has `local_copy: null`. The Bedrock summary
     reporter's `output_file`, `output_executive_file` and `output_technical_file`
     are file names in the reports directory: a path there is refused with a
     warning, and that file is not written.
@@ -317,7 +319,10 @@
   `ASH_MCP_ALLOWED_CONFIG_ROOTS` names. So does a `--config` or `ASH_CONFIG`
   naming a file under the MCP workspace root on the CLI, while scanning any
   directory, and the runtime-override policy is never read from such an
-  `ASH_CONFIG`: the built-in defaults are the trusted config instead. The workspace tools' `config_overrides` are checked against the session config's
+  `ASH_CONFIG`: the built-in defaults are the trusted config instead. Such a file
+  is also checked against that policy as a delivered config is, so on the CLI one
+  that changes a denied field, such as `fail_on_findings`, stops the run with
+  exit 3. The workspace tools' `config_overrides` are checked against the session config's
   `runtime_overrides` allowlist, as `select_profile`'s `patch_ops` and
   `override_yaml` are, and are refused while runtime overrides are off (the
   default). Each override is checked by the key it names, so one whose value the
@@ -799,6 +804,16 @@
   With the gate off (`fail_on_incomplete_scanners: false`), a scan whose scanners
   did not run is still `completed`, as its exit code of 0 says, but it now reports
   `coverage_complete: false` and names those scanners.
+
+- **`run_ash_scan` reports a refused config with the refusal's own `error_type`.**
+  A config the server refuses before the scan starts returns `success: false` with
+  `error_type` `config_input_not_permitted`, `config_field_denied`,
+  `config_policy_unreadable` or `config_env_not_resolved`, and the reason in
+  `error`, the same values `get_config` returns for that file. Before, a refusal
+  found while starting the scan came back as `scan_start_failure` with the reason
+  only in the text of `error`. A client that branches on `scan_start_failure` gets
+  these values instead; `scan_start_failure` remains for every other reason a scan
+  could not be started.
 
 - **A scan against a content database past its declared age bound now exits 1 by
   default, online and offline. An air-gapped image stops passing once its database

@@ -21,6 +21,53 @@ AWS plugins provide:
 | **[CloudWatch Logs Reporter](cloudwatch-logs-reporter.md)** | Real-time logging            | Structured logging, metric filters, alarms                    | Real-time monitoring, automated alerting              |
 | **[S3 Reporter](s3-reporter.md)**                           | Cloud storage for reports    | Multiple formats, lifecycle management, analytics integration | Long-term archival, data analytics                    |
 
+## Loading the plugins
+
+ASH loads only its built-in plugins by default. The four AWS reporters are in the
+`automated_security_helper.plugin_modules.ash_aws_plugins` package, and once it is
+loaded they are enabled and send findings to AWS with the credentials of whoever runs
+ASH. So only the operator running ASH can load it, in one of these ways:
+
+- `--ash-plugin-modules automated_security_helper.plugin_modules.ash_aws_plugins`
+- the `ASH_PLUGIN_MODULES` environment variable, set to the same module name
+- `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_aws_plugins"]'`
+- `ash_plugin_modules` in a config file outside the scanned tree, passed with
+  `--config`
+
+A repository's own config cannot load it. An `ash_plugin_modules` entry that names
+the package, or a module inside it, in a config file inside the scanned tree (such as
+the repository's `.ash/.ash.yaml`) is ignored with a warning naming the entry.
+
+Under the MCP server, list the package in `ash_plugin_modules` of a profile registered
+with `ash mcp --profile NAME=path/to/ash.yaml`; scans in a session bound to that
+profile with `select_profile` load it. A config an MCP client delivered cannot add it.
+
+## Settings only the operator can set
+
+These reporter options choose where findings are sent or written and which
+credentials send them:
+
+| Reporter section           | Options                                                                                                 |
+|----------------------------|---------------------------------------------------------------------------------------------------------|
+| `aws-security-hub`         | `aws_region`, `aws_profile`, `account_id`                                                               |
+| `bedrock-summary-reporter` | `aws_region`, `aws_profile`, `model_id`, `output_file`, `output_executive_file`, `output_technical_file` |
+| `cloudwatch-logs`          | `aws_region`, `log_group_name`, `log_stream_name`                                                       |
+| `s3`                       | `aws_region`, `aws_profile`, `bucket_name`, `key_prefix`                                                |
+
+They take effect only from the defaults (including the environment variables each
+reporter's page lists), `--config-overrides`, or a config file outside the scanned
+tree. A config file inside the scanned tree cannot set them: each one it sets is
+ignored, with one warning naming them, and the operator's value applies. This holds
+for every spelling of the section ASH reads as that reporter's, such as
+`s3-reporter` or `BedrockSummary`. The reporters' other options, including
+`enabled`, still apply from the tree.
+
+Under the MCP server they are also default `denied_paths` entries, and for
+`cloudwatch-logs` every setting of the section is (`/reporters/cloudwatch-logs/**`).
+A config an MCP client delivered that changes one is refused with
+`error_type: config_field_denied`; one that leaves them at the server's values scans.
+See [Configs an MCP client delivered](../../configuration-guide.md#configs-an-mcp-client-delivered).
+
 ## Quick Start
 
 ### Basic Setup
@@ -31,9 +78,14 @@ AWS plugins provide:
    # or use IAM roles (recommended)
    ```
 
-2. **Enable desired plugins**:
+2. **Write a config file outside the scanned tree** that loads the plugins and sets
+   their destinations (see [Loading the plugins](#loading-the-plugins) and
+   [Settings only the operator can set](#settings-only-the-operator-can-set)):
    ```yaml
-   # ash-config.yml
+   # /etc/ash/aws-reporters.yml
+   ash_plugin_modules:
+     - automated_security_helper.plugin_modules.ash_aws_plugins
+
    reporters:
      aws-security-hub:
        enabled: true
@@ -47,14 +99,15 @@ AWS plugins provide:
          aws_region: "us-east-1"
    ```
 
-3. **Run scan with AWS reporters**:
+3. **Run a scan with that config**:
    ```bash
-   ash /path/to/code --reporters aws-security-hub,s3-reporter
+   ash --source-dir /path/to/code --config /etc/ash/aws-reporters.yml
    ```
 
 ### Enterprise Setup
 
-For enterprise deployments, combine multiple AWS plugins:
+For enterprise deployments, combine multiple AWS plugins. As above, this goes in a
+config file outside the scanned tree:
 
 ```yaml
 # Enterprise configuration

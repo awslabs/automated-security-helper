@@ -49,6 +49,20 @@ reporters:
       aws_profile: "production"
 ```
 
+### Where these options can be set
+
+`aws_region`, `aws_profile` and `account_id` choose where findings are sent and which
+credentials send them, so they are the operator's. They take effect only from the
+defaults (`AWS_REGION`, `AWS_DEFAULT_REGION` and `AWS_PROFILE`), `--config-overrides`,
+or a config file outside the scanned tree. A config file inside the scanned tree, or
+one an MCP client delivered, cannot set them: from the tree they are ignored with a
+warning, and under the MCP server they are default `denied_paths` entries, so a
+delivered config that changes one is refused.
+
+The reporter is in the `ash_aws_plugins` package, which only the operator can load,
+with `--ash-plugin-modules`, `ASH_PLUGIN_MODULES` or the operator's own config, never
+a repository's. See [Loading the plugins](index.md#loading-the-plugins).
+
 ## Prerequisites
 
 ### AWS Security Hub Setup

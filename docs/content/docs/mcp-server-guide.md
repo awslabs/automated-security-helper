@@ -358,6 +358,24 @@ The following error categories are used:
 - `scan_incomplete`: Scan has not completed yet
 - `unexpected_error`: An unexpected error occurred
 
+### Config refusals
+
+A config the server will not use is refused with its own `error_type`, so a client
+can tell the reason apart from a scan that failed to start (`scan_start_failure`):
+
+| `error_type` | Returned by | Meaning |
+|---|---|---|
+| `config_input_not_permitted` | `run_ash_scan`, `get_config`, and as a `validate_config` error `type` | The config path, or a base its `extends` chain names, is outside the directories this session may read a config from |
+| `config_field_denied` | `run_ash_scan`, `get_config` | A config file an MCP client delivered or named sets a field the session's runtime-override policy denies; `error` names each field |
+| `denied_by_runtime_policy` | `validate_config`, as an error `type` | The same, one error per field, with the field in `field` |
+| `config_policy_unreadable` | `run_ash_scan`, `get_config`, and as a `validate_config` error `type` | The session's runtime-override policy cannot be established, for example because the profile it bound is no longer registered |
+| `config_env_not_resolved` | `run_ash_scan`, `get_config`, and as a `validate_config` error `type` | Such a file uses `!ENV` |
+
+Delivering source while a scan of the same session runs is refused as well:
+`set_source_zip_finalize` returns `error_type: SourceDeliveryBusyError`, and
+`set_source_git` returns `success: false` with no `error_type`. See
+[Config files in delivered source](mcp/streamable-http.md#config-files-in-delivered-source).
+
 ### Example Error Response
 
 ```json

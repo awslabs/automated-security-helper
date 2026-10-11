@@ -51,6 +51,21 @@ reporters:
       log_stream_name: "production-scans"
 ```
 
+### Where these options can be set
+
+`aws_region`, `log_group_name` and `log_stream_name` choose where findings are sent,
+so they are the operator's. They take effect only from the defaults (`AWS_REGION`,
+`AWS_DEFAULT_REGION` and `ASH_CLOUDWATCH_LOG_GROUP_NAME`), `--config-overrides`, or a
+config file outside the scanned tree. A config file inside the scanned tree cannot set
+them; each one it sets is ignored with a warning. Under the MCP server every
+`cloudwatch-logs` setting is a default `denied_paths` entry
+(`/reporters/cloudwatch-logs/**`), so a config an MCP client delivered that changes any
+of them is refused.
+
+The reporter is in the `ash_aws_plugins` package, which only the operator can load,
+with `--ash-plugin-modules`, `ASH_PLUGIN_MODULES` or the operator's own config, never
+a repository's. See [Loading the plugins](index.md#loading-the-plugins).
+
 ## Prerequisites
 
 ### AWS Permissions

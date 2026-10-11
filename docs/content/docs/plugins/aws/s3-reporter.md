@@ -61,6 +61,21 @@ export AWS_REGION="us-east-1"
 export AWS_PROFILE="my-profile"
 ```
 
+### Where these options can be set
+
+`aws_region`, `aws_profile`, `bucket_name` and `key_prefix` choose where reports are
+uploaded and which credentials upload them, so they are the operator's. They take
+effect only from the defaults (the environment variables above, and `AWS_DEFAULT_REGION`),
+`--config-overrides`, or a config file outside the scanned tree, which is where the
+advanced configuration above belongs. A config file inside the scanned tree, or one an
+MCP client delivered, cannot set them: from the tree they are ignored with a warning,
+and under the MCP server they are default `denied_paths` entries, so a delivered config
+that changes one is refused.
+
+The reporter is in the `ash_aws_plugins` package, which only the operator can load,
+with `--ash-plugin-modules`, `ASH_PLUGIN_MODULES` or the operator's own config, never
+a repository's. See [Loading the plugins](index.md#loading-the-plugins).
+
 ## Prerequisites
 
 ### S3 Bucket Setup
@@ -263,8 +278,10 @@ The reporter also creates a local copy of the uploaded report in:
 ```
 
 `local_copy` is `null` when the local copy could not be written, for example
-because `s3-report.json` in the reports directory is a symlink to a file outside
-it. A warning is logged and the upload still counts.
+because the reports directory is not writable. A warning is logged and the upload
+still counts. If a symlink or directory junction is at `s3-report.json` (or
+`s3-report.yaml`) when the report phase starts, the run stops with exit 1 before any
+reporter writes, so nothing is uploaded.
 
 If the upload fails, no receipt is written and the reporter is logged as having
 produced no report.
