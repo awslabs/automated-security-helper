@@ -72,9 +72,9 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Tuple
+from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
-from pydantic import AnyUrl, Field, field_validator, model_validator
+from pydantic import AnyUrl, Field, PrivateAttr, field_validator, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import (
@@ -224,6 +224,10 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
+    # Rules warnings already logged. The rules are selected again for the dependency
+    # check and for each target, and each warning is logged once per scanner.
+    _warned_rules: Set[str] = PrivateAttr(default_factory=set)
+
     @property
     def sandbox_requirements(self) -> SandboxRequirements:
         """Read access to the installed rules bundle, and nothing else.
@@ -315,10 +319,9 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             if entry.path is None
         ]
         for raw, reason in refused:
-            self._plugin_log(
+            self._warn_rules_once(
                 f"Ignoring scanners.cfn-guard.options.rules_paths entry {raw!r}: "
-                f"{reason}.",
-                level=logging.WARNING,
+                f"{reason}."
             )
         rules: List[_RuleFile] = []
         for entry in chosen:
@@ -366,12 +369,16 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 try:
                     rules.append(self._read_rule(path, directory))
                 except TreeInputRefused as refused:
-                    self._plugin_log(
+                    self._warn_rules_once(
                         f"Not evaluating cfn-guard rules {path.as_posix()}: "
-                        f"{refused.reason.replace('scanned tree', 'rules directory')}.",
-                        level=logging.WARNING,
+                        f"{refused.reason.replace('scanned tree', 'rules directory')}."
                     )
         return rules
+
+    def _warn_rules_once(self, message: str) -> None:
+        if message not in self._warned_rules:
+            self._warned_rules.add(message)
+            self._plugin_log(message, level=logging.WARNING)
 
     @staticmethod
     def _read_rule(path: Path, root: Path) -> _RuleFile:
@@ -403,11 +410,10 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         if refused and not rule_sets:
             # The repository emptied rule_sets and supplied its own rules. Its
             # rules are not read, and it does not get to switch cfn-guard off.
-            self._plugin_log(
+            self._warn_rules_once(
                 "scanners.cfn-guard.options.rule_sets is empty and rules_paths was "
                 f"ignored, so cfn-guard evaluates ASH's default rule set, "
-                f"{DEFAULT_RULE_SET}.",
-                level=logging.WARNING,
+                f"{DEFAULT_RULE_SET}."
             )
             rule_sets = [DEFAULT_RULE_SET]
         selected: List[_RuleFile] = []

@@ -302,6 +302,21 @@ class TestRuleSelection:
         assert "Ignoring scanners.cfn-guard.options.rules_paths entry" in caplog.text
         assert f"ASH's default rule set, {DEFAULT_RULE_SET}" in caplog.text
 
+    def test_each_rules_warning_is_logged_once_per_scanner(
+        self, repo, rules_root, caplog
+    ):
+        """The rules are selected for the dependency check and again per target."""
+        _fake_bundle(rules_root)
+        (repo / "policy.guard").write_text("rule mine { }\n")
+        scanner = _scanner(
+            repo, operator=False, rule_sets=[], rules_paths=["policy.guard"]
+        )
+        with caplog.at_level("WARNING"):
+            for _ in range(3):
+                scanner.rule_files()
+        assert caplog.text.count("Ignoring scanners.cfn-guard.options.rules_paths") == 1
+        assert caplog.text.count("ASH's default rule set") == 1
+
     def test_rules_paths_from_the_tree_leave_the_chosen_rule_sets_alone(
         self, repo, rules_root, caplog
     ):
