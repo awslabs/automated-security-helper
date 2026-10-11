@@ -112,8 +112,10 @@ class TestPrunedDirectoriesAreCounted:
     def test_files_ash_leaves_out_on_its_own_are_not_counted(self, tmp_path):
         """A ``.git`` and CDK assets under a pruned directory were not the ignore file's doing.
 
-        The template under ``cdk.out`` is counted: without the ignore file it would be
-        in the scan set, so the ignore file is what removed it.
+        The count is what turning the ignore files off adds back. ``vendor/lib.py``
+        is in it; whether the template under ``cdk.out`` is depends on whether the
+        walk keeps templates from a pruned cloud assembly, so the count is compared
+        with the scan sets rather than fixed at a number.
         """
         root = _build(
             tmp_path / "src",
@@ -127,12 +129,16 @@ class TestPrunedDirectoriesAreCounted:
             },
         )
         record = _record(root)
-        assert record["by_ignore_file"] == {".gitignore": 2}, record
-
+        honored = _names(root, scan_set(source=str(root)))
         unhonored = _names(root, scan_set(source=str(root), honor_ignore_files=False))
         assert {"vendor/lib.py", "cdk.out/Stack.template.json"} <= unhonored
         assert "vendor/.git/HEAD" not in unhonored
         assert "cdk.out/asset.abc/handler.py" not in unhonored
+        assert "vendor/lib.py" in unhonored - honored
+        assert record["by_ignore_file"] == {".gitignore": len(unhonored - honored)}, (
+            record,
+            sorted(unhonored - honored),
+        )
 
     def test_an_ignore_file_inside_a_pruned_directory_is_not_listed(self, tmp_path):
         """git never reads it, and neither does ASH, so it removed nothing."""
