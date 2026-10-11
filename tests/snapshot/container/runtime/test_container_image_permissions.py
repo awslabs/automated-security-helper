@@ -6,8 +6,10 @@
 tests/unit/test_dockerfile_directory_permissions.py holds the Dockerfile text to the
 rule; this checks the image a CI leg actually built, because a base image, an
 installer or a later edit can leave a mode the text does not show. Deselected by
-default (tests/conftest.py); the scan-validation legs that build the image run it
-with ``--run-container-snapshots``. Locally, with an image already built:
+default (tests/conftest.py); the scan-validation legs that build the ``ci`` image
+run it with ``--run-container-snapshots``, and the ``non-root-image-permissions`` job
+in ash-unified-ci.yml runs it against the default stage, ``non-root``. Locally, with
+an image already built:
 
     ASH_IMAGE_NAME=<tag> OCI_RUNNER=docker \\
         pytest tests/snapshot/container/runtime/test_container_image_permissions.py \\

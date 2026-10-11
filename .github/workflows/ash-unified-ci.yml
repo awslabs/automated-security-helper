@@ -741,6 +741,58 @@ jobs:
           offline: ${{ matrix.offline || 'false' }}
 
   # ---------------------------------------------------------------------------
+  # The default image stage's permissions.
+  #
+  # `ash build-image` and `ash --mode container` build the `non-root` stage when no
+  # --build-target is given, and that is the image an operator runs. Every scan leg
+  # above builds `ci` (validate-container and run-scan-test pass --build-target ci),
+  # so the steps only `non-root` has -- its user's home, the grype cache handed to
+  # that user, ASH_BIN_PATH handed back to root, its closing sweep of what an install
+  # left writable by every user -- were checked only as Dockerfile text. This builds
+  # the stage with no target, as an operator does, and runs the image permissions
+  # probe against the tag that build produces.
+  #
+  # No layer cache: the cache scope is per stage and only `ci`'s is warmed, so this
+  # leg would read nothing, and leaving the cache credentials out keeps the build
+  # step from holding them. tests/unit/test_ci_builds_and_probes_the_default_stage.py
+  # holds this job's shape.
+  # ---------------------------------------------------------------------------
+  non-root-image-permissions:
+    name: "non-root image permissions (ubuntu-latest)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "true"
+      - name: Pre-pull the base image
+        id: prepull
+        uses: ./.github/actions/prepull-base-image
+        with:
+          oci-runner: docker
+          runner-wrapper: ""
+      - name: Build the default stage
+        shell: bash
+        env:
+          ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
+          ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
+        run: ash build-image --oci-runner docker --ash-revision-to-install LOCAL --no-run --verbose
+      - name: Check who can write to the image
+        shell: bash
+        env:
+          ASH_IMAGE_NAME: automated-security-helper:non-root
+          OCI_RUNNER: docker
+        run: >-
+          uv run --extra cdk pytest
+          tests/snapshot/container/runtime/test_container_image_permissions.py
+          --run-container-snapshots --no-cov -n 0
+
+  # ---------------------------------------------------------------------------
   # External-target scan: assert on what comes back when ASH scans a directory
   # that is not its own working directory.
   #
@@ -1843,6 +1895,7 @@ jobs:
       - snapshot-trailers
       - unit-test
       - scan-validation
+      - non-root-image-permissions
       - external-target-scan
       - multi-project-attribution
       - deploy-aws-helpers
