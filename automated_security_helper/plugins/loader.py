@@ -1,7 +1,8 @@
 """Plugin loading mechanism for ASH."""
 
 import importlib
-from typing import Dict, List, Any
+import sys
+from typing import Any, Callable, Dict, Iterable, List
 
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -157,6 +158,81 @@ def _is_allowed_module_path(module_path: str) -> bool:
 
     top_level = module_path.split(".", 1)[0]
     return top_level.endswith(_ALLOWED_TOP_LEVEL_SUFFIX)
+
+
+#: ASH's built-in plugin package. Every scan selects its plugins without naming it.
+BUILTIN_PLUGIN_PACKAGE = "automated_security_helper.plugin_modules.ash_builtin"
+
+#: Where ASH keeps the plugin packages a scan opts into by naming them in
+#: ``ash_plugin_modules`` (``ash_aws_plugins``, ``ash_snyk_plugins``, ...).
+_OPT_IN_PLUGIN_ROOT = "automated_security_helper.plugin_modules"
+
+
+def _module_within(module: str, package: str) -> bool:
+    return module == package or module.startswith(package + ".")
+
+
+def _is_builtin_plugin_module(module: str) -> bool:
+    """Whether *module* is ASH's own code that every scan uses.
+
+    ``ash_builtin``, and ASH's modules outside ``plugin_modules``. The other
+    packages under ``plugin_modules`` ship with ASH but take part in a scan only
+    when that scan names them.
+    """
+    if _module_within(module, BUILTIN_PLUGIN_PACKAGE):
+        return True
+    return _module_within(module, "automated_security_helper") and not (
+        _module_within(module, _OPT_IN_PLUGIN_ROOT)
+    )
+
+
+def _declared_by(module_name: str) -> List[Any]:
+    """The plugins and event handlers an imported module declares; imports nothing."""
+    module = sys.modules.get(module_name)
+    declared: List[Any] = []
+    if module is None:
+        return declared
+    for attr in ("ASH_CONVERTERS", "ASH_SCANNERS", "ASH_REPORTERS"):
+        value = getattr(module, attr, None)
+        if isinstance(value, (list, tuple)):
+            declared.extend(value)
+    handlers = getattr(module, "ASH_EVENT_HANDLERS", None)
+    if isinstance(handlers, dict):
+        for callbacks in handlers.values():
+            if isinstance(callbacks, (list, tuple)):
+                declared.extend(callbacks)
+    return declared
+
+
+def scan_plugin_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
+    """Which registered plugins and event handlers a scan naming *plugin_modules* uses.
+
+    The plugin registry and the event-handler lists are process-wide: a module
+    stays registered after the scan that imported it, and ``list_scanners``
+    imports the community packages ASH ships so it can describe them. A scan
+    therefore selects from them through this filter rather than taking everything
+    registered, so it gets ASH's built-in plugins plus those of the modules its
+    own ``ash_plugin_modules`` names: a class or handler defined in one of those
+    modules (or below it), or one such a module lists in ``ASH_CONVERTERS``,
+    ``ASH_SCANNERS``, ``ASH_REPORTERS`` or ``ASH_EVENT_HANDLERS``.
+
+    Call it after the modules are imported; it reads their declarations from
+    ``sys.modules`` and imports nothing.
+    """
+    modules = tuple(dict.fromkeys(name for name in plugin_modules if name))
+    declared: List[Any] = []
+    for name in modules:
+        declared.extend(_declared_by(name))
+
+    def admits(plugin: Any) -> bool:
+        module = getattr(plugin, "__module__", None) or ""
+        if _is_builtin_plugin_module(module):
+            return True
+        if any(_module_within(module, name) for name in modules):
+            return True
+        return plugin in declared
+
+    return admits
 
 
 def load_additional_plugin_modules(plugin_modules: List[str] | None = None) -> dict:

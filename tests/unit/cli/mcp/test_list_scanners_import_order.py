@@ -5,14 +5,15 @@
 
 The mechanism these guard
 -------------------------
-``ash_plugin_manager.plugin_modules()`` memoises its resolved class list and never
-invalidates it, so the first resolve in a process decides the answer for every
-later one. ``mcp_list_scanners()`` has to account for the vendored
-ferret/snyk/trivy scanners, which ``load_internal_plugins()`` does not load; when
-it read them back through that memo, and anything had resolved earlier, those
-three were absent from what it returned. A caller asking a security scanner which
-scanners it has got an answer three short, with nothing logged and no error
-raised.
+``ash_plugin_manager.plugin_modules()`` used to memoise its first resolved class
+list for the life of the process. ``mcp_list_scanners()`` has to account for the
+vendored ferret/snyk/trivy scanners, which ``load_internal_plugins()`` does not
+load; when it read them back through that memo, and anything had resolved
+earlier, those three were absent from what it returned. A caller asking a
+security scanner which scanners it has got an answer three short, with nothing
+logged and no error raised. The memo now re-resolves after a new registration,
+and ``mcp_list_scanners()`` still reads the loaders' return values rather than
+the registry, which these tests keep order-independent either way.
 
 Why these tests provoke the memo through the public API only
 -----------------------------------------------------------
@@ -30,12 +31,10 @@ caught it.
 
 What is deliberately not asserted here
 -------------------------------------
-That ``mcp_list_scanners()`` leaves ``plugin_modules()`` returning the full set.
-It does not, and is not meant to: the memo is repaired for nobody, because
-workspace mode depends on it holding still. The scope of this fix is that *this*
-function answers completely; every other consumer of the memo is unchanged, and a
-test asserting otherwise passed only when no prior resolve had happened, which is
-the same worker-count nondeterminism these tests exist to remove.
+What ``plugin_modules()`` returns after ``mcp_list_scanners()``. Listing registers
+the vendored scanners in the process-wide registry; whether a scan then runs them
+is decided by the scan's own plugin modules, which
+tests/unit/cli/mcp/test_list_scanners_scan_selection.py holds.
 """
 
 from automated_security_helper.cli.mcp_tools import (

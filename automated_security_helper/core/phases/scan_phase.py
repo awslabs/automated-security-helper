@@ -125,7 +125,12 @@ class ScanPhase(EnginePhase):
     """Implementation of the Scan phase."""
 
     def __init__(
-        self, plugin_context, plugins=None, progress_display=None, asharp_model=None
+        self,
+        plugin_context,
+        plugins=None,
+        progress_display=None,
+        asharp_model=None,
+        plugin_filter=None,
     ):
         """Initialize the ScanPhase with validation manager.
 
@@ -134,8 +139,15 @@ class ScanPhase(EnginePhase):
             plugins: List of plugins to use
             progress_display: Progress display to use for reporting progress
             asharp_model: AshAggregatedResults to update with results
+            plugin_filter: The event handlers this phase's notifications reach
         """
-        super().__init__(plugin_context, plugins or [], progress_display, asharp_model)
+        super().__init__(
+            plugin_context,
+            plugins or [],
+            progress_display,
+            asharp_model,
+            plugin_filter=plugin_filter,
+        )
         self.validation_manager = ScannerValidationManager(plugin_context)
         # Set when this run is one shard of several; read by the caller to stamp
         # provenance onto the results so `ash merge` can verify coverage.

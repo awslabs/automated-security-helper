@@ -409,38 +409,47 @@ class _ProjectRun:
     run: Optional[Dict[str, Any]] = None
 
 
+def workspace_plugin_modules(
+    plan: WorkspacePlan, settings: ProjectScanSettings
+) -> List[str]:
+    """The plugin modules the workspace's scans name, sorted.
+
+    Every active project has the same list by now, so the projects speak for all
+    of them; settings may add more from the CLI.
+    """
+    declared: Set[str] = set(settings.ash_plugin_modules)
+    for project in plan.active_projects:
+        declared.update(project.ash_plugin_modules)
+    return sorted(declared)
+
+
 def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) -> int:
     """Register every plugin the workspace needs, once, before any project starts.
 
-    Why this has to happen up front
-    -------------------------------
-    ``ScanExecutionEngine.__init__`` registers a project's ``ash_plugin_modules``
-    into the module-level ``plugin_library`` and then reads the scanner set back
-    through ``ash_plugin_manager.plugin_modules()``, which memoises into
-    ``_resolved_plugins``. Whichever project builds its engine first therefore
-    freezes the scanner class list for the whole run. Measured before this
-    existed, on two real projects where only one declared an external plugin:
-    scanning the non-declaring project first made the declaring project LOSE its
-    own scanner, and the other order gave the non-declaring project one it never
-    asked for. Neither order was correct, at every value of
-    ``max_parallel_projects`` -- concurrency only randomises which project is
-    wrong.
+    Why this happens up front
+    -------------------------
+    ``ScanExecutionEngine.__init__`` imports a project's ``ash_plugin_modules``,
+    which registers their plugins into the module-level ``plugin_library``, and
+    then resolves the registry through ``ash_plugin_manager.plugin_modules()``.
+    Before this existed, the first project to build its engine froze the resolved
+    scanner list for the whole run (measured on two real projects where only one
+    declared an external plugin: either order gave one project the wrong set).
+    Each engine now selects only the built-in plugins and its own modules'
+    (``plugins.loader.scan_plugin_filter``), and a resolve re-reads the registry
+    after a new registration, so the order no longer decides the set. Importing
+    and resolving once before the pool still means no worker does import work or
+    resolves a registry another worker is registering into.
 
     Resolution has already refused any workspace whose projects ask for different
     module sets (see ``resolver._validate_plugin_modules``), so there is exactly
-    one correct set and registering it here is correct for every project. Doing it
-    before the pool starts also removes the ordering nondeterminism entirely, and
-    with it the concurrent-registration race in ``plugin_modules``: that function
-    iterates ``plugin_library.scanners`` doing imports inside the loop, and a
-    second thread registering a new key mid-iteration raises
-    ``RuntimeError: dictionary changed size during iteration``, which surfaces as
-    a spurious failed project.
+    one set and registering it here is correct for every project.
 
     This does not change *which* scanners run for a project. Registration and
-    selection are separate mechanisms: this fills the registry, and each
-    project's own config still decides enablement through
-    ``ScanPhase._execute_phase``'s ``config.enabled`` and enabled/excluded
-    filtering. A project that disables a scanner still skips it.
+    selection are separate mechanisms: this fills the registry, each project's
+    engine selects from it by its own modules, and the project's config still
+    decides enablement through ``ScanPhase._execute_phase``'s ``config.enabled``
+    and enabled/excluded filtering. A project that disables a scanner still skips
+    it.
 
     Returns:
         How many scanner classes the registry resolved to, for logging. Zero
@@ -456,12 +465,7 @@ def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) 
 
     load_internal_plugins()
 
-    # Every active project has the same list by now, so the first one speaks for
-    # all of them; settings may add more from the CLI.
-    declared: Set[str] = set(settings.ash_plugin_modules)
-    for project in plan.active_projects:
-        declared.update(project.ash_plugin_modules)
-    modules = sorted(declared)
+    modules = workspace_plugin_modules(plan, settings)
 
     if modules:
         ASH_LOGGER.info(f"Loading workspace plugin modules: {modules}")
@@ -1265,7 +1269,9 @@ def execute_workspace(
             ``ASHScanOrchestrator.create``; injected only by tests, so production
             callers never pass it.
         reporter_classes: The reporters the workspace-level report step considers.
-            Defaults to the plugin registry; injected only by tests.
+            Defaults to the built-in reporters plus those of the workspace's
+            plugin modules (:func:`workspace_plugin_modules`); injected only by
+            tests.
 
     Returns:
         The unified results path, the process exit code, and the payload.
@@ -1307,6 +1313,15 @@ def execute_workspace(
     # Before the pool, never inside it: the registry is process-global and the
     # first project to touch it would otherwise freeze the scanner set for all.
     prewarm_plugin_registry(plan, settings)
+    if reporter_classes is None:
+        # The workspace's own reporters, as each project's engine selects its own:
+        # the registry also holds whatever another scan in this process imported.
+        from automated_security_helper.plugins import ash_plugin_manager
+        from automated_security_helper.plugins.loader import scan_plugin_filter
+
+        reporter_classes = ash_plugin_manager.plugin_modules(
+            "reporter", scan_plugin_filter(workspace_plugin_modules(plan, settings))
+        )
 
     reports_requested = _REPORT_PHASE in settings.phases
     if reports_requested:

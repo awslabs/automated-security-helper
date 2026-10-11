@@ -300,7 +300,7 @@ The ASH MCP server provides these tools:
 | `suggest_suppression` | Build a paste-ready `AshSuppression` entry for a finding | Draft a correctly-shaped suppression without hand-writing YAML |
 | `resolve_ash_workspace` | Resolve a VS Code `.code-workspace` file into a scan plan without scanning | Inspect which projects, configs and thresholds a workspace would use before committing to N repository scans |
 | `run_ash_workspace_scan` | Scan every project in a `.code-workspace` file and return the per-project verdict | Scan a multi-repository workspace in one call, each project under its own config and threshold |
-| `list_scanners` | List every registered scanner with its metadata | See what will run, and under what name, before scanning |
+| `list_scanners` | List the built-in and community scanners ASH ships, with their metadata | See each scanner's name and whether its tool is installed; a community scanner runs only in a scan that names its plugin module |
 | `validate_config` | Validate a config file or an inline config string against the schema | Catch a malformed `.ash.yaml` without starting a scan |
 | `list_profiles` | List the config profiles the operator registered at startup | Discover which named configs a deployment offers |
 | `select_profile` | Bind a registered profile to this session, optionally patched or overridden | Run every later scan in the session under a named config without naming it each time |

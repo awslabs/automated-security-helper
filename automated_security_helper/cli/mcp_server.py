@@ -1252,6 +1252,12 @@ def list_scanners() -> list:
     the call. It is not a prediction about a scan: a scanner reporting true can
     still fail on a given target, and a scan may skip a scanner for reasons of
     configuration rather than dependencies.
+
+    The list covers the built-in scanners and the community scanners ASH ships
+    (ferret-scan, snyk-code, trivy-repo). Listing a community scanner does not add
+    it to any scan: a scan runs the built-in scanners plus those of the plugin
+    modules its own ash_plugin_modules names, so a community scanner runs only in a
+    scan whose config or --ash-plugin-modules names its module.
     """
     try:
         return mcp_list_scanners()

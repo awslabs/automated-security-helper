@@ -70,7 +70,17 @@ class AshPluginManager(BaseModel):
 
     plugin_library: Annotated[AshPluginLibrary, Field()] = AshPluginLibrary()
     context: Any = None
+    #: Resolved plugin classes per plugin type, each stored with the registrations
+    #: it was resolved from. A stored list is reused only while the registrations
+    #: are unchanged: a module imported after the first resolve (a later scan's
+    #: ``ash_plugin_modules``, or ``list_scanners`` loading the community packages)
+    #: adds registrations, and the next resolve has to include them, or a scanner
+    #: that scan selected would get no row in its results and the completeness gate
+    #: could not report it.
     _resolved_plugins: dict = PrivateAttr(default_factory=dict)
+    #: Guards the registration dicts while they are changed or copied. Imports run
+    #: outside it: an import registers plugins, which takes this lock.
+    _registry_lock: Lock = PrivateAttr(default_factory=Lock)
     #: Guards the shared event-handler lists. This manager is a module-level
     #: singleton (``plugins/__init__.py``) and workspace mode runs several
     #: differently-configured scans against it concurrently, so subscribe and
@@ -123,8 +133,22 @@ class AshPluginManager(BaseModel):
         )
         return callback  # Return for decorator usage
 
-    def notify(self, event_type, *args, **kwargs):
-        """Notify all subscribers of an event"""
+    def notify(
+        self,
+        event_type,
+        *args,
+        handler_filter: Callable[[Callable], bool] | None = None,
+        **kwargs,
+    ):
+        """Notify the subscribers of an event.
+
+        Args:
+            event_type: The event to notify.
+            handler_filter: Which subscribers this notification reaches. A scan
+                passes its own (``plugins.loader.scan_plugin_filter``), so a handler
+                registered by a module only another scan named is not called for
+                it. None notifies every subscriber.
+        """
         if not hasattr(self.plugin_library, "event_handlers"):
             ASH_LOGGER.debug(
                 f"No event handlers dictionary exists for event {event_type}"
@@ -141,6 +165,8 @@ class AshPluginManager(BaseModel):
         # in a workspace.
         with self._event_lock:
             handlers = list(self.plugin_library.event_handlers[event_type])
+        if handler_filter is not None:
+            handlers = [callback for callback in handlers if handler_filter(callback)]
 
         ASH_LOGGER.debug(f"Notifying {len(handlers)} subscribers of event {event_type}")
         results = []
@@ -183,39 +209,36 @@ class AshPluginManager(BaseModel):
                 f"ash-default is a protected plugin_module_name. Plugin module at path '{plugin_module_path}' should register with a different name."
             )
             return
-        elif (
-            (
-                plugin_type == "converter"
-                and plugin_module_name in self.plugin_library.converters
+
+        registrations = self._registrations(plugin_type)
+        with self._registry_lock:
+            already_registered = (
+                registrations is not None and plugin_module_name in registrations
             )
-            or (
-                plugin_type == "scanner"
-                and plugin_module_name in self.plugin_library.scanners
-            )
-            or (
-                plugin_type == "reporter"
-                and plugin_module_name in self.plugin_library.reporters
-            )
-        ):
+            if registrations is not None and not already_registered:
+                registrations[plugin_module_name] = AshPluginRegistration(
+                    name=plugin_module_name,
+                    plugin_module_path=plugin_module_path,
+                    version=plugin_module_version,
+                    enabled=plugin_module_enabled,
+                )
+        if already_registered:
             ASH_LOGGER.warning(
                 f"Plugin module '{plugin_module_name}' already registered. Skipping."
             )
             return
 
-        plug_reg = AshPluginRegistration(
-            name=plugin_module_name,
-            plugin_module_path=plugin_module_path,
-            version=plugin_module_version,
-            enabled=plugin_module_enabled,
-        )
-        if plugin_type == "converter":
-            self.plugin_library.converters[plugin_module_name] = plug_reg
-        elif plugin_type == "scanner":
-            self.plugin_library.scanners[plugin_module_name] = plug_reg
-        elif plugin_type == "reporter":
-            self.plugin_library.reporters[plugin_module_name] = plug_reg
-
         ASH_LOGGER.verbose(f"Registered plugin module '{plugin_module_name}'")
+
+    def _registrations(self, plugin_type) -> Dict[str, AshPluginRegistration] | None:
+        """The registration dict for *plugin_type*, or None for an unknown type."""
+        if plugin_type == "converter":
+            return self.plugin_library.converters
+        if plugin_type == "scanner":
+            return self.plugin_library.scanners
+        if plugin_type == "reporter":
+            return self.plugin_library.reporters
+        return None
 
     def filter_plugin_modules(self, items: List, callback: Callable, *args, **kwargs):
         filtered = []
@@ -244,96 +267,50 @@ class AshPluginManager(BaseModel):
 
         # Normalize plugin_type to a string key
         cache_key = plugin_type if isinstance(plugin_type, str) else None
-        if cache_key is None:
+        registrations = self._registrations(plugin_type) if cache_key else None
+        if registrations is None:
             ASH_LOGGER.warning(f"Unknown plugin type: {plugin_type}")
             return []
 
-        if cache_key in self._resolved_plugins:
-            cached = self._resolved_plugins[cache_key]
-            return self.filter_plugin_modules(cached, filter_callback, *args, **kwargs)
+        # Copied under the lock: another thread importing a plugin module registers
+        # into this dict, and iterating it while that happens raises
+        # "dictionary changed size during iteration".
+        with self._registry_lock:
+            snapshot = tuple(
+                (registration.plugin_module_path, registration.enabled)
+                for registration in registrations.values()
+            )
+        cached = self._resolved_plugins.get(cache_key)
+        if cached is not None and cached[0] == snapshot:
+            return self.filter_plugin_modules(
+                cached[1], filter_callback, *args, **kwargs
+            )
 
         plugins = []
+        for plugin_module_path, enabled in snapshot:
+            if not enabled:
+                continue
+            try:
+                # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
+                module = importlib.import_module(plugin_module_path)
+                # Find the plugin class in the module
+                for attr_name in dir(module):
+                    attr = getattr(module, attr_name)
+                    if (
+                        isinstance(attr, type)
+                        and hasattr(attr, "ash_plugin_type")
+                        and attr.ash_plugin_type == plugin_type
+                    ):
+                        if attr not in plugins:  # Avoid duplicates
+                            plugins.append(attr)
+            except ImportError as e:
+                ASH_LOGGER.warning(
+                    f"Failed to import plugin module {plugin_module_path}: {e}"
+                )
 
-        # Get all registered plugins (internal and external)
-        if plugin_type == "converter":
-            # Add registered converters
-            for name, registration in self.plugin_library.converters.items():
-                if registration.enabled:
-                    try:
-                        # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
-                        module = importlib.import_module(
-                            registration.plugin_module_path
-                        )
-                        # Find the plugin class in the module
-                        for attr_name in dir(module):
-                            attr = getattr(module, attr_name)
-                            if (
-                                isinstance(attr, type)
-                                and hasattr(attr, "ash_plugin_type")
-                                and attr.ash_plugin_type == "converter"
-                            ):
-                                if attr not in plugins:  # Avoid duplicates
-                                    plugins.append(attr)
-                    except ImportError as e:
-                        ASH_LOGGER.warning(
-                            f"Failed to import plugin module {registration.plugin_module_path}: {e}"
-                        )
-
-        elif plugin_type == "scanner":
-            # Add registered scanners
-            for name, registration in self.plugin_library.scanners.items():
-                if registration.enabled:
-                    try:
-                        # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
-                        module = importlib.import_module(
-                            registration.plugin_module_path
-                        )
-                        # Find the plugin class in the module
-                        for attr_name in dir(module):
-                            attr = getattr(module, attr_name)
-                            if (
-                                isinstance(attr, type)
-                                and hasattr(attr, "ash_plugin_type")
-                                and attr.ash_plugin_type == "scanner"
-                            ):
-                                if attr not in plugins:  # Avoid duplicates
-                                    plugins.append(attr)
-                    except ImportError as e:
-                        ASH_LOGGER.warning(
-                            f"Failed to import plugin module {registration.plugin_module_path}: {e}"
-                        )
-
-        elif plugin_type == "reporter":
-            # Add registered reporters
-            for name, registration in self.plugin_library.reporters.items():
-                if registration.enabled:
-                    try:
-                        # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
-                        module = importlib.import_module(
-                            registration.plugin_module_path
-                        )
-                        # Find the plugin class in the module
-                        for attr_name in dir(module):
-                            attr = getattr(module, attr_name)
-                            if (
-                                isinstance(attr, type)
-                                and hasattr(attr, "ash_plugin_type")
-                                and attr.ash_plugin_type == "reporter"
-                            ):
-                                if attr not in plugins:  # Avoid duplicates
-                                    plugins.append(attr)
-                    except ImportError as e:
-                        ASH_LOGGER.warning(
-                            f"Failed to import plugin module {registration.plugin_module_path}: {e}"
-                        )
-        else:
-            # If we get here, we don't know what to do with this plugin type
-            ASH_LOGGER.warning(f"Unknown plugin type: {plugin_type}")
-            return []
-
-        # Cache the unfiltered result so repeat calls skip the import work
-        if cache_key:
-            self._resolved_plugins[cache_key] = plugins
+        # Cache the unfiltered result, keyed by the registrations it came from, so
+        # repeat calls skip the import work until something new registers
+        self._resolved_plugins[cache_key] = (snapshot, plugins)
 
         # Apply filter callback
         return self.filter_plugin_modules(plugins, filter_callback, *args, **kwargs)

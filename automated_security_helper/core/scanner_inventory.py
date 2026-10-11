@@ -99,24 +99,21 @@ def _loaded_scanner_classes() -> list:
 
     Why this does not call ``ash_plugin_manager.plugin_modules("scanner")``
     ---------------------------------------------------------------------
-    That method memoises its resolved class list into ``_resolved_plugins`` and
-    never invalidates it, so the first resolve in a process decides the answer for
-    every later one. Registration is not what breaks: measured here, the registry
-    held all 13 scanners while the memo, built before the vendored packages were
-    loaded, kept serving the 10 it was created with. Any earlier resolve is
-    enough -- a CLI command, another test, an in-flight scan -- which is how a
-    caller asking an ASH server which scanners it has got an answer three short,
-    with nothing logged and no error raised.
-
-    Two alternatives were rejected. Clearing the memo breaks callers that depend
-    on it holding still: ``workspace.execution.prewarm_plugin_registry`` exists so
-    the resolved set is frozen once, up front, for a whole workspace run, and
-    clearing it from an MCP tool can resize the registry under a scan thread that
-    is mid-iteration -- the ``dictionary changed size during iteration`` failure
-    prewarming was added to close. Reading ``plugin_library`` directly instead
+    That method used to memoise its first resolve for the life of the process,
+    which is how a caller asking an ASH server which scanners it has got an answer
+    three short, with nothing logged and no error raised (measured: the registry
+    held all 13 scanners while the memo kept serving the 10 it was created with).
+    It now re-resolves after a new registration, but the registry also holds
+    whatever else the process imported, so it answers "what is registered here",
+    not "what this build contains". Reading ``plugin_library`` directly instead
     fails the sweep in ``tests/unit/workspace/test_project_isolation.py``, which
     forbids reaching into the manager's registry from outside the class that owns
     it, because that is the shape the original defect arrived in.
+
+    Loading the vendored packages registers their scanners in the process-wide
+    registry. That does not make them part of a scan: a scan selects the built-in
+    scanners plus those of the modules its own ``ash_plugin_modules`` names
+    (``plugins.loader.scan_plugin_filter``).
 
     What is left is the loaders' own return values. Both
     ``load_internal_plugins`` and ``load_additional_plugin_modules`` return the

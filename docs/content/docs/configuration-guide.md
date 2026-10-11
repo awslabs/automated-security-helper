@@ -446,6 +446,13 @@ name like `another_plugin_module` silently registers nothing. When the list come
 a config file inside the scanned tree, only installed modules are imported; see
 [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose).
 
+A scan uses ASH's built-in plugins plus the converters, scanners, reporters and event
+handlers of the modules its own `ash_plugin_modules` (from its config and
+`--ash-plugin-modules`) names. This holds when one process runs several scans, as the
+MCP server does: a module that an earlier scan named, or that the MCP `list_scanners`
+tool loaded to describe the community scanners, takes no part in a scan that does not
+name it, and a module that only a later scan names takes part in that scan.
+
 ## Settings a repository's config cannot choose
 
 ASH reads its configuration from the repository it scans unless `--config` names a

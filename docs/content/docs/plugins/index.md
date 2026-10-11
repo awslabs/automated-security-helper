@@ -89,6 +89,10 @@ Or specify it on the command line:
 ash --ash-plugin-modules my_ash_plugins
 ```
 
+A scan uses ASH's built-in plugins plus the plugins and event handlers of the modules
+it names this way. When one process runs several scans (the MCP server, or a program
+calling `run_ash_scan` more than once), a module only another scan named takes no part.
+
 ## Real-World Examples
 
 ASH includes several built-in plugins that you can use as examples:
