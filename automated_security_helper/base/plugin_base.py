@@ -492,8 +492,16 @@ class PluginBase(UVToolMixin, BaseModel):
             ASH_LOGGER.debug(
                 f"({self.config.name}) Full error details: {e}", exc_info=True
             )
-            self.exit_code = 1
-            return {"error": str(e)}
+            # ASH's own failure, not the tool's code: 1 is accepted by most
+            # scanners, so a results file already in place would have been graded.
+            # In the response too, so a scanner judging each target by its own
+            # run sees it.
+            from automated_security_helper.utils.subprocess_utils import (
+                SPAWN_FAILURE_RETURNCODE,
+            )
+
+            self.exit_code = SPAWN_FAILURE_RETURNCODE
+            return {"error": str(e), "returncode": SPAWN_FAILURE_RETURNCODE}
 
     def get_installation_commands(self, platform: str, arch: str) -> List[List[str]]:
         """Generate installation commands for the specified platform/architecture as arrays of arguments"""

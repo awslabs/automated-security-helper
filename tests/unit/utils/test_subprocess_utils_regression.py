@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from automated_security_helper.utils.subprocess_utils import SPAWN_FAILURE_RETURNCODE
+
 
 @pytest.fixture(autouse=True)
 def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
@@ -241,7 +243,8 @@ class TestBug48PopenOrphanedOnException:
 
         mock_process.kill.assert_called_once()
         mock_process.wait.assert_called()
-        assert result == 1
+        # ASH's own failure: not 1, which most scanners accept.
+        assert result == SPAWN_FAILURE_RETURNCODE
 
     @patch(
         "automated_security_helper.utils.subprocess_utils.find_executable",
@@ -262,7 +265,7 @@ class TestBug48PopenOrphanedOnException:
         result = run_command_stream_output(["some", "cmd"])
 
         mock_process.kill.assert_not_called()
-        assert result == 1
+        assert result == SPAWN_FAILURE_RETURNCODE
 
     @patch(
         "automated_security_helper.utils.subprocess_utils.find_executable",

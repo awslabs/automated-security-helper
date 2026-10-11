@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from pathlib import Path
 from typing import ClassVar, Literal
 from unittest.mock import MagicMock
 
@@ -41,6 +42,7 @@ from automated_security_helper.core.enums import (
 )
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.utils.subprocess_utils import SPAWN_FAILURE_RETURNCODE
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
@@ -365,3 +367,65 @@ def test_each_target_is_judged_by_its_own_run(plugin_context, tmp_path):
 
     assert (source_row.status, source_row.exit_code) == (ScannerStatus.PASSED, 2)
     assert (converted_row.status, converted_row.exit_code) == (ScannerStatus.ERROR, 1)
+
+
+class TestTheRunnersOwnFailureIsAnError:
+    """ASH failing to run the tool is not an accepted exit code.
+
+    ``_run_subprocess`` catches an exception from its own runner and used to record
+    exit code 1, which ``{0, 1}`` accepts. With a results file already in place the
+    template then graded it. It is recorded as ``SPAWN_FAILURE_RETURNCODE``, as a
+    command the OS could not start is, and the row says what failed.
+    """
+
+    def test_the_row_is_error_even_with_a_results_file_in_place(
+        self, plugin_context, tmp_path, monkeypatch
+    ):
+        from automated_security_helper.utils import subprocess_utils
+
+        def broken_runner(command, **kwargs):
+            # The results file the command would have produced, then the failure.
+            Path(command[4]).write_text(json.dumps(_sarif([])), encoding="utf-8")
+            raise RuntimeError("the runner could not read its own output")
+
+        # _run_subprocess imports the runner from this module when it runs.
+        monkeypatch.setattr(
+            subprocess_utils, "run_command_with_output_handling", broken_runner
+        )
+
+        container = _run(
+            plugin_context,
+            tmp_path,
+            success_codes={0, 1},
+            exit_code=0,
+            results=json.dumps(_sarif([])),
+        )
+
+        assert container.status == ScannerStatus.ERROR, (
+            f"the runner failed and the row was graded {container.status.value} "
+            f"with exit code {container.exit_code}"
+        )
+        assert container.exit_code == SPAWN_FAILURE_RETURNCODE
+        assert any(
+            "the runner could not read its own output" in str(e)
+            for e in container.errors
+        ), container.errors
+
+    def test_the_response_carries_the_code(self, plugin_context, monkeypatch):
+        """So a scanner that judges each target by its own run sees it too."""
+        from automated_security_helper.utils import subprocess_utils
+
+        def broken_runner(command, **kwargs):
+            raise RuntimeError("boom")
+
+        # _run_subprocess imports the runner from this module when it runs.
+        monkeypatch.setattr(
+            subprocess_utils, "run_command_with_output_handling", broken_runner
+        )
+        scanner = _scanner_class({0, 1})(config=_ToolConfig(), context=plugin_context)
+
+        response = scanner._run_subprocess([sys.executable, "-c", "pass"])
+
+        assert response["returncode"] == SPAWN_FAILURE_RETURNCODE
+        assert scanner.exit_code == SPAWN_FAILURE_RETURNCODE
+        assert not scanner._exit_code_accepted()

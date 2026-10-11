@@ -112,7 +112,11 @@ class TestSpawnFailureReturnCode:
         assert not isinstance(result, SpawnFailedProcess)
 
     def test_an_oserror_writing_logs_is_not_a_spawn_failure(self, tmp_path):
-        """Only the spawn is guarded: the tool ran, so this is the generic path."""
+        """Only the spawn is guarded: the tool ran, so this is the generic path.
+
+        That path reports ASH's own failure with the code no scanner accepts, not
+        1, which most do, and not as a spawn failure.
+        """
         with patch.object(
             subprocess_utils, "_write_stream_log", side_effect=OSError("disk full")
         ):
@@ -120,7 +124,7 @@ class TestSpawnFailureReturnCode:
                 [sys.executable, "-c", "print('ran')"], results_dir=tmp_path
             )
 
-        assert response["returncode"] == 1
+        assert response["returncode"] == subprocess_utils.SPAWN_FAILURE_RETURNCODE
         assert "spawn_failed" not in response
 
 

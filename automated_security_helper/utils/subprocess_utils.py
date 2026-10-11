@@ -89,6 +89,10 @@ class TimedOutProcess(subprocess.CompletedProcess):
 # It used to be 1, the generic failure code. bandit and semgrep both accept 1, so
 # a uv binary that failed to exec with [Errno 14] Bad address let the scan carry
 # on, and the only error anyone saw was the SARIF file the tool never wrote.
+#
+# The runners' own failures (an exception that is not an OSError, from building
+# the spawn or from reading the tool's output) report it too, for the same
+# reason: ASH did not get a run it can vouch for, and 1 would read as one.
 SPAWN_FAILURE_RETURNCODE = 127
 
 
@@ -996,10 +1000,10 @@ def run_command(
         ASH_LOGGER.error(f"Error running command {cmd_str}: {e}", extra=NO_MARKUP)
         if check:
             raise
-        # Create a CompletedProcess-like object with error info
+        # Not 1, which most scanners accept: see SPAWN_FAILURE_RETURNCODE.
         return subprocess.CompletedProcess(
             args=args,
-            returncode=1,
+            returncode=SPAWN_FAILURE_RETURNCODE,
             stdout="",
             stderr=f"Error: {str(e)}",
         )
@@ -1205,7 +1209,12 @@ def run_command_with_output_handling(
     except Exception as e:
         error_msg = f"Error running {cmd_str}: {e}"
         ASH_LOGGER.error(error_msg, extra=NO_MARKUP)
-        return {"error": str(e), "returncode": 1, "stderr": error_msg}
+        # Not 1, which most scanners accept: see SPAWN_FAILURE_RETURNCODE.
+        return {
+            "error": str(e),
+            "returncode": SPAWN_FAILURE_RETURNCODE,
+            "stderr": error_msg,
+        }
     finally:
         if sandbox_plan is not None:
             sandbox_plan.run_cleanup()
@@ -1305,8 +1314,10 @@ def run_command_stream_output(
             process.wait()
             return process.returncode
         except Exception as e:
+            # The tool is stopped below; what it did is unknown. Not 1, which most
+            # scanners accept: see SPAWN_FAILURE_RETURNCODE.
             ASH_LOGGER.error(f"Error running command {cmd_str}: {e}", extra=NO_MARKUP)
-            return 1
+            return SPAWN_FAILURE_RETURNCODE
         finally:
             if process.poll() is None:
                 process.kill()
@@ -1317,7 +1328,7 @@ def run_command_stream_output(
         return SPAWN_FAILURE_RETURNCODE
     except Exception as e:
         ASH_LOGGER.error(f"Error running command {cmd_str}: {e}")
-        return 1
+        return SPAWN_FAILURE_RETURNCODE
     finally:
         if sandbox_plan is not None:
             sandbox_plan.run_cleanup()

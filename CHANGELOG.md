@@ -612,7 +612,9 @@
   code, the accepted set and the tool's stderr. Each target is judged by its own
   run's exit code. A tool a signal ended is recorded as `128 + N`, as a shell
   reports it; its absolute value had put SIGHUP, SIGINT and SIGQUIT inside common
-  success sets. The accepted codes per scanner, with their sources, are in
+  success sets. A run ASH itself failed to carry out (an error in its own runner,
+  not the tool's) is recorded as 127, like a tool that could not start, where it had
+  been 1, which most scanners accept. The accepted codes per scanner, with their sources, are in
   [A Scanner Is ERROR With an Exit Code It Does Not Accept](docs/content/docs/troubleshooting.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
 
   The same rule now holds for the scanners that run their tool outside the template:
