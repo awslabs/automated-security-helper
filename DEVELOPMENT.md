@@ -346,6 +346,7 @@ ASH uses [Semantic Versioning](https://semver.org/). The version is defined in `
 - `pyproject.toml` is the single source of truth for the version.
 - Documentation files that reference the version (README, install guides, etc.) have corresponding `.template` files containing `{{VERSION}}` placeholders.
 - The `scripts/version_bump.py` script updates `pyproject.toml` and regenerates all documentation from templates.
+- Text that is only true from a later release on goes in a version block of the template, `{{#after 3.7.1}}` ... `{{else}}` ... `{{/after}}`, each marker on its own line; `generate` keeps the first part when the version is after the one named and the `{{else}}` part (optional) otherwise. The docs publish on every push to `main`, so this is how a page can describe a feature `main` has without telling readers of the current release that it is theirs. A malformed or unclosed block stops `generate`.
 
 ### Commit Messages
 

@@ -160,6 +160,73 @@ class VersionTemplateManager:
             print(f"Error converting {file_path} to template: {e}")
             return False
 
+    # A block of template text that depends on the version being documented:
+    #
+    #     {{#after 3.7.1}}
+    #     text for a release after 3.7.1
+    #     {{else}}
+    #     text for 3.7.1 and earlier (optional)
+    #     {{/after}}
+    #
+    # Each marker sits on a line of its own and the line is dropped. "After" compares
+    # major.minor.patch, so 3.8.0rc1 is after 3.7.1. It exists for docs that describe
+    # a feature main has and the documented release does not: the docs publish on
+    # every push to main, so without it they would describe the feature as part of
+    # the release, and an example copied from them would not run against it.
+    #
+    # Blocks do not nest, and an unbalanced or malformed marker is an error rather
+    # than text, so a typo cannot publish both branches. `convert` cannot recreate a
+    # block from a generated doc; edit the template, never regenerate it with
+    # `convert`.
+    _AFTER_OPEN = re.compile(r"^\{\{#after (?P<threshold>[^}]*)\}\}$")
+    _AFTER_ELSE = "{{else}}"
+    _AFTER_CLOSE = "{{/after}}"
+
+    @staticmethod
+    def _release(version: str, what: str) -> Tuple[int, int, int]:
+        match = re.match(r"^(\d+)\.(\d+)\.(\d+)", version.strip())
+        if not match:
+            raise ValueError(f"{what} {version!r} is not a major.minor.patch version")
+        return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+    def render(self, content: str, version: str) -> str:
+        """The template text with its version blocks resolved and the placeholder filled."""
+        release = self._release(version, "version")
+        out: List[str] = []
+        block = None  # (shown when after, in else branch)
+        for number, line in enumerate(content.splitlines(keepends=True), 1):
+            marker = line.strip()
+            opened = self._AFTER_OPEN.match(marker)
+            if opened or marker.startswith("{{#after"):
+                if block is not None:
+                    raise ValueError(f"line {number}: version blocks do not nest")
+                if not opened:
+                    raise ValueError(
+                        f"line {number}: malformed version block {marker!r}"
+                    )
+                threshold = self._release(opened.group("threshold"), "threshold")
+                block = [release > threshold, False]
+                continue
+            if marker == self._AFTER_ELSE:
+                if block is None or block[1]:
+                    raise ValueError(
+                        f"line {number}: {{{{else}}}} outside a version block"
+                    )
+                block[1] = True
+                continue
+            if marker == self._AFTER_CLOSE:
+                if block is None:
+                    raise ValueError(
+                        f"line {number}: {{{{/after}}}} without a version block"
+                    )
+                block = None
+                continue
+            if block is None or block[0] != block[1]:
+                out.append(line)
+        if block is not None:
+            raise ValueError("a version block is not closed with {{/after}}")
+        return "".join(out).replace(self.version_placeholder, version)
+
     def generate_from_template(self, template_path: Path) -> bool:
         """
         Generate final file from template by replacing placeholders with actual version.
@@ -178,9 +245,9 @@ class VersionTemplateManager:
             with open(template_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
-            # Replace version placeholder with actual version
+            # Resolve version blocks and replace the placeholder with the version
             current_version = get_version()
-            content = content.replace(self.version_placeholder, current_version)
+            content = self.render(content, current_version)
 
             # Generate output file (remove .template suffix)
             output_path = template_path.with_suffix("")
@@ -195,6 +262,10 @@ class VersionTemplateManager:
             print(f"Generated {output_path} from template")
             return True
 
+        except ValueError:
+            # A malformed version block: stop rather than skip the file and leave a
+            # stale doc behind a success message.
+            raise
         except Exception as e:
             print(f"Error generating from template {template_path}: {e}")
             return False

@@ -315,7 +315,8 @@ The shard upload step has no `if: always()`, so a shard whose scan crashed uploa
 
 ### Using ASH's reusable workflow
 
-ASH scans its own repository with `.github/workflows/run-ash-security-scan.yml`, and you can call the same workflow from yours. It installs ASH (and Grype, Syft, OpenGrep and cfn-nag when you ask for them, each checked against the version and SHA256 that ASH pins), runs the scan, and reports the results on the pull request.
+{{#after 3.7.1}}
+ASH scans its own repository with `.github/workflows/run-ash-security-scan.yml`, and you can call the same workflow from yours. The `config-ref` and `config-ref-missing` inputs, the read-only scan job and the separate `Report ASH results` job described here are in ASH releases after v3.7.1. It installs ASH (and Grype, Syft, OpenGrep and cfn-nag when you ask for them, each checked against the version and SHA256 that ASH pins), runs the scan, and reports the results on the pull request.
 
 ```yaml
 name: ASH
@@ -353,6 +354,9 @@ Before you call it:
 - The job's first step resolves `ash-version` to a commit (a tag to the commit it points at) and every later step installs ASH and its cfn-nag Gemfile from that commit, so a branch that moves during the run changes nothing. A name that is both a branch and a tag on different commits is refused; pass `refs/heads/<name>` or `refs/tags/<name>`.
 - On `pull_request` and `merge_group` the workflow restores no cache (no uv cache, grype database or OpenGrep binary), because another job running the pull request's code in the same cache scope could have written those entries. Expect one uncached ASH install and one grype database download per run on those events.
 - `config-ref` does not stop everything a pull request can change: its `.gitignore` and `.ignore` files still shrink the set of files ASH scans, scanners still find their own config files by name when the config names none, and inline suppressions such as `# nosec` still apply. On `pull_request`, GitHub also runs your workflow file from the pull request, so a pull request can edit this call itself. A ruleset's required workflow, which GitHub runs from a ref the ruleset pins, is the control for that.
+{{else}}
+ASH scans its own repository with `.github/workflows/run-ash-security-scan.yml`, and you can call the same workflow from yours. Its `config-ref` and `config-ref-missing` inputs, which read the scan's config from a pull request's base commit, its read-only scan job and its separate `Report ASH results` job are in ASH releases after v3.7.1. v{{VERSION}}, the release this page documents, does not have them yet, so this section describes them once the documented release does.
+{{/after}}
 
 ## GitLab CI
 
