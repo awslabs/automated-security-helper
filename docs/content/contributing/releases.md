@@ -217,8 +217,18 @@ version should exist, in any order: whichever release is newest takes `latest`.
 
 A page that shows an install command pinned to the current release is generated from a
 template. The template has the same name plus `.template` (for example
-`README.md.template`) and holds `{{VERSION}}` where the version goes. The rendered page is
-committed beside it.
+`README.md.template`), and the rendered page is committed beside it. A template has two
+placeholders:
+
+- `{{VERSION}}` is the ref an install command uses, written after a `v` where the command
+  names a tag: `@v{{VERSION}}`, `rev: v{{VERSION}}`.
+- `{{RELEASE}}` is the current release number, for text that needs the number itself:
+  what `ash --version` prints, the release that this repository's generated files pin, a
+  release named in a table.
+
+Both render as the release version at a release, so the committed page shows the same
+number in both places. They differ only on the docs site's `main` version, described
+below.
 
 `scripts/version_template_manager.py generate` renders the template of each file listed
 in its `target_files` over that file. The release workflow runs it after the bump. Run
@@ -237,16 +247,28 @@ release's version, which gives the committed page. When it builds the `main` ver
 renders them with `main`: `v{{VERSION}}` becomes `main`, so `@v{{VERSION}}` becomes
 `@main`, `git clone --branch v{{VERSION}}` becomes `git clone --branch main` and
 `rev: v{{VERSION}}` becomes `rev: main`; `refs/tags/v{{VERSION}}` becomes `refs/heads/main`;
-and a bare `{{VERSION}}` becomes `main`. So write every sentence around a placeholder to
-read correctly with either a release or `main` in its place. Any other build, such as
-`mkdocs serve`, shows the committed pages.
+and a bare `{{VERSION}}` becomes `main`. `{{RELEASE}}` becomes the current release number,
+which is what an install of `main` reports. Any other build, such as `mkdocs serve`, shows
+the committed pages.
+
+So write every sentence around `{{VERSION}}` to read correctly with either a release or
+`main` in its place ("installs ASH `v{{VERSION}}`", not "installs the `v{{VERSION}}`
+release"), and use `{{RELEASE}}` only where the number has to stay a release number. Never
+write `{{RELEASE}}` as the ref of an install command, in any of the forms
+`scripts/version_template_manager.py` lists in `INSTALL_REF_FORMS` (`@v`, `--branch v`,
+`rev: v`, `refs/tags/v`, a flake ref, `--ash-revision-to-install v`, `ash-version: v`): the
+`main` version would then install a release. The docs checks report one anywhere except
+a table row or a `text` block, which may name the release because neither is a command a
+reader runs.
 
 Edit the template, not the rendered page: `generate` overwrites the page, so an edit made
 only to the page is lost at the next release. `tests/unit/test_version_template_round_trip.py`
 renders every template with the current version on each pull request and fails when the
 result differs from the committed page, so the two cannot drift in the meantime. To add a
-templated page, add it to `target_files`, write its `.template` file with `{{VERSION}}`,
-render it with `generate`, and commit both files. Avoid the script's `convert` action: it
+templated page, add it to `target_files`, write its `.template` file with `{{VERSION}}` and,
+where it needs one, `{{RELEASE}}`, render it with `generate`, and commit both files. The
+round-trip test also fails when a rendered template still contains something shaped like
+a placeholder, such as a misspelled `{{RELASE}}`. Avoid the script's `convert` action: it
 rewrites the template of every file in `target_files` from its rendered page, and turns
 every version reference it finds into the placeholder, including deliberately older
 ones.
