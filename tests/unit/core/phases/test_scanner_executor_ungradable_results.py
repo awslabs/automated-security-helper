@@ -180,3 +180,64 @@ class TestTheDictShapesTheExecutorGrades:
         row = _template_row(plugin_context, json.dumps(sarif))
 
         assert row.status == ScannerStatus.PASSED
+
+
+class TestAResultWithNoRunIsAnError:
+    """An empty results file, or SARIF with no run, records no scan at all.
+
+    bandit, checkov and semgrep write SARIF with exactly one run even when there is
+    nothing for them to scan (measured, clean tree and a tree of a text file), and
+    grype's and opengrep's SARIF writers always add one. A file with no run is
+    therefore not a clean scan, and with an accepted exit code it used to be graded
+    PASSED with 0 findings.
+    """
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "",
+            "null",
+            "{}",
+            json.dumps({"version": "2.1.0", "runs": []}),
+            json.dumps({"$schema": "x"}),
+        ],
+        ids=["zero-byte", "json-null", "empty-object", "sarif-no-runs", "schema-only"],
+    )
+    def test_the_row_is_error(self, plugin_context, content):
+        row = _template_row(plugin_context, content)
+
+        assert row.status == ScannerStatus.ERROR, (
+            f"the tool exited 0 and wrote {content!r}; the row was graded "
+            f"{row.status.value} with {row.finding_count} findings"
+        )
+        assert any("nothing to grade" in str(e) for e in row.errors), row.errors
+
+
+class PostProcessingFails(TemplateScanner):
+    """Valid SARIF, and a defect in the scanner's own post-processing."""
+
+    def _post_process_sarif(self, sarif_report, final_args, target):
+        raise RuntimeError("post-processing defect")
+
+
+def test_a_post_processing_failure_is_not_reported_as_unreadable_sarif(
+    plugin_context,
+):
+    """The message names what failed: the scanner's own code, not the tool's file."""
+    config = _Config()
+    scanner = PostProcessingFails(config=config, context=plugin_context)
+    scanner.results_text = json.dumps(
+        {
+            "version": "2.1.0",
+            "runs": [{"tool": {"driver": {"name": "shape-tool"}}, "results": []}],
+        }
+    )
+    with patch.object(
+        scanner, "_run_subprocess", return_value={"returncode": 0, "stderr": ""}
+    ):
+        row = _row(plugin_context, scanner)
+
+    assert row.status == ScannerStatus.ERROR
+    errors = " ".join(str(e) for e in row.errors)
+    assert "post-processing defect" in errors
+    assert "not SARIF" not in errors, errors

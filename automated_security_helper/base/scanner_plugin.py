@@ -620,15 +620,14 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def _read_results_file(self, results_file: "Path") -> Optional[dict]:
         """Read and parse the scanner results file as JSON.
 
-        Returns ``None`` for a file that exists and is EMPTY, which
-        ``scan()`` replaces with the default empty SARIF report (see
-        ``_handle_empty_results``).
+        Returns ``None`` for a file that exists and is EMPTY (or holds JSON
+        ``null``), which ``scan()`` hands to ``_handle_empty_results``.
 
         A **missing** file must raise, and that is a constraint rather than an
         accident of this implementation. Returning ``None`` for it would route a
         scanner that produced no output at all into ``_handle_empty_results()``,
-        which yields an empty SARIF and lets the scan **succeed** -- reporting a
-        clean result for a tool that died. That is a false negative in a security
+        which a scanner may override to return a report and let the scan
+        **succeed** -- reporting a clean result for a tool that died. That is a false negative in a security
         scanner, so the missing case must stay an exception. ``scan()``'s handler
         enriches it with the exit code and the tool's stderr; see
         ``_describe_scan_failure``.
@@ -647,15 +646,16 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         return json.loads(content)
 
     def _handle_empty_results(self) -> SarifReport:
-        """Return a SARIF report representing an empty/missing scanner result.
+        """Decide what an empty results file means, after an accepted exit code.
 
-        Default returns an empty SARIF 2.1.0 report with no runs. Override
-        if a scanner needs richer empty-state handling.
+        The default raises ``ScannerError``: there is nothing to grade. bandit,
+        checkov and semgrep write SARIF with one run even when there is nothing for
+        them to scan (measured), and grype's and opengrep's SARIF writers always add
+        one, so an empty file is not a clean scan. It used to be returned as an empty
+        report and graded PASSED with 0 findings. A scanner whose tool really does
+        write an empty file for a clean scan overrides this to return a report.
         """
-        return SarifReport(  # type: ignore[call-arg]
-            version="2.1.0",
-            runs=[],
-        )
+        raise ScannerError("its results file is empty, so there is nothing to grade")
 
     def _ensure_runs(self, sarif_report: SarifReport) -> None:
         """Ensure ``sarif_report.runs`` is non-empty before invocation injection.
@@ -860,8 +860,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
             raw = self._read_results_file(results_file)
             if raw is None:
-                # Empty result file: defer to _handle_empty_results so
-                # subclasses can log or build a richer fallback report.
+                # Empty result file: defer to _handle_empty_results, which raises
+                # unless the scanner says an empty file is a clean scan.
                 error_msg = (
                     f"{self.__class__.__name__} results file is empty "
                     f"(exit code: {self.exit_code}). "
@@ -875,11 +875,6 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
             try:
                 sarif_report: SarifReport = SarifReport.model_validate(raw)
-                self._ensure_runs(sarif_report)
-                self._inject_invocation(sarif_report, final_args, target)
-                sarif_report = self._post_process_sarif(
-                    sarif_report, final_args, target
-                )
             except Exception as e:
                 # Not returned as it is: a dict without a verdict was graded PASSED
                 # with no findings, which is how a clean scan reads.
@@ -887,8 +882,17 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     f"its results file is not SARIF ASH can read, so its findings "
                     f"could not be graded: {e}"
                 )
-
-            return sarif_report
+            self._ensure_runs(sarif_report)
+            if not sarif_report.runs:
+                # Every field of a SARIF log is optional, so `{}` validates. No run
+                # is no scan; see _handle_empty_results.
+                raise ScannerError(
+                    "its results file holds no SARIF run, so there is nothing to grade"
+                )
+            # Failures from here on are ASH's or the scanner's own code, and the
+            # outer handler reports them as what they are.
+            self._inject_invocation(sarif_report, final_args, target)
+            return self._post_process_sarif(sarif_report, final_args, target)
 
         except Exception as e:
             raise ScannerError(self._describe_scan_failure(e, results_file))

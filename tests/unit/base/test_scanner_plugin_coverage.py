@@ -259,14 +259,12 @@ def test_reading_a_missing_results_file_raises(plugin_context, tmp_path):
         scanner._read_results_file(tmp_path / "never-written.json")
 
 
-def test_handle_empty_results_returns_an_empty_sarif_report(plugin_context):
+def test_handle_empty_results_raises_by_default(plugin_context):
+    """An empty results file is nothing to grade; it used to be an empty report."""
     scanner = _scanner(plugin_context)
 
-    report = scanner._handle_empty_results()
-
-    assert isinstance(report, SarifReport)
-    assert report.version == "2.1.0"
-    assert report.runs == []
+    with pytest.raises(ScannerError, match="nothing to grade"):
+        scanner._handle_empty_results()
 
 
 def test_the_default_ensure_runs_and_post_process_hooks_are_inert(plugin_context):
@@ -401,7 +399,8 @@ def test_a_timed_out_tool_is_reported_as_a_timeout_not_a_missing_file(
     assert "scanners.stub.options.scan_timeout" in message
 
 
-def test_an_empty_results_file_yields_the_empty_sarif_report(plugin_context, tmp_path):
+def test_an_empty_results_file_fails_the_scan(plugin_context, tmp_path):
+    """It used to yield an empty report, which was graded PASSED with no findings."""
     scanner = _scanner(plugin_context, execute_scan=_execute_writing(""))
     target = _populated_target(tmp_path)
 
@@ -409,11 +408,10 @@ def test_an_empty_results_file_yields_the_empty_sarif_report(plugin_context, tmp
     with (
         patch.object(type(scanner), "_run_subprocess", return_value={"returncode": 0}),
         patch("automated_security_helper.base.scanner_plugin.ASH_LOGGER", logger),
+        pytest.raises(ScannerError, match="nothing to grade"),
     ):
-        report = scanner.scan(target=target, target_type="source")
+        scanner.scan(target=target, target_type="source")
 
-    assert isinstance(report, SarifReport)
-    assert report.runs == []
     assert "results file is empty" in logger.warning.call_args.args[0]
     assert "No stderr output captured." in logger.warning.call_args.args[0]
 
@@ -433,6 +431,7 @@ def test_the_empty_results_warning_quotes_captured_stderr_when_present(
     with (
         patch.object(type(scanner), "_run_subprocess", _run),
         patch("automated_security_helper.base.scanner_plugin.ASH_LOGGER", logger),
+        pytest.raises(ScannerError, match="tool said no"),
     ):
         scanner.scan(target=target, target_type="source")
 

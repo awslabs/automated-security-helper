@@ -621,8 +621,11 @@
   unset. snyk-code, which raised on every non-zero code, now accepts 1 ("issues
   found"), so a snyk run with findings reports them instead of failing.
 
-  Two more shapes that read as a clean scan are `ERROR` now. A results file the
-  template reads as JSON but not as SARIF, even with an accepted exit code, was
+  More shapes that read as a clean scan are `ERROR` now, even with an accepted exit
+  code. An empty results file (or JSON `null`) and SARIF with no run were graded
+  `PASSED` with no findings; bandit, checkov and semgrep write one run even when
+  there is nothing to scan (measured), and grype's and opengrep's SARIF writers
+  always add one. A results file the template reads as JSON but not as SARIF was
   returned as it was and graded `PASSED` with no findings; a scanner that overrides
   `scan()` could return its tool's JSON the same way (ferret-scan and syft do when it
   does not parse). A result with no `status`, `severity_counts` or `findings` is no

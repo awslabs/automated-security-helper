@@ -185,8 +185,9 @@ load its database), and "found nothing" and "never scanned" look the same in it,
 that file is not read. The accepted codes per scanner are in
 [Scanner exit codes](troubleshooting.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
 A results file ASH cannot read as SARIF is `ERROR` too, whatever the exit code, as is
-a scanner result that carries nothing to grade; neither can show that the target is
-clean. So is a scanner whose tool reports that its content database does not exist;
+an empty results file, SARIF with no run, and a scanner result that carries nothing
+to grade; none of them can show that the target is clean. The scanners ASH ships
+write SARIF with one run even when there is nothing for them to scan. So is a scanner whose tool reports that its content database does not exist;
 see [Failing on a stale content database](#failing-on-a-stale-content-database).
 
 With the key off, an `ERROR` scanner no longer fails the scan: the exit code comes from
