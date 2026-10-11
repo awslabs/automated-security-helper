@@ -156,25 +156,30 @@ on:
         required: false
         default: false
         type: boolean
+      # The four tools below belong to builtin scanners that are on by default and
+      # that ASH does not install for itself, so they default to true: an unset input
+      # would leave its scanner MISSING in ash-mode: local, which fails the
+      # incomplete-scan gate. tests/unit/test_scan_workflow_installs_default_scanners.py
+      # holds every input of their install step to that default.
       install-actionlint:
-        description: "Whether to install the actionlint scanner"
+        description: "Whether to install the actionlint scanner (about 2.4 MB). Set false when the scan does not need it, for example in ash-mode: container or with scanners.actionlint.enabled: false."
         required: false
-        default: false
+        default: true
         type: boolean
       install-cfn-guard:
-        description: "Whether to install the cfn-guard scanner and the rules it evaluates"
+        description: "Whether to install the cfn-guard scanner and the rules it evaluates (about 3.4 MB for the binary). Set false when the scan does not need it, for example in ash-mode: container or with scanners.cfn-guard.enabled: false."
         required: false
-        default: false
+        default: true
         type: boolean
       install-gitleaks:
-        description: "Whether to install the gitleaks scanner"
+        description: "Whether to install the gitleaks scanner (about 8.2 MB). Set false when the scan does not need it, for example in ash-mode: container or with scanners.gitleaks.enabled: false."
         required: false
-        default: false
+        default: true
         type: boolean
       install-trivy:
-        description: "Whether to install the trivy scanner"
+        description: "Whether to install the trivy scanner (a 52 MB download), which then downloads its vulnerability database during the scan (about 127 MB compressed), so about 180 MB per run. Set false when the scan does not need it, for example in ash-mode: container or with scanners.trivy.enabled: false."
         required: false
-        default: false
+        default: true
         type: boolean
       changed-files-only:
         description: "Limit the scan to files changed in the PR (reduces scan time and focuses feedback)"

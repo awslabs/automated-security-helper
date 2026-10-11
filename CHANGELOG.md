@@ -172,13 +172,17 @@
   missing grype or semgrep does. Run `ash dependencies install`, use the container
   image, or set `scanners.<name>.enabled: false` for any you do not want. Their
   findings count toward `fail_on_findings` like any scanner's, so a scan that passed
-  can now exit 2. Callers of the reusable workflow
-  `.github/workflows/run-ash-security-scan.yml` in its default `ash-mode: local` need
-  its new `install-actionlint`, `install-cfn-guard`, `install-gitleaks` and
-  `install-trivy` inputs set to true (they default to false), or use
-  `ash-mode: container`; otherwise those scanners are MISSING. trivy reads
-  its vulnerability database, so online it downloads it, and offline it needs the
-  database in its cache (`TRIVY_CACHE_DIR`). Configs that list the community Trivy
+  can now exit 2. The reusable workflow
+  `.github/workflows/run-ash-security-scan.yml` installs four of their tools by
+  default: its new `install-actionlint`, `install-cfn-guard`, `install-gitleaks` and
+  `install-trivy` inputs default to true, so a caller that upgrades without setting
+  them still gets those scanners rather than MISSING ones. Each run therefore
+  downloads them: about 180 MB for trivy, which is a 52 MB release archive plus the
+  vulnerability database it downloads during the scan (127 MB compressed, measured
+  on 2026-10-11), and about 14 MB for the other three. A caller that does not need
+  one, for example in `ash-mode: container` or with the scanner disabled, sets its
+  input to false. trivy reads its vulnerability database, so online it downloads
+  it, and offline it needs the database in its cache (`TRIVY_CACHE_DIR`). Configs that list the community Trivy
   plugin for `trivy-repo` now run trivy twice; set `scanners.trivy.enabled: false` to
   keep only `trivy-repo`.
 - **The scanned repository's own scanner configs are not read.** A tool config
