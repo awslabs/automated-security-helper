@@ -1900,8 +1900,8 @@ def load_env_read_set(root_str: str = str(REPO_ROOT)) -> EnvReadSet:
     return read
 
 
-def dockerfile_args(text: str, label: str) -> dict[str, str]:
-    """Names an ``ARG`` instruction declares in a Dockerfile, parsed by instruction.
+def _dockerfile_arg_words(text: str) -> Iterator[tuple[int, str]]:
+    """(line, word) for every word of every ``ARG`` instruction in a Dockerfile.
 
     Continuation lines are joined, comments and here-document bodies skipped, and only
     an instruction whose keyword is ARG counts, so a name in a comment, a RUN line or a
@@ -1909,7 +1909,6 @@ def dockerfile_args(text: str, label: str) -> dict[str, str]:
     """
     import shlex
 
-    declared: dict[str, str] = {}
     lines = text.split("\n")
     index = 0
     while index < len(lines):
@@ -1935,10 +1934,31 @@ def dockerfile_args(text: str, label: str) -> dict[str, str]:
         except ValueError:
             words = match.group(1).split()
         for word in words:
-            name = word.split("=", 1)[0]
-            if _ENV_NAME.match(name):
-                declared.setdefault(name, f"{label}:{start + 1} (ARG)")
+            yield start + 1, word
+
+
+def dockerfile_args(text: str, label: str) -> dict[str, str]:
+    """Names an ``ARG`` instruction declares in a Dockerfile, with where (see above)."""
+    declared: dict[str, str] = {}
+    for line, word in _dockerfile_arg_words(text):
+        name = word.split("=", 1)[0]
+        if _ENV_NAME.match(name):
+            declared.setdefault(name, f"{label}:{line} (ARG)")
     return declared
+
+
+def dockerfile_arg_defaults(text: str) -> dict[str, set[str | None]]:
+    """Every default each ARG is declared with; None for a declaration without one.
+
+    A multi-stage Dockerfile can declare one ARG several times, so a name can have
+    more than one default.
+    """
+    defaults: dict[str, set[str | None]] = {}
+    for _line, word in _dockerfile_arg_words(text):
+        name, sep, value = word.partition("=")
+        if _ENV_NAME.match(name):
+            defaults.setdefault(name, set()).add(value if sep else None)
+    return defaults
 
 
 def build_argument_names(code: Path) -> dict[str, str]:
@@ -2879,6 +2899,23 @@ OPTION_TABLE_HEADERS = frozenset(
         "setting",
         "settings",
         "argument",
+        "arguments",
+        "param",
+        "parameter",
+        "parameters",
+    }
+)
+#: Headers of the column a table states defaults in. Renaming the column does not take
+#: a table out of the default comparison.
+DEFAULT_HEADERS = frozenset(
+    {
+        "default",
+        "defaults",
+        "default value",
+        "defaults to",
+        "if not passed",
+        "if not set",
+        "if unset",
     }
 )
 #: ``of=`` prefix for the workspace policy file, whose schema is not AshConfig's.
@@ -2899,6 +2936,8 @@ _PLATFORMS = {"linux": "Linux", "darwin": "macOS", "win32": "Windows"}
 #: Not a value, so nothing to compare: the sentinel for a section's default.
 SECTION = object()
 COMPUTED = object()
+#: A CloudFormation parameter or GitHub input with no default: given at deploy or call time.
+REQUIRED = object()
 
 
 @dataclass
@@ -2909,6 +2948,18 @@ class KeySpec:
     required: bool = False
     default: Any = None
     compare: bool = True
+    #: How the Default cell is read: "yaml" (config, CLI and MCP values), "python"
+    #: (a literal, or the source of the default), or "text" (the string as written:
+    #: Dockerfile and CloudFormation defaults are strings, and YAML would read NO as
+    #: false).
+    syntax: str = "yaml"
+
+
+@dataclass(frozen=True)
+class PythonSource:
+    """A Python default that is not a literal, compared by its source text."""
+
+    text: str
 
 
 @dataclass
@@ -3104,10 +3155,27 @@ def _model_keys(model: type) -> dict[str, KeySpec]:
     return keys
 
 
-def options_section(of: str, models: ConfigModels) -> tuple[Section | None, str | None]:
-    """The keys an ``options of=`` marker names, or why it names nothing."""
+def options_section(
+    of: str, models: ConfigModels, code: Path | None = None
+) -> tuple[Section | None, str | None]:
+    """The keys an ``options of=`` marker names, or why it names nothing.
+
+    ``code`` is the tree the Python, Dockerfile and CloudFormation sections are read
+    from; it defaults to the checkout of the installed ASH.
+    """
     from automated_security_helper.base.options import ScannerOptionsBase
 
+    code = code or code_root(REPO_ROOT)
+    if of == "mcp" or of.startswith("mcp."):
+        return mcp_section(of)
+    if of == "python" or of.startswith("python."):
+        return python_section(of, code)
+    if of == "dockerfile":
+        return dockerfile_section(code)
+    if of == "cloudformation" or of.startswith("cloudformation:"):
+        return cloudformation_section(of, code)
+    if of == "github-inputs" or of.startswith("github-inputs:"):
+        return github_inputs_section(of, code)
     if of == "config":
         keys = _model_keys(models.ash_config)
         keys.update({key: KeySpec((key,), default=None) for key in LOADER_KEYS})
@@ -3178,12 +3246,329 @@ def cli_section(of: str) -> tuple[Section | None, str | None]:
     return Section(f"of={of} (ash {' '.join(words)})".replace(" )", ")"), keys), None
 
 
+@functools.lru_cache(maxsize=None)
+def _mcp_tool_schemas() -> dict[str, dict[str, Any]]:
+    """Each MCP tool's input schema, as the server lists it to a client."""
+    import asyncio
+
+    from automated_security_helper.cli import mcp_server
+
+    tools = asyncio.run(mcp_server.mcp.list_tools())
+    return {tool.name: dict(tool.input_schema or {}) for tool in tools}
+
+
+def mcp_section(of: str) -> tuple[Section | None, str | None]:
+    """The parameters of one MCP tool: its input schema's properties and defaults."""
+    try:
+        tools = _mcp_tool_schemas()
+    except Exception as exc:  # noqa: BLE001 -- the server not loading is the finding
+        return None, f"of={of}: the MCP server's tools cannot be listed ({exc!r})"
+    words = of.split(".")[1:]
+    if len(words) != 1:
+        return None, (
+            f"of={of}: name one tool, as of=mcp.<tool>; tools: {', '.join(sorted(tools))}"
+        )
+    schema = tools.get(words[0])
+    if schema is None:
+        close = difflib.get_close_matches(words[0], sorted(tools), n=1)
+        hint = f"; did you mean '{close[0]}'?" if close else ""
+        return None, f"of={of}: the MCP server has no tool {words[0]}{hint}"
+    required = set(schema.get("required", []))
+    keys: dict[str, KeySpec] = {}
+    for name, prop in schema.get("properties", {}).items():
+        if name in required:
+            keys[name] = KeySpec((name,), required=True)
+        else:
+            keys[name] = KeySpec((name,), default=_normalize(prop.get("default")))
+    return Section(f"of={of} (the input schema of the {words[0]} tool)", keys), None
+
+
+def python_section(of: str, code: Path) -> tuple[Section | None, str | None]:
+    """The parameters of a Python function, method or class, read from its source.
+
+    of=python.<module>.<name>[.<method>] names a module file under the code tree, then
+    a function, a class (its __init__) or a class's method. The source is parsed, not
+    imported, so a module that needs an extra the docs job lacks can still be named.
+    Defaults are compared as Python: a literal by value, anything else
+    (ExecutionStrategy.PARALLEL) by its source text.
+    """
+    words = of.split(".")[1:]
+    module_file: Path | None = None
+    rest: list[str] = []
+    for end in range(len(words), 0, -1):
+        base = code.joinpath(*words[:end])
+        for candidate in (base.parent / f"{base.name}.py", base / "__init__.py"):
+            if candidate.is_file():
+                module_file, rest = candidate, words[end:]
+                break
+        if module_file is not None:
+            break
+    if module_file is None:
+        return (
+            None,
+            f"of={of}: no module {'.'.join(words) or '<module>'} in the code tree",
+        )
+    if not rest:
+        return None, (
+            f"of={of} names a module; add the function or class, as of={of}.<function>"
+        )
+    try:
+        tree = ast.parse(module_file.read_text(encoding="utf-8"))
+    except SyntaxError as exc:
+        return (
+            None,
+            f"of={of}: {rel_path(module_file, code)} does not parse ({exc.msg})",
+        )
+    body: list[ast.stmt] = tree.body
+    node: ast.AST | None = None
+    parent_is_class = False
+    for index, name in enumerate(rest):
+        found = next(
+            (
+                item
+                for item in body
+                if isinstance(
+                    item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+                )
+                and item.name == name
+            ),
+            None,
+        )
+        if found is None:
+            where = ".".join(words[: len(words) - len(rest) + index])
+            nor = (
+                f", and there is no module {where}.{name}"
+                if index == 0 and module_file.name == "__init__.py"
+                else ""
+            )
+            return None, f"of={of}: {where} defines no function or class {name}{nor}"
+        if index < len(rest) - 1 and not isinstance(found, ast.ClassDef):
+            return (
+                None,
+                f"of={of}: {name} is a function, so it has no {rest[index + 1]}",
+            )
+        parent_is_class = isinstance(node, ast.ClassDef)
+        node = found
+        if isinstance(found, ast.ClassDef):
+            body = found.body
+    if isinstance(node, ast.ClassDef):
+        init = next(
+            (
+                item
+                for item in node.body
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and item.name == "__init__"
+            ),
+            None,
+        )
+        if init is None:
+            return None, f"of={of}: the class defines no __init__; name a method"
+        node, parent_is_class = init, True
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return None, f"of={of} names no function"
+    arguments = node.args
+    positional = arguments.posonlyargs + arguments.args
+    defaults: list[ast.expr | None] = [None] * (
+        len(positional) - len(arguments.defaults)
+    ) + list(arguments.defaults)
+    pairs = list(zip(positional, defaults)) + list(
+        zip(arguments.kwonlyargs, arguments.kw_defaults)
+    )
+    if parent_is_class and pairs and pairs[0][0].arg in ("self", "cls"):
+        pairs = pairs[1:]
+    keys: dict[str, KeySpec] = {}
+    for argument, default in pairs:
+        if default is None:
+            spec = KeySpec((argument.arg,), required=True, syntax="python")
+        else:
+            try:
+                value: Any = ast.literal_eval(default)
+            except (ValueError, SyntaxError, TypeError):
+                value = PythonSource(re.sub(r"\s+", "", ast.unparse(default)))
+            spec = KeySpec((argument.arg,), default=value, syntax="python")
+        keys[argument.arg] = spec
+    label = f"of={of} ({rel_path(module_file, code)}:{node.lineno})"
+    return Section(label, keys), None
+
+
+def dockerfile_section(code: Path) -> tuple[Section | None, str | None]:
+    """The build arguments of the shipped Dockerfile, with the defaults its ARGs give."""
+    keys: dict[str, KeySpec] = {}
+    found = False
+    for rel in SHIPPED_DOCKERFILES:
+        path = code / rel
+        if not path.is_file():
+            continue
+        found = True
+        for name, declared in dockerfile_arg_defaults(
+            path.read_text(encoding="utf-8")
+        ).items():
+            # A stage that re-declares an ARG without a value inherits the global one.
+            values = {value for value in declared if value is not None}
+            spec = (
+                KeySpec((name,), default=next(iter(values)), syntax="text")
+                if len(values) == 1
+                else KeySpec((name,), default=None, compare=not values, syntax="text")
+            )
+            keys[name] = spec
+    if not found:
+        return None, "of=dockerfile: the code tree has no " + ", ".join(
+            SHIPPED_DOCKERFILES
+        )
+    return Section(f"of=dockerfile ({', '.join(SHIPPED_DOCKERFILES)})", keys), None
+
+
+def cloudformation_section(of: str, code: Path) -> tuple[Section | None, str | None]:
+    """The Parameters of CloudFormation templates: one file, or every template in a
+    directory, whose parameters are pooled. A parameter whose default differs between
+    templates is listed without a default to compare."""
+    import yaml
+
+    rel = of.partition(":")[2].strip()
+    problem = save_as_problem(rel) if rel else "a path is missing"
+    if problem:
+        return None, (
+            f"of={of}: name a template or a directory of templates in the code tree, "
+            f"as of=cloudformation:deploy/cdk/templates ({problem})"
+        )
+    target = code / rel
+    if target.is_dir():
+        files = sorted(
+            p
+            for p in target.iterdir()
+            if p.is_file() and p.suffix in (".json", ".yaml", ".yml")
+        )
+    elif target.is_file():
+        files = [target]
+    else:
+        return None, f"of={of}: {rel} is not in the code tree"
+
+    class _TagTolerantLoader(yaml.SafeLoader):
+        """Reads !Ref, !Sub and the other short-form intrinsics as plain values."""
+
+    _TagTolerantLoader.add_multi_constructor("!", lambda loader, suffix, node: None)
+    pooled: dict[str, list[Any]] = {}
+    templates = 0
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8")
+            data = (
+                json.loads(text)
+                if path.suffix == ".json"
+                else yaml.load(text, Loader=_TagTolerantLoader)  # noqa: S506 -- a SafeLoader subclass
+            )
+        except (ValueError, yaml.YAMLError) as exc:
+            return None, f"of={of}: {rel_path(path, code)} does not parse ({exc})"
+        parameters = data.get("Parameters") if isinstance(data, dict) else None
+        if not isinstance(parameters, dict):
+            continue
+        templates += 1
+        for name, spec in parameters.items():
+            default = (
+                spec.get("Default", REQUIRED) if isinstance(spec, dict) else REQUIRED
+            )
+            pooled.setdefault(name, []).append(default)
+    if not templates:
+        return None, f"of={of}: {rel} holds no CloudFormation template with Parameters"
+    keys: dict[str, KeySpec] = {}
+    for name, defaults in pooled.items():
+        distinct = {json.dumps(d, default=str) for d in defaults}
+        if len(distinct) > 1:
+            keys[name] = KeySpec((name,), compare=False, syntax="text")
+        elif defaults[0] is REQUIRED:
+            keys[name] = KeySpec((name,), required=True, syntax="text")
+        else:
+            value = defaults[0]
+            keys[name] = KeySpec(
+                (name,),
+                default=value if isinstance(value, str) else json.dumps(value),
+                syntax="text",
+            )
+    count = f"{templates} template{'s' if templates != 1 else ''}"
+    return Section(f"of={of} ({count})", keys), None
+
+
+def github_inputs_section(of: str, code: Path) -> tuple[Section | None, str | None]:
+    """The inputs of a GitHub Action (its action.yml, or the directory holding one) or of
+    a workflow (its workflow_call and workflow_dispatch inputs).
+
+    Defaults are compared as the text GitHub passes: a workflow's boolean default true
+    is the string true, as an action's default 'true' is.
+    """
+    import yaml
+
+    rel = of.partition(":")[2].strip()
+    problem = save_as_problem(rel) if rel else "a path is missing"
+    if problem:
+        return None, (
+            f"of={of}: name an action or a workflow in the code tree, as "
+            f"of=github-inputs:.github/workflows/<file>.yml ({problem})"
+        )
+    target = code / rel
+    if target.is_dir():
+        target = next(
+            (
+                target / n
+                for n in ("action.yml", "action.yaml")
+                if (target / n).is_file()
+            ),
+            target,
+        )
+    if not target.is_file():
+        return None, f"of={of}: {rel} is not an action or a workflow in the code tree"
+    try:
+        data = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        return None, f"of={of}: {rel} does not parse ({exc})"
+    if not isinstance(data, dict):
+        return None, f"of={of}: {rel} is not an action or a workflow"
+    groups: list[dict[str, Any]] = []
+    if isinstance(data.get("inputs"), dict) and "runs" in data:
+        groups.append(data["inputs"])
+        kind = "action"
+    else:
+        # PyYAML reads the key on: as the boolean true.
+        triggers = data.get("on", data.get(True))
+        triggers = triggers if isinstance(triggers, dict) else {}
+        for trigger in ("workflow_call", "workflow_dispatch"):
+            inputs = (triggers.get(trigger) or {}).get("inputs")
+            if isinstance(inputs, dict):
+                groups.append(inputs)
+        kind = "workflow"
+    if not groups:
+        return None, f"of={of}: {rel} declares no inputs"
+
+    def as_text(value: Any) -> str:
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return "" if value is None else str(value)
+
+    keys: dict[str, KeySpec] = {}
+    seen: dict[str, set[str]] = {}
+    for inputs in groups:
+        for name, spec in inputs.items():
+            spec = spec if isinstance(spec, dict) else {}
+            if spec.get("required") is True and "default" not in spec:
+                state = REQUIRED
+            else:
+                state = as_text(spec.get("default"))
+            seen.setdefault(str(name), set()).add(state)
+    for name, states in seen.items():
+        if len(states) > 1:
+            keys[name] = KeySpec((name,), compare=False, syntax="text")
+        elif REQUIRED in states:
+            keys[name] = KeySpec((name,), required=True, syntax="text")
+        else:
+            keys[name] = KeySpec((name,), default=next(iter(states)), syntax="text")
+    return Section(f"of={of} (the {kind}'s inputs)", keys), None
+
+
 _SPAN = re.compile(r"(`+)(.+?)\1")
 _ENV_FORM = re.compile(r"^(?:from `([A-Za-z_][A-Za-z0-9_]*)`, else )+")
 _ENV_NAMES = re.compile(r"from `([A-Za-z_][A-Za-z0-9_]*)`, else ")
 
 
-def _cell_value(text: str) -> tuple[bool, Any]:
+def _cell_value(text: str, syntax: str = "yaml") -> tuple[bool, Any]:
     """(parsed, value) of a Default cell holding one value, in a code span or bare."""
     import yaml
 
@@ -3196,6 +3581,14 @@ def _cell_value(text: str) -> tuple[bool, Any]:
             return True, None
     else:
         return False, None
+    if syntax == "text":
+        quoted = re.fullmatch(r"(['\"])(.*)\1", content)
+        return True, quoted.group(2) if quoted else content
+    if syntax == "python":
+        try:
+            return True, ast.literal_eval(content)
+        except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+            return True, PythonSource(re.sub(r"\s+", "", content))
     try:
         return True, yaml.safe_load(content) if content else ""
     except yaml.YAMLError:
@@ -3203,6 +3596,9 @@ def _cell_value(text: str) -> tuple[bool, Any]:
 
 
 def _same_default(written: Any, actual: Any) -> bool:
+    if isinstance(written, PythonSource) and isinstance(actual, str):
+        # A Python string written without quotes: `t3.medium` for "t3.medium".
+        return written.text == re.sub(r"\s+", "", actual)
     if isinstance(written, str) and isinstance(actual, str):
         if written.startswith("<repository>/"):
             return actual.endswith(written[len("<repository>") :])
@@ -3222,31 +3618,35 @@ def _same_default(written: Any, actual: Any) -> bool:
 def default_problem(cell: str, spec: KeySpec) -> str | None:
     """Why a Default cell does not state the model's default, or None."""
     text = re.sub(r"<[^>]+>", "", cell).strip()
-    lowered = text.lower()
+    # A phrase may be set in emphasis (*required*); a value belongs in a code span.
+    lowered = re.sub(r"^([*_]+)(.+?)\1$", r"\2", text).strip().lower()
     if lowered in DEFAULT_PHRASES_NOT_COMPARED or not spec.compare:
         return None
+
+    def shown() -> str:
+        return _shown(spec.default, spec.syntax)
+
     if lowered == "required":
-        return (
-            None
-            if spec.required
-            else f"says required, but the default is {_shown(spec.default)}"
-        )
+        return None if spec.required else f"says required, but the default is {shown()}"
     if spec.required:
         return f"says {text or 'nothing'}, but the key is required"
     if lowered == "see the section":
         return (
             None
             if spec.default is SECTION
-            else f"says see the section, but the default is {_shown(spec.default)}"
+            else f"says see the section, but the default is {shown()}"
         )
-    if lowered in ("not set", "off", "on"):
-        allowed = {"not set": (None, False, [], ""), "off": (False,), "on": (True,)}[
-            lowered
-        ]
+    if lowered in ("not set", "empty", "off", "on"):
+        allowed = {
+            "not set": (None, False, [], ""),
+            "empty": ("", [], {}),
+            "off": (False,),
+            "on": (True,),
+        }[lowered]
         return (
             None
             if any(spec.default == a and type(spec.default) is type(a) for a in allowed)
-            else f"says {text}, but the default is {_shown(spec.default)}"
+            else f"says {text}, but the default is {shown()}"
         )
     env = _ENV_FORM.match(text)
     if env:
@@ -3265,19 +3665,25 @@ def default_problem(cell: str, spec: KeySpec) -> str | None:
         if chosen is None:
             return None  # this platform is not one the cell names
         text = chosen
-    parsed, value = _cell_value(text)
+    parsed, value = _cell_value(text, spec.syntax)
     if not parsed:
         return f"'{cell}' is not a value or a recognized phrase; put the default in one code span"
     if spec.default is SECTION:
         return f"says {text}, but the key is a section (write: see the section)"
     if not _same_default(value, spec.default):
-        return f"says {text}, but the default is {_shown(spec.default)}"
+        return f"says {text}, but the default is {shown()}"
     return None
 
 
-def _shown(value: Any) -> str:
+def _shown(value: Any, syntax: str = "yaml") -> str:
     if value is SECTION:
         return "a section"
+    if isinstance(value, PythonSource):
+        return f"`{value.text}`"
+    if syntax == "python":
+        return f"`{value!r}`"
+    if syntax == "text":
+        return f"`{value}`" if value else "empty"
     return "`" + json.dumps(value, default=str) + "`"
 
 
@@ -3287,7 +3693,7 @@ def _is_options_table(table: Table) -> bool:
     cells = [re.sub(r"[`*_]", "", cell).strip().lower() for cell in table.header]
     if cells[0] in _ENV_TABLE_HEADERS:
         return False
-    return cells[0] in OPTION_TABLE_HEADERS or "default" in cells
+    return cells[0] in OPTION_TABLE_HEADERS or bool(DEFAULT_HEADERS & set(cells))
 
 
 def _row_key(cell: str) -> str:
@@ -3295,6 +3701,29 @@ def _row_key(cell: str) -> str:
     cell = re.sub(r"<a\s[^>]*>\s*</a>", "", cell)
     span = _SPAN.search(cell)
     return (span.group(2) if span else re.sub(r"<[^>]+>", "", cell)).strip()
+
+
+_LIST_SEPARATORS = re.compile(r"(?:\s|,|\band\b|\bor\b)*")
+
+
+def _row_keys(cell: str) -> list[str]:
+    """The keys a row names: every code span when the cell is only a list of them
+    (`quiet`, `simple` and `debug`), else the first one."""
+    bare = re.sub(r"<a\s[^>]*>\s*</a>", "", cell)
+    spans = [match.group(2).strip() for match in _SPAN.finditer(bare)]
+    if len(spans) > 1 and _LIST_SEPARATORS.fullmatch(_SPAN.sub("", bare)):
+        return spans
+    return [_row_key(cell)]
+
+
+def _row_defaults(cell: str, count: int) -> list[str]:
+    """The Default cell for each of a row's keys: one value per key, in order, when
+    the cell lists exactly that many code spans; else the one cell for all of them."""
+    if count > 1:
+        spans = [match.group(0) for match in _SPAN.finditer(cell)]
+        if len(spans) == count and _LIST_SEPARATORS.fullmatch(_SPAN.sub("", cell)):
+            return spans
+    return [cell] * count
 
 
 #: A config path in prose: a top-level key, dotted, maybe with a value after it.
@@ -3348,9 +3777,16 @@ def config_path_problem(span: str, models: ConfigModels) -> str | None:
     return f"`{span}`: {problem}" if problem else None
 
 
-def check_option_tables(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding]:
-    """Option tables name their section, list its keys with its defaults; config paths resolve."""
+def check_option_tables(
+    files: Iterable[Path], root: Path = REPO_ROOT, code: Path | None = None
+) -> list[Finding]:
+    """Option tables name their section, list its keys with its defaults; config paths resolve.
+
+    ``code`` is the tree Python, Dockerfile and CloudFormation sections are read from;
+    by default the checkout of the installed ASH.
+    """
     models = load_config_models()
+    code = code or code_root(root)
     findings: list[Finding] = []
     for page in load_pages(files, root):
         if page.rel in HISTORICAL_DOCS:
@@ -3365,7 +3801,10 @@ def check_option_tables(files: Iterable[Path], root: Path = REPO_ROOT) -> list[F
                             table.header_line,
                             "this table documents options or keys but names no section: put "
                             "<!-- doctest: options of=<section> --> on the line above its header, "
-                            "for example of=scanners.bandit, of=global_settings or of=cli.scan",
+                            "for example of=scanners.bandit, of=cli.scan, of=mcp.run_ash_scan, "
+                            "of=python.<module>.<function>, of=dockerfile, "
+                            "of=cloudformation:<template or directory> or "
+                            "of=github-inputs:<action or workflow>",
                         )
                     )
                 continue
@@ -3391,40 +3830,58 @@ def check_option_tables(files: Iterable[Path], root: Path = REPO_ROOT) -> list[F
                     )
                 )
                 continue
-            section, problem = options_section(of, models)
+            section, problem = options_section(of, models, code)
             if problem:
                 findings.append(Finding("options", page.rel, line, problem))
                 continue
             headers = [
                 re.sub(r"[`*_]", "", cell).strip().lower() for cell in table.header
             ]
-            default_column = headers.index("default") if "default" in headers else None
+            default_column = next(
+                (
+                    index
+                    for index, cell in enumerate(headers)
+                    if cell in DEFAULT_HEADERS
+                ),
+                None,
+            )
             for number, cells in table.rows:
-                key = _row_key(cells[0]) if cells else ""
-                spec = section.keys.get(key)
-                if spec is None:
-                    close = difflib.get_close_matches(key, sorted(section.keys), n=1)
-                    hint = f"; did you mean '{close[0]}'?" if close else ""
-                    findings.append(
-                        Finding(
-                            "options",
-                            page.rel,
-                            number,
-                            f"'{key}' is not a key of {section.label}{hint}",
+                keys = _row_keys(cells[0]) if cells else [""]
+                defaults = (
+                    _row_defaults(cells[default_column], len(keys))
+                    if default_column is not None and default_column < len(cells)
+                    else None
+                )
+                for position, key in enumerate(keys):
+                    spec = section.keys.get(key)
+                    head = re.split(r"[\s=]", key, maxsplit=1)[0]
+                    if spec is None and head != key:
+                        spec = section.keys.get(head)  # `--build-target ci`
+                    if spec is None:
+                        close = difflib.get_close_matches(
+                            key, sorted(section.keys), n=1
                         )
-                    )
-                    continue
-                if default_column is not None and default_column < len(cells):
-                    problem = default_problem(cells[default_column], spec)
-                    if problem:
+                        hint = f"; did you mean '{close[0]}'?" if close else ""
                         findings.append(
                             Finding(
                                 "options",
                                 page.rel,
                                 number,
-                                f"'{key}' default {problem}",
+                                f"'{key}' is not a key of {section.label}{hint}",
                             )
                         )
+                        continue
+                    if defaults is not None:
+                        problem = default_problem(defaults[position], spec)
+                        if problem:
+                            findings.append(
+                                Finding(
+                                    "options",
+                                    page.rel,
+                                    number,
+                                    f"'{key}' default {problem}",
+                                )
+                            )
         for number, line in page.prose:
             for span in inline_code_spans(line):
                 problem = config_path_problem(span, models)

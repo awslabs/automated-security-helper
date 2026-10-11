@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -1792,6 +1793,478 @@ def test_option_tables_check_passes_every_valid_form(tmp_path):
 def test_option_tables_check_can_fail(tmp_path, case, text, expected, line):
     page = _write(tmp_path, "docs/page.md", text)
     _assert_reports(dc.check_option_tables([page], tmp_path), expected, line)
+
+
+SECTION_CODE = {
+    "pkg/__init__.py": "",
+    "pkg/api.py": """from enum import Enum
+
+
+class Mode(Enum):
+    local = "local"
+    container = "container"
+
+
+def scan(source_dir=None, *, offline=False, mode=Mode.local, name="t3.medium",
+         retries=3, tags=("a",), **kwargs):
+    pass
+
+
+class Stack:
+    def __init__(self, scope, vpc_cidr: str = "10.0.0.0/16"):
+        pass
+
+    def deploy(self, wait=True):
+        pass
+""",
+    "Dockerfile": """ARG BASE_IMAGE=python:3.12-slim
+FROM ${BASE_IMAGE}
+ARG OFFLINE=NO
+ARG BASE_IMAGE
+ARG UNSET
+""",
+    "deploy/templates/A.template.json": json.dumps(
+        {
+            "Parameters": {
+                "Version": {"Type": "String", "Default": "v1"},
+                "Repo": {"Type": "String"},
+                "Flag": {"Type": "String", "Default": "true"},
+                "Empty": {"Type": "String", "Default": ""},
+                "Diff": {"Type": "String", "Default": "y"},
+            }
+        }
+    ),
+    ".github/workflows/scan.yml": """name: scan
+on:
+  workflow_call:
+    inputs:
+      ash-version: {type: string, default: main}
+      verbose: {type: boolean, default: true}
+      config: {type: string, default: ""}
+      token: {type: string, required: true}
+  workflow_dispatch:
+    inputs:
+      ash-version: {type: string, default: main}
+jobs: {}
+""",
+    "actions/setup/action.yml": """name: setup
+inputs:
+  python-version: {default: "3.12"}
+  install-ash: {default: "false"}
+runs:
+  using: composite
+  steps: []
+""",
+    "deploy/templates/B.template.yaml": """Parameters:
+  Version: {Type: String, Default: v1}
+  Schedule: {Type: String, Default: rate(1 day)}
+  Diff: {Type: String, Default: x}
+Resources:
+  Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Ref Version
+""",
+}
+
+
+@pytest.fixture
+def section_code(tmp_path):
+    """A code tree with a Python module, a Dockerfile and two CloudFormation templates."""
+    code = tmp_path / "code"
+    for rel, text in SECTION_CODE.items():
+        _write(code, rel, text)
+    return code
+
+
+CLEAN_SECTIONS = """# Sections read from code
+
+<!-- doctest: options of=mcp.run_ash_scan -->
+| Param | Type | Default | Notes |
+|-------|------|---------|-------|
+| `source_dir` | string \\| null | not set | x |
+| `severity_threshold` | string | `"MEDIUM"` | x |
+| `config_path` | string \\| null | `null` | x |
+| `clean_output` | boolean | `true` | x |
+
+<!-- doctest: options of=mcp.resolve_ash_workspace -->
+| Param | Default |
+|-------|---------|
+| `workspace_file` | *required* |
+| `allow_missing_projects` | `false` |
+
+<!-- doctest: options of=mcp.get_scan_progress -->
+| Param | Type | Notes |
+|-------|------|-------|
+| `scan_id` | string | x |
+
+<!-- doctest: options of=python.pkg.api.scan -->
+| Parameter | Default | Notes |
+|-----------|---------|-------|
+| `source_dir` | `None` | |
+| `mode` | `Mode.local` | |
+| `name` | `t3.medium` | |
+| `retries`, `offline` | `3`, `False` | |
+| `tags` | `("a",)` | |
+
+<!-- doctest: options of=python.pkg.api.Stack -->
+| Parameter | Default |
+|-----------|---------|
+| `scope` | required |
+| `vpc_cidr` | `"10.0.0.0/16"` |
+
+<!-- doctest: options of=python.pkg.api.Stack.deploy -->
+| Parameter | Default |
+|-----------|---------|
+| `wait` | `True` |
+
+<!-- doctest: options of=dockerfile -->
+| Argument | Default |
+|----------|---------|
+| `BASE_IMAGE` | `python:3.12-slim` |
+| `OFFLINE` | `NO` |
+| `UNSET` | not set |
+
+<!-- doctest: options of=cloudformation:deploy/templates -->
+| Parameter | Default |
+|-----------|---------|
+| `Version` | `v1` |
+| `Repo` | required |
+| `Flag` | `true` |
+| `Empty` | empty |
+| `Schedule` | `rate(1 day)` |
+| `Diff` | differs between the templates |
+
+<!-- doctest: options of=github-inputs:.github/workflows/scan.yml -->
+| Input | Defaults to | Effect |
+|-------|-------------|--------|
+| `ash-version` | `main` | x |
+| `verbose` | `true` | x |
+| `config` | empty | x |
+| `token` | required | x |
+
+<!-- doctest: options of=github-inputs:actions/setup -->
+| Input | If not set |
+|-------|------------|
+| `python-version` | `3.12` |
+| `install-ash` | `false` |
+
+<!-- doctest: options of=cli.scan -->
+| Option | Effect |
+|--------|--------|
+| `--build-target ci` | x |
+"""
+
+
+def test_sections_read_from_code_pass_every_valid_form(tmp_path, section_code):
+    page = _write(tmp_path, "docs/page.md", CLEAN_SECTIONS)
+    assert dc.check_option_tables([page], tmp_path, section_code) == []
+
+
+def _table(of: str, header: str, *rows: str) -> str:
+    divider = "|" + "---|" * (header.count("|") - 1)
+    lines = [f"<!-- doctest: options of={of} -->", header, divider, *rows]
+    return "\n".join(lines) + "\n"
+
+
+SECTION_DEFECTS = [
+    (
+        "unknown MCP tool",
+        _table("mcp.run_scan", "| Param | Default |", "| `x` | `1` |"),
+        "the MCP server has no tool run_scan; did you mean 'run_ash_scan'?",
+        1,
+    ),
+    (
+        "parameter the MCP tool lacks",
+        _table("mcp.run_ash_scan", "| Param | Default |", "| `severity` | `1` |"),
+        "'severity' is not a key of of=mcp.run_ash_scan",
+        4,
+    ),
+    (
+        "wrong MCP default",
+        _table(
+            "mcp.run_ash_scan", "| Param | Default |", "| `clean_output` | `false` |"
+        ),
+        "'clean_output' default says `false`, but the default is `true`",
+        4,
+    ),
+    (
+        "required MCP parameter given a default",
+        _table(
+            "mcp.resolve_ash_workspace",
+            "| Param | Default |",
+            "| `workspace_file` | `null` |",
+        ),
+        "but the key is required",
+        4,
+    ),
+    (
+        "MCP default in prose",
+        _table(
+            "mcp.run_ash_scan", "| Param | Default |", "| `source_dir` | current dir |"
+        ),
+        "'source_dir' default says current dir, but the default is `null`",
+        4,
+    ),
+    (
+        "unmarked param table",
+        "| Param | Type | Notes |\n|---|---|---|\n| `scan_id` | string | x |\n",
+        "documents options or keys but names no section",
+        1,
+    ),
+    (
+        "wrong Python default",
+        _table("python.pkg.api.scan", "| Parameter | Default |", "| `retries` | `5` |"),
+        "'retries' default says `5`, but the default is `3`",
+        4,
+    ),
+    (
+        "wrong enum member",
+        _table(
+            "python.pkg.api.scan",
+            "| Parameter | Default |",
+            "| `mode` | `Mode.container` |",
+        ),
+        "'mode' default says `Mode.container`, but the default is `Mode.local`",
+        4,
+    ),
+    (
+        "None written as a string",
+        _table(
+            "python.pkg.api.scan",
+            "| Parameter | Default |",
+            '| `source_dir` | `"None"` |',
+        ),
+        "'source_dir' default says `\"None\"`, but the default is `None`",
+        4,
+    ),
+    (
+        "parameter the function lacks",
+        _table(
+            "python.pkg.api.scan", "| Parameter | Default |", "| `verbose` | `False` |"
+        ),
+        "'verbose' is not a key of of=python.pkg.api.scan",
+        4,
+    ),
+    (
+        "self is not a parameter",
+        _table(
+            "python.pkg.api.Stack.deploy",
+            "| Parameter | Default |",
+            "| `self` | required |",
+        ),
+        "'self' is not a key",
+        4,
+    ),
+    (
+        "keyword arguments are not parameters",
+        _table(
+            "python.pkg.api.scan", "| Parameter | Default |", "| `kwargs` | not set |"
+        ),
+        "'kwargs' is not a key",
+        4,
+    ),
+    (
+        "unknown function",
+        _table("python.pkg.api.nope", "| Parameter | Default |", "| `x` | `1` |"),
+        "pkg.api defines no function or class nope",
+        1,
+    ),
+    (
+        "module without a function",
+        _table("python.pkg.api", "| Parameter | Default |", "| `x` | `1` |"),
+        "names a module; add the function or class",
+        1,
+    ),
+    (
+        "unknown package",
+        _table("python.nopkg.scan", "| Parameter | Default |", "| `x` | `1` |"),
+        "no module nopkg.scan in the code tree",
+        1,
+    ),
+    (
+        "unknown submodule",
+        _table("python.pkg.nothing.scan", "| Parameter | Default |", "| `x` | `1` |"),
+        "pkg defines no function or class nothing, and there is no module pkg.nothing",
+        1,
+    ),
+    (
+        "a function has no methods",
+        _table("python.pkg.api.scan.inner", "| Parameter | Default |", "| `x` | `1` |"),
+        "scan is a function, so it has no inner",
+        1,
+    ),
+    (
+        "row of several keys, defaults swapped",
+        _table(
+            "python.pkg.api.scan",
+            "| Parameter | Default |",
+            "| `retries`, `offline` | `False`, `3` |",
+        ),
+        "'retries' default says `False`, but the default is `3`",
+        4,
+    ),
+    (
+        "row of several keys, one unknown",
+        _table(
+            "python.pkg.api.scan",
+            "| Parameter | Default |",
+            "| `retries`, `verbose` | `3` |",
+        ),
+        "'verbose' is not a key",
+        4,
+    ),
+    (
+        "wrong build argument default",
+        _table(
+            "dockerfile", "| Argument | Default |", "| `BASE_IMAGE` | `python:3.13` |"
+        ),
+        "'BASE_IMAGE' default says `python:3.13`, but the default is `python:3.12-slim`",
+        4,
+    ),
+    (
+        "build argument read as YAML",
+        _table("dockerfile", "| Argument | Default |", "| `OFFLINE` | `false` |"),
+        "'OFFLINE' default says `false`, but the default is `NO`",
+        4,
+    ),
+    (
+        "unknown build argument",
+        _table("dockerfile", "| Argument | Default |", "| `NOPE` | `x` |"),
+        "'NOPE' is not a key of of=dockerfile",
+        4,
+    ),
+    (
+        "wrong CloudFormation default",
+        _table(
+            "cloudformation:deploy/templates",
+            "| Parameter | Default |",
+            "| `Schedule` | `cron(0 6 * * ? *)` |",
+        ),
+        "'Schedule' default says `cron(0 6 * * ? *)`, but the default is `rate(1 day)`",
+        4,
+    ),
+    (
+        "required CloudFormation parameter given a default",
+        _table(
+            "cloudformation:deploy/templates",
+            "| Parameter | Default |",
+            "| `Repo` | empty |",
+        ),
+        "but the key is required",
+        4,
+    ),
+    (
+        "empty that is not",
+        _table(
+            "cloudformation:deploy/templates",
+            "| Parameter | Default |",
+            "| `Version` | empty |",
+        ),
+        "'Version' default says empty, but the default is `v1`",
+        4,
+    ),
+    (
+        "unknown CloudFormation parameter",
+        _table(
+            "cloudformation:deploy/templates",
+            "| Parameter | Default |",
+            "| `Region` | `x` |",
+        ),
+        "'Region' is not a key of of=cloudformation:deploy/templates (2 templates)",
+        4,
+    ),
+    (
+        "wrong workflow input default",
+        _table(
+            "github-inputs:.github/workflows/scan.yml",
+            "| Input | Default |",
+            "| `ash-version` | `v3` |",
+        ),
+        "'ash-version' default says `v3`, but the default is `main`",
+        4,
+    ),
+    (
+        "input the workflow lacks",
+        _table(
+            "github-inputs:.github/workflows/scan.yml",
+            "| Input | Default |",
+            "| `install-trivy` | `false` |",
+        ),
+        "'install-trivy' is not a key of of=github-inputs:.github/workflows/scan.yml",
+        4,
+    ),
+    (
+        "required workflow input given a default",
+        _table(
+            "github-inputs:.github/workflows/scan.yml",
+            "| Input | Default |",
+            "| `token` | empty |",
+        ),
+        "but the key is required",
+        4,
+    ),
+    (
+        "wrong action input default",
+        _table(
+            "github-inputs:actions/setup",
+            "| Input | Default |",
+            "| `install-ash` | `true` |",
+        ),
+        "'install-ash' default says `true`, but the default is `false`",
+        4,
+    ),
+    (
+        "path that is not an action or a workflow",
+        _table("github-inputs:deploy", "| Input | Default |", "| `x` | `1` |"),
+        "deploy is not an action or a workflow in the code tree",
+        1,
+    ),
+    (
+        "Default column under another name",
+        _table(
+            "github-inputs:.github/workflows/scan.yml",
+            "| Input | If not passed |",
+            "| `ash-version` | `v3` |",
+        ),
+        "'ash-version' default says `v3`",
+        4,
+    ),
+    (
+        "unmarked table whose Default column has another name",
+        "| Input | Defaults to |\n|---|---|\n| `ash-version` | `main` |\n",
+        "documents options or keys but names no section",
+        1,
+    ),
+    (
+        "CloudFormation path outside the code tree",
+        _table(
+            "cloudformation:../elsewhere", "| Parameter | Default |", "| `x` | `1` |"
+        ),
+        "name a template or a directory of templates in the code tree",
+        1,
+    ),
+    (
+        "CloudFormation path that does not exist",
+        _table(
+            "cloudformation:deploy/none", "| Parameter | Default |", "| `x` | `1` |"
+        ),
+        "deploy/none is not in the code tree",
+        1,
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "case,text,expected,line", SECTION_DEFECTS, ids=[c[0] for c in SECTION_DEFECTS]
+)
+def test_sections_read_from_code_can_fail(
+    tmp_path, section_code, case, text, expected, line
+):
+    page = _write(tmp_path, "docs/page.md", text)
+    _assert_reports(
+        dc.check_option_tables([page], tmp_path, section_code), expected, line
+    )
 
 
 def test_an_options_marker_binds_only_to_a_table(fixture_root):
