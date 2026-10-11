@@ -222,10 +222,20 @@ if [[ "${NO_RUN}" = "NO" && ( "${CONFIG_GIVEN}" = "YES" || -n "${CONFIG_PATH}" )
     *)
       CONFIG_RUN_ARGS=(--mount "type=bind,source=${CONFIG_REAL},destination=/ash-config/$(basename -- "${CONFIG_REAL}"),readonly")
       CONFIG_ASH_ARGS=(--config "/ash-config/$(basename -- "${CONFIG_REAL}")")
-      # A config elsewhere in the scanned tree was written by the repository being
-      # scanned. The scan inside sees it only at /ash-config, outside its own tree,
-      # so it is told.
-      if [[ "${real_in_tree}" = "YES" ]]; then
+      # A config elsewhere in the scanned tree, or inside any other git checkout
+      # by its named or real path, is one a local scan counts as repository-written
+      # (config/sandbox_grants.repository_written). The scan inside sees it only at
+      # /ash-config, outside its own tree, so it is told.
+      in_checkout="NO"
+      for start in "$(dirname -- "${CONFIG_NAMED}")" "$(dirname -- "${CONFIG_REAL}")"; do
+        dir="${start}"
+        while :; do
+          if [ -e "${dir}/.git" ]; then in_checkout="YES"; break; fi
+          if [ "${dir}" = "/" ] || [ -z "${dir}" ]; then break; fi
+          dir="$(dirname -- "${dir}")"
+        done
+      done
+      if [[ "${real_in_tree}" = "YES" || "${in_checkout}" = "YES" ]]; then
         CONFIG_ASH_ARGS+=(--config-from-scanned-repository)
       fi
       ;;

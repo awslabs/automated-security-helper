@@ -171,8 +171,9 @@
   path is outside it, a config file ASH cannot read, and a config outside
   `--source-dir` that extends a file inside it, or whose chain has a file of the
   scanned checkout extending a file outside it.
-  A config inside the scanned checkout but outside `--source-dir` keeps the limits a
-  local scan gives a repository's config: the host decides, and passes the scan inside
+  A config inside a git checkout (the scanned one or another) but outside
+  `--source-dir` keeps the limits a local scan gives a repository-written config: the
+  host decides with the local scan's rule, and passes the scan inside
   `--config-from-scanned-repository`, since it sees that file only at `/ash-config`.
   The same holds for `./ash --config` and `Invoke-ASH -Config`, which also honor
   `ASH_CONFIG` now, and for `run_ash_scan(mode=container)` called with no `config`,

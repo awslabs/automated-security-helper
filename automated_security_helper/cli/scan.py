@@ -487,7 +487,7 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--config-from-scanned-repository",
             hidden=True,
-            help="Apply the limits ASH puts on a config file inside the scanned tree to the --config file and every file it extends, wherever they are. Container mode passes this to the scan inside the container when the config, or a file it extends, is inside the scanned repository but outside --source-dir, where that scan cannot see it.",
+            help="Apply the limits ASH puts on a repository-written config file to the --config file and every file it extends, wherever they are. Container mode passes this to the scan inside the container when the config, or a file it extends, is inside a git checkout (the scanned one or another) but outside --source-dir, where that scan cannot see it.",
         ),
     ] = False,
     ### WORKSPACE-RELATED OPTIONS

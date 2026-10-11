@@ -218,10 +218,10 @@ whole from outside it. A file of the chain inside the scanned checkout may exten
 files inside that checkout. A config the scanned
 repository wrote keeps the limits a local scan gives it (see
 [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)):
-when the config or a file it extends is inside the outermost git checkout at or above
-`--source-dir` but outside `--source-dir` itself, where the scan inside the container
-cannot see that, the host passes it `--config-from-scanned-repository` (`./ash` and
-`Invoke-ASH` do the same). In workspace mode the
+when the config or a file it extends is inside a git checkout, the one holding
+`--source-dir` or any other, but outside `--source-dir` itself, where the scan inside
+the container cannot see that, the host passes it `--config-from-scanned-repository`
+(`./ash` and `Invoke-ASH` do the same for the config file). In workspace mode the
 policy file the host resolved (`--workspace-config`, or the one found in the workspace
 root) is handed to the container the same way. The `./ash` wrapper and `Invoke-ASH`
 mount a config from outside the source directory on its own, so an `extends` base next

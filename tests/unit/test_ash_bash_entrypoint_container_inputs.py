@@ -387,6 +387,22 @@ class TestAConfigTheScannedRepositoryWroteKeepsItsLimits:
         assert rc == 0, output
         assert "--config-from-scanned-repository" in _inner_args(_only(calls, "run"))
 
+    def test_a_config_in_another_checkout_is_marked(
+        self, fake_runner, checkout, tmp_path
+    ):
+        """As a local scan treats it: a config inside any git checkout cannot grant."""
+        (tmp_path / "ops" / ".git").mkdir(parents=True)
+        (tmp_path / "ops" / "ash.yaml").write_text("project_name: p\n")
+
+        rc, output, calls = _run_ash_status(
+            fake_runner,
+            checkout / "services" / "api",
+            ["--no-build", "--config", str(tmp_path / "ops" / "ash.yaml")],
+        )
+
+        assert rc == 0, output
+        assert "--config-from-scanned-repository" in _inner_args(_only(calls, "run"))
+
     def test_a_config_outside_the_checkout_is_not_marked(
         self, fake_runner, checkout, tmp_path
     ):

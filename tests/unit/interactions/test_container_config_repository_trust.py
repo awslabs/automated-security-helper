@@ -3,10 +3,11 @@
 
 """A config the scanned repository wrote keeps that standing inside the container.
 
-A local scan treats a config file inside the scanned tree -- the outermost git
-checkout at or above ``--source-dir``, not only ``--source-dir`` itself -- as
-written by the repository being scanned, and limits what it may set
-(``config/sandbox_grants.py``, ``config/plugin_module_trust.py``). Container mode
+A local scan treats a config file inside any git checkout, or inside
+``--source-dir``, as repository-written, and limits what it may set
+(``config/sandbox_grants.repository_written``, ``config/plugin_module_trust.py``).
+That includes the checkout holding ``--source-dir`` and any other, such as an ops
+repository the operator keeps their config in. Container mode
 mounts a ``--config`` from outside ``--source-dir`` at ``/ash-config``, where the
 scan inside sees it outside its own tree. The host decides, with the same rule a
 local scan uses, and tells the scan inside with ``--config-from-scanned-repository``,
@@ -30,7 +31,7 @@ from automated_security_helper.interactions.run_ash_container import (
 
 FLAG = "--config-from-scanned-repository"
 #: A module no environment has: a config inside the tree may not add it.
-UNINSTALLED = "ash_test_module_that_is_not_installed"
+UNINSTALLED = "not_installed_ash_plugins"
 
 
 def _assemble(source_dir: Path, output_dir: Path, **overrides: Any) -> List[str]:
@@ -110,6 +111,20 @@ class TestTheHostTellsTheContainer:
         # Beside the checkout, so its confinement root holds the base.
         config = tmp_path / "ash.yaml"
         config.write_text("extends: repo/ci/base.yaml\n", encoding="utf-8")
+
+        inner = _inner_args(
+            _assemble(checkout["source"], checkout["out"], config=str(config))
+        )
+
+        assert FLAG in inner
+
+    def test_a_config_in_another_checkout_is_marked(self, checkout, tmp_path):
+        """As locally: a config inside any git checkout cannot grant, not only one in
+        the checkout being scanned."""
+        ops = tmp_path / "ops"
+        (ops / ".git").mkdir(parents=True)
+        config = ops / "ash.yaml"
+        config.write_text("project_name: p\n", encoding="utf-8")
 
         inner = _inner_args(
             _assemble(checkout["source"], checkout["out"], config=str(config))

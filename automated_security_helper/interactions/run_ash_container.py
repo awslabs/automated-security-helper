@@ -17,7 +17,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Sequence, Tuple
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 import typer
@@ -912,22 +912,35 @@ class UnmountablePathError(ContainerInputError):
     """A host path that would be mounted holds a character ``--mount`` cannot carry."""
 
 
+def _scanned_tree_roots(source_dir: Path) -> List[Path]:
+    """The scanned tree, under every name it has.
+
+    The outermost git checkout holding the source directory, by its own and its
+    resolved path, and the source directory's own names (as given, resolved, and
+    through ``$PWD``): ``config/sandbox_grants.scanned_checkouts`` and
+    ``scan_root_names``, the roots ``sandbox_grants.in_tree_reason`` judges by.
+    """
+    from automated_security_helper.config.sandbox_grants import (
+        scan_root_names,
+        scanned_checkouts,
+    )
+
+    return [*scanned_checkouts(Path(source_dir)), *scan_root_names(Path(source_dir))]
+
+
 def _refuse_config_linked_out_of_the_tree(config: str, source_dir: Path) -> None:
     """Refuse a config named inside the scanned tree whose real path is outside it.
 
-    The scanned tree is the outermost checkout at or above the source directory, as
-    ``config/sandbox_grants.scanned_trees`` defines it. A config path inside it is
-    mounted only when its real path, every link on the way resolved, is inside it
-    too; a link that stays inside the tree is followed. A config path outside the
+    The scanned tree is the outermost checkout at or above the source directory,
+    and the source directory itself (``_scanned_tree_roots``). A config path inside
+    it is mounted only when its real path, every link on the way resolved, is inside
+    it too; a link that stays inside the tree is followed. A config path outside the
     tree is followed wherever it points.
     """
-    from automated_security_helper.config.sandbox_grants import (
-        is_within,
-        scanned_trees,
-    )
+    from automated_security_helper.config.sandbox_grants import is_within
 
     named = Path(os.path.abspath(config))
-    trees = scanned_trees(Path(source_dir))
+    trees = _scanned_tree_roots(Path(source_dir))
     if not any(named.is_relative_to(tree) for tree in trees):
         return
     resolved = Path(config).resolve()
@@ -1071,20 +1084,22 @@ def container_input_refusal(
 CONFIG_FROM_SCANNED_REPOSITORY_FLAG = "--config-from-scanned-repository"
 
 
-def _written_by_the_scanned_repository(files: List[Path], source_dir: Path) -> bool:
-    """Whether any of *files* is inside the tree a local scan of *source_dir* trusts less.
+def _written_by_the_scanned_repository(
+    files: List[Path], source_dir: Path, named: Sequence[Path] = ()
+) -> bool:
+    """Whether a local scan of *source_dir* would count any of *files* as
+    repository-written.
 
-    The same rule ``resolve_config`` applies to a local scan: the outermost git
-    checkout at or above the source directory, under every name it has
-    (``config/sandbox_grants.scanned_trees``). A config mounted at /ash-config is
-    outside the scan's own tree inside the container, so the host has to decide.
+    The same rule ``resolve_config`` applies to a local scan,
+    ``config/sandbox_grants.repository_written``: a file inside any git checkout, by
+    its own or its resolved path, or inside the source directory by any of its
+    names, or reached through a link inside one. *named* holds the same files as
+    the operator named them. A config mounted at /ash-config is outside the scan's
+    own tree inside the container, so the host has to decide.
     """
-    from automated_security_helper.config.sandbox_grants import (
-        files_inside,
-        scanned_trees,
-    )
+    from automated_security_helper.config.sandbox_grants import repository_written
 
-    return bool(files_inside(files, scanned_trees(Path(source_dir))))
+    return bool(repository_written(files, Path(source_dir), named))
 
 
 def _extends_refs_of(path: Path) -> List[str]:
@@ -1164,16 +1179,13 @@ def _refuse_repository_bases_reaching_out(
 ) -> None:
     """Refuse a chain where a file inside the scanned checkout extends one outside it.
 
-    A file of the chain inside the scanned checkout (``scanned_trees``) may extend
-    only files inside that checkout. Files outside it are mounted when a config
-    outside the checkout names them.
+    A file of the chain inside the scanned checkout (``_scanned_tree_roots``) may
+    extend only files inside that checkout. Files outside it are mounted when a
+    config outside the checkout names them.
     """
-    from automated_security_helper.config.sandbox_grants import (
-        is_within,
-        scanned_trees,
-    )
+    from automated_security_helper.config.sandbox_grants import is_within
 
-    trees = scanned_trees(source)
+    trees = _scanned_tree_roots(source)
 
     def written_by_the_repository(path: Path) -> bool:
         return any(is_within(path, tree) for tree in trees)
@@ -1368,10 +1380,14 @@ def _assemble_run_command(
         )
         cmd.extend(config_mounts)
         # A config inside the source directory is read through /src, which is the
-        # inner scan's own tree; one mounted from elsewhere needs the host's verdict.
+        # inner scan's own tree, and mounts no host file; one mounted from elsewhere
+        # needs the host's verdict, judged by its files and the name it was given.
         config_from_scanned_repository = (
             workspace_relative_file is None
-            and _written_by_the_scanned_repository(config_files, source_dir)
+            and bool(config_files)
+            and _written_by_the_scanned_repository(
+                config_files, source_dir, [Path(config)]
+            )
         )
     inner_workspace_config = None
     if workspace_config and workspace_relative_file is not None:

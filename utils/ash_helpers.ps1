@@ -262,6 +262,7 @@ function Invoke-ASH {
         # does not need one.
         $configMountArg = $null
         $configFromRepository = $false
+        $configInCheckout = $false
         if (-not $NoRun -and ($PSBoundParameters.ContainsKey('Config') -or -not [string]::IsNullOrEmpty($Config))) {
             if ([string]::IsNullOrEmpty($Config) -or -not (Test-Path -LiteralPath $Config -PathType Leaf)) {
                 [Console]::Error.WriteLine("ERROR: Config file not found: '$Config'. -Config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container.")
@@ -300,6 +301,17 @@ function Invoke-ASH {
                 }
                 $checkoutPrefix = $checkout.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
                 $configFromRepository = $configFull.StartsWith($checkoutPrefix, $pathComparison)
+                # A config inside any other git checkout is one a local scan counts as
+                # repository-written too (config/sandbox_grants.repository_written), so
+                # it is marked; the link check below stays with the scanned checkout.
+                $dir = Get-Item -LiteralPath (Split-Path -Parent $configFull)
+                while ($null -ne $dir) {
+                    if (Test-Path -LiteralPath (Join-Path $dir.FullName '.git')) {
+                        $configInCheckout = $true
+                        break
+                    }
+                    $dir = $dir.Parent
+                }
                 # The runner resolves links when it mounts. A config inside the scanned
                 # checkout is mounted only when neither the file nor a directory on the
                 # way to it is a link; otherwise the run is refused.
@@ -316,7 +328,7 @@ function Invoke-ASH {
             }
             $ashCmdArgs.Add("--config")
             $ashCmdArgs.Add('"$configInner"')
-            if ($configFromRepository) {
+            if ($configFromRepository -or $configInCheckout) {
                 $ashCmdArgs.Add('--config-from-scanned-repository')
             }
         }
