@@ -1,7 +1,7 @@
 # Run ASH in GitHub Actions
 
 ASH ships two reusable workflows. `run-ash-security-scan.yml` installs ASH and its scanner
-tools, scans the repository and reports the result on the pull request.
+tools, scans the repository, and reports the result on the pull request.
 `upload-ash-sarif.yml` uploads the SARIF report to code scanning. You can call them, or
 write the steps yourself. For a first setup, follow
 [Add ASH to a GitHub Actions pipeline](../../getting-started/ci.md).
@@ -26,6 +26,7 @@ jobs:
       pull-requests: write
     with:
       ash-version: v3.7.0
+      ash-args: --fail-on-incomplete-scanners --no-allow-stale-content-db
       collect-sarif-report: false
       install-grype: true
       install-syft: true
@@ -37,7 +38,7 @@ jobs:
       install-trivy: true
   sarif:
     needs: ash
-    if: needs.ash.result == 'success' || needs.ash.result == 'failure'
+    if: ${{ !cancelled() && (needs.ash.result == 'success' || needs.ash.result == 'failure') }}
     uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v3.7.0
     permissions:
       contents: read
@@ -48,8 +49,8 @@ Three things in this file are required, not optional:
 
 - Pin `ash-version` to the same release as the `uses:` lines. The `uses:` ref selects the
   workflow file; `ash-version` selects the ASH that the workflow installs, and it defaults
-  to `main`. Both accept a tag, a branch or a commit SHA.
-- Grant the scan job `contents: read`, `checks: write` and `pull-requests: write`. The
+  to `main`. Both accept a tag, a branch, or a commit SHA.
+- Grant the scan job `contents: read`, `checks: write`, and `pull-requests: write`. The
   called workflow declares all three, and GitHub refuses to start the run when the calling
   job grants less, even if you turn off the comment and the check.
 - Set every `install-*` input to `true`. They default to `false`, while the scanners that
@@ -57,22 +58,38 @@ Three things in this file are required, not optional:
   reported as MISSING, and the job fails with exit code 1 even when nothing was found. To
   leave a tool out, turn its scanner off, for example `ash-args: --exclude-scanners cfn-nag`.
 
+ASH's zizmor scanner reports each `uses:` line that names a tag as `zizmor/unpinned-uses` at
+HIGH, so a scan of a repository that holds this file fails until you pin both lines to a
+commit. `git ls-remote https://github.com/awslabs/automated-security-helper refs/tags/v3.7.0`
+prints the commit of the release. Replace the `v3.7.0` after each `@` with that SHA and
+end each line with the comment `# v3.7.0`. Leave `ash-version` at the tag; zizmor does
+not check it.
+
+A pull request scan reads the configuration in the branch it scans, so the branch can change
+the gate. The workflow passes the `fail-on-findings` choice on the command line, and the
+`ash-args` line above does the same for incomplete scans and stale content databases, so the
+branch cannot turn those three off. It can still raise a severity threshold, add
+suppressions, or turn scanners off, and the `config` input names a file in the checkout,
+which the branch can edit too. [Who can change the gate](../set-the-gate.md#who) lists what a
+repository can still affect.
+
 ### Inputs of run-ash-security-scan.yml {#inputs}
 
+<!-- doctest: options of=github-inputs:.github/workflows/run-ash-security-scan.yml -->
 | Input | Defaults to | Effect |
 |---|---|---|
 | `ash-version` | `main` | Git ref of ASH to install. Every run installs it again. |
 | `ash-repo` | `awslabs/automated-security-helper` | Repository (`owner/repo`) to install ASH from. |
 | `ash-mode` | `local` | Value of `--mode`. `container` builds ASH's image on the runner and scans inside it; see [Run ASH in a container](../run-in-a-container.md). |
 | `config` | empty | Path to an ASH config file, exported as `ASH_CONFIG`. When empty, ASH finds the config in the repository. |
-| `output-dir` | `.ash/ash_output` | Output directory. The comment, check and upload steps read their files from it. |
+| `output-dir` | `.ash/ash_output` | Output directory. The comment, check, and upload steps read their files from it. |
 | `fail-on-findings` | `true` | Passes `--fail-on-findings` or `--no-fail-on-findings`. Either one overrides `fail_on_findings` in the repository's config. |
 | `verbose` | `true` | Passes `--verbose`. |
-| `ash-args` | empty | More `ash scan` options, split on spaces with no quoting, and passed last, so they override the workflow's own `--mode`, `--base-ref` and fail-on-findings choice. |
+| `ash-args` | empty | More `ash scan` options, split on spaces with no quoting, and passed last, so they override the workflow's own `--mode`, `--base-ref`, and fail-on-findings choice. |
 | `collect-sarif-report` | `true` | Upload `ash.ghas.sarif` to code scanning from the scan job. This works on `pull_request` events only; see [Upload SARIF](#sarif). |
 | `collect-junit-xml-report` | `true` | Publish `ash.junit.xml` as the check run **ASH Scan JUnit Test Report**. Every actionable finding is a failed test, so the check is red when there are findings. This step does not fail the job. |
 | `post-pr-comment` | `true` | Post `ash.summary.md` as a pull request comment, and update that comment on later runs. |
-| `repository-owner` | the calling repository's owner | Post the comment only when the repository owner equals this value. |
+| `repository-owner` | `${{ github.repository_owner }}` | Post the comment only when the repository owner equals this value. |
 | `python-version` | `3.12` | Python version that `actions/setup-python` installs. |
 | `install-grype` | `false` | Install grype, and cache its vulnerability database. |
 | `install-syft` | `false` | Install syft. |
@@ -87,7 +104,7 @@ Three things in this file are required, not optional:
 
 The binary tools come from `ash dependencies install`, which downloads the versions that
 ASH pins at `ash-version` and checks each download against its pinned SHA256 before
-installing it. bandit, checkov, semgrep, cfn-lint and zizmor need no input: ASH installs
+installing it. bandit, checkov, semgrep, cfn-lint, and zizmor need no input: ASH installs
 them from PyPI with `uv tool install` during the scan. detect-secrets is part of ASH, and
 cdk-nag and npm-audit use the Node.js and npm that GitHub's Ubuntu runners include.
 
@@ -95,9 +112,10 @@ cdk-nag and npm-audit use the Node.js and npm that GitHub's Ubuntu runners inclu
 
 The workflow runs one job, `SAST, SCA, and IaC Scan`, on `ubuntu-latest` with a 30-minute
 timeout. Neither is an input. The job checks out the calling repository, installs the tools
-you asked for, and runs ASH with `uvx --reinstall`, passing `--source-dir .`, the output
-directory, `--no-progress`, `--build-target ci`, `--mode` and the fail-on-findings choice,
-then `ash-args`.
+you asked for, and runs ASH with `uvx --reinstall`. It passes `--source-dir .`, the output
+directory, `--no-progress`, the fail-on-findings choice, `--build-target ci`, and `--mode`;
+`--verbose` unless `verbose` is `false`; `--changed-files-only` and `--base-ref` when
+`changed-files-only` is `true`; and then `ash-args`.
 
 After the scan, whether it passed or failed, the job:
 
@@ -109,7 +127,7 @@ After the scan, whether it passed or failed, the job:
   `collect-sarif-report` is `true` and the event is not `merge_group`.
 
 On a pull request from a fork, `GITHUB_TOKEN` is read-only, so the job skips the comment
-and the check run and prints a notice. The scan, its exit code, the job summary and the
+and the check run and prints a notice. The scan, its exit code, the job summary, and the
 artifact are unchanged. On a push, the comment goes to the pull request that the pushed
 commit came from, if there is one.
 
@@ -118,7 +136,7 @@ commit came from, if there is one.
 `run-ash-security-scan.yml` does not declare `security-events: write`, and a called workflow
 can only narrow the token its caller grants, so the upload step inside it never holds that
 permission. GitHub accepts code scanning uploads without it on `pull_request` events only.
-On `push`, `schedule` and `workflow_dispatch` events the step fails with "Resource not
+On `push`, `schedule`, and `workflow_dispatch` events the step fails with "Resource not
 accessible by integration", and the job fails with it. Leave `collect-sarif-report` at
 `true` only in a workflow that runs on pull requests alone.
 
@@ -131,12 +149,15 @@ For every other trigger, set `collect-sarif-report: false` and add a job that ca
 - skips `merge_group` events;
 - declares `contents: read` and `security-events: write`, which the calling job must grant.
 
-Give the job `if: needs.ash.result == 'success' || needs.ash.result == 'failure'`. A scan
-that fails on findings has still written its report, and the default `if` would skip the
-upload exactly when there is something to see.
+Give the calling job
+`if: ${{ !cancelled() && (needs.ash.result == 'success' || needs.ash.result == 'failure') }}`.
+A scan that fails on findings has still written its report. A job-level `if:` with no status
+function such as `!cancelled()` or `always()` is skipped whenever a job it needs failed, so
+`needs.ash.result == 'failure'` alone never lets the upload run.
 
 Code scanning is available for public repositories. A private repository needs a GitHub
-Code Security license.
+Code Security license. GitHub's SARIF upload documentation also lists `actions: read` for
+workflows in private repositories; `upload-ash-sarif.yml` does not declare it.
 
 ## Permissions {#permissions}
 
@@ -147,13 +168,14 @@ Code Security license.
 | Scan | `pull-requests: write` | The pull request comment |
 | SARIF upload | `contents: read` | The checkout in the upload job |
 | SARIF upload | `security-events: write` | Uploading to code scanning |
+| SARIF upload | `actions: read` | Private repositories only, per GitHub's upload documentation |
 
 Set `permissions: contents: read` at the top of the workflow, as the example does, and grant
 the rest per job.
 
 ## Write the steps yourself {#plain-steps}
 
-This job does what the reusable workflows do, without the comment, the check run and the
+This job does what the reusable workflows do, without the comment, the check run, and the
 job summary:
 
 <!-- doctest: config kind=github-actions -->
@@ -171,6 +193,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
+      actions: read # private repositories only
     env:
       INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
     steps:
@@ -188,12 +211,15 @@ jobs:
           uv tool install "${INSTALL_SPEC}"
           uv tool dir --bin >> "${GITHUB_PATH}"
       - name: Install scanner tools
+        working-directory: ${{ runner.temp }}
         run: >-
           ash dependencies install
           --tool grype --tool syft --tool opengrep --tool cfn-nag
           --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy
       - name: Run ASH
-        run: ash scan --mode local --no-progress
+        run: >-
+          ash scan --mode local --no-progress
+          --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
       - name: Upload the output directory
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -214,10 +240,17 @@ Notes on the steps:
   finds inside the directory it scans, so an ASH installed into a virtual environment in the
   repository loses the scanners that need `uv`; see
   [Tools inside the scanned directory](../../docs/advanced-usage.md#tools-inside-the-scanned-directory).
+- Run `ash dependencies install` outside the checkout too, as `working-directory` does
+  here, so a config in the repository cannot change what it installs.
 - `uv` has to stay on `PATH` during the scan, because ASH installs bandit, checkov, semgrep,
-  cfn-lint and zizmor with it.
+  cfn-lint, and zizmor with it.
 - `ruby/setup-ruby` is there for cfn-nag, which `ash dependencies install` installs with
   `gem` and which builds native extensions.
+- The three gate flags keep a pull request's own config from turning off the gate for
+  findings, incomplete scans, and stale content databases. A branch's config can still
+  raise thresholds, add suppressions, and turn scanners off; to keep those yours, pass
+  `--config` with a file outside the checkout. See
+  [Who can change the gate](../set-the-gate.md#who).
 - `if: ${{ !cancelled() }}` keeps both uploads running when the scan step fails, which is
   what it does when it finds something.
 
@@ -225,16 +258,17 @@ Notes on the steps:
 
 The reusable workflow caches three things:
 
-- uv's package cache, through `astral-sh/setup-uv`.
+- uv's package cache, through `astral-sh/setup-uv`. It is saved from any push.
 - The opengrep binary, for a week. A restored binary is used only if it hashes to the SHA256
   that ASH pins.
 - grype's vulnerability database. The cache key changes daily, and a restored database older
   than ASH's bound for it (120 hours) is deleted before the scan, so grype downloads a new
   one.
 
-It restores these caches on every run, but saves them only from a push to the repository's
-default branch, so pull requests do not each write a copy. A repository that never runs the
-workflow on such a push never saves a cache, and every run downloads everything.
+It restores all three on every run. It saves the opengrep binary and grype's database only
+from a push to the repository's default branch, so pull requests do not each write a copy.
+A repository that never runs the workflow on such a push never saves those two, and every
+run downloads them.
 
 In your own steps, cache ASH's tool directory and grype's database. These steps replace
 the install and scan steps of the job above:
@@ -250,6 +284,7 @@ the install and scan steps of the job above:
       ~/.ash/share
     key: ash-tools-${{ runner.os }}-${{ runner.arch }}-v3.7.0
 - name: Install scanner tools
+  working-directory: ${{ runner.temp }}
   run: >-
     ash dependencies install
     --tool grype --tool syft --tool opengrep --tool cfn-nag
@@ -272,7 +307,9 @@ the install and scan steps of the job above:
     path: ~/.cache/grype/db
     key: grype-db-${{ runner.os }}-${{ steps.date.outputs.today }}
 - name: Run ASH
-  run: ash scan --mode local --no-progress
+  run: >-
+    ash scan --mode local --no-progress
+    --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
 - name: Save grype's database
   if: ${{ !cancelled() && steps.grype-db.outputs.cache-hit != 'true' }}
   uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -282,9 +319,10 @@ the install and scan steps of the job above:
 ```
 
 Keep `ash dependencies install` after the restore. It checks each binary it finds against
-the pinned SHA256, skips the ones that match and installs again over any that do not, so a
+the pinned SHA256, skips the ones that match, and installs again over any that do not, so a
 restored cache cannot substitute a different tool. Key the tool cache on the ASH release,
-because each release pins its own tool versions.
+because each release pins its own tool versions. cfn-nag is the exception: it is a Ruby gem,
+not a pinned binary, so it is installed again on every run.
 
 The save steps are separate because the combined `actions/cache` action saves only when the
 job succeeds, and a scan with findings fails the job. Do not add `restore-keys` to the
@@ -300,8 +338,9 @@ happens when a database is past one.
 
 `--changed-files-only` runs every scanner on the whole tree, then keeps only the findings in
 files changed between the merge base with `--base-ref` and `HEAD`. It does not make the scan
-faster, and it filters `ash.sarif` and the exit code but not the other reports.
-[Scan large repositories](../scale-large-repos.md#changed-files) lists exactly what it
+faster, and it filters `ash.sarif`, `ash_aggregated_results.json`, and the exit code, but
+not the other reports.
+[Scale to large repositories](../scale-large-repos.md#changed-files) lists exactly what it
 filters.
 
 It needs the base branch's history. `actions/checkout` fetches a single commit unless told

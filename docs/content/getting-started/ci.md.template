@@ -4,16 +4,17 @@ In this tutorial you add a workflow that scans every pull request with ASH, fail
 when ASH finds something, and shows the findings on the pull request and in GitHub code
 scanning. It uses the reusable workflows that ASH ships, pinned to release v{{VERSION}}.
 
-You need:
+## Before you start
 
 - A GitHub repository with Actions enabled, where you can push a branch and open a pull
   request.
 - For step 4, code scanning: any public repository, or a private one with a GitHub Code
   Security license. Without it, skip step 4; the other steps work the same.
+- git, to look up the commit of the release in step 1.
 
-Nothing has to be installed on your machine. Using another CI service? See
+Nothing else has to be installed on your machine. Using another CI service? See
 [GitLab CI](../how-to/ci/gitlab-ci.md) or
-[Jenkins, CodeBuild, Azure Pipelines and others](../how-to/ci/other-ci.md).
+[Jenkins, CodeBuild, Azure Pipelines, and other CI systems](../how-to/ci/other-ci.md).
 
 ## 1. Add the workflow
 
@@ -53,28 +54,43 @@ What the parts do:
 - `uses: ...@v{{VERSION}}` pins the workflow file, and `ash-version: v{{VERSION}}` pins the
   ASH it installs. Keep the two the same. Without `ash-version`, the workflow installs
   ASH from the `main` branch.
-- The three permissions let the job read the code, publish a check run and comment on the
+- The three permissions let the job read the code, publish a check run, and comment on the
   pull request.
 - The `install-*` inputs install the tools that the default scanners need. Each input
   defaults to `false`, and a scanner whose tool is missing makes the scan fail.
 - `collect-sarif-report: false` because step 4 uploads the SARIF report from a separate
   job.
 - The `push` trigger scans `main` after each merge. Code scanning compares a pull request
-  with the analysis of its base branch, and the workflow saves its download caches only
-  from these runs.
+  with the analysis of its base branch, and the workflow saves its tool and database caches
+  only from these runs.
 
 If your default branch is not `main`, change the branch name.
 
+Now pin the `uses:` line to a commit. ASH's zizmor scanner reports a `uses:` line that names
+a tag as `zizmor/unpinned-uses` at HIGH, because a tag can be moved and a commit cannot, so
+until you pin it every scan of this repository fails on this file. Look up the commit that
+the release tag points to:
+
+<!-- doctest: illustrative reason="queries GitHub over the network" -->
+```bash
+git ls-remote https://github.com/awslabs/automated-security-helper refs/tags/v{{VERSION}}
+```
+
+In the `uses:` line, replace the `v{{VERSION}}` after the `@` with the 40-character SHA that
+the command prints, and add the comment `# v{{VERSION}}` at the end of the line. Leave
+`ash-version: v{{VERSION}}` as it is: zizmor does not check it, and it has to name the same
+release.
+
 ## 2. Open a pull request and watch the scan
 
-Commit the file, push the branch and open a pull request. Under **Checks**, the job
+Commit the file, push the branch, and open a pull request. Under **Checks**, the job
 **ash / SAST, SCA, and IaC Scan** starts. The first run downloads every scanner tool and the
 vulnerability databases, so expect it to take several minutes.
 
 When it finishes, you see:
 
 - A comment on the pull request with the ASH summary: one row per scanner, with its finding
-  counts and a result of PASSED, FAILED, MISSING or SKIPPED.
+  counts and a result of PASSED, FAILED, MISSING, SKIPPED, or ERROR.
 - The same summary in the job's summary page.
 - A check run named **ASH Scan JUnit Test Report**, which lists each actionable finding as a
   failed test.
@@ -94,7 +110,7 @@ If the job fails, the end of its log says why:
 
 By default the job fails when a scanner reports a finding at severity MEDIUM or above that
 is not suppressed, when a scanner did not run, or when a vulnerability database is past its
-age limit.
+age bound.
 
 To fail only on HIGH and CRITICAL findings, add `.ash/.ash.yaml` to the branch:
 
@@ -110,12 +126,13 @@ Other choices, each set under `with:` in the workflow:
 - `ash-args: --exclude-scanners cfn-nag` leaves a scanner out. Remove its `install-*` input
   too.
 
-To accept one finding instead, suppress it with a reason and an expiry date; see
-[Suppress a finding](../how-to/suppress-findings.md).
+To accept one finding instead, suppress it with a reason and an expiration date; see
+[Suppress findings](../how-to/suppress-findings.md).
 
 `.ash/.ash.yaml` is part of the repository, so a pull request that edits it changes the rules
-it is judged by. To hold repositories to a gate that their own pull requests cannot change,
-see [Roll out ASH across repositories](platform-teams.md).
+it is judged by: it can raise the threshold, add suppressions, or turn scanners off. To hold
+repositories to a gate that their own pull requests cannot change, see
+[Roll out ASH across repositories](platform-teams.md).
 [Set the gate](../how-to/set-the-gate.md) covers every option.
 
 ## 4. Upload results to code scanning
@@ -126,18 +143,22 @@ Add a second job under `jobs:`, at the same indentation as `ash`:
 ```yaml
   sarif:
     needs: ash
-    if: needs.ash.result == 'success' || needs.ash.result == 'failure'
+    if: ${{ !cancelled() && (needs.ash.result == 'success' || needs.ash.result == 'failure') }}
     uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v{{VERSION}}
     permissions:
       contents: read
       security-events: write
 ```
 
+Pin its `uses:` line to the same commit as the first one, with the same `# v{{VERSION}}`
+comment.
+
 This job downloads the `ash_output` artifact and uploads `ash.ghas.sarif` to code scanning.
 It needs `security-events: write`, which the scan job cannot hold: a called workflow can
 only narrow the permissions its caller grants, and the scan workflow does not ask for this
 one. The `if:` makes it upload after a scan that failed on findings too, since that scan
-still wrote its report.
+still wrote its report. Without `!cancelled()` in it, GitHub skips the job whenever the scan
+job fails.
 
 Push the change, then merge the pull request. The merge starts the workflow on `main`, and
 when that run finishes, the repository's **Security and quality** tab lists ASH's findings
@@ -174,6 +195,6 @@ actionable findings.
 
 - [Run ASH in GitHub Actions](../how-to/ci/github-actions.md): every input of the reusable
   workflow, writing the steps yourself, caching, and changed-files scans.
-- [Read the results](../how-to/read-results.md): what each report file is for.
+- [Read scan results](../how-to/read-results.md): what each report file is for.
 - [Choose scanners](../how-to/choose-scanners.md): turn scanners on and off.
-- [Scan large repositories](../how-to/scale-large-repos.md): split a scan across runners.
+- [Scale to large repositories](../how-to/scale-large-repos.md): split a scan across runners.

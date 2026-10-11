@@ -1,4 +1,4 @@
-# Scan large repositories
+# Scale to large repositories
 
 Three features help when one scan of one tree is too slow or too coarse:
 
@@ -17,7 +17,8 @@ feature does not do.
 (default `origin/main`) and `HEAD`. The environment variables `ASH_CHANGED_FILES_ONLY` and
 `ASH_BASE_REF` set the same options.
 
-The sample project below has a finding in `app.py`. Change only `notes.txt` on a branch:
+These examples use a git repository whose `app.py` has a detect-secrets finding and whose
+`notes.txt` has none. Change only `notes.txt` on a branch:
 
 ```bash
 git switch -c edit-notes
@@ -47,18 +48,19 @@ ash.ghas.sarif 1
 How the change is computed and applied:
 
 - The changed files are `git diff --name-only <base-ref>...HEAD`: files changed in commits
-  since the merge base. Staged, modified and untracked files that are not committed are not
+  since the merge base. Staged, modified, and untracked files that are not committed are not
   included. A renamed file counts under its new name.
 - Every scanner scans the whole tree, so the option does not make a scan faster.
 - After the scan, ASH removes the findings whose file is not in the changed set from
   `ash.sarif` and from `ash_aggregated_results.json`, and the exit code counts only what is
   left. Findings with no file location are kept.
-- The other reports are not filtered: `ash.ghas.sarif`, `ash.gl-sast-report.json`, CSV,
-  HTML, flat JSON, OCSF, the summaries and the summary table still list every finding.
-  Reports that [`ash merge`](#sharding) writes are the exception, because it builds them
-  from the filtered results.
-- When the changed set is empty, the scan exits 0 and logs a warning that the discarded
-  findings are not evidence of a clean tree.
+- The other reports are not filtered: `ash.ghas.sarif`, `ash.gl-sast-report.json`,
+  `ash.junit.xml`, CSV, HTML, flat JSON, OCSF, the summaries, and the summary table still
+  list every finding. Reports that [`ash merge`](#sharding) writes are the exception,
+  because it builds them from the filtered results.
+- When the changed set is empty, every finding with a file location is discarded and the
+  scan exits 0. If that discarded any findings, ASH logs a warning that the result is not
+  evidence of a clean tree.
 
 ASH falls back to a full scan, with a warning and the full scan's exit code, when the base
 ref does not exist (in a shallow clone, for example), when there is no merge base, when the
@@ -76,12 +78,12 @@ runner a share of the scanners. Every runner scans the whole tree with its share
 then combines the shards' results into one set of reports and one exit code.
 
 ASH sorts the names of every registered scanner and deals them out in turn, so shard *i*
-of *n* gets the scanners at positions *i*, *i + n* and so on. Counts above about four save
+of *n* gets the scanners at positions *i*, *i + n*, and so on. Counts above about four save
 little time: a scan is never faster than its slowest scanner, and the split balances the
 number of scanners, not their run time.
 
-Split the sample project's scan in two, writing each shard's output outside the project so
-that the second shard does not scan the first one's reports:
+Split the scan in two, writing each shard's output outside the repository so that the
+second shard does not scan the first one's reports:
 
 <!-- doctest: run fresh -->
 ```bash
@@ -95,7 +97,7 @@ ash scan --scanners detect-secrets --shard-index 1 --shard-count 2 --output-dir 
 
 The first shard runs no scanner and exits 0: detect-secrets belongs to shard 1, and
 `--scanners` narrows what a shard runs, not how the scanners are split. The second exits 2
-for the sample project's finding. Merge them:
+for the finding in `app.py`. Merge them:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
@@ -110,7 +112,7 @@ Scanners: 16 | Findings: 1 | Actionable: 1 | Suppressed: 0
 shard. `ash merge` writes `ash_aggregated_results.json` and every report the shards'
 configuration enables, including `ash.ghas.sarif` and `ash.gl-sast-report.json`, unless
 `--output-formats` narrows them. It reads the fail-on-findings setting, the incomplete-scan
-setting, the severity thresholds and the suppressions from the configuration recorded in
+setting, the severity thresholds, and the suppressions from the configuration recorded in
 the lowest-numbered shard, and has no `--config` option; `--fail-on-findings` and
 `--fail-on-incomplete-scanners` on the command line override the first two.
 
@@ -160,13 +162,16 @@ jobs:
         run: |
           uv tool install "${INSTALL_SPEC}"
           uv tool dir --bin >> "${GITHUB_PATH}"
+          cd "${RUNNER_TEMP}"
           "$(uv tool dir --bin)/ash" dependencies install \
             --tool grype --tool syft --tool opengrep --tool cfn-nag \
             --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy
       - name: Scan one shard
         env:
           SHARD: ${{ matrix.shard }}
-        run: ash scan --mode local --no-progress --no-fail-on-findings --shard-index "${SHARD}" --shard-count 4
+        run: >-
+          ash scan --mode local --no-progress --no-fail-on-findings --no-allow-stale-content-db
+          --shard-index "${SHARD}" --shard-count 4
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
@@ -179,6 +184,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
+      actions: read # private repositories only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -194,7 +200,7 @@ jobs:
           path: shards
       - name: Merge the shards
         run: >-
-          ash merge --fail-on-findings --output-dir .ash/ash_output
+          ash merge --fail-on-findings --fail-on-incomplete-scanners --output-dir .ash/ash_output
           --results shards/ash-shard-0 --results shards/ash-shard-1
           --results shards/ash-shard-2 --results shards/ash-shard-3
       - uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
@@ -205,7 +211,11 @@ jobs:
 ```
 
 The shards run with `--no-fail-on-findings`, so a shard job fails only when one of its
-scanners did not run, and the merge job gives the verdict with `--fail-on-findings`. Each
+scanners did not run, and the merge job gives the verdict. The merge reads its gate settings
+from the configuration that the shards recorded, which on a pull request is the branch's own,
+so it passes `--fail-on-findings` and `--fail-on-incomplete-scanners`, and the shards pass
+`--no-allow-stale-content-db`. The thresholds and suppressions still come from the branch; to
+keep those yours, run the shards with `--config` and a file outside the checkout. Each
 shard installs every tool, because which scanners land on which shard depends on the
 scanner list at that release. Every shard must load the same plugin modules, or the merge
 refuses them.
@@ -224,7 +234,7 @@ What sharding does not do:
 separate project, with that project's own configuration, in one run. Pass
 `--workspace auto` to use the only `.code-workspace` file in the current directory.
 
-Make two projects from the sample project and a workspace file that names them:
+Make two projects from that repository and a workspace file that names them:
 
 <!-- doctest: run fresh -->
 ```bash
@@ -242,7 +252,7 @@ EOF
 ash scan --workspace services.code-workspace --dry-run
 ```
 
-`--dry-run` prints the plan, one entry per project with its path, configuration, threshold
+`--dry-run` prints the plan, one entry per project with its path, configuration, threshold,
 and scanners, and scans nothing. Scan it:
 
 <!-- doctest: run expect-exit=2 -->
@@ -269,13 +279,13 @@ The output directory, `.ash/ash_output` next to the workspace file by default, h
 
 - combined reports for the workspace in `reports/`;
 - each project's full output, as from a single scan, in `projects/<project>/`. GitHub code
-  scanning, GitLab SAST and CycloneDX reports exist only there, one per project, because
+  scanning, GitLab SAST, and CycloneDX reports exist only there, one per project, because
   each describes one repository.
 
 A workspace policy file applies to every project: a severity threshold that projects can
 tighten but not relax, suppressions and ignore paths for every project, and extra scanners.
-ASH finds `ash-workspace.yaml`, `.yml` or `.json` in the workspace directory or its `.ash`
-directory, or takes the path from `--workspace-config`; the
+ASH finds `ash-workspace.yaml`, `.yml`, or `.json`, with or without a leading dot, in the
+workspace directory or its `.ash` directory, or takes the path from `--workspace-config`; the
 [configuration reference](../reference/configuration.md#workspace-policy-file) lists its
 keys.
 
@@ -302,7 +312,7 @@ unfiltered.
 
 The scan tool refuses the whole workspace, with exit code 4, when any project folder
 resolves outside the roots the server allows (`ASH_MCP_ALLOWED_ROOTS`); see
-[Run the MCP server](mcp-server.md). Over MCP there are no changed-files, sharding or
+[Run the MCP server](mcp-server.md). Over MCP there are no changed-files, sharding, or
 fail-gate parameters. Leave `config_overrides` and `profile` unset: `ash mcp` has no option
 that registers profiles, so a call that sets either is refused with exit code 3.
 

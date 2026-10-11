@@ -1,4 +1,4 @@
-# Run ASH as a pre-commit hook
+# Run ASH with pre-commit
 
 ASH's repository defines hooks for the [pre-commit](https://pre-commit.com/) framework.
 This page sets up the one that works, says what it scans, and what it costs per commit.
@@ -32,8 +32,9 @@ pre-commit run ash --all-files
 
 The first run builds the hook's environment and installs bandit and checkov, so it takes
 longer than later runs. When the hook finds something, pre-commit prints `Failed` with
-ASH's summary and `- exit code: 2`, and the commit stops. Exit code 1 means a scanner did not
-run.
+ASH's summary and `- exit code: 2`, and the commit stops. Exit code 1 means the scan did not
+complete, for example because a scanner was MISSING; [Exit codes](../reference/exit-codes.md)
+lists every cause.
 
 Ignore ASH's output directory in git, so the reports are not committed and ASH does not scan
 its own previous output. `ash config init` writes a `.ash/.gitignore` that does this, or add
@@ -49,7 +50,7 @@ Do not ignore all of `.ash/`: ASH reads its configuration from `.ash/.ash.yaml`.
 
 The `ash` hook runs `ashv3 --mode=precommit` with your `args`. Precommit mode:
 
-- runs five scanners: bandit, detect-secrets, checkov, cdk-nag and npm-audit. `--scanners`
+- runs five scanners: bandit, detect-secrets, checkov, cdk-nag, and npm-audit. `--scanners`
   can add others but cannot remove these; `--exclude-scanners` removes them.
 - scans the whole repository on every run, not only the staged files. A commit that touches
   one file is still blocked by a finding in a file committed earlier.
@@ -122,9 +123,10 @@ Measured on a repository of four files:
 | First run with the `cdk` packages | about 60 seconds |
 
 Most of a later run passes before the first scanner starts, while ASH checks its scanner
-installs; checkov is the slowest scanner. Scan time grows with the size of the repository, because every run
-scans all of it. The hook environment and bandit and checkov take about 700 MB under
-`~/.cache/pre-commit` and `~/.local/share/uv`, and the `cdk` packages add about 400 MB.
+installs; checkov is the slowest scanner. Scan time grows with the size of the repository,
+because every run scans all of it. The hook environment, bandit, and checkov take about
+700 MB under `~/.cache/pre-commit` and `~/.local/share/uv`, and the `cdk` packages add about
+400 MB.
 
 ## Use an ASH you already installed {#local-hook}
 
@@ -138,16 +140,19 @@ repos:
     hooks:
       - id: ash
         name: ASH
-        entry: ash --mode precommit
+        entry: ash --mode precommit --exclude-scanners cdk-nag --exclude-scanners npm-audit
         language: system
         pass_filenames: false
 ```
 
 `ash` and `uv` must both be on `PATH` when git runs the hook: ASH installs bandit and checkov
-with `uv`, and reports them MISSING when it cannot find it. `pass_filenames: false` is
-required. Without it, pre-commit appends the staged file names, ASH reads the first one as a
-command name and exits 2, the same code as a finding. This hook uses the extras and tools of
-that installation, so cdk-nag runs if it has the `cdk` extra and Node.js is on `PATH`.
+with `uv`, and reports them MISSING when it finds neither `uv` nor the tool itself.
+`pass_filenames: false` is required. Without it, pre-commit appends the staged file names,
+ASH reads the first one as a command name, and exits 2, the same code as a finding.
+
+This hook uses the extras and tools of that installation. Drop the two `--exclude-scanners`
+options only if it has the `cdk` extra and Node.js and npm are on `PATH`; otherwise cdk-nag
+and npm-audit are MISSING and every commit fails with exit code 1.
 
 ## Pre-commit on Python 3.9 {#python-version}
 
@@ -183,7 +188,7 @@ global_settings:
       reason: pre-commit autoupdate --freeze pins hooks to commit SHAs
 ```
 
-Put it in `.ash/.ash.yaml`. [Suppress a finding](suppress-findings.md) covers expiry dates
+Put it in `.ash/.ash.yaml`. [Suppress findings](suppress-findings.md) covers expiration dates
 and narrower matches.
 
 ## The ash-full-scan hook {#full-scan}

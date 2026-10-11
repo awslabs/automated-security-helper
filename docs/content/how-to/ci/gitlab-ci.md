@@ -6,12 +6,13 @@ ASH found something.
 
 Prerequisites:
 
-- A runner with the Docker executor, or any runner where the job image has Python 3.10 or
-  later and git.
-- Network access from the job to GitHub, PyPI and the scanners' download sites.
+- A runner with the Docker executor, or any runner whose job image is based on Debian or
+  Ubuntu, runs as root, and has Python 3.10 or later and git. The `before_script` below
+  installs packages with `apt-get`.
+- Network access from the job to GitHub, PyPI, and the scanners' download sites.
 
 GitLab reads the SAST report on every tier, and offers it as a download. Showing the
-findings in the merge request widget, the vulnerability report and the security dashboard
+findings in the merge request widget, the vulnerability report, and the security dashboard
 needs GitLab Ultimate.
 
 ## Add the jobs
@@ -24,17 +25,20 @@ ash-scan:
   variables:
     INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
   before_script:
-    - apt-get update && apt-get install -y --no-install-recommends nodejs npm ruby ruby-dev
+    - apt-get update && apt-get install -y --no-install-recommends nodejs npm ruby ruby-dev libyaml-dev
     - python -m venv /opt/ash
     - /opt/ash/bin/pip install --quiet "$INSTALL_SPEC"
     - export PATH="/opt/ash/bin:$PATH"
     - >-
-      ash dependencies install
+      (cd "$(mktemp -d)" && ash dependencies install
       --tool grype --tool syft --tool opengrep --tool cfn-nag
-      --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy
+      --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
   script:
     - ash_exit=0
-    - ash scan --mode local --no-progress || ash_exit=$?
+    - >-
+      ash scan --mode local --no-progress
+      --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+      || ash_exit=$?
     - echo "$ash_exit" > ash-exit-code.txt
   artifacts:
     when: always
@@ -61,17 +65,26 @@ code and fails with it: 2 for actionable findings, 1 for a scan that did not com
 
 What the `before_script` does:
 
-- Installs Node.js and npm, which cdk-nag and npm-audit need, and Ruby with its headers,
-  which `ash dependencies install` needs to build cfn-nag.
+- Installs Node.js and npm, which cdk-nag and npm-audit need, and Ruby with its headers and
+  libyaml, which `ash dependencies install` needs to build cfn-nag.
 - Installs ASH into a virtual environment at `/opt/ash`, outside the checkout. ASH does not
   run tools it finds inside the directory it scans, and the virtual environment carries the
-  `uv` that ASH uses to install bandit, checkov, semgrep, cfn-lint and zizmor during the scan.
+  `uv` that ASH uses to install bandit, checkov, semgrep, cfn-lint, and zizmor during the
+  scan.
 - Installs the binary scanner tools at the versions that ASH pins, checking each download
-  against its pinned SHA256.
+  against its pinned SHA256. It runs in an empty directory, so a config in the repository
+  cannot change what it installs.
 
 To skip a scanner instead of installing what it needs, drop it from the install list and
 name it in `--exclude-scanners` on `ash scan`, for example
 `ash scan --mode local --no-progress --exclude-scanners cfn-nag`.
+
+A merge request pipeline scans the configuration in the branch it scans, so the branch's
+author can change the gate. The three gate flags on `ash scan` keep the branch from turning
+off the gate for findings, incomplete scans, and stale content databases. The branch's
+config can still raise thresholds, add suppressions, and turn scanners off; to keep those
+yours, pass `--config` with a file outside the checkout. See
+[Who can change the gate](../set-the-gate.md#who).
 
 ## The report files
 
@@ -92,8 +105,8 @@ Leave the option out, or produce the file afterward with `ash report`; see
 ## Use your own ASH image
 
 Instead of installing ASH in every job, build ASH's container image once, push it to your
-registry and use it as the job image. The image has every scanner tool, so the job only runs
-the scan. Build the `ci` target, which runs as root like most job images, and see
+registry, and use it as the job image. The image has every scanner tool, so the job only
+runs the scan. Build the `ci` target, which runs as root like most job images, and see
 [Build and host your own image](../run-in-a-container.md#own-image):
 
 <!-- doctest: config kind=gitlab-ci -->
@@ -103,7 +116,10 @@ ash-scan:
   image: registry.example.com/security/automated-security-helper:ci
   script:
     - ash_exit=0
-    - ash scan --mode local --no-progress || ash_exit=$?
+    - >-
+      ash scan --mode local --no-progress
+      --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+      || ash_exit=$?
     - echo "$ash_exit" > ash-exit-code.txt
   artifacts:
     when: always
@@ -117,7 +133,7 @@ ash-scan:
 
 Keep the `ash-gate` job from the first example. The scanners download their vulnerability
 databases during the scan, as they do in the first example. An image built for offline use
-carries the databases instead, and has to be rebuilt within their age limits; see
+carries the databases instead, and has to be rebuilt within their age bounds; see
 [Refresh cadence](../run-offline.md#refresh).
 
 ## Scan only what a merge request changes
@@ -125,8 +141,11 @@ carries the databases instead, and has to be rebuilt within their age limits; se
 `--changed-files-only` keeps only the findings in files changed since the merge base with
 `--base-ref`. GitLab clones 20 commits by default, which may not reach the merge base, and
 ASH then scans everything and logs a warning. In a merge request pipeline, clone the full
-history and pass GitLab's diff base, which is that merge base. Add this to the `ash-scan`
-job:
+history and pass GitLab's diff base, which is that merge base.
+
+Add this to the `ash-scan` job, and give `ash-gate` the same `rules:`. GitLab does not
+create a pipeline in which a job's `needs:` names a job that the rules left out, so with the
+rule on `ash-scan` alone, branch pipelines stop starting:
 
 <!-- doctest: config kind=gitlab-ci -->
 ```yaml
@@ -137,10 +156,21 @@ ash-scan:
     GIT_DEPTH: "0"
   script:
     - ash_exit=0
-    - ash scan --mode local --no-progress --changed-files-only --base-ref "$CI_MERGE_REQUEST_DIFF_BASE_SHA" || ash_exit=$?
+    - >-
+      ash scan --mode local --no-progress
+      --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+      --changed-files-only --base-ref "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      || ash_exit=$?
     - echo "$ash_exit" > ash-exit-code.txt
+
+ash-gate:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 ```
 
-The option filters `ash.sarif` and the exit code, not `ash.gl-sast-report.json`, so the
-SAST report still lists findings in unchanged files.
-[Scan large repositories](../scale-large-repos.md#changed-files) has the details.
+Both jobs then run in merge request pipelines only. To scan branch pipelines as well, keep
+the jobs from the first example under other names, with the opposite rule.
+
+The option filters `ash.sarif`, `ash_aggregated_results.json`, and the exit code, but not
+`ash.gl-sast-report.json` or `ash.junit.xml`, so those still list findings in unchanged
+files. [Scale to large repositories](../scale-large-repos.md#changed-files) has the details.
