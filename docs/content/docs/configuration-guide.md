@@ -735,8 +735,12 @@ Selecting individual bandit tests is done in a bandit configuration file rather 
 through ASH options. ASH does not look for one by name in the scanned tree. Name it
 with `config_file`, set with `--config-overrides` or in a config file outside the
 tree; a config file inside the tree does not set it (see
-[Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose)). Without one, bandit gets an empty config, so it
-does not read a `.bandit` file from the tree either. For the file's format, refer to
+[Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose)). A file named
+`.bandit` is passed with `bandit --ini`, and any other file with `bandit --configfile`.
+Unless you name a `.bandit` file, ASH passes bandit an empty config file with
+`bandit --ini`, so bandit does not read a `.bandit` file from the tree either. A path
+that does not exist is logged as a warning, and bandit runs without a config file.
+For the file's format, refer to
 the Bandit [documentation](https://bandit.readthedocs.io/en/latest/config.html).
 
 ### Semgrep
