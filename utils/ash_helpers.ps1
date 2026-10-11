@@ -195,10 +195,6 @@ function Invoke-ASH {
         if ($Offline) {
             $ashCmdArgs.Add('--offline')
         }
-        if ($PSBoundParameters.ContainsKey('Config')) {
-            $ashCmdArgs.Add("--config")
-            $ashCmdArgs.Add($Config)
-        }
         if ($PSBoundParameters.ContainsKey('Scanners')) {
             foreach ($scanner in $Scanners) {
                 $ashCmdArgs.Add("--scanners")
@@ -236,6 +232,34 @@ function Invoke-ASH {
             New-Item $OutputDir -ItemType Directory -Force | Out-Null
         }
         $outputDirFull = Get-Item $OutputDir | Select-Object -ExpandProperty FullName
+
+        # The config file, -Config or else ASH_CONFIG, is read by the scan inside the
+        # container, which sees the host only through its mounts: the host path names
+        # nothing there. A config inside SourceDir is read through the read-only /src
+        # mount, with every extends base it can name; one outside it is mounted
+        # read-only on its own at /ash-config. Refused with exit 3, as any unusable
+        # config is, when it is not an existing file. -NoRun scans nothing, so it
+        # does not need one.
+        $configMountArg = $null
+        if (-not $NoRun -and ($PSBoundParameters.ContainsKey('Config') -or -not [string]::IsNullOrEmpty($Config))) {
+            if ([string]::IsNullOrEmpty($Config) -or -not (Test-Path -LiteralPath $Config -PathType Leaf)) {
+                Write-Error "Config file not found: '$Config'. -Config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container."
+                exit 3
+            }
+            $configFull = (Get-Item -LiteralPath $Config).FullName
+            $separators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+            $sourcePrefix = $sourceDirFull.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
+            $pathComparison = if ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+            if ($configFull.StartsWith($sourcePrefix, $pathComparison)) {
+                $configInner = "/src/" + $configFull.Substring($sourcePrefix.Length).Replace('\', '/')
+            }
+            else {
+                $configInner = "/ash-config/" + (Split-Path -Leaf $configFull)
+                $configMountArg = "--mount `"type=bind,source=$configFull,destination=$configInner,readonly`""
+            }
+            $ashCmdArgs.Add("--config")
+            $ashCmdArgs.Add("`"$configInner`"")
+        }
 
         # Set image name with target stage
         if ($AshImageName -notmatch ":") {
@@ -396,6 +420,11 @@ function Invoke-ASH {
 
                     # Add output directory mount
                     $runCmd += "--mount `"type=bind,source=$outputDirFull,destination=/out`""
+
+                    # Add the config file mount, when the config is outside SourceDir
+                    if ($configMountArg) {
+                        $runCmd += $configMountArg
+                    }
 
                     # Add any extra run args
                     if ($runArgs.Count -gt 0) {

@@ -23,6 +23,8 @@ OFFLINE="NO"
 OFFLINE_SEMGREP_RULESETS="p/ci"
 TARGET_STAGE="non-root"
 INSTALL_ASH_REVISION="LOCAL"
+CONFIG_GIVEN="NO"
+CONFIG_PATH=""
 # Parse arguments
 while (("$#")); do
   case $1 in
@@ -84,6 +86,15 @@ while (("$#")); do
       shift
       INSTALL_ASH_REVISION="$1"
       ;;
+    --config)
+      shift
+      CONFIG_GIVEN="YES"
+      CONFIG_PATH="$1"
+      ;;
+    --config=*)
+      CONFIG_GIVEN="YES"
+      CONFIG_PATH="${1#--config=}"
+      ;;
     --help | -h)
       python -m automated_security_helper.cli.main --help
       exit 0
@@ -113,6 +124,49 @@ fi
 SOURCE_DIR="$(cd "$SOURCE_DIR"; pwd)"
 mkdir -p "${OUTPUT_DIR}"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR"; pwd)"
+
+# The file's path with every symlink followed: the link's target is what is read.
+resolve_file() {
+  local path="$1" target dir
+  while [ -L "${path}" ]; do
+    target="$(readlink "${path}")"
+    case "${target}" in
+      /*) path="${target}" ;;
+      *) path="$(dirname "${path}")/${target}" ;;
+    esac
+  done
+  dir="$(cd "$(dirname "${path}")" && pwd -P)" || return 1
+  printf '%s/%s\n' "${dir}" "$(basename "${path}")"
+}
+
+# The config file, --config or else ASH_CONFIG, is read by the scan inside the
+# container, which sees the host only through its mounts: the host path itself
+# names nothing there. A config inside the source dir is read through the
+# read-only /src mount, with every extends base it can name; one outside it is
+# mounted read-only on its own at /ash-config. Refused before any build when it
+# is not an existing file, with exit 3 as for any unusable config.
+CONFIG_RUN_ARGS=()
+CONFIG_ASH_ARGS=()
+if [[ "${CONFIG_GIVEN}" = "NO" ]]; then
+  CONFIG_PATH="${ASH_CONFIG:-}"
+fi
+if [[ "${NO_RUN}" = "NO" && ( "${CONFIG_GIVEN}" = "YES" || -n "${CONFIG_PATH}" ) ]]; then
+  if [[ -z "${CONFIG_PATH}" || ! -f "${CONFIG_PATH}" ]]; then
+    echo "ERROR: Config file not found: '${CONFIG_PATH}'. --config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container." >&2
+    exit 3
+  fi
+  CONFIG_REAL="$(resolve_file "${CONFIG_PATH}")"
+  SOURCE_REAL="$(cd "${SOURCE_DIR}" && pwd -P)"
+  case "${CONFIG_REAL}" in
+    "${SOURCE_REAL%/}"/*)
+      CONFIG_ASH_ARGS=(--config "/src/${CONFIG_REAL#"${SOURCE_REAL%/}"/}")
+      ;;
+    *)
+      CONFIG_RUN_ARGS=(--mount "type=bind,source=${CONFIG_REAL},destination=/ash-config/$(basename "${CONFIG_REAL}"),readonly")
+      CONFIG_ASH_ARGS=(--config "/ash-config/$(basename "${CONFIG_REAL}")")
+      ;;
+  esac
+fi
 
 #
 # Gather the UID and GID of the caller
@@ -256,12 +310,14 @@ else
           -e "ASH_OUTPUT_FORMAT=${OUTPUT_FORMAT}" \
           --mount source="${SOURCE_DIR}",type=bind,destination=/src,readonly \
           --mount source="${OUTPUT_DIR}",type=bind,destination=/out \
+          "${CONFIG_RUN_ARGS[@]}" \
           ${MOUNT_OUTPUT_DIR} \
           ${DOCKER_RUN_EXTRA_ARGS} \
           ${ASH_IMAGE_NAME} \
             ash \
               --source-dir /src \
               --output-dir /out \
+              "${CONFIG_ASH_ARGS[@]}" \
               $ASH_ARGS
       RC=$?
     fi

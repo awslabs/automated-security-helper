@@ -151,6 +151,19 @@
   jobs) cannot build `non-root`, whose user would get UID 0, and is refused before the
   build with that explanation: pass `--build-target ci` there. This repository's
   validate-container action now passes `--build-target ci` to every build and scan.
+- **Container mode reads the config file you named.** `--config` (or `ASH_CONFIG`) was
+  handed to the scan inside the container as the host path, which names nothing there,
+  so that scan ran with the default config: none of the file's suppressions, scanner
+  settings or thresholds applied. The file is now mounted read-only (with its `extends`
+  chain, for one outside the source directory) and the inner scan is given the path it
+  has in the container; one that is not an existing file refuses the scan with exit 3.
+  The same holds for `./ash --config` and `Invoke-ASH -Config`, which also honor
+  `ASH_CONFIG` now. In workspace mode, a `--workspace-config` policy outside the
+  workspace root was not passed to the container at all, so its ceiling and policy
+  scanners did not apply there; it is mounted and forwarded the same way. A
+  `config_base_gate` passed to `run_ash_scan` with container or nix mode is refused,
+  because the ASH those modes run would read the config without it. See
+  [Running a scan in a container](docs/content/docs/cli-reference.md#running-a-scan-in-a-container).
 - **A repository-written config file can no longer choose what ASH installs,
   imports or hands a scanner as its own configuration.** It applies to a discovered
   `.ash/.ash.yaml`, a `--config` path, an `extends` base, or `ASH_CONFIG`, when the

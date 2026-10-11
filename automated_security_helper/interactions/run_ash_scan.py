@@ -1706,6 +1706,14 @@ def _run_container_mode(
         allow_missing_projects=opts.allow_missing_projects,
         shard_index=opts.shard_index,
         shard_count=opts.shard_count,
+        # The policy the host resolved for the plan. The container resolves the
+        # workspace again, and on its own it would find only a policy inside the
+        # root, so one named with --workspace-config elsewhere would not apply.
+        workspace_config=(
+            opts.workspace_plan.workspace_config_source
+            if opts.workspace_plan is not None
+            else None
+        ),
     )
 
     if opts.debug:
@@ -3094,6 +3102,15 @@ def run_ash_scan(
     # a separate ASH that is handed the config path alone, and workspace mode
     # resolves each project's own config, so in any of them the restriction would
     # be dropped without a word.
+    if opts.config_base_gate is not None and opts.mode in (
+        RunMode.container,
+        RunMode.nix,
+    ):
+        raise ValueError(
+            "config_base_gate is applied only to a scan in local mode, not to "
+            f"mode={opts.mode.value!r}: the ASH that mode runs reads the config "
+            "without it"
+        )
     if opts.untrusted_config and (
         opts.mode in (RunMode.container, RunMode.nix) or opts.workspace_plan is not None
     ):

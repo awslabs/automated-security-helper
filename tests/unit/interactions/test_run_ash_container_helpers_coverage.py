@@ -1068,9 +1068,27 @@ class TestAssembleRunCommandFlagPassthrough:
         assert "checkov" in cmd
         assert "my_plugin" in cmd
 
-    def test_config_is_forwarded(self, tmp_path):
-        cmd = _run_command(tmp_path, tmp_path / "out", config="ash.yaml")
-        assert cmd[cmd.index("--config") + 1] == "ash.yaml"
+    def test_config_is_forwarded(self, tmp_path, monkeypatch):
+        """Rewritten: this asserted the host path reached the inner scan verbatim.
+
+        The container cannot see that path, so the inner scan ran with its
+        defaults. The file is mounted read-only and the inner scan is given the
+        path it has in the container; see test_container_config_reaches_the_scan.py.
+        """
+        operator = tmp_path / "operator"
+        operator.mkdir()
+        (operator / "ash.yaml").write_text("project_name: p\n", encoding="utf-8")
+        monkeypatch.chdir(operator)
+        source = tmp_path / "src"
+        source.mkdir()
+
+        cmd = _run_command(source, tmp_path / "out", config="ash.yaml")
+
+        assert cmd[cmd.index("--config") + 1] == "/ash-config/ash.yaml"
+        assert (
+            f"type=bind,source={(operator / 'ash.yaml').resolve()},"
+            "destination=/ash-config/ash.yaml,readonly"
+        ) in cmd
 
     def test_existing_results_becomes_the_declared_flag(self, tmp_path):
         """Inverted assertion.

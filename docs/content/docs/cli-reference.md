@@ -189,14 +189,28 @@ ash [options]
 `--mode container`, the `./ash` wrapper and `Invoke-ASH` in `utils/ash_helpers.ps1` run
 the scan inside the ASH image with these bind mounts:
 
-| Mount  | Host path        | Access     |
-|--------|------------------|------------|
-| `/src` | `--source-dir`   | read-only  |
-| `/out` | `--output-dir`   | read-write |
+| Mount                     | Host path                                        | Access     |
+|---------------------------|--------------------------------------------------|------------|
+| `/src`                    | `--source-dir`                                   | read-only  |
+| `/out`                    | `--output-dir`                                   | read-write |
+| `/ash-config/...`         | `--config` (or `ASH_CONFIG`), when outside `--source-dir` | read-only  |
+| `/ash-workspace-config/...` | the workspace policy, when outside the workspace root | read-only  |
 
 The source is mounted read-only wherever the output directory is, including the default
 `.ash/ash_output` inside the source directory: the scan inside the container writes only
 to `/out`.
+
+The config file named with `--config` (or `ASH_CONFIG`) is the one the scan inside the
+container reads. One inside `--source-dir` is read through `/src`. One outside it is
+mounted read-only under `/ash-config`, together with the files its `extends` chain
+names, each at the same place relative to the config's directory (the parent of `.ash/`
+for a file in `.ash/`), so relative bases resolve as they do on the host; only those
+files are mounted, not the directory. A `--config` that is not an existing file, or is
+empty, refuses the scan with exit 3 before anything is built. In workspace mode the
+policy file the host resolved (`--workspace-config`, or the one found in the workspace
+root) is handed to the container the same way. The `./ash` wrapper and `Invoke-ASH`
+mount a config from outside the source directory on its own, so an `extends` base next
+to it is not reachable there; use `ash --mode container` for such a chain.
 
 The image stage is the one `--build-target` names, `non-root` when it is not given. The
 `CI`, `IsCI`, `ISCI` and `CODEBUILD_BUILD_ID` variables do not change it;
@@ -337,7 +351,7 @@ workspace:
 
 #### Container mode
 
-Container mode has one bind mount, so the workspace **root** is mounted at `/src` and each project is `/src/<relative-path>`. This is why every project must sit below the workspace root. `--changed-files-only` is not supported in container mode, as in single-directory mode.
+Container mode has one source mount, so the workspace **root** is mounted at `/src` and each project is `/src/<relative-path>`. This is why every project must sit below the workspace root. `--changed-files-only` is not supported in container mode, as in single-directory mode.
 
 #### Fail-closed validation
 

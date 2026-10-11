@@ -71,6 +71,7 @@ _SCRUBBED_ENV = (
     "ASH_BASE_OCI_LAYOUT",
     "ASH_BASE_IMAGE_OVERRIDE",
     "DOCKER_EXTRA_ARGS",
+    "ASH_CONFIG",
 )
 
 
@@ -228,3 +229,99 @@ class TestTheBuildTargetIsTheOneRequested:
         calls = run_ash(fake_runner, project, ["--no-run", "--build-target", "ci"])
 
         assert _flag(_only(calls, "build"), "--target") == "ci"
+
+
+def _run_ash_status(
+    fake_runner, cwd: Path, args: List[str], extra_env: Optional[Dict[str, str]] = None
+):
+    """Like ``run_ash``, for a run that may stop early: (returncode, stderr, calls)."""
+    runner, log_dir = fake_runner
+    env = {k: v for k, v in os.environ.items() if k not in _SCRUBBED_ENV}
+    env.update({"OCI_RUNNER": str(runner), "FAKE_RUNNER_LOG_DIR": str(log_dir)})
+    env.update(extra_env or {})
+    result = subprocess.run(  # nosec B603 B607 — fixed script path, list args, no shell
+        ["bash", str(ASH_SCRIPT), *args],
+        capture_output=True,
+        text=True,
+        cwd=str(cwd),
+        env=env,
+        timeout=180,
+        check=False,
+    )
+    calls = [
+        record.read_bytes().decode().split("\0")[:-1]
+        for record in sorted(log_dir.iterdir())
+    ]
+    return result.returncode, result.stderr, calls
+
+
+def _inner_args(call: List[str]) -> List[str]:
+    """The arguments the wrapper hands the ``ash`` inside the image."""
+    return call[call.index("ash") + 1 :]
+
+
+class TestTheConfigIsReadableInsideTheContainer:
+    """``--config`` (or ``ASH_CONFIG``) names a host file; the container sees it
+    only through a mount. The host path itself used to be passed through, which
+    names nothing inside, so the scan ran with its defaults."""
+
+    def test_a_config_inside_the_source_is_read_through_the_source_mount(
+        self, fake_runner, project
+    ):
+        (project / ".ash").mkdir()
+        (project / ".ash" / "strict.yaml").write_text("project_name: p\n")
+
+        rc, err, calls = _run_ash_status(
+            fake_runner, project, ["--no-build", "--config", ".ash/strict.yaml"]
+        )
+
+        assert rc == 0, err
+        run = _only(calls, "run")
+        assert _flag(_inner_args(run), "--config") == "/src/.ash/strict.yaml"
+        assert run.count("--mount") == 2
+
+    @pytest.mark.parametrize(
+        "how", ["--config <path>", "--config=<path>", "ASH_CONFIG"]
+    )
+    def test_a_config_outside_the_source_is_mounted_read_only(
+        self, how, fake_runner, project, tmp_path
+    ):
+        config = tmp_path / "operator" / "ash.yaml"
+        config.parent.mkdir()
+        config.write_text("project_name: p\n")
+        if how == "--config <path>":
+            args, env = ["--no-build", "--config", str(config)], None
+        elif how == "--config=<path>":
+            args, env = ["--no-build", f"--config={config}"], None
+        else:
+            args, env = ["--no-build"], {"ASH_CONFIG": str(config)}
+
+        rc, err, calls = _run_ash_status(fake_runner, project, args, env)
+
+        assert rc == 0, err
+        run = _only(calls, "run")
+        inner = _flag(_inner_args(run), "--config")
+        assert inner == "/ash-config/ash.yaml"
+        mount = _mount(run, inner)
+        assert Path(str(mount["source"])) == config.resolve()
+        assert "readonly" in mount, f"the config mount is writable: {mount}"
+        assert str(config) not in _inner_args(run)
+
+    @pytest.mark.parametrize("value", ["missing.yaml", ""], ids=["missing", "empty"])
+    def test_an_unreadable_config_is_refused_before_anything_runs(
+        self, value, fake_runner, project
+    ):
+        rc, err, calls = _run_ash_status(fake_runner, project, ["--config", value])
+
+        assert rc == 3
+        assert calls == [], f"the runner was called: {calls}"
+        assert "Config file not found" in err
+
+    def test_a_build_without_a_run_does_not_need_the_config(self, fake_runner, project):
+        """Control: ``--no-run`` scans nothing."""
+        rc, err, calls = _run_ash_status(
+            fake_runner, project, ["--no-run", "--config", "missing.yaml"]
+        )
+
+        assert rc == 0, err
+        assert [call[0] for call in calls] == ["build"]

@@ -16,7 +16,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 import typer
@@ -860,6 +860,81 @@ def _build_custom_image(
     return "automated-security-helper:custom"
 
 
+#: Where a config file kept outside the scanned tree is mounted, read-only.
+CONTAINER_CONFIG_ROOT = "/ash-config"
+#: The same for a workspace policy file kept outside the workspace root.
+CONTAINER_WORKSPACE_CONFIG_ROOT = "/ash-workspace-config"
+
+
+def _unreadable_config(config: str | None) -> str | None:
+    """Why ``--config`` cannot be handed to the scan in the container, or None.
+
+    The scan in the container reads the file through a mount, so the path has to
+    name a file that exists on the host. One that does not -- or an empty value, or a
+    directory -- is refused with exit 3, the code a local scan gives an unusable
+    config, rather than mounted as nothing and scanned with the defaults.
+    """
+    if config is None:
+        return None
+    if config and Path(config).is_file():
+        return None
+    return (
+        f"Config file not found: {config!r}. --config (or ASH_CONFIG) has to name an "
+        "existing file: container mode mounts it read-only for the scan inside the "
+        "container."
+    )
+
+
+def _host_file_in_container(
+    host_path: str, source_dir: Path, mount_root: str, *, follow_extends: bool
+) -> Tuple[List[str], str]:
+    """The mounts that make a host config file readable in the container, and its path there.
+
+    A file inside the source directory is already under the read-only ``/src``
+    mount, and so is every ``extends`` base it can name: a config inside the
+    source directory is confined to it (``config_sources.default_confinement_root``).
+
+    A file outside it is mounted read-only under *mount_root* at its path relative
+    to its confinement root, and with *follow_extends* each file of its ``extends``
+    chain is mounted the same way, so relative bases resolve inside the container
+    exactly as on the host. Only those files are mounted, not the directory they
+    are in. A chain that does not resolve on the host mounts the file alone: the
+    scan inside reaches the same error and reports it with its own exit code.
+
+    The path is resolved first, so a symlink is judged, and mounted, by its target.
+    """
+    resolved = Path(host_path).resolve()
+    source = Path(source_dir).resolve()
+    if resolved.is_relative_to(source):
+        return [], f"/src/{resolved.relative_to(source).as_posix()}"
+
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+        resolve_config_document,
+    )
+
+    root = default_confinement_root(resolved, source)
+    files = [resolved]
+    if follow_extends:
+        try:
+            chain = resolve_config_document(resolved, confine_to=root).chain
+        except Exception as e:
+            # See the docstring: the scan inside reports it.
+            ASH_LOGGER.debug(
+                f"Mounting {resolved} alone: its chain did not resolve: {e}"
+            )
+            chain = []
+        files = list(dict.fromkeys([*chain, resolved]))
+
+    mounts: List[str] = []
+    for file in files:
+        destination = f"{mount_root}/{file.relative_to(root).as_posix()}"
+        mounts.extend(
+            ["--mount", f"type=bind,source={file},destination={destination},readonly"]
+        )
+    return mounts, f"{mount_root}/{resolved.relative_to(root).as_posix()}"
+
+
 def _assemble_run_command(
     oci_command_prefix: List[str],
     resolved_oci_runner: str,
@@ -896,10 +971,19 @@ def _assemble_run_command(
     shard_index: int | None = None,
     shard_count: int | None = None,
     fail_on_incomplete_scanners: bool | None = None,
+    workspace_config: str | None = None,
 ) -> List[str]:
     """Assemble the full `docker run` command list.
 
     Args:
+        config: The host path of ``--config``. It is made readable in the
+            container and the inner scan is given the path it has there; see
+            :func:`_host_file_in_container`. Handing the host path over verbatim
+            named a file the container does not have, and the inner scan ran with
+            its defaults.
+        workspace_config: In workspace mode, the host path of the workspace
+            policy the host resolved, handed over the same way as
+            ``--workspace-config``.
         fail_on_incomplete_scanners: Whether the in-container scan should fail
             when a selected scanner did not complete, or None for unset. Defaults
             to None so that the many existing callers -- most of them tests
@@ -947,6 +1031,23 @@ def _assemble_run_command(
     # Output dir mount
     cmd.extend(["--mount", f"type=bind,source={output_dir},destination=/out"])
 
+    # The config files the operator named on the host, read-only.
+    inner_config = None
+    if config:
+        config_mounts, inner_config = _host_file_in_container(
+            config, source_dir, CONTAINER_CONFIG_ROOT, follow_extends=True
+        )
+        cmd.extend(config_mounts)
+    inner_workspace_config = None
+    if workspace_config and workspace_relative_file is not None:
+        policy_mounts, inner_workspace_config = _host_file_in_container(
+            workspace_config,
+            source_dir,
+            CONTAINER_WORKSPACE_CONFIG_ROOT,
+            follow_extends=False,
+        )
+        cmd.extend(policy_mounts)
+
     # Network: offline always uses none; container_network overrides otherwise
     if offline or container_network == "none":
         cmd.append("--network=none")
@@ -982,6 +1083,8 @@ def _assemble_run_command(
         cmd.extend(
             ["--workspace", f"/src/{workspace_relative_file}", "--output-dir", "/out"]
         )
+        if inner_workspace_config is not None:
+            cmd.extend(["--workspace-config", inner_workspace_config])
         if allow_missing_projects:
             cmd.append("--allow-missing-projects")
     else:
@@ -1040,8 +1143,8 @@ def _assemble_run_command(
             ["--output-formats", fmt.value if hasattr(fmt, "value") else str(fmt)]
         )
 
-    if config:
-        ash_args.extend(["--config", config])
+    if inner_config is not None:
+        ash_args.extend(["--config", inner_config])
 
     for override in config_overrides:
         ash_args.extend(["--config-overrides", override])
@@ -1176,6 +1279,7 @@ def run_ash_container(
     allow_missing_projects: bool = False,
     shard_index: int | None = None,
     shard_count: int | None = None,
+    workspace_config: str | None = None,
 ):
     """Build and run the ASH container image.
 
@@ -1207,6 +1311,11 @@ def run_ash_container(
             have every shard scan the whole repository, and merging does not
             deduplicate -- see _run_container_mode's docstring.
         shard_count: Total shard count, forwarded alongside shard_index.
+        config: Host path of the config file. Mounted read-only for the inner
+            scan; one that is not an existing file refuses the run with exit 3
+            before anything is built.
+        workspace_config: Host path of the workspace policy the host resolved,
+            mounted and forwarded as ``--workspace-config``.
 
     Returns:
         CompletedProcess: The result of the container execution
@@ -1232,6 +1341,16 @@ def run_ash_container(
         custom_build_arg = []
     if ash_plugin_modules is None:
         ash_plugin_modules = []
+
+    # Before any build: a scan that cannot be given its config is not worth one.
+    config_refusal = _unreadable_config(config) if run else None
+    if config_refusal is not None:
+        typer.secho(config_refusal, fg=typer.colors.RED)
+        return _not_started(
+            create_completed_process(
+                args=[], returncode=3, stdout="", stderr=config_refusal
+            )
+        )
 
     # Get host UID and GID using safe subprocess calls
     try:
@@ -1450,6 +1569,7 @@ def run_ash_container(
             allow_missing_projects=allow_missing_projects,
             shard_index=shard_index,
             shard_count=shard_count,
+            workspace_config=workspace_config,
         )
 
         return _execute_container(run_cmd, debug=debug)
