@@ -5,9 +5,9 @@
 
 The archive here is built in the test with the same layout as the AWS Guard Rules
 Registry's ``ruleset-build-v1.0.2.zip`` -- rule files under ``output/`` plus
-``__MACOSX/`` resource-fork entries -- and with hostile entries added. Only the network
-fetch is replaced; extraction, the manifest, the skip decision and verification are
-the real code.
+``__MACOSX/`` resource-fork entries -- and with entries the installers must refuse
+added. Only the network fetch is replaced; extraction, the manifest, the skip
+decision and verification are the real code.
 """
 
 from __future__ import annotations
@@ -302,7 +302,7 @@ def _script():
     return script
 
 
-class TestHostileArchivesAgainstBothInstallers:
+class TestRefusedArchiveEntriesInBothInstallers:
     """The same refusals in rules_bundles.extract_bundle and the image's script."""
 
     def test_a_rule_file_named_like_a_directory_is_not_flattened(self, tmp_path):

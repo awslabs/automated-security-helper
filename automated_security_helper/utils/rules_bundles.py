@@ -38,7 +38,7 @@ Only regular files directly inside ``RulesBundle.member_dir`` whose names end in
 directory the installer created. No path from inside the archive is ever used as a
 destination, so an entry named ``../../x`` or ``/etc/x`` cannot escape. Basenames must
 match ``_SAFE_MEMBER_NAME``, duplicates are refused, and each member and the total are
-size-capped so a hostile archive cannot fill the disk. The registry's zip carries
+size-capped so no archive can fill the disk. The registry's zip carries
 ``__MACOSX/`` resource-fork entries; they fail the directory test and are skipped.
 
 The finished directory is moved into place with one rename, so a reader never sees a

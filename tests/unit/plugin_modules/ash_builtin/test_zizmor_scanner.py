@@ -628,12 +628,12 @@ def test_without_an_operator_config_zizmor_reads_none(repo, caplog, name):
 
 
 def test_a_path_that_looks_like_a_flag_stays_an_input(repo):
-    hostile = repo / "--config=evil" / "action.yml"
-    hostile.parent.mkdir()
-    hostile.write_text((repo / "actions/clean/action.yaml").read_text())
+    dashed = repo / "--config=other" / "action.yml"
+    dashed.parent.mkdir()
+    dashed.write_text((repo / "actions/clean/action.yaml").read_text())
     final_args, _, _ = _argv_and_env(_scanner(repo), repo)
     separator = final_args.index("--")
-    assert "--config=evil/action.yml" in final_args[separator + 1 :]
+    assert "--config=other/action.yml" in final_args[separator + 1 :]
     assert not any(a.startswith("--config") for a in final_args[:separator])
 
 
@@ -993,9 +993,9 @@ def test_post_process_leaves_the_input_report_intact_for_other_runs(repo):
 @pytest.mark.parametrize(
     "value",
     [
-        " @ file:///tmp/evil",
-        "@ git+https://example.invalid/evil.git",
-        "[evil]>=1",
+        " @ file:///tmp/other",
+        "@ git+https://example.invalid/other.git",
+        "[extra]>=1",
         ">=1; sys_platform != 'x'",
         "1.30.1",
     ],

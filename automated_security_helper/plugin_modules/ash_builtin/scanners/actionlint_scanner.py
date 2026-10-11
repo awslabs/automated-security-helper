@@ -102,11 +102,11 @@ Severity mapping
 ----------------
 actionlint gives every finding the same weight; its upstream SARIF template marks all
 of them ``error``. ASH maps by rule kind (``kind`` becomes the SARIF ``ruleId``) so the
-severity gate separates exploitable workflow defects from lint:
+severity gate separates workflow defects that expose the run from lint:
 
 * HIGH (SARIF ``error``): an ``expression`` finding whose message says the input is
-  "potentially untrusted" -- script injection, an attacker-controlled
-  ``${{ github.event.* }}`` value interpolated into a ``run:`` script -- and
+  "potentially untrusted" -- script injection, a ``${{ github.event.* }}`` value that
+  whoever triggers the workflow sets, interpolated into a ``run:`` script -- and
   ``credentials`` (a password hard-coded in a ``container:``/``services:`` block).
 * MEDIUM (SARIF ``warning``): ``if-cond`` (an ``if:`` that is always true because of
   text around ``${{ }}``, so a guard silently does nothing), ``permissions``
