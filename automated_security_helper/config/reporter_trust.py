@@ -89,11 +89,33 @@ if TYPE_CHECKING:
 #: caps are in the reporters' options models (``ash_aws_plugins.aws_utils``).
 _RETRY_OPTIONS: Tuple[str, ...] = ("max_retries", "base_delay", "max_delay")
 
+#: What the Bedrock reporter sends to the model, besides where it sends it: source
+#: from the scanned tree and instructions (``include_code_snippets``,
+#: ``custom_prompt``), text added to the prompts (``industry_context``,
+#: ``compliance_frameworks``, ``custom_context``), which findings and how many
+#: (``exclude_scanner_types``, which keeps secret findings out by default,
+#: ``actionable_only``, ``max_findings_to_analyze``, ``max_findings_per_severity``,
+#: ``summarize_findings``, ``batch_processing``), and whether another model than
+#: ``model_id`` may receive them (``enable_fallback_models``).
+_BEDROCK_CONTENT_OPTIONS: Tuple[str, ...] = (
+    "include_code_snippets",
+    "custom_prompt",
+    "exclude_scanner_types",
+    "actionable_only",
+    "max_findings_to_analyze",
+    "max_findings_per_severity",
+    "summarize_findings",
+    "batch_processing",
+    "industry_context",
+    "compliance_frameworks",
+    "custom_context",
+    "enable_fallback_models",
+)
+
 #: The options of each built-in reporter that pick where findings go or which
 #: credentials send them: each reporter's ``destination_options``. Where each is
 #: used is listed in the PR that added this. The Bedrock reporter's
-#: ``include_code_snippets`` and ``custom_prompt`` choose what is sent to the
-#: model besides the findings: source from the scanned tree, and instructions.
+#: ``_BEDROCK_CONTENT_OPTIONS`` choose what is sent to the model with them.
 #: Security Hub's ``findings_scope``
 #: (which findings it imports and may archive) and ``archive_resolved_findings``
 #: are listed before its options model defines them, so that no repository's or
@@ -114,8 +136,7 @@ REPORTER_DESTINATION_OPTIONS: Dict[str, Tuple[str, ...]] = {
         "output_file",
         "output_executive_file",
         "output_technical_file",
-        "include_code_snippets",
-        "custom_prompt",
+        *_BEDROCK_CONTENT_OPTIONS,
         *_RETRY_OPTIONS,
     ),
     "cloudwatch-logs": (
@@ -413,7 +434,11 @@ def _confine_options(
 ) -> List[str]:
     """Set each reporter's ``destinations`` options to the trusted base's.
 
-    Returns the options the config set that were not kept, as dotted keys.
+    An option is matched under every mix of ``-`` and ``_`` in its name, since a
+    config merge reads them as the same key (``config_sources._resolve_dict_key``):
+    each spelling the config writes is replaced by the spellings the trusted base
+    writes, with their values. Returns the spellings the config set to a value
+    the trusted base does not give them, as dotted keys.
     """
     extras = config.reporters.__pydantic_extra__
     ignored: List[str] = []
@@ -429,21 +454,32 @@ def _confine_options(
             options = dict(section.get("options") or {})
             changed = False
             for name in option_names:
-                wanted = trusted_options.get(name, _MISSING)
-                current = options.get(name, _MISSING)
-                if current == wanted:
+                written = _spellings(options, name)
+                wanted = {
+                    k: trusted_options[k] for k in _spellings(trusted_options, name)
+                }
+                if {k: options[k] for k in written} == wanted:
                     continue
-                if current is not _MISSING:
-                    ignored.append(f"reporters.{key}.options.{name}")
-                if wanted is _MISSING:
-                    options.pop(name, None)
-                else:
-                    options[name] = wanted
+                for spelling in written:
+                    if options[spelling] != wanted.get(spelling, _MISSING):
+                        ignored.append(f"reporters.{key}.options.{spelling}")
+                    options.pop(spelling)
+                options.update(wanted)
                 changed = True
             if changed:
                 section["options"] = options
                 extras[key] = section
     return ignored
+
+
+def _spellings(options: Mapping[Any, Any], name: str) -> List[str]:
+    """The keys of ``options`` that are ``name`` with ``-`` and ``_`` folded."""
+    folded = name.replace("-", "_")
+    return [
+        key
+        for key in options
+        if isinstance(key, str) and key.replace("-", "_") == folded
+    ]
 
 
 def _confine_enabled(

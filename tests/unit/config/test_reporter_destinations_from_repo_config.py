@@ -122,9 +122,22 @@ def test_security_hubs_import_scope_and_archiving_are_the_operators(
     assert f"reporters.aws-security-hub.options.{name}" in warnings, warnings
 
 
-#: What the Bedrock reporter sends to the model besides the findings, each with a
-#: value other than its default.
-_BEDROCK_CONTENT = {"include_code_snippets": True, "custom_prompt": "Repo prompt."}
+#: What the Bedrock reporter sends to the model with the findings, and which
+#: findings and how many, each with a value other than its default.
+_BEDROCK_CONTENT = {
+    "include_code_snippets": True,
+    "custom_prompt": "Repo prompt.",
+    "exclude_scanner_types": [],
+    "actionable_only": False,
+    "max_findings_to_analyze": 999,
+    "max_findings_per_severity": 999,
+    "summarize_findings": True,
+    "batch_processing": True,
+    "industry_context": "Repo industry.",
+    "compliance_frameworks": ["Repo framework"],
+    "custom_context": "Repo context.",
+    "enable_fallback_models": False,
+}
 
 
 @pytest.mark.parametrize("name", sorted(_BEDROCK_CONTENT))
@@ -142,6 +155,30 @@ def test_a_repository_config_does_not_choose_what_bedrock_is_sent(
     assert name not in _options(config, "bedrock-summary-reporter")
     warnings = "\n".join(_warnings(ash_log))
     assert f"reporters.bedrock-summary-reporter.options.{name}" in warnings, warnings
+
+
+@pytest.mark.parametrize("name", sorted(_BEDROCK_CONTENT))
+@pytest.mark.parametrize(
+    "section",
+    ["bedrock-summary-reporter", "BedrockSummary", "bedrock_summary_reporter"],
+)
+def test_a_hyphenated_spelling_of_a_bedrock_option_is_ignored_too(
+    tmp_path, ash_log, name, section
+):
+    """``-`` and ``_`` are the same key to a config merge, so both are confined."""
+    spelled = name.replace("_", "-")
+    source = tmp_path / "repo"
+    _write_config(
+        source / ".ash" / ".ash.yaml",
+        {section: {"options": {spelled: _BEDROCK_CONTENT[name]}}},
+    )
+
+    config = resolve_config(source_dir=source)
+
+    options = _options(config, "bedrock-summary-reporter")
+    assert spelled not in options and name not in options, options
+    warnings = "\n".join(_warnings(ash_log))
+    assert f"reporters.{section}.options.{spelled}" in warnings, warnings
 
 
 @pytest.mark.parametrize("name", sorted(_BEDROCK_CONTENT))
@@ -241,7 +278,7 @@ def test_other_reporter_options_in_the_tree_still_apply(tmp_path, ash_log):
             "bedrock-summary-reporter": {
                 "enabled": False,
                 "options": {
-                    "max_findings_to_analyze": 3,
+                    "summary_style": "technical",
                     "aws_region": "repo-region-1",
                 },
             },
@@ -254,7 +291,7 @@ def test_other_reporter_options_in_the_tree_still_apply(tmp_path, ash_log):
 
     bedrock = config.get_plugin_config("reporter", "bedrock-summary-reporter")
     assert bedrock["enabled"] is False
-    assert bedrock["options"]["max_findings_to_analyze"] == 3
+    assert bedrock["options"]["summary_style"] == "technical"
     assert _options(config, "s3")["file_format"] == "yaml"
     assert config.reporters.markdown.options.compact is True
 
@@ -909,15 +946,6 @@ _MODEL_PARAMETER = (
 _SUMMARY_SHAPE = (
     "the shape of the summary ASH writes locally, or which sections it asks for"
 )
-_FINDINGS_SENT = (
-    "chooses which findings, or how many, are sent to the model with them; still "
-    "set from the tree, as only include_code_snippets and custom_prompt of this "
-    "kind are the operator's"
-)
-_CONTEXT_SENT = (
-    "text added to every prompt, as custom_prompt is; still set from the tree, as "
-    "only include_code_snippets and custom_prompt of this kind are the operator's"
-)
 
 #: Options of the off-host reporters that a repository's config may still set,
 #: each with why. Every other option of their models is in
@@ -942,19 +970,6 @@ _OPEN_OFF_HOST_OPTIONS: Dict[Tuple[str, str], str] = {
     ("bedrock-summary-reporter", "enable_caching"): (
         "whether ASH reuses a response it already has for the same request"
     ),
-    ("bedrock-summary-reporter", "enable_fallback_models"): (
-        "whether ASH tries another model of the same family from its own list "
-        "when model_id is unavailable; still set from the tree"
-    ),
-    ("bedrock-summary-reporter", "max_findings_to_analyze"): _FINDINGS_SENT,
-    ("bedrock-summary-reporter", "max_findings_per_severity"): _FINDINGS_SENT,
-    ("bedrock-summary-reporter", "actionable_only"): _FINDINGS_SENT,
-    ("bedrock-summary-reporter", "exclude_scanner_types"): _FINDINGS_SENT,
-    ("bedrock-summary-reporter", "summarize_findings"): _FINDINGS_SENT,
-    ("bedrock-summary-reporter", "batch_processing"): _FINDINGS_SENT,
-    ("bedrock-summary-reporter", "industry_context"): _CONTEXT_SENT,
-    ("bedrock-summary-reporter", "compliance_frameworks"): _CONTEXT_SENT,
-    ("bedrock-summary-reporter", "custom_context"): _CONTEXT_SENT,
 }
 
 #: How each off-host reporter's settings stand under the MCP server's default

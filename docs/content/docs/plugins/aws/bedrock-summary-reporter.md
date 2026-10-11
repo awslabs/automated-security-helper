@@ -78,18 +78,34 @@ only when the resolved file is directly inside the reports directory.
 
 ### Where these options can be set
 
-`aws_region`, `aws_profile`, `model_id`, `output_file`, `output_executive_file` and
-`output_technical_file` choose where findings are sent or written and which
-credentials send them, `include_code_snippets` and `custom_prompt` choose what is
-sent to the model with them (source from the scanned tree, and instructions), and
-`max_retries`, `base_delay` and `max_delay` how long the reporter keeps calling
-Bedrock when it is refused, so they are the operator's. `max_retries` is at most 10,
-`max_delay` at most 60 seconds, and `base_delay` at most `max_delay`. They take effect only from the
+These options are the operator's:
+
+- `aws_region`, `aws_profile`, `model_id`, `output_file`, `output_executive_file` and
+  `output_technical_file` choose where findings are sent or written and which
+  credentials send them.
+- `include_code_snippets`, `custom_prompt`, `industry_context`,
+  `compliance_frameworks` and `custom_context` choose what is sent to the model
+  with them: source from the scanned tree, and text added to the prompts.
+- `exclude_scanner_types` (which keeps secret findings out by default),
+  `actionable_only`, `max_findings_to_analyze`, `max_findings_per_severity`,
+  `summarize_findings` and `batch_processing` choose which findings are sent, and
+  how many.
+- `enable_fallback_models` chooses whether a model other than `model_id` may
+  receive them.
+- `max_retries`, `base_delay` and `max_delay` choose how long the reporter keeps
+  calling Bedrock when it is refused. `max_retries` is at most 10, `max_delay` at
+  most 60 seconds, and `base_delay` at most `max_delay`.
+
+They take effect only from the
 defaults (`AWS_REGION`, `AWS_DEFAULT_REGION`, `AWS_PROFILE` and `ASH_BEDROCK_MODEL_ID`),
 `--config-overrides`, or a config file outside the scanned tree. A config file inside
 the scanned tree, or one an MCP client delivered, cannot set them: from the tree they
-are ignored with a warning, and under the MCP server they are default `denied_paths`
-entries, so a delivered config that changes one is refused.
+are ignored with a warning, under either spelling of the name (`exclude-scanner-types`
+is the same option as `exclude_scanner_types`), and under the MCP server they are
+default `denied_paths` entries, so a delivered config that changes one is refused. A
+repository config that repeats the operator's value is no change, and is not warned
+about. The model parameters (`temperature`, `top_p`, `max_tokens`) and the options
+that shape the summary ASH writes still apply from the tree.
 
 Whether the reporter runs is the operator's too: where the operator's settings have
 it off, a config file inside the scanned tree does not turn it on (see

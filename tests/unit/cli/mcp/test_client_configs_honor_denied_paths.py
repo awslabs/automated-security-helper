@@ -552,20 +552,23 @@ def _operator_only_reporter_options() -> List[tuple]:
     ]
 
 
+@pytest.mark.parametrize("spelling", ["as-listed", "hyphenated"])
 @pytest.mark.parametrize(
     "reporter,name",
     _operator_only_reporter_options(),
     ids=[f"{r}.{n}" for r, n in _operator_only_reporter_options()],
 )
 def test_every_operator_only_reporter_option_in_an_upload_is_refused(
-    _server, reporter, name
+    _server, reporter, name, spelling
 ) -> None:
-    """Every option config/reporter_trust.py lists, so a new one is covered."""
-    text = f"reporters:\n  {reporter}:\n    options:\n      {name}: other-value\n"
+    """Every option config/reporter_trust.py lists, so a new one is covered, under
+    either spelling a config merge reads as the same key."""
+    written = name.replace("_", "-") if spelling == "hyphenated" else name
+    text = f"reporters:\n  {reporter}:\n    options:\n      {written}: other-value\n"
     source = _upload({"ash.yaml": text})
     _assert_refused(
         _scan_resolution(_server["target"], str(source / "ash.yaml")),
-        key=f"reporters.{reporter}.options.{name}",
+        key=f"reporters.{reporter}.options.{written}",
     )
 
 

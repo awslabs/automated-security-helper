@@ -300,9 +300,20 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         "output_file",
         "output_executive_file",
         "output_technical_file",
-        # What is sent to the model besides the findings.
+        # What is sent to the model with the findings, which findings and how
+        # many, and whether another model may receive them.
         "include_code_snippets",
         "custom_prompt",
+        "exclude_scanner_types",
+        "actionable_only",
+        "max_findings_to_analyze",
+        "max_findings_per_severity",
+        "summarize_findings",
+        "batch_processing",
+        "industry_context",
+        "compliance_frameworks",
+        "custom_context",
+        "enable_fallback_models",
         # How long it keeps calling Bedrock with the operator's credentials.
         "max_retries",
         "base_delay",

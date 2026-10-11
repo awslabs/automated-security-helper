@@ -1202,6 +1202,17 @@
     file inside the scanned tree that sets one is ignored with a warning, and a
     repository that set them in its own config sets them with `--config-overrides`
     or in a config file outside the tree instead.
+  - So are the rest of what the Bedrock reporter sends to the model:
+    `industry_context`, `compliance_frameworks` and `custom_context`, the text
+    added to its prompts; `exclude_scanner_types`, which keeps secret findings out
+    by default, `actionable_only`, `max_findings_to_analyze`,
+    `max_findings_per_severity`, `summarize_findings` and `batch_processing`, which
+    choose which findings are sent and how many; and `enable_fallback_models`,
+    which lets a model other than `model_id` receive them. A repository that set
+    one of these in its own config sets it with `--config-overrides` or in a config
+    file outside the tree instead. A repository config that repeats the operator's
+    value is unchanged and not warned about. An operator-only option of any AWS
+    reporter is now matched whether its name is written with `-` or `_`.
   - The retry options of the Bedrock summary, CloudWatch Logs and S3 reporters,
     `max_retries`, `base_delay` and `max_delay`, are the operator's too: a config
     file inside the scanned tree that sets one is ignored with a warning, so a
