@@ -366,8 +366,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         (``module.dir``) and load them, and ``--module-dir`` names one directly. So
         a path for either is used only when the operator set the option
         (``--config-overrides`` or a config file outside the scanned tree, see
-        ``utils/config_trust.py``) and it resolves outside that tree. Otherwise
-        this logs ``why`` and returns None, and the caller uses ASH's own.
+        ``utils/config_trust.py``) and it resolves outside that tree, without a
+        symbolic link in the tree leading it there. Otherwise this logs ``why``
+        and returns None, and the caller uses ASH's own.
         """
         if self.context is None:
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")

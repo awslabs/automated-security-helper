@@ -258,11 +258,12 @@
   into the report); `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG` still apply, for a
   file outside the scanned tree. trivy's and trivy-repo's `config_file`,
   `ignore_file` and `secret_config_file`, trivy-repo's `module_dir` and cfn-lint's
-  `config_file` are also refused when the file is inside the scanned tree, even when
-  the operator names it; actionlint's, gitleaks' and zizmor's `config_file`,
-  gitleaks' `baseline_path` and cfn-guard's `rules_paths` may name a file in the tree
-  when the operator sets them; such a path there that leads out of the tree through
-  a symbolic link makes cfn-guard MISSING and the other three scanners ERROR, without
+  `config_file` are also refused when the file is inside the scanned tree, or when
+  the path is in the tree and leads out of it through a symbolic link, even when the
+  operator names it; actionlint's, gitleaks' and zizmor's `config_file`, gitleaks'
+  `baseline_path` and cfn-guard's `rules_paths` may name a file in the tree when the
+  operator sets them, and such a path there that leads out of the tree through a
+  symbolic link makes cfn-guard MISSING and the other three scanners ERROR, without
   running the tool. With `rules_paths` ignored and `rule_sets` empty,
   cfn-guard falls back to `wa-Security-Pillar`. In an operator's rules directory, a
   rules file that resolves outside it through a symlink is refused, and cfn-guard

@@ -1160,6 +1160,34 @@ def test_the_operator_cannot_point_an_integration_inside_the_scanned_tree(
     assert not any("planted" in arg for arg in argv)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit and symlinks")
+@pytest.mark.parametrize("flag", ["shellcheck", "pyflakes"])
+@pytest.mark.parametrize("shape", ["file", "directory"])
+def test_the_operator_cannot_name_a_path_in_the_tree_that_links_out_of_it(
+    repo, monkeypatch, on_path, caplog, flag, shape
+):
+    """A path written inside the scanned tree goes where the tree's links send it,
+    so the tree would choose the program actionlint pipes every run: script to
+    (a link to /bin/sh would execute them). The integration stays off."""
+    tool = _plant(repo.parent / "outside")
+    if shape == "file":
+        (repo / "tools").mkdir()
+        (repo / "tools" / flag).symlink_to(tool)
+        value = f"tools/{flag}"
+    else:
+        (repo / "tools").symlink_to(tool.parent, target_is_directory=True)
+        value = f"tools/{tool.name}"
+    scanner = _scanner(repo, operator=True, **{flag: value})
+
+    with caplog.at_level(logging.WARNING):
+        argv = _argv(scanner, monkeypatch, repo)
+
+    assert f"-{flag}=" in argv
+    assert tool.as_posix() not in " ".join(argv)
+    assert f"Ignoring scanners.actionlint.options.{flag}" in caplog.text
+    assert "symbolic link" in caplog.text
+
+
 def test_a_name_that_resolves_inside_the_scanned_tree_is_refused(repo, monkeypatch):
     # A relative PATH entry such as "." finds a file the repository committed.
     inside = (repo / "shellcheck").as_posix()

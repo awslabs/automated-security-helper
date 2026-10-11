@@ -254,12 +254,15 @@ def _spelled(tmp_path: Path, source: Path, chosen: Path, spelling: str) -> str:
 def test_trivy_is_handed_the_path_that_was_checked(
     tmp_path, monkeypatch, scanner, option, flag, name, content, spelling
 ):
-    """However the operator spells an outside file, trivy gets that file.
+    """However the operator spells an outside file, trivy gets that file, and
+    never a file the spelling could be mistaken for.
 
     ``home`` is the case where the spellings part: the check expands ``~`` and a
     path rebuilt from the raw value does not, so ``~/trivy.yaml`` was checked as
     the operator's home and used as ``<source>/~/trivy.yaml``, a file the
-    repository planted.
+    repository planted. ``relative-dotdot-through-link`` reaches the outside file
+    only through ``jump``, a link in the tree, so the tree chose it and ASH's own
+    file is passed instead.
     """
     source = _source(tmp_path)
     chosen = _outside(tmp_path, name, content)
@@ -283,13 +286,13 @@ def test_trivy_is_handed_the_path_that_was_checked(
     assert _real(planted) not in " ".join(argv)
     assert passed != _real(lexical)
     # Where the filesystem itself takes the spelling. On POSIX "jump/../<name>"
-    # goes through the link to <outside>/<name>; Windows collapses ".." before
-    # following links, so there it is <source>/<name>, inside the tree, and ASH's
-    # own file is passed instead.
+    # goes through the tree's link to <outside>/<name>, which the link chose;
+    # Windows collapses ".." before following links, so there it is
+    # <source>/<name>, inside the tree. Either way ASH's own file is passed.
     target = Path(
         os.path.realpath(source / value if spelling.startswith("relative") else chosen)
     )
-    if _inside(target, source):
+    if spelling == "relative-dotdot-through-link" or _inside(target, source):
         assert Path(passed).is_relative_to(Path(os.path.realpath(tmp_path / "out")))
     else:
         assert passed == _real(target) == _real(chosen)

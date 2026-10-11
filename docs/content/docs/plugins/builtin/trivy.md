@@ -62,7 +62,7 @@ trivy reads `trivy.yaml`, `.trivyignore` and, for the `secret` scanner, `trivy-s
 
 To use your own:
 
-- `config_file`: set it as the operator, through `--config-overrides` or an ASH config file outside the scanned tree, for a file outside the scanned tree. Set by an ASH config inside the tree, or naming a file inside it, it is ignored with a warning and trivy gets ASH's empty config.
+- `config_file`: set it as the operator, through `--config-overrides` or an ASH config file outside the scanned tree, for a file outside the scanned tree. Set by an ASH config inside the tree, or naming a file inside it, it is ignored with a warning and trivy gets ASH's empty config. So is a path inside the tree that leads out of it through a symbolic link there: the link chose the file, not the operator.
 - `ignore_file` and `secret_config_file`: under the same rule as `config_file`. Otherwise `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG` from the environment, for a file outside the scanned tree. A file inside the tree is ignored with a warning, and trivy gets ASH's empty one. trivy-repo takes these two the same way.
 
 <!-- doctest: illustrative reason="runs a full scan, which needs every scanner installed" -->

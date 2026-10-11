@@ -60,7 +60,7 @@ Each option names the program actionlint pipes every `run:` script to, started f
 ash scan --config-overrides 'scanners.actionlint.options.shellcheck=/opt/shellcheck/bin/shellcheck'
 ```
 
-Whoever sets it, a program that resolves inside the scanned tree is refused. An operator's relative path is resolved against the source directory and must land outside the tree. A refused value is logged as a warning and actionlint runs with that integration off.
+Whoever sets it, a program that resolves inside the scanned tree is refused. An operator's relative path is resolved against the source directory and must land outside the tree, and a path inside the tree that a symbolic link there leads out of it is refused too, because the link, not the operator, chose the program. A refused value is logged as a warning and actionlint runs with that integration off.
 
 A relative `PATH` entry, such as `.` or `bin`, is never searched, for actionlint itself or for these programs. actionlint runs from the scanned directory, where such an entry could name a program the repository committed, so ASH starts actionlint, and passes it shellcheck and pyflakes, by absolute path only. A tool reachable only through a relative entry is `MISSING`.
 

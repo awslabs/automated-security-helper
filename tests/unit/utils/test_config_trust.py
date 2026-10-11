@@ -486,3 +486,31 @@ def test_operator_path_refuses_a_path_in_the_tree_that_links_out_of_it(tmp_path)
         outside_tree=False,
     )
     assert kept.path == outside.resolve()
+
+
+def test_operator_path_kept_outside_the_tree_refuses_a_link_out_of_it(tmp_path):
+    """A path written in the tree that resolves outside it passes the "inside the
+    tree" test on where it lands, but the tree's link chose where that is."""
+    from automated_security_helper.utils.config_trust import operator_path
+
+    repo, config = _operator_path_case(tmp_path, operator=True)
+    outside = tmp_path / "outside" / "tool"
+    outside.parent.mkdir()
+    outside.write_text("", encoding="utf-8")
+    (repo / "bin").mkdir()
+    _link(repo / "bin" / "tool", outside)
+    _link(repo / "linked", outside.parent)
+    for value in ("bin/tool", "linked/tool", str(repo / "bin" / "tool")):
+        chosen = operator_path(config, "scanners.x.options.y", value, repo)
+        assert chosen.path is None, value
+        from automated_security_helper.utils.config_trust import (
+            LEADS_OUT_OF_THE_TREE,
+        )
+
+        assert chosen.refusal == LEADS_OUT_OF_THE_TREE
+    # The same file, named directly or through the operator's own link, is used.
+    _link(tmp_path / "mine", outside)
+    for value in (str(outside), "../mine"):
+        assert operator_path(config, "scanners.x.options.y", value, repo).path == (
+            outside.resolve()
+        )

@@ -683,6 +683,32 @@ class TestTheScannedTreeCannotLoadRules:
 
         assert self._config_arg(scanner, repo / "out").endswith("/ash-empty.cfnlintrc")
 
+    @pytest.mark.skipif(os.name == "nt", reason="symlinks")
+    @pytest.mark.parametrize("shape", ["file", "directory"])
+    def test_the_operator_cannot_name_a_path_in_the_tree_that_links_out_of_it(
+        self, repo, tmp_path, caplog, shape
+    ):
+        """A path written in the tree goes where the tree's links send it, so the
+        tree would choose which .cfnlintrc, and which append_rules, cfn-lint
+        loads."""
+        # tmp_path, not ash_temp_path: the repo fixture is inside this checkout.
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / ".cfnlintrc").write_text("append_rules:\n  - rules\n")
+        if shape == "file":
+            (repo / "ci").mkdir()
+            (repo / "ci" / ".cfnlintrc").symlink_to(outside / ".cfnlintrc")
+        else:
+            (repo / "ci").symlink_to(outside, target_is_directory=True)
+        scanner = _scanner(repo, operator=True, config_file="ci/.cfnlintrc")
+
+        with caplog.at_level("WARNING"):
+            arg = self._config_arg(scanner, repo / "out")
+
+        assert arg.endswith("/ash-empty.cfnlintrc")
+        assert "Ignoring scanners.cfn-lint.options.config_file" in caplog.text
+        assert "symbolic link" in caplog.text
+
     def test_an_override_of_another_option_does_not_vouch_for_config_file(self, repo):
         rc = self._plant(repo)
         scanner = _scanner(

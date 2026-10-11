@@ -296,6 +296,34 @@ def test_the_operator_can_name_a_program_outside_the_tree(repo, tmp_path):
     assert marker.exists(), "the operator's shellcheck never ran"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell and symlinks")
+def test_an_operator_path_in_the_tree_that_links_out_never_runs(repo, tmp_path):
+    """The operator names tools/shellcheck in the tree; the tree's link there
+    decides which program that is. Before, actionlint ran the program the link
+    pointed at on every run: script; now shellcheck stays off. The operator test
+    above is the control: the same program runs when named outside the tree."""
+    _require_actionlint()
+    marker = tmp_path / "linked-ran"
+    program = _marker_program(tmp_path / "elsewhere" / "program", marker)
+    (repo / "tools").mkdir()
+    (repo / "tools" / "shellcheck").symlink_to(program)
+    output = tmp_path / "out"
+
+    result = _scan(
+        repo,
+        output,
+        "--config-overrides",
+        "scanners.actionlint.options.shellcheck=tools/shellcheck",
+    )
+
+    assert not marker.exists(), "actionlint ran the program the tree's link chose"
+    log = (output / "ash.log").read_text(encoding="utf-8", errors="replace")
+    assert "Ignoring scanners.actionlint.options.shellcheck" in log, (
+        result.stdout[-3000:] + result.stderr[-3000:]
+    )
+    assert program.as_posix() not in _actionlint_sarif(output)
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
 def test_a_local_reference_out_of_the_tree_is_never_read(repo, tmp_path):
     """actionlint reads the action a ``uses: ./...`` names and lists its inputs in the

@@ -58,7 +58,9 @@ Decisions, and why
    (``utils/config_trust.py``), may name another program or a path, absolute or
    relative to the source directory, checked by ``config_trust.operator_path``.
    Whoever sets it, a program that resolves inside the scanned tree is
-   refused. A refused value is logged and the integration stays off.
+   refused, and so is a path in the tree that a symbolic link there leads out of
+   it, since the link would choose the program. A refused value is logged and the
+   integration stays off.
 
    Names are looked up only in PATH's absolute entries and ASH's bin directory, and
    actionlint is handed the absolute path ASH checked; actionlint itself is started

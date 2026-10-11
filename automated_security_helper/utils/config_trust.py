@@ -310,11 +310,14 @@ def operator_path(
     file is refused inside the tree even when the operator named it. Without it,
     the operator may name a file of their own in the tree (a findings config, a
     baseline, a rules directory), which is a choice about that tree's content
-    they are entitled to make. What a path there leads to is the tree's choice,
-    though, so one that resolves outside the tree through a symbolic link in it
-    is refused with ``LEADS_OUT_OF_THE_TREE``. A scanner that must not run
-    without the operator's file turns that refusal into its own failure instead
-    of ignoring the option.
+    they are entitled to make.
+
+    Either way, what a path written inside the tree leads to is the tree's choice,
+    so one that resolves outside the tree through a symbolic link in it is refused
+    with ``LEADS_OUT_OF_THE_TREE``: with ``outside_tree`` the link would otherwise
+    pass the check on where the path lands, and choose a program or config
+    outside the tree. A scanner that must not run without the operator's file
+    turns that refusal into its own failure instead of ignoring the option.
     """
     return _operator_candidate(
         config, value, source_dir, set_by_operator(config, key, value), outside_tree
@@ -363,6 +366,6 @@ def _operator_candidate(
     candidate = resolved_path(value, Path(source_dir))
     if outside_tree and in_scanned_tree(candidate, root):
         return OperatorPath(None, INSIDE_THE_TREE)
-    if not outside_tree and leaves_the_tree_through_a_link(value, source_dir, root):
+    if leaves_the_tree_through_a_link(value, source_dir, root):
         return OperatorPath(None, LEADS_OUT_OF_THE_TREE)
     return OperatorPath(candidate)

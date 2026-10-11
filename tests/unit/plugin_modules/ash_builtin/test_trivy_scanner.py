@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 from pathlib import Path
 
@@ -424,6 +425,47 @@ def test_an_operator_override_names_a_trivy_config_outside_the_tree(tmp_path):
     argv = _argv(scanner, scanner.context.source_dir)
 
     assert f"--config={chosen.resolve().as_posix()}" in argv
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks")
+@pytest.mark.parametrize(
+    "option, flag, ash_name",
+    [
+        ("config_file", "--config", "trivy-config.yaml"),
+        ("ignore_file", "--ignorefile", None),
+        ("secret_config_file", "--secret-config", None),
+    ],
+)
+@pytest.mark.parametrize("shape", ["file", "directory"])
+def test_the_operator_cannot_name_a_path_in_the_tree_that_links_out_of_it(
+    tmp_path, caplog, monkeypatch, option, flag, ash_name, shape
+):
+    """A path written in the tree goes where the tree's links send it, so the tree
+    would choose which file trivy reads: a trivy.yaml that loads modules, or an
+    ignore file that drops findings. trivy gets ASH's own file instead."""
+    for env in ("TRIVY_IGNOREFILE", "TRIVY_SECRET_CONFIG"):
+        monkeypatch.delenv(env, raising=False)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "trivy.yaml").write_text(_MODULE_CONFIG, encoding="utf-8")
+    source = _scanner(tmp_path).context.source_dir
+    if shape == "file":
+        (source / "ci").mkdir()
+        (source / "ci" / "trivy.yaml").symlink_to(outside / "trivy.yaml")
+    else:
+        (source / "ci").symlink_to(outside, target_is_directory=True)
+    scanner = _scanner(tmp_path, operator=True, **{option: "ci/trivy.yaml"})
+
+    with caplog.at_level("WARNING"):
+        argv = _argv(scanner, scanner.context.source_dir)
+
+    assert (outside / "trivy.yaml").resolve().as_posix() not in " ".join(argv)
+    (value,) = [a[len(flag) + 1 :] for a in argv if a.startswith(f"{flag}=")]
+    assert Path(value).is_relative_to(scanner.results_dir.resolve())
+    if ash_name is not None:
+        assert value.endswith(f"/{ash_name}")
+    assert f"Ignoring scanners.trivy.options.{option}" in caplog.text
+    assert "symbolic link" in caplog.text
 
 
 @pytest.mark.parametrize("option", ["config_file", "ignore_file", "secret_config_file"])
@@ -1356,6 +1398,37 @@ def test_trivy_repo_uses_an_operator_config_and_modules_outside_the_tree(
 
     assert _flag(argv, "--config") == (operator / "trivy.yaml").resolve()
     assert _flag(argv, "--module-dir") == (operator / "modules").resolve()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks")
+def test_trivy_repo_refuses_operator_paths_in_the_tree_that_link_out_of_it(
+    tmp_path, monkeypatch, caplog
+):
+    """trivy-repo's config and modules directory, written in the tree, through
+    links there to a config and a modules directory outside it."""
+    outside = tmp_path / "outside"
+    (outside / "modules").mkdir(parents=True)
+    (outside / "trivy.yaml").write_text(_PLANTED_TRIVY_YAML, encoding="utf-8")
+    source = Path(_repo_scanner(tmp_path).context.source_dir)
+    (source / "ci").mkdir()
+    (source / "ci" / "trivy.yaml").symlink_to(outside / "trivy.yaml")
+    (source / "mods").symlink_to(outside / "modules", target_is_directory=True)
+
+    with caplog.at_level("WARNING"):
+        _, _, argv = _repo_scan_argv(
+            tmp_path,
+            monkeypatch,
+            operator=True,
+            config_file="ci/trivy.yaml",
+            module_dir="mods",
+        )
+
+    assert _flag(argv, "--config").name == "trivy-config.yaml"
+    assert _flag(argv, "--module-dir").name == "trivy-modules"
+    assert outside.resolve().as_posix() not in " ".join(argv)
+    for option in ("config_file", "module_dir"):
+        assert f"Ignoring scanners.trivy-repo.options.{option}" in caplog.text
+    assert "symbolic link" in caplog.text
 
 
 def test_trivy_repo_honors_an_override_for_its_config(tmp_path, monkeypatch):
