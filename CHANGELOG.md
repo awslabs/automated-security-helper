@@ -1122,7 +1122,10 @@
   `--offline`). Offline, every process ASH starts now gets the variables that turn
   those checks off, and the syft and grype settings that look things up over the
   network; trivy-repo also gets `--skip-version-check` and `--disable-telemetry`
-  whatever `disable_telemetry` says, and npm `--no-update-notifier`. See
+  whatever `disable_telemetry` says, and npm `--no-update-notifier`. On a Go module,
+  offline syft no longer runs the Go toolchain on PATH (`golang.use-packages-lib`
+  was on by default), and the toolchain grype runs gets `GOPROXY=off` and
+  `GOTOOLCHAIN=local`, so neither can download modules or a toolchain. See
   [What offline mode turns off](docs/content/docs/advanced-usage.md#what-offline-mode-turns-off).
 
 - **detect-secrets finds its baseline in the source directory.** A relative

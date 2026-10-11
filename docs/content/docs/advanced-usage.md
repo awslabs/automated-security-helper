@@ -171,16 +171,19 @@ otherwise undo the flag.
 Besides the database and rule downloads, offline mode turns off what the scanners do
 over the network on their own:
 
-- Every process ASH starts, the version probes of its dependency check included, gets
-  environment variables that turn off each tool's update, version and telemetry
-  checks: semgrep's version check and metrics (`SEMGREP_ENABLE_VERSION_CHECK=0`,
-  `SEMGREP_SEND_METRICS=off`), checkov's PyPI update check
-  (`CKV_SKIP_PACKAGE_UPDATE_CHECK=true`), npm's update notifier
+- Every scanner tool process ASH starts, the version probes of its dependency check
+  included, gets environment variables that turn off each tool's update, version and
+  telemetry checks: semgrep's version check and metrics
+  (`SEMGREP_ENABLE_VERSION_CHECK=0`, `SEMGREP_SEND_METRICS=off`), checkov's PyPI update
+  check (`CKV_SKIP_PACKAGE_UPDATE_CHECK=true`), npm's update notifier
   (`npm_config_update_notifier=false`), trivy's version check and telemetry
   (`TRIVY_SKIP_VERSION_CHECK`, `TRIVY_DISABLE_TELEMETRY`), and the update checks of
   syft and grype. They also turn off the lookups a tool's own config file can enable:
   syft's remote license searches, maven lookups and vcpkg git clones, and grype's
-  external sources. The full list is in `automated_security_helper/utils/offline_tool_env.py`.
+  external sources. On a Go module syft does not run the Go toolchain
+  (`SYFT_GOLANG_USE_PACKAGES_LIB=false`), and the toolchain grype runs gets
+  `GOPROXY=off` and `GOTOOLCHAIN=local`, so it downloads no module and no toolchain.
+  The full list is in `automated_security_helper/utils/offline_tool_env.py`.
 - trivy-repo also gets `--skip-version-check` and `--disable-telemetry`, whatever
   `disable_telemetry` says, and `--config` naming `TRIVY_CONFIG` when that is a file
   outside the scanned tree, or an empty config otherwise. A `trivy.yaml` in the scanned

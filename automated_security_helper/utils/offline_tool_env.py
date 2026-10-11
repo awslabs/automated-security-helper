@@ -23,12 +23,21 @@ lookups over the network: syft's remote license searches, maven lookups and vcpk
 git clones, and grype's external sources. Setting them false in the environment
 overrides the file (measured for syft's Go license search).
 
-Every process ASH starts in offline mode gets the whole set, whichever tool it is:
-a variable means nothing to the other tools, and setting all of them means a tool
-started through ``uv tool run``, a wrapper script or a version probe gets its own
-too. ``subprocess_utils`` applies it to every spawn and ``PluginBase._run_subprocess``
-to every scanner command, including one whose own ``offline`` option is set while
-ASH runs online.
+On a Go module, syft (``golang.use-packages-lib``, on by default) and grype run the Go
+toolchain found on PATH (``go list``; measured with a fake ``go``). A real toolchain
+resolves missing modules from GOPROXY and, for a ``go`` or ``toolchain`` line newer
+than itself, downloads a toolchain. syft's setting is turned off, and for grype, which
+has none, ``GOPROXY=off`` and ``GOTOOLCHAIN=local`` keep that toolchain from
+downloading anything.
+
+In offline mode every process started through ``subprocess_utils`` gets the whole
+set, whichever tool it is: a variable means nothing to the other tools, and setting
+all of them means a tool started through ``uv tool run``, a wrapper script or a
+version probe gets its own too. ``PluginBase._run_subprocess`` also applies it to
+every scanner command, including one whose own ``offline`` option is set while ASH
+runs online. A few spawns call ``subprocess.run`` directly and do not get it: git
+for the scan set, nbconvert, the sandbox backends' own probes and the nix wrapper.
+None of them starts a tool with a check of this kind.
 """
 
 from typing import Dict, Mapping, Optional
@@ -52,10 +61,14 @@ OFFLINE_TOOL_ENVIRONMENT: Mapping[str, str] = {
     "SYFT_JAVASCRIPT_SEARCH_REMOTE_LICENSES": "false",
     "SYFT_PYTHON_SEARCH_REMOTE_LICENSES": "false",
     "SYFT_CPP_VCPKG_ALLOW_GIT_CLONE": "false",
+    "SYFT_GOLANG_USE_PACKAGES_LIB": "false",
     # grype: update checks, and the external sources a .grype.yaml can turn on.
     "GRYPE_CHECK_FOR_APP_UPDATE": "false",
     "GRYPE_DB_AUTO_UPDATE": "false",
     "GRYPE_EXTERNAL_SOURCES_ENABLE": "false",
+    # The Go toolchain syft or grype may run: no module proxy, no toolchain download.
+    "GOPROXY": "off",
+    "GOTOOLCHAIN": "local",
 }
 
 
