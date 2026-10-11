@@ -88,7 +88,7 @@ class NpmAuditScannerConfigOptions(ScannerOptionsBase):
     offline: Annotated[
         bool,
         Field(
-            description="Run in offline mode, using locally cached data. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
+            description="Run offline. npm, pnpm and yarn audit only against the package registry's advisory service, so offline npm-audit audits nothing: each lockfile is listed as not scanned, and with a lockfile the scanner is reported MISSING. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
             default=False,
         ),
     ]

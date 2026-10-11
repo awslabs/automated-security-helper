@@ -916,6 +916,19 @@ asks for it, and never in offline mode:
   settings, and logs a warning that names the source.
 - Under `--offline` (or `ASH_OFFLINE`) nothing turns it on.
 
+To verify, name the filter with its `min_level` in your own config. detect-secrets reads
+`min_level` for this filter, and without it the scan fails:
+
+```yaml
+scanners:
+  detect-secrets:
+    options:
+      scan_settings:
+        filters_used:
+          - path: detect_secrets.filters.common.is_ignored_due_to_verification_policies
+            min_level: 2
+```
+
 The same sources decide which plugin and filter files detect-secrets may import. A
 `plugins_used` or `filters_used` entry named by `file://` path is a Python file the
 detect-secrets worker loads, so only the operator's own configuration, or a baseline

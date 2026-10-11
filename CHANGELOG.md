@@ -299,7 +299,9 @@
   snyk-code is offline, so an offline scan of a Node.js project now fails under the
   default completeness gate (`fail_on_incomplete_scanners`) with exit code 1. Pass
   `--exclude-scanners npm-audit` to scan offline without it. A project with no
-  lockfile has nothing to audit and is SKIPPED.
+  lockfile has nothing to audit and is SKIPPED. The same applies when
+  `scanners.npm-audit.options.offline` is true with ASH online: npm-audit no longer
+  runs `npm audit --offline` against a local cache.
 
 - **Offline, trivy-repo does not run trivy's Terraform checks.** trivy downloads the
   source of every `module` block in the scanned Terraform, from the registry, with the
@@ -337,8 +339,10 @@
   are kept. An operator's `--config-overrides` naming a baseline outside the tree
   verifies beside a repository's own config, and an operator's verification filter is
   kept when the tree's `.secrets.baseline` supplies the plugins and other filters. To
-  keep verifying, name the filter in
-  `scanners.detect-secrets.options.scan_settings.filters_used` of your own config. See
+  keep verifying, name the filter with its `min_level` in
+  `scanners.detect-secrets.options.scan_settings.filters_used` of your own config:
+  `{path: detect_secrets.filters.common.is_ignored_due_to_verification_policies,
+  min_level: 2}`. detect-secrets reads `min_level` and the scan fails without it. See
   [Secret verification](docs/content/docs/configuration-guide.md#secret-verification).
 
 - **Container mode builds ASH's own Dockerfile, never one in the working directory.**
