@@ -35,12 +35,16 @@ set, whichever tool it is: a variable means nothing to the other tools, and sett
 all of them means a tool started through ``uv tool run``, a wrapper script or a
 version probe gets its own too. ``PluginBase._run_subprocess`` also applies it to
 every scanner command, including one whose own ``offline`` option is set while ASH
-runs online. A few spawns call ``subprocess.run`` directly and do not get it: git
+runs online, and ``offline_tool_scope`` applies it to that scanner's probes
+(``sandbox.scope.plugin_probe_scope`` wraps its construction and its dependency
+check). A few spawns call ``subprocess.run`` directly and do not get it: git
 for the scan set, nbconvert, the sandbox backends' own probes and the nix wrapper.
 None of them starts a tool with a check of this kind.
 """
 
-from typing import Dict, Mapping, Optional
+import contextvars
+from contextlib import contextmanager
+from typing import Dict, Iterator, Mapping, Optional
 
 #: Variable -> value that turns the check or lookup off.
 OFFLINE_TOOL_ENVIRONMENT: Mapping[str, str] = {
@@ -75,17 +79,42 @@ OFFLINE_TOOL_ENVIRONMENT: Mapping[str, str] = {
 }
 
 
+#: True inside :func:`offline_tool_scope` for a scanner that runs offline.
+_SCOPE_OFFLINE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "ash_offline_tool_scope", default=False
+)
+
+
+@contextmanager
+def offline_tool_scope(offline: bool) -> Iterator[None]:
+    """Give the spawns made in this context the offline variables when ``offline``.
+
+    For the probes a scanner runs before its scan (``<tool> --version``, ``uv tool
+    run <tool> --version``), which start through ``subprocess_utils`` and not
+    through the scanner's own ``_run_subprocess``: with ASH online and the scanner's
+    ``options.offline: true``, they would otherwise run with the tools' update
+    checks on. ``sandbox.scope.plugin_probe_scope`` enters it. Nested scopes keep an
+    outer offline scope.
+    """
+    token = _SCOPE_OFFLINE.set(bool(offline) or _SCOPE_OFFLINE.get())
+    try:
+        yield
+    finally:
+        _SCOPE_OFFLINE.reset(token)
+
+
 def offline_tool_environment(offline: Optional[bool] = None) -> Dict[str, str]:
     """The variables to add to a child's environment, or nothing when online.
 
     Args:
         offline: Whether the process runs offline. None reads ASH's offline mode
-            (``--offline`` or ``ASH_OFFLINE``) now.
+            (``--offline`` or ``ASH_OFFLINE``) now, and an enclosing
+            :func:`offline_tool_scope` for a scanner that runs offline.
     """
     if offline is None:
         from automated_security_helper.core.constants import is_offline_mode
 
-        offline = is_offline_mode()
+        offline = is_offline_mode() or _SCOPE_OFFLINE.get()
     return dict(OFFLINE_TOOL_ENVIRONMENT) if offline else {}
 
 

@@ -295,7 +295,55 @@ def plugin_probe_scope(plugin: Any, context: Any) -> Iterator[None]:
 
     A scanner that cannot be sandboxed gets a refusing scope, so its probes fail
     rather than run unsandboxed, and it is recorded MISSING later with the reason.
+
+    A scanner that runs offline while ASH does not (its own ``options.offline:
+    true``) gets the offline tool variables on these probes as well, sandbox or not,
+    as its scan command does: ``semgrep --version`` checks semgrep.dev and
+    ``checkov --version`` pypi.org without them.
     """
+    from automated_security_helper.utils.offline_tool_env import offline_tool_scope
+
+    with offline_tool_scope(_probe_offline(plugin, context)):
+        with _sandboxed_probe_scope(plugin, context):
+            yield
+
+
+def _probe_offline(plugin: Any, context: Any) -> bool:
+    """Whether the scanner a probe scope covers runs offline by its own option.
+
+    An instance answers for itself (``_scanner_offline``). A class, probed before it
+    is constructed, has its option read from the run's config, the way ScanPhase
+    builds it. False when neither says so; ASH's own offline mode is read where the
+    variables are added (``offline_tool_environment``).
+    """
+    if not isinstance(plugin, type):
+        check = getattr(plugin, "_scanner_offline", None)
+        return bool(check()) if callable(check) else False
+    config = getattr(context, "config", None)
+    get_plugin_config = getattr(config, "get_plugin_config", None)
+    if not callable(get_plugin_config):
+        return False
+    from automated_security_helper.base.plugin_config import plugin_config_key
+
+    plugin_config = get_plugin_config(
+        plugin_type="scanner", plugin_name=plugin_config_key(plugin)
+    )
+    options = (
+        plugin_config.get("options")
+        if isinstance(plugin_config, dict)
+        else getattr(plugin_config, "options", None)
+    )
+    offline = (
+        options.get("offline")
+        if isinstance(options, dict)
+        else getattr(options, "offline", False)
+    )
+    return offline is True
+
+
+@contextmanager
+def _sandboxed_probe_scope(plugin: Any, context: Any) -> Iterator[None]:
+    """The sandbox half of :func:`plugin_probe_scope`."""
     import shutil
     import tempfile
 

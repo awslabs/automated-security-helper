@@ -190,7 +190,9 @@ over the network on their own:
   external sources. On a Go module syft does not run the Go toolchain
   (`SYFT_GOLANG_USE_PACKAGES_LIB=false`), and the toolchain grype runs gets
   `GOPROXY=off` and `GOTOOLCHAIN=local`, so it downloads no module and no toolchain.
-  The full list is in `automated_security_helper/utils/offline_tool_env.py`.
+  The full list is in `automated_security_helper/utils/offline_tool_env.py`. A scanner
+  set offline by its own `options.offline: true` while ASH runs online gets them too,
+  on its scan and on the version probes of its dependency check.
 - trivy's version check and telemetry are off whatever `disable_telemetry` says, through
   `TRIVY_SKIP_VERSION_CHECK` and `TRIVY_DISABLE_TELEMETRY` rather than flags, which a
   trivy too old to know them would refuse.
