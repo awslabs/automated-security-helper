@@ -84,10 +84,12 @@ from automated_security_helper.utils.process_env import (
     restore_environ,
 )
 from automated_security_helper.utils.report_path_links import (
+    REMEDY,
     ReportPathLinkRefused,
     ReportPathRefused,
     linked_report_path,
     refuse_a_linked_reports_dir,
+    refuse_linked_report_paths,
 )
 from automated_security_helper.utils.inner_run_outcome import (
     as_seen_from_the_host,
@@ -2178,7 +2180,25 @@ def _run_local_mode(
             results = _filter_results_to_changed_files(
                 results, _changed_file_set, opts.source_dir
             )
-            sarif_path = opts.output_dir / "reports" / "ash.sarif"
+            # Written like any report: not through a link, which is refused (the
+            # report phase does not examine this name when no selected reporter
+            # writes it), and only as a file directly inside the reports directory.
+            from automated_security_helper.base.reporter_plugin import (
+                confined_report_path,
+            )
+
+            reports_dir = opts.output_dir / "reports"
+            refuse_linked_report_paths(reports_dir, ["ash.sarif"])
+            sarif_path = confined_report_path(reports_dir, "ash.sarif")
+            if sarif_path is None:
+                # Only when reports/ or the file became a link after the check above.
+                # Skipping the rewrite would leave the unfiltered report in place.
+                raise ReportPathRefused(
+                    f"{(reports_dir / 'ash.sarif').as_posix()} is not a file in "
+                    f"{reports_dir.as_posix()}, so the --changed-files-only rewrite "
+                    "cannot replace it",
+                    REMEDY,
+                )
             if sarif_path.exists() and results.sarif:
                 # Replaced atomically for the same reason as the aggregated file
                 # below: ash.sarif already exists, so a reader waiting on it would
@@ -2225,9 +2245,11 @@ def _run_local_mode(
         print(f"[bold red]ERROR (1) {e}[/bold red]")
         sys.exit(1)
     except ReportPathRefused as e:
-        # The report phase refused before any reporter wrote: a link is at the
-        # reports directory or at a report file, or a report file name is not a
-        # file in the reports directory. Not a fault, so no traceback. As the inner
+        # A report path was refused: by the report phase before any reporter wrote
+        # (a link at the reports directory or at a report file, or a report file
+        # name that is not a file in the reports directory), or by the
+        # --changed-files-only rewrite of reports/ash.sarif after the reporters
+        # wrote (a link there). Not a fault, so no traceback. As the inner
         # run of a container or nix scan, recorded in the results file the scan left
         # for the outer process; if that fails, the outer process finds no record of
         # this run's completion and exits 1 all the same.

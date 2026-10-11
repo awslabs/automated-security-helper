@@ -823,6 +823,93 @@ class TestRunLocalModeChangedFiles:
         assert len(returned.sarif.runs[0].results) == 2
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="creating symlinks needs privileges on Windows"
+)
+class TestChangedFilesSarifRewriteIsNotWrittenThroughALink:
+    """The rewrite of ``reports/ash.sarif`` refuses a link there, as reports do.
+
+    With no reporter selected that writes ``ash.sarif`` (``--output-formats yaml``),
+    the report phase does not examine that name, so the rewrite is where a link
+    there is met. Replacing it would remove the link without a word, and the exit
+    code check that refuses a link at that name would then find a regular file.
+    """
+
+    @pytest.mark.parametrize("target", ["outside", "inside"])
+    def test_a_link_at_the_sarif_report_refuses_the_run(
+        self, local_orchestrator, logger, monkeypatch, tmp_path, target
+    ):
+        from automated_security_helper.utils import get_scan_set
+
+        monkeypatch.setattr(
+            get_scan_set, "get_changed_files", lambda base_ref, cwd: ["changed.py"]
+        )
+        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: tmp_path)
+        output_dir = tmp_path / "out"
+        reports = output_dir / "reports"
+        reports.mkdir(parents=True)
+        pointed_at = (
+            tmp_path / "outside.sarif"
+            if target == "outside"
+            else reports / "kept.sarif"
+        )
+        pointed_at.write_text("unchanged", encoding="utf-8")
+        link = reports / "ash.sarif"
+        link.symlink_to(pointed_at)
+        local_orchestrator(
+            results=AshAggregatedResults(
+                sarif=_sarif_with_uris("changed.py", "untouched.py")
+            )
+        )
+        opts = _opts(tmp_path, output_dir, changed_files_only=True)
+
+        with pytest.raises(SystemExit) as refused:
+            _run_local_mode(opts, logger)
+
+        assert refused.value.code == 1
+        assert f"{link.as_posix()} is a symlink" in getattr(refused.value, "reason", "")
+        assert link.is_symlink()
+        assert pointed_at.read_text(encoding="utf-8") == "unchanged"
+
+
+class TestChangedFilesSarifRewriteIsNotSkippedSilently:
+    def test_a_sarif_report_the_rewrite_may_not_write_refuses_the_run(
+        self, local_orchestrator, logger, monkeypatch, tmp_path
+    ):
+        """Skipping the rewrite would leave the unfiltered ash.sarif as the report.
+
+        ``confined_report_path`` refuses the name only when ``reports/`` or the file
+        is a link, which is refused just before; the check that remains is for the
+        state changing between the two.
+        """
+        from automated_security_helper.base import reporter_plugin
+        from automated_security_helper.utils import get_scan_set
+
+        monkeypatch.setattr(
+            get_scan_set, "get_changed_files", lambda base_ref, cwd: ["changed.py"]
+        )
+        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: tmp_path)
+        monkeypatch.setattr(
+            reporter_plugin, "confined_report_path", lambda report_dir, filename: None
+        )
+        output_dir = tmp_path / "out"
+        (output_dir / "reports").mkdir(parents=True)
+        sarif = output_dir / "reports" / "ash.sarif"
+        sarif.write_text("unfiltered", encoding="utf-8")
+        local_orchestrator(
+            results=AshAggregatedResults(
+                sarif=_sarif_with_uris("changed.py", "untouched.py")
+            )
+        )
+        opts = _opts(tmp_path, output_dir, changed_files_only=True)
+
+        with pytest.raises(SystemExit) as refused:
+            _run_local_mode(opts, logger)
+
+        assert refused.value.code == 1
+        assert sarif.as_posix() in getattr(refused.value, "reason", "")
+
+
 class TestRunLocalModeResultPersistence:
     def test_the_aggregated_results_are_written_to_the_output_dir(
         self, local_orchestrator, logger, tmp_path

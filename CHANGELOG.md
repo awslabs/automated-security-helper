@@ -782,7 +782,8 @@
   than reading the results back, and when the inner run refused a report file name,
   which leaves nothing in `reports/`; see the entry on container and nix read-back.
   The exit code is never counted from a
-  `reports/ash.sarif` that is a link. A fresh scan removes `reports/` and anything in
+  `reports/ash.sarif` that is a link, and the `--changed-files-only` rewrite of
+  `reports/ash.sarif` refuses a link there the same way. A fresh scan removes `reports/` and anything in
   it while setting up its directories, so a link left there by an earlier run is
   cleared rather than refused, as before. A regular file at a report path is still
   replaced. A reporter without an `extension` now writes `ash.txt`, the name the
