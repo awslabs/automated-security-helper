@@ -148,6 +148,7 @@ ash_config:
         - /fail_on_incomplete_scanners
         - /content_db_staleness
         - /content_db_staleness_overrides
+        - /honor_ignore_files
         - /sandbox
         - /sandbox/**
         - /ash_plugin_modules
@@ -185,6 +186,7 @@ ash_config:
       reason: Stale suppression for a check that no longer exists
       rule_id: CKV_AWS_999
       symbol: null
+  honor_ignore_files: true
   mcp-resource-management:
     enable_health_checks: true
     enable_resource_logging: true
@@ -612,6 +614,7 @@ metadata:
   execution_discrepancy_report: {}
   expected_scanners: []
   generated_at: '2026-01-15T12:00:00+00:00'
+  ignore_file_exclusions: null
   plugin_load_errors: {}
   project_name: ASH
   report_id: ASH-20260115

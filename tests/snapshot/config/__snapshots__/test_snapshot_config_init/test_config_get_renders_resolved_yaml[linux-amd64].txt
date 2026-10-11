@@ -16,6 +16,7 @@ global_settings:
       - /fail_on_incomplete_scanners
       - /content_db_staleness
       - /content_db_staleness_overrides
+      - /honor_ignore_files
       - /sandbox
       - /sandbox/**
       - /ash_plugin_modules
@@ -32,6 +33,7 @@ global_settings:
       denied_value_patterns: {}
 fail_on_findings: false
 fail_on_incomplete_scanners: true
+honor_ignore_files: true
 sandbox:
   mode: 'off'
   network_scanners: null

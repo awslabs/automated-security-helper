@@ -916,6 +916,9 @@ class TestConvert:
         assert seen == {
             "source": converter.context.source_dir,
             "output": converter.context.output_dir,
+            # The operator's switch for the repository's ignore files, from the
+            # context's config; the default config honors them.
+            "honor_ignore_files": True,
         }
 
 

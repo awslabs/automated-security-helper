@@ -676,6 +676,9 @@ class RuntimeOverridesConfig(BaseModel):
         # out-of-date vulnerability database pass.
         "/content_db_staleness",
         "/content_db_staleness_overrides",
+        # Turning the scanned repository's ignore files off or on changes which
+        # files are scanned; it is the operator's choice.
+        "/honor_ignore_files",
         # The scanner sandbox: a client must not be able to switch it off, hand a
         # scanner a network, or widen what it can read.
         "/sandbox",
@@ -1169,6 +1172,25 @@ class AshConfig(BaseModel):
                 "code; excluding the scanner whose tool is unavailable is usually "
                 "better, because an excluded scanner is recorded SKIPPED and the "
                 "report then says what was not measured."
+            )
+        ),
+    ] = True
+
+    honor_ignore_files: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether the .gitignore and .ignore files in the scanned tree decide "
+                "which files are left out of ASH's scan set, the file list "
+                "detect-secrets, cfn-nag, cdk-nag, npm-audit and the converters "
+                "read. True (the default) leaves out every file they match. False "
+                "scans those files too; ASH's own exclusions (.git, CDK assets) "
+                "still apply. An operator setting: a config file inside the scanned "
+                "tree, or one an MCP client supplied, cannot change it, and its "
+                "value there is ignored with a warning. Set it in a config file "
+                "outside the tree, with --config-overrides, or with "
+                "--no-honor-ignore-files / --honor-ignore-files. Every scan records "
+                "the outcome in metadata.ignore_file_exclusions."
             )
         ),
     ] = True

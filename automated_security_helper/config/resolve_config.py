@@ -430,7 +430,9 @@ def resolve_config(
             trusted base sets. Its ``ash_plugin_modules`` are limited the same way
             as an in-tree file's (``config/plugin_module_trust.py``), and so are
             detect-secrets' secret verification and the plugin and filter files it
-            imports (``config/secret_verification_trust.py``).
+            imports (``config/secret_verification_trust.py``), and its
+            ``honor_ignore_files`` is replaced by the trusted value
+            (:func:`confine_honor_ignore_files`).
         client_overrides: ``config_overrides`` came from an MCP client (a
             workspace tool's), not the operator, so a tool path they name is not
             the operator's (``path_trust.OperatorPaths``).
@@ -547,7 +549,56 @@ def resolve_config(
         config, trusted, config_overrides, Path(scanned_root), in_tree
     )
     confine_detect_secrets_settings(config, trusted, config_overrides, in_tree, reason)
+    confine_honor_ignore_files(config, trusted, config_overrides, in_tree, reason)
     return config
+
+
+def confine_honor_ignore_files(
+    config: AshConfig,
+    trusted: AshConfig,
+    config_overrides: Optional[List[str]],
+    in_tree: List[Path],
+    reason: str = REPOSITORY_WRITTEN,
+) -> None:
+    """Take ``honor_ignore_files`` from the trusted base, never from an untrusted file.
+
+    The setting decides whether the scanned repository's own ``.gitignore`` and
+    ``.ignore`` files shrink the scan set, so the repository must not choose it in
+    either direction. Its value comes from the trusted base (the defaults, or the
+    operator's config outside the tree) with the ``--config-overrides`` entries for
+    it replayed on top, the way the sandbox grants and ``ash_plugin_modules`` are
+    decided. A different value in the in-tree file is replaced, with one warning
+    naming the key and the file.
+
+    Args:
+        config: The resolved AshConfig, changed in place.
+        trusted: The trusted base ``resolve_config`` built.
+        config_overrides: ``--config-overrides``; only the entries for this key are
+            replayed.
+        in_tree: The repository-written config files (or the MCP client's
+            upload), named in the warning.
+        reason: Why those files may not choose it, for the warning.
+    """
+    key_overrides = [
+        override
+        for override in config_overrides or []
+        if override.partition("=")[0].removesuffix("+").strip().replace("-", "_")
+        == "honor_ignore_files"
+    ]
+    if key_overrides:
+        trusted = apply_config_overrides(trusted, key_overrides)
+    if config.honor_ignore_files == trusted.honor_ignore_files:
+        return
+    config.honor_ignore_files = trusted.honor_ignore_files
+    files = ", ".join(describe_config_path(path) for path in in_tree)
+    ASH_LOGGER.warning(
+        f"Ignoring honor_ignore_files from {files}: {reason}, and whether the "
+        "scanned repository's own .gitignore and .ignore files are honored is the "
+        "operator's choice. Using honor_ignore_files: "
+        f"{str(trusted.honor_ignore_files).lower()}. Set it with "
+        "--no-honor-ignore-files, --config-overrides or a config file outside every "
+        "git checkout."
+    )
 
 
 def _operator_paths(

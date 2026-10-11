@@ -26,7 +26,10 @@ from automated_security_helper.base.options import (
     tool_version_constraint,
 )
 from automated_security_helper.plugins.decorators import ash_converter_plugin
-from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_scan_set import (
+    honors_ignore_files,
+    scan_set,
+)
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.normalizers import get_normalized_filename
@@ -391,6 +394,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         ipynb_files = scan_set(
             source=self.context.source_dir,
             output=self.context.output_dir,
+            honor_ignore_files=honors_ignore_files(self.context.config),
         )
         return [f.strip() for f in ipynb_files if f.strip().endswith(".ipynb")]
 

@@ -268,6 +268,7 @@ from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
     WorkspaceDefinitionError,
 )
+from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
     SkippedProjectReason,
@@ -866,8 +867,19 @@ def _scan_one_project(
         )
         or bool(stale_content_databases(results, enforced_only=True)),
         ceiling_unreachable_findings=unreachable,
+        ignore_file_exclusions=_ignore_file_exclusions_of(results),
     )
     return _ProjectRun(outcome=outcome, run=run)
+
+
+def _ignore_file_exclusions_of(results: Any) -> Optional[IgnoreFileExclusions]:
+    """The project's ``metadata.ignore_file_exclusions``, or None when it has none."""
+    record = getattr(getattr(results, "metadata", None), "ignore_file_exclusions", None)
+    if isinstance(record, IgnoreFileExclusions):
+        return record
+    if isinstance(record, dict):
+        return IgnoreFileExclusions.model_validate(record)
+    return None
 
 
 def _workspace_root(project: ProjectPlan) -> Path:

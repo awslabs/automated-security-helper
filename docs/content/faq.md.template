@@ -84,7 +84,10 @@ global_settings:
 ```
 
 ### How do I exclude files from scanning?
-ASH respects `.gitignore` files. You can also configure ignore paths in your `.ash/.ash.yaml` configuration file.
+ASH leaves out of its scan set every file a `.gitignore` or `.ignore` file in the scanned tree matches. You can also configure ignore paths in your `.ash/.ash.yaml` configuration file. The summaries and `ash_aggregated_results.json` (`metadata.ignore_file_exclusions`) record how many files the ignore files excluded.
+
+### How do I scan files that a `.gitignore` excludes?
+Pass `--no-honor-ignore-files`, or set `honor_ignore_files: false` in a config file outside the scanned tree. A config file inside the repository being scanned cannot change this setting. See [Ignore files and the scan set](docs/configuration-guide.md#ignore-files-and-the-scan-set).
 
 ### How do I run specific scanners?
 ```bash

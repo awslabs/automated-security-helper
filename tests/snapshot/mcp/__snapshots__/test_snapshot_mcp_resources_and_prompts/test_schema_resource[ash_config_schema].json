@@ -144,6 +144,7 @@
                   "/fail_on_incomplete_scanners",
                   "/content_db_staleness",
                   "/content_db_staleness_overrides",
+                  "/honor_ignore_files",
                   "/sandbox",
                   "/sandbox/**",
                   "/ash_plugin_modules",
@@ -166,6 +167,12 @@
             "suppressions": []
           },
           "description": "Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
+        },
+        "honor_ignore_files": {
+          "default": true,
+          "description": "Whether the .gitignore and .ignore files in the scanned tree decide which files are left out of ASH's scan set, the file list detect-secrets, cfn-nag, cdk-nag, npm-audit and the converters read. True (the default) leaves out every file they match. False scans those files too; ASH's own exclusions (.git, CDK assets) still apply. An operator setting: a config file inside the scanned tree, or one an MCP client supplied, cannot change it, and its value there is ignored with a warning. Set it in a config file outside the tree, with --config-overrides, or with --no-honor-ignore-files / --honor-ignore-files. Every scan records the outcome in metadata.ignore_file_exclusions.",
+          "title": "Honor Ignore Files",
+          "type": "boolean"
         },
         "mcp-resource-management": {
           "$ref": "#/$defs/MCPResourceManagementConfig",
@@ -539,6 +546,7 @@
                 "/fail_on_incomplete_scanners",
                 "/content_db_staleness",
                 "/content_db_staleness_overrides",
+                "/honor_ignore_files",
                 "/sandbox",
                 "/sandbox/**",
                 "/ash_plugin_modules",
@@ -598,6 +606,7 @@
               "/fail_on_incomplete_scanners",
               "/content_db_staleness",
               "/content_db_staleness_overrides",
+              "/honor_ignore_files",
               "/sandbox",
               "/sandbox/**",
               "/ash_plugin_modules",
@@ -3146,6 +3155,7 @@
             "/fail_on_incomplete_scanners",
             "/content_db_staleness",
             "/content_db_staleness_overrides",
+            "/honor_ignore_files",
             "/sandbox",
             "/sandbox/**",
             "/ash_plugin_modules",

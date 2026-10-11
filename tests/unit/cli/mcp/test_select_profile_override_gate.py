@@ -281,6 +281,10 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
         {"op": "replace", "path": "/content_db_staleness", "value": "warn"},
         {"content_db_staleness": "warn"},
     ),
+    "/honor_ignore_files": (
+        {"op": "replace", "path": "/honor_ignore_files", "value": False},
+        {"honor_ignore_files": False},
+    ),
     "/content_db_staleness_overrides": (
         {
             "op": "add",

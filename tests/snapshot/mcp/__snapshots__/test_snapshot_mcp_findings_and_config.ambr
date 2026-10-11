@@ -548,6 +548,7 @@
               '/fail_on_incomplete_scanners',
               '/content_db_staleness',
               '/content_db_staleness_overrides',
+              '/honor_ignore_files',
               '/sandbox',
               '/sandbox/**',
               '/ash_plugin_modules',
@@ -571,6 +572,7 @@
         'suppressions': list([
         ]),
       }),
+      'honor_ignore_files': True,
       'mcp_resource_management': dict({
         'enable_health_checks': True,
         'enable_resource_logging': True,
@@ -946,6 +948,7 @@
               '/fail_on_incomplete_scanners',
               '/content_db_staleness',
               '/content_db_staleness_overrides',
+              '/honor_ignore_files',
               '/sandbox',
               '/sandbox/**',
               '/ash_plugin_modules',
@@ -969,6 +972,7 @@
         'suppressions': list([
         ]),
       }),
+      'honor_ignore_files': True,
       'mcp_resource_management': dict({
         'enable_health_checks': True,
         'enable_resource_logging': True,

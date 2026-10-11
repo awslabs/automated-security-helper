@@ -30,6 +30,7 @@
   "allow_stale_content_db": null,
   "simple": false,
   "ignore_suppressions": false,
+  "honor_ignore_files": null,
   "min_severity": "low",
   "compact_report": false,
   "changed_files_only": false,

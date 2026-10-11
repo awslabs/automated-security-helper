@@ -30,9 +30,13 @@ from automated_security_helper.core.exceptions import (
     ASHValidationError,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.utils.get_ash_version import get_ash_version
-from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_scan_set import (
+    honors_ignore_files,
+    scan_set,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.output_dir_links import (
     OUTPUT_RESULT_FILES,
@@ -621,11 +625,23 @@ class ASHScanOrchestrator(BaseModel):
             # Only identify files to scan if we're not using existing results
             elif "convert" in phases or "scan" in phases:
                 ASH_LOGGER.info("Identifying non-ignored files to include in scans")
+                exclusions: Dict[str, Any] = {}
                 self.source_scan_set = scan_set(
                     source=str(self.source_dir),
                     output=str(self.output_dir),
                     debug=self.debug,
+                    honor_ignore_files=honors_ignore_files(self.config),
+                    exclusions=exclusions,
                 )
+                # Recorded on the results the phases build on, so the aggregated
+                # JSON and every summary say whether the repository's ignore files
+                # were honored and how many files they removed. Empty only for a
+                # scan set reused from the output directory, which initialize()
+                # removes before every scan.
+                if exclusions and self.execution_engine is not None:
+                    self.execution_engine._asharp_model.metadata.ignore_file_exclusions = IgnoreFileExclusions.model_validate(
+                        exclusions
+                    )
                 ASH_LOGGER.info(
                     f"Found {len(self.source_scan_set)} files within the provided source directory to scan. Please see the 'ash-scan-set-files-list.txt' in the output folder for the full list of files identified to scan within the source directory identified."
                 )

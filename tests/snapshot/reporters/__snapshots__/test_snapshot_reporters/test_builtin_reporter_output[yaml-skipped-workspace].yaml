@@ -27,6 +27,7 @@ metadata:
   execution_discrepancy_report: {}
   expected_scanners: []
   generated_at: '2026-01-15T12:00:42+00:00'
+  ignore_file_exclusions: null
   plugin_load_errors: {}
   project_name: workspace
   report_id: ASH-WORKSPACE-snapshot-with-skipped
@@ -701,6 +702,7 @@ workspace:
     error: null
     exceeds_threshold: true
     finding_count: 1
+    ignore_file_exclusions: null
     incomplete_converters: {}
     incomplete_scanners:
     - npm-audit
@@ -726,6 +728,7 @@ workspace:
     error: null
     exceeds_threshold: true
     finding_count: 2
+    ignore_file_exclusions: null
     incomplete_converters: {}
     incomplete_scanners: []
     invalid_config: false
@@ -750,6 +753,7 @@ workspace:
     error: null
     exceeds_threshold: false
     finding_count: 0
+    ignore_file_exclusions: null
     incomplete_converters: {}
     incomplete_scanners: []
     invalid_config: false

@@ -19,6 +19,7 @@ from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import ExportFormat, ScannerStatus
 from automated_security_helper.core.sharding import ShardAssignment
+from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.models.workspace import WorkspaceResults
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
@@ -556,6 +557,23 @@ class ReportMetadata(BaseModel):
             ),
         ),
     ]
+    # Declared for the reasons the `shard` field above states. The scan set decides
+    # what detect-secrets, cfn-nag, cdk-nag, npm-audit and the converters read, and
+    # nothing in their own results says a file was left out of it.
+    ignore_file_exclusions: Annotated[
+        IgnoreFileExclusions | None,
+        Field(
+            default=None,
+            description=(
+                "Whether the scanned repository's .gitignore and .ignore files were "
+                "honored when ASH built its scan set, and how many files they "
+                "removed from it, in total and per ignore file. Written by every "
+                "scan that runs the convert or scan phase. Absent from results "
+                "that did not build a scan set, and from results older ASH "
+                "versions wrote."
+            ),
+        ),
+    ] = None
 
     @field_validator("project_name")
     @classmethod

@@ -969,7 +969,9 @@ async def get_scan_summary(
     quick status checks without transferring large amounts of data.
 
     Returns:
-    - Scan metadata (timestamps, duration, etc.)
+    - Scan metadata (timestamps, duration, etc.), including
+      `ignore_file_exclusions`: whether the scanned repository's .gitignore and
+      .ignore files were honored and how many files they excluded from the scan set
     - Findings count by severity
     - Findings count by scanner/tool
     - Scanner execution status

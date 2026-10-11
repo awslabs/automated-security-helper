@@ -38,7 +38,10 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.utils.ash_install import extra_requirements_from_metadata
 from automated_security_helper.utils.cdk_nag_worker import cdk_nag_worker_batch
 from automated_security_helper.utils.get_ash_version import get_ash_version
-from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_scan_set import (
+    honors_ignore_files,
+    scan_set,
+)
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.cfn_template_model import describe_parse_error
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -916,6 +919,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             else scan_set(
                 source=self.context.source_dir,
                 output=self.context.output_dir,
+                honor_ignore_files=honors_ignore_files(self.context.config),
                 # filter_pattern=r"\.(yaml|yml|json)$",
             )
         )

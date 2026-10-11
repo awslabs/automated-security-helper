@@ -348,7 +348,7 @@ The run exits cleanly and a report is generated, but `total_findings` is `0` for
 One of three things:
 
 1. `--source-dir` points somewhere that doesn't contain your code (e.g. the repo root when the code lives in a subdirectory).
-2. A broad `.gitignore` or ASH `ignore_paths` entry is excluding everything the scanners would look at.
+2. A broad `.gitignore` or `.ignore` file, or an ASH `ignore_paths` entry, is excluding everything the scanners would look at.
 3. Every scanner that would produce findings is disabled or excluded.
 
 **Fix**
@@ -358,6 +358,13 @@ Confirm the source directory:
 ```bash
 ash --source-dir ./src --debug
 ```
+
+Check how many files the repository's ignore files removed. The scan metadata in
+`ash.summary.txt` and `ash.summary.md` has an `Ignore files:` line with the total,
+and `metadata.ignore_file_exclusions.by_ignore_file` in `ash_aggregated_results.json`
+gives the count for each `.gitignore` and `.ignore`. To scan the files they exclude,
+pass `--no-honor-ignore-files`; see
+[Ignore files and the scan set](configuration-guide.md#ignore-files-and-the-scan-set).
 
 Check for overly broad ignore paths in your config:
 

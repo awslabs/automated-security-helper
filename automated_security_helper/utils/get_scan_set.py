@@ -6,7 +6,7 @@ import io
 import re
 import subprocess  # nosec B404
 import sys
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from igittigitt import IgnoreParser
 from pathlib import Path, PurePosixPath
 import argparse
@@ -31,6 +31,17 @@ ASH_INCLUSIONS = [
 # add up to the number of files actually removed.
 ASH_INCLUSIONS_MARKER = "ASH_INCLUSIONS"
 BUNDLED_CDK_MARKER = "node_modules/aws-cdk (ASH built-in exclusion)"
+
+# The file names ASH reads as ignore files when it walks the scanned tree.
+IGNORE_FILE_NAMES = frozenset({".ignore", ".gitignore"})
+
+# Written into ash-ignore-report.txt in place of the repository's ignore files when
+# the operator turned them off, so the report says why they are missing from it.
+# A comment line: get_ash_ignorespec_with_attribution skips it.
+NOT_HONORED_REPORT_LINE = (
+    "######### NOT HONORED: the scanned repository's .gitignore and .ignore files "
+    "(honor_ignore_files: false) #########"
+)
 
 # The characters that count as a path separator when a posix-shaped literal has to
 # be tested against a path ``os.walk`` built. ``os.walk`` joins with ``os.sep``, so
@@ -186,10 +197,50 @@ def _is_bundled_cdk_path(
     return "/node_modules/aws-cdk" in _with_posix_separators(file_path, separators)
 
 
+def _ash_own_exclusion_spec(source_dir: str | Path) -> IgnoreParser:
+    """``ASH_INCLUSIONS`` compiled on its own, the spec a scan has with no ignore files."""
+    parser = IgnoreParser()
+    base_path = Path(source_dir)
+    for entry in ASH_INCLUSIONS:
+        parser.add_rule(entry, base_path=base_path)
+    return parser
+
+
+def _count_files_ash_would_scan(
+    directory: Path,
+    own_spec: IgnoreParser,
+    forced_inclusions: IgnoreParser,
+) -> int:
+    """How many files under *directory* stay in the scan set when no ignore file applies.
+
+    The test is :func:`get_files_not_matching_spec`'s, with ``ASH_INCLUSIONS`` as
+    the whole spec. A file ASH leaves out on its own (``.git``, CDK assets, the
+    bundled aws-cdk tree) was not removed by the ignore file that pruned its
+    directory, so it is not counted. Links to directories are not followed, as in
+    the walk that pruned the directory.
+    """
+    count = 0
+    for root, _dirs, files in os.walk(directory):
+        for name in files:
+            full_path = os.path.join(root, name)
+            if _is_bundled_cdk_path(full_path):
+                continue
+            file_path = Path(full_path)
+            try:
+                if own_spec.match(file_path) and not forced_inclusions.match(file_path):
+                    continue
+            except (ValueError, TypeError, IndexError, re.error):
+                pass
+            count += 1
+    return count
+
+
 def _collect_ignorefiles_and_all_files(
     path: str,
     extra_ignorefiles: List[str] | None = None,
     debug: bool = False,
+    honor_ignore_files: bool = True,
+    pruned_counts: Optional[Dict[str, int]] = None,
 ) -> tuple[List[str], List[str]]:
     """Walk the directory tree once to collect ignore files and all file paths.
 
@@ -198,12 +249,23 @@ def _collect_ignorefiles_and_all_files(
     This prevents rules like ``*`` inside ``.venv/.gitignore`` from being
     applied globally and accidentally ignoring all project files.
 
+    Args:
+        honor_ignore_files: False when the operator turned the scanned
+            repository's ignore files off. They are then not collected and prune
+            nothing: every directory is walked, and only the ignore files the
+            caller named in *extra_ignorefiles* are returned.
+        pruned_counts: Filled, when given, with the root ``.gitignore`` (as
+            walked, the same string :func:`get_ash_ignorespec_lines` builds its
+            marker from) mapped to the number of files under the directories it
+            pruned that ASH would have scanned without it. Those files are in
+            neither list returned, so :func:`report_ignore_file_exclusions` adds
+            them to that file's count.
+
     Returns a tuple of (ignore_file_paths, all_file_paths).
     """
     if extra_ignorefiles is None:
         extra_ignorefiles = []
 
-    _ignore_names = {".ignore", ".gitignore"}
     ignore_files: List[str] = []
     all_files: List[str] = []
 
@@ -218,7 +280,7 @@ def _collect_ignorefiles_and_all_files(
     # add_rule per line is what parse_rule_file does with each line it reads.
     # Parsed into a parser of its own and adopted only once every line has parsed,
     # so a file that fails part way prunes nothing rather than some directories.
-    if root_gitignore.is_file():
+    if honor_ignore_files and root_gitignore.is_file():
         try:
             candidate_parser = IgnoreParser()
             with io.TextIOWrapper(
@@ -240,6 +302,11 @@ def _collect_ignorefiles_and_all_files(
                 debug=debug,
             )
 
+    # Built only when a directory is pruned, for counting what the pruning removed.
+    own_spec: Optional[IgnoreParser] = None
+    forced_inclusions: Optional[IgnoreParser] = None
+    pruned_key = os.path.join(path, ".gitignore")
+
     for root, dirs, files in os.walk(path):
         # Prune directories that are ignored by the root .gitignore.
         # This prevents descending into .venv/, node_modules/, etc.
@@ -260,10 +327,23 @@ def _collect_ignorefiles_and_all_files(
                 pass
         for d in dirs_to_remove:
             dirs.remove(d)
+            # The pruned files are still counted: they are missing from the scan set
+            # because of the root .gitignore, and a count that left them out would
+            # report less than the file removed. Counted, not listed, so a pruned
+            # node_modules costs a walk and no memory.
+            if pruned_counts is None:
+                continue
+            if own_spec is None or forced_inclusions is None:
+                own_spec = _ash_own_exclusion_spec(path)
+                forced_inclusions = _forced_inclusion_spec(path)
+            removed = _count_files_ash_would_scan(
+                Path(root) / d, own_spec, forced_inclusions
+            )
+            pruned_counts[pruned_key] = pruned_counts.get(pruned_key, 0) + removed
 
         for f in files:
             full_path = os.path.join(root, f)
-            if f in _ignore_names:
+            if honor_ignore_files and f in IGNORE_FILE_NAMES:
                 ignore_files.append(full_path)
             all_files.append(full_path)
 
@@ -567,6 +647,8 @@ def report_ignore_file_exclusions(
     rule_ids_by_marker: dict[str, list[int]],
     all_files: list[str],
     debug: bool = False,
+    pruned_counts: Optional[Dict[str, int]] = None,
+    honored: bool = True,
 ) -> dict[str, int]:
     """Log how many files each ignore file removed from the scan set.
 
@@ -590,12 +672,16 @@ def report_ignore_file_exclusions(
     removed. Counting spec matches would print a number that contradicts the
     artifact it describes.
 
-    Known limitation: the counts cover files that were walked and then dropped.
     A directory the root ``.gitignore`` prunes in
-    :func:`_collect_ignorefiles_and_all_files` is never descended into, so its
-    contents are in neither *all_files* nor the scan set and cannot be counted --
-    the report says nothing about them rather than guessing. The root
-    ``.gitignore`` therefore reads lower than the files it truly accounts for.
+    :func:`_collect_ignorefiles_and_all_files` is not walked for the scan set, so
+    its files are in neither *all_files* nor the scan set. That walk counts them
+    instead, leaving out files ASH would exclude on its own, and they arrive here
+    as *pruned_counts*, keyed by the ignore file that pruned them. They are added
+    to that file's count, so the root ``.gitignore`` reports every file it removed
+    and not only the ones walked.
+
+    *honored* is False when the operator turned the repository's ignore files off,
+    so none were read; the "no ignore files were found" line is then not logged.
 
     Returns:
         Marker to number of files removed, for every marker seen -- including
@@ -614,11 +700,17 @@ def report_ignore_file_exclusions(
     unattributed: list[str] = []
 
     for excluded_file in sorted(excluded):
+        # The bundled aws-cdk tree first, because get_files_not_matching_spec drops it
+        # before it consults the spec: an ignore rule that also matches one of its
+        # files did not remove it.
+        if _is_bundled_cdk_path(excluded_file):
+            marker = BUNDLED_CDK_MARKER
+            counts[marker] = counts.get(marker, 0) + 1
+            paths_by_marker.setdefault(marker, []).append(excluded_file)
+            continue
         _ignored, rule = spec.match_with_rule(Path(excluded_file))
         if rule is not None and id(rule) in marker_by_rule_id:
             marker = marker_by_rule_id[id(rule)]
-        elif _is_bundled_cdk_path(excluded_file):
-            marker = BUNDLED_CDK_MARKER
         else:
             # No ignore rule owns this exclusion. Reaching here means the
             # attribution mapping and the parser disagree, which would otherwise
@@ -629,10 +721,16 @@ def report_ignore_file_exclusions(
         counts[marker] = counts.get(marker, 0) + 1
         paths_by_marker.setdefault(marker, []).append(excluded_file)
 
+    for ignorefile, pruned in (pruned_counts or {}).items():
+        marker = _source_dir_marker(path, ignorefile)
+        counts[marker] = counts.get(marker, 0) + pruned
+
     ignore_file_markers = [
         marker for marker in rule_ids_by_marker if marker != ASH_INCLUSIONS_MARKER
     ]
-    if not ignore_file_markers:
+    # With the repository's ignore files not honored, none were read, so "none were
+    # found" would be untrue; scan_set says why they were not read instead.
+    if not ignore_file_markers and honored:
         ASH_LOGGER.info(
             "No ignore files were found under %s, so no ignore rules removed "
             "anything from the scan set.",
@@ -663,6 +761,36 @@ def report_ignore_file_exclusions(
         )
 
     return counts
+
+
+def ignore_file_exclusion_record(
+    counts: Dict[str, int], honored: bool
+) -> Dict[str, Any]:
+    """The ``metadata.ignore_file_exclusions`` record of one scan set.
+
+    Built from :func:`report_ignore_file_exclusions`'s counts, without the two
+    entries that are not an ignore file (``ASH_INCLUSIONS`` and the bundled aws-cdk
+    tree): what ASH leaves out on its own is not something an ignore file removed.
+    Each ignore file is named by its path relative to the scan root, the
+    ``${SOURCE_DIR}/`` token dropped, and keeps its count when that is zero.
+
+    Args:
+        counts: Marker to number of files removed.
+        honored: Whether the scanned repository's own ignore files were applied.
+            False when the operator turned them off; *counts* then holds only the
+            ignore files the caller named, which is nothing for ``ash scan``.
+    """
+    by_ignore_file: Dict[str, int] = {}
+    for marker, count in counts.items():
+        if marker in (ASH_INCLUSIONS_MARKER, BUNDLED_CDK_MARKER):
+            continue
+        key = marker.removeprefix("${SOURCE_DIR}/")
+        by_ignore_file[key] = by_ignore_file.get(key, 0) + count
+    return {
+        "honored": honored,
+        "excluded_file_count": sum(by_ignore_file.values()),
+        "by_ignore_file": by_ignore_file,
+    }
 
 
 def get_files_not_matching_spec(
@@ -857,9 +985,28 @@ def parse_args() -> argparse.Namespace:
         nargs="*",
     )
     parser.add_argument(
+        "--honor-ignore-files",
+        help=(
+            "Whether the .gitignore and .ignore files in the scanned tree decide "
+            "what is left out (default). --no-honor-ignore-files lists every file "
+            "but the ones ASH leaves out on its own"
+        ),
+        default=True,
+        action=argparse.BooleanOptionalAction,
+    )
+    parser.add_argument(
         "--debug", help="Enables debug logging", action=argparse.BooleanOptionalAction
     )
     return parser.parse_args()
+
+
+def honors_ignore_files(config: Any) -> bool:
+    """The ``honor_ignore_files`` setting of *config*, True when it has none.
+
+    For callers holding a plugin context's config, which tests build from mocks:
+    anything but a real ``False`` reads as the default.
+    """
+    return getattr(config, "honor_ignore_files", True) is not False
 
 
 def scan_set(
@@ -869,8 +1016,15 @@ def scan_set(
     debug: bool = False,
     print_results: bool = False,
     filter_pattern: Optional[re.Pattern] = None,
+    honor_ignore_files: bool = True,
+    exclusions: Optional[Dict[str, Any]] = None,
 ) -> list[str]:
     """Get list of files not matching .gitignore underneath source path.
+
+    A scan set reused from *output* is returned as it was written, whatever
+    *honor_ignore_files* says. The orchestrator removes both files before it
+    computes the scan set, so within one scan the scanners and converters that call
+    this later reuse the list it wrote.
 
     Args:
         source: Path to scan. Defaults to current working directory.
@@ -879,6 +1033,15 @@ def scan_set(
         debug: Enable debug logging.
         print_results: Print results to stdout. Defaults to False for library usage.
         filter_pattern: Filter results against a re.Pattern. Defaults to returning the full scan set.
+        honor_ignore_files: Whether the scanned repository's ``.gitignore`` and
+            ``.ignore`` files decide what is left out. False scans every file but
+            the ones ASH leaves out on its own (``.git``, CDK assets, the bundled
+            aws-cdk tree). The ``honor_ignore_files`` config key and
+            ``--no-honor-ignore-files`` set it; see :func:`honors_ignore_files`.
+        exclusions: When given, filled with the record of what the ignore files
+            removed (:func:`ignore_file_exclusion_record`), which the orchestrator
+            stores as ``metadata.ignore_file_exclusions``. Left empty when the
+            scan set was reused from *output*, since nothing was matched then.
 
     Returns:
         List of files not matching ignore specifications.
@@ -911,10 +1074,15 @@ def scan_set(
                 f"Imported ash-scan-set-files-list.txt from {output}", debug=debug
             )
 
+    pruned_counts: Dict[str, int] = {}
     if not ashignore_content or not ashscanset_list:
         # Single os.walk pass collects both ignore files and the full file list
         discovered_ignores, all_files = _collect_ignorefiles_and_all_files(
-            source, ignorefile, debug=debug
+            source,
+            ignorefile,
+            debug=debug,
+            honor_ignore_files=honor_ignore_files,
+            pruned_counts=pruned_counts,
         )
 
     if not ashignore_content:
@@ -924,8 +1092,16 @@ def scan_set(
             debug=debug,
             _discovered_ignore_files=discovered_ignores,
         )
+        if not honor_ignore_files:
+            ashignore_content.insert(0, NOT_HONORED_REPORT_LINE)
 
     if not ashscanset_list:
+        if not honor_ignore_files:
+            ASH_LOGGER.info(
+                "The scanned repository's .gitignore and .ignore files are not "
+                "honored for this scan (honor_ignore_files: false), so they remove "
+                "nothing from the scan set."
+            )
         spec, rule_ids_by_marker = get_ash_ignorespec_with_attribution(
             ashignore_content, source, debug=debug
         )
@@ -935,14 +1111,20 @@ def scan_set(
             debug=debug,
             _all_files=all_files,
         )
-        report_ignore_file_exclusions(
+        counts = report_ignore_file_exclusions(
             source,
             spec,
             ashscanset_list,
             rule_ids_by_marker,
             all_files,
             debug=debug,
+            pruned_counts=pruned_counts,
+            honored=honor_ignore_files,
         )
+        if exclusions is not None:
+            exclusions.update(
+                ignore_file_exclusion_record(counts, honored=honor_ignore_files)
+            )
     else:
         # The scan set came off disk, so nothing was matched this run and there is
         # no attribution to report. Say that rather than printing nothing, which
@@ -1004,6 +1186,7 @@ def main() -> int:
         ignorefile=args.ignorefile,
         debug=args.debug,
         print_results=True,
+        honor_ignore_files=args.honor_ignore_files,
     )
     print(file_list, file=sys.stderr)
 

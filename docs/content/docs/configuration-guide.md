@@ -296,6 +296,75 @@ turned on. When the scan also has actionable findings, the exit code is 1 rather
 than 2: clearing the reported findings would not make a scan against a stale
 database trustworthy.
 
+### Ignore files and the scan set
+
+Before the scanners run, ASH builds a scan set: the list of files in the source
+directory that detect-secrets, cfn-nag, cdk-nag, npm-audit and the archive and
+Jupyter converters read. By default every file a `.gitignore` or `.ignore` in the
+scanned tree matches is left out of it, as git would leave it out. A nested ignore
+file applies to the directory it sits in, a later negation (`!keep.log`) puts a file
+back, and a directory the root `.gitignore` excludes is not entered at all, so the
+ignore files inside it are not read. ASH also leaves out files on its own: `.git`,
+CDK assets under `cdk.out/asset.*`, and its bundled aws-cdk tree. A CloudFormation
+template (`*.template.json`) an ignore file matches is kept, unless it sits in a
+directory the root `.gitignore` excludes. bandit, semgrep, checkov, grype and syft
+walk the source directory themselves, with their own ignore rules, so this setting
+does not change what they read.
+
+`honor_ignore_files` is a top-level key, and it defaults to `true`. To scan the files
+the repository's ignore files match as well, set it to `false` in a config file
+outside the scanned tree, or for one scan:
+
+```bash
+ash --source-dir . --no-honor-ignore-files
+ash --source-dir . --config-overrides 'honor_ignore_files=false'
+```
+
+ASH's own exclusions still apply then. `--honor-ignore-files` sets it back to `true`
+for one scan. Either form of the flag takes precedence over the config value, and
+in container mode the flag reaches the scan inside the container. In workspace mode
+it applies to every project.
+
+Whether the repository's ignore files hide its own files is the operator's decision,
+so a config file inside the scanned tree cannot set this key in either direction;
+see [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose).
+An MCP client cannot set it either: a client's config file is treated the same way,
+and `/honor_ignore_files` is in the default `runtime_overrides.denied_paths`.
+
+Every scan records the outcome in `ash_aggregated_results.json`, under
+`metadata.ignore_file_exclusions`:
+
+```json
+"ignore_file_exclusions": {
+  "honored": true,
+  "excluded_file_count": 7,
+  "by_ignore_file": {
+    ".gitignore": 3,
+    ".ignore": 1,
+    "vendor/.gitignore": 2,
+    "sub/.ignore": 1,
+    "sub/deep/.gitignore": 0
+  }
+}
+```
+
+`excluded_file_count` is the number of files the ignore files removed. Files ASH
+leaves out on its own are not counted. Each ignore file is listed by its path
+relative to the source directory, with 0 when it removed nothing. The files under a
+directory the root `.gitignore` excludes count for the root `.gitignore`. With
+`honor_ignore_files: false` the record reads `"honored": false` with a count of 0.
+
+`ash.summary.txt` and `ash.summary.md` print the total in their scan metadata, for
+example `Ignore files: the scanned repository's .gitignore and .ignore files
+excluded 7 files from the scan set`, or say that the ignore files were not honored.
+`ash report --format text` and `--format markdown` print the same line from the
+stored results. The MCP `get_scan_summary` tool returns the record under
+`metadata.ignore_file_exclusions`. In a workspace scan, each project's record is in
+`workspace.projects[].ignore_file_exclusions`, and the merged results and summaries
+carry the workspace total, with each ignore file keyed by its path relative to the
+workspace root. The log names every ignore file and its count at INFO level, and
+`ash-ignore-report.txt` in the output directory holds the rules that were applied.
+
 ### Global Settings
 
 The `global_settings` section controls general behavior:
@@ -586,6 +655,7 @@ the operator's file writes itself count as the operator's. An MCP client's
 | trivy-repo's ignore file and secret config | trivy-repo always gets `--ignorefile` and `--secret-config`, so trivy does not read a `.trivyignore` or `trivy-secret.yaml` from the scanned repository. `scanners.trivy-repo.options.ignore_file` and `secret_config_file`, or `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`, name the files to use; each is passed by the rule above, and a file that sets nothing is passed otherwise. |
 | `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`, `sandbox.env_scanners` | Not used from a repository-written config: these grant sandbox access. A `network_scanners` list still removes network from the scanners it does not name. See [Scanner sandbox](scanner-sandbox.md). |
 | `sandbox.mode` | From a repository-written config, applies only when nothing the operator set turns the sandbox on. When `--sandbox`, `ASH_CONFIG` or the operator's config file turns it on, this cannot turn it off or switch backends. |
+| `honor_ignore_files` | Not honored in either direction. The value comes from a config file that is not repository-written, `--config-overrides`, `--no-honor-ignore-files` / `--honor-ignore-files`, or the default `true`. See [Ignore files and the scan set](#ignore-files-and-the-scan-set). |
 
 Each setting that is not honored is logged once, as a warning that names it.
 

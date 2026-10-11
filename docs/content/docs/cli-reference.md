@@ -34,6 +34,7 @@ These parameters are available across multiple ASH commands:
 | `--custom-containerfile` | Path to a custom container definition (e.g. | |  | `scan` |
 | `--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | Exit 1 when a selected scanner did not complete (`ERROR` or `MISSING`), or a converter could not convert some of its inputs. On by default; see [An incomplete scan is not a clean scan](#an-incomplete-scan-is-not-a-clean-scan). | | `--fail-on-incomplete-scanners` | `scan` |
 | `--formats` | The output formats to use (comma-separated). | |  | `scan` |
+| `--honor-ignore-files` / `--no-honor-ignore-files` | Whether the `.gitignore` and `.ignore` files in the scanned tree leave files out of ASH's scan set. `--no-honor-ignore-files` scans those files too; ASH's own exclusions such as `.git` still apply. Takes precedence over the `honor_ignore_files` config value, which a config file inside the scanned tree cannot set. The results and summaries record how many files the ignore files excluded; see [Ignore files and the scan set](configuration-guide.md#ignore-files-and-the-scan-set). | Unset: the operator's `honor_ignore_files`, then honored |  | `scan` |
 | `--min-severity` | Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). | |  | `scan` |
 | `--progress` | Show progress of each job live in the console. Defaults to True. | |  | `scan` |
 | `--python-based-plugins-only` / `--all-enabled-plugins` | Exclude execution of any plugins or tools that have depencies external to Python. Also spelled `--python-only` / `--full`, and `--python-based-scanners-only` / `--all-enabled-scanners`; all three name the same option, and the `plugins` spelling is preferred because the option covers converters and reporters too. | |  | `scan` |
@@ -165,6 +166,7 @@ ash [options]
 | `--log-level`                 | Set the log level                                       | `INFO`                |                         |
 | `--fail-on-findings`          | Exit with non-zero code if findings are found           | From config           |                         |
 | `--ignore-suppressions`       | Ignore all suppression rules and report all findings    | `False`               |                         |
+| `--honor-ignore-files/--no-honor-ignore-files` | Whether the scanned tree's `.gitignore` and `.ignore` files leave files out of ASH's scan set. A config file inside the scanned tree cannot set it; see [Ignore files and the scan set](configuration-guide.md#ignore-files-and-the-scan-set) | From operator config, then honored | |
 | `--offline`                   | Run in offline mode (container mode only)               | `False`               |                         |
 | `--offline-semgrep-rulesets`  | Semgrep rulesets for offline mode                       | `p/ci`                |                         |
 | `--build/--no-build`, `-b/-B` | Whether to build the ASH container image                | `True`                |                         |

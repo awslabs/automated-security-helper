@@ -163,6 +163,8 @@ from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional
 
 from pydantic import BaseModel, Field, computed_field
 
+from automated_security_helper.models.core import IgnoreFileExclusions
+
 
 class WorkspaceExitCode(IntEnum):
     """Process exit statuses for a workspace-mode scan.
@@ -468,6 +470,19 @@ class WorkspaceProjectResult(BaseModel):
             ),
         ),
     ]
+    ignore_file_exclusions: Annotated[
+        Optional[IgnoreFileExclusions],
+        Field(
+            None,
+            description=(
+                "The project's own metadata.ignore_file_exclusions: whether its "
+                ".gitignore and .ignore files were honored and how many files they "
+                "removed from its scan set, keyed by path relative to the project. "
+                "Null for a project that built no scan set (skipped, or failed "
+                "before scanning)."
+            ),
+        ),
+    ] = None
     skip_reason: Annotated[
         Optional[SkippedProjectReason],
         Field(None, description="Why the project was skipped, when it was."),

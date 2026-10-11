@@ -672,6 +672,40 @@ def _worse_status(left: Optional[str], right: Optional[str]) -> Optional[str]:
     return left
 
 
+def workspace_ignore_file_exclusions(
+    outcomes: Iterable[WorkspaceProjectResult],
+) -> Optional[Dict[str, Any]]:
+    """The merged results' ``metadata.ignore_file_exclusions``, from every project's.
+
+    The workspace summaries render this record like a single scan's, so the line
+    they print is the workspace total. Each ignore file is keyed by its path
+    relative to the workspace root (the project's ``relative_path`` joined to the
+    project-relative key), so two projects' root ``.gitignore`` files stay apart.
+    ``honored`` is True only when every project that built a scan set honored its
+    ignore files; the switch is the operator's, so the projects agree unless their
+    configs were resolved from different operator sources. None when no project
+    built a scan set.
+    """
+    recorded = [
+        outcome for outcome in outcomes if outcome.ignore_file_exclusions is not None
+    ]
+    if not recorded:
+        return None
+    by_ignore_file: Dict[str, int] = {}
+    for outcome in recorded:
+        prefix = PurePosixPath(outcome.relative_path)
+        for path, count in outcome.ignore_file_exclusions.by_ignore_file.items():
+            key = path if str(prefix) == "." else (prefix / path).as_posix()
+            by_ignore_file[key] = by_ignore_file.get(key, 0) + count
+    return {
+        "honored": all(outcome.ignore_file_exclusions.honored for outcome in recorded),
+        "excluded_file_count": sum(
+            outcome.ignore_file_exclusions.excluded_file_count for outcome in recorded
+        ),
+        "by_ignore_file": by_ignore_file,
+    }
+
+
 class WorkspaceAggregator:
     """Collects per-project runs and writes the unified workspace results file.
 
@@ -887,6 +921,20 @@ class WorkspaceAggregator:
             if outcome.project in self._spooled
         ]
 
+        metadata: Dict[str, Any] = {
+            "report_id": f"ASH-WORKSPACE-{Path(self.plan.workspace_file).stem}",
+            "project_name": project_name
+            or Path(self.plan.workspace_root).name
+            or "ash-workspace",
+            "tool_version": get_ash_version(),
+            "description": (
+                "Automated Security Helper workspace-mode aggregated report"
+            ),
+        }
+        ignore_file_exclusions = workspace_ignore_file_exclusions(payload.projects)
+        if ignore_file_exclusions is not None:
+            metadata["ignore_file_exclusions"] = ignore_file_exclusions
+
         header: Dict[str, Any] = {
             "name": f"ASH Workspace Scan: {project_name or Path(self.plan.workspace_root).name}",
             "description": (
@@ -894,16 +942,7 @@ class WorkspaceAggregator:
                 "SARIF run per project; see the 'workspace' block for "
                 "attribution and per-project verdicts."
             ),
-            "metadata": {
-                "report_id": f"ASH-WORKSPACE-{Path(self.plan.workspace_file).stem}",
-                "project_name": project_name
-                or Path(self.plan.workspace_root).name
-                or "ash-workspace",
-                "tool_version": get_ash_version(),
-                "description": (
-                    "Automated Security Helper workspace-mode aggregated report"
-                ),
-            },
+            "metadata": metadata,
             "workspace": payload.model_dump(mode="json"),
             "scanner_results": self._scanner_results_payload(),
             # Empty on purpose. Converter rows are per project -- their paths are

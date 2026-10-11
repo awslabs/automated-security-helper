@@ -849,6 +849,7 @@
           'error': None,
           'exceeds_threshold': False,
           'finding_count': 0,
+          'ignore_file_exclusions': None,
           'incomplete_converters': dict({
           }),
           'incomplete_scanners': list([
@@ -878,6 +879,7 @@
           'error': None,
           'exceeds_threshold': False,
           'finding_count': 0,
+          'ignore_file_exclusions': None,
           'incomplete_converters': dict({
           }),
           'incomplete_scanners': list([
@@ -907,6 +909,7 @@
           'error': None,
           'exceeds_threshold': False,
           'finding_count': 0,
+          'ignore_file_exclusions': None,
           'incomplete_converters': dict({
           }),
           'incomplete_scanners': list([

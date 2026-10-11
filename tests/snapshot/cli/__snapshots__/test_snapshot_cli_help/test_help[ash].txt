@@ -333,6 +333,38 @@
 │                                                                            suppression status.   │
 │                                                                            [default:             │
 │                                                                            no-ignore-suppressio… │
+│ --honor-ignore-files       --no-honor-ignore-f…                            Whether the           │
+│                                                                            .gitignore and        │
+│                                                                            .ignore files in the  │
+│                                                                            scanned tree decide   │
+│                                                                            which files are left  │
+│                                                                            out of ASH's scan set │
+│                                                                            (the files            │
+│                                                                            detect-secrets,       │
+│                                                                            cfn-nag, cdk-nag,     │
+│                                                                            npm-audit and the     │
+│                                                                            converters read).     │
+│                                                                            --no-honor-ignore-fi… │
+│                                                                            scans the files they  │
+│                                                                            match too; ASH's own  │
+│                                                                            exclusions such as    │
+│                                                                            .git still apply.     │
+│                                                                            Defaults to unset,    │
+│                                                                            which prefers the     │
+│                                                                            operator's            │
+│                                                                            `honor_ignore_files`  │
+│                                                                            config value and then │
+│                                                                            honoring them. Either │
+│                                                                            form takes precedence │
+│                                                                            over the config. A    │
+│                                                                            config file inside    │
+│                                                                            the scanned tree      │
+│                                                                            cannot set it. The    │
+│                                                                            results and summaries │
+│                                                                            record whether the    │
+│                                                                            ignore files were     │
+│                                                                            honored and how many  │
+│                                                                            files they excluded.  │
 │ --min-severity                                       <str>                 Minimum severity to   │
 │                                                                            trigger non-zero exit │
 │                                                                            code (critical, high, │

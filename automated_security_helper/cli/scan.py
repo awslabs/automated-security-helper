@@ -436,6 +436,23 @@ def run_ash_scan_cli_command(
             help="Ignore all suppression rules and report all findings regardless of suppression status."
         ),
     ] = False,
+    honor_ignore_files: Annotated[
+        bool | None,
+        typer.Option(
+            help=(
+                "Whether the .gitignore and .ignore files in the scanned tree decide "
+                "which files are left out of ASH's scan set (the files "
+                "detect-secrets, cfn-nag, cdk-nag, npm-audit and the converters "
+                "read). --no-honor-ignore-files scans the files they match too; "
+                "ASH's own exclusions such as .git still apply. Defaults to unset, "
+                "which prefers the operator's `honor_ignore_files` config value and "
+                "then honoring them. Either form takes precedence over the config. "
+                "A config file inside the scanned tree cannot set it. The results "
+                "and summaries record whether the ignore files were honored and how "
+                "many files they excluded."
+            )
+        ),
+    ] = None,
     min_severity: Annotated[
         str,
         typer.Option(
@@ -696,6 +713,14 @@ def run_ash_scan_cli_command(
     # and workspace runs unchanged and wins over the config file's sandbox.mode.
     if sandbox is not None:
         config_overrides.append(f"sandbox.mode={SandboxMode(sandbox).value}")
+
+    # The same route again. As an override it is operator input, which a config
+    # file inside the scanned tree cannot outvote (resolve_config's
+    # confine_honor_ignore_files), and the container runs it unchanged.
+    if honor_ignore_files is not None:
+        config_overrides.append(
+            f"honor_ignore_files={'true' if honor_ignore_files else 'false'}"
+        )
 
     workspace_plan: WorkspacePlan | None = None
     if workspace is not None:

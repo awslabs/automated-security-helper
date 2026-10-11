@@ -122,6 +122,12 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             md_parts.append(f"- **Project**: {metadata['project']}")
             md_parts.append(f"- **Scan executed**: {metadata['scan_time']}")
             md_parts.append(f"- **ASH version**: {metadata['tool_version']}")
+            # See the text reporter: the scan set depends on the ignore files.
+            ignore_file_exclusions = model.metadata.ignore_file_exclusions
+            if ignore_file_exclusions is not None:
+                md_parts.append(
+                    f"- **Ignore files**: {ignore_file_exclusions.summary_text()}"
+                )
             md_parts.append("")
 
         # Add summary section if enabled

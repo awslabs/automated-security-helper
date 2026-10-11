@@ -1382,6 +1382,7 @@
                   "/fail_on_incomplete_scanners",
                   "/content_db_staleness",
                   "/content_db_staleness_overrides",
+                  "/honor_ignore_files",
                   "/sandbox",
                   "/sandbox/**",
                   "/ash_plugin_modules",
@@ -1404,6 +1405,12 @@
             "suppressions": []
           },
           "description": "Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
+        },
+        "honor_ignore_files": {
+          "default": true,
+          "description": "Whether the .gitignore and .ignore files in the scanned tree decide which files are left out of ASH's scan set, the file list detect-secrets, cfn-nag, cdk-nag, npm-audit and the converters read. True (the default) leaves out every file they match. False scans those files too; ASH's own exclusions (.git, CDK assets) still apply. An operator setting: a config file inside the scanned tree, or one an MCP client supplied, cannot change it, and its value there is ignored with a warning. Set it in a config file outside the tree, with --config-overrides, or with --no-honor-ignore-files / --honor-ignore-files. Every scan records the outcome in metadata.ignore_file_exclusions.",
+          "title": "Honor Ignore Files",
+          "type": "boolean"
         },
         "mcp-resource-management": {
           "$ref": "#/$defs/MCPResourceManagementConfig",
@@ -1777,6 +1784,7 @@
                 "/fail_on_incomplete_scanners",
                 "/content_db_staleness",
                 "/content_db_staleness_overrides",
+                "/honor_ignore_files",
                 "/sandbox",
                 "/sandbox/**",
                 "/ash_plugin_modules",
@@ -1836,6 +1844,7 @@
               "/fail_on_incomplete_scanners",
               "/content_db_staleness",
               "/content_db_staleness_overrides",
+              "/honor_ignore_files",
               "/sandbox",
               "/sandbox/**",
               "/ash_plugin_modules",
@@ -8600,6 +8609,36 @@
       "title": "IdentifiableAction",
       "type": "object"
     },
+    "IgnoreFileExclusions": {
+      "description": "What the scanned repository's ignore files took out of one scan set.\n\nASH leaves out every file a ``.gitignore`` or ``.ignore`` in the scanned tree\nmatches, unless the operator turned that off with ``honor_ignore_files: false``\nor ``--no-honor-ignore-files``. A scanner that read fewer files cannot say so in\nits own results, so the scan records it here and the summaries print it.",
+      "properties": {
+        "by_ignore_file": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Each ignore file whose rules were applied, by its path relative to the scan root (relative to the workspace root in a workspace scan's merged results), mapped to the number of files it removed. An ignore file that removed nothing is listed with 0. Files under a directory the root .gitignore excluded count for the root .gitignore, and ignore files inside that directory are not read.",
+          "title": "By Ignore File",
+          "type": "object"
+        },
+        "excluded_file_count": {
+          "default": 0,
+          "description": "How many files the ignore files removed from the scan set: the sum of by_ignore_file. Files ASH leaves out on its own (.git, CDK assets, the bundled aws-cdk tree) are not counted. 0 when the ignore files were not honored.",
+          "minimum": 0,
+          "title": "Excluded File Count",
+          "type": "integer"
+        },
+        "honored": {
+          "description": "Whether the scanned repository's .gitignore and .ignore files decided which files were scanned. False when the operator set honor_ignore_files: false or passed --no-honor-ignore-files.",
+          "title": "Honored",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "honored"
+      ],
+      "title": "IgnoreFileExclusions",
+      "type": "object"
+    },
     "IgnorePathWithReason": {
       "description": "Represents a path exclusion entry.",
       "properties": {
@@ -13842,6 +13881,18 @@
           "default": null,
           "title": "Generated At"
         },
+        "ignore_file_exclusions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IgnoreFileExclusions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether the scanned repository's .gitignore and .ignore files were honored when ASH built its scan set, and how many files they removed from it, in total and per ignore file. Written by every scan that runs the convert or scan phase. Absent from results that did not build a scan set, and from results older ASH versions wrote."
+        },
         "plugin_load_errors": {
           "additionalProperties": {
             "type": "string"
@@ -16079,6 +16130,7 @@
             "/fail_on_incomplete_scanners",
             "/content_db_staleness",
             "/content_db_staleness_overrides",
+            "/honor_ignore_files",
             "/sandbox",
             "/sandbox/**",
             "/ash_plugin_modules",
@@ -21878,6 +21930,18 @@
           "minimum": 0,
           "title": "Finding Count",
           "type": "integer"
+        },
+        "ignore_file_exclusions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IgnoreFileExclusions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The project's own metadata.ignore_file_exclusions: whether its .gitignore and .ignore files were honored and how many files they removed from its scan set, keyed by path relative to the project. Null for a project that built no scan set (skipped, or failed before scanning)."
         },
         "incomplete_converters": {
           "additionalProperties": {

@@ -104,6 +104,11 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
         text_parts.append(f"Project: {metadata['project']}")
         text_parts.append(f"Scan executed: {metadata['scan_time']}")
         text_parts.append(f"ASH version: {metadata['tool_version']}")
+        # Which files the scanners read depends on the repository's ignore files, and
+        # no scanner's own result can say that some were left out.
+        ignore_file_exclusions = model.metadata.ignore_file_exclusions
+        if ignore_file_exclusions is not None:
+            text_parts.append(f"Ignore files: {ignore_file_exclusions.summary_text()}")
         text_parts.append("")
 
         # The per-project table, ahead of the summary because in a workspace the

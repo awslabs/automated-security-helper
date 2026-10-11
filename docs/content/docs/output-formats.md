@@ -350,6 +350,11 @@ reporters:
 
 **Output file:** `reports/ash.summary.md`
 
+The scan metadata section has an **Ignore files** line: how many files the scanned
+repository's `.gitignore` and `.ignore` files excluded from ASH's scan set, or that
+they were not honored. It is left out in `compact` mode, with the rest of the scan
+metadata. See [Ignore files and the scan set](configuration-guide.md#ignore-files-and-the-scan-set).
+
 ---
 
 ## YAML
@@ -379,6 +384,8 @@ reporters:
 ```
 
 **Output file:** `reports/ash.summary.txt`
+
+`SCAN METADATA` has the same `Ignore files:` line as the Markdown summary.
 
 ---
 
