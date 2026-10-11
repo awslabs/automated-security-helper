@@ -1718,6 +1718,42 @@ class TestAssertRootOnly:
         (target / "bundle" / "a.guard").chmod(0o666)
         assert any("a.guard" in p for p in self._problems(target, tmp_path))
 
+    def test_a_group_writable_file_inside_fails(self, tmp_path):
+        """Group write counts as much as world write: the group need not be root's."""
+        target = self._tree(tmp_path, 0o755)
+        (target / "bundle" / "a.guard").chmod(0o664)
+        problems = self._problems(target, tmp_path)
+        assert any("a.guard" in p and "write" in p for p in problems), problems
+
+    def test_a_group_writable_parent_without_the_sticky_bit_fails(self, tmp_path):
+        target = self._tree(tmp_path, 0o775)
+        problems = self._problems(target, tmp_path)
+        assert any(str(target.parent) in p and "write" in p for p in problems)
+
+    @pytest.mark.skipif(not hasattr(Path, "symlink_to"), reason="no symlinks")
+    def test_a_symlink_inside_is_judged_as_the_link_not_its_target(self, tmp_path):
+        """lstat, not stat. The link points at the bundle's own root-only rule
+        file, so following it would find nothing wrong; the link itself is a name
+        in the bundle that the check must see as it is."""
+        target = self._tree(tmp_path, 0o755)
+        link = target / "bundle" / "b.guard"
+        try:
+            link.symlink_to("a.guard")
+        except OSError:
+            pytest.skip("symlinks need privileges here")
+        if hasattr(os, "lchmod"):
+            try:
+                os.lchmod(link, 0o777)
+            except (NotImplementedError, OSError):
+                pass
+        if not os.lstat(link).st_mode & 0o022:
+            pytest.skip("a symlink here has a mode that lets no one else write it")
+        problems = self._problems(target, tmp_path)
+        assert any(p.startswith(f"{link}:") for p in problems), problems
+        assert not any(
+            p.startswith(f"{target / 'bundle' / 'a.guard'}:") for p in problems
+        )
+
     def test_a_sticky_directory_inside_still_fails(self, tmp_path):
         """Inside the target, sticky is no excuse: the content itself must be root's."""
         target = self._tree(tmp_path, 0o755)
