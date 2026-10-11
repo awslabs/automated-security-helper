@@ -11,11 +11,12 @@ The ASH MCP server exposes twenty-two tools and five resources.
 
 Starts a scan asynchronously. Returns a `scan_id` immediately — the scan continues in the background regardless of MCP connection state.
 
+<!-- doctest: options of=mcp.run_ash_scan -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
-| `source_dir` | string \| null | current dir | Absolute path to scan |
+| `source_dir` | string \| null | not set | Absolute path to scan. When not set: the source delivered to this session with `set_source_git` or `set_source_zip_finalize`, or, for a client with no session, the server's working directory |
 | `severity_threshold` | string | `"MEDIUM"` | Recorded with the scan and returned by `get_scan_progress`; it does not change which findings the scan reports |
-| `config_path` | string \| null | `<source>/.ash/.ash.yaml` | Custom config path |
+| `config_path` | string \| null | not set | Custom config path. When not set: the config this session bound with `select_profile`, or else ASH's own discovery in the source directory |
 | `clean_output` | boolean | `true` | Wipe stale reports before starting |
 
 Output reports are written to `<source_dir>/.ash/ash_output/` — there is no parameter to override this. Scanner selection, mode, and other tuning live in `.ash/.ash.yaml`, not in tool arguments.
@@ -46,6 +47,7 @@ The `directory_path` field tells you the resolved absolute path the server is sc
 
 Poll progress every 5 seconds until `status` is `completed`, `incomplete`, `failed`, or `cancelled`.
 
+<!-- doctest: options of=mcp.get_scan_progress -->
 | Param | Type | Notes |
 |-------|------|-------|
 | `scan_id` | string | From `run_ash_scan` |
@@ -99,12 +101,13 @@ There is no top-level `duration` field — derive elapsed time from `start_time`
 
 Fetch finalized results with filtering. Run only after `get_scan_progress` reports complete.
 
+<!-- doctest: options of=mcp.get_scan_results -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `output_dir` | string | `".ash/ash_output"` | Absolute path strongly recommended; the server resolves relative paths against its own cwd, which usually isn't your project root |
 | `filter_level` | string | `"full"` | `full`, `summary`, `minimal` |
-| `scanners` | string | all | Comma-separated subset |
-| `severities` | string | all | `critical,high,medium,low,info` |
+| `scanners` | string | not set | Comma-separated subset; not set means every scanner |
+| `severities` | string | not set | Comma-separated subset of `critical,high,medium,low,info,suppressed`; not set means every severity |
 | `actionable_only` | boolean | `false` | Drop suppressed findings |
 
 Returns full or filtered findings depending on `filter_level`.
@@ -115,6 +118,7 @@ Returns full or filtered findings depending on `filter_level`.
 
 Metadata and counts only — no individual findings. Cheap for quick health checks.
 
+<!-- doctest: options of=mcp.get_scan_summary -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `output_dir` | string | `".ash/ash_output"` | Absolute path |
@@ -125,6 +129,7 @@ Returns total count, severity breakdown, scanner statuses.
 
 Returns file paths to all generated reports. Useful when you want to read HTML, SARIF, CSV, or markdown directly with file tools instead of pulling JSON over MCP.
 
+<!-- doctest: options of=mcp.get_scan_result_paths -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `output_dir` | string | `".ash/ash_output"` | Absolute path |
@@ -141,6 +146,7 @@ No parameters. Returns a list of scan summaries.
 
 Marks a running scan `cancelled`. It does not stop the scan: the scan keeps running in the server process and can still write its results, while its `status` stays `cancelled`.
 
+<!-- doctest: options of=mcp.cancel_scan -->
 | Param | Type | Notes |
 |-------|------|-------|
 | `scan_id` | string | The scan to mark cancelled |
@@ -163,6 +169,7 @@ No parameters. Deletes this session's delivered source tree and workspace.
 
 Compare two ash_aggregated_results.json files and return a structured diff.
 
+<!-- doctest: options of=mcp.diff_scan_results -->
 | Param | Type | Notes |
 |-------|------|-------|
 | `before_path` | string | Path to the baseline ash_aggregated_results.json file. |
@@ -172,18 +179,20 @@ Compare two ash_aggregated_results.json files and return a structured diff.
 
 Return structured details for a single finding by ID.
 
+<!-- doctest: options of=mcp.explain_finding -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `finding_id` | string | *required* | The FlatVulnerability ID to look up (e.g. "bandit-B601-deadbeef"). |
-| `results_path` | string \| null | `null` | Optional path to the output directory containing ash_aggregated_results.json. Defaults to <cwd>/.ash/ash_output. |
+| `results_path` | string \| null | not set | Optional path to the output directory containing ash_aggregated_results.json. Defaults to <cwd>/.ash/ash_output. |
 
 ## get_config
 
 Get the resolved ASH config (defaults + user overrides merged).
 
+<!-- doctest: options of=mcp.get_config -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
-| `config_path` | string \| null | `null` | Optional explicit path to config file. If None, auto-discovers. |
+| `config_path` | string \| null | not set | Optional explicit path to config file. If None, auto-discovers. |
 | `raw` | boolean | `false` | If True, returns the user file contents without merging defaults. |
 
 ## list_profiles
@@ -202,56 +211,61 @@ No parameters. Returns one entry per registered scanner with its config name, de
 
 Resolve a VS Code workspace file into a scan plan without scanning anything.
 
+<!-- doctest: options of=mcp.resolve_ash_workspace -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `workspace_file` | string | *required* | Absolute path to the .code-workspace file. |
-| `workspace_config` | string \| null | `null` | Optional path to a workspace policy file. Must exist if given; ASH will not fall back to searching for one. |
+| `workspace_config` | string \| null | not set | Optional path to a workspace policy file. Must exist if given; ASH will not fall back to searching for one. |
 | `allow_missing_projects` | boolean | `false` | Mark project directories that are absent or unreadable as skipped instead of refusing the workspace. |
-| `config_overrides` | array \| null | `null` | Optional list of `key=value` config overrides, applied to each project's config so the reported threshold is the enforced one. |
-| `profile` | string \| null | `null` | Name of a registered config profile to resolve under for this one call, instead of whatever select_profile bound to this session. Call list_profiles to see what the operator registered. |
+| `config_overrides` | array \| null | not set | Optional list of `key=value` config overrides, applied to each project's config so the reported threshold is the enforced one. |
+| `profile` | string \| null | not set | Name of a registered config profile to resolve under for this one call, instead of whatever select_profile bound to this session. Call list_profiles to see what the operator registered. |
 
 ## run_ash_workspace_scan
 
 Scan every project in a VS Code workspace and return the per-project verdict.
 
+<!-- doctest: options of=mcp.run_ash_workspace_scan -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `workspace_file` | string | *required* | Absolute path to the .code-workspace file. |
-| `workspace_config` | string \| null | `null` | Optional path to a workspace policy file. |
+| `workspace_config` | string \| null | not set | Optional path to a workspace policy file. |
 | `allow_missing_projects` | boolean | `false` | Skip absent or unreadable project directories rather than refusing the workspace. |
-| `config_overrides` | array \| null | `null` | Optional list of `key=value` config overrides. |
-| `output_dir` | string \| null | `null` | Where to write the workspace output tree. Defaults to `<workspace root>/.ash/ash_output`. |
-| `scanners` | array \| null | `null` | Restrict every project to these scanner names. |
-| `excluded_scanners` | array \| null | `null` | Exclude these scanners from every project. Takes precedence over `scanners`. |
+| `config_overrides` | array \| null | not set | Optional list of `key=value` config overrides. |
+| `output_dir` | string \| null | not set | Where to write the workspace output tree. Defaults to `<workspace root>/.ash/ash_output`. |
+| `scanners` | array \| null | not set | Restrict every project to these scanner names. |
+| `excluded_scanners` | array \| null | not set | Exclude these scanners from every project. Takes precedence over `scanners`. |
 | `offline` | boolean | `false` | Run without network access. |
 | `clean_output` | boolean | `true` | Remove each project's previous aggregated-results file first. |
-| `profile` | string \| null | `null` | Name of a registered config profile to scan under for this one call, instead of whatever select_profile bound to this session. An unknown name refuses the whole scan; running N repository scans under the default config because a profile name was misspelled, and reporting success, is exactly what the confinement refusal above exists to prevent. |
+| `profile` | string \| null | not set | Name of a registered config profile to scan under for this one call, instead of whatever select_profile bound to this session. An unknown name refuses the whole scan; running N repository scans under the default config because a profile name was misspelled, and reporting success, is exactly what the confinement refusal above exists to prevent. |
 
 ## select_profile
 
 Bind one of the operator's registered config profiles to this session.
 
+<!-- doctest: options of=mcp.select_profile -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `profile_name` | string | *required* | Name the operator registered the profile under. |
-| `patch_ops` | array \| null | `null` | JSON-Patch operations to apply to the profile's config. |
-| `override_yaml` | string \| null | `null` | Complete ASH config YAML replacing the profile's. |
+| `patch_ops` | array \| null | not set | JSON-Patch operations to apply to the profile's config. |
+| `override_yaml` | string \| null | not set | Complete ASH config YAML replacing the profile's. |
 
 ## set_source_git
 
 Clone a repository into this session's workspace and make it the scan target.
 
+<!-- doctest: options of=mcp.set_source_git -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `url` | string | *required* | Repository URL |
-| `ref` | string \| null | default branch | Branch, tag, or commit |
-| `ssh_key_id` | string \| null | none | Operator-registered key id for private repos |
+| `ref` | string \| null | not set | Branch, tag, or commit; not set means the remote's default branch |
+| `ssh_key_id` | string \| null | not set | Operator-registered key id for private repos; not set means no key |
 | `depth` | integer | `1` | Clone depth; `0` for a full clone |
 
 ## set_source_zip_chunk
 
 Upload one base64 chunk of a zipped source tree.
 
+<!-- doctest: options of=mcp.set_source_zip_chunk -->
 | Param | Type | Notes |
 |-------|------|-------|
 | `upload_id` | string | Caller-chosen id tying the chunks of one upload together |
@@ -265,6 +279,7 @@ Pair with `set_source_zip_finalize`, which verifies the reassembled archive agai
 
 Verify an uploaded zip and extract it as this session's scan target.
 
+<!-- doctest: options of=mcp.set_source_zip_finalize -->
 | Param | Type | Notes |
 |-------|------|-------|
 | `upload_id` | string | The identifier used for the preceding chunk calls. |
@@ -274,21 +289,23 @@ Verify an uploaded zip and extract it as this session's scan target.
 
 Build a paste-ready AshSuppression entry for a specific finding.
 
+<!-- doctest: options of=mcp.suggest_suppression -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `finding_id` | string | *required* | Stable hash ID of the finding (from get_scan_results or explain_finding). |
-| `results_path` | string \| null | `null` | Path to ash_aggregated_results.json. Defaults to .ash/ash_output/ash_aggregated_results.json in cwd. |
-| `expiration` | string \| null | `null` | Expiration date in YYYY-MM-DD format. Defaults to 90 days from today. |
-| `justification` | string \| null | `null` | Human-readable reason for the suppression. |
+| `results_path` | string \| null | not set | Path to ash_aggregated_results.json. Defaults to .ash/ash_output/ash_aggregated_results.json in cwd. |
+| `expiration` | string \| null | not set | Expiration date in YYYY-MM-DD format. Defaults to 90 days from today. |
+| `justification` | string \| null | not set | Human-readable reason for the suppression. |
 
 ## validate_config
 
 Validate an ASH configuration file or content string.
 
+<!-- doctest: options of=mcp.validate_config -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
-| `config_content` | string \| null | `null` | YAML/JSON string to validate. |
-| `config_path` | string \| null | `null` | Path to the config file to validate. |
+| `config_content` | string \| null | not set | YAML/JSON string to validate. |
+| `config_path` | string \| null | not set | Path to the config file to validate. |
 
 ## Resources
 

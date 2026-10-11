@@ -119,9 +119,9 @@ def _spell(n: int) -> str:
 
 # Editorial content per tool. Every field is optional.
 #   intro     -- replaces the docstring's first line.
-#   params    -- per-parameter Notes column, and an optional default_display that
-#                overrides the schema default when the schema value is uninformative
-#                (e.g. `null` where the real behaviour is "current dir").
+#   params    -- per-parameter Notes column. The Default column is always the
+#                schema's default, because the docs checks compare it with the
+#                schema; what an unset parameter means goes in the notes.
 #   returns   -- a fenced example response block.
 #   caveats   -- paragraphs appended after the returns block, in order.
 TOOL_NOTES: dict[str, dict] = {
@@ -131,7 +131,13 @@ TOOL_NOTES: dict[str, dict] = {
             "continues in the background regardless of MCP connection state."
         ),
         "params": {
-            "source_dir": {"default": "current dir", "notes": "Absolute path to scan"},
+            "source_dir": {
+                "notes": (
+                    "Absolute path to scan. When not set: the source delivered to this "
+                    "session with `set_source_git` or `set_source_zip_finalize`, or, for "
+                    "a client with no session, the server's working directory"
+                )
+            },
             "severity_threshold": {
                 "notes": (
                     "Recorded with the scan and returned by `get_scan_progress`; it "
@@ -139,8 +145,11 @@ TOOL_NOTES: dict[str, dict] = {
                 )
             },
             "config_path": {
-                "default": "`<source>/.ash/.ash.yaml`",
-                "notes": "Custom config path",
+                "notes": (
+                    "Custom config path. When not set: the config this session bound "
+                    "with `select_profile`, or else ASH's own discovery in the source "
+                    "directory"
+                ),
             },
             "clean_output": {"notes": "Wipe stale reports before starting"},
         },
@@ -266,10 +275,14 @@ TOOL_NOTES: dict[str, dict] = {
                 )
             },
             "filter_level": {"notes": "`full`, `summary`, `minimal`"},
-            "scanners": {"default": "all", "notes": "Comma-separated subset"},
+            "scanners": {
+                "notes": "Comma-separated subset; not set means every scanner"
+            },
             "severities": {
-                "default": "all",
-                "notes": "`critical,high,medium,low,info`",
+                "notes": (
+                    "Comma-separated subset of `critical,high,medium,low,info,suppressed`; "
+                    "not set means every severity"
+                ),
             },
             "actionable_only": {"notes": "Drop suppressed findings"},
         },
@@ -348,10 +361,15 @@ TOOL_NOTES: dict[str, dict] = {
     "set_source_git": {
         "params": {
             "url": {"notes": "Repository URL"},
-            "ref": {"default": "default branch", "notes": "Branch, tag, or commit"},
+            "ref": {
+                "notes": (
+                    "Branch, tag, or commit; not set means the remote's default branch"
+                )
+            },
             "ssh_key_id": {
-                "default": "none",
-                "notes": "Operator-registered key id for private repos",
+                "notes": (
+                    "Operator-registered key id for private repos; not set means no key"
+                ),
             },
             "depth": {"notes": "Clone depth; `0` for a full clone"},
         },
@@ -399,23 +417,23 @@ def _type_name(schema: dict) -> str:
     return str(declared or "any")
 
 
-def _default_display(
-    name: str, schema: dict, required: bool, override: str | None
-) -> str:
-    if override is not None:
-        return override
+def _default_display(schema: dict, required: bool) -> str:
+    """The schema's default as the docs checks read it: a phrase or one JSON span."""
+    import json
+
     if required:
         return "*required*"
     if "default" not in schema:
         return ""
     value = schema["default"]
     if value is None:
-        return "`null`"
-    if isinstance(value, bool):
-        return f"`{str(value).lower()}`"
-    if isinstance(value, str):
-        return f'`"{value}"`'
-    return f"`{value}`"
+        return "not set"
+    return f"`{json.dumps(value)}`"
+
+
+#: The docs checks compare each tool's parameter table with the tool's input schema.
+def _options_marker(tool: str) -> str:
+    return f"<!-- doctest: options of=mcp.{tool} -->"
 
 
 def _docstring_arg_notes(func) -> dict[str, str]:
@@ -478,9 +496,7 @@ def _render_tool(name: str, description: str, schema: dict, func) -> list[str]:
         # Match the existing convention: a Default column only when at least one
         # parameter has a default worth showing.
         defaults = {
-            key: _default_display(
-                key, spec, key in required, param_notes.get(key, {}).get("default")
-            )
+            key: _default_display(spec, key in required)
             for key, spec in properties.items()
         }
         # The document's existing convention: a Default column appears only when
@@ -488,6 +504,7 @@ def _render_tool(name: str, description: str, schema: dict, func) -> list[str]:
         # required renders as a three-column table, so "*required*" alone does not
         # earn the column.
         show_default = any(v for v in defaults.values() if v != "*required*")
+        lines.append(_options_marker(name))
         if show_default:
             lines += [
                 "| Param | Type | Default | Notes |",
@@ -561,7 +578,8 @@ def _adapt_markdown(lines: list[str], strip_bold: bool) -> list[str]:
       checks read the agent-facing file and every copy the transpiler makes of it.
     * With ``strip_bold``, no bold in running prose (the docs site's house style).
       Bold that wraps a code span is unwrapped too; ``**`` inside a code span or a
-      fence is left alone. The agent-facing file keeps its bold.
+      fence is left alone. The agent-facing file keeps its bold. Table cells also
+      get ``<`` and ``>`` outside code spans escaped there.
     """
     import json
     import re
@@ -602,6 +620,11 @@ def _adapt_markdown(lines: list[str], strip_bold: bool) -> list[str]:
 
         hidden = re.sub(r"`[^`]*`", hide, line)
         hidden = hidden.replace("**", "")
+        if hidden.startswith("|"):
+            # Notes taken from docstrings say things like "Defaults to <cwd>/...",
+            # which python-markdown would pass through as an HTML tag and the
+            # browser would drop. The agent-facing file is read as text and keeps it.
+            hidden = hidden.replace("<", "&lt;").replace(">", "&gt;")
         out.append(re.sub(r"\x00(\d+)\x00", lambda m: spans[int(m.group(1))], hidden))
         i += 1
     return out
