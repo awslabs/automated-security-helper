@@ -252,6 +252,17 @@
     `--config-overrides scanners.ferret-scan.options.profile=security-audit`, or
     in a config file outside the tree. ferret-scan's `checks`,
     `confidence_levels` and other options still apply from the tree.
+  - snyk-code no longer runs on a tree whose own exclusion files would narrow it.
+    `snyk code test` leaves out the files that the `exclude.code` and
+    `exclude.global` entries of a `.snyk` file, or the rules of a `.dcignore`
+    file, name, anywhere in the tree it tests, and it has no option to stop
+    reading them (`code test` takes no `--policy-path`). When the tree has one,
+    snyk-code now fails with an error naming the files. A `.snyk` with only open
+    source `ignore` entries, and `.gitignore`, do not count. The operator accepts
+    a repository's exclusions with the new
+    `scanners.snyk-code.options.honor_tree_exclusions`, set with
+    `--config-overrides` or in a config file outside the tree; a config file
+    inside the tree, or one an MCP client delivered, does not set it.
   - A reporter's `extension` has to be a filename suffix, from any source: a value
     with `/`, `\`, `..` or NUL is replaced by the reporter's default, with a
     warning naming the key. Reports, the files the unused-suppressions, S3 and

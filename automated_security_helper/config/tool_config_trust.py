@@ -26,6 +26,12 @@ it scans into its working directory. ``use_default_config: false`` swaps the
 bundled config for an empty one, which leaves out findings the bundled config's
 validators report.
 
+snyk-code's ``honor_tree_exclusions`` is the third kind. ``snyk code test`` reads
+the ``.snyk`` and ``.dcignore`` files in the tree it tests and leaves out the
+files they name, with no option to stop it, so the scanner does not run on a tree
+that has one (``ash_snyk_plugins/snyk_code_scanner.tree_exclusion_files``) unless
+this option, the operator's, accepts them.
+
 What happens now
 ----------------
 * When the config was built from a file inside the scanned tree, or from a file
@@ -96,10 +102,12 @@ SCANNER_CONFIG_FILE_OPTIONS: Dict[str, Tuple[str, ...]] = {
 #: worker loads code from (``file://<path>``).
 _SETTINGS_FILE_LISTS: Tuple[str, ...] = ("plugins_used", "filters_used")
 
-#: Options that choose which part of a scanner's own config the tool uses, each
+#: Options that choose which part of a scanner's own config the tool uses, or
+#: whether it applies the exclusion files it reads from the tree itself, each
 #: with its default, which is what applies when the operator sets nothing.
 SCANNER_CONFIG_CHOICE_OPTIONS: Dict[str, Dict[str, Any]] = {
     "ferret-scan": {"profile": None, "use_default_config": True},
+    "snyk-code": {"honor_tree_exclusions": False},
 }
 
 _MISSING = object()
@@ -200,11 +208,10 @@ def confine_scanner_config_files(
     if ignored:
         files = ", ".join(describe_config_path(path) for path in in_tree)
         ASH_LOGGER.warning(
-            f"Ignoring {', '.join(sorted(set(ignored)))} from {files}: a scanner's "
-            "own config file, which part of it the tool uses, the rules it runs and "
-            "whether it sends metrics are the operator's choice, and that config is "
-            "inside the scanned tree or was delivered by an MCP client. Set them with "
-            "--config-overrides or in a config file outside the tree."
+            f"Ignoring {', '.join(sorted(set(ignored)))} from {files}: these choose "
+            "a scanner's own configuration, which is the operator's choice, and that "
+            "config is inside the scanned tree or was delivered by an MCP client. Set "
+            "them with --config-overrides or in a config file outside the tree."
         )
 
 

@@ -372,6 +372,9 @@ class TestDefaults:
         from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
             TrivyRepoScannerConfig,
         )
+        from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
+            SnykCodeScannerConfig,
+        )
 
         from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
             BedrockSummaryReporterConfig,
@@ -402,6 +405,7 @@ class TestDefaults:
                 "scanners": {
                     "ferret-scan": FerretScannerConfig().model_dump(by_alias=True),
                     "trivy-repo": TrivyRepoScannerConfig().model_dump(by_alias=True),
+                    "snyk-code": SnykCodeScannerConfig().model_dump(by_alias=True),
                 },
             }
         )

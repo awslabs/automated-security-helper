@@ -240,6 +240,7 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/scanners/grype/options/config_file",
             "/scanners/syft/options/config_file",
             "/scanners/trivy-repo/options/secret_config_file",
+            "/scanners/snyk-code/options/honor_tree_exclusions",
             "/scanners/*/options/tool_version",
             "/converters/jupyter/options/tool_version",
             "/scanners/opengrep/options/version",

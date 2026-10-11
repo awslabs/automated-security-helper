@@ -19,6 +19,7 @@ also why the denial tests check the error names the entry, not just
 
 from __future__ import annotations
 
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, get_args
 
@@ -467,6 +468,10 @@ _POINTED_DENIALS: Dict[str, Tuple[str, Any]] = {
         "/scanners/trivy-repo/options/secret_config_file",
         "/etc/other.yaml",
     ),
+    "/scanners/snyk-code/options/honor_tree_exclusions": (
+        "/scanners/snyk-code/options/honor_tree_exclusions",
+        True,
+    ),
     "/scanners/*/options/tool_version": (
         "/scanners/checkov/options/tool_version",
         "==1.0.0",
@@ -595,10 +600,12 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
     )
 
     def first_denied_under(section: str) -> str:
+        # A glob entry such as /scanners/*/options/offline is under every
+        # scanner's section.
         return next(
             denied
             for denied in RuntimeOverridesConfig().denied_paths
-            if denied.startswith(section)
+            if fnmatchcase(section, "/".join(denied.split("/")[:3]) + "/")
         )
 
     # A case that adds a whole reporter section the profile does not configure
@@ -606,11 +613,15 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
     added_section = patch_op["path"] + "/"
     if entry.startswith(added_section):
         covering = first_denied_under(added_section)
-    # The override restates the profile, which configures no ferret-scan or
-    # trivy-repo section, so its patch adds that whole section and the first
-    # denied entry under it is the one named.
+    # The override restates the profile, which configures no ferret-scan,
+    # snyk-code or trivy-repo section, so its patch adds that whole section and
+    # the first denied entry under it is the one named.
     section = "/".join(entry.split("/")[:3]) + "/"
-    plugin_section = section in ("/scanners/ferret-scan/", "/scanners/trivy-repo/")
+    plugin_section = section in (
+        "/scanners/ferret-scan/",
+        "/scanners/snyk-code/",
+        "/scanners/trivy-repo/",
+    )
     covering_override = first_denied_under(section) if plugin_section else covering
     assert f"entry {covering!r}" in patched["error"], patched["error"]
     assert f"entry {covering_override!r}" in overridden["error"], overridden["error"]

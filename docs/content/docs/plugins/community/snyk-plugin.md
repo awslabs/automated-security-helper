@@ -91,7 +91,9 @@ ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_snyk_plugins
 ```
 
-The scanner's settings can stay in the repository's `.ash/.ash.yaml`:
+The scanner's settings, except `honor_tree_exclusions` (see
+[Exclusion files in the scanned tree](#exclusion-files-in-the-scanned-tree)),
+can stay in the repository's `.ash/.ash.yaml`:
 
 ```yaml
 scanners:
@@ -136,6 +138,38 @@ scanners:
     enabled: true
     severity_threshold: "HIGH"  # Options: LOW, MEDIUM, HIGH, CRITICAL
 ```
+
+### Exclusion files in the scanned tree
+
+`snyk code test` reads exclusions from files in the directory it tests, at any
+depth, and leaves the files they name out of its analysis: the `exclude.code` and
+`exclude.global` entries of a `.snyk` file, and the rules of a `.dcignore` file.
+Its legacy implementation also reads any file whose name ends in `.snyk`,
+`.dcignore` or `.gitignore`. It has no option that turns this off, and
+`snyk code test` takes no `--policy-path`. So when the tree has such a file,
+snyk-code does not run, and its error names the files. A `.snyk` file with only
+open source `ignore` entries or other `exclude` sections does not count, and
+neither does `.gitignore`, which ASH's own scan set honors too.
+
+To accept a repository's exclusions, set `honor_tree_exclusions` with
+`--config-overrides`:
+
+```bash
+uv run ash --scanners snyk-code --config-overrides 'scanners.snyk-code.options.honor_tree_exclusions=true'
+```
+
+or in a config file outside the scanned tree, passed with `--config`:
+
+```yaml
+scanners:
+  snyk-code:
+    enabled: true
+    options:
+      honor_tree_exclusions: true
+```
+
+A config file inside the scanned tree, such as the repository's own
+`.ash/.ash.yaml`, or one an MCP client delivered, does not set it.
 
 ### Advanced Options
 

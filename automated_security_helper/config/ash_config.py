@@ -776,6 +776,9 @@ class RuntimeOverridesConfig(BaseModel):
         "/scanners/grype/options/config_file",
         "/scanners/syft/options/config_file",
         "/scanners/trivy-repo/options/secret_config_file",
+        # Whether snyk code test may apply the .snyk and .dcignore files in the
+        # tree it tests, which leave files out of its analysis.
+        "/scanners/snyk-code/options/honor_tree_exclusions",
         "/scanners/*/options/tool_version",
         "/converters/jupyter/options/tool_version",
         "/scanners/opengrep/options/version",
