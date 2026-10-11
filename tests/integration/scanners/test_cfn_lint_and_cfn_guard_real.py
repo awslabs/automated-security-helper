@@ -477,6 +477,34 @@ def test_a_relative_path_in_the_operators_cfnlintrc_never_reaches_the_tree(tmp_p
     )
 
 
+def test_a_relative_path_in_the_operators_cfnlintrc_names_nothing(tmp_path):
+    """Run from the filesystem root, cfn-lint read a relative ``append_rules``
+    entry from there: ``tmp/x`` named /tmp/x. The entry below names a rules
+    directory when read from the root, and nothing from the empty directory ASH
+    runs cfn-lint in."""
+    _require_cfn_lint()
+    marker = tmp_path / "rule-imported-from-root"
+    rules = _rules_that_mark(tmp_path / "rules-named-from-root", marker)
+    rc = tmp_path / "operator" / ".cfnlintrc"
+    rc.parent.mkdir()
+    rc.write_text(
+        f"append_rules:\n  - {rules.relative_to(rules.anchor).as_posix()}\n",
+        encoding="utf-8",
+    )
+
+    proc, output = _scan_with_tree_config(
+        tmp_path,
+        {},
+        "--config-overrides",
+        f"scanners.cfn-lint.options.config_file={rc.as_posix()}",
+    )
+
+    assert not marker.exists(), "cfn-lint read a relative path from the root"
+    assert _scanner_results(output)["cfn-lint"]["status"] == "ERROR", (
+        proc.stdout[-3000:] + proc.stderr[-3000:]
+    )
+
+
 def test_the_scanned_trees_config_cannot_narrow_what_is_reported(tmp_path):
     """ignore_checks and rule_sets drop findings before ASH sees them, and
     tool_version picks the cfn-lint release. Set by the tree's .ash/.ash.yaml,

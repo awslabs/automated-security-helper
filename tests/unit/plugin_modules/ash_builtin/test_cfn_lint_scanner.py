@@ -416,6 +416,35 @@ class TestScan:
             assert Path(value).is_absolute(), (option, value)
         _assert_parses_to(report, EXPECTED_INSECURE)
 
+    def test_each_scan_runs_cfn_lint_in_a_new_empty_private_directory(self, repo):
+        """From the filesystem root, a relative ``append_rules: [tmp/x]`` in the
+        operator's .cfnlintrc named /tmp/x, which any local user can write to. So
+        each scan runs cfn-lint in a directory of its own: new, empty, outside
+        the scanned tree, only this user can enter it, and it is removed
+        afterwards. A relative path then names nothing."""
+        seen = []
+        fake = FakeCfnLint({"templates/insecure.yaml": CAPTURED_INSECURE})
+
+        def cfn_lint(command, **kwargs):
+            cwd = Path(kwargs["cwd"])
+            seen.append(
+                (cwd, cwd.is_dir() and not any(cwd.iterdir()), cwd.stat().st_mode)
+            )
+            return fake(command, **kwargs)
+
+        scanner = _scanner(repo)
+        _assert_parses_to(self._run(scanner, cfn_lint), EXPECTED_INSECURE)
+        self._run(scanner, cfn_lint)
+
+        (first, first_empty, first_mode), (second, second_empty, _) = seen
+        assert first != Path(first.anchor), "cfn-lint ran in the filesystem root"
+        assert first_empty and second_empty
+        assert first != second
+        assert not first.absolute().is_relative_to(repo.absolute()), first
+        if os.name != "nt":
+            assert first_mode & 0o777 == 0o700, oct(first_mode)
+        assert not first.exists() and not second.exists()
+
     def test_the_recorded_invocation_carries_no_host_path(self, repo):
         fake = FakeCfnLint({}, returncode=0)
         report = self._run(_scanner(repo), fake)

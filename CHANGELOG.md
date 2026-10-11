@@ -238,8 +238,9 @@
   `--config-overrides` or an ASH config file outside the scanned tree:
   - actionlint runs with an empty config ASH writes, not `.github/actionlint.yaml`;
   - cfn-lint runs with an empty config ASH writes, not a `.cfnlintrc` in the
-    repository or the home directory, and from outside the scanned tree, so a
-    relative path in an operator's `.cfnlintrc` cannot load rules from it;
+    repository or the home directory, and in a new, empty, private directory
+    outside the scanned tree, so a relative path in an operator's `.cfnlintrc`
+    names nothing;
   - gitleaks runs with its default rules, not `.gitleaks.toml` or
     `.ash/.gitleaks.toml`, and ASH re-scans each file a root `.gitleaksignore`
     names (gitleaks always reads that file) and reports what it dropped;

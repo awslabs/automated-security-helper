@@ -20,10 +20,10 @@ with its reason, as cfn-nag counts it.
 
 How it is invoked, and why each argument is there
 -------------------------------------------------
-``cfn-lint --format sarif --output-file <f> [options] -- <template>...``, run from
-outside the scanned tree (normally the filesystem root) with every path absolute,
-because cfn-lint resolves a config file's relative paths against its working
-directory (``CfnLintScanner._subprocess_cwd``). cfn-lint writes each URI as the
+``cfn-lint --format sarif --output-file <f> [options] -- <template>...``, run in a
+new empty directory outside the scanned tree with every path absolute, because
+cfn-lint resolves a config file's relative paths against its working directory
+(``CfnLintScanner._private_cwd``). cfn-lint writes each URI as the
 absolute path it was given, and ``normalize_report`` maps it back to the
 repository-relative path ASH reports.
 
@@ -74,7 +74,19 @@ import re
 import string
 from pathlib import Path
 import copy
-from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
+from contextlib import ExitStack
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    ContextManager,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Tuple,
+)
 
 import yaml
 from pydantic import AnyUrl, Field, PrivateAttr, field_validator
@@ -83,7 +95,9 @@ from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
 )
-from automated_security_helper.config.path_trust import cwd_outside_scanned_tree
+from automated_security_helper.config.path_trust import (
+    private_cwd_outside_scanned_tree,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -824,7 +838,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         """Locate results as ASH reports them, map severities, sort rules, in place.
 
         cfn-lint writes each URI as the template path it was given, which is
-        absolute (see ``_subprocess_cwd``); ``shown_by_argument`` maps each such
+        absolute (see ``_private_cwd``); ``shown_by_argument`` maps each such
         path to the repository-relative one ASH reports, as cfn-guard's
         ``normalize_results`` replaces its URIs. cfn-lint also tags every
         location with ``uriBaseId: EXECUTIONROOT``, a base its own run declares
@@ -866,22 +880,24 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             raise ScannerError("cfn-lint has no plugin context")
         return Path(self.context.source_dir)
 
-    def _subprocess_cwd(self, results_dir: Path) -> Path | None:
-        """Run cfn-lint from outside the scanned tree, normally the filesystem root.
+    def _private_cwd(self, results_dir: Path) -> ContextManager[Path]:
+        """A new, empty directory of this scan's own to run cfn-lint in.
 
         cfn-lint resolves every relative path in a config file (``append_rules``,
         ``custom_rules``, ``override_spec`` and the rest) against its working
         directory, not against the file (cfnlint/helpers.py ``load_plugins``
         walks the directory as written). Run in the source directory, an
         operator's ``.cfnlintrc`` outside the tree with ``append_rules: [rules]``
-        imported the scanned tree's ``rules/*.py`` (measured with 1.57.2). From
-        outside the tree a relative path cannot name a file in it, so templates,
-        the output file and the config file are all passed as absolute paths.
-        The ``.cfnlintrc`` lookup in the working directory is already off: ASH
-        always names a config file.
+        imported the scanned tree's ``rules/*.py`` (measured with 1.57.2). Run
+        from the filesystem root, ``append_rules: [tmp/x]`` read ``/tmp/x``,
+        which any local user can write to. From a new empty directory outside
+        the tree that only this user can enter, removed after the scan, a
+        relative path names nothing (``private_cwd_outside_scanned_tree``), so
+        templates, the output file and the config file are all passed as
+        absolute paths. The ``.cfnlintrc`` lookup in the working directory is
+        already off: ASH always names a config file.
         """
-        return cwd_outside_scanned_tree(
-            self._source_dir(),
+        return private_cwd_outside_scanned_tree(
             results_dir=results_dir,
             source_dir=self._source_dir(),
             config=getattr(self.context, "config", None),
@@ -954,6 +970,8 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             self._post_scan(target=target, target_type=target_type)
             return False
 
+        # Removes cfn-lint's working directory however the scan ends.
+        cleanup = ExitStack()
         try:
             if self.context is None:
                 raise ScannerError("cfn-lint has no plugin context")
@@ -994,7 +1012,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             results_dir.mkdir(parents=True, exist_ok=True)
             option_args = self._option_args(results_dir)
             # Absolute, because cfn-lint does not run in the source directory (see
-            # _subprocess_cwd). Each maps back to the path ASH reports.
+            # _private_cwd). Each maps back to the path ASH reports.
             shown_by_argument = {
                 Path(template).absolute().as_posix(): display_path(template, source_dir)
                 for template in discovery.templates
@@ -1003,7 +1021,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             rules: Dict[str, ReportingDescriptor] = {}
             driver = report.runs[0].tool.driver
             child_env = self._child_env()
-            cwd = self._subprocess_cwd(results_dir)
+            cwd = cleanup.enter_context(self._private_cwd(results_dir))
 
             # _option_args keeps this under _OPTION_CHAR_BUDGET.
             budget = _ARGV_CHAR_BUDGET - sum(len(arg) + 1 for arg in option_args)
@@ -1102,6 +1120,8 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             raise
         except Exception as exc:
             raise ScannerError(f"{self.__class__.__name__} failed: {exc}") from exc
+        finally:
+            cleanup.close()
 
     @staticmethod
     def _batch_failure(response: object, batch_file: Path) -> Optional[str]:

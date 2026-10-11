@@ -20,9 +20,11 @@ asks.
 from __future__ import annotations
 
 import os
+import shutil
 import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterator, Optional, Set, Tuple, Union
 
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -154,6 +156,45 @@ def cwd_outside_scanned_tree(
         "may leave out directories they share with that location."
     )
     return made
+
+
+@contextmanager
+def private_cwd_outside_scanned_tree(
+    *,
+    results_dir: Union[str, Path],
+    source_dir: Union[str, Path],
+    config: Any = None,
+) -> Iterator[Path]:
+    """A new, empty working directory that only this user can enter, for one scan.
+
+    For a tool that resolves the relative paths in an operator's config file
+    against its working directory and is handed only absolute paths otherwise
+    (cfn-lint). From the filesystem root, which ``cwd_outside_scanned_tree``
+    normally gives, a relative ``tmp/x`` names ``/tmp/x``, which any local user
+    can write to. From here a relative path names nothing: the directory is new
+    and empty, and ``tempfile.mkdtemp`` makes it mode 0700, so nobody else can
+    add to it. A path that climbs out with ``..`` still names whatever is there.
+
+    Made in the system temp directory, or under ``results_dir`` when that is
+    inside the scanned tree (a scan of the whole filesystem). A sandbox grants
+    the working directory read-only, so either is visible to a sandboxed tool.
+    Removed, with anything the tool left in it, when the block ends.
+    """
+    root = getattr(config, "_scanned_root", None) or source_dir
+    made = _new_directory(None)
+    if made is not None and in_scanned_tree(made, root):
+        made.rmdir()
+        made = None
+    if made is None:
+        directory = Path(os.path.abspath(results_dir))
+        directory.mkdir(parents=True, exist_ok=True)
+        made = _new_directory(directory)
+        if made is None:
+            raise OSError(f"cannot create a working directory under {directory}")
+    try:
+        yield made
+    finally:
+        shutil.rmtree(made, ignore_errors=True)
 
 
 def resolved_path(value: Union[str, Path], source_dir: Union[str, Path]) -> Path:
