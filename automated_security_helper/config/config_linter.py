@@ -967,7 +967,7 @@ class ConfigLinter:
             SYMBOLS_EXTRA,
             is_valid_symbol,
             symbols_extra_available,
-            symbols_extra_install_command,
+            symbols_extra_install_hint,
         )
 
         symbol = suppression.get("symbol")
@@ -1010,6 +1010,7 @@ class ConfigLinter:
                     )
 
         if not reported_missing_extra and not symbols_extra_available():
+            hint = symbols_extra_install_hint()
             result.issues.append(
                 LintIssue(
                     severity=LintSeverity.WARNING,
@@ -1018,8 +1019,7 @@ class ConfigLinter:
                         f"Suppressions that set 'symbol' need the optional "
                         f"'{SYMBOLS_EXTRA}' extra, which is not installed here. "
                         f"Until it is, they match nothing and the findings they "
-                        f"name stay visible. Install it with "
-                        f"`{symbols_extra_install_command()}`"
+                        f"name stay visible. {hint[:1].upper()}{hint[1:]}"
                     ),
                     path=path_prefix,
                 )

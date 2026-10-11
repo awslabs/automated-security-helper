@@ -37,7 +37,7 @@ from automated_security_helper.config.config_linter import (
     LintResult,
     LintSeverity,
 )
-from automated_security_helper.core.constants import ASH_REPO_URL
+from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
@@ -716,6 +716,18 @@ class TestLint:
         lint_install = _symbols_install(lint_issues[0].message)
         assert scan_install is not None, scan_hints[0]
         assert scan_install == lint_install, (scan_hints[0], lint_issues[0].message)
+
+    def test_both_hints_point_at_the_docs_for_other_installers(
+        self, tmp_path, caplog, monkeypatch
+    ):
+        """The printed command is pip's; uv tool, pipx and uvx users need the page."""
+        url = f"{ASH_DOCS_URL}/docs/suppressions/#installing-the-extra"
+        scan_hints = _missing_extra_scan_hints(tmp_path, caplog, monkeypatch)
+        lint_issues = _symbol_issues(
+            _lint([{"path": "src/app.py", "reason": "r", "symbol": "module_function"}])
+        )
+        assert len(scan_hints) == 1 and url in scan_hints[0], scan_hints
+        assert len(lint_issues) == 1 and url in lint_issues[0].message, lint_issues
 
 
 class TestInstallHintChecker:

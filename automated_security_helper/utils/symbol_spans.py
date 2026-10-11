@@ -47,6 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
+from automated_security_helper.core.constants import ASH_DOCS_URL
 from automated_security_helper.utils.ash_install import extra_install_command
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
@@ -67,6 +68,24 @@ def symbols_extra_install_command() -> str:
     # requirement pinned to v<version> replaced it and was wrong too: main
     # reports the last release's version, and v3.7.0 has no symbols extra.
     return extra_install_command(SYMBOLS_EXTRA)
+
+
+#: The docs section with the uv tool, pipx and uvx forms of the install.
+SYMBOLS_EXTRA_DOCS_URL = f"{ASH_DOCS_URL}/docs/suppressions/#installing-the-extra"
+
+
+def symbols_extra_install_hint() -> str:
+    """The install advice the scan warning and the config lint both print.
+
+    The command is pip's, which installs into the environment ASH runs in. An
+    ASH installed as a uv or pipx tool, or run by uvx, has an environment of its
+    own that pip does not reach, so the hint also links the docs section that
+    gives those forms.
+    """
+    return (
+        f"install it with `{symbols_extra_install_command()}`, or for an ASH "
+        f"installed with uv tool, pipx or uvx see {SYMBOLS_EXTRA_DOCS_URL}"
+    )
 
 
 #: One identifier. ``\w`` is Unicode-aware, so non-ASCII Python identifiers are
@@ -407,7 +426,7 @@ def _index_file(path: Path) -> Any:
                 result = _Unresolvable(
                     f"the {grammar.language} grammar is not available ({exc}). "
                     f"Symbol suppressions need the optional '{SYMBOLS_EXTRA}' extra: "
-                    f"install it with `{symbols_extra_install_command()}`"
+                    f"{symbols_extra_install_hint()}"
                 )
             except SymbolParseError as exc:
                 result = _Unresolvable(f"the file does not parse cleanly: {exc}")

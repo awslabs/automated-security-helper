@@ -40,7 +40,7 @@ from urllib.request import url2pathname
 import pytest
 import typer
 
-from automated_security_helper.core.constants import ASH_REPO_URL
+from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.utils import ash_install
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from tests.utils.bare_install_names import find_bare_installs, normalize
@@ -312,6 +312,21 @@ class TestTheSymbolsHint:
             "install",
             f"automated-security-helper[symbols] @ git+{GIT_INSTALL['url']}@{COMMIT}",
         ]
+
+    def test_it_points_at_the_docs_for_other_installers(self, monkeypatch):
+        """pip is one installer; uv tool, pipx and uvx users need the docs page."""
+        from automated_security_helper.utils.symbol_spans import (
+            symbols_extra_install_command,
+            symbols_extra_install_hint,
+        )
+
+        url = f"{ASH_DOCS_URL}/docs/suppressions/#installing-the-extra"
+        hint = symbols_extra_install_hint()
+        assert url in hint, hint
+        assert f"`{symbols_extra_install_command()}`" in hint, hint
+        assert find_bare_installs(hint) == []
+        page = REPO_ROOT / "docs" / "content" / "docs" / "suppressions.md"
+        assert "\n### Installing the extra\n" in page.read_text(encoding="utf-8")
 
 
 def _name_and_clauses(requirement: str) -> tuple[str, frozenset[str]]:
