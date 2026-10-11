@@ -214,3 +214,25 @@ def test_assemble_run_command_online_no_network_flag():
     """--network=none is NOT present when offline=False."""
     cmd = _assemble_run_command(**_base_assemble_kwargs(offline=False))
     assert "--network=none" not in cmd
+
+
+class TestTheInTreeToolOptInReachesTheContainer:
+    """The container's ASH makes the same in-tree decision as the host's."""
+
+    def env_values(self):
+        cmd = _assemble_run_command(**_base_assemble_kwargs())
+        return [cmd[i + 1] for i, a in enumerate(cmd) if a == "-e"]
+
+    def test_forwarded_when_the_scan_allows_it(self, monkeypatch, tmp_path):
+        from automated_security_helper.utils.subprocess_utils import scanning_tree
+
+        monkeypatch.setenv("ASH_ALLOW_IN_TREE_TOOLS", "1")
+        with scanning_tree(tmp_path):
+            assert "ASH_ALLOW_IN_TREE_TOOLS=1" in self.env_values()
+
+    def test_not_forwarded_otherwise(self, monkeypatch, tmp_path):
+        from automated_security_helper.utils.subprocess_utils import scanning_tree
+
+        monkeypatch.delenv("ASH_ALLOW_IN_TREE_TOOLS", raising=False)
+        with scanning_tree(tmp_path):
+            assert not [v for v in self.env_values() if "IN_TREE" in v]

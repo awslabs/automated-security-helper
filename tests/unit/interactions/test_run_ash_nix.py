@@ -6,6 +6,7 @@ local mode when Nix is absent all produce a scan that looks like it worked. Each
 gets an explicit test rather than being left to an end-to-end run to notice.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -153,11 +154,15 @@ class TestBuildNixCommand:
         # makes every first run fail with "experimental Nix feature ... is disabled".
         assert cmd.index("--extra-experimental-features") < cmd.index("develop")
 
-    def test_runs_ash_inside_the_shell_with_the_forwarded_args(self):
+    def test_runs_this_ash_inside_the_shell_with_the_forwarded_args(self):
+        """The inner scan is the interpreter running now, started by absolute path."""
         cmd = build_nix_command("path:/repo", ["scan", "--mode", "local"], "nix")
-        assert cmd[-4:] == ["ash", "scan", "--mode", "local"]
-        assert "--command" in cmd
-        assert cmd[cmd.index("--command") + 1] == "ash"
+        inner = cmd[cmd.index("--command") + 1 :]
+        assert inner[0] == sys.executable
+        assert Path(inner[0]).is_absolute()
+        assert inner[1] == "-c"
+        assert "automated_security_helper.cli.entrypoint" in inner[2]
+        assert inner[3:] == ["scan", "--mode", "local"]
 
     def test_flake_ref_is_passed_to_develop(self):
         cmd = build_nix_command("github:owner/repo/v1", ["scan"], "nix")
@@ -285,8 +290,44 @@ class TestRunAshNix:
 
         run_ash_nix()
         # sys.argv[0] is the executable and must not be forwarded as a scan argument.
-        assert "ash" == captured["cmd"][captured["cmd"].index("--command") + 1]
+        inner = captured["cmd"][captured["cmd"].index("--command") + 1 :]
+        assert inner[0] == sys.executable
+        assert "ash" not in inner
         assert "--quiet" in captured["cmd"]
+
+    def test_the_shell_gets_a_path_without_the_scanned_trees_entries(
+        self, monkeypatch, tmp_path
+    ):
+        """As every other child does; nix develop prepends its own packages to it."""
+        from automated_security_helper.utils import subprocess_utils
+        from automated_security_helper.utils.subprocess_utils import scanning_tree
+
+        repo = tmp_path / "repo"
+        (repo / ".venv" / "bin").mkdir(parents=True)
+        monkeypatch.delenv(ASH_IN_NIX_ENV_VAR, raising=False)
+        monkeypatch.delenv("ASH_ALLOW_IN_TREE_TOOLS", raising=False)
+        monkeypatch.setenv(ASH_NIX_FLAKE_REF_ENV_VAR, "path:/repo")
+        monkeypatch.setenv(
+            "PATH", os.pathsep.join([str(repo / ".venv" / "bin"), "/usr/bin"])
+        )
+        monkeypatch.setattr(
+            "automated_security_helper.interactions.run_ash_nix.find_executable",
+            lambda _: "/usr/bin/nix",
+        )
+        captured = {}
+        monkeypatch.setattr(
+            "automated_security_helper.interactions.run_ash_nix.subprocess.run",
+            lambda cmd, env=None, check=None, text=None: (
+                captured.update(env=env) or subprocess.CompletedProcess(cmd, 0)
+            ),
+        )
+        subprocess_utils.clear_find_executable_cache()
+
+        with scanning_tree(repo):
+            run_ash_nix(argv=["scan"])
+
+        assert captured["env"]["PATH"] == "/usr/bin"
+        assert captured["env"][ASH_IN_NIX_ENV_VAR] == "1"
 
 
 class TestRepoFlakeDir:

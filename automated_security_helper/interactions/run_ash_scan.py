@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import functools
 import json
 import logging
 import os
@@ -12,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
+    Any,
     Callable,
     Dict,
     List,
@@ -44,7 +46,6 @@ from automated_security_helper.core.enums import (
     ExecutionStrategy,
     ExportFormat,
     RunMode,
-    SandboxMode,
     ScannerStatus,
 )
 from automated_security_helper.core.exceptions import (
@@ -76,6 +77,10 @@ from automated_security_helper.utils.content_db_staleness import (
     stale_content_databases,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, escape_markup
+from automated_security_helper.utils.output_dir_links import (
+    OUTPUT_RESULT_FILES,
+    OUTPUT_WORKING_DIRS,
+)
 from automated_security_helper.utils.process_env import (
     apply_environ_overrides,
     restore_environ,
@@ -603,6 +608,23 @@ def incomplete_scanners(
     return listed
 
 
+def _failed_inputs_reason(failed_inputs: Sequence[Any], shown: int = 5) -> str:
+    """``could not convert 2 inputs: a.ipynb, b.ipynb``, naming at most ``shown``."""
+    paths = [
+        str(
+            getattr(item, "path", None)
+            or (item.get("path") if isinstance(item, dict) else None)
+            or "?"
+        )
+        for item in failed_inputs
+    ]
+    named = ", ".join(paths[:shown])
+    if len(paths) > shown:
+        named += f" and {len(paths) - shown} more"
+    noun = "input" if len(paths) == 1 else "inputs"
+    return f"could not convert {len(paths)} {noun}: {named}"
+
+
 def incomplete_converters(
     results: Optional[AshAggregatedResults],
 ) -> List[tuple[str, str]]:
@@ -614,12 +636,16 @@ def incomplete_converters(
     any verdict -- the scanners that ran reported PASSED on the targets they were
     handed, and nothing asked whether the targets that should have existed did.
 
-    Two conditions, read off the recorded row rather than re-derived:
+    Three conditions, read off the recorded row rather than re-derived:
 
     1. ``failure`` is set -- the converter raised, or was dropped by the plugin
        filter for a reason its own dependency check did not explain. ConvertPhase
        records both.
-    2. ``dependencies_satisfied`` is False -- its external tool was not available.
+    2. ``failed_inputs`` is not empty -- the converter ran, and some of its inputs
+       could not be converted: nbconvert exited non-zero on a notebook, or an
+       archive could not be extracted. Each one is a file the scanners never saw in
+       converted form, which is the same loss as condition 1 at a smaller scale.
+    3. ``dependencies_satisfied`` is False -- its external tool was not available.
 
     ``excluded`` is checked first and wins over both. It is the converter-side
     counterpart of a SKIPPED scanner: work the run was never meant to do, which is
@@ -628,8 +654,8 @@ def incomplete_converters(
     run that turns conversion off, which is a supported configuration.
 
     Read with ``getattr`` because a results file written by an older version carries
-    rows without ``failure``, and ``ash merge`` reads shard results from whatever
-    ASH produced each one.
+    rows without ``failure`` or ``failed_inputs``, and ``ash merge`` reads shard
+    results from whatever ASH produced each one.
 
     Args:
         results: The aggregated results, or None when the scan produced none.
@@ -647,8 +673,11 @@ def incomplete_converters(
         if getattr(row, "excluded", False):
             continue
         failure = getattr(row, "failure", None)
+        failed_inputs = list(getattr(row, "failed_inputs", None) or [])
         if failure:
             listed.append((name, str(failure)))
+        elif failed_inputs:
+            listed.append((name, _failed_inputs_reason(failed_inputs)))
         elif getattr(row, "dependencies_satisfied", True) is False:
             # An unavailable converter costs coverage only if it had inputs. The count
             # is established without its tool, which is what makes it answerable for a
@@ -725,7 +754,7 @@ def print_incompleteness_message(
             "everything they were given[/bold red]"
         )
         for _name, _status in incomplete_scanner_rows:
-            print(f"  [red]{_name}: {_status}[/red]")
+            print(f"  [red]{escape_markup(_name)}: {escape_markup(_status)}[/red]")
         print(
             "[yellow]ERROR means the scanner ran and failed; MISSING means its "
             "dependencies were unavailable; a target count means the scanner ran "
@@ -734,6 +763,7 @@ def print_incompleteness_message(
             "with --exclude-scanners, or drop --fail-on-incomplete-scanners to "
             "accept a partial scan.[/yellow]"
         )
+        _print_in_tree_refusals()
     elif incomplete_converter_rows:
         # Names the converter, because that is the actionable part -- the fix is to
         # install that converter's tool or accept the partial scan, and neither is
@@ -744,16 +774,44 @@ def print_incompleteness_message(
             "files they were given[/bold red]"
         )
         for _name, _reason in incomplete_converter_rows:
-            print(f"  [red]{_name}: {_reason}[/red]")
+            # Escaped: the reason names files, and rich reads "[x]" in a name such as
+            # "[x].ipynb" as markup and drops it.
+            print(f"  [red]{escape_markup(_name)}: {escape_markup(_reason)}[/red]")
         print(
-            "[yellow]A converter that did not run leaves its inputs unscanned, so "
-            "the scanners saw fewer files than this repository holds. Install the "
-            "converter's tool, disable the converter if its inputs are not wanted, "
-            "or drop --fail-on-incomplete-scanners to accept a partial scan. A "
-            "converter with nothing to convert never reports here.[/yellow]"
+            "[yellow]A converter that did not run, or could not convert some files, "
+            "leaves those inputs unscanned, so the scanners saw fewer files than "
+            "this repository holds. Install the converter's tool if it is missing, "
+            "fix or exclude the files it could not convert, disable the converter "
+            "if its inputs are not wanted, or drop --fail-on-incomplete-scanners to "
+            "accept a partial scan. A converter with nothing to convert never "
+            "reports here.[/yellow]"
         )
     elif not stale_database_records:
         print("[bold red]ERROR (1) Exiting due to exception during ASH scan[/bold red]")
+
+
+def _print_in_tree_refusals() -> None:
+    """Name the tools this scan found only inside its tree, which are MISSING rows.
+
+    "Install the missing tools" is the wrong advice for one that is installed, in
+    the repository's own .venv/bin or node_modules/.bin.
+    """
+    from automated_security_helper.utils.subprocess_utils import (
+        in_tree_refusals,
+        in_tree_remedy,
+    )
+
+    refused = in_tree_refusals()
+    if not refused:
+        return
+    named = ", ".join(
+        f"{command} ({path})" for command, path in sorted(refused.items())
+    )
+    message = (
+        f"Found only inside the scanned tree, so not run: {named}. To use them, "
+        f"{in_tree_remedy()}."
+    )
+    print(f"[yellow]{escape_markup(message)}[/yellow]")
 
 
 def unevaluated_rules(results: Optional[AshAggregatedResults]) -> List[str]:
@@ -1357,78 +1415,51 @@ def _scan_config_path(opts: ScanOptions, log_selection: bool = False) -> Optiona
     return _discovered_config_path(opts.source_dir, log_selection=log_selection)
 
 
-def _scan_sandbox_modes(opts: ScanOptions) -> List[SandboxMode]:
-    """The sandbox mode of each scan this run starts, resolved as that scan will be.
+class OutputDirRefusedExit(SystemExit):
+    """``sys.exit(1)`` for an output directory ASH will not use, with the reason.
 
-    A single-directory scan resolves through ``orchestrator.resolve_scan_config``
-    with the arguments ``_run_local_mode`` gives the orchestrator, trust
-    parameters included, so a config file the scanned repository or an MCP
-    client wrote cannot turn off a mode the operator set. In workspace mode each
-    active project's scan resolves its own config
-    (``workspace.execution._project_config_with_policy``), so each one counts.
-    Raises whatever those resolutions raise.
+    A ``SystemExit`` with code 1, so the CLI's exit code is what it was. ``found``
+    names the link and ``reason`` adds the command-line remedy; an in-process
+    caller (the MCP scan runner) reports ``found`` with a remedy of its own instead
+    of a bare "exited with code 1".
     """
-    if opts.workspace_plan is not None:
-        from automated_security_helper.workspace.execution import (
-            _project_config_with_policy,
-        )
 
-        settings = build_project_scan_settings(opts)
-        return [
-            SandboxMode(_project_config_with_policy(project, settings).sandbox.mode)
-            for project in opts.workspace_plan.active_projects
-        ]
-    from automated_security_helper.core.orchestrator import resolve_scan_config
-
-    config = resolve_scan_config(
-        config_path=_scan_config_path(opts),
-        source_dir=opts.source_dir,
-        config_overrides=opts.config_overrides,
-        config_base_gate=opts.config_base_gate,
-        trusted_config_path=opts.trusted_config_path,
-        untrusted_config=opts.untrusted_config,
-        client_overrides=opts.client_overrides,
-    )
-    return [SandboxMode(config.sandbox.mode)]
+    def __init__(self, found: str, reason: str):
+        super().__init__(1)
+        self.found = found
+        self.reason = reason
 
 
 def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
-    """Exit before a sandboxed scan writes through a symlinked output directory.
+    """Exit before ASH writes, clears or mounts its output through a link.
 
-    The logger opens ash.log in the output directory and the orchestrator clears
-    its subdirectories, both unsandboxed, so this has to run before either: the
-    per-scanner check in utils/sandbox/policy.py would only mark each scanner
-    MISSING after ASH had already written through the link. The check is cheap
-    and runs first; the config is resolved only for an output directory it
-    refuses, to learn whether the sandbox is on, and the same way the scan
-    resolves it (``_scan_sandbox_modes``): a mode only an operator source can
-    turn off is on here too. With every scan's sandbox off the output goes where
-    the operator sent it, as before. A config that does not resolve counts as
-    on, since that scan fails anyway. Container mode is left alone: the container
-    is the boundary there and runs its inner scan unsandboxed.
+    The logger opens ash.log in the output directory, the orchestrator and the
+    container and nix modes clear its working directories, and a sandbox mounts it,
+    so this runs before any of them, in every run mode and whatever the sandbox
+    mode. Refused, with the link named and --output-dir as the remedy: a component
+    below the scanned directory on the way to the output directory, the output
+    directory itself, each of ``analysis``, ``reports``, ``scanners`` and
+    ``converted`` under it, and the files ASH writes there by a fixed name. See
+    utils/output_dir_links.py, and
+    ASHScanOrchestrator._refuse_linked_output_dir, which makes the same refusal for
+    callers that do not come through here. A workspace project's own output tree is
+    checked by workspace/execution.py before it is created; here a workspace run's
+    ``projects`` and spool directories are checked with the rest.
     """
-    if opts.mode == RunMode.container:
-        return
-    from automated_security_helper.utils.sandbox.policy import (
-        SandboxUnavailable,
-        refuse_symlinked_output_dir,
+    from automated_security_helper.utils.output_dir_links import (
+        OutputDirLinkRefused,
+        refuse_linked_output_dir,
     )
 
     try:
-        refuse_symlinked_output_dir(opts.source_dir, opts.output_dir)
-        return
-    except SandboxUnavailable as refusal:
-        reason = str(refusal)
-    try:
-        if all(mode == SandboxMode.off for mode in _scan_sandbox_modes(opts)):
-            return
-    except Exception:  # noqa: BLE001 - an unresolvable config is reported by the scan
-        pass
-    print(
-        f"[bold red]ERROR (1) The scanner sandbox is on, and {escape_markup(reason)}. "
-        "Choose an output directory that is not reached through a symlink.[/bold red]"
-    )
-    sys.exit(1)
+        refuse_linked_output_dir(
+            opts.source_dir,
+            opts.output_dir,
+            workspace=opts.workspace_plan is not None,
+        )
+    except OutputDirLinkRefused as refusal:
+        print(f"[bold red]ERROR (1) {escape_markup(str(refusal))}[/bold red]")
+        raise OutputDirRefusedExit(refusal.found, str(refusal)) from refusal
 
 
 # ---------------------------------------------------------------------------
@@ -1477,20 +1508,13 @@ def _workspace_relative_file(opts: ScanOptions) -> Optional[str]:
     )
 
 
-# The output-directory entries a local scan clears before it starts, copied from the two
-# places the orchestrator clears them: ``ensure_directories`` rmtrees these four working
-# directories (core/orchestrator.py:418-425) and ``initialize`` unlinks these three files
-# (core/orchestrator.py:280-293). Both are gated there on ``existing_results_path is
-# None``, which is the exemption in ``_discard_prior_run_artifacts`` below.
-#
-# Named here rather than inlined because the point of the list is that it matches that
-# other list; a reader checking the claim needs to see the whole of both.
-_PRIOR_RUN_OUTPUT_DIRECTORIES = ("analysis", "reports", "scanners", "converted")
-_PRIOR_RUN_OUTPUT_FILES = (
-    "ash_aggregated_results.json",
-    "ash-ignore-report.txt",
-    "ash-scan-set-files-list.txt",
-)
+# The output-directory entries a local scan clears before it starts: the orchestrator's
+# ``ensure_directories`` rmtrees the working directories and its ``initialize`` unlinks
+# the result files, both gated on ``existing_results_path is None``, which is the
+# exemption in ``_discard_prior_run_artifacts`` below. One list for both, in
+# utils/output_dir_links.py, which also refuses a link at any of them.
+_PRIOR_RUN_OUTPUT_DIRECTORIES = OUTPUT_WORKING_DIRS
+_PRIOR_RUN_OUTPUT_FILES = OUTPUT_RESULT_FILES
 
 
 def _discard_prior_run_artifacts(opts: ScanOptions, logger) -> None:
@@ -1526,7 +1550,12 @@ def _discard_prior_run_artifacts(opts: ScanOptions, logger) -> None:
       single-project tree per project under ``projects/<key>/`` and only the unified
       top-level files are rewritten by the outer run, so a workspace scan that removed
       ``projects/`` would delete the per-project reports it is about to summarize.
+
+    The output directory is checked for links first, here beside the removals it
+    protects, although run_ash_scan has already checked it: an rmtree through a
+    linked ``reports`` deletes inside wherever it points.
     """
+    _refuse_symlinked_output_dir(opts)
     if opts.existing_results:
         # The one shape that legitimately consumes a file from before this invocation.
         # --use-existing resolves to a path in this directory and the inner scan is asked
@@ -2910,6 +2939,33 @@ def _filter_results_to_changed_files(
 # ---------------------------------------------------------------------------
 
 
+def _in_scanned_tree_from_arguments(run):
+    """Run ``run_ash_scan`` with its target registered as the scanned tree.
+
+    Before mode dispatch, so container mode's runtime lookup, nix mode's ``nix``
+    and workspace mode's projects are covered too: the source directory, or the
+    workspace root when a workspace plan is given.
+    """
+
+    @functools.wraps(run)
+    def wrapper(*args, **kwargs):
+        from automated_security_helper.utils.subprocess_utils import scanning_tree
+
+        plan = kwargs.get("workspace_plan")
+        source_dir = kwargs.get("source_dir")
+        if plan is not None:
+            root = Path(plan.workspace_root)
+        elif source_dir is not None:
+            root = Path(source_dir)
+        else:
+            root = Path.cwd()
+        with scanning_tree(root):
+            return run(*args, **kwargs)
+
+    return wrapper
+
+
+@_in_scanned_tree_from_arguments
 def run_ash_scan(
     source_dir: str | Path | None = None,
     output_dir: str | Path | None = None,

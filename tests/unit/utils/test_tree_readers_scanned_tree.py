@@ -285,3 +285,31 @@ class TestInlineSuppressionsInConvertedFiles:
                 "it is a symbolic link that resolves outside the scanned tree"
             )
         ]
+
+
+class TestRootGitignorePruning:
+    def test_a_root_gitignore_that_fails_part_way_prunes_nothing(self, layout):
+        """Rules parsed before the failing line are not used for pruning either."""
+        from unittest.mock import patch
+
+        from igittigitt import IgnoreParser
+
+        from automated_security_helper.utils.get_scan_set import (
+            _collect_ignorefiles_and_all_files,
+        )
+
+        tree, _, _ = layout
+        (tree / ".gitignore").write_text("vendor/\nbroken\n")
+        (tree / "vendor").mkdir()
+        (tree / "vendor" / "lib.py").write_text("x = 1\n")
+        real_add_rule = IgnoreParser.add_rule
+
+        def add_rule(self, pattern, base_path):
+            if pattern == "broken":
+                raise ValueError("malformed pattern")
+            return real_add_rule(self, pattern, base_path)
+
+        with patch.object(IgnoreParser, "add_rule", add_rule):
+            _, all_files = _collect_ignorefiles_and_all_files(str(tree))
+
+        assert any(Path(p).name == "lib.py" for p in all_files)

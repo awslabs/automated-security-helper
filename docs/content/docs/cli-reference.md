@@ -23,6 +23,7 @@ These parameters are available across multiple ASH commands:
 | `--ash-revision-to-install` | ASH branch or tag to install in the container image for usage during containerized scans | |  | `scan` |
 | `--base-ref` | Git ref to diff against when --changed-files-only is set. | | `ASH_BASE_REF` | `scan` |
 | `--allow-stale-content-db` / `--no-allow-stale-content-db` | Let the scan pass when a scanner's content database is past its declared age bound (for grype, 5 days after it was built), recording a warning in the log and the reports. Without it such a scan exits 1. Takes precedence over the `content_db_staleness` config value; see [Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database). | Unset: the `content_db_staleness` config value, then `fail` |  | `scan` |
+| `--allow-in-tree-tools` | Let ASH start scanners and other tools found inside the scanned directory, such as an activated in-repo `.venv/bin` or `node_modules/.bin`, and the scanner sandbox's own programs (`bwrap`, `firejail`, `readlink`, `true`). Without it such a tool is treated as missing and the scanner is reported MISSING with the in-tree path. Only this flag (also the `allow_in_tree_tools` key of `--cli-json-input`) and the environment variable, set to `1`, `true`, `yes` or `on`, turn it on, never a config file, and `ash mcp` never does; see [Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory). | Off | `ASH_ALLOW_IN_TREE_TOOLS` | `scan` |
 | `--sandbox` | Run every scanner subprocess in an OS-level sandbox: `auto`, `bwrap`, `firejail`, `landlock`, `sandbox-exec` or `off`. A scanner that cannot be sandboxed as requested is reported MISSING. Overrides the `sandbox.mode` config value; ignored in container mode. See [Scanner sandboxing](scanner-sandbox.md). | `off` (or `sandbox.mode`) |  | `scan` |
 | `--changed-files-only` | Limit the scan to files changed between the base branch and HEAD. | | `ASH_CHANGED_FILES_ONLY` | `scan` |
 | `--color` | Enable/disable colorized output | |  | `scan` |
@@ -31,7 +32,7 @@ These parameters are available across multiple ASH commands:
 | `--container-uid` | UID to use for the container user | |  | `scan` |
 | `--custom-build-arg` | Custom build arguments to pass to the container build | |  | `scan` |
 | `--custom-containerfile` | Path to a custom container definition (e.g. | |  | `scan` |
-| `--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | Exit 1 when a selected scanner did not complete (`ERROR` or `MISSING`). On by default; see [An incomplete scan is not a clean scan](#an-incomplete-scan-is-not-a-clean-scan). | | `--fail-on-incomplete-scanners` | `scan` |
+| `--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | Exit 1 when a selected scanner did not complete (`ERROR` or `MISSING`), or a converter could not convert some of its inputs. On by default; see [An incomplete scan is not a clean scan](#an-incomplete-scan-is-not-a-clean-scan). | | `--fail-on-incomplete-scanners` | `scan` |
 | `--formats` | The output formats to use (comma-separated). | |  | `scan` |
 | `--min-severity` | Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). | |  | `scan` |
 | `--progress` | Show progress of each job live in the console. Defaults to True. | |  | `scan` |
@@ -39,7 +40,7 @@ These parameters are available across multiple ASH commands:
 | `--runner` | Use the specified OCI runner instead of docker to run the containerized tools | | `OCI_RUNNER` | `scan` |
 | `--show-summary` | Show metrics table and results summary | |  | `scan` |
 | `--simple` | Simplified output mode with minimal logging | |  | `scan` |
-| `--output-dir`         | Path to store scan results                                 | `.ash/ash_output` | `ASH_OUTPUT_DIR`     | `scan`, `report`                     |
+| `--output-dir`         | Path to store scan results. Refused, whatever the sandbox mode, when it, a directory or file ASH writes in it, or a directory inside the scanned tree on the way to it is a symlink; see [Output directory](concepts.md#output-directory). | `.ash/ash_output` | `ASH_OUTPUT_DIR`     | `scan`, `report`                     |
 | `--config`, `-c`       | Path to ASH configuration file                             | `.ash/.ash.yaml`  | `ASH_CONFIG`         | `scan`, `config`, `plugin`           |
 | `--config-overrides`   | Override configuration values (can be used multiple times) |                   |                      | `scan`, `config`, `plugin`, `report` |
 | `--ash-plugin-modules` | List of Python modules to import containing ASH plugins    |                   | `ASH_PLUGIN_MODULES` | `scan`, `plugin`                     |
@@ -181,6 +182,7 @@ ash [options]
 | `--workspace-config`          | Path to the workspace policy file. Defaults to `ash-workspace.{yaml,yml,json}` in the workspace root or its `.ash` directory | None | `ASH_WORKSPACE_CONFIG` |
 | `--allow-missing-projects`    | Skip workspace projects that are absent or unreadable   | `False`               |                         |
 | `--dry-run`                   | Print the resolved workspace plan and exit without scanning | `False`           |                         |
+| `--allow-in-tree-tools`       | Let ASH start tools found inside the scanned directory; see Common Parameters | `False` | `ASH_ALLOW_IN_TREE_TOOLS` |
 
 ### Workspace Mode
 
@@ -433,7 +435,7 @@ ash merge --results <file-or-dir> [--results ...] --output-dir <dir> [options]
 
 `--results` accepts a directory because CI artifact downloads land as directories. A directory is searched for `ash_aggregated_results.json` at `./`, `ash_output/`, and `.ash/ash_output/` in that order, and only then recursively. The recursive search must find exactly one file, so pointing `--results` at a parent holding every shard's artifact directory is refused with a message naming what it found — picking one of several would silently drop shards. Pass one `--results` per shard instead.
 
-The merged report does not depend on the order the shards are listed in. They are sorted by shard index before anything is merged, and the report's identity — its configuration, converter results, name, and description — comes from the lowest-indexed shard, because those are properties of the scan rather than of a shard.
+The merged report does not depend on the order the shards are listed in. They are sorted by shard index before anything is merged, and the report's identity — its configuration, name, and description — comes from the lowest-indexed shard, because those are properties of the scan rather than of a shard. Converter results are combined across shards instead, so a notebook or archive one shard could not convert still makes the merged report incomplete.
 
 The reporters and severity thresholds come from the scan's own configuration, carried through the shard results, rather than from a config file resolved on the collector host. The collector job need not have the source tree checked out at all, and a config file found there could disagree with the one the shards actually scanned under, which would move the verdict without moving the findings.
 
@@ -458,6 +460,8 @@ This one check is opt-in while the rest are unconditional. The others describe a
 
 An unstamped results file is refused rather than treated as "probably the only shard". A whole unsharded scan and one shard of five are indistinguishable without that record, and guessing would let `ash merge` accept a single scan as a complete merge of a five-way split.
 
+The output directory is checked the way `ash scan` checks it: when it, a directory or file ASH writes in it, or a directory below the current directory on the way to it is a symlink, the merge is refused with exit 1 before anything is written. See [Output directory](concepts.md#output-directory).
+
 The merged output carries no shard provenance of its own; it records `merged_shard_count` and `merged_shard_indices` instead. Copying the base shard's assignment through would make the merged file look like shard 0 of n, so a second `ash merge` over an output directory would accept it and report a whole scan as one fifth of itself.
 
 ### Merge Exit Codes
@@ -465,7 +469,7 @@ The merged output carries no shard provenance of its own; it records `merged_sha
 | Code | Meaning                                                                       |
 |------|-------------------------------------------------------------------------------|
 | 0    | The shards reconstructed one whole scan and the union has no actionable findings |
-| 1    | The merge was refused, or a scanner in the union did not complete — the scan's findings are unknown, not absent |
+| 1    | The merge was refused, or a scanner or converter in the union did not complete — the scan's findings are unknown, not absent |
 | 2    | The union has findings at or above `--min-severity`                            |
 
 Codes 1 and 2 are genuinely different situations. Code 2 means the merge succeeded and the union failed the threshold. Code 1 means no verdict was reached at all, which a CI gate must not read as a clean scan.
@@ -735,7 +739,7 @@ ash report [options]
 | Option               | Description                       | Default           | Environment Variable |
 |----------------------|-----------------------------------|-------------------|----------------------|
 | `--format`           | Report format to generate         | `markdown`        |                      |
-| `--output-dir`       | Directory containing scan results | `.ash/ash_output` | `ASH_OUTPUT_DIR`     |
+| `--output-dir`       | Directory containing scan results. Refused, with exit 1, when it, a directory or file ASH writes in it, or a directory below the current directory on the way to it is a symlink; see [Output directory](concepts.md#output-directory). | `.ash/ash_output` | `ASH_OUTPUT_DIR`     |
 | `--config`, `-c`     | Path to configuration file        | `.ash/.ash.yaml`  | `ASH_CONFIG`         |
 | `--config-overrides` | Override configuration values     |                   |                      |
 | `--log-level`        | Set the log level                 | `INFO`            |                      |
@@ -1004,6 +1008,11 @@ The MCP server provides a standardized interface for AI assistants to:
 - Manage multiple concurrent scans
 - Access scan result files and paths
 
+A scan started through the MCP server never runs a tool from inside the scanned or
+delivered directory: `ASH_ALLOW_IN_TREE_TOOLS` and `--allow-in-tree-tools` are not
+honored by `ash mcp`. See
+[Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory).
+
 ### MCP Server Features
 
 - **Real-time Progress Tracking**: Monitor scan progress with streaming updates
@@ -1095,6 +1104,7 @@ ASH supports additional environment variables that don't directly map to command
 | `ASH_VERBOSE`         | Enable verbose logging                                               |                                              |
 | `ASH_BASE_IMAGE_OVERRIDE` | Registry to fetch the Dockerfile's base image from                   | unset (the Dockerfile's own `ARG BASE_IMAGE`) |
 | `ASH_BASE_OCI_LAYOUT` | Verified OCI layout to build the base image from, with no registry call | unset |
+| `ASH_ALLOW_IN_TREE_TOOLS` | Let ASH start tools found inside the scanned directory, as `--allow-in-tree-tools` does: `1`, `true`, `yes` or `on`. Ignored by `ash mcp` | unset |
 
 ### `ASH_BASE_IMAGE_OVERRIDE`
 
@@ -1182,6 +1192,24 @@ how sharding divides work between executors: each shard excludes the scanners it
 siblings own, and those land as `SKIPPED`. Gating on `SKIPPED` would fail every
 shard of a healthy sharded scan.
 
+Converters count too. A notebook nbconvert could not convert (it exited non-zero,
+timed out or wrote no output) and a `.zip`, `.tar` or `.gz` file that is not an
+archive Python can read are recorded under `converter_results.<name>.failed_inputs`,
+and the scan exits 1 naming the converter and the files:
+
+```console
+ERROR (1) Exiting because conversion was incomplete: 1 converter(s) did not process the files they were given
+  jupyter: could not convert 1 input: notebooks/report.ipynb
+```
+
+Other errors are recorded too, as `<Type>: <message>`. A converter that crashed, and
+one whose tool is missing while it had inputs, also make the scan incomplete. A `.gz`
+that is one compressed file rather than a tarball, such as `data.json.gz`, is not an
+archive and is skipped. `ash merge` combines every shard's failed inputs, and
+workspace mode reports them per project in `incomplete_converters`. When a scanner is
+incomplete as well, the message names the scanners only; the converter failures are
+then in `ash.log` and in the results file.
+
 Narrowing a run selects rather than fails. Both `--scanners bandit` and
 `--exclude-scanners grype` record the scanners you left out as `SKIPPED`, so they
 do not trip the gate. That was not always true of `--scanners`: the scan phase used
@@ -1215,7 +1243,8 @@ Workspace mode applies the gate per project, so `ash --workspace` and
 `ash --source-dir <one project>` agree about whether that project's scan happened.
 A project that completed with a scanner at `ERROR` or `MISSING` is reported with
 `scan_incomplete: true` and the scanner named in `incomplete_scanners`, and the run
-exits `1`. `--no-fail-on-incomplete-scanners` applies per project as well, and it
+exits `1`. A converter that did not process its inputs is named in the project's
+`incomplete_converters` and fails the project the same way. `--no-fail-on-incomplete-scanners` applies per project as well, and it
 clears only the verdict: `incomplete_scanners` still names the scanners that did
 not run, because turning the gate off accepts the risk rather than asserting the
 scan was complete.

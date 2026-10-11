@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the BedrockSummaryReporter class."""
 
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -16,6 +17,7 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_re
     BedrockSummaryReporterConfigOptions,
 )
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
 
 AshConfig.model_rebuild()
 BedrockSummaryReporterConfig.model_rebuild()
@@ -837,6 +839,44 @@ class TestReport:
         assert main_report.exists()
         content = main_report.read_text()
         assert len(content) > 0
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    @patch("boto3.client")
+    @patch("boto3.Session")
+    def test_report_is_not_written_through_a_link_at_its_name(
+        self,
+        mock_session_cls,
+        mock_boto3_client,
+        mock_context,
+        sample_sarif_model,
+        bedrock_client_ok,
+        bedrock_runtime_ok,
+        temp_output_dir,
+        tmp_path,
+    ):
+        """``ash report`` writes into an existing reports/, so the name may be a link."""
+        session = MagicMock()
+        session.client.side_effect = lambda svc, **kw: {
+            "bedrock": bedrock_client_ok,
+            "bedrock-runtime": bedrock_runtime_ok,
+        }.get(svc, MagicMock())
+        mock_session_cls.return_value = session
+        mock_boto3_client.return_value = bedrock_client_ok
+        reports_dir = Path(temp_output_dir) / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        victim = tmp_path / "victim.md"
+        (reports_dir / "ash.bedrock.summary.md").symlink_to(victim)
+
+        reporter = BedrockSummaryReporter(context=mock_context)
+        reporter.config.options.output_markdown = True
+        try:
+            reporter.report(sample_sarif_model)
+        except OutputDirLinkRefused:
+            pass
+
+        assert not victim.exists(), "the summary was written through the link"
 
     @patch("boto3.client")
     @patch("boto3.Session")

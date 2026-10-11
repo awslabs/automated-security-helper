@@ -567,15 +567,7 @@ def get_logger(
         if log_format in ["JSONL", "BOTH"]:
             jsonl_log_file = Path(output_dir).joinpath(f"{name}.log.jsonl")
             jsonl_log_file.parent.mkdir(parents=True, exist_ok=True)
-            # Truncate the file if requested (default), otherwise append
-            if truncate_log:
-                jsonl_log_file.write_text("")  # Clear the file
-            else:
-                jsonl_log_file.touch(
-                    exist_ok=True
-                )  # Create if doesn't exist, but don't truncate
-
-            jsonl_file_handler = logging.FileHandler(jsonl_log_file.as_posix())
+            jsonl_file_handler = _log_file_handler(jsonl_log_file, truncate_log)
             logger.verbose("Logging to JSONL file: %s", jsonl_log_file.as_posix())
             jsonl_file_handler.setLevel(final_file_log_level)
             jsonl_file_handler.setFormatter(
@@ -599,15 +591,7 @@ def get_logger(
         if log_format in ["TABULAR", "BOTH"]:
             tab_log_file = Path(output_dir).joinpath(f"{name}.log")
             tab_log_file.parent.mkdir(parents=True, exist_ok=True)
-            # Truncate the file if requested (default), otherwise append
-            if truncate_log:
-                tab_log_file.write_text("")  # Clear the file
-            else:
-                tab_log_file.touch(
-                    exist_ok=True
-                )  # Create if doesn't exist, but don't truncate
-
-            tab_file_handler = logging.FileHandler(tab_log_file.as_posix())
+            tab_file_handler = _log_file_handler(tab_log_file, truncate_log)
             logger.verbose("Logging to tabular file: %s", tab_log_file.as_posix())
             tab_file_handler.setLevel(final_file_log_level)
             tab_file_handler.setFormatter(
@@ -618,6 +602,36 @@ def get_logger(
             logger.addHandler(tab_file_handler)
 
     return logger
+
+
+class _NoFollowFileHandler(logging.FileHandler):
+    """A FileHandler that does not follow a link at its file's name.
+
+    The file is opened with utils/output_dir_links.open_no_follow: a regular file is
+    appended to, and a link at the name is refused.
+    """
+
+    def _open(self):  # type: ignore[override]
+        from automated_security_helper.utils.output_dir_links import open_no_follow
+
+        return open_no_follow(
+            self.baseFilename,
+            append=True,
+            encoding=self.encoding,
+            errors=self.errors,
+        )
+
+
+def _log_file_handler(path: Path, truncate: bool) -> logging.FileHandler:
+    """A handler appending to ``path``, emptied first when ``truncate`` (the default).
+
+    Both opens refuse a link at the name; see utils/output_dir_links.open_no_follow.
+    """
+    from automated_security_helper.utils.output_dir_links import open_no_follow
+
+    if truncate:
+        open_no_follow(path).close()
+    return _NoFollowFileHandler(path.as_posix(), mode="a")
 
 
 ASH_LOGGER: ASHLogger = logging.getLogger("ash")  # type: ignore[assignment]

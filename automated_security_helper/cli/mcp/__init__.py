@@ -560,6 +560,13 @@ def mcp_command(
         f"Starting MCP server with transport={transport}, log level={log_level_value}"
     )
 
+    # Before any transport starts: MCP scans never run a tool from inside a scanned
+    # tree, whatever ASH_ALLOW_IN_TREE_TOOLS says. See MCP_HONORS_IN_TREE_OPT_IN.
+    from automated_security_helper.cli.mcp_server import MCP_HONORS_IN_TREE_OPT_IN
+    from automated_security_helper.utils.subprocess_utils import honor_in_tree_opt_in
+
+    honor_in_tree_opt_in(MCP_HONORS_IN_TREE_OPT_IN)
+
     # Initialize and start the MCP server with comprehensive error handling
     try:
         if transport == "stdio":

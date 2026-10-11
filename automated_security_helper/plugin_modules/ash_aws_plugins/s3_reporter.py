@@ -19,6 +19,7 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.output_dir_links import open_no_follow
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     retry_with_backoff,
 )
@@ -244,7 +245,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             )
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(output_path, "w", encoding="utf-8") as f:
+            with open_no_follow(output_path) as f:
                 f.write(output_content)
 
             # What ReportPhase writes to reports/ash.s3.json: a receipt for the

@@ -184,6 +184,60 @@ def relative_display(path: PathLike, root: PathLike) -> str:
     return "/".join(below[1])
 
 
+def is_inside_tree(path: PathLike, root: PathLike) -> bool:
+    """Whether ``path`` is in the tree at ``root``, as written or once resolved.
+
+    For a file ASH found some other way than through the scan set, such as an
+    executable on PATH. Inside if any of these is at or below the root: the path
+    as given; the path with its directory resolved; its real path. Or if the root
+    is one of its parents by device and inode, as named or resolved, which covers
+    spellings that differ only in case on a case-insensitive volume, and macOS's
+    ``/var`` for ``/private/var``. Components are compared through
+    ``os.path.normcase``.
+    """
+    if _below(path, root) is not None:
+        return True
+    named = _absolute(path)
+    real_root = Path(os.path.realpath(root))
+    # As named, with its directory resolved, and fully resolved: a link on PATH
+    # whose directory is a link into the tree, and a file in the tree that is
+    # itself a link elsewhere, are both in the tree.
+    for spelling in (
+        Path(os.path.realpath(named.parent)) / named.name,
+        Path(os.path.realpath(named)),
+    ):
+        if _starts_with(spelling, real_root):
+            return True
+    return _has_ancestor_file(named, root) or _has_ancestor_file(
+        Path(os.path.realpath(named)), root
+    )
+
+
+def _has_ancestor_file(path: Path, root: PathLike) -> bool:
+    """Whether ``root`` is ``path`` or one of its parents, by device and inode.
+
+    For spellings the comparisons by name miss: on a case-insensitive volume, which
+    macOS uses by default, ``/Users/me/Repo`` and ``/users/me/repo`` are one
+    directory, and ``normcase`` folds case only on Windows. A filesystem that
+    reports no inode numbers answers False rather than matching everything.
+    """
+    try:
+        root_stat = os.stat(root)
+    except OSError:
+        return False
+    if not root_stat.st_ino:
+        return False
+    identity = (root_stat.st_dev, root_stat.st_ino)
+    for candidate in (path, *path.parents):
+        try:
+            found = os.stat(candidate)
+        except OSError:
+            continue
+        if (found.st_dev, found.st_ino) == identity:
+            return True
+    return False
+
+
 def _split_below_root(path: PathLike, root: PathLike) -> Tuple[Path, Tuple[str, ...]]:
     """The root to anchor at, and the components of ``path`` below it.
 

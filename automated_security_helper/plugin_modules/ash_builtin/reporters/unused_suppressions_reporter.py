@@ -16,6 +16,7 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.utils.output_dir_links import open_no_follow
 from automated_security_helper.models.core import (
     PACKAGE_SUPPRESSION_FIELDS,
     AshSuppression,
@@ -167,7 +168,7 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                 report_dir = Path(self.context.output_dir) / "reports"
                 report_dir.mkdir(parents=True, exist_ok=True)
                 markdown_file = report_dir / "ash.unused-suppressions.md"
-                with open(markdown_file, "w", encoding="utf-8") as f:
+                with open_no_follow(markdown_file) as f:
                     f.write(markdown_output)
 
             # Return JSON as the primary output

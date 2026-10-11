@@ -558,6 +558,26 @@ class _AshLoggerSwitches:
 
 
 @pytest.fixture(autouse=True)
+def _no_scanned_tree_scope_outlives_its_test():
+    """A test that leaves a scanned-tree scope active fails, rather than its neighbors.
+
+    The scope (utils/subprocess_utils.scanning_tree) makes every later lookup in the
+    context refuse tools inside its tree, so one left behind changes what an
+    unrelated test finds. ``ash mcp`` also turns off the operator's opt-in for the
+    whole process, and a module-scoped fixture that starts the server would leave
+    it off for every later test on the worker, so each test starts and ends with
+    the process default, on.
+    """
+    from automated_security_helper.utils import subprocess_utils
+
+    subprocess_utils._opt_in_honored = True
+    yield
+    leaked = subprocess_utils._TREE_SCOPE.get()
+    subprocess_utils._opt_in_honored = True
+    assert leaked is None, f"a scanned-tree scope was left active: {leaked.roots}"
+
+
+@pytest.fixture(autouse=True)
 def _restore_ash_logger_switches():
     """Stop one test's logging side effects from blinding another's ``caplog``.
 

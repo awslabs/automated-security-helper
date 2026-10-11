@@ -429,7 +429,8 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
       "exit_code": 0,
-      "duration": 0.0
+      "duration": 0.0,
+      "missing_reason": null
     },
     "cdk-nag": {
       "status": "SKIPPED",
@@ -447,7 +448,8 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
       "exit_code": 0,
-      "duration": 0.0
+      "duration": 0.0,
+      "missing_reason": null
     },
     "bandit": {
       "status": "FAILED",
@@ -465,7 +467,8 @@
       "actionable_finding_count": 1,
       "suppressed_finding_count": 0,
       "exit_code": 0,
-      "duration": 1.25
+      "duration": 1.25,
+      "missing_reason": null
     },
     "cfn-nag": {
       "status": "ERROR",
@@ -483,7 +486,8 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
       "exit_code": 0,
-      "duration": 0.25
+      "duration": 0.25,
+      "missing_reason": null
     },
     "checkov": {
       "status": "FAILED",
@@ -501,7 +505,8 @@
       "actionable_finding_count": 3,
       "suppressed_finding_count": 0,
       "exit_code": 0,
-      "duration": 7.5
+      "duration": 7.5,
+      "missing_reason": null
     },
     "detect-secrets": {
       "status": "PASSED",
@@ -519,7 +524,8 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 1,
       "exit_code": 0,
-      "duration": 0.5
+      "duration": 0.5,
+      "missing_reason": null
     },
     "grype": {
       "status": "FAILED",
@@ -537,7 +543,8 @@
       "actionable_finding_count": 2,
       "suppressed_finding_count": 0,
       "exit_code": 0,
-      "duration": 3.0
+      "duration": 3.0,
+      "missing_reason": null
     },
     "semgrep": {
       "status": "PASSED",
@@ -555,7 +562,8 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
       "exit_code": 0,
-      "duration": 4.0
+      "duration": 4.0,
+      "missing_reason": null
     },
     "syft": {
       "status": "PASSED",
@@ -573,7 +581,8 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
       "exit_code": 0,
-      "duration": 2.0
+      "duration": 2.0,
+      "missing_reason": null
     }
   },
   "converter_results": {},

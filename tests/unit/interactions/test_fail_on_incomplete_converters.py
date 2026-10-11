@@ -52,7 +52,10 @@ from automated_security_helper.interactions.run_ash_scan import (
     incomplete_converters,
     print_incompleteness_message,
 )
-from automated_security_helper.models.asharp_model import ConverterStatusInfo
+from automated_security_helper.models.asharp_model import (
+    ConverterStatusInfo,
+    FailedInputInfo,
+)
 
 _MODULE = "automated_security_helper.interactions.run_ash_scan"
 
@@ -114,6 +117,55 @@ class TestIncompleteConvertersAreListed:
         listed = incomplete_converters(results)
         assert [name for name, _ in listed] == ["jupyter"]
         assert "dependencies" in listed[0][1]
+
+    def test_a_converter_with_failed_inputs_is_listed_with_them(self):
+        """It ran, but some inputs the scanners never saw in converted form."""
+        results = _results(
+            jupyter=ConverterStatusInfo(
+                converted_paths=["converted/ok.py"],
+                failed_inputs=[
+                    FailedInputInfo(
+                        path="[x].ipynb", reason="nbconvert exited with code 1"
+                    )
+                ],
+            )
+        )
+
+        assert incomplete_converters(results) == [
+            ("jupyter", "could not convert 1 input: [x].ipynb")
+        ]
+
+    def test_a_crash_is_reported_ahead_of_its_failed_inputs(self):
+        results = _results(
+            archive=ConverterStatusInfo(
+                failure="OSError: disk full",
+                failed_inputs=[FailedInputInfo(path="a.zip", reason="BadZipFile")],
+            )
+        )
+
+        assert incomplete_converters(results) == [("archive", "OSError: disk full")]
+
+    def test_failed_inputs_read_back_from_a_results_file_still_count(self):
+        """A merged or reloaded row carries plain data; the gate reads it the same."""
+        row = ConverterStatusInfo.model_validate(
+            {"failed_inputs": [{"path": "b.tar", "reason": "ReadError: truncated"}]}
+        )
+
+        assert incomplete_converters(_results(archive=row)) == [
+            ("archive", "could not convert 1 input: b.tar")
+        ]
+
+    def test_failed_inputs_fail_the_exit_code(self, tmp_path):
+        results = _results(
+            jupyter=ConverterStatusInfo(
+                failed_inputs=[FailedInputInfo(path="nb.ipynb", reason="timeout")]
+            )
+        )
+
+        gate_on = _opts(tmp_path, fail_on_incomplete_scanners=True)
+        gate_off = _opts(tmp_path, fail_on_incomplete_scanners=False)
+        assert _exit_code(results, gate_on) == 1
+        assert _exit_code(results, gate_off) == 0
 
     @pytest.mark.parametrize(
         "row",
@@ -435,3 +487,41 @@ class TestTheConverterArmHasItsOwnExitMessage:
         out = capsys.readouterr().out
 
         assert "exception" in out.lower()
+
+
+def test_a_bracketed_file_name_is_printed_as_it_is(monkeypatch):
+    """Rich reads ``[x]`` as markup; a converter row names files like that."""
+    import io
+
+    from rich.console import Console
+
+    from automated_security_helper.interactions import run_ash_scan
+
+    buffer = io.StringIO()
+    console = Console(file=buffer, width=200, color_system=None)
+    monkeypatch.setattr(run_ash_scan, "print", lambda *args, **_: console.print(*args))
+
+    run_ash_scan.print_incompleteness_message(
+        [], [("jupyter", "could not convert 1 input: notebooks/[x].ipynb")]
+    )
+
+    assert "jupyter: could not convert 1 input: notebooks/[x].ipynb" in (
+        buffer.getvalue()
+    )
+
+
+def test_the_advice_covers_files_that_could_not_be_converted(monkeypatch):
+    """A corrupt archive is not fixed by installing a tool."""
+    from automated_security_helper.interactions import run_ash_scan
+
+    printed: list = []
+    monkeypatch.setattr(
+        run_ash_scan, "print", lambda *args, **_: printed.append(" ".join(args))
+    )
+
+    run_ash_scan.print_incompleteness_message(
+        [], [("archive", "could not convert 1 input: data.zip")]
+    )
+
+    advice = " ".join(printed)
+    assert "fix or exclude the files it could not convert" in advice

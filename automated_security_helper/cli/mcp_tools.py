@@ -37,6 +37,10 @@ from automated_security_helper.core.resource_management.exceptions import (
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.output_dir_links import (
+    WHY as OUTPUT_LINK_WHY,
+    OutputDirLinkRefused,
+)
 
 if TYPE_CHECKING:
     # Typing only: the runtime import stays local to the tools that need it.
@@ -45,6 +49,13 @@ if TYPE_CHECKING:
 # Configure module logger (without affecting global logging)
 # The MCP logging patch will ensure this logger is properly isolated
 _logger = ASH_LOGGER
+
+#: The remedy for a scan this server started: it writes to .ash/ash_output in the
+#: scanned directory, which the client cannot redirect.
+MCP_SCAN_OUTPUT_REMEDY = (
+    f"{OUTPUT_LINK_WHY} This server writes a scan's output to .ash/ash_output in the "
+    "scanned directory: replace the link there with a directory."
+)
 
 #: ``error_type`` of every refusal of a config input outside the permitted roots,
 #: whichever tool refused it. The same value ``run_ash_scan`` returns.
@@ -470,6 +481,15 @@ async def _run_scan_async(
             _logger.info(f"Scan {scan_id} completed successfully")
         else:
             error_message = f"ASH exited with code {e.code}"
+            # An output directory refused before the scan started says why, since
+            # the client cannot read the console it was printed to, and with a
+            # remedy an MCP client can act on: it has no --output-dir to pass.
+            found = getattr(e, "found", None)
+            if found:
+                error_message = (
+                    f"{error_message}: "
+                    f"{OutputDirLinkRefused(found, MCP_SCAN_OUTPUT_REMEDY)}"
+                )
             registry.finish_scan(scan_id, MCScanStatus.FAILED, error_message)
             _logger.error(f"Scan {scan_id} failed: {error_message}")
 

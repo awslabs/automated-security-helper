@@ -935,6 +935,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             )
             self.dependencies_satisfied = False
             return False
+        # Availability only. The node jsii starts is looked up again in the worker,
+        # outside the scanned tree; see cdk_nag_wrapper.run_cdk_nag_against_cfn_template.
         found = find_executable("node")
         return found is not None
 

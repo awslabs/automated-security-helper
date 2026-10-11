@@ -1,17 +1,15 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The pre-scan output directory check decides with the sandbox mode the scan uses.
+"""The pre-scan output directory check refuses a linked output directory whatever
+any config says.
 
 ``run_ash_scan._refuse_symlinked_output_dir`` runs before the logger opens ash.log
-in the output directory, so it reads the sandbox mode before any orchestrator
-exists. It used to resolve the config without the trust parameters the scan
-resolves with (``untrusted_config``, ``trusted_config_path``) and without the
-per-project resolution of workspace mode. A config file the scanned repository or
-an MCP client wrote could then set ``sandbox.mode: off`` and skip the refusal,
-while the scan, which may not lower the operator's mode, still ran sandboxed with
-its output written through the symlink. Here the check is held to the scan's own
-resolution: an operator source can turn it off, and nothing else can.
+in the output directory, so it runs before any orchestrator exists. It reads no
+config: a linked output directory is refused in every sandbox mode, so no config
+file, whether the scanned repository, an MCP client or the operator wrote it, can
+turn the refusal off. The scan's own resolution still carries the trust parameters
+(``untrusted_config``, ``trusted_config_path``).
 """
 
 from __future__ import annotations
@@ -71,7 +69,7 @@ def _refused(opts: ScanOptions, capsys: pytest.CaptureFixture) -> bool:
         assert exc.code == 1
         # rich wraps and colors the message; compare its words.
         words = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out).split())
-        assert "The scanner sandbox is on" in words and "is a symlink" in words
+        assert "is a symlink" in words and "whatever the sandbox mode" in words
         return True
     return False
 
@@ -115,7 +113,7 @@ class TestTheScannedTreeCannotSkipIt:
         assert _refused(opts, capsys)
 
 
-class TestAnOperatorSourceStillSkipsIt:
+class TestAnOperatorSourceDoesNotSkipItEither:
     def test_the_cli_flag(self, tree, capsys):
         # `--sandbox off` reaches the scan as this override.
         _write(tree.source / ".ash" / ".ash.yaml", _mode("auto"))
@@ -126,14 +124,14 @@ class TestAnOperatorSourceStillSkipsIt:
             trusted_config_path=str(tree.operator),
             config_overrides=["sandbox.mode=off"],
         )
-        assert not _refused(opts, capsys)
+        assert _refused(opts, capsys)
 
     def test_an_operator_config_file(self, tree, capsys):
         _write(tree.operator, _mode("off"))
         opts = ScanOptions(
             source_dir=tree.source, output_dir=tree.output, config=str(tree.operator)
         )
-        assert not _refused(opts, capsys)
+        assert _refused(opts, capsys)
 
     def test_the_trusted_config_path(self, tree, capsys):
         _write(tree.upload, _mode("off"))
@@ -145,15 +143,15 @@ class TestAnOperatorSourceStillSkipsIt:
             untrusted_config=True,
             trusted_config_path=str(tree.operator),
         )
-        assert not _refused(opts, capsys)
+        assert _refused(opts, capsys)
 
     def test_the_default_with_no_config_at_all(self, tree, capsys):
         opts = ScanOptions(source_dir=tree.source, output_dir=tree.output)
-        assert not _refused(opts, capsys)
+        assert _refused(opts, capsys)
 
 
 class TestWorkspaceMode:
-    """Each project resolves its own config, so each project's mode counts."""
+    """A workspace run is refused too, whatever each project's config says."""
 
     @staticmethod
     def _plan(root: Path, web_mode: str):
@@ -193,7 +191,7 @@ class TestWorkspaceMode:
         )
         assert _refused(opts, capsys)
 
-    def test_the_cli_flag_turns_every_project_off(self, tree, capsys):
+    def test_the_cli_flag_turning_every_project_off(self, tree, capsys):
         plan = self._plan(tree.source, web_mode="auto")
         _write(tree.operator, _mode("auto"))
         opts = ScanOptions(
@@ -203,15 +201,15 @@ class TestWorkspaceMode:
             workspace_plan=plan,
             config_overrides=["sandbox.mode=off"],
         )
-        assert not _refused(opts, capsys)
+        assert _refused(opts, capsys)
 
 
-def test_the_check_resolves_with_the_arguments_the_scan_resolves_with(
+def test_the_check_resolves_no_config_and_the_scan_keeps_its_trust_arguments(
     tree, capsys, monkeypatch
 ):
-    """One resolution, not two: the check and the orchestrator call the same
-    function with the same arguments, so a trust parameter added to one reaches
-    the other."""
+    """The check refuses without resolving any config, and the scan's own
+    resolution goes through ``orchestrator.resolve_scan_config`` with the trust
+    parameters."""
     from automated_security_helper.core import orchestrator as orchestrator_module
     from automated_security_helper.interactions.run_ash_scan import _run_local_mode
     from automated_security_helper.utils.log import ASH_LOGGER
@@ -241,16 +239,17 @@ def test_the_check_resolves_with_the_arguments_the_scan_resolves_with(
         untrusted_config=True,
         trusted_config_path=str(tree.operator),
     )
-    # A resolution that fails counts as on.
     assert _refused(opts, capsys)
+    assert seen == []
+    # With an output directory that is not a link the scan goes on to resolve.
+    opts.output_dir = tree.root / "out"
     with pytest.raises(SystemExit):
         _run_local_mode(opts, ASH_LOGGER)
-    check, scan = seen
-    assert Path(check.pop("source_dir")) == Path(scan.pop("source_dir"))
-    assert list(check.pop("config_overrides") or []) == list(
-        scan.pop("config_overrides") or []
-    )
-    assert check == scan
-    assert check["untrusted_config"] is True
-    assert check["trusted_config_path"] == str(tree.operator)
-    assert check["config_base_gate"] is gate
+    (scan,) = seen
+    assert Path(scan["source_dir"]) == tree.source
+    assert list(scan["config_overrides"] or []) == [
+        "global_settings.severity_threshold=HIGH"
+    ]
+    assert scan["untrusted_config"] is True
+    assert scan["trusted_config_path"] == str(tree.operator)
+    assert scan["config_base_gate"] is gate

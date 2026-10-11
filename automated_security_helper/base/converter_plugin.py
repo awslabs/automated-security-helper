@@ -11,11 +11,15 @@ from automated_security_helper.base.options import ConverterOptionsBase
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.asharp_model import RefusedInputInfo
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.models.asharp_model import (
+    FailedInputInfo,
+    RefusedInputInfo,
+)
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     open_in_scanned_tree,
+    relative_display,
 )
 
 
@@ -39,6 +43,9 @@ class ConverterPluginBase(PluginBase, Generic[T]):
     # into the converter's results row, which is what keeps a refused input visible in
     # the scan result rather than only in the log.
     refused_inputs: List[RefusedInputInfo] = Field(default_factory=list)
+    # Inputs convert() set out to convert and could not. Copied into the row the same
+    # way; the completeness gate counts them as lost coverage.
+    failed_inputs: List[FailedInputInfo] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def setup_paths(self) -> Self:
@@ -113,6 +120,23 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         self.refused_inputs.append(
             RefusedInputInfo(path=refusal.path, member=member, reason=refusal.reason)
         )
+
+    def record_failed_input(self, path: Path | str, reason: str) -> None:
+        """Log an input that could not be converted and keep it for the results row.
+
+        Args:
+            path: The input, as the scan set gave it.
+            reason: Why conversion failed, without the input's content.
+        """
+        # Recording a failure must not itself fail: with no context, the path as
+        # given is the best name there is.
+        display = (
+            relative_display(path, self.context.source_dir)
+            if self.context is not None
+            else Path(path).as_posix()
+        )
+        ASH_LOGGER.error(f"Could not convert '{display}': {reason}", extra=NO_MARKUP)
+        self.failed_inputs.append(FailedInputInfo(path=display, reason=reason))
 
     def candidate_input_count(self) -> int | None:
         """How many files this converter WOULD convert, or None if it cannot say.

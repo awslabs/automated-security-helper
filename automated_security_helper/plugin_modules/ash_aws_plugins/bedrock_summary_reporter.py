@@ -18,6 +18,7 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.output_dir_links import open_no_follow
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     get_fallback_model,
     validate_bedrock_model,
@@ -886,7 +887,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         reports_dir.mkdir(parents=True, exist_ok=True)
 
         output_path = reports_dir / opts.output_file
-        with open(output_path, "w", encoding="utf-8") as f:
+        with open_no_follow(output_path) as f:
             f.write(summary)
         ASH_LOGGER.info(f"Bedrock summary written to {output_path}")
 
@@ -908,7 +909,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 ),
             )
             exec_path = reports_dir / opts.output_executive_file
-            with open(exec_path, "w", encoding="utf-8") as f:
+            with open_no_follow(exec_path) as f:
                 f.write(f"# Executive Security Summary\n\n{exec_content}")
             ASH_LOGGER.info(f"Executive summary written to {exec_path}")
 
@@ -932,7 +933,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 ),
             )
             tech_path = reports_dir / opts.output_technical_file
-            with open(tech_path, "w", encoding="utf-8") as f:
+            with open_no_follow(tech_path) as f:
                 f.write(f"# Technical Security Analysis\n\n{tech_content}")
             ASH_LOGGER.info(f"Technical analysis written to {tech_path}")
 

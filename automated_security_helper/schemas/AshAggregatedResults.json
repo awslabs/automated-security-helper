@@ -1366,7 +1366,7 @@
         },
         "fail_on_incomplete_scanners": {
           "default": true,
-          "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). SKIPPED scanners are not selected and never trip this. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured.",
+          "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). SKIPPED scanners are not selected and never trip this. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Converters count too: one that crashed, one that could not convert some of its inputs, and one whose tool is missing while it had inputs make the scan exit non-zero the same way. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured.",
           "title": "Fail On Incomplete Scanners",
           "type": "boolean"
         },
@@ -4807,6 +4807,14 @@
           "title": "Excluded",
           "type": "boolean"
         },
+        "failed_inputs": {
+          "description": "Inputs this converter tried to convert and could not, so the scanners never saw what conversion would have produced from them. The completeness gate counts a converter with any as incomplete.",
+          "items": {
+            "$ref": "#/$defs/FailedInputInfo"
+          },
+          "title": "Failed Inputs",
+          "type": "array"
+        },
         "failure": {
           "anyOf": [
             {
@@ -7464,6 +7472,28 @@
         "type"
       ],
       "title": "ExternalReference",
+      "type": "object"
+    },
+    "FailedInputInfo": {
+      "additionalProperties": true,
+      "description": "One input a converter set out to convert and could not.",
+      "properties": {
+        "path": {
+          "description": "The input's path relative to the scanned tree, with '/' separators.",
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why it was not converted.",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "title": "FailedInputInfo",
       "type": "object"
     },
     "FairnessAssessment": {
@@ -16883,6 +16913,19 @@
           "default": 0,
           "title": "Finding Count"
         },
+        "missing_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why the scanner is MISSING, when ASH knows more than that its tool was not found: for example, that the tool was found only inside the scanned tree, which ASH does not run tools from by default.",
+          "title": "Missing Reason"
+        },
         "severity_counts": {
           "$ref": "#/$defs/ScannerSeverityCount",
           "default": {
@@ -21816,6 +21859,14 @@
           "title": "Finding Count",
           "type": "integer"
         },
+        "incomplete_converters": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Converter name to reason, for each converter of this project that lost coverage: it crashed, could not convert some of its inputs, or its tool was absent with inputs to convert. The same rows `ash --source-dir P` fails on. Populated whether or not the completeness gate is on, for the same reason incomplete_scanners is.",
+          "title": "Incomplete Converters",
+          "type": "object"
+        },
         "incomplete_scanners": {
           "description": "Scanners this project was asked to run that did not complete -- ERROR or MISSING. Populated whether or not the completeness gate is on, because an operator who turned the gate off has accepted the risk and has not asked to be told the scan was complete. Read through the unified metrics rather than off `scanners`, so a scanner the operator excluded on a host that also lacks its tool reads SKIPPED here rather than MISSING.",
           "items": {
@@ -21877,7 +21928,7 @@
         },
         "scan_incomplete": {
           "default": false,
-          "description": "Whether the two completeness facts above fail this project -- the incomplete scanners it names, or having run no scanner at all. Stored rather than derived from them for the same reason exceeds_threshold is: fail_on_incomplete_scanners can be off, in which case a project has scanners that did not run and still passes.",
+          "description": "Whether the completeness facts above fail this project -- the incomplete scanners or converters it names, or having run no scanner at all. Stored rather than derived from them for the same reason exceeds_threshold is: fail_on_incomplete_scanners can be off, in which case a project has scanners that did not run and still passes.",
           "title": "Scan Incomplete",
           "type": "boolean"
         },

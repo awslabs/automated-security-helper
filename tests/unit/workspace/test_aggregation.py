@@ -16,6 +16,7 @@ The three properties these tests exist to hold:
 """
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,7 @@ from automated_security_helper.workspace.aggregation import (
     rebase_run_for_project,
     to_workspace_uri,
 )
+from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 
 
@@ -868,6 +870,39 @@ class TestAggregatorOutput:
             output_path=f"projects/{key}",
             **kwargs,
         )
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    def test_the_unified_file_is_not_written_through_a_link(self, tmp_path):
+        plan = _plan(tmp_path, "api")
+        output = tmp_path / "out"
+        output.mkdir()
+        victim = tmp_path / "victim.json"
+        (output / "ash_aggregated_results.json").symlink_to(victim)
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=output)
+        aggregator.add(self._outcome("api"), _run(_result()), plan.projects[0])
+
+        with pytest.raises(OutputDirLinkRefused):
+            aggregator.write(exit_code=0, wall_clock_seconds=1.0)
+
+        assert not victim.exists()
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    def test_a_spool_file_is_not_written_through_a_link(self, tmp_path):
+        plan = _plan(tmp_path, "api")
+        spool = tmp_path / "out" / ".workspace-spool"
+        spool.mkdir(parents=True)
+        victim = tmp_path / "victim.json"
+        (spool / "api.run.json").symlink_to(victim)
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
+
+        with pytest.raises(OutputDirLinkRefused):
+            aggregator.add(self._outcome("api"), _run(_result()), plan.projects[0])
+
+        assert not victim.exists()
 
     def test_the_unified_file_parses_as_json(self, tmp_path):
         """The writer streams rather than dumping one object, so this is not free."""

@@ -223,10 +223,11 @@
       │ inspect, use_existing, version, mode, python_based_plugins_only, show_summary, quiet, log_level, │
       │ config, verbose, debug, color, fail_on_findings, fail_on_incomplete_scanners,                    │
       │ allow_stale_content_db, simple, ignore_suppressions, min_severity, compact_report,               │
-      │ changed_files_only, base_ref, shard_index, shard_count, workspace, workspace_config,             │
-      │ allow_missing_projects, dry_run, build, run, force, oci_runner, build_target, container_uid,     │
-      │ container_gid, ash_revision_to_install, custom_containerfile, custom_build_arg; each option's    │
-      │ long flag spelling is accepted as well. Run with --generate-cli-skeleton for a template.         │
+      │ changed_files_only, base_ref, allow_in_tree_tools, shard_index, shard_count, workspace,          │
+      │ workspace_config, allow_missing_projects, dry_run, build, run, force, oci_runner, build_target,  │
+      │ container_uid, container_gid, ash_revision_to_install, custom_containerfile, custom_build_arg;   │
+      │ each option's long flag spelling is accepted as well. Run with --generate-cli-skeleton for a     │
+      │ template.                                                                                        │
       ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
   
     ''',
@@ -242,8 +243,9 @@
       ERROR (1) Exiting because conversion was incomplete: 1 converter(s) did not process the files they
       were given
         jupyter: dependencies unavailable, so it never ran
-      A converter that did not run leaves its inputs unscanned, so the scanners saw fewer files than this
-      repository holds. Install the converter's tool, disable the converter if its inputs are not wanted,
+      A converter that did not run, or could not convert some files, leaves those inputs unscanned, so the
+      scanners saw fewer files than this repository holds. Install the converter's tool if it is missing,
+      fix or exclude the files it could not convert, disable the converter if its inputs are not wanted,
       or drop --fail-on-incomplete-scanners to accept a partial scan. A converter with nothing to convert
       never reports here.
   

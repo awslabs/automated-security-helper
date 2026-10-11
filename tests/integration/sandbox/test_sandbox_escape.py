@@ -572,12 +572,18 @@ def test_an_output_directory_reached_through_a_link_in_the_tree_is_refused(
     assert not listeners.received
 
 
-def test_with_the_sandbox_off_a_linked_output_directory_is_still_used(
+def test_with_the_sandbox_off_a_linked_output_directory_in_the_tree_is_refused_too(
     tmp_path, listeners
 ):
-    """Only a sandboxed scan is refused; unsandboxed, the operator chose the path."""
+    """With the sandbox off too: ASH clears subdirectories of the output directory.
+
+    The operator chose ``build/ash``; where ``build`` points is the tree's. See
+    core/orchestrator.py, _refuse_linked_output_dir.
+    """
     target = tmp_path / "host-dir"
     target.mkdir()
+    (target / "keep.txt").write_text("original\n")
+    before = _snapshot(target)
     outcomes, _, result = _scan(
         tmp_path,
         listeners,
@@ -587,8 +593,10 @@ def test_with_the_sandbox_off_a_linked_output_directory_is_still_used(
             target, target_is_directory=True
         ),
     )
-    assert outcomes is not None, (result.stdout + result.stderr)[-4000:]
-    assert (target / "ash" / "ash_aggregated_results.json").is_file()
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode != 0, output[-4000:]
+    assert "is a symlink" in output, output[-4000:]
+    assert _snapshot(target) == before, "the scan changed the link's target"
 
 
 @pytest.mark.parametrize("backend", BACKENDS)

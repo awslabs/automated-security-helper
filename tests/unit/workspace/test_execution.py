@@ -94,6 +94,7 @@ class FakeOrchestrator:
     def execute_scan(self, phases=None):
         from automated_security_helper.models.asharp_model import (
             AshAggregatedResults,
+            ConverterStatusInfo,
             ScannerTargetStatusInfo,
         )
         from automated_security_helper.schemas.sarif_schema_model import SarifReport
@@ -136,6 +137,10 @@ class FakeOrchestrator:
         # The explicit spec wins, so a test can say a scanner did not complete.
         for name, info in (spec.get("scanner_results") or {}).items():
             model.scanner_results[name] = ScannerTargetStatusInfo(**info)
+        # Converter rows as ConvertPhase records them, for the converter half of
+        # the completeness verdict.
+        for name, row in (spec.get("converter_results") or {}).items():
+            model.converter_results[name] = ConverterStatusInfo.model_validate(row)
         return model
 
 
@@ -951,6 +956,98 @@ class TestScannerCompleteness:
 PROJECT_TIMEOUT = 3.0
 
 
+class TestConverterCompleteness:
+    """A project whose converter lost coverage is incomplete, as ``ash --source-dir P`` is.
+
+    ``_compute_exit_code`` asks ``incomplete_converters`` alongside the scanner
+    questions: a notebook that could not be converted, a converter that crashed, or
+    one whose tool was absent with inputs to convert. The workspace verdict asked
+    only the scanner questions, so the same project passed inside a workspace.
+    """
+
+    @staticmethod
+    def _project(tmp_path, converter_row):
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"bandit": _scanner("PASSED")},
+            "converter_results": {"jupyter": converter_row},
+        }
+        return plan
+
+    def test_a_failed_conversion_makes_the_project_incomplete(self, tmp_path):
+        plan = self._project(
+            tmp_path,
+            {"failed_inputs": [{"path": "nb.ipynb", "reason": "nbconvert timed out"}]},
+        )
+
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        # Control: every scanner completed and nothing was found.
+        assert entry.incomplete_scanners == []
+        assert entry.exceeds_threshold is False
+
+        assert entry.scan_incomplete is True
+        assert outcome.exit_code == WorkspaceExitCode.INTERNAL_ERROR
+        assert entry.incomplete_converters == {
+            "jupyter": "could not convert 1 input: nb.ipynb"
+        }
+
+    def test_a_crashed_converter_makes_the_project_incomplete(self, tmp_path):
+        plan = self._project(tmp_path, {"failure": "RuntimeError: boom"})
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+
+        assert entry.scan_incomplete is True
+        assert entry.incomplete_converters == {"jupyter": "RuntimeError: boom"}
+
+    def test_the_gate_off_still_reports_the_converter(self, tmp_path):
+        plan = self._project(
+            tmp_path,
+            {"failed_inputs": [{"path": "nb.ipynb", "reason": "timed out"}]},
+        )
+
+        outcome = _run(tmp_path, plan, fail_on_incomplete_scanners=False)
+        entry = outcome.payload.projects[0]
+
+        assert entry.scan_incomplete is False
+        assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+        assert list(entry.incomplete_converters) == ["jupyter"]
+
+    def test_an_absent_tool_with_nothing_to_convert_is_complete(self, tmp_path):
+        plan = self._project(
+            tmp_path, {"dependencies_satisfied": False, "candidate_inputs": 0}
+        )
+
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        assert entry.incomplete_converters == {}
+        assert entry.scan_incomplete is False
+        assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+
+    def test_the_mcp_coverage_for_the_project_names_the_converter(self, tmp_path):
+        """An MCP client polling the project is told why it is incomplete."""
+        from automated_security_helper.cli.mcp.workspace import _project_coverage
+        from automated_security_helper.core.resource_management.scan_tracking import (
+            coverage_has_gap,
+        )
+
+        plan = self._project(
+            tmp_path,
+            {"failed_inputs": [{"path": "nb.ipynb", "reason": "timed out"}]},
+        )
+        entry = _run(tmp_path, plan).payload.projects[0]
+
+        coverage = _project_coverage(entry)
+
+        assert coverage["incomplete_converters"] == [
+            {"converter": "jupyter", "reason": "could not convert 1 input: nb.ipynb"}
+        ]
+        assert coverage_has_gap(coverage)
+
+
 class TestFailureHandling:
     def test_a_failing_project_does_not_stop_the_others(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("broken", "MEDIUM"), ("fine", "MEDIUM"))
@@ -1702,3 +1799,21 @@ class TestOptionalOrchestratorFactory:
 
         signature = inspect.signature(execute_workspace)
         assert signature.parameters["orchestrator_factory"].default is None
+
+
+class TestProjectThreadsKeepTheWorkspaceScope:
+    def test_each_project_is_built_with_the_workspace_root_registered(self, tmp_path):
+        """Project threads start with a copy of the run's context, which holds it."""
+        from automated_security_helper.utils import subprocess_utils
+
+        root, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
+        seen: List[List[str]] = []
+
+        def factory(**kwargs: Any) -> "FakeOrchestrator":
+            seen.append(subprocess_utils.scanned_trees())
+            return FakeOrchestrator.create(**kwargs)
+
+        with subprocess_utils.scanning_tree(root):
+            execute_workspace(plan, _settings(tmp_path), orchestrator_factory=factory)
+
+        assert seen == [[str(root.absolute())], [str(root.absolute())]]

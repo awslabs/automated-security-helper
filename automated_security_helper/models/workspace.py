@@ -422,13 +422,27 @@ class WorkspaceProjectResult(BaseModel):
             ),
         ),
     ] = False
+    incomplete_converters: Annotated[
+        Dict[str, str],
+        Field(
+            default_factory=dict,
+            description=(
+                "Converter name to reason, for each converter of this project that "
+                "lost coverage: it crashed, could not convert some of its inputs, "
+                "or its tool was absent with inputs to convert. The same rows "
+                "`ash --source-dir P` fails on. Populated whether or not the "
+                "completeness gate is on, for the same reason incomplete_scanners is."
+            ),
+        ),
+    ]
     scan_incomplete: Annotated[
         bool,
         Field(
             False,
             description=(
-                "Whether the two completeness facts above fail this project -- the "
-                "incomplete scanners it names, or having run no scanner at all. "
+                "Whether the completeness facts above fail this project -- the "
+                "incomplete scanners or converters it names, or having run no "
+                "scanner at all. "
                 "Stored rather than derived from them for the same reason "
                 "exceeds_threshold is: fail_on_incomplete_scanners can be off, in "
                 "which case a project has scanners that did not run and still "

@@ -96,9 +96,14 @@ def scan(run_cli, monkeypatch):
 
 
 def _seen(result, shell: FakeNixShell) -> dict:
+    # The inner scan runs on this interpreter, whose path differs between hosts.
+    commands = [
+        ["<PYTHON>" if part == sys.executable else part for part in command]
+        for command in shell.commands
+    ]
     return {
         **result,
-        "nix_commands": shell.commands,
+        "nix_commands": commands,
         "ASH_IN_NIX": [env.get("ASH_IN_NIX") for env in shell.environments],
         "ASH_OFFLINE": [env.get("ASH_OFFLINE") for env in shell.environments],
     }

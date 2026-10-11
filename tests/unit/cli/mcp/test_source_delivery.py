@@ -8,6 +8,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import os
+import sys
 import zipfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -18,6 +20,16 @@ from automated_security_helper.cli.mcp import source_delivery as sd
 
 
 _SESSION = "session-test"
+
+#: What ``_git_executable`` answers in the tests that replace ``subprocess.run``, so
+#: the argv they assert is the same on every machine.
+GIT = "/opt/git/bin/git"
+_REAL_GIT_EXECUTABLE = sd._git_executable
+
+
+@pytest.fixture(autouse=True)
+def resolved_git(monkeypatch):
+    monkeypatch.setattr(sd, "_git_executable", lambda: GIT)
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +158,8 @@ class TestSetSourceGit:
             )
 
         assert target == tmp_path / _SESSION / "source"
-        assert called["cmds"][0][0:4] == ["git", "clone", "--depth", "1"]
+        # git by the absolute path it resolved to, never by name.
+        assert called["cmds"][0][0:4] == [GIT, "clone", "--depth", "1"]
         # "--" fences the url off from git's option parsing, so it sits after
         # the end-of-options marker rather than directly after the depth.
         assert called["cmds"][0][4] == "--"
@@ -181,7 +194,7 @@ class TestSetSourceGit:
             res = MagicMock()
             res.stdout = ""
             res.stderr = ""
-            if cmd[:2] == ["git", "clone"]:
+            if cmd[:2] == [GIT, "clone"]:
                 res.returncode = 0
             elif "checkout" in cmd:
                 res.returncode = 1
@@ -200,6 +213,80 @@ class TestSetSourceGit:
                     session_id=_SESSION,
                 )
         sd.clear_source(_SESSION, workspace_root=tmp_path)
+
+    def test_every_git_call_uses_the_resolved_path(self, tmp_path):
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            res = MagicMock()
+            res.returncode = 0
+            res.stdout = ""
+            res.stderr = ""
+            return res
+
+        with patch.object(sd.subprocess, "run", side_effect=fake_run):
+            sd.set_source_git(
+                url="https://example.com/foo.git",
+                ref="v1.2.3",
+                workspace_root=tmp_path,
+                session_id=_SESSION,
+            )
+
+        assert [cmd[0] for cmd in calls] == [GIT, GIT, GIT]
+        sd.clear_source(_SESSION, workspace_root=tmp_path)
+
+    def test_no_git_on_path_fails_before_anything_runs(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sd, "_git_executable", _REAL_GIT_EXECUTABLE)
+        empty = tmp_path / "empty-bin"
+        empty.mkdir()
+        monkeypatch.setenv("PATH", str(empty))
+        from automated_security_helper.utils import subprocess_utils
+
+        monkeypatch.setattr(
+            subprocess_utils, "path_independent_dirs", lambda: [tmp_path / "ash-bin"]
+        )
+        subprocess_utils.clear_find_executable_cache()
+        try:
+            with (
+                patch.object(sd.subprocess, "run") as run,
+                pytest.raises(RuntimeError, match="git was not found on PATH"),
+            ):
+                sd.set_source_git(
+                    url="https://example.com/foo.git",
+                    workspace_root=tmp_path,
+                    session_id=_SESSION,
+                )
+        finally:
+            subprocess_utils.clear_find_executable_cache()
+
+        run.assert_not_called()
+        assert not (tmp_path / _SESSION / "source").exists()
+
+    def test_git_resolves_to_an_absolute_path_on_path(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sd, "_git_executable", _REAL_GIT_EXECUTABLE)
+        bin_dir = tmp_path / "usr" / "bin"
+        bin_dir.mkdir(parents=True)
+        git = bin_dir / ("git.exe" if sys.platform == "win32" else "git")
+        git.write_text("#!/bin/sh\nexit 0\n")
+        git.chmod(0o755)
+        # A git in the working directory, which Windows would look in first.
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        (cwd / git.name).write_text("#!/bin/sh\nexit 0\n")
+        (cwd / git.name).chmod(0o755)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setenv("PATH", os.pathsep.join([".", str(bin_dir)]))
+        from automated_security_helper.utils import subprocess_utils
+
+        monkeypatch.setattr(
+            subprocess_utils, "path_independent_dirs", lambda: [tmp_path / "ash-bin"]
+        )
+        subprocess_utils.clear_find_executable_cache()
+        try:
+            assert sd._git_executable() == str(git)
+        finally:
+            subprocess_utils.clear_find_executable_cache()
 
 
 # ---------------------------------------------------------------------------

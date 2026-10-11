@@ -26,16 +26,33 @@ def _converter_display_name(plugin_instance: Any) -> str:
     return name or plugin_instance.__class__.__name__
 
 
-def _refused_inputs_field(plugin_instance: Any) -> Dict[str, Any]:
-    """The ``refused_inputs`` keyword for a converter's row, or nothing.
+def _input_record_fields(plugin_instance: Any) -> Dict[str, Any]:
+    """The ``refused_inputs`` and ``failed_inputs`` keywords for a converter's row.
 
-    Omitted when the converter refused nothing, so ``to_simple_dict``, which dumps
-    with ``exclude_unset``, renders a clean tree's row as it did before the field
+    Each is omitted when empty, so ``to_simple_dict``, which dumps with
+    ``exclude_unset``, renders a clean tree's row as it did before the fields
     existed. Read with ``getattr`` because a third-party converter need not derive
     from ``ConverterPluginBase``.
     """
-    refused = list(getattr(plugin_instance, "refused_inputs", None) or [])
-    return {"refused_inputs": refused} if refused else {}
+    fields: Dict[str, Any] = {}
+    for name in ("refused_inputs", "failed_inputs"):
+        records = list(getattr(plugin_instance, name, None) or [])
+        if records:
+            fields[name] = records
+    return fields
+
+
+def _could_not_convert(plugin_instance: Any) -> str:
+    """``"2 files could not be converted"`` for a converter's failed inputs, or ``""``.
+
+    For the progress row and the CONVERT_COMPLETE message. A converter whose inputs
+    all failed returns no paths, and without this it was reported as having found
+    no files to convert -- the message a tree without notebooks gets.
+    """
+    count = len(list(getattr(plugin_instance, "failed_inputs", None) or []))
+    if not count:
+        return ""
+    return f"{count} {'file' if count == 1 else 'files'} could not be converted"
 
 
 class ConvertPhase(EnginePhase):
@@ -362,13 +379,19 @@ class ConvertPhase(EnginePhase):
                     )
                     plugin_converted_paths.extend(convert_result)
                     converted_paths.extend(convert_result)
+                    not_converted = _could_not_convert(plugin_instance)
+                    also = f", {not_converted}" if not_converted else ""
 
                     # Update converter task to 100%
                     self.progress_display.update_task(
                         phase=ExecutionPhase.CONVERT,
                         task_id=converter_task,
                         completed=100,
-                        description=f"[green]({display_name}) Converted {len(convert_result)} files",
+                        description=(
+                            f"[{'yellow' if not_converted else 'green'}]"
+                            f"({display_name}) Converted {len(convert_result)} files"
+                            f"{also}"
+                        ),
                     )
 
                     # Notify converter complete
@@ -383,7 +406,10 @@ class ConvertPhase(EnginePhase):
                             converter_class=plugin_instance.__class__.__name__,
                             converted_files=convert_result,
                             file_count=len(convert_result),
-                            message=f"Converter {display_name} completed: {len(convert_result)} files converted",
+                            message=(
+                                f"Converter {display_name} completed: "
+                                f"{len(convert_result)} files converted{also}"
+                            ),
                         )
                     except Exception as event_error:
                         ASH_LOGGER.error(
@@ -393,14 +419,20 @@ class ConvertPhase(EnginePhase):
                     ASH_LOGGER.debug(
                         f"Converter {display_name} returned None or empty result"
                     )
-                    converters_with_no_files.append(display_name)
+                    not_converted = _could_not_convert(plugin_instance)
+                    if not not_converted:
+                        converters_with_no_files.append(display_name)
 
                     # Update converter task to 100%
                     self.progress_display.update_task(
                         phase=ExecutionPhase.CONVERT,
                         task_id=converter_task,
                         completed=100,
-                        description=f"[yellow]({display_name}) No files to convert",
+                        description=(
+                            f"[red]({display_name}) {not_converted}"
+                            if not_converted
+                            else f"[yellow]({display_name}) No files to convert"
+                        ),
                     )
 
                     # Notify converter complete (no files)
@@ -415,7 +447,10 @@ class ConvertPhase(EnginePhase):
                             converter_class=plugin_instance.__class__.__name__,
                             converted_files=[],
                             file_count=0,
-                            message=f"Converter {display_name} completed: no files to convert",
+                            message=(
+                                f"Converter {display_name} completed: "
+                                f"{not_converted or 'no files to convert'}"
+                            ),
                         )
                     except Exception as event_error:
                         ASH_LOGGER.error(
@@ -427,7 +462,7 @@ class ConvertPhase(EnginePhase):
                         dependencies_satisfied=plugin_instance.dependencies_satisfied,
                         excluded=not plugin_instance.config.enabled or False,
                         converted_paths=plugin_converted_paths,
-                        **_refused_inputs_field(plugin_instance),
+                        **_input_record_fields(plugin_instance),
                     )
                 )
 
@@ -468,7 +503,7 @@ class ConvertPhase(EnginePhase):
                         excluded=False,
                         failure=f"{type(e).__name__}: {e}",
                         converted_paths=plugin_converted_paths,
-                        **_refused_inputs_field(plugin_instance),
+                        **_input_record_fields(plugin_instance),
                     )
                 )
 
@@ -494,8 +529,10 @@ class ConvertPhase(EnginePhase):
         if not converted_paths:
             unproductive = [
                 f"{name} ({row.failure})"
-                for name, row in aggregated_results.converter_results.items()
                 if getattr(row, "failure", None)
+                else f"{name} ({len(row.failed_inputs)} could not be converted)"
+                for name, row in aggregated_results.converter_results.items()
+                if getattr(row, "failure", None) or getattr(row, "failed_inputs", None)
             ]
             if unproductive:
                 ASH_LOGGER.warning(

@@ -80,7 +80,10 @@ _ACTIVE: contextvars.ContextVar["SandboxScope | RefusingScope | None"] = (
 )
 
 _probe_lock = threading.Lock()
-_resolved: Dict[str, "SandboxBackend | SandboxUnavailable"] = {}
+# Keyed by mode and by the scanned-tree scope: which bwrap or firejail a probe finds
+# depends on the trees being scanned and the in-tree opt-in, so a scan of one tree
+# must not reuse a backend another scan's lookup chose.
+_resolved: Dict[Any, "SandboxBackend | SandboxUnavailable"] = {}
 
 
 def clear_backend_cache() -> None:
@@ -103,11 +106,14 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
     Probed once per process and mode, under a lock, because parallel scanner threads
     ask at the same moment and each probe starts a process.
     """
+    from automated_security_helper.utils.subprocess_utils import tree_scope_key
+
     mode_value = SandboxMode(mode).value
     if mode_value == SandboxMode.off.value:
         raise ValueError("resolve_backend called for sandbox mode 'off'")
+    cache_key = (mode_value, tree_scope_key())
     with _probe_lock:
-        cached = _resolved.get(mode_value)
+        cached = _resolved.get(cache_key)
         if cached is None:
             try:
                 if mode_value == SandboxMode.auto.value:
@@ -119,7 +125,7 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
                 )
             except SandboxUnavailable as e:
                 cached = e
-            _resolved[mode_value] = cached
+            _resolved[cache_key] = cached
     if isinstance(cached, SandboxUnavailable):
         raise cached
     return cached

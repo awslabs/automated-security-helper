@@ -1,6 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
+import sys
 from unittest.mock import MagicMock, patch
 
 import typer
@@ -232,3 +234,54 @@ def test_report_command_with_verbose(
     mock_results_class.model_validate_json.assert_called_once()
     # Verify reporter plugin was called
     mock_reporter_plugin.report.assert_called_once()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="creating symlinks needs privileges on Windows",
+)
+@pytest.mark.parametrize("linked", ["output", "reports"])
+@patch("automated_security_helper.cli.report.load_plugins")
+@patch("automated_security_helper.cli.report.resolve_config")
+@patch("automated_security_helper.cli.report.ash_plugin_manager")
+@patch("automated_security_helper.cli.report.PluginContext")
+@patch("automated_security_helper.cli.report.AshAggregatedResults")
+@patch("automated_security_helper.cli.report.print")
+def test_a_linked_output_or_reports_directory_is_refused(
+    mock_print,
+    _mock_results_class,
+    _mock_plugin_context,
+    mock_plugin_manager,
+    _mock_resolve_config,
+    _mock_load_plugins,
+    linked,
+    tmp_path,
+    monkeypatch,
+):
+    """Reporters write into reports/ here without a scan's clean-up first."""
+    host = tmp_path / "host"
+    host.mkdir()
+    results = {"metadata": {"summary_stats": {"actionable": 0}}}
+    output_dir = tmp_path / "out"
+    if linked == "output":
+        output_dir.symlink_to(host, target_is_directory=True)
+        (host / "ash_aggregated_results.json").write_text(json.dumps(results))
+    else:
+        output_dir.mkdir()
+        (output_dir / "ash_aggregated_results.json").write_text(json.dumps(results))
+        (output_dir / "reports").symlink_to(host, target_is_directory=True)
+    plugin = MagicMock()
+    plugin.config.name = "text"
+    plugin.report.return_value = "rendered"
+    plugin_class = MagicMock(return_value=plugin)
+    plugin_class.__name__ = "MockTextReporter"
+    mock_plugin_manager.plugin_modules.return_value = [plugin_class]
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(typer.Exit) as exited:
+        report_command(report_format="text", output_dir=str(output_dir))
+
+    assert exited.value.exit_code == 1
+    printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list if c.args)
+    assert "is a symlink" in printed and "--output-dir" in printed
+    plugin.report.assert_not_called()

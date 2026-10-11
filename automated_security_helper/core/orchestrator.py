@@ -31,6 +31,13 @@ from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.output_dir_links import (
+    OUTPUT_RESULT_FILES,
+    OUTPUT_WORKING_DIRS,
+    OutputDirLinkRefused,
+    refuse_linked_output_dir,
+)
+from automated_security_helper.utils.subprocess_utils import scanning_tree
 
 
 def resolve_scan_config(
@@ -45,9 +52,7 @@ def resolve_scan_config(
 ) -> AshConfig:
     """The config a single-directory scan of ``source_dir`` runs with.
 
-    The orchestrator resolves through here, and so does any check that has to
-    reach the same answer before the orchestrator exists, such as
-    ``run_ash_scan._refuse_symlinked_output_dir``. ``trusted_config_path`` and
+    The orchestrator resolves through here. ``trusted_config_path`` and
     ``untrusted_config`` decide whose sandbox settings stand, and with them
     ``resolve_config`` keeps the operator's sandbox mode as a floor. A resolution
     without them reads ``sandbox.mode`` from a file the scanned repository or an
@@ -326,7 +331,14 @@ class ASHScanOrchestrator(BaseModel):
         """
         if self._initialized:
             return
+        # Building the plugins already looks tools up, so source_dir is the scanned
+        # tree for this as well as for execute_scan; see
+        # utils/subprocess_utils.scanning_tree. Scoped to the call, so nothing is
+        # left registered if it raises.
+        with scanning_tree(self.source_dir):
+            self._initialize()
 
+    def _initialize(self) -> None:
         ASH_LOGGER.info(f"Initializing ASH v{get_ash_version()}")
 
         if self.resolved_config is not None:
@@ -350,8 +362,6 @@ class ASHScanOrchestrator(BaseModel):
             for warning in self.config._resolution_warnings:
                 ASH_LOGGER.warning(f"⚠️  CONFIG WARNING: {warning}")
 
-        self._refuse_symlinked_output_dir()
-
         ASH_LOGGER.verbose("Setting up working directories")
 
         self.ensure_directories()
@@ -361,16 +371,8 @@ class ASHScanOrchestrator(BaseModel):
             for old_file in [
                 file
                 for file in self.output_dir.glob("*.*")
-                if file.name
-                in [
-                    "ash_aggregated_results.json",
-                    "ash-ignore-report.txt",
-                    "ash-scan-set-files-list.txt",
-                    # Don't delete log files here - they're managed by the logger
-                    # which truncates them on initialization
-                    # "ash.log",
-                    # "ash.log.jsonl",
-                ]
+                # Not the logs: the logger truncates them when it opens them.
+                if file.name in OUTPUT_RESULT_FILES
             ]:
                 ASH_LOGGER.debug(f"Removing old file: {old_file}")
                 try:
@@ -477,38 +479,39 @@ class ASHScanOrchestrator(BaseModel):
         instance.initialize()
         return instance
 
-    def _refuse_symlinked_output_dir(self) -> None:
-        """Stop a sandboxed scan whose output directory runs through a symlink.
+    def _refuse_linked_output_dir(self) -> None:
+        """Refuse an output directory that ASH would write or clear through a link.
 
-        Before ensure_directories, which clears subdirectories of the output
-        directory, and before anything else ASH writes there unsandboxed. See
-        utils/sandbox/policy.py:refuse_symlinked_output_dir for what is refused.
-        With the sandbox off, where the output goes is the operator's choice.
+        Called first by ensure_directories, whatever the sandbox mode:
+        ensure_directories clears the working directories under the output
+        directory, initialize then removes files at its top level, and a sandbox
+        mounts it. Refused, with the link in the message and --output-dir as the
+        remedy: a component below the source directory on the way to it (the
+        repository's own, as the default ``.ash/ash_output`` is), the output
+        directory itself or a real path that differs from its spelling, each of
+        ``analysis``, ``reports``, ``scanners`` and ``converted``, and each file ASH
+        writes there by a fixed name. See utils/output_dir_links.py. Components above an
+        output directory outside the tree are the operator's spelling (``/tmp`` on
+        macOS is one) and are not examined.
+
+        Raises:
+            ASHValidationError: one of those is a symlink or a junction.
         """
-        from automated_security_helper.core.enums import SandboxMode
-        from automated_security_helper.utils.sandbox.policy import (
-            SandboxUnavailable,
-            refuse_symlinked_output_dir,
-        )
-
-        settings = getattr(self.config, "sandbox", None)
-        mode = getattr(settings, "mode", SandboxMode.off)
-        if SandboxMode(mode) == SandboxMode.off:
-            return
         try:
-            refuse_symlinked_output_dir(Path(self.source_dir), Path(self.output_dir))
-        except SandboxUnavailable as refusal:
-            raise ASHValidationError(
-                f"The scanner sandbox is on, and {refusal}. Choose an output "
-                "directory that is not reached through a symlink."
-            ) from refusal
+            refuse_linked_output_dir(self.source_dir, self.output_dir)
+        except OutputDirLinkRefused as refusal:
+            raise ASHValidationError(str(refusal)) from refusal
 
     def ensure_directories(self):
         """Ensure required directories exist in a thread-safe manner.
 
         Creates work_dir if it doesn't exist or if no_cleanup
-        is True, and output_dir if it doesn't exist.
+        is True, and output_dir if it doesn't exist. A working directory left by a
+        previous run is removed first. An output directory or working directory
+        that is a link is refused before anything here runs, so the clean-up cannot
+        delete inside wherever it points.
         """
+        self._refuse_linked_output_dir()
         try:
             # Create output directory if it doesn't exist
             ASH_LOGGER.debug(
@@ -522,14 +525,19 @@ class ASHScanOrchestrator(BaseModel):
                 path_reports_dir.mkdir(parents=True, exist_ok=True)
             else:
                 # Otherwise, set up all working directories
-                for working_dir in ["analysis", "reports", "scanners", "converted"]:
+                for working_dir in OUTPUT_WORKING_DIRS:
                     path_working_dir = self.output_dir.joinpath(working_dir)
                     if path_working_dir.exists() and self.existing_results_path is None:
                         ASH_LOGGER.verbose(
                             f"Cleaning up working directory from previous run: {path_working_dir.as_posix()}"
                         )
                         shutil.rmtree(path_working_dir)
-                    path_working_dir.mkdir(parents=True, exist_ok=True)
+                        # Without exist_ok, so anything at the name after the
+                        # removal makes this fail rather than be taken for the
+                        # directory.
+                        path_working_dir.mkdir()
+                    else:
+                        path_working_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             ASH_LOGGER.error(f"Error ensuring directories: {str(e)}")
             raise ASHValidationError(f"Failed to ensure directories: {str(e)}")
@@ -546,6 +554,12 @@ class ASHScanOrchestrator(BaseModel):
         Returns:
             AshAggregatedResults: The results of the scan.
         """
+        with scanning_tree(self.source_dir):
+            return self._execute_scan(phases)
+
+    def _execute_scan(
+        self, phases: List[ExecutionPhaseType] | None = None
+    ) -> AshAggregatedResults:
         if phases is None:
             phases = ["convert", "scan", "report"]
         ASH_LOGGER.verbose(f"Source directory: {self.source_dir}")

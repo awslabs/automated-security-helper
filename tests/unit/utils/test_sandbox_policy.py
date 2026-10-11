@@ -777,7 +777,7 @@ class TestSymlinkedOutputDirectory:
         refuse_symlinked_output_dir(source, link / "out")
 
     @pytest.mark.parametrize("mode", ["off", "landlock"])
-    def test_a_sandboxed_scan_stops_before_writing_through_it(self, tree, mode):
+    def test_a_scan_stops_before_writing_through_it_in_every_mode(self, tree, mode):
         # The orchestrator checks before ensure_directories, which would create
         # and clear subdirectories under the link's target.
         from automated_security_helper.core.exceptions import ASHValidationError
@@ -788,11 +788,9 @@ class TestSymlinkedOutputDirectory:
             source_dir=tree.source, output_dir=tree.source / "build" / "ash"
         )
         orchestrator.config = AshConfig(sandbox=SandboxConfig(mode=mode))
-        if mode == "off":
-            orchestrator._refuse_symlinked_output_dir()
-        else:
-            with pytest.raises(ASHValidationError, match="build is a symlink"):
-                orchestrator._refuse_symlinked_output_dir()
+        # Whatever the mode: the check is not the sandbox's alone.
+        with pytest.raises(ASHValidationError, match="build is a symlink"):
+            orchestrator._refuse_linked_output_dir()
         assert sorted(p.name for p in tree.target.iterdir()) == ["deep"]
 
     def test_every_spawn_policy_refuses_it(self, layout, tmp_path):

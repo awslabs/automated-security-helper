@@ -54,17 +54,33 @@ from automated_security_helper.utils.tool_downloads import CFN_NAG_GEM_VERSION
 #: the template cfn_nag_scan reads. Removed once cfn_nag_scan has run.
 _CFN_NAG_INPUT_DIR = ".ash-cfn-nag-input"
 
+#: The copy's name, less its extension. Fixed, so the path cfn_nag_scan is given is
+#: the same whatever the template is called, including on Windows, where
+#: cfn_nag_scan is the RubyGems wrapper cfn_nag_scan.bat.
+_CFN_NAG_INPUT_STEM = "template"
+
+#: The extensions the scanner selects templates by. The copy keeps the template's
+#: own, so cfn_nag sees a JSON template as JSON and a YAML one as YAML.
+_CFN_NAG_INPUT_SUFFIXES = (".json", ".yaml", ".yml")
+
 
 def _stage_cfn_nag_input(results_file_dir: Path, cfn_file: str, text: str) -> Path:
     """Write the template text ASH checked where cfn_nag_scan will read it.
 
     cfn_nag_scan opens its ``--input-path`` by name. Giving it the scanned-tree path
     would let a file replaced after ASH's check be read in its place; a copy of the
-    checked text cannot be. The copy keeps the template's file name, and is written
-    without following a link (``open_for_write``) because the results directory is
-    one a sandboxed scanner can write.
+    checked text cannot be. The copy is named ``template`` plus the template's
+    extension whatever the template is called (see ``_CFN_NAG_INPUT_STEM``), and is
+    written without following a link (``open_for_write``) because the results
+    directory is one a sandboxed scanner can write. Findings on it are pointed back
+    at the template by :func:`_restore_cfn_nag_uris`.
     """
-    staged = results_file_dir.joinpath(_CFN_NAG_INPUT_DIR, Path(cfn_file).name)
+    suffix = Path(cfn_file).suffix.lower()
+    if suffix not in _CFN_NAG_INPUT_SUFFIXES:
+        suffix = ".yaml"
+    staged = results_file_dir.joinpath(
+        _CFN_NAG_INPUT_DIR, f"{_CFN_NAG_INPUT_STEM}{suffix}"
+    )
     staged.parent.mkdir(parents=True, exist_ok=True)
     with open_for_write(staged) as handle:
         handle.write(text)

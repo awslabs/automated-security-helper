@@ -262,7 +262,13 @@ class TestCfnNag:
 
         scanner.scan(target=root, target_type=target_type)
 
-        assert [Path(p).name for p in cfn_nag_inputs(run)] == ["real.yaml"]
+        # The copy has a fixed name; its results directory is named after the
+        # template (get_normalized_filename).
+        inputs = cfn_nag_inputs(run)
+        assert [Path(p).name for p in inputs] == ["template.yaml"]
+        assert [Path(p).parent.parent.name.endswith("real__yaml") for p in inputs] == [
+            True
+        ]
         assert "Skipped t.yaml: it is a symbolic link" in " ".join(scanner.errors)
         warnings = [r.getMessage() for r in ash_records if r.levelno == logging.WARNING]
         assert any("Skipped t.yaml: it is a symbolic link" in w for w in warnings)
@@ -418,7 +424,7 @@ class TestCfnNagReadsTheCheckedText:
 
         ((staged, text),) = given
         assert staged != template
-        assert staged.name == template.name
+        assert staged.name == "template.yaml"
         assert text == template.read_text()
         assert not staged.exists()
         uris = [
@@ -426,6 +432,69 @@ class TestCfnNagReadsTheCheckedText:
             for r in report.runs[0].results
         ]
         assert uris == ["infra/role.yaml"]
+
+    @pytest.mark.parametrize(
+        "name, staged_name",
+        [
+            # Names with characters a Windows command line gives meaning to.
+            ("a&b&.yaml", "template.yaml"),
+            ("a|b^c.yml", "template.yml"),
+            ("queue.json", "template.json"),
+        ],
+    )
+    def test_the_copy_has_a_fixed_name_and_findings_keep_the_templates(
+        self, cfn_nag, plugin_context, name, staged_name
+    ):
+        import os
+
+        if os.name == "nt" and "|" in name:
+            pytest.skip("'|' is not a Windows filename")
+        scanner, run = cfn_nag
+        template = plugin_context.source_dir / name
+        if name.endswith(".json"):
+            template.write_text(
+                json.dumps({"Resources": {"Q": {"Type": "AWS::SQS::Queue"}}})
+            )
+        else:
+            template.write_text(VALID_TEMPLATE.replace(MARKER.lower(), "in-tree"))
+        given = []
+
+        def cfn_nag_scan(self, **kwargs):
+            command = kwargs["command"]
+            staged = Path(command[command.index("--input-path") + 1])
+            given.append(staged)
+            uri = os.path.relpath(staged, os.path.realpath(plugin_context.source_dir))
+            sarif = json.loads(CLEAN_SARIF)
+            sarif["runs"][0]["results"] = [
+                {
+                    "ruleId": "W35",
+                    "level": "warning",
+                    "message": {"text": "logging"},
+                    "locations": [
+                        {
+                            "physicalLocation": {
+                                "artifactLocation": {"uri": Path(uri).as_posix()},
+                                "region": {"startLine": 1},
+                            }
+                        }
+                    ],
+                }
+            ]
+            return {"stdout": json.dumps(sarif), "stderr": "", "returncode": 0}
+
+        run.side_effect = cfn_nag_scan
+
+        report = scanner.scan(target=plugin_context.source_dir, target_type="source")
+
+        (staged,) = given
+        assert staged.name == staged_name
+        # Nothing of the template's own name reaches the command line.
+        assert all(ch not in str(staged) for ch in "&|^")
+        uris = [
+            r.locations[0].physicalLocation.root.artifactLocation.uri
+            for r in report.runs[0].results
+        ]
+        assert uris == [name]
 
 
 class TestCdkNagWorkerCarriesARefusal:

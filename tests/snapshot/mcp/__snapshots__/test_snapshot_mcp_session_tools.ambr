@@ -801,6 +801,8 @@
           'error': None,
           'exceeds_threshold': False,
           'finding_count': 0,
+          'incomplete_converters': dict({
+          }),
           'incomplete_scanners': list([
           ]),
           'invalid_config': False,
@@ -828,6 +830,8 @@
           'error': None,
           'exceeds_threshold': False,
           'finding_count': 0,
+          'incomplete_converters': dict({
+          }),
           'incomplete_scanners': list([
           ]),
           'invalid_config': False,
@@ -855,6 +859,8 @@
           'error': None,
           'exceeds_threshold': False,
           'finding_count': 0,
+          'incomplete_converters': dict({
+          }),
           'incomplete_scanners': list([
           ]),
           'invalid_config': False,

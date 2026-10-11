@@ -35,6 +35,16 @@ from automated_security_helper.utils.suppression_matcher import (
 )
 
 
+def _is_plain_gzip(name: str, head: bytes) -> bool:
+    """A ``.gz`` that is gzip but not named as a tarball: a single compressed file."""
+    lowered = name.lower()
+    return (
+        lowered.endswith(".gz")
+        and not lowered.endswith(".tar.gz")
+        and head == b"\x1f\x8b"
+    )
+
+
 class ArchiveConverterConfigOptions(ConverterOptionsBase):
     pass
 
@@ -341,8 +351,21 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             else:
                                 _copy_tar_members(tar_ref, safe_members, target_path)
                     else:
-                        ASH_LOGGER.debug(
-                            f"Skipping unsupported archive format: {archive_file}"
+                        archive_handle.seek(0)
+                        if _is_plain_gzip(archive_file, archive_handle.read(2)):
+                            # data.json.gz: one compressed file, not an archive of
+                            # files. There is nothing to extract.
+                            ASH_LOGGER.debug(
+                                f"Skipping {archive_file}: a gzip-compressed file, "
+                                "not an archive"
+                            )
+                            continue
+                        # Named as an archive and not one zipfile or tarfile can
+                        # read: a corrupt or truncated archive, so lost coverage
+                        # rather than a file to pass over in the debug log.
+                        self.record_failed_input(
+                            archive_file,
+                            "it is not a zip or tar archive Python can read",
                         )
                         continue
 
@@ -351,6 +374,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             except IsADirectoryError:
                 ASH_LOGGER.debug(f"Skipping directory: {archive_file}")
             except Exception as e:
-                ASH_LOGGER.error(f"Error processing archive {archive_file}: {e}")
+                # Recorded, not only logged: the completeness gate reads
+                # failed_inputs, and an archive that could not be extracted is
+                # coverage lost.
+                self.record_failed_input(archive_file, f"{type(e).__name__}: {e}")
 
         return results

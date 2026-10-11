@@ -86,7 +86,7 @@ from pathlib import Path
 from typing import Dict, List, Literal, Optional, Sequence, Tuple
 from automated_security_helper.utils.process_env import snapshot_environ
 
-from automated_security_helper.utils.subprocess_utils import spawn_run
+from automated_security_helper.utils.subprocess_utils import find_executable, spawn_run
 
 Status = Literal["satisfied", "unsatisfied", "unverifiable"]
 
@@ -224,7 +224,7 @@ def find_tool_interpreter(executable: str) -> Optional[str]:
         return None
     interpreter = parts[0]
     if Path(interpreter).name == "env" and len(parts) > 1:
-        interpreter = shutil.which(parts[1]) or ""
+        interpreter = find_executable(parts[1]) or ""
     if "python" not in Path(interpreter).name.lower():
         return None
     return interpreter if Path(interpreter).is_file() else None
@@ -437,7 +437,7 @@ def _verify(
             f"`{executable} --version` exited {probe.returncode}: {excerpt}",
         )
 
-    uv = uv_executable or shutil.which("uv")
+    uv = uv_executable or find_executable("uv")
 
     nix_environment = find_nix_python_environment(executable)
     if nix_environment is not None:

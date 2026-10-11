@@ -32,6 +32,17 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 
 
+#: What ``_git_executable`` answers in these tests, so the argv is known exactly.
+GIT = "/opt/git/bin/git"
+
+
+@pytest.fixture(autouse=True)
+def resolved_git(monkeypatch):
+    monkeypatch.setattr(
+        "automated_security_helper.utils.get_scan_set._git_executable", lambda: GIT
+    )
+
+
 class TestGetChangedFiles:
     """Unit tests for the get_changed_files helper."""
 
@@ -44,8 +55,10 @@ class TestGetChangedFiles:
         ) as mock_run:
             result = get_changed_files("origin/main")
 
+        # git by the absolute path it resolved to, never by name: on Windows a name
+        # is looked for in the working directory, usually the scanned repo, first.
         mock_run.assert_called_once_with(
-            ["git", "diff", "--name-only", "origin/main...HEAD"],
+            [GIT, "diff", "--name-only", "origin/main...HEAD"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -64,6 +77,19 @@ class TestGetChangedFiles:
             result = get_changed_files()
 
         assert result == []
+
+    def test_returns_none_without_running_anything_when_git_is_not_found(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "automated_security_helper.utils.get_scan_set._git_executable",
+            lambda: None,
+        )
+        with patch(
+            "automated_security_helper.utils.get_scan_set.subprocess.run"
+        ) as mock_run:
+            assert get_changed_files("origin/main") is None
+        mock_run.assert_not_called()
 
     def test_returns_none_when_git_not_found(self):
         with patch(
@@ -102,7 +128,7 @@ class TestGetChangedFiles:
             result = get_changed_files("origin/develop")
 
         mock_run.assert_called_once_with(
-            ["git", "diff", "--name-only", "origin/develop...HEAD"],
+            [GIT, "diff", "--name-only", "origin/develop...HEAD"],
             capture_output=True,
             text=True,
             timeout=30,

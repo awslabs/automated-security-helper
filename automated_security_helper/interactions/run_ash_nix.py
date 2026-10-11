@@ -22,7 +22,10 @@ from typing import List, Optional
 
 from automated_security_helper.core.constants import ASH_REPO_URL
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.subprocess_utils import (
+    child_environ,
+    find_executable,
+)
 
 # Recursion guard, following the existing ASH_IN_CONTAINER precedent. The inner invocation
 # is rewritten to --mode local, so this should never be observed as already set; it is
@@ -138,12 +141,26 @@ def rewrite_mode_args(argv: List[str]) -> List[str]:
     return out
 
 
+#: How the shell starts the inner scan: this interpreter, by absolute path, running
+#: the same entry point as the ``ash`` script, so the inner scan is the ASH that is
+#: running now. ``sys.argv[0]`` is set so its messages name ``ash``, not ``-c``.
+_INNER_ENTRY_POINT = (
+    "import sys; sys.argv[0] = 'ash'; "
+    "from automated_security_helper.cli.entrypoint import main; main()"
+)
+
+
+def _this_ash() -> List[str]:
+    """The command that runs the ASH running now."""
+    return [sys.executable, "-c", _INNER_ENTRY_POINT]
+
+
 def build_nix_command(
     flake_ref: str,
     inner_args: List[str],
     nix_executable: str,
 ) -> List[str]:
-    """Assemble the `nix develop ... --command ash ...` invocation."""
+    """Assemble the `nix develop ... --command <this ASH> ...` invocation."""
     return [
         nix_executable,
         "--extra-experimental-features",
@@ -151,7 +168,7 @@ def build_nix_command(
         "develop",
         flake_ref,
         "--command",
-        "ash",
+        *_this_ash(),
         *inner_args,
     ]
 
@@ -190,7 +207,10 @@ def run_ash_nix(
     inner_args = rewrite_mode_args(list(argv if argv is not None else sys.argv[1:]))
     cmd = build_nix_command(resolved_ref, inner_args, nix_executable)
 
-    env = os.environ.copy()
+    # The environment every child of a scan gets: no PATH entry inside the scanned
+    # tree unless the operator allowed in-tree tools. nix develop prepends the
+    # shell's packages to this PATH.
+    env = child_environ()
     env[ASH_IN_NIX_ENV_VAR] = "1"
     # The flake already supplies every scanner, so stop the thirteen scanners that prefer
     # `uv tool install` from fetching their own copies and shadowing the pinned ones.

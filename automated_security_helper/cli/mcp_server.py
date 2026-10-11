@@ -574,7 +574,8 @@ async def run_ash_workspace_scan(
             rather than refusing the workspace.
         config_overrides: Optional list of `key=value` config overrides.
         output_dir: Where to write the workspace output tree. Defaults to
-            `<workspace root>/.ash/ash_output`.
+            `<workspace root>/.ash/ash_output`. Refused when it, a directory or
+            file ASH writes in it, or a project's `projects/<key>` is a symlink.
         scanners: Restrict every project to these scanner names.
         excluded_scanners: Exclude these scanners from every project. Takes
             precedence over `scanners`.
@@ -1845,8 +1846,19 @@ Scan Result Locations:
 Focus on actionable insights and practical remediation steps."""
 
 
+#: Decision point: whether ``ash mcp`` honors ASH_ALLOW_IN_TREE_TOOLS. It does not:
+#: an MCP client chooses what is scanned, including trees it delivers, so its scans
+#: never run a tool from inside a scanned tree, whatever the server's environment
+#: says. Scanners for MCP use are installed outside the repository. See
+#: utils/subprocess_utils.honor_in_tree_opt_in.
+MCP_HONORS_IN_TREE_OPT_IN = False
+
+
 def run_mcp_server():
     """Run the MCP server with improved error handling."""
+    from automated_security_helper.utils.subprocess_utils import honor_in_tree_opt_in
+
+    honor_in_tree_opt_in(MCP_HONORS_IN_TREE_OPT_IN)
     try:
         mcp.run()
     except KeyboardInterrupt:

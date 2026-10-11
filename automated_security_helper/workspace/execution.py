@@ -256,6 +256,7 @@ from __future__ import annotations
 
 import json
 import time
+import contextvars
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -283,12 +284,17 @@ from automated_security_helper.utils.get_scan_set import (
     git_repository_root,
 )
 from automated_security_helper.utils.atomic_write import write_text_atomically
+from automated_security_helper.utils.output_dir_links import (
+    OutputDirLinkRefused,
+    refuse_linked_output_dir,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.workspace.aggregation import (
     RESULTS_FILENAME,
     WorkspaceAggregator,
     count_actionable_results,
     has_finding_at_min_severity,
+    incomplete_converters_for_project,
     incomplete_scanners_for_project,
     no_scanner_ran_for_project,
 )
@@ -616,6 +622,20 @@ def _scan_one_project(
             f"no files changed against '{settings.base_ref}'",
         )
 
+    # Before the mkdir, which would follow a link at projects/ or projects/<key>.
+    # Checked from the workspace's output directory down, so both are examined, and
+    # the project's working directories with them. The orchestrator checks again
+    # from the project's own directory.
+    try:
+        refuse_linked_output_dir(settings.output_dir, project_output)
+    except OutputDirLinkRefused as refusal:
+        ASH_LOGGER.error(f"Project '{project.key}' was not scanned: {refusal}")
+        return _failed_outcome(
+            project,
+            settings,
+            str(refusal),
+            duration_seconds=time.monotonic() - started,
+        )
     project_output.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -743,6 +763,12 @@ def _scan_one_project(
     # under workspace/ passes shard_index or shard_count to an orchestrator, so a
     # guard for it could not fire and would only imply the case was handled.
     measured_nothing = no_scanner_ran_for_project(results)
+    # The converter question _compute_exit_code also asks: a notebook that could
+    # not be converted, or a converter that crashed, is coverage the scanners never
+    # had. Without it a project inside a workspace passed where `ash --source-dir P`
+    # exited 1. Not subject to the policy-scanner exclusion below, which is about
+    # scanners a policy added; converters are not added by policy.
+    incomplete_conversions = incomplete_converters_for_project(results)
     fail_on_incomplete = _resolve_fail_on_incomplete_scanners(settings, results)
     # The same policy_scanners_gate exclusion, applied to the completeness half.
     # Without it the flag is honoured for findings and ignored for the exit code:
@@ -817,11 +843,17 @@ def _scan_one_project(
         scanners=statuses,
         incomplete_scanners=incomplete,
         no_scanner_ran=measured_nothing,
+        incomplete_converters=incomplete_conversions,
         # A stale content database under `content_db_staleness: fail` fails the project
         # whatever fail_on_incomplete says, matching _compute_exit_code's own arm for it:
         # `ash --source-dir P` exits 1 on it, so P inside a workspace must not pass.
         scan_incomplete=(
-            (bool(gating_incomplete) or measured_nothing) and fail_on_incomplete
+            (
+                bool(gating_incomplete)
+                or measured_nothing
+                or bool(incomplete_conversions)
+            )
+            and fail_on_incomplete
         )
         or bool(stale_content_databases(results, enforced_only=True)),
         ceiling_unreachable_findings=unreachable,
@@ -1405,7 +1437,11 @@ def _run_projects(
     pool = ThreadPoolExecutor(max_workers=bound)
     try:
         futures: Dict[Future, ProjectPlan] = {
-            pool.submit(worker, project): project for project in active
+            # With a copy of this context: the scanned-tree scope the run entered
+            # (utils/subprocess_utils.scanning_tree) is per context, and a pool
+            # thread would otherwise start without it.
+            pool.submit(contextvars.copy_context().run, worker, project): project
+            for project in active
         }
         pending: Set[Future] = set(futures)
         timeout = settings.project_timeout

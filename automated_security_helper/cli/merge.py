@@ -172,11 +172,20 @@ from automated_security_helper.core.sharding import (
 from automated_security_helper.core.unified_metrics import (
     populate_metrics_from_unified_source,
 )
-from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    ConverterStatusInfo,
+    FailedInputInfo,
+    RefusedInputInfo,
+)
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.utils.atomic_write import write_text_atomically
-from automated_security_helper.utils.log import ASH_LOGGER, get_logger
+from automated_security_helper.utils.log import ASH_LOGGER, escape_markup, get_logger
+from automated_security_helper.utils.output_dir_links import (
+    OutputDirLinkRefused,
+    refuse_linked_output_dir,
+)
 
 #: The filename every ASH scan writes its aggregated results to. A ``--results``
 #: directory is searched for this name.
@@ -839,10 +848,11 @@ def merge_shard_results(
 
     Does not mutate its inputs; the base is a deep copy of the lowest-indexed
     shard. That shard supplies the report's identity -- name, description,
-    ``ash_config``, ``converter_results`` -- because those are properties of the
-    scan rather than of the shard, and taking them from the *lowest index* rather
-    than from the first ``--results`` argument makes the merged report
-    independent of the order the operator listed the shards in.
+    ``ash_config`` -- because those are properties of the scan rather than of the
+    shard, and taking them from the *lowest index* rather than from the first
+    ``--results`` argument makes the merged report independent of the order the
+    operator listed the shards in. ``converter_results`` rows are combined across
+    shards instead; see :func:`_merge_converter_rows`.
 
     Args:
         loaded: (path, results) pairs, in any order.
@@ -885,10 +895,17 @@ def merge_shard_results(
 
         for name, converter_result in shard.converter_results.items():
             # Converters are not sharded: every shard converts the whole tree, so
-            # the entries agree and the first one is as good as any. setdefault
-            # rather than assignment keeps the lowest-indexed shard's copy, which
-            # is what makes the result order-independent.
-            merged.converter_results.setdefault(name, converter_result)
+            # the rows normally agree. They are still each shard's own record, and
+            # one shard's runner can fail where another's succeeded -- nbconvert
+            # timing out, a tool missing -- so the rows are combined rather than
+            # the lowest-indexed one kept. Shards are visited in index order, so
+            # the result does not depend on the order they were passed in.
+            base = merged.converter_results.get(name)
+            merged.converter_results[name] = (
+                converter_result.model_copy(deep=True)
+                if base is None
+                else _merge_converter_rows(base, converter_result)
+            )
 
         for name, report in shard.additional_reports.items():
             merged.additional_reports.setdefault(name, report)
@@ -907,6 +924,75 @@ def merge_shard_results(
     # every count would still be the base shard's, so a merged report would show
     # the union's findings under one shard's totals.
     return populate_metrics_from_unified_source(aggregated_results=merged)
+
+
+def _merge_converter_rows(
+    base: ConverterStatusInfo, other: ConverterStatusInfo
+) -> ConverterStatusInfo:
+    """One converter's row for the union of two shards' rows.
+
+    Combined so that the completeness gate (``run_ash_scan.incomplete_converters``)
+    sees in the union whatever it would have seen in either shard:
+
+    * ``failure``: every distinct one, in shard order.
+    * ``failed_inputs`` and ``refused_inputs``: every shard's, listed once per path
+      (and per archive member for a refusal), first record kept.
+    * ``dependencies_satisfied``: False if it was False in either shard, with the
+      candidate count of the shards where it was. Only a count of 0 exempts an
+      unavailable converter, so 0 is kept only when every such shard reported 0,
+      and a missing count stays missing.
+    * ``excluded``: True only if both shards excluded it; a shard that ran it is
+      not overridden by one that did not.
+    * ``converted_paths``: the union, in order.
+
+    A field neither row set is left unset, so a simple dump of two agreeing rows is
+    the base row's dump. Neither input is modified.
+    """
+    update: Dict[str, Any] = {}
+    fields_set = base.model_fields_set | other.model_fields_set
+
+    failures = list(dict.fromkeys(f for f in (base.failure, other.failure) if f))
+    if failures:
+        update["failure"] = "; ".join(failures)
+
+    if not (base.dependencies_satisfied and other.dependencies_satisfied):
+        update["dependencies_satisfied"] = False
+        counts = [
+            row.candidate_inputs
+            for row in (base, other)
+            if not row.dependencies_satisfied
+        ]
+        if any(count is None for count in counts):
+            update["candidate_inputs"] = None
+        else:
+            update["candidate_inputs"] = max(c for c in counts if c is not None)
+    elif "candidate_inputs" in fields_set:
+        update["candidate_inputs"] = base.candidate_inputs
+
+    if "excluded" in fields_set:
+        update["excluded"] = base.excluded and other.excluded
+
+    failed: Dict[str, FailedInputInfo] = {}
+    for record in [*base.failed_inputs, *other.failed_inputs]:
+        failed.setdefault(record.path, record)
+    if failed:
+        update["failed_inputs"] = [r.model_copy() for r in failed.values()]
+
+    refused: Dict[Tuple[str, Optional[str]], RefusedInputInfo] = {}
+    for refusal in [*base.refused_inputs, *other.refused_inputs]:
+        refused.setdefault((refusal.path, refusal.member), refusal)
+    if refused:
+        update["refused_inputs"] = [r.model_copy() for r in refused.values()]
+
+    if "converted_paths" in fields_set:
+        update["converted_paths"] = list(
+            dict.fromkeys([*base.converted_paths, *other.converted_paths])
+        )
+
+    merged = base.model_copy(deep=True)
+    for key, value in update.items():
+        setattr(merged, key, value)
+    return merged
 
 
 def _has_sbom_components(cyclonedx: Any) -> bool:
@@ -1247,6 +1333,13 @@ def merge_command(
         raise typer.Exit(1)
 
     output_dir_path = _relocate_colliding_output_dir(Path(output_dir))
+    # The merged results and reports are written into the output directory, so a
+    # link there or at reports/ is refused as a scan refuses it.
+    try:
+        refuse_linked_output_dir(Path.cwd(), output_dir_path)
+    except OutputDirLinkRefused as refusal:
+        print(f"[red]{escape_markup(str(refusal))}[/red]")
+        raise typer.Exit(1)
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
     # The scan's own configuration, carried through the shard results, rather

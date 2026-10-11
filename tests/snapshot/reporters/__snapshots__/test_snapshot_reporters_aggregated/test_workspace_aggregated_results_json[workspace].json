@@ -34,6 +34,7 @@
           "npm-audit"
         ],
         "no_scanner_ran": false,
+        "incomplete_converters": {},
         "scan_incomplete": true,
         "ceiling_unreachable_findings": {},
         "skip_reason": null,
@@ -60,6 +61,7 @@
         },
         "incomplete_scanners": [],
         "no_scanner_ran": false,
+        "incomplete_converters": {},
         "scan_incomplete": false,
         "ceiling_unreachable_findings": {},
         "skip_reason": null,

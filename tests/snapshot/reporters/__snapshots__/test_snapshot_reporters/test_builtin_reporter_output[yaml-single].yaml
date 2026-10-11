@@ -2011,6 +2011,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 2
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 1
@@ -2027,6 +2028,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2043,6 +2045,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2059,6 +2062,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 4
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 1
@@ -2075,6 +2079,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2091,6 +2096,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 2
+    missing_reason: null
     severity_counts:
       critical: 1
       high: 0
@@ -2107,6 +2113,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2123,6 +2130,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 2
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2139,6 +2147,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0

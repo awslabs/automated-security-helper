@@ -161,6 +161,16 @@ from automated_security_helper.models.workspace import (
     WorkspaceResults,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.output_dir_links import (
+    WHY as OUTPUT_LINK_WHY,
+)
+from automated_security_helper.utils.output_dir_links import refuse_linked_output_dir
+
+#: The remedy for this tool's caller, which names the output tree with output_dir.
+MCP_WORKSPACE_OUTPUT_REMEDY = (
+    f"{OUTPUT_LINK_WHY} Pass output_dir with a directory that is not a link, or "
+    "replace the link with a directory."
+)
 from automated_security_helper.utils.process_env import (
     apply_environ_overrides,
     restore_environ,
@@ -683,10 +693,23 @@ def _prepare_project_outputs(
     single-directory tool. A failure to remove one is logged and not raised: a
     leftover file makes the progress monitor report a project complete early,
     which is worse than the alternative but not worth refusing a scan over.
+
+    Nothing is created through a link: the workspace's output directory and each
+    project's are checked first (utils/output_dir_links.py), and a link raises
+    OutputDirLinkRefused, a ValueError the caller reports.
     """
+    refuse_linked_output_dir(
+        plan.workspace_root,
+        settings.output_dir,
+        workspace=True,
+        remedy=MCP_WORKSPACE_OUTPUT_REMEDY,
+    )
     outputs: Dict[str, Path] = {}
     for project in plan.active_projects:
         project_output = Path(settings.output_dir) / PROJECTS_DIR_NAME / project.key
+        refuse_linked_output_dir(
+            settings.output_dir, project_output, remedy=MCP_WORKSPACE_OUTPUT_REMEDY
+        )
         project_output.mkdir(parents=True, exist_ok=True)
         if clean_output:
             stale = project_output / AGGREGATED_RESULTS_FILENAME
@@ -814,12 +837,12 @@ def _project_coverage(outcome: WorkspaceProjectResult) -> Dict[str, Any]:
 
     Built from the facts the project's outcome already carries, so a client
     polling a workspace project and one polling a single scan read the same keys.
-    ``incomplete_converters`` and ``unevaluated_rules`` are empty because a
-    project's outcome does not record them, and neither of them feeds
-    ``scan_incomplete``. ``stale_content_databases`` is empty for the first of
-    those reasons only: a stale database does fail the project, and the outcome
-    names its scanner in ``incomplete_scanners`` rather than carrying a record
-    of its own.
+    ``incomplete_converters`` has the shape ``ScanIncompleteness.to_payload``
+    gives it. ``unevaluated_rules`` is empty because a project's outcome does not
+    record it, and it does not feed ``scan_incomplete``.
+    ``stale_content_databases`` is empty for the first of those reasons only: a
+    stale database does fail the project, and the outcome names its scanner in
+    ``incomplete_scanners`` rather than carrying a record of its own.
     """
     statuses = outcome.scanners or {}
     rows = []
@@ -836,7 +859,10 @@ def _project_coverage(outcome: WorkspaceProjectResult) -> Dict[str, Any]:
     return {
         "incomplete_scanners": rows,
         "no_scanner_ran": bool(outcome.no_scanner_ran),
-        "incomplete_converters": [],
+        "incomplete_converters": [
+            {"converter": name, "reason": reason}
+            for name, reason in (outcome.incomplete_converters or {}).items()
+        ],
         "unevaluated_rules": [],
         "stale_content_databases": [],
     }

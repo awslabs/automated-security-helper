@@ -255,6 +255,20 @@ class ScannerTargetStatusInfo(BaseModel):
     suppressed_finding_count: int | None = 0
     exit_code: int | None = 0
     duration: float | None = 0.0
+    # Set only when a MISSING row has a reason better than "not installed": today,
+    # that its tool was found only inside the scanned tree. Left unset otherwise,
+    # so an exclude_unset dump of every other row is what it was.
+    missing_reason: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "Why the scanner is MISSING, when ASH knows more than that its tool "
+                "was not found: for example, that the tool was found only inside "
+                "the scanned tree, which ASH does not run tools from by default."
+            ),
+        ),
+    ] = None
 
     @property
     def total_duration(self) -> float:
@@ -320,6 +334,22 @@ class RefusedInputInfo(BaseModel):
         ),
     ] = None
     reason: Annotated[str, Field(description="Why the input was not read.")]
+
+
+class FailedInputInfo(BaseModel):
+    """One input a converter set out to convert and could not."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="allow")
+
+    path: Annotated[
+        str,
+        Field(
+            description=(
+                "The input's path relative to the scanned tree, with '/' separators."
+            )
+        ),
+    ]
+    reason: Annotated[str, Field(description="Why it was not converted.")]
 
 
 class ConverterStatusInfo(BaseModel):
@@ -399,6 +429,20 @@ class ConverterStatusInfo(BaseModel):
             "file that is not a regular file or has more than one hard link, or "
             "an archive member that is a link or would be extracted outside its "
             "destination."
+        ),
+    )
+
+    # A converter that raised has failure; one that could not convert some of its
+    # inputs carried on, and before this field those inputs were in the log alone.
+    # The completeness gate reads it, so a notebook nbconvert could not convert is
+    # lost coverage in the exit code as well. Omitted from the row when empty, as
+    # refused_inputs is.
+    failed_inputs: List[FailedInputInfo] = Field(
+        default_factory=list,
+        description=(
+            "Inputs this converter tried to convert and could not, so the scanners "
+            "never saw what conversion would have produced from them. The "
+            "completeness gate counts a converter with any as incomplete."
         ),
     )
 

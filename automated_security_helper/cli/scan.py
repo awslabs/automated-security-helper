@@ -459,6 +459,13 @@ def run_ash_scan_cli_command(
             envvar="ASH_BASE_REF",
         ),
     ] = "origin/main",
+    allow_in_tree_tools: Annotated[
+        bool,
+        typer.Option(
+            "--allow-in-tree-tools",
+            help="Let ASH start scanners and other tools found inside the scanned directory, such as an activated in-repo .venv/bin or node_modules/.bin. Off by default: a tool inside the scanned directory is treated as missing. Only this flag (also the allow_in_tree_tools key of --cli-json-input) and the ASH_ALLOW_IN_TREE_TOOLS environment variable (1, true, yes or on) turn it on, never a config file, and `ash mcp` never does.",
+        ),
+    ] = False,
     shard_index: Annotated[
         Optional[int],
         typer.Option(
@@ -609,6 +616,19 @@ def run_ash_scan_cli_command(
         debug = False
 
     _validate_shard_options(shard_index, shard_count, workspace)
+
+    # Through the environment rather than a parameter, so that every lookup in this
+    # process and in the processes it starts (the cdk-nag worker, a container, a
+    # nix shell) sees the same answer; see utils/subprocess_utils.in_tree_tools_allowed.
+    if allow_in_tree_tools:
+        from automated_security_helper.utils.process_env import (
+            apply_environ_overrides,
+        )
+        from automated_security_helper.utils.subprocess_utils import (
+            ALLOW_IN_TREE_TOOLS_ENV,
+        )
+
+        apply_environ_overrides({ALLOW_IN_TREE_TOOLS_ENV: "1"})
 
     # Workspace mode is handled before any cwd-based default is applied, because
     # --workspace and --source-dir are mutually exclusive and defaulting

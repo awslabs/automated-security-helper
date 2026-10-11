@@ -36,7 +36,9 @@ from automated_security_helper.core.enums import (
 )
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import (
+    ALLOW_IN_TREE_TOOLS_ENV,
     create_completed_process,
+    in_tree_tools_allowed,
     raise_called_process_error,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -858,6 +860,10 @@ def _assemble_run_command(
         cmd.append(f"--network={container_network}")
     if offline:
         cmd.extend(["-e", "ASH_OFFLINE=YES"])
+    # The operator's opt-in for tools inside the scanned tree applies to the scan the
+    # container runs too; see utils/subprocess_utils.in_tree_tools_allowed.
+    if in_tree_tools_allowed():
+        cmd.extend(["-e", f"{ALLOW_IN_TREE_TOOLS_ENV}=1"])
 
     # Terminal size passthrough (matches ./ash lines 190-191)
     try:

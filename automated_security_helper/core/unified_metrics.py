@@ -521,6 +521,11 @@ def _populate_scanner_results_from_unified_metrics(
         else:
             status = ScannerStatus.PASSED  # Default fallback
 
+        # The scan phase's reason for a MISSING row survives the replacement below:
+        # the metrics know the status, not why.
+        previous = aggregated_results.scanner_results.get(scanner_name)
+        missing_reason = getattr(previous, "missing_reason", None)
+
         # Create consolidated target status info (combines source + converted)
         consolidated_target_info = ScannerTargetStatusInfo(
             severity_counts=consolidated_severity_counts,
@@ -530,6 +535,10 @@ def _populate_scanner_results_from_unified_metrics(
             duration=total_duration,
             status=status,
         )
+        if status == ScannerStatus.MISSING and isinstance(missing_reason, str):
+            # Assigned rather than passed, so the field is set only when it has a
+            # value and an exclude_unset dump of every other row is unchanged.
+            consolidated_target_info.missing_reason = missing_reason
 
         # Update scanner_results with consolidated information.
         #

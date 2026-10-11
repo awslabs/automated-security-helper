@@ -26,6 +26,7 @@ between a partial merge and a false clean bill of health.
 """
 
 import json
+import sys
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
@@ -57,8 +58,12 @@ from automated_security_helper.core.sharding import (
 from automated_security_helper.core.unified_metrics import (
     populate_metrics_from_unified_source,
 )
+from automated_security_helper.interactions.run_ash_scan import incomplete_converters
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
+    ConverterStatusInfo,
+    FailedInputInfo,
+    RefusedInputInfo,
     ScannerStatusInfo,
     ScannerTargetStatusInfo,
 )
@@ -1675,6 +1680,34 @@ class TestMergeCli:
         assert result.exit_code != 0
         assert "not a valid format" in result.output
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    @pytest.mark.parametrize("linked", ["output", "reports"])
+    def test_a_linked_output_or_reports_directory_is_refused(self, tmp_path, linked):
+        """Merge writes the merged results and reports there, as a scan would."""
+        shard_paths = write_shards(tmp_path / "artifacts", build_shards(3))
+        host = tmp_path / "host"
+        host.mkdir()
+        output_dir = tmp_path / "merged"
+        if linked == "output":
+            output_dir.symlink_to(host, target_is_directory=True)
+        else:
+            output_dir.mkdir()
+            (output_dir / "reports").symlink_to(host, target_is_directory=True)
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(output_dir), "--output-formats", "sarif"]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 1, result.output
+        output = " ".join(result.output.split())
+        assert "is a symlink" in output
+        assert "--output-dir" in output
+        assert list(host.iterdir()) == [], "the merge wrote through the link"
+
 
 def _incomplete_entries(
     model: AshAggregatedResults, scanner: str, status: ScannerStatus
@@ -2303,3 +2336,151 @@ class TestMergedExitCodeIncompleteScanners:
         merged = merge_shard_results(as_loaded(shards))
 
         assert _merged_exit_code(merged, tmp_path, "low", None, False) == 2
+
+
+class TestConverterRowsAcrossShards:
+    """Each shard converts the whole tree, but its converter row is its own record.
+
+    A conversion that failed in one shard -- a notebook nbconvert timed out on, an
+    archive that could not be extracted, a tool missing on that runner -- is lost
+    coverage for the union exactly as it would be for one scan, so the merged row
+    carries every shard's record and the completeness gate reads it.
+    """
+
+    @staticmethod
+    def _with_rows(**rows_by_shard):
+        shards = build_shards(3)
+        for index, row in rows_by_shard.items():
+            shards[int(index.removeprefix("shard"))].converter_results["jupyter"] = row
+        return shards
+
+    def test_a_failed_input_in_a_later_shard_reaches_the_merged_row(self, tmp_path):
+        shards = self._with_rows(
+            shard0=ConverterStatusInfo(converted_paths=["converted/nb.py"]),
+            shard1=ConverterStatusInfo(
+                converted_paths=[],
+                failed_inputs=[
+                    FailedInputInfo(path="nb.ipynb", reason="nbconvert timed out")
+                ],
+            ),
+            shard2=ConverterStatusInfo(converted_paths=["converted/nb.py"]),
+        )
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        row = merged.converter_results["jupyter"]
+        assert [(r.path, r.reason) for r in row.failed_inputs] == [
+            ("nb.ipynb", "nbconvert timed out")
+        ]
+        assert incomplete_converters(merged) == [
+            ("jupyter", "could not convert 1 input: nb.ipynb")
+        ]
+        assert _merged_exit_code(merged, tmp_path, "low", None, True) == 1
+
+    def test_inputs_recorded_by_several_shards_are_listed_once(self):
+        def failed():
+            return [FailedInputInfo(path="nb.ipynb", reason="exited with code 1")]
+
+        def refused():
+            return [
+                RefusedInputInfo(path="a.zip", reason="it is a symbolic link"),
+                RefusedInputInfo(
+                    path="b.tar", member="../x.py", reason="its path contains '..'"
+                ),
+            ]
+
+        shards = self._with_rows(
+            shard0=ConverterStatusInfo(
+                failed_inputs=failed(), refused_inputs=refused()
+            ),
+            shard1=ConverterStatusInfo(
+                failed_inputs=failed()
+                + [FailedInputInfo(path="other.ipynb", reason="timed out")],
+                refused_inputs=refused(),
+            ),
+            shard2=ConverterStatusInfo(
+                failed_inputs=failed(), refused_inputs=refused()
+            ),
+        )
+
+        row = merge_shard_results(as_loaded(shards)).converter_results["jupyter"]
+
+        assert [r.path for r in row.failed_inputs] == ["nb.ipynb", "other.ipynb"]
+        assert [(r.path, r.member) for r in row.refused_inputs] == [
+            ("a.zip", None),
+            ("b.tar", "../x.py"),
+        ]
+
+    def test_a_crash_in_any_shard_is_kept(self, tmp_path):
+        shards = self._with_rows(
+            shard2=ConverterStatusInfo(failure="RuntimeError: nbconvert crashed"),
+        )
+        for model in shards[:2]:
+            model.converter_results["jupyter"] = ConverterStatusInfo(
+                converted_paths=["converted/nb.py"]
+            )
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert incomplete_converters(merged) == [
+            ("jupyter", "RuntimeError: nbconvert crashed")
+        ]
+        assert _merged_exit_code(merged, tmp_path, "low", None, True) == 1
+
+    def test_a_tool_missing_on_one_runner_is_lost_coverage(self):
+        shards = self._with_rows(
+            shard0=ConverterStatusInfo(converted_paths=["converted/nb.py"]),
+            shard1=ConverterStatusInfo(
+                dependencies_satisfied=False, candidate_inputs=2
+            ),
+            shard2=ConverterStatusInfo(converted_paths=["converted/nb.py"]),
+        )
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        row = merged.converter_results["jupyter"]
+        assert row.dependencies_satisfied is False
+        assert row.candidate_inputs == 2
+        assert [name for name, _ in incomplete_converters(merged)] == ["jupyter"]
+
+    def test_a_tool_missing_with_nothing_to_convert_stays_exempt(self):
+        """The candidate count is what exempts an absent tool, as in one scan."""
+        shards = self._with_rows(
+            shard0=ConverterStatusInfo(
+                dependencies_satisfied=False, candidate_inputs=0
+            ),
+            shard1=ConverterStatusInfo(),
+            shard2=ConverterStatusInfo(),
+        )
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert incomplete_converters(merged) == []
+
+    def test_agreeing_rows_merge_to_the_base_shards_row(self):
+        """The common case is unchanged, down to which fields a simple dump omits."""
+        shards = self._with_rows(
+            shard0=ConverterStatusInfo(converted_paths=["converted/nb.py"]),
+            shard1=ConverterStatusInfo(converted_paths=["converted/nb.py"]),
+            shard2=ConverterStatusInfo(converted_paths=["converted/nb.py"]),
+        )
+
+        row = merge_shard_results(as_loaded(shards)).converter_results["jupyter"]
+
+        assert row.model_dump(exclude_unset=True) == {
+            "converted_paths": ["converted/nb.py"]
+        }
+
+    def test_the_shards_are_not_mutated(self):
+        shards = self._with_rows(
+            shard0=ConverterStatusInfo(converted_paths=["converted/nb.py"]),
+            shard1=ConverterStatusInfo(
+                failed_inputs=[FailedInputInfo(path="nb.ipynb", reason="timed out")]
+            ),
+            shard2=ConverterStatusInfo(failure="RuntimeError: crashed"),
+        )
+        before = [m.converter_results["jupyter"].model_dump() for m in shards]
+
+        merge_shard_results(as_loaded(shards))
+
+        assert [m.converter_results["jupyter"].model_dump() for m in shards] == before

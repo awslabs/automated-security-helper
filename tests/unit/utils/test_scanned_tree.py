@@ -12,7 +12,9 @@ switching the descriptor walk off.
 
 from __future__ import annotations
 
+import ntpath
 import os
+import posixpath
 import stat
 import sys
 import threading
@@ -335,6 +337,24 @@ class TestReplacedAfterTheCheck:
 
 
 class TestHelpers:
+    @pytest.mark.parametrize(
+        "normcase, folds",
+        [(posixpath.normcase, False), (ntpath.normcase, True)],
+        ids=["posix", "windows"],
+    )
+    def test_the_prefix_comparison_folds_case_where_the_platform_does(
+        self, monkeypatch, normcase, folds
+    ):
+        """On Windows ``C:`` and ``c:`` are one drive; normcase is how that is seen.
+
+        Both platforms' ``normcase`` are pinned, so the expectation for each is checked
+        on every host rather than only the one the suite happens to run on.
+        """
+        monkeypatch.setattr(scanned_tree.os.path, "normcase", normcase)
+        assert scanned_tree._starts_with(Path("/A/b/c"), Path("/a/b")) is folds
+        assert scanned_tree._starts_with(Path("/a/b/c"), Path("/a/b"))
+        assert not scanned_tree._starts_with(Path("/a/bc"), Path("/a/b/c"))
+
     def test_relative_display_is_posix_and_relative(self, layout):
         tree, host = layout
         assert relative_display(tree / "real" / "deep" / "ok.txt", tree) == (

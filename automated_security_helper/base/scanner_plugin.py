@@ -20,6 +20,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import (
     SPAWN_FAILURE_RETURNCODE,
     find_executable,
+    in_tree_refusal,
 )
 
 from pydantic import Field, PrivateAttr
@@ -263,6 +264,12 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if self.dependency_unavailable_reason:
             return False
         found = find_executable(self.command)
+        if found is None and self.command:
+            # A copy inside the scanned tree was refused: say so in the MISSING row,
+            # with the path and how to allow it, rather than "not installed".
+            refusal = in_tree_refusal(self.command)
+            if refusal is not None:
+                self.dependency_unavailable_reason = refusal
         return found is not None
 
     def content_databases_in_use(self) -> list:

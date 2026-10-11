@@ -442,10 +442,24 @@ class TestJupyterConverter:
         assert converter.validate_plugin_dependencies() is True
 
     def test_jupyter_converter_convert(
-        self, test_plugin_context, sample_notebook, monkeypatch
+        self, test_plugin_context, sample_notebook, monkeypatch, tmp_path
     ):
         """Test convert method."""
+        import os
+        import sys
         from unittest.mock import Mock
+
+        from automated_security_helper.utils import subprocess_utils
+
+        # A jupyter-nbconvert on PATH for the direct route to resolve; never executed.
+        bin_dir = tmp_path / "installed" / "bin"
+        bin_dir.mkdir(parents=True)
+        name = "jupyter-nbconvert"
+        jupyter = bin_dir / (f"{name}.exe" if sys.platform == "win32" else name)
+        jupyter.write_text("#!/bin/sh\nexit 0\n")
+        jupyter.chmod(0o755)
+        monkeypatch.setenv("PATH", os.pathsep.join([str(bin_dir), os.environ["PATH"]]))
+        subprocess_utils.clear_find_executable_cache()
 
         # Mock scan_set to return our sample notebook
         def mock_scan_set(*args, **kwargs):
@@ -454,17 +468,21 @@ class TestJupyterConverter:
         # Mock subprocess.run to simulate successful nbconvert execution
         def mock_subprocess_run(*args, **kwargs):
             # Create the expected output file
-            if len(args) > 0 and isinstance(args[0], list) and "nbconvert" in args[0]:
+            if (
+                len(args) > 0
+                and isinstance(args[0], list)
+                and Path(args[0][0]).stem == "jupyter-nbconvert"
+            ):
                 # Extract output path from command
                 cmd = args[0]
-                if "--output" in cmd:
-                    output_idx = cmd.index("--output") + 1
-                    if output_idx < len(cmd):
-                        output_path = Path(cmd[output_idx] + ".py")
-                        output_path.parent.mkdir(parents=True, exist_ok=True)
-                        output_path.write_text(
-                            '#!/usr/bin/env python\n# coding: utf-8\n\nprint("Hello World")\n'
-                        )
+                # nbconvert writes <--output-dir>/<--output>.py.
+                output_path = Path(
+                    cmd[cmd.index("--output-dir") + 1],
+                    cmd[cmd.index("--output") + 1] + ".py",
+                )
+                output_path.write_text(
+                    '#!/usr/bin/env python\n# coding: utf-8\n\nprint("Hello World")\n'
+                )
 
             # Return successful result
             result = Mock()
@@ -503,3 +521,4 @@ class TestJupyterConverter:
         # Check content
         content = converted_file.read_text()
         assert 'print("Hello World")' in content
+        subprocess_utils.clear_find_executable_cache()

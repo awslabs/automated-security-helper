@@ -1,5 +1,6 @@
 """Implementation of the Scan phase."""
 
+import contextvars
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Any, Tuple
 
@@ -17,6 +18,9 @@ from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.scope import plugin_probe_scope
+from automated_security_helper.utils.subprocess_utils import (
+    recording_in_tree_refusals,
+)
 from automated_security_helper.utils.sarif_utils import (
     get_severity_metrics_from_sarif,
 )
@@ -738,23 +742,34 @@ class ScanPhase(EnginePhase):
 
                         # Check dependencies early
                         ASH_LOGGER.debug(f"Validating dependencies for: {display_name}")
-                        with plugin_probe_scope(plugin_instance, self.plugin_context):
+                        # Whatever tool lookups the check makes, a refused in-tree
+                        # copy is what the MISSING row says, with its path and the
+                        # remedy, rather than "Dependencies not satisfied". Read here
+                        # so every scanner's own validate_plugin_dependencies counts.
+                        with (
+                            plugin_probe_scope(plugin_instance, self.plugin_context),
+                            recording_in_tree_refusals() as in_tree_reasons,
+                        ):
                             plugin_instance.dependencies_satisfied = (
                                 plugin_instance.validate_plugin_dependencies()
                             )
                         if not plugin_instance.dependencies_satisfied:
+                            missing_reason = "; ".join(in_tree_reasons)
                             ASH_LOGGER.warning(
                                 f"Scanner {display_name} dependencies are not satisfied, marking as MISSING"
+                                + (f": {missing_reason}" if missing_reason else "")
                             )
                             # Track dependency error for validation
                             dependency_error_scanners[display_name] = [
-                                "Dependencies not satisfied"
+                                missing_reason or "Dependencies not satisfied"
                             ]
 
                             # Create a ScanResultsContainer with dependencies_satisfied=False
                             results_container = ScanResultsContainer.for_missing_deps(
                                 display_name
                             )
+                            if missing_reason:
+                                results_container.add_error(missing_reason)
 
                             # Process the container through _process_results to store duration info
                             aggregated_results = self._process_results(
@@ -770,6 +785,11 @@ class ScanPhase(EnginePhase):
                                     status=ScannerStatus.MISSING,
                                     dependencies_satisfied=False,
                                     excluded=False,
+                                    **(
+                                        {"missing_reason": missing_reason}
+                                        if missing_reason
+                                        else {}
+                                    ),
                                 )
                             )
 
@@ -1538,7 +1558,10 @@ class ScanPhase(EnginePhase):
                     completed=10,
                     description=f"[blue]({scanner_name}) Queued scan...",
                 )
+                # With a copy of this context, which carries the scanned-tree scope
+                # (utils/subprocess_utils.scanning_tree) into the scanner's thread.
                 future = executor.submit(
+                    contextvars.copy_context().run,
                     self._safe_execute_scanner,
                     scanner_name,
                     scanner_plugin,

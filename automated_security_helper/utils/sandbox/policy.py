@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import stat
 import sys
 from dataclasses import dataclass, field
@@ -459,6 +458,13 @@ def _symlink_hops(path: Path) -> List[Path]:
     return hops
 
 
+def _lookup(name: str) -> Optional[str]:
+    """``find_executable``: never from the working directory or the scanned tree."""
+    from automated_security_helper.utils.subprocess_utils import find_executable
+
+    return find_executable(name)
+
+
 def _executable_prefix(argv0: str) -> List[Path]:
     """The executable's directory, and its install prefix when it sits in a bin dir.
 
@@ -466,7 +472,7 @@ def _executable_prefix(argv0: str) -> List[Path]:
     beside the bin directory (``<prefix>/bin/tool`` with ``<prefix>/lib``), so the
     prefix is what has to be visible, not only the file.
     """
-    found = argv0 if os.path.isabs(argv0) else shutil.which(argv0)
+    found = argv0 if os.path.isabs(argv0) else _lookup(argv0)
     if not found:
         return []
     home = Path.home()
@@ -517,7 +523,7 @@ def _shebang_interpreter(script: Path) -> Optional[Path]:
         names = [w for w in words[1:] if not w.startswith("-")]
         if not names:
             return None
-        program = shutil.which(names[0]) or ""
+        program = _lookup(names[0]) or ""
     return Path(program) if os.path.isabs(program) else None
 
 
@@ -629,48 +635,20 @@ def refuse_symlinked_output_dir(source_dir: Path, output_dir: Path) -> None:
     would let the repository pick a host directory for the sandbox to show and
     for ASH to write.
 
-    Refused, with the path in the message: any component from below the source
-    directory down to the output directory that is a symlink; the output
-    directory itself if it is one, wherever it is; and an output directory inside
-    the source tree whose real path is not the source directory's real path plus
-    the rest of its spelling (a ``..`` after a symlink resolves elsewhere than it
-    reads). Components at and above the source directory are the operator's own
-    spelling (a home directory that links elsewhere, macOS's ``/var``) and are not
-    examined, so an ordinary output directory outside the tree is unaffected.
+    The same check every scan makes before it starts, whatever the sandbox mode
+    (utils/output_dir_links.py), made again here for each scanner's policy so a
+    link that appeared since is not mounted. Links at or above the source
+    directory are the operator's own spelling and are not examined.
     """
-    source = Path(os.path.abspath(source_dir))
-    spelled = Path(output_dir).absolute()
+    from automated_security_helper.utils.output_dir_links import (
+        linked_output_component,
+    )
 
-    def refuse_link(path: Path) -> None:
-        if path.is_symlink():
-            raise SandboxUnavailable(
-                f"the output directory path {path.as_posix()} is a symlink, so "
-                "mounting the output directory would expose wherever it points"
-            )
-
-    # Walked as spelled, `..` included, so a link that a later `..` would step
-    # back out of is still seen.
-    current = Path(spelled.anchor)
-    for part in spelled.parts[1:]:
-        if part == "..":
-            current = current.parent
-            continue
-        if part in ("", "."):
-            continue
-        current = current / part
-        if source in current.parents:
-            refuse_link(current)
-    refuse_link(current)
-    lexical = Path(os.path.abspath(spelled))
-    if source in lexical.parents:
-        expected = Path(os.path.realpath(source)) / lexical.relative_to(source)
-        actual = Path(os.path.realpath(lexical))
-        if actual != expected:
-            raise SandboxUnavailable(
-                f"the output directory {lexical.as_posix()} resolves to "
-                f"{actual.as_posix()}, not where its path inside the source "
-                "directory reads, so mounting it would expose another directory"
-            )
+    found = linked_output_component(source_dir, output_dir)
+    if found is not None:
+        raise SandboxUnavailable(
+            f"{found}, so mounting the output directory would expose wherever it points"
+        )
 
 
 def build_scanner_policy(

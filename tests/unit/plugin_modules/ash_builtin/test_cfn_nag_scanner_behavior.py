@@ -451,8 +451,8 @@ def test_each_template_is_passed_to_the_subprocess_as_the_input_path(
     """The resolved argv names one template, not the containing directory.
 
     The path is a copy of the text ASH read and checked, kept under the template's
-    results directory with the template's file name, and removed afterwards; see
-    ``_stage_cfn_nag_input``.
+    results directory under a fixed name with the template's extension, and removed
+    afterwards; see ``_stage_cfn_nag_input``.
     """
     template = scanner.context.work_dir / "role.yaml"
     template.write_text(CFN_TEMPLATE)
@@ -472,7 +472,7 @@ def test_each_template_is_passed_to_the_subprocess_as_the_input_path(
     assert command[0] == "cfn_nag_scan"
     assert "--input-path" in command
     ((staged, text),) = given
-    assert staged.name == template.name
+    assert staged.name == "template.yaml"
     assert staged != template
     assert text == CFN_TEMPLATE
     assert not staged.exists(), "the copy is removed once cfn_nag_scan has run"
@@ -681,7 +681,9 @@ def test_source_target_type_scans_the_source_tree(
         call.kwargs["command"][call.kwargs["command"].index("--input-path") + 1]
         for call in subprocess_double.call_args_list
     ]
-    assert any(path.endswith("role.yaml") for path in scanned), (
+    # The copy cfn_nag reads has a fixed name; the directory it sits in is named
+    # after the template.
+    assert any("role__yaml" in path for path in scanned), (
         f"the source template was never scanned; scanned={scanned}"
     )
     assert not any("should-not-be-scanned" in path for path in scanned), (

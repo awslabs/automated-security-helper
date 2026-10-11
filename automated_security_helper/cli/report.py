@@ -22,7 +22,11 @@ from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
-from automated_security_helper.utils.log import get_logger
+from automated_security_helper.utils.log import escape_markup, get_logger
+from automated_security_helper.utils.output_dir_links import (
+    OutputDirLinkRefused,
+    refuse_linked_output_dir,
+)
 
 
 # Reporters whose output is a JSON document, printed with rich's print_json.
@@ -149,6 +153,13 @@ def report_command(
         output_dir = Path.cwd().joinpath(".ash", "ash_output").as_posix()
     results_file = None
     output_dir_path = Path(output_dir)
+    # Reporters write into reports/ here without the scan's clean-up first, so a
+    # link at the output directory or reports/ is refused as a scan refuses it.
+    try:
+        refuse_linked_output_dir(Path.cwd(), output_dir_path)
+    except OutputDirLinkRefused as refusal:
+        print(f"[red]{escape_markup(str(refusal))}[/red]")
+        raise typer.Exit(1)
     results_file_paths = [
         output_dir_path.joinpath(".ash", "ash_output", "ash_aggregated_results.json"),
         output_dir_path.joinpath("ash_output", "ash_aggregated_results.json"),

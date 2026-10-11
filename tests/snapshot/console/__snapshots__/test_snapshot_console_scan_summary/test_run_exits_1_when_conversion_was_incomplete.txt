@@ -8,6 +8,7 @@ View detailed findings...
 ERROR (1) Exiting because conversion was incomplete: 2 converter(s) did not process the files they were given
   jupyter: RuntimeError: nbconvert exited 1
   archive: dependencies unavailable, so it never ran
-A converter that did not run leaves its inputs unscanned, so the scanners saw fewer files than this repository holds.
-Install the converter's tool, disable the converter if its inputs are not wanted, or drop --fail-on-incomplete-scanners
-to accept a partial scan. A converter with nothing to convert never reports here.
+A converter that did not run, or could not convert some files, leaves those inputs unscanned, so the scanners saw fewer
+files than this repository holds. Install the converter's tool if it is missing, fix or exclude the files it could not
+convert, disable the converter if its inputs are not wanted, or drop --fail-on-incomplete-scanners to accept a partial
+scan. A converter with nothing to convert never reports here.

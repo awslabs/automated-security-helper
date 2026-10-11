@@ -13,7 +13,7 @@ import argparse
 import os
 
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.output_dir_links import open_no_follow
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     open_in_scanned_tree,
@@ -702,6 +702,26 @@ def get_files_not_matching_spec(
     return included
 
 
+def child_environ():
+    """The environment git is started with; see subprocess_utils.child_environ."""
+    from automated_security_helper.utils.subprocess_utils import (
+        child_environ as _child_environ,
+    )
+
+    return _child_environ()
+
+
+def _git_executable() -> Optional[str]:
+    """The git to run, as an absolute path, or None when there is none.
+
+    Not the bare name: on Windows a program started by name is looked for in the
+    working directory before PATH, and ASH usually runs from the repository it scans.
+    """
+    from automated_security_helper.utils.subprocess_utils import find_executable
+
+    return find_executable("git")
+
+
 def git_repository_root(path: Path) -> Optional[Path]:
     """Return the root of the git repository containing *path*, or None.
 
@@ -725,14 +745,17 @@ def git_repository_root(path: Path) -> Optional[Path]:
         The absolute repository root, or ``None`` when *path* is not inside a git
         repository, git is not on ``PATH``, or the command times out.
     """
+    git = _git_executable()
+    if git is None:
+        return None
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],  # nosec B603 B607
+            [git, "rev-parse", "--show-toplevel"],  # nosec B603
             capture_output=True,
             text=True,
             timeout=30,
             cwd=path,
-            env=snapshot_environ(),
+            env=child_environ(),
         )
     except (FileNotFoundError, NotADirectoryError, subprocess.TimeoutExpired, OSError):
         return None
@@ -767,14 +790,18 @@ def get_changed_files(
         ASH_LOGGER.warning(f"Invalid base_ref '{base_ref}'; falling back to full scan")
         return None
 
+    git = _git_executable()
+    if git is None:
+        ASH_LOGGER.warning("git not available; falling back to full scan")
+        return None
     try:
         result = subprocess.run(
-            ["git", "diff", "--name-only", f"{base_ref}...HEAD"],  # nosec B603 B607
+            [git, "diff", "--name-only", f"{base_ref}...HEAD"],  # nosec B603
             capture_output=True,
             text=True,
             timeout=30,
             cwd=cwd,
-            env=snapshot_environ(),
+            env=child_environ(),
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         ASH_LOGGER.warning("git not available or timed out; falling back to full scan")
@@ -936,7 +963,7 @@ def scan_set(
             debug_echo(f"Writing ash-ignore-report.txt to {output}", debug=debug)
             if not ashignore_path.parent.exists():
                 ashignore_path.parent.mkdir(parents=True)
-            with open(ashignore_path, mode="w", encoding="utf-8") as f:
+            with open_no_follow(ashignore_path) as f:
                 f.write("\n".join(ashignore_content))
 
         if not ashscanset_imported:
@@ -946,7 +973,7 @@ def scan_set(
             )
             if not ashscanset_path.parent.exists():
                 ashscanset_path.parent.mkdir(parents=True)
-            with open(ashscanset_path, mode="w", encoding="utf-8") as f:
+            with open_no_follow(ashscanset_path) as f:
                 f.write("\n".join(ashscanset_list))
 
     if print_results:

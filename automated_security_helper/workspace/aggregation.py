@@ -133,6 +133,7 @@ from automated_security_helper.models.workspace import (
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.output_dir_links import open_no_follow
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
     sarif_level_fails_threshold,
@@ -583,6 +584,30 @@ def incomplete_scanners_for_project(results: Any) -> List[str]:
     return [name for name, _status in incomplete_scanners(results)]
 
 
+def incomplete_converters_for_project(results: Any) -> Dict[str, str]:
+    """Converter name to reason, for each converter of this project that lost coverage.
+
+    The converter question ``_compute_exit_code`` asks beside the scanner ones: a
+    converter that crashed, one that could not convert some of its inputs, or one
+    whose tool was absent with something to convert. Delegates to
+    ``run_ash_scan.incomplete_converters`` for the reason its scanner siblings
+    delegate -- one decision, one place -- and is imported inside the function
+    for the same import-cycle reason.
+
+    Args:
+        results: One project's ``AshAggregatedResults``, or ``None``.
+
+    Returns:
+        ``{name: reason}`` in the order the rows were recorded; empty when every
+        converter ran cleanly or was excluded, and for ``None``.
+    """
+    from automated_security_helper.interactions.run_ash_scan import (
+        incomplete_converters,
+    )
+
+    return dict(incomplete_converters(results))
+
+
 def no_scanner_ran_for_project(results: Any) -> bool:
     """Whether this project recorded scanners and none of them reached a verdict.
 
@@ -746,7 +771,7 @@ class WorkspaceAggregator:
         # The project key is a path-derived value with separators already
         # replaced by dashes, so it is safe as a filename by construction.
         spool_path = self.spool_dir / f"{outcome.project}.run.json"
-        with open(spool_path, "w", encoding="utf-8") as handle:
+        with open_no_follow(spool_path) as handle:
             json.dump(rebased, handle)
         self._spooled[outcome.project] = spool_path
 
@@ -881,6 +906,12 @@ class WorkspaceAggregator:
             },
             "workspace": payload.model_dump(mode="json"),
             "scanner_results": self._scanner_results_payload(),
+            # Empty on purpose. Converter rows are per project -- their paths are
+            # relative to that project's tree and two projects run converters of
+            # the same name -- so one top-level map keyed by converter cannot hold
+            # them. Each project's converter verdict is in its entry under
+            # "workspace": incomplete_converters, and scan_incomplete when the gate
+            # is on.
             "converter_results": {},
             "additional_reports": {},
             "validation_checkpoints": [],
@@ -890,7 +921,7 @@ class WorkspaceAggregator:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         target = self.output_dir / RESULTS_FILENAME
         try:
-            with open(target, "w", encoding="utf-8") as handle:
+            with open_no_follow(target) as handle:
                 handle.write("{\n")
                 handle.writelines(
                     f"{json.dumps(key)}: {json.dumps(value)},\n"

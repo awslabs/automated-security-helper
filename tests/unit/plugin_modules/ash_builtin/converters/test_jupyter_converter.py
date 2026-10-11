@@ -13,6 +13,7 @@ rather than silently reported as converted.
 
 import json
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -26,10 +27,12 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
     JupyterConverterConfig,
     JupyterConverterConfigOptions,
 )
+from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.uv_tool_runner import (
     UVToolRunner,
     UVToolRunnerError,
 )
+from tests.unit.converters.nbconvert_stand_in import expand, notebook_patterns
 
 MODULE = (
     "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter"
@@ -105,6 +108,31 @@ def converter(test_plugin_context):
     )
 
 
+@pytest.fixture(autouse=True)
+def installed_jupyter(monkeypatch, tmp_path) -> Path:
+    """A jupyter-nbconvert on PATH, outside the scanned tree, for the direct route.
+
+    Never executed: every test that reaches the direct route replaces
+    ``subprocess.run``. ASH's own bin directory and /usr/local/bin are taken out of
+    the lookup, and its cache cleared, so the jupyter found is this one.
+    """
+    bin_dir = tmp_path / "installed" / "bin"
+    bin_dir.mkdir(parents=True)
+    name = "jupyter-nbconvert"
+    jupyter = bin_dir / (f"{name}.exe" if sys.platform == "win32" else name)
+    jupyter.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    jupyter.chmod(0o755)
+    monkeypatch.setenv(
+        "PATH", os.pathsep.join([str(bin_dir), os.environ.get("PATH", "")])
+    )
+    monkeypatch.setattr(
+        subprocess_utils, "path_independent_dirs", lambda: [tmp_path / "ash-bin"]
+    )
+    subprocess_utils.clear_find_executable_cache()
+    yield jupyter
+    subprocess_utils.clear_find_executable_cache()
+
+
 def expected_output_name(notebook: Path) -> str:
     """The tail of the converted file's name for a given notebook.
 
@@ -123,29 +151,47 @@ def write_notebook(directory: Path, name: str) -> Path:
     return path
 
 
+def notebook_arg(cmd) -> str:
+    """The notebook nbconvert reads for this command line, its argument expanded."""
+    (pattern,) = notebook_patterns(cmd)
+    (path,) = expand(pattern)
+    return path
+
+
+def output_file(cmd) -> Path:
+    """Where nbconvert writes: ``--output-dir`` / ``--output`` plus ``.py``."""
+    return Path(
+        cmd[cmd.index("--output-dir") + 1], cmd[cmd.index("--output") + 1] + ".py"
+    )
+
+
 def nbconvert_double(returncode=0, stdout="", stderr="", create_output=True):
     """Stand in for subprocess.run over `jupyter nbconvert`.
 
-    Mimics nbconvert's real contract: the output path on the command line gets
-    ".py" appended. Returns a CompletedProcess, not a bare Mock, so a test
-    cannot pass by touching an attribute the real object does not have.
+    Mimics nbconvert's real contract: the output is written into ``--output-dir``
+    under the ``--output`` name, with ".py" appended. Returns a CompletedProcess,
+    not a bare Mock, so a test cannot pass by touching an attribute the real
+    object does not have.
     """
     calls = []
     inputs = []
+    staged = []
 
     def _run(cmd, *args, **kwargs):
         calls.append(list(cmd))
         # What nbconvert was given to read, captured while it still exists: the
         # converter hands it a staged copy that is removed afterwards.
-        inputs.append(Path(cmd[6]).read_bytes() if len(cmd) > 6 else None)
+        staged.append(notebook_arg(cmd))
+        inputs.append(Path(staged[-1]).read_bytes())
         if create_output and "--output" in cmd:
-            out = Path(cmd[cmd.index("--output") + 1] + ".py")
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text("#!/usr/bin/env python\nimport os\n", encoding="utf-8")
+            output_file(cmd).write_text(
+                "#!/usr/bin/env python\nimport os\n", encoding="utf-8"
+            )
         return subprocess.CompletedProcess(cmd, returncode, stdout, stderr)
 
     _run.calls = calls
     _run.inputs = inputs
+    _run.staged = staged
     return _run
 
 
@@ -252,7 +298,7 @@ class TestValidatePluginDependencies:
         conv._install_uv_tool.assert_called_once_with(timeout=42)
 
     def test_failed_install_falls_back_to_direct_jupyter(
-        self, converter, ash_log_records
+        self, converter, ash_log_records, installed_jupyter
     ):
         converter._get_tool_installation_info = Mock(return_value={"available": False})
         converter._install_uv_tool = Mock(return_value=False)
@@ -264,8 +310,10 @@ class TestValidatePluginDependencies:
             assert converter.validate_plugin_dependencies() is True
 
         run.assert_called_once()
-        assert run.call_args.args[0] == ["jupyter", "nbconvert", "--version"]
+        # By the path ASH resolved, never the bare name, and not in ASH's cwd.
+        assert run.call_args.args[0] == [str(installed_jupyter), "--version"]
         assert run.call_args.kwargs["timeout"] == 10
+        assert run.call_args.kwargs["cwd"] not in (None, os.getcwd())
         assert any(
             "UV tool installation failed" in m
             for m in messages_at(ash_log_records, logging.WARNING)
@@ -383,11 +431,33 @@ class TestExecuteNbconvertViaUv:
             "passing a constraint here makes uv error; it was validated earlier"
         )
 
-    def test_nonzero_exit_returns_false_and_logs_stderr(
-        self, converter, uv_runner, ash_log_records
+    def test_nbconvert_failing_under_uv_is_raised_not_retried(
+        self, converter, uv_runner
     ):
+        """nbconvert's own failure on the notebook: no second run outside uv."""
         uv_runner.run_tool.return_value = subprocess.CompletedProcess(
             ["jupyter"], 3, "", "nbconvert blew up"
+        )
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=uv_runner,
+        ):
+            with pytest.raises(subprocess.CalledProcessError) as raised:
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"])
+
+        assert raised.value.returncode == 3
+        assert raised.value.stderr == "nbconvert blew up"
+
+    def test_uv_failing_to_start_returns_false_for_the_fallback(
+        self, converter, uv_runner
+    ):
+        from automated_security_helper.utils.subprocess_utils import (
+            SpawnFailedProcess,
+        )
+
+        uv_runner.run_tool.return_value = SpawnFailedProcess(
+            ["uv"], 127, "", "uv: No such file or directory"
         )
 
         with patch(
@@ -398,13 +468,72 @@ class TestExecuteNbconvertViaUv:
                 converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"]) is False
             )
 
-        assert any(
-            "exit code 3" in m for m in messages_at(ash_log_records, logging.WARNING)
+    def test_uv_reporting_its_own_error_returns_false_for_the_fallback(
+        self, converter, uv_runner
+    ):
+        """uv's "error: ..." means nbconvert never ran, so the direct route may."""
+        uv_runner.run_tool.return_value = subprocess.CompletedProcess(
+            ["uv"], 2, "", "error: Failed to resolve nbconvert offline\n"
         )
-        assert any(
-            "nbconvert blew up" in m
-            for m in messages_at(ash_log_records, logging.DEBUG)
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=uv_runner,
+        ):
+            assert (
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"]) is False
+            )
+
+    def test_uvs_resolution_failure_returns_false_for_the_fallback(
+        self, converter, uv_runner
+    ):
+        """uv 0.12 reports an unresolvable tool, offline included, as a diagnostic."""
+        uv_runner.run_tool.return_value = subprocess.CompletedProcess(
+            ["uv"],
+            1,
+            "",
+            "  \u00d7 No solution found when resolving tool dependencies:\n"
+            "  \u2570\u2500\u25b6 Because nbconvert was not found in the cache and you "
+            "require nbconvert, we can conclude that your requirements are "
+            "unsatisfiable.\n",
         )
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=uv_runner,
+        ):
+            assert (
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"]) is False
+            )
+
+    def test_nbconverts_own_failure_is_not_taken_for_uvs(self, converter, uv_runner):
+        uv_runner.run_tool.return_value = subprocess.CompletedProcess(
+            ["uv"],
+            1,
+            "",
+            "[NbConvertApp] Converting notebook notebook.ipynb to python\n"
+            "Traceback (most recent call last):\n"
+            "nbformat.reader.NotJSONError: Notebook does not appear to be JSON\n",
+        )
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=uv_runner,
+        ):
+            with pytest.raises(subprocess.CalledProcessError):
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"])
+
+    def test_a_uv_timeout_is_raised_as_one(self, converter, uv_runner):
+        from automated_security_helper.utils.subprocess_utils import TimedOutProcess
+
+        uv_runner.run_tool.return_value = TimedOutProcess(["uv"], 124, "", "")
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+            return_value=uv_runner,
+        ):
+            with pytest.raises(subprocess.TimeoutExpired):
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"], 9)
 
     def test_uv_tool_runner_error_returns_false(
         self, converter, uv_runner, ash_log_records
@@ -508,7 +637,7 @@ class TestConvert:
         )
 
     def test_converts_a_notebook_via_direct_execution(
-        self, converter, tmp_path, monkeypatch
+        self, converter, tmp_path, monkeypatch, installed_jupyter
     ):
         notebook = write_notebook(converter.context.source_dir, "analysis.ipynb")
         monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
@@ -525,24 +654,23 @@ class TestConvert:
         assert out.parent == converter.results_dir
         # The command handed to nbconvert must ask for a script export.
         (cmd,) = run.calls
+        # jupyter-nbconvert is run by the absolute path ASH resolved, never by name.
+        assert cmd[0] == str(installed_jupyter)
         # A Python notebook is exported with nbconvert's Python exporter, chosen by
         # ASH rather than by the notebook's metadata.
-        assert cmd[:6] == [
-            "jupyter",
-            "nbconvert",
-            "--log-level",
-            "WARN",
-            "--to",
-            "python",
-        ]
+        assert cmd[1:5] == ["--log-level", "WARN", "--to", "python"]
         # nbconvert reads a copy made through the checked handle, never the tree
-        # path itself, so a link swapped in after the check cannot be followed.
-        assert Path(cmd[6]).name == notebook.name
-        assert cmd[6] != str(notebook)
+        # path itself, so a link swapped in after the check cannot be followed. The
+        # copy has a fixed name, because nbconvert reads its argument as a glob.
+        (staged,) = run.staged
+        assert Path(staged).name == "notebook.ipynb"
+        assert staged != str(notebook)
         assert run.inputs == [notebook.read_bytes()]
-        assert not Path(cmd[6]).exists(), "the staged copy is removed afterwards"
-        assert cmd[7] == "--output"
-        assert not cmd[8].endswith(".py"), "nbconvert appends .py itself"
+        assert not Path(staged).exists(), "the staged copy is removed"
+        assert cmd[cmd.index("--output") + 1] == "notebook", (
+            "nbconvert appends .py itself, and formats this name with str.format"
+        )
+        assert not Path(cmd[cmd.index("--output-dir") + 1]).exists()
 
     def test_directories_in_the_scan_set_are_skipped(
         self, converter, ash_log_records, monkeypatch
@@ -582,7 +710,7 @@ class TestConvert:
 
         assert len(results) == 1, "only the non-ignored notebook should convert"
         assert len(run.calls) == 1
-        assert Path(run.calls[0][6]).name == kept.name
+        assert results[0].name.endswith(expected_output_name(kept))
         debug = messages_at(ash_log_records, logging.DEBUG)
         assert any("third-party code" in m for m in debug), (
             "the ignore reason belongs in the log so the skip is explainable"
@@ -596,11 +724,12 @@ class TestConvert:
         run = nbconvert_double()
         monkeypatch.setattr(f"{MODULE}.subprocess.run", run)
 
+        uv_cwds = []
+
         def fake_uv(cmd, timeout=60, cwd=None):
             # Stand in for nbconvert succeeding under uv: write the output file.
-            out = Path(cmd[cmd.index("--output") + 1] + ".py")
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text("converted\n", encoding="utf-8")
+            uv_cwds.append(cwd)
+            output_file(cmd).write_text("converted\n", encoding="utf-8")
             return True
 
         converter._execute_nbconvert_via_uv = fake_uv
@@ -609,6 +738,14 @@ class TestConvert:
 
         assert len(results) == 1
         assert run.calls == [], "subprocess must not run when uv succeeded"
+        # uv runs nbconvert outside the scanned tree, never inheriting a cwd.
+        (cwd,) = uv_cwds
+        assert cwd is not None
+        assert (
+            not Path(cwd)
+            .resolve()
+            .is_relative_to(converter.context.source_dir.resolve())
+        )
 
     def test_uv_failure_falls_back_to_subprocess(
         self, converter, ash_log_records, monkeypatch
@@ -644,8 +781,8 @@ class TestConvert:
 
         assert converter.convert() == []
         errors = messages_at(ash_log_records, logging.ERROR)
-        assert len(errors) == 1
-        assert errors[0].startswith("Error converting ")
+        assert errors == ["Could not convert 'nb.ipynb': nbconvert exited with code 2"]
+        assert [r.path for r in converter.failed_inputs] == ["nb.ipynb"]
         assert "nbconvert failed" in " ".join(
             messages_at(ash_log_records, logging.DEBUG)
         )
@@ -669,11 +806,10 @@ class TestConvert:
         )
 
         def _run(cmd, *args, **kwargs):
-            if Path(cmd[6]).name == broken.name:
+            # The copy has a fixed name; which notebook it is shows in its bytes.
+            if Path(notebook_arg(cmd)).read_bytes() == broken.read_bytes():
                 return subprocess.CompletedProcess(cmd, 1, "", stderr_text)
-            out = Path(cmd[cmd.index("--output") + 1] + ".py")
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text("ok\n", encoding="utf-8")
+            output_file(cmd).write_text("ok\n", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, "", "")
 
         monkeypatch.setattr(f"{MODULE}.subprocess.run", _run)
@@ -686,9 +822,11 @@ class TestConvert:
         assert not any("broken" in p.name for p in results)
         # Exactly one failure was reported, and nbconvert's diagnosis was kept.
         errors = messages_at(ash_log_records, logging.ERROR)
-        assert len(errors) == 1
-        assert errors[0].startswith("Error converting ")
-        assert broken.name in errors[0]
+        assert errors == [
+            "Could not convert 'broken.ipynb': nbconvert exited with code 1"
+        ]
+        # Recorded as well as logged, so the completeness gate sees it.
+        assert [r.path for r in converter.failed_inputs] == ["broken.ipynb"]
         assert stderr_text in " ".join(messages_at(ash_log_records, logging.DEBUG)), (
             "nbconvert's stderr is the only clue to why the notebook failed"
         )
@@ -706,10 +844,12 @@ class TestConvert:
 
         assert converter.convert() == []
         errors = messages_at(ash_log_records, logging.ERROR)
-        assert len(errors) == 1
-        assert errors[0].startswith("Timeout converting ")
+        assert errors == [
+            "Could not convert 'slow.ipynb': nbconvert did not finish within 60s"
+        ]
+        assert [r.path for r in converter.failed_inputs] == ["slow.ipynb"]
 
-    def test_missing_output_file_is_a_warning_not_a_result(
+    def test_missing_output_file_is_a_failure_not_a_result(
         self, converter, ash_log_records, monkeypatch
     ):
         """A zero exit with no output file must not be counted as a conversion."""
@@ -721,10 +861,10 @@ class TestConvert:
         )
 
         assert converter.convert() == []
-        assert any(
-            "output file not found" in m
-            for m in messages_at(ash_log_records, logging.WARNING)
-        )
+        assert messages_at(ash_log_records, logging.ERROR) == [
+            "Could not convert 'nb.ipynb': nbconvert exited 0 but wrote no output"
+        ]
+        assert [r.path for r in converter.failed_inputs] == ["nb.ipynb"]
 
     def test_unexpected_error_is_logged_with_a_traceback_and_does_not_abort(
         self, converter, ash_log_records, monkeypatch
@@ -736,9 +876,12 @@ class TestConvert:
         )
         converter.use_uv_tool = False
         real = nbconvert_double()
+        seen = []
 
         def _run(cmd, *args, **kwargs):
-            if Path(cmd[6]).name == first.name:
+            # Both copies have the same name and bytes; the first call is first.ipynb.
+            seen.append(cmd)
+            if len(seen) == 1:
                 raise ValueError("something unexpected")
             return real(cmd, *args, **kwargs)
 
@@ -749,8 +892,9 @@ class TestConvert:
         assert len(results) == 1, "one bad notebook must not stop the others"
         assert results[0].name.endswith(expected_output_name(second))
         errors = messages_at(ash_log_records, logging.ERROR)
-        assert len(errors) == 1
-        assert errors[0].startswith("Unexpected error converting ")
+        assert errors == [
+            "Could not convert 'first.ipynb': ValueError: something unexpected"
+        ]
         assert any(
             "Traceback (most recent call last)" in m
             for m in messages_at(ash_log_records, logging.DEBUG)

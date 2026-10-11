@@ -1318,6 +1318,34 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+  # The Jupyter converter's integration tests on the two platforms integration-test does
+  # not run. Only these, because they provision their tool the way ASH does -- the
+  # converter's own validate_plugin_dependencies runs `uv tool install nbconvert` -- and
+  # that works the same on macOS and Windows; the rest of tests/integration has not been
+  # made portable. Windows is the one that matters most here: it looks for a program
+  # started by name in the working directory before PATH.
+  converter-integration:
+    name: "converter-integration (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "false"
+      - name: Install dependencies
+        run: uv sync
+      - name: Run the converter integration tests
+        run: uv run pytest tests/integration/converters --run-integration --no-cov -p no:randomly -n 0
+
   # ---------------------------------------------------------------------------
   # Install methods: method x OS x Python (matches ash-install-methods.yml)
   # ---------------------------------------------------------------------------
@@ -1819,6 +1847,7 @@ jobs:
       - multi-project-attribution
       - deploy-aws-helpers
       - integration-test
+      - converter-integration
       - install-validation
       - sandbox
       - sandbox-scanner-parity

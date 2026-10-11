@@ -1,5 +1,6 @@
 """ScannerExecutor — owns scanner task lifecycle for ScanPhase."""
 
+import contextvars
 import threading
 import time
 import traceback
@@ -926,7 +927,10 @@ class ScannerExecutor:
                     description=f"[blue]({scanner_name}) Queued scan...",
                 )
                 ASH_LOGGER.debug(f"Submitting {scanner_name} to thread pool")
+                # With a copy of this context, which carries the scanned-tree scope
+                # (utils/subprocess_utils.scanning_tree) into the scanner's thread.
                 future = executor.submit(
+                    contextvars.copy_context().run,
                     self._safe_execute_scanner,
                     scanner_name,
                     scanner_plugin,

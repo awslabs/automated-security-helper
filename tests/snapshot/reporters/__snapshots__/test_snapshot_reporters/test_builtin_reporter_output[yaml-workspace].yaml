@@ -626,6 +626,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 1
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -642,6 +643,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 1
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -658,6 +660,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -674,6 +677,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 1
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -697,6 +701,7 @@ workspace:
     error: null
     exceeds_threshold: true
     finding_count: 1
+    incomplete_converters: {}
     incomplete_scanners:
     - npm-audit
     invalid_config: false
@@ -721,6 +726,7 @@ workspace:
     error: null
     exceeds_threshold: true
     finding_count: 2
+    incomplete_converters: {}
     incomplete_scanners: []
     invalid_config: false
     no_scanner_ran: false

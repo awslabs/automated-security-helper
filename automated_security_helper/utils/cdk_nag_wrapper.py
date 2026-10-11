@@ -42,6 +42,10 @@ from automated_security_helper.utils.process_env import (
     apply_environ_overrides,
     restore_environ,
 )
+from automated_security_helper.utils.subprocess_utils import (
+    lookup_for_scan,
+    started_from_working_directory,
+)
 
 
 class CdkNagWrapperResponse:
@@ -722,7 +726,30 @@ def run_cdk_nag_against_cfn_template(
             "JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION",
             "JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION",
         )
-        _original_jsii_env = apply_environ_overrides(dict.fromkeys(_jsii_env_keys, "1"))
+        jsii_env = dict.fromkeys(_jsii_env_keys, "1")
+        # jsii starts JSII_NODE, or "node" by name, which on Windows is looked for
+        # in the working directory first; this process runs in ASH's, usually the
+        # repository being scanned. So it is given the node ASH resolved, as an
+        # absolute path. With none, it is left to start "node" itself unless that
+        # would find one through the working directory. An explicit JSII_NODE is
+        # the operator's choice and is kept.
+        if not os.environ.get("JSII_NODE"):
+            node, refusal = lookup_for_scan(
+                "node", scan_root if scan_root is not None else Path.cwd()
+            )
+            if node is not None:
+                jsii_env["JSII_NODE"] = node
+            elif refusal is not None:
+                # Left unset, jsii would start "node" by name and find that copy.
+                raise RuntimeError(refusal)
+            else:
+                local = started_from_working_directory("node")
+                if local is not None:
+                    raise RuntimeError(
+                        "node is not on PATH, and the copy found through the "
+                        f"working directory, {local}, is not run"
+                    )
+        _original_jsii_env = apply_environ_overrides(jsii_env)
 
         # Suppress JSII stack traces by redirecting stderr for entire function
         import sys

@@ -957,8 +957,8 @@ def reset_uv_tool_runner() -> None:
 
 
 _uv_command_cache: Dict[str, Optional[List[str]]] = {}
-_uv_executable_cache: Dict[str, Optional[str]] = {}
-_executable_cache: Dict[str, Optional[str]] = {}
+_uv_executable_cache: Dict[Any, Optional[str]] = {}
+_executable_cache: Dict[Any, Optional[str]] = {}
 
 # ``uv tool run <tool> --version`` results, keyed by ``tool::package``.
 #
@@ -1103,33 +1103,46 @@ def _reset_uv_tool_runner_caches() -> None:
         _uv_tool_version_cache.clear()
 
 
+def _lookup_key(name: str) -> Any:
+    """Cache key for a lookup: the name and the scanned-tree scope it was made in.
+
+    The answer depends on the trees being scanned and the in-tree opt-in (see
+    subprocess_utils.scanning_tree), so one scan's answer is not another's.
+    """
+    from automated_security_helper.utils.subprocess_utils import tree_scope_key
+
+    return (name, tree_scope_key())
+
+
 def find_uv_or_none() -> Optional[str]:
     """Return the path to the ``uv`` binary, or ``None`` if it is missing."""
+    key = _lookup_key("uv")
     with _uv_tool_runner_cache_lock:
-        if "uv" in _uv_executable_cache:
-            return _uv_executable_cache["uv"]
+        if key in _uv_executable_cache:
+            return _uv_executable_cache[key]
 
         from automated_security_helper.utils.subprocess_utils import (
             find_executable as _find_executable,
         )
 
         resolved = _find_executable("uv")
-        _uv_executable_cache["uv"] = resolved
+        _uv_executable_cache[key] = resolved
         return resolved
 
 
 def find_executable(name: str) -> Optional[str]:
     """Find an executable by direct path, then PATH lookup."""
+    key = _lookup_key(name)
     with _uv_tool_runner_cache_lock:
-        if name in _executable_cache:
-            return _executable_cache[name]
+        if key in _executable_cache:
+            return _executable_cache[key]
 
         from automated_security_helper.utils.subprocess_utils import (
             find_executable as _find_executable,
         )
 
         resolved = _find_executable(name)
-        _executable_cache[name] = resolved
+        _executable_cache[key] = resolved
         return resolved
 
 
@@ -1155,7 +1168,12 @@ def get_uv_tool_command(
     consistent result.
     """
     binary = fallback_binary or tool_name
+    # With the scanned-tree scope when a scan is running: the fallback binary is
+    # looked up under it, so one scan's answer is not another's.
     cache_key = f"{tool_name}::{binary}"
+    scope = _lookup_key(binary)[1]
+    if scope[0]:
+        cache_key = f"{cache_key}::{scope!r}"
 
     # Fast-path: cache hit under the coarse lock.
     with _uv_tool_runner_cache_lock:

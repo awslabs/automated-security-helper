@@ -294,6 +294,26 @@ def local_clone_path(url: str) -> Optional[Path]:
     return Path(url)
 
 
+def _git_executable() -> str:
+    """The git to clone with, as an absolute path.
+
+    Not the bare name: on Windows a program started by name is looked for in the
+    working directory before PATH, and ``find_executable`` does not answer from the
+    working directory.
+
+    Raises:
+        RuntimeError: git was not found, so nothing is run.
+    """
+    from automated_security_helper.utils.subprocess_utils import find_executable
+
+    git = find_executable("git")
+    if git is None:
+        raise RuntimeError(
+            "git was not found on PATH, so the repository cannot be cloned"
+        )
+    return git
+
+
 def set_source_git(
     url: str,
     ref: Optional[str] = None,
@@ -322,8 +342,8 @@ def set_source_git(
     Raises:
         ValueError: if ``session_id`` is invalid, or if ``url``/``ref`` is
             option-like or uses a command-executing git transport.
-        RuntimeError: if ``git clone`` (or the optional ``git checkout``
-            for an explicit ref) fails.
+        RuntimeError: if git is not on PATH, or ``git clone`` (or the optional
+            ``git checkout`` for an explicit ref) fails.
     """
 
     # Validate before touching the filesystem so a rejected request leaves no
@@ -338,6 +358,9 @@ def set_source_git(
     # Wipe any previous source for this session before cloning a fresh one;
     # callers are expected to call clear_source explicitly, but cloning over
     # an existing tree is a footgun we'd rather avoid.
+    # Resolved before the session directory is touched, like the validation above.
+    git = _git_executable()
+
     target = session_dir / "source"
     if target.exists():
         shutil.rmtree(target, ignore_errors=True)
@@ -351,7 +374,7 @@ def set_source_git(
         )
 
     cmd = [
-        "git",
+        git,
         "clone",
         "--depth",
         str(int(depth)),
@@ -361,7 +384,7 @@ def set_source_git(
         url,
         str(target),
     ]
-    result = subprocess.run(  # nosec B603 - list-form argv, literal "git" executable, url validated by _validate_clone_url and fenced behind "--"
+    result = subprocess.run(  # nosec B603 - list-form argv, git resolved by _git_executable, url validated by _validate_clone_url and fenced behind "--"
         cmd,
         capture_output=True,
         text=True,
@@ -378,7 +401,7 @@ def set_source_git(
         # ``--depth 1`` may not have fetched the requested ref. Fetch it
         # explicitly before checking out so non-default refs work reliably.
         fetch_cmd = [
-            "git",
+            git,
             "-C",
             str(target),
             "fetch",
@@ -387,7 +410,7 @@ def set_source_git(
             "origin",
             ref,
         ]
-        fetch_res = subprocess.run(  # nosec B603 - list-form argv, literal "git" executable, ref validated by _reject_option_like
+        fetch_res = subprocess.run(  # nosec B603 - list-form argv, git resolved by _git_executable, ref validated by _reject_option_like
             fetch_cmd, capture_output=True, text=True, env=env, check=False
         )
         if fetch_res.returncode != 0:
@@ -396,8 +419,8 @@ def set_source_git(
             # diagnostic.
             pass
 
-        checkout_cmd = ["git", "-C", str(target), "checkout", "--detach", ref]
-        co_res = subprocess.run(  # nosec B603 - list-form argv, literal "git" executable, ref validated by _reject_option_like
+        checkout_cmd = [git, "-C", str(target), "checkout", "--detach", ref]
+        co_res = subprocess.run(  # nosec B603 - list-form argv, git resolved by _git_executable, ref validated by _reject_option_like
             checkout_cmd, capture_output=True, text=True, env=env, check=False
         )
         if co_res.returncode != 0:

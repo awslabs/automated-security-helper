@@ -34,6 +34,7 @@
   "compact_report": false,
   "changed_files_only": false,
   "base_ref": "origin/main",
+  "allow_in_tree_tools": false,
   "shard_index": null,
   "shard_count": null,
   "workspace": null,
