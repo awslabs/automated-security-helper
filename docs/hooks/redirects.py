@@ -89,26 +89,41 @@ def on_files(files, config):
     return files
 
 
+def redirect_page(
+    page_url: str, target: str, canonical: str, fragment: str = ""
+) -> str:
+    """The page written at an old URL.
+
+    page_url is the new page's URL within its site ("" for the home page), which
+    names it in the title. target is the same page's URL relative to the old one,
+    canonical its absolute URL, and fragment ("#name" or "") the anchor to land on
+    when the reader's URL has none. scripts/docs_versions.py writes the redirects at
+    the root of the versioned site with this too.
+    """
+    title = posixpath.basename(page_url.rstrip("/")) or "the home page"
+    return _PAGE.format(
+        title=html.escape(title),
+        canonical=html.escape(canonical + fragment, quote=True),
+        relative=html.escape(target + fragment, quote=True),
+        # json.dumps quotes and escapes for JavaScript. No page path or fragment
+        # contains "<", so nothing can end the script element early.
+        target_js=json.dumps(target),
+        fragment_js=json.dumps(fragment),
+    )
+
+
 def on_post_build(config):
     site_url = (config.site_url or "").rstrip("/") + "/"
     for source, target_url, fragment in _redirects:
         own_fragment = f"#{fragment}" if fragment else ""
-        target = get_relative_url(target_url, source.url)
-        relative = target + own_fragment
-        canonical = site_url + target_url + own_fragment
         output = Path(source.abs_dest_path)
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(
-            _PAGE.format(
-                title=html.escape(
-                    posixpath.basename(target_url.rstrip("/")) or "the home page"
-                ),
-                canonical=html.escape(canonical, quote=True),
-                relative=html.escape(relative, quote=True),
-                # json.dumps quotes and escapes for JavaScript. No page path or
-                # fragment contains "<", so nothing can end the script element early.
-                target_js=json.dumps(target),
-                fragment_js=json.dumps(own_fragment),
+            redirect_page(
+                target_url,
+                get_relative_url(target_url, source.url),
+                site_url + target_url,
+                own_fragment,
             ),
             encoding="utf-8",
         )

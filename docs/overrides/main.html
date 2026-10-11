@@ -1,11 +1,40 @@
 {% extends "base.html" %}
 
-{#
-  The site is built from the main branch, while install commands pin the latest
-  release. Say so on every page, so a reader who finds a flag missing from their
-  installed version knows why. Remove this block when the docs are versioned.
-#}
+{#-
+  The site is published as versions (see scripts/docs_versions.py), and a page says
+  which kind it belongs to. config.extra.docs_version is the version mike is
+  building, from MIKE_DOCS_VERSION (mkdocs.yml). A version that starts with a digit,
+  such as 3.8.0, is a release; anything else is unreleased code: main, and any build
+  that is not one of mike's, such as a pull request's or `mkdocs serve`.
+
+  A release page carries the outdated notice. Material hides it, and shows it when
+  the version being read does not have the `latest` alias (extra.version.default),
+  which it can only know when the page is read. An unreleased page always carries the
+  unreleased notice instead, and no outdated one: main is ahead of the latest release,
+  not behind it.
+
+  Both notices link to the site root, which redirects to the latest release.
+  `scripts/docs_versions.py check` builds a release and main and fails when either
+  page shows the wrong notice; the data-ash-notice attributes are what it looks for.
+-#}
+
 {% block announce %}
-These docs describe the main branch. A feature described here may not be in the latest release yet:
-<a href="{{ 'how-to/install/' | url }}#install-from-main">install from main</a> to use it now.
+  {%- if not (config.extra.docs_version or "")[:1].isdigit() -%}
+    <span data-ash-notice="unreleased">
+      These docs describe the main branch, which is not released yet, so a feature
+      described here may not be in the latest release.
+      <a href="{{ '../' ~ base_url }}">Read the docs for the latest release</a>, or
+      <a href="{{ 'how-to/install/' | url }}#install-from-main">install from main</a>
+      to use it now.
+    </span>
+  {%- endif -%}
+{% endblock %}
+
+{% block outdated %}
+  {%- if (config.extra.docs_version or "")[:1].isdigit() -%}
+    <span data-ash-notice="outdated">
+      These docs are for ASH {{ config.extra.docs_version }}, which is not the latest release.
+      <a href="{{ '../' ~ base_url }}"><strong>Read the docs for the latest release.</strong></a>
+    </span>
+  {%- endif -%}
 {% endblock %}

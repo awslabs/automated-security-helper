@@ -16,6 +16,11 @@ site_dir: "public"
 # Every option below that makes the build strict or offline is checked by
 # scripts/docs_checks.py check_site_build, so removing one fails the lint job.
 
+# Every build is strict, not only the ones that pass --strict: mike runs `mkdocs build`
+# without it when it publishes a version. To preview a page that still has warnings,
+# run `mkdocs serve --no-strict`.
+strict: true
+
 # Moved pages keep their old URLs: docs/redirects.yml maps each old page to its new
 # one, and this hook writes a redirect page at every old URL.
 hooks:
@@ -41,6 +46,19 @@ validation:
     anchors: warn
 
 plugins:
+  # The site is published as versions (main, and one per release) by
+  # scripts/docs_versions.py, with mike. mike adds this plugin itself when it is not
+  # listed; it is listed so the two settings below are reviewed here, and so that
+  # extra.docs_version is read when mike builds (mike rewrites a config it adds the
+  # plugin to, and expands !ENV while doing so, in a process that has no version yet).
+  - mike:
+      # latest/ is a full copy of the release, so a /latest/ URL is a page rather than
+      # a redirect to a numbered one, and nothing depends on how the host treats
+      # symbolic links, mike's default.
+      alias_type: copy
+      # Every version names the /latest/ page as canonical, so search engines send
+      # readers to the latest release rather than to whichever version they crawled.
+      canonical_version: latest
   # The privacy plugin downloads external assets at build time and serves them from
   # the site. The build must not need the network, so the two assets that cannot be
   # downloaded offline are left external rather than fetched: mermaid, which the
@@ -90,6 +108,17 @@ theme:
     logo: aws-logo-light
     repo: fontawesome/brands/github
   favicon: assets/images/aws-logo-light.svg
+
+extra:
+  # Material's version selector, filled from the versions.json that mike writes at the
+  # root of the gh-pages branch. A page of a version without the `default` alias shows
+  # the outdated notice in docs/overrides/main.html.
+  version:
+    provider: mike
+    default: latest
+  # The version mike is building, which it puts in MIKE_DOCS_VERSION, and empty in any
+  # other build. docs/overrides/main.html chooses the notice a page shows from it.
+  docs_version: !ENV [MIKE_DOCS_VERSION, ""]
 
 markdown_extensions:
   - admonition
