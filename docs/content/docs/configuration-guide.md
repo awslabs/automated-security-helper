@@ -795,7 +795,7 @@ scanners:
       config_file: null           # a gitleaks TOML config; operator-only, may be inside the tree
       baseline_path: null         # a gitleaks report whose findings are ignored; same rule
       honor_inline_ignores: false # honor gitleaks:allow comments; operator-only
-      max_target_megabytes: null  # skip files larger than this
+      max_target_megabytes: null  # skip files larger than this; operator-only
 ```
 
 A `.gitleaks.toml` in the scanned repository is not read, and findings a root `.gitleaksignore` drops are reported anyway. See [Gitleaks](plugins/builtin/gitleaks.md).

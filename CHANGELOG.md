@@ -127,7 +127,8 @@
     which stays on and unchanged. An operator's `options.config_file` and
     `options.baseline_path` apply. gitleaks runs with `--ignore-gitleaks-allow`,
     so a `gitleaks:allow` comment in the scanned tree hides nothing unless the
-    operator sets `options.honor_inline_ignores`.
+    operator sets `options.honor_inline_ignores`. `options.max_target_megabytes`
+    is honored only from the operator, as `config_file` is.
   - zizmor (`>=1.29.0,<2.0.0`) on workflows and composite
     actions, run with `--offline`; GitHub tokens are withheld unless the operator
     sets `options.online_audits` (a config in the scanned tree cannot). A workflow

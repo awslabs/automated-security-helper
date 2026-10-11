@@ -205,6 +205,42 @@ def test_honor_inline_ignores_from_the_scanned_tree_is_ignored(
     assert caplog.text.count("scanners.gitleaks.options.honor_inline_ignores") == 1
 
 
+@pytest.mark.parametrize("operator", [False, None])
+def test_max_target_megabytes_from_the_scanned_tree_is_ignored(
+    tmp_path, caplog, operator
+):
+    """A tree that raised gitleaks' size floor would skip any file it chose."""
+    scanner = _scanner(tmp_path, operator=operator, max_target_megabytes=1)
+    with caplog.at_level("WARNING"):
+        args = scanner._build_arguments(
+            scanner.context.source_dir, tmp_path / "o.sarif"
+        )
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o2.sarif")
+    assert not any(a.startswith("--max-target-megabytes") for a in args)
+    assert caplog.text.count("scanners.gitleaks.options.max_target_megabytes") == 1
+
+
+def test_the_operators_max_target_megabytes_applies(tmp_path):
+    scanner = _scanner(tmp_path, operator=True, max_target_megabytes=3)
+    args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+    assert "--max-target-megabytes=3" in args
+
+
+def test_the_re_scan_skips_large_files_only_at_the_operators_limit(
+    tmp_path, monkeypatch
+):
+    """The tree's limit is not the re-scan's either: it copies what the first run
+    was told to read."""
+    scanner, calls = _rescan_harness(
+        tmp_path, monkeypatch, {}, operator=False, max_target_megabytes=1
+    )
+    source = Path(scanner.context.source_dir)
+    _write(source, "app/big.py", "x" * 1_500_000)
+    (source / ".gitleaksignore").write_text("app/big.py:github-pat:1\n")
+    _add_back(scanner, source, _report(), tmp_path)
+    assert [call["files"] for call in calls] == [["app/big.py"]]
+
+
 def test_argv_for_the_converted_target_is_absolute(tmp_path):
     scanner = _scanner(tmp_path)
     converted = scanner.context.work_dir

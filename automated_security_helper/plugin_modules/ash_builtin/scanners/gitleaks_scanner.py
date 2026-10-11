@@ -353,7 +353,13 @@ class GitleaksScannerConfigOptions(ScannerOptionsBase):
     max_target_megabytes: Annotated[
         int | None,
         Field(
-            description="Skip files larger than this many megabytes (gitleaks --max-target-megabytes). Unset scans every file.",
+            description=(
+                "Skip files larger than this many megabytes (gitleaks "
+                "--max-target-megabytes). Unset scans every file. Honored only "
+                "when set by --config-overrides or a config file outside the "
+                "scanned tree; from a config in the scanned tree it is ignored "
+                "with a warning."
+            ),
             ge=1,
         ),
     ] = None
@@ -390,6 +396,8 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     _rescan_skipped: int = PrivateAttr(default=0)
     # Whether the tree-set honor_inline_ignores refusal was already logged.
     _ignores_refusal_logged: bool = PrivateAttr(default=False)
+    # Whether the tree-set max_target_megabytes refusal was already logged.
+    _size_refusal_logged: bool = PrivateAttr(default=False)
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -485,6 +493,31 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             )
         return False
 
+    def _max_target_megabytes(self) -> Optional[int]:
+        """The size above which gitleaks skips a file, when the operator set one.
+
+        From a config in the scanned tree it is ignored: a tree that set it could
+        have gitleaks skip any file it holds, unreported.
+        """
+        value = self._options().max_target_megabytes
+        if not value:
+            return None
+        config = self.context.config if self.context is not None else None
+        if set_by_operator(
+            config, "scanners.gitleaks.options.max_target_megabytes", value
+        ):
+            return int(value)
+        if not self._size_refusal_logged:
+            self._size_refusal_logged = True
+            self._plugin_log(
+                f"scanners.gitleaks.options.max_target_megabytes ({value}) is set "
+                "in a config in the scanned tree or from an MCP client, so it is "
+                "ignored and gitleaks scans files of every size. Set it with "
+                "--config-overrides or a config file outside the scanned tree.",
+                level=logging.WARNING,
+            )
+        return None
+
     def _resolve_config_file(self, results_dir: Path) -> Optional[Path]:
         """The config to pass as ``--config``; None leaves it to the environment.
 
@@ -554,7 +587,6 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         Every option is one ``--flag=value`` token and the scan path follows
         ``--``, so no path or config value can be read as a flag.
         """
-        options = self._options()
         results_dir = results_file.parent
         args: List[str] = [
             self.command or "gitleaks",
@@ -575,8 +607,9 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         baseline = self._operator_option_path("baseline_path")
         if baseline is not None:
             args.append(f"--baseline-path={baseline.as_posix()}")
-        if options.max_target_megabytes:
-            args.append(f"--max-target-megabytes={int(options.max_target_megabytes)}")
+        max_mb = self._max_target_megabytes()
+        if max_mb is not None:
+            args.append(f"--max-target-megabytes={max_mb}")
         args.extend(["--", self._scan_path(target)])
         return args
 
@@ -901,10 +934,12 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 baseline = Path(os.path.normpath(Path(arg.split("=", 1)[1]).absolute()))
                 if baseline.is_relative_to(target_abs):
                     skipped_names.add(baseline.relative_to(target_abs).as_posix())
+        # The limit the first run was given, not the option: it may have been
+        # refused (_max_target_megabytes).
         size_limit = None
-        max_mb = self._options().max_target_megabytes
-        if max_mb:
-            size_limit = int(max_mb) * 1_000_000
+        for arg in final_args:
+            if arg.startswith("--max-target-megabytes="):
+                size_limit = int(arg.split("=", 1)[1]) * 1_000_000
 
         tree_dir = rescan_dir / RESCAN_TREE_DIR
         self_dir = rescan_dir / RESCAN_SELF_DIR

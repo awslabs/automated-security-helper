@@ -30,7 +30,7 @@ scanners:
       baseline_path: null
       # Honor gitleaks:allow comments in the scanned tree. Off by default.
       honor_inline_ignores: false
-      # Skip files larger than this many megabytes.
+      # Skip files larger than this many megabytes. Operator-only.
       max_target_megabytes: null
       # Seconds before the gitleaks process is killed. Inherited by every scanner.
       scan_timeout: 1800
@@ -47,7 +47,7 @@ The scanned repository's own gitleaks configuration is not used. A `.gitleaks.to
 2. Otherwise, if `GITLEAKS_CONFIG` or `GITLEAKS_CONFIG_TOML` is set in the environment, gitleaks resolves the config from it. Under `--sandbox` those variables are not passed in, and step 3 applies.
 3. Otherwise gitleaks' default rules, through a config ASH writes that extends them and adds nothing. It is passed as `--config`, so gitleaks does not fall back to a `.gitleaks.toml` in the scanned tree.
 
-`config_file` or `baseline_path` set by an ASH config inside the scanned tree (`.ash/.ash.yaml`) is ignored with a warning, and a `.gitleaks.toml` or `.ash/.gitleaks.toml` in the tree is noted at INFO. The operator's files may be absolute paths or point outside the source directory, and a file the operator names may also be inside the scanned tree.
+`config_file`, `baseline_path`, `max_target_megabytes` or `honor_inline_ignores` set by an ASH config inside the scanned tree (`.ash/.ash.yaml`) is ignored with a warning, and a `.gitleaks.toml` or `.ash/.gitleaks.toml` in the tree is noted at INFO. The operator's files may be absolute paths or point outside the source directory, and a file the operator names may also be inside the scanned tree.
 
 gitleaks always reads `.gitleaksignore` at the root of the path it scans, whatever `gitleaks --gitleaks-ignore-path` says, and has no flag to turn that off. When the scan root has one, ASH copies the files it names into a directory of its own, at the same paths, runs gitleaks once more over the copies (there is no `.gitleaksignore` there), and reports the findings the first run dropped. ASH reads `.gitleaksignore` the way gitleaks does (a line ends at a newline only, surrounding whitespace is trimmed as Go trims it, and a backslash in a path is a slash), so it re-scans the files gitleaks matched. Files the first run does not read are not copied: files under `.git` or another directory gitleaks' allowlists skip, files reached through a symlink, and anything that is not a regular file. A failed re-run fails the scan, and the copies are deleted when it ends. The re-run copies at most 10,000 files and runs within one `scan_timeout`; when the file names more, the rest are not re-scanned, a warning gives their number, and the scan exits 1 as incomplete, because a finding the file hides in them would not be reported.
 

@@ -8503,7 +8503,7 @@
             }
           ],
           "default": null,
-          "description": "Skip files larger than this many megabytes (gitleaks --max-target-megabytes). Unset scans every file.",
+          "description": "Skip files larger than this many megabytes (gitleaks --max-target-megabytes). Unset scans every file. Honored only when set by --config-overrides or a config file outside the scanned tree; from a config in the scanned tree it is ignored with a warning.",
           "title": "Max Target Megabytes"
         },
         "scan_timeout": {
