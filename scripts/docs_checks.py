@@ -2907,12 +2907,12 @@ OPTION_TABLE_HEADERS = frozenset(
         "props",
     }
 )
-#: Headers of the column a table states defaults in. Renaming the column does not take
-#: a table out of the default comparison.
+#: Headers of the column a table states one key's default in. Renaming the column does
+#: not take a table out of the default comparison. "Defaults" is left out: a summary
+#: table uses it for a list of several keys' defaults in one row.
 DEFAULT_HEADERS = frozenset(
     {
         "default",
-        "defaults",
         "default value",
         "defaults to",
         "if not passed",
