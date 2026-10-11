@@ -585,6 +585,11 @@ async def run_ash_workspace_scan(
     prevent. The .code-workspace file and the workspace policy file are config
     inputs, governed by `ASH_MCP_ALLOWED_CONFIG_ROOTS` on a network transport.
 
+    A workspace in a tree this session delivered holds that tree for the whole
+    scan: clear_source, set_source_git and set_source_zip_finalize are refused
+    meanwhile (error_type source_delivery_busy), and this call is refused the
+    same way while one of them is changing the tree.
+
     Not available in container mode; workspace mode runs locally.
 
     Args:

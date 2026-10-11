@@ -126,6 +126,17 @@ from typing import (
 from automated_security_helper.cli.mcp.progress_monitor import (
     monitor_workspace_progress,
 )
+from automated_security_helper.cli.mcp.session_identity import (
+    UNIDENTIFIED_SESSION_ID,
+)
+from automated_security_helper.cli.mcp.sessions import (
+    finish_ended_session,
+    get_default_registry,
+)
+from automated_security_helper.cli.mcp.source_delivery import (
+    SOURCE_DELIVERY_BUSY,
+    SourceDeliveryBusyError,
+)
 from automated_security_helper.cli.mcp.scan_target import (
     ASH_MCP_ALLOWED_ROOTS_ENV,
     validate_scan_target,
@@ -1180,7 +1191,7 @@ async def mcp_resolve_workspace(
     }
 
 
-async def mcp_scan_workspace(
+async def _scan_workspace(
     workspace_file: str,
     workspace_config: Optional[str] = None,
     allow_missing_projects: bool = False,
@@ -1194,58 +1205,7 @@ async def mcp_scan_workspace(
     session_id: Optional[str] = None,
     profile: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Scan every active project in a workspace and return the per-project verdict.
-
-    Resolves, confines, builds the settings through the CLI's own builder,
-    registers one scan per project, executes off the event loop, and closes the
-    registry entries out. That order is not a preference: confinement needs the
-    resolved project directories, so it cannot precede resolution, and every
-    filesystem write happens after it.
-
-    Args:
-        workspace_file: Path to the ``.code-workspace`` definition. Confined as a
-            config input -- see the module docstring on why that changed.
-        workspace_config: Path to a workspace policy file. Confined the same way.
-        allow_missing_projects: Skip absent or unreadable project directories
-            rather than refusing the workspace. Skipped projects get no registry
-            entry and no scan id.
-        config_overrides: ``--config-overrides`` values, applied per project.
-        output_dir: Where the workspace output tree goes. Defaults to
-            ``<workspace root>/.ash/ash_output``. When given, confined like a
-            scan target, because it is written into.
-        scanners: Restrict every project to these scanners.
-        excluded_scanners: Exclude these scanners from every project. Takes
-            precedence over ``scanners``.
-        offline: Run without network access.
-        clean_output: Remove a previous per-project aggregated-results file before
-            scanning. Runs after confinement, never before it.
-        progress_reporter: An awaitable taking ``progress``, ``total`` and
-            ``message``. ``Context.report_progress`` satisfies it. Omitted, no
-            progress is emitted and the scan is otherwise identical.
-        session_id: The session this call acts for. Lets a workspace inside a tree
-            this session delivered over the protocol scan, and selects which bound
-            profile applies.
-        profile: A registered profile to scan under for this one call, instead of
-            whatever this session bound. Unknown names refuse the whole scan
-            rather than falling back to the default config: a workspace scan is N
-            repository scans, and running them all under configuration nobody
-            chose while reporting success is what this module refuses everywhere
-            else.
-
-    Returns:
-        On success, ``success`` True, ``exit_code`` from the workspace run (0, or 2
-        when a project exceeded its threshold), ``scan_ids`` mapping project key to
-        registry scan id, and ``projects`` carrying each project's verdict.
-        ``success`` reports whether the operation completed; the verdict is in
-        ``exit_code``, because a scan that found actionable findings ran fine.
-
-        On failure, ``create_error_response``'s keys plus ``exit_code``: 4 for a
-        workspace definition, policy or confinement refusal, 3 for a project whose
-        own config is invalid, 1 for anything else. Both stages are mapped --
-        ``execute_workspace`` raises ``WorkspaceDefinitionError`` too, for an
-        enabled reporter that cannot produce a workspace artifact or a project
-        that is not a git repository under precommit.
-    """
+    """``mcp_scan_workspace`` once the session's tree is claimed."""
     # Before resolution, because resolution is the read this gate guards. Every
     # other gate in this function runs after it, for the reasons the module
     # docstring gives.
@@ -1387,3 +1347,115 @@ async def mcp_scan_workspace(
             entry.model_dump(mode="json") for entry in plan.skipped_projects
         ],
     }
+
+
+async def mcp_scan_workspace(
+    workspace_file: str,
+    workspace_config: Optional[str] = None,
+    allow_missing_projects: bool = False,
+    config_overrides: Optional[List[str]] = None,
+    output_dir: Optional[str] = None,
+    scanners: Optional[List[str]] = None,
+    excluded_scanners: Optional[List[str]] = None,
+    offline: bool = False,
+    clean_output: bool = True,
+    progress_reporter: Optional[ProgressReporter] = None,
+    session_id: Optional[str] = None,
+    profile: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Scan every active project in a workspace and return the per-project verdict.
+
+    Resolves, confines, builds the settings through the CLI's own builder,
+    registers one scan per project, executes off the event loop, and closes the
+    registry entries out. That order is not a preference: confinement needs the
+    resolved project directories, so it cannot precede resolution, and every
+    filesystem write happens after it.
+
+    A scan of a tree this session delivered claims the session for the whole run
+    (``MCPSession.try_claim_scan``), from before the workspace is resolved until
+    the run returns: ``clear_source``, ``set_source_git`` and
+    ``set_source_zip_finalize`` are refused meanwhile with ``source_delivery_busy``,
+    and a session that ends meanwhile is removed once the scan returns. The scan
+    is refused the same way while one of those calls is changing the tree.
+
+    Args:
+        workspace_file: Path to the ``.code-workspace`` definition. Confined as a
+            config input -- see the module docstring on why that changed.
+        workspace_config: Path to a workspace policy file. Confined the same way.
+        allow_missing_projects: Skip absent or unreadable project directories
+            rather than refusing the workspace. Skipped projects get no registry
+            entry and no scan id.
+        config_overrides: ``--config-overrides`` values, applied per project.
+        output_dir: Where the workspace output tree goes. Defaults to
+            ``<workspace root>/.ash/ash_output``. When given, confined like a
+            scan target, because it is written into.
+        scanners: Restrict every project to these scanners.
+        excluded_scanners: Exclude these scanners from every project. Takes
+            precedence over ``scanners``.
+        offline: Run without network access.
+        clean_output: Remove a previous per-project aggregated-results file before
+            scanning. Runs after confinement, never before it.
+        progress_reporter: An awaitable taking ``progress``, ``total`` and
+            ``message``. ``Context.report_progress`` satisfies it. Omitted, no
+            progress is emitted and the scan is otherwise identical.
+        session_id: The session this call acts for. Lets a workspace inside a tree
+            this session delivered over the protocol scan, and selects which bound
+            profile applies.
+        profile: A registered profile to scan under for this one call, instead of
+            whatever this session bound. Unknown names refuse the whole scan
+            rather than falling back to the default config: a workspace scan is N
+            repository scans, and running them all under configuration nobody
+            chose while reporting success is what this module refuses everywhere
+            else.
+
+    Returns:
+        On success, ``success`` True, ``exit_code`` from the workspace run (0, or 2
+        when a project exceeded its threshold), ``scan_ids`` mapping project key to
+        registry scan id, and ``projects`` carrying each project's verdict.
+        ``success`` reports whether the operation completed; the verdict is in
+        ``exit_code``, because a scan that found actionable findings ran fine.
+
+        On failure, ``create_error_response``'s keys plus ``exit_code``: 4 for a
+        workspace definition, policy or confinement refusal, 3 for a project whose
+        own config is invalid, 1 for anything else. Both stages are mapped --
+        ``execute_workspace`` raises ``WorkspaceDefinitionError`` too, for an
+        enabled reporter that cannot produce a workspace artifact or a project
+        that is not a git repository under precommit.
+    """
+    claimed = None
+    if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
+        try:
+            claimed = get_default_registry().get_or_create(session_id)
+        except ValueError:
+            # An id that names no directory has no delivered tree to hold; the
+            # checks below refuse it.
+            claimed = None
+        if claimed is not None and not claimed.try_claim_scan():
+            response = _error_response(
+                SourceDeliveryBusyError(
+                    "the delivered source of this session is being changed; start "
+                    "the workspace scan after the change finishes"
+                ),
+                "scan_workspace",
+            )
+            response["error_type"] = SOURCE_DELIVERY_BUSY
+            return response
+    try:
+        return await _scan_workspace(
+            workspace_file=workspace_file,
+            workspace_config=workspace_config,
+            allow_missing_projects=allow_missing_projects,
+            config_overrides=config_overrides,
+            output_dir=output_dir,
+            scanners=scanners,
+            excluded_scanners=excluded_scanners,
+            offline=offline,
+            clean_output=clean_output,
+            progress_reporter=progress_reporter,
+            session_id=session_id,
+            profile=profile,
+        )
+    finally:
+        if claimed is not None:
+            claimed.release_scan()
+            finish_ended_session(session_id)
