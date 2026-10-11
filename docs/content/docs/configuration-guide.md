@@ -627,7 +627,9 @@ a config file inside the scanned tree, only installed modules are imported; see
 A scan uses ASH's built-in plugins (those defined in
 `automated_security_helper.plugin_modules.ash_builtin`) plus the converters, scanners,
 reporters and event handlers of the modules its own `ash_plugin_modules` (from its config and
-`--ash-plugin-modules`) names. This holds when one process runs several scans, as the
+`--ash-plugin-modules`) names. A module's plugins are those it defines itself, imports
+into its namespace, or lists in its `ASH_*` declarations; naming a package does not
+select a plugin that only one of its subpackages defines, so name that subpackage. This holds when one process runs several scans, as the
 MCP server does: a module that an earlier scan named, or that the MCP `list_scanners`
 tool loaded to describe the community scanners, takes no part in a scan that does not
 name it, and a module that only a later scan names takes part in that scan.

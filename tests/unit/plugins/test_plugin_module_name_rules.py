@@ -12,10 +12,11 @@
   be ASH's plugin root ``automated_security_helper.plugin_modules`` or above it, which
   holds every plugin package ASH ships and names none of them.
 * ``scan_plugin_filter``, which selects from the process-wide registry: ASH's
-  built-in plugins (defined in ``ash_builtin``), plugins defined in or below a module
-  the scan names, and plugins a named module lists in its ``ASH_*`` declarations. A
-  name that holds other plugin packages (the plugin root, or a namespace package)
-  selects nothing below it.
+  built-in plugins (defined in ``ash_builtin``), and for each module the scan names,
+  the plugins defined in that module itself, bound in its namespace (imported into
+  it), or listed in its ``ASH_*`` declarations. A plugin defined only in a submodule
+  of a named package is not selected through the package, because whether that
+  submodule is imported depends on what else ran in the process.
 
 The classes here are plain objects with ``__module__`` set, or classes in temporary
 packages, so the process-wide registry is never touched.
@@ -88,11 +89,18 @@ class TestThePluginRootIsRefused:
         assert not admits(snyk)
         assert not admits(aws)
 
-    def test_naming_the_package_itself_still_selects_it(self):
-        """Control for the test above: the same class through its own package."""
+    def test_naming_the_module_that_defines_a_class_selects_it(self):
+        """Control for the test above: the same class through the module defining it.
+
+        Naming the package above that module does not select the class: the package
+        neither binds nor lists this one (it binds and lists ASH's own snyk scanner,
+        a different class), and a class whose module is below a named package is
+        not selected for that alone.
+        """
         snyk = _plugin(f"{SNYK_PACKAGE}.snyk_code_scanner", "SnykCodeScanner")
 
-        assert scan_plugin_filter([SNYK_PACKAGE])(snyk)
+        assert scan_plugin_filter([f"{SNYK_PACKAGE}.snyk_code_scanner"])(snyk)
+        assert not scan_plugin_filter([SNYK_PACKAGE])(snyk)
 
 
 class TestANamespacePackageSelectsNothingBelowIt:
@@ -186,6 +194,12 @@ class TestWhatANamedModuleSelects:
         assert not scan_plugin_filter([])(helper), "control: unnamed, unselected"
 
     def test_a_class_only_in_a_submodule_with_no_declarations(self, site):
+        """Naming the package or a package between does not select it.
+
+        The submodule is imported here, the state an earlier scan that named it
+        leaves behind. A scan naming only the package never imports it, so what the
+        package selects must not depend on that import.
+        """
         _write(site, "zzsub_ash_plugins/__init__.py")
         _write(site, "zzsub_ash_plugins/scanners/__init__.py")
         _write(
@@ -196,8 +210,33 @@ class TestWhatANamedModuleSelects:
         importlib.invalidate_caches()
         deep = importlib.import_module("zzsub_ash_plugins.scanners.deep").DeepScanner
 
-        assert scan_plugin_filter(["zzsub_ash_plugins"])(deep)
-        assert not scan_plugin_filter(["zzsub_ash_plugins_other"])(deep)
+        assert not scan_plugin_filter(["zzsub_ash_plugins"])(deep)
+        assert not scan_plugin_filter(["zzsub_ash_plugins.scanners"])(deep)
+        assert scan_plugin_filter(["zzsub_ash_plugins.scanners.deep"])(deep), (
+            "control: the module that defines the class selects it"
+        )
+
+    def test_a_class_the_named_package_imports_into_its_namespace(self, site):
+        """Bound in the package's namespace: selected, and only that class object."""
+        _write(
+            site,
+            "zzbind_ash_plugins/__init__.py",
+            "from zzbind_ash_plugins.scanners import BoundScanner\n",
+        )
+        _write(
+            site,
+            "zzbind_ash_plugins/scanners.py",
+            "class BoundScanner:\n    ash_plugin_type = 'scanner'\n",
+        )
+        importlib.invalidate_caches()
+        importlib.import_module("zzbind_ash_plugins")
+        bound = sys.modules["zzbind_ash_plugins.scanners"].BoundScanner
+        same_name = _plugin("zzbind_ash_plugins.scanners", "BoundScanner")
+
+        assert scan_plugin_filter(["zzbind_ash_plugins"])(bound)
+        assert not scan_plugin_filter(["zzbind_ash_plugins"])(same_name), (
+            "a different class with the bound class's name and module was selected"
+        )
 
     def test_a_handler_the_named_module_declares(self, site):
         _write(

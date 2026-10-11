@@ -462,14 +462,19 @@ The package name has to be inside ASH's plugin namespace, which `my_ash_plugins`
 because it ends in `_ash_plugins`; a name outside it refuses the scan with exit code 3
 (see [Custom Plugin Modules](../configuration-guide.md#custom-plugin-modules)).
 
-A scan that names your package uses the plugins defined in the package or in a module
-below it, plus the classes and event handlers the package lists in `ASH_SCANNERS`,
-`ASH_REPORTERS`, `ASH_CONVERTERS` or `ASH_EVENT_HANDLERS`. A plugin defined in another
-package, for example a helper library your `__init__.py` imports whose classes carry
-`@ash_scanner_plugin`, registers when it is imported but is not used unless your
-package lists it in one of those declarations. The scan logs each registered plugin it
-leaves out, in a line starting "Registered plugins not used by this scan", in the
-console and in `ash.log` in the output directory.
+A scan that names your package uses three kinds of plugin from it: those defined in
+the package's own `__init__.py`, the classes and functions `__init__.py` imports into
+its namespace (as in the example above), and those it lists in `ASH_SCANNERS`,
+`ASH_REPORTERS`, `ASH_CONVERTERS` or `ASH_EVENT_HANDLERS`. A plugin defined only in a
+submodule, such as a class in `my_ash_plugins/scanners.py` that `__init__.py` neither
+imports nor lists, is not used through the package; the scan uses it only if it names
+that submodule (`my_ash_plugins.scanners`) itself. The same holds for a plugin defined
+in another package, for example a helper library whose classes carry
+`@ash_scanner_plugin`: `from helper_lib import HelperScanner` in `__init__.py` makes
+the scan use it, and `import helper_lib` alone does not, though the class registers
+either way. The scan logs each registered plugin it leaves out, in a line starting
+"Registered plugins not used by this scan", in the console and in `ash.log` in the
+output directory.
 
 ## Best Practices
 

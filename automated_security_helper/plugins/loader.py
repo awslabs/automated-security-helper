@@ -167,8 +167,8 @@ def _module_path_refusal(module_path: str) -> Optional[str]:
     identifiers, the only spelling that imports the module it names, so a stray
     space, an empty segment, a comma or a fullwidth letter is refused. ASH's plugin
     root and the package above it are refused although they are in the namespace:
-    the root holds every plugin package ASH ships and names none of them, and a name
-    that holds other plugin packages selects nothing below it (see
+    the root holds every plugin package ASH ships and names none of them, and naming
+    a package does not select the plugins its subpackages define (see
     :func:`scan_plugin_filter`).
     """
     parts = module_path.split(".")
@@ -222,8 +222,9 @@ def _namespace_package_refusal(module_path: str) -> Optional[str]:
     """Why *module_path* is refused as a namespace package, or None.
 
     A namespace package (a directory with no ``__init__.py``, whose portions can
-    come from several distributions) declares no ``ASH_*`` lists, and a scan selects
-    nothing below it (:func:`scan_plugin_filter`), so it adds no plugin to a scan.
+    come from several distributions) declares no ``ASH_*`` lists and defines and
+    binds no plugin (its portions are bound as modules), so naming it adds no plugin
+    to a scan (:func:`scan_plugin_filter`).
 
     Each level of the name is located without importing its parent packages
     (``config.plugin_module_trust._spec_without_importing``), so the check runs no
@@ -310,22 +311,17 @@ def _is_builtin_plugin_module(module: str) -> bool:
     return _module_within(module, BUILTIN_PLUGIN_PACKAGE)
 
 
-def _holds_plugin_packages(name: str) -> bool:
-    """Whether *name* holds other plugin packages rather than being one.
+def _bound_in(module_name: str) -> List[Any]:
+    """The objects an imported module's namespace binds; imports nothing.
 
-    ASH's plugin root and anything above it, and a namespace package (one with no
-    ``__init__``, whose portions can come from separate distributions). A class
-    below such a name belongs to one of the packages it holds, which the scan did
-    not name.
+    A package's submodules appear here as module objects, never as the classes
+    they define, so what this returns does not depend on which submodules the
+    process has imported.
     """
-    if _module_within(_OPT_IN_PLUGIN_ROOT, name):
-        return True
-    module = sys.modules.get(name)
-    return (
-        module is not None
-        and hasattr(module, "__path__")
-        and getattr(module, "__file__", None) is None
-    )
+    module = sys.modules.get(module_name)
+    if module is None:
+        return []
+    return list(vars(module).values())
 
 
 def _declared_by(module_name: str) -> List[Any]:
@@ -353,29 +349,38 @@ def scan_plugin_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
     stays registered after the scan that imported it, and ``list_scanners``
     imports the community packages ASH ships so it can describe them. A scan
     therefore selects from them through this filter rather than taking everything
-    registered, so it gets ASH's built-in plugins plus those of the modules its
-    own ``ash_plugin_modules`` names: a class or handler defined in one of those
-    modules (or below it), or one such a module lists in ``ASH_CONVERTERS``,
-    ``ASH_SCANNERS``, ``ASH_REPORTERS`` or ``ASH_EVENT_HANDLERS``. A name that holds
-    other plugin packages (ASH's plugin root, a namespace package) selects nothing
-    below it, since what is below it depends on what the process imported.
+    registered, so it gets ASH's built-in plugins plus, for each module its own
+    ``ash_plugin_modules`` names, the classes and handlers that are:
 
-    Call it after the modules are imported; it reads their declarations from
+    * defined in that module itself;
+    * bound in its namespace, such as a class its ``__init__`` imports;
+    * listed in its ``ASH_CONVERTERS``, ``ASH_SCANNERS``, ``ASH_REPORTERS`` or
+      ``ASH_EVENT_HANDLERS``.
+
+    A class defined only in a submodule of a named package is not selected through
+    the package. A scan naming the package does not import that submodule, so
+    whether the class is registered depends on what else the process imported.
+    The bound and listed objects are matched by identity, so another class with
+    the same name and module is not selected.
+
+    Call it after the modules are imported; it reads their namespaces from
     ``sys.modules`` and imports nothing.
     """
-    modules = tuple(dict.fromkeys(name for name in plugin_modules if name))
-    packages = tuple(name for name in modules if not _holds_plugin_packages(name))
-    declared: List[Any] = []
+    modules = frozenset(name for name in plugin_modules if name)
+    # Keyed by id for identity matching; the values keep each object alive while
+    # the filter exists, so no key can be reused by another object.
+    selected: Dict[int, Any] = {}
     for name in modules:
-        declared.extend(_declared_by(name))
+        for obj in _bound_in(name) + _declared_by(name):
+            selected[id(obj)] = obj
 
     def admits(plugin: Any) -> bool:
         module = getattr(plugin, "__module__", None) or ""
         if _is_builtin_plugin_module(module):
             return True
-        if any(_module_within(module, name) for name in packages):
+        if module in modules:
             return True
-        return plugin in declared
+        return selected.get(id(plugin)) is plugin
 
     return admits
 

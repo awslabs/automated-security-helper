@@ -97,7 +97,8 @@ root `automated_security_helper.plugin_modules` itself, refuses the scan with ex
 code 3 before anything is imported.
 
 A scan uses ASH's built-in plugins (those defined in `ash_builtin`) plus the plugins and
-event handlers of the modules it names this way. When one process runs several scans (the MCP server, or a program
+event handlers of the modules it names this way: those a named module defines, imports,
+or lists in its `ASH_*` declarations, but not those only a subpackage of it defines. When one process runs several scans (the MCP server, or a program
 calling `run_ash_scan` more than once), a module only another scan named takes no part.
 
 ## Real-World Examples

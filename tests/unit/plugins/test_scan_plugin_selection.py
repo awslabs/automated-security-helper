@@ -113,6 +113,25 @@ class ZzMarkReporter(ReporterPluginBase[ZzMarkReporterConfig]):
 ASH_REPORTERS = [ZzMarkReporter]
 """
 
+
+def _mark_reporter_init(class_name: str, config_name: str, extension: str) -> str:
+    """``_REPORTER_INIT`` with its class, config name and extension renamed."""
+    return (
+        _REPORTER_INIT.replace("ZzMarkReporter", class_name)
+        .replace('"zz-mark"', f'"{config_name}"')
+        .replace('"zzmark"', f'"{extension}"')
+    )
+
+
+def _reports(output_dir: Path, extension: str) -> List[str]:
+    """The ``*.<extension>`` reports under *output_dir*, relative to it."""
+    if not output_dir.is_dir():
+        return []
+    return sorted(
+        p.relative_to(output_dir).as_posix() for p in output_dir.rglob(f"*.{extension}")
+    )
+
+
 #: argv[1] is a JSON list of steps. A scan is ``{"source_dir", "output_dir",
 #: "modules"}``, or ``{"workspace_file", "output_dir"}`` for a workspace scan;
 #: ``{"list": true}`` calls the MCP ``list_scanners`` tool function, which imports the
@@ -527,6 +546,85 @@ class TestReportersFollowTheScansModules:
         assert unexpected == [], (
             "a reporter from a module only the first scan named ran in the "
             f"workspace scan: {unexpected}"
+        )
+
+
+#: A regular package whose ``__init__`` imports nothing, and a subpackage of it
+#: holding one reporter that writes ``ash.zzcloud``.
+PARENT_PACKAGE = "zzparent_ash_plugins"
+CHILD_PACKAGE = f"{PARENT_PACKAGE}.cloud"
+
+
+class TestAPackageDoesNotSelectItsSubpackagesPlugins:
+    """Naming a package selects what it defines, imports or lists, in either order.
+
+    A scan naming only the parent never imports the subpackage, so a parent that
+    selected its subpackages' plugins would select them only after another scan in
+    the process had imported one.
+    """
+
+    def _process(self, tmp_path: Path) -> _Process:
+        proc = _Process(tmp_path)
+        child = proc.site / PARENT_PACKAGE / "cloud"
+        child.mkdir(parents=True)
+        (proc.site / PARENT_PACKAGE / "__init__.py").write_text("", encoding="utf-8")
+        (child / "__init__.py").write_text(
+            _mark_reporter_init("ZzCloudMarkReporter", "zz-cloud-mark", "zzcloud"),
+            encoding="utf-8",
+        )
+        return proc
+
+    def test_the_parent_after_a_scan_that_named_the_subpackage(self, tmp_path):
+        proc = self._process(tmp_path)
+        first, second = proc.tree("first"), proc.tree("second")
+        proc.run(
+            [
+                {
+                    "source_dir": str(first),
+                    "output_dir": str(tmp_path / "out1"),
+                    "modules": [CHILD_PACKAGE],
+                },
+                {
+                    "source_dir": str(second),
+                    "output_dir": str(tmp_path / "out2"),
+                    "modules": [PARENT_PACKAGE],
+                },
+            ]
+        )
+
+        assert _reports(tmp_path / "out1", "zzcloud"), (
+            "control: the subpackage the first scan named wrote no report for it",
+            proc.output[-3000:],
+        )
+        assert _reports(tmp_path / "out2", "zzcloud") == [], (
+            "a scan naming only the parent package ran the reporter of a subpackage "
+            "that an earlier scan had imported"
+        )
+
+    def test_the_subpackage_after_a_scan_that_named_the_parent(self, tmp_path):
+        proc = self._process(tmp_path)
+        first, second = proc.tree("first"), proc.tree("second")
+        proc.run(
+            [
+                {
+                    "source_dir": str(first),
+                    "output_dir": str(tmp_path / "out1"),
+                    "modules": [PARENT_PACKAGE],
+                },
+                {
+                    "source_dir": str(second),
+                    "output_dir": str(tmp_path / "out2"),
+                    "modules": [CHILD_PACKAGE],
+                },
+            ]
+        )
+
+        assert _reports(tmp_path / "out1", "zzcloud") == [], (
+            "a scan naming only the parent package ran its subpackage's reporter"
+        )
+        assert _reports(tmp_path / "out2", "zzcloud"), (
+            "control: the subpackage the second scan named wrote no report for it",
+            proc.output[-3000:],
         )
 
 
