@@ -61,7 +61,7 @@ from automated_security_helper.utils.get_scan_set import (
     scan_set,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -217,7 +217,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         except ImportError as exc:
             reason = _missing_library_reason()
             self.dependency_unavailable_reason = reason
-            ASH_LOGGER.warning(f"{reason} ({exc})")
+            # Data, not markup: the reason holds the path ASH was installed
+            # from, and the console handler would read a "[" in it as a tag.
+            ASH_LOGGER.warning(f"{reason} ({exc})", extra=NO_MARKUP)
             self._secrets_collection = None
         else:
             self._secrets_collection = secrets_collection_cls()

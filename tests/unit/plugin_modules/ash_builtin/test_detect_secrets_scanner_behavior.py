@@ -121,6 +121,56 @@ def test_dependencies_are_always_satisfied_because_the_import_succeeded(scanner)
 _COMMIT = "0123456789abcdef0123456789abcdef01234567"
 
 
+def test_missing_library_log_line_prints_a_bracketed_path_as_is(
+    plugin_context, monkeypatch, tmp_path
+):
+    """The logged reason holds a path, which is data and not Rich markup.
+
+    The console handler parses markup, so a checkout path holding ``[bold]``
+    loses it, and one holding ``[/]`` raises MarkupError out of the logging
+    call, which here is the scanner's constructor.
+    """
+    import io
+
+    from rich.console import Console
+    from rich.logging import RichHandler
+
+    from automated_security_helper.utils import ash_install
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    checkout = tmp_path / "c[bold]d" / "a[" / "]b"
+    checkout.mkdir(parents=True)
+    assert "[/]" in str(checkout) and "[bold]" in str(checkout)
+    monkeypatch.setattr(
+        ash_install,
+        "_direct_url",
+        lambda: {"url": checkout.as_uri(), "dir_info": {"editable": True}},
+    )
+    monkeypatch.setitem(sys.modules, "detect_secrets", None)
+    buffer = io.StringIO()
+    handler = RichHandler(
+        console=Console(file=buffer, width=400, color_system=None),
+        markup=True,
+        show_time=False,
+        show_path=False,
+    )
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    saved_handlers, saved_level = list(ASH_LOGGER.handlers), ASH_LOGGER.level
+    ASH_LOGGER.handlers = [handler]
+    ASH_LOGGER.setLevel(logging.WARNING)
+    try:
+        DetectSecretsScanner(
+            context=plugin_context, config=DetectSecretsScannerConfig()
+        )
+    finally:
+        ASH_LOGGER.handlers = saved_handlers
+        ASH_LOGGER.setLevel(saved_level)
+
+    printed = " ".join(buffer.getvalue().split())
+    assert "detect-secrets is not importable" in printed, printed
+    assert "c[bold]d" in printed and "a[/]b" in printed, printed
+
+
 @pytest.mark.parametrize(
     "direct_url, reinstall",
     [
