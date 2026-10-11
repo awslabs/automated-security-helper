@@ -973,10 +973,14 @@ def _assemble_run_command(
     fail_on_incomplete_scanners: bool | None = None,
     workspace_config: str | None = None,
     ignore_suppressions: bool = False,
+    log_level: AshLogLevel | str | None = None,
 ) -> List[str]:
     """Assemble the full `docker run` command list.
 
     Args:
+        log_level: ``--log-level``, forwarded unless it is INFO, the inner
+            default. ``--debug``, ``--verbose`` and ``--simple`` cover only three
+            of the levels, so ERROR, QUIET and TRACE were otherwise lost.
         ignore_suppressions: Forwarded, because the suppressions are applied by
             the scan inside: the host recomputes the verdict from the ash.sarif
             that scan writes, which already carries them.
@@ -1109,6 +1113,9 @@ def _assemble_run_command(
         ash_args.append("--debug")
     if verbose:
         ash_args.append("--verbose")
+    log_level_value = getattr(log_level, "value", log_level)
+    if log_level_value is not None and log_level_value != AshLogLevel.INFO.value:
+        ash_args.extend(["--log-level", str(log_level_value)])
     if simple:
         ash_args.append("--simple")
     if python_based_plugins_only:
@@ -1578,6 +1585,7 @@ def run_ash_container(
             shard_count=shard_count,
             workspace_config=workspace_config,
             ignore_suppressions=ignore_suppressions,
+            log_level=log_level,
         )
 
         return _execute_container(run_cmd, debug=debug)

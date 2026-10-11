@@ -167,6 +167,9 @@
 - **`--ignore-suppressions` works in container mode.** It was not passed to the scan
   inside the container, which applies the suppressions, so suppressed findings stayed
   out of the reports and out of the exit code the host computes from them.
+- **`--log-level` is passed to the scan inside the container.** It was dropped; only
+  the levels the host also expresses as `--debug`, `--verbose` or `--simple` got
+  through, so `--log-level ERROR`, `QUIET` or `TRACE` left the inner scan at INFO.
 - **A repository-written config file can no longer choose what ASH installs,
   imports or hands a scanner as its own configuration.** It applies to a discovered
   `.ash/.ash.yaml`, a `--config` path, an `extends` base, or `ASH_CONFIG`, when the

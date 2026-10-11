@@ -214,7 +214,8 @@ to it is not reachable there; use `ash --mode container` for such a chain.
 
 `--ignore-suppressions` is passed to the scan inside the container, which is where
 suppressions are applied: the host reads that scan's `ash.sarif` back to compute the
-exit code. `--min-severity` stays on the host, which applies it to the results it
+exit code. `--log-level` is passed too, so the log inside the container is kept at the
+level asked for. `--min-severity` stays on the host, which applies it to the results it
 reads back.
 
 The image stage is the one `--build-target` names, `non-root` when it is not given. The

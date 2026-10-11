@@ -47,6 +47,7 @@ import pytest
 
 from automated_security_helper.core.constants import ASH_REPO_LATEST_REVISION
 from automated_security_helper.core.enums import (
+    AshLogLevel,
     ExecutionPhase,
     ExecutionStrategy,
     ExportFormat,
@@ -1228,6 +1229,7 @@ class TestTheInnerArgvIsAcceptedByTheInnerCli:
             shard_index=0,
             shard_count=2,
             ignore_suppressions=True,
+            log_level=AshLogLevel.ERROR,
         )
 
         with self._parse(argv) as ctx:
@@ -1237,6 +1239,7 @@ class TestTheInnerArgvIsAcceptedByTheInnerCli:
             assert ctx.params["fail_on_findings"] is False
             assert ctx.params["fail_on_incomplete_scanners"] is True
             assert ctx.params["ignore_suppressions"] is True
+            assert ctx.params["log_level"] == AshLogLevel.ERROR
 
     def test_the_undeclared_flag_this_replaced_is_still_rejected(self):
         """Guards the premise, and records why the rejection was invisible.
