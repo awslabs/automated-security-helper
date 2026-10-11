@@ -681,6 +681,26 @@ def _copy_tar_members(
             _copy_at_most(source, out, member.size)
 
 
+def _failure_reason(error: Exception, target: Optional[Path]) -> str:
+    """Why an archive could not be extracted, as recorded in its failed input.
+
+    An OS error's message carries the absolute path it was raised for, which is
+    in the work directory, and the record goes to the results file, the reports
+    and the MCP client. Its path is shown relative to the archive's target
+    directory instead, which is the member's path inside the archive.
+    """
+    if isinstance(error, _UnreadableArchive):
+        return error.reason
+    if isinstance(error, OSError) and error.filename is not None:
+        path = Path(os.fsdecode(error.filename))
+        try:
+            shown = path.relative_to(target).as_posix() if target else path.name
+        except ValueError:
+            shown = path.name
+        return f"{type(error).__name__}: {error.strerror or 'error'}: {shown}"
+    return f"{type(error).__name__}: {error}"
+
+
 def _unused_target(results_dir: Path, name: str) -> Path:
     """``results_dir / name``, or with ``-2``, ``-3`` ... appended if that exists.
 
@@ -1107,11 +1127,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 # coverage lost.
                 if created_target is not None:
                     shutil.rmtree(created_target, ignore_errors=True)
-                reason = (
-                    e.reason
-                    if isinstance(e, _UnreadableArchive)
-                    else f"{type(e).__name__}: {e}"
+                self.record_failed_input(
+                    archive_file, _failure_reason(e, created_target)
                 )
-                self.record_failed_input(archive_file, reason)
 
         return results

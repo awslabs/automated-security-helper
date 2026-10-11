@@ -262,6 +262,34 @@ def test_a_valid_empty_zip_is_not_refused(test_plugin_context, monkeypatch):
     assert converter.failed_inputs == []
 
 
+@pytest.mark.parametrize(
+    "name, data",
+    [
+        pytest.param("clash.zip", zip_of(FILE_OVER_DIRECTORY), id="zip-is-a-directory"),
+        pytest.param("clash.tar", tar_of(FILE_OVER_DIRECTORY), id="tar-is-a-directory"),
+        pytest.param(
+            "clash.zip", zip_of(DIRECTORY_OVER_FILE), id="zip-not-a-directory"
+        ),
+        pytest.param(
+            "clash.tar", tar_of(DIRECTORY_OVER_FILE), id="tar-not-a-directory"
+        ),
+    ],
+)
+def test_a_write_error_is_reported_by_member_not_by_work_directory_path(
+    name, data, test_plugin_context, monkeypatch
+):
+    """The OS error's path is the work directory's, so the member's path is shown."""
+    converter, _ = convert(test_plugin_context, monkeypatch, name, data)
+
+    (failed,) = converter.failed_inputs
+    assert str(Path(converter.results_dir)) not in failed.reason, failed.reason
+    assert str(Path(test_plugin_context.work_dir)) not in failed.reason, failed.reason
+    assert "/" not in failed.reason.replace("d.py/a.py", ""), failed.reason
+    assert failed.reason.endswith(": d.py") or failed.reason.endswith(": d.py/a.py"), (
+        failed.reason
+    )
+
+
 def test_a_readable_archive_is_extracted_as_before(test_plugin_context, monkeypatch):
     data = io.BytesIO()
     with tarfile.open(fileobj=data, mode="w:gz") as archive:
