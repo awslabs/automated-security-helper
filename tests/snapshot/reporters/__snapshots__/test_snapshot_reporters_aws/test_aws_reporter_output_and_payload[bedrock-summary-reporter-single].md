@@ -86,10 +86,7 @@ This section contains detailed information about each finding referenced in the 
         },
         "region": {
           "startLine": 9,
-          "endLine": 9,
-          "snippet": {
-            "text": "    return subprocess.run(f\"pg_dump orders --where id={customer_id}\", shell=True)"
-          }
+          "endLine": 9
         }
       }
     }

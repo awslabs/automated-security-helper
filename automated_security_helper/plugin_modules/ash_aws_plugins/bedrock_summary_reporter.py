@@ -19,6 +19,10 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.output_dir_links import open_no_follow
+from automated_security_helper.utils.scanner_tool_types import (
+    normalize_tool_type,
+    result_tool_types,
+)
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     get_fallback_model,
     validate_bedrock_model,
@@ -184,7 +188,14 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     exclude_scanner_types: Annotated[
         List[str],
         Field(
-            description="List of scanner types to exclude from detailed analysis (e.g., 'SECRET').",
+            description=(
+                "Scanner tool types whose findings are counted but not sent to the "
+                "model (e.g., 'SECRETS'). A finding's type is its scanner's tool "
+                "type, looked up from the scanner's name, or a tool_type:: tag on "
+                "the finding; 'SECRET' and 'SECRETS' both name the secrets type. A "
+                "finding whose type cannot be determined is sent without its code "
+                "snippets."
+            ),
         ),
     ] = ["SECRET"]
     # Include only actionable findings (not suppressed, above severity threshold)
@@ -245,6 +256,24 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
             description="Whether to process findings in batches for better performance with large datasets.",
         ),
     ] = False
+
+
+#: Keys of a SARIF result that hold source code: snippets of a region or context
+#: region, and the content a fix would insert.
+_CODE_KEYS = frozenset({"snippet", "insertedContent"})
+
+
+def _without_snippets(value: Any) -> Any:
+    """A copy of a SARIF result dict (or part of one) without any code it holds."""
+    if isinstance(value, dict):
+        return {
+            key: _without_snippets(item)
+            for key, item in value.items()
+            if key not in _CODE_KEYS
+        }
+    if isinstance(value, list):
+        return [_without_snippets(item) for item in value]
+    return value
 
 
 class BedrockSummaryReporterConfig(ReporterPluginConfigBase):
@@ -464,6 +493,10 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             finding_dict = result.model_dump(
                 by_alias=True, exclude_defaults=True, exclude_unset=True, mode="json"
             )
+            # A finding from a scanner of unknown type might be a secret finding the
+            # exclusion cannot recognize, so its code is not sent or written.
+            if not result_tool_types(finding_dict):
+                finding_dict = _without_snippets(finding_dict)
             finding_dict["index"] = i + 1
             indexed_findings.append(self._make_indexed_finding(i + 1, finding_dict))
 
@@ -512,8 +545,19 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         }
 
     def _is_secret_scanner(self, finding_dict: Dict[str, Any]) -> bool:
-        props = finding_dict.get("properties", {})
-        return props.get("scanner_type") in self.config.options.exclude_scanner_types
+        """Whether the finding's scanner type is one ``exclude_scanner_types`` names.
+
+        The type comes from the scanner, looked up by the ``scanner_name`` the
+        engine writes on every result, and from ``tool_type::`` tags
+        (utils/scanner_tool_types.py). No scanner writes a ``scanner_type``
+        property.
+        """
+        excluded = {
+            normalize_tool_type(name)
+            for name in self.config.options.exclude_scanner_types
+        }
+        excluded.discard(None)
+        return bool(result_tool_types(finding_dict) & excluded)
 
     def _is_actionable(self, finding_dict: Dict[str, Any]) -> bool:
         if not self.config.options.actionable_only:
@@ -803,6 +847,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                         report += f"**Code Snippet**:\n```\n{snippet_text}\n```\n\n"
 
             if original:
+                if not self.config.options.include_code_snippets:
+                    original = _without_snippets(original)
                 report += "<details>\n<summary>Raw JSON</summary>\n\n```json\n"
                 report += json.dumps(original, indent=2)
             report += "\n```\n</details>\n\n"

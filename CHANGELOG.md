@@ -1658,6 +1658,17 @@
   the matched values are still masked in ASH's reports (see above); they remain in
   ferret-scan's own output under `scanners/ferret-scan/`.
 
+- **The Bedrock summary reporter recognizes secrets-scanner findings.** Its
+  `exclude_scanner_types` compared a `scanner_type` property that no scanner
+  writes, and its default `SECRET` did not match the `SECRETS` tool type, so
+  detect-secrets and ferret-scan findings were sent to the model as ordinary
+  findings. A finding's type is now its scanner's tool type, looked up from the
+  scanner's name, or a `tool_type::` tag in either spelling, and `SECRET` and
+  `SECRETS` both match. A finding whose scanner type cannot be determined is sent
+  without its snippets. With `include_code_snippets` off (the default),
+  `reports/ash.bedrock.summary.md` no longer carries snippets in its "Raw JSON"
+  blocks.
+
 ### Configuration sources
 
 - **`pyproject.toml [tool.ash]` and `ashrc` files are config sources (#313).**

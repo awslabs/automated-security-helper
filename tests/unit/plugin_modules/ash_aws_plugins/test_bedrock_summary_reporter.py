@@ -111,7 +111,15 @@ def reporter(mock_context):
 
 @pytest.fixture
 def sample_sarif_model():
-    """Build an AshAggregatedResults with realistic SARIF findings."""
+    """Build an AshAggregatedResults with findings shaped as the engine shapes them.
+
+    Two bandit findings and one detect-secrets finding, each scanner's report
+    passed through ``attach_scanner_details`` and merged the way
+    ``ScanResultProcessor`` does it. The secret finding is the result
+    ``DetectSecretsScanner`` writes, tags included; no scanner sets a
+    ``scanner_type`` property, so none is set here.
+    """
+    from automated_security_helper.core.enums import ScannerToolType
     from automated_security_helper.models.asharp_model import AshAggregatedResults
     from automated_security_helper.schemas.sarif_schema_model import (
         SarifReport,
@@ -126,11 +134,13 @@ def sample_sarif_model():
         Region,
         ReportingDescriptorReference,
         PropertyBag,
+        ArtifactContent,
     )
+    from automated_security_helper.utils.sarif_utils import attach_scanner_details
 
     AshAggregatedResults.model_rebuild()
 
-    findings = [
+    bandit_findings = [
         Result(
             ruleId="B101",
             rule=ReportingDescriptorReference(id="B101"),
@@ -144,7 +154,6 @@ def sample_sarif_model():
                     )
                 )
             ],
-            properties=PropertyBag(scanner_type="SAST"),
         ),
         Result(
             ruleId="B108",
@@ -159,38 +168,63 @@ def sample_sarif_model():
                     )
                 )
             ],
-            properties=PropertyBag(scanner_type="SAST"),
         ),
+    ]
+    detect_secrets_findings = [
         Result(
-            ruleId="SECRET001",
-            rule=ReportingDescriptorReference(id="SECRET001"),
+            ruleId="SECRET-AWS-ACCESS-KEY",
+            properties=PropertyBag(
+                tags=[
+                    "detect-secrets",
+                    "secret",
+                    "security",
+                    "tool_name::detect-secrets",
+                    f"tool_type::{ScannerToolType.SECRETS}",
+                ],
+            ),
             level="error",
-            message=Message(text="Possible AWS access key"),
+            message=Message(
+                text="Secret of type 'AWS Access Key' detected in file "
+                "'config/.env' at line 3"
+            ),
             locations=[
                 Location(
+                    id=1,
                     physicalLocation=PhysicalLocation(
                         artifactLocation=ArtifactLocation(uri="config/.env"),
-                        region=Region(startLine=3, endLine=3),
-                    )
+                        region=Region(
+                            startLine=3,
+                            endLine=3,
+                            snippet=ArtifactContent(
+                                text="Secret of type AWS Access Key detected"
+                            ),
+                        ),
+                    ),
                 )
             ],
-            properties=PropertyBag(scanner_type="SECRET"),
         ),
     ]
 
-    run = Run(
-        tool=Tool(
-            driver=ToolComponent(
-                name="ASH",
-                version="1.0.0",
-            )
-        ),
-        results=findings,
-    )
-
     model = AshAggregatedResults()
-    model.sarif = SarifReport(version="2.1.0", runs=[run])
-    model.scanner_results = {"bandit": MagicMock(), "gitleaks": MagicMock()}
+    for scanner_name, version, results in (
+        ("bandit", "1.9.4", bandit_findings),
+        ("detect-secrets", "1.5.0", detect_secrets_findings),
+    ):
+        report = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(driver=ToolComponent(name=scanner_name)),
+                    results=results,
+                )
+            ],
+        )
+        model.sarif.merge_sarif_report(
+            attach_scanner_details(
+                report, scanner_name=scanner_name, scanner_version=version
+            )
+        )
+    model.scanner_results = {"bandit": MagicMock(), "detect-secrets": MagicMock()}
     return model
 
 

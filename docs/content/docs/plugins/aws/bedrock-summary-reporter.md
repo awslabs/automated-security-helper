@@ -51,6 +51,25 @@ reporters:
       enable_fallback_models: true
 ```
 
+### What is sent to Bedrock
+
+The reporter receives results ASH has already masked: secret values that findings
+expose are masked in every snippet and message before any reporter runs (see
+"Secret values in reports" in the output formats page). On top of that:
+
+- **Findings from secrets scanners are counted, not sent.** `exclude_scanner_types`
+  (default `["SECRET"]`) names scanner tool types whose findings go into the
+  prompts only as a count ("Secret findings: N"). A finding's type is its scanner's
+  tool type, looked up from the scanner's name (detect-secrets and ferret-scan are
+  `SECRETS`), or a `tool_type::` tag on the finding. `SECRET` and `SECRETS` both
+  name the secrets type.
+- **A finding whose scanner type cannot be determined is sent without its code.**
+  Its message and location are sent, its snippets are not, and they are left out of
+  the local summary too.
+- **`include_code_snippets` decides whether code is sent or written.** With it off
+  (the default), no prompt holds a snippet, and the "Raw JSON" blocks in
+  `reports/ash.bedrock.summary.md` are written without the result's snippets.
+
 ### Environment Variables
 
 ```bash
