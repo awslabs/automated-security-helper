@@ -156,7 +156,7 @@ class _UncheckedReporter(ReporterPluginBase[_UncheckedConfig]):
         return '{"findings": []}'
 
 
-def test_the_report_phase_writes_only_inside_the_reports_directory(tmp_path, ash_log):
+def _unchecked_phase(tmp_path, reporter):
     output_dir = tmp_path / "out"
     reports_dir = output_dir / "reports"
     (reports_dir / "ash.x").mkdir(parents=True)
@@ -167,22 +167,96 @@ def test_the_report_phase_writes_only_inside_the_reports_directory(tmp_path, ash
         config=AshConfig(),
     )
     phase = ReportPhase(
-        plugins=[_UncheckedReporter],
+        plugins=[reporter],
         plugin_context=context,
         progress_display=LiveProgressDisplay(show_progress=False),
         asharp_model=AshAggregatedResults(),
     )
+    return phase, reports_dir
 
-    phase._execute_phase(
-        report_dir=reports_dir,
-        aggregated_results=AshAggregatedResults(),
-        cli_output_formats=["unchecked-reporter"],
-        python_based_plugins_only=False,
-    )
 
-    assert not (output_dir / "escaped-probe.json").exists()
+def test_the_report_phase_writes_only_inside_the_reports_directory(tmp_path, ash_log):
+    """A report name outside ``reports/`` refuses the run before any reporter writes."""
+    from automated_security_helper.utils.report_path_links import ReportPathRefused
+
+    phase, reports_dir = _unchecked_phase(tmp_path, _UncheckedReporter)
+
+    with pytest.raises(ReportPathRefused) as excinfo:
+        phase._execute_phase(
+            report_dir=reports_dir,
+            aggregated_results=AshAggregatedResults(),
+            cli_output_formats=["unchecked-reporter"],
+            python_based_plugins_only=False,
+        )
+
+    assert "is not a file in" in str(excinfo.value)
     assert not list(tmp_path.rglob("escaped-probe.json"))
-    assert any("unchecked-reporter" in w for w in _warnings(ash_log))
+    assert [entry.name for entry in reports_dir.iterdir()] == ["ash.x"]
+
+
+class _DotDotConfig(ReporterPluginConfigBase):
+    model_config = ConfigDict(validate_default=False)
+
+    name: Literal["dotdot-reporter"] = "dotdot-reporter"
+    extension: str = "../x"
+    enabled: bool = True
+
+
+class _DotDotReporter(ReporterPluginBase[_DotDotConfig]):
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _DotDotConfig()
+        return super().model_post_init(context)
+
+    def report(self, model: AshAggregatedResults) -> Optional[str]:
+        return "escaped"
+
+
+def test_an_extension_of_dot_dot_x_writes_nothing_and_fails_the_scan(tmp_path):
+    """``extension: ../x`` that skipped validation: nothing outside ``reports/``, exit 1."""
+    from automated_security_helper.interactions.run_ash_scan import (
+        ReportPathRefusedExit,
+        _refuse_report_path_link,
+    )
+    from automated_security_helper.utils.report_path_links import ReportPathRefused
+
+    phase, reports_dir = _unchecked_phase(tmp_path, _DotDotReporter)
+    before = sorted(path for path in tmp_path.rglob("*"))
+
+    with pytest.raises(ReportPathRefused) as excinfo:
+        phase._execute_phase(
+            report_dir=reports_dir,
+            aggregated_results=AshAggregatedResults(),
+            cli_output_formats=["dotdot-reporter"],
+            python_based_plugins_only=False,
+        )
+    with pytest.raises(ReportPathRefusedExit) as exited:
+        _refuse_report_path_link(excinfo.value)
+
+    assert exited.value.code == 1
+    assert sorted(path for path in tmp_path.rglob("*")) == before
+    assert not (reports_dir.parent / "x").exists()
+
+
+def test_an_extension_of_dot_dot_x_in_a_config_file_writes_only_inside(
+    tmp_path, ash_log
+):
+    """From a config file the value is replaced by the default, which stays inside."""
+    source = tmp_path / "repo"
+    (source / ".ash").mkdir(parents=True)
+    (source / ".ash" / ".ash.yaml").write_text(
+        yaml.safe_dump({"reporters": {"csv": {"extension": "../x"}}})
+    )
+    config = resolve_config(source_dir=source)
+    from automated_security_helper.base.reporter_plugin import confined_report_path
+
+    assert config.reporters.csv.extension == "csv"
+    reports_dir = tmp_path / "out" / "reports"
+    reports_dir.mkdir(parents=True)
+    assert (
+        confined_report_path(reports_dir, f"ash.{config.reporters.csv.extension}")
+        == reports_dir / "ash.csv"
+    )
 
 
 def test_the_confined_path_helper_refuses_a_path_outside(tmp_path):

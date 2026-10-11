@@ -116,6 +116,7 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_path_links import (
     refuse_linked_report_paths,
+    refuse_report_names_outside,
 )
 from automated_security_helper.workspace.plan import WorkspacePlan
 
@@ -424,6 +425,15 @@ def _workspace_report_file_names(selection) -> List[str]:
     return names
 
 
+def _workspace_report_main_names(selection) -> List[str]:
+    """The report file (``ash.<extension>``) of each reporter that will emit one."""
+    return [
+        reporter_file_name(instance)
+        for instance, behaviour, skipped in selection
+        if skipped is None and behaviour in _EMITTING_BEHAVIOURS
+    ]
+
+
 def refuse_linked_workspace_report_paths(
     plan: WorkspacePlan,
     output_dir: Path,
@@ -447,13 +457,18 @@ def refuse_linked_workspace_report_paths(
             manifest is a symlink or a directory junction.
     """
     context, config_lookup = _workspace_context(plan.workspace_root, Path(output_dir))
-    selection = _selected_reporters(
-        context=context,
-        config_lookup=config_lookup,
-        output_formats=output_formats,
-        python_based_plugins_only=python_based_plugins_only,
-        reporter_classes=reporter_classes,
-        check_dependencies=False,
+    selection = list(
+        _selected_reporters(
+            context=context,
+            config_lookup=config_lookup,
+            output_formats=output_formats,
+            python_based_plugins_only=python_based_plugins_only,
+            reporter_classes=reporter_classes,
+            check_dependencies=False,
+        )
+    )
+    refuse_report_names_outside(
+        Path(output_dir) / REPORTS_DIR_NAME, _workspace_report_main_names(selection)
     )
     refuse_linked_report_paths(
         Path(output_dir) / REPORTS_DIR_NAME, _workspace_report_file_names(selection)
@@ -588,6 +603,7 @@ def emit_workspace_reports(
     # Before any reporter runs and before the manifest: a link that appeared
     # after refuse_linked_workspace_report_paths ran is refused here, with
     # nothing written.
+    refuse_report_names_outside(reports_dir, _workspace_report_main_names(selection))
     refuse_linked_report_paths(reports_dir, _workspace_report_file_names(selection))
 
     for instance, behaviour, skipped in selection:

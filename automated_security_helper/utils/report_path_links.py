@@ -23,9 +23,15 @@ uses it where ASH reads a report back: container and nix mode before reading the
 inner run's results, and ``_compute_exit_code`` before it counts
 ``reports/ash.sarif``.
 
-A name that is not a single path component is not examined: such a file is not
-written (``confined_report_path``), so nothing goes through a link there. Links
-above the reports directory are not examined here either.
+A report file name (``ash.<extension>``) that is not a single path component,
+such as one built from an ``extension`` with a ``/`` or ``..`` in it, refuses the
+run too (``refuse_report_names_outside``, ``ReportPathRefused``):
+``confined_report_path`` would not write it, and a report the operator asked for
+and did not get is a failed run, not a log line.
+A reporter config built from ``ReporterPluginConfigBase`` never gets there,
+because its ``extension`` is replaced by the default when it is not a file name
+suffix; one that skips that validation does. Links above the reports directory
+are not examined here.
 """
 
 from __future__ import annotations
@@ -50,15 +56,29 @@ _FILE_ATTRIBUTE_REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x
 _IO_REPARSE_TAG_MOUNT_POINT = getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003)
 
 
-class ReportPathLinkRefused(ASHValidationError):
-    """A path ASH would write a report to is a link.
+#: Ends a refusal of a report file name that is not a file in the reports directory.
+NAME_REMEDY = (
+    "ASH writes a report only as a file directly inside the reports directory. "
+    "Give the reporter an extension that is a file name suffix, such as json."
+)
 
-    ``found`` describes the link; the message adds the remedy.
+
+class ReportPathRefused(ASHValidationError):
+    """ASH would write a report somewhere other than a file in the reports directory.
+
+    ``found`` describes the path; the message adds the remedy.
     """
 
-    def __init__(self, found: str, remedy: str = REMEDY):
+    def __init__(self, found: str, remedy: str = NAME_REMEDY):
         self.found = found
         super().__init__(f"{found[0].upper()}{found[1:]}. {remedy}")
+
+
+class ReportPathLinkRefused(ReportPathRefused):
+    """A path ASH would write a report to is a link."""
+
+    def __init__(self, found: str, remedy: str = REMEDY):
+        super().__init__(found, remedy)
 
 
 def _is_junction(path: Path) -> bool:
@@ -131,3 +151,19 @@ def refuse_linked_report_paths(
     found = linked_report_path(report_dir, names)
     if found is not None:
         raise ReportPathLinkRefused(found, remedy)
+
+
+def refuse_report_names_outside(report_dir: PathLike, names: Iterable[str]) -> None:
+    """Raise ReportPathRefused if a reporter's report file name is not a file name.
+
+    ``names`` are the reporters' report files (``reporter_file_name``), which
+    ``ReportPhase`` writes. A reporter's own files beside its report are left to
+    the reporter, which refuses such a name itself with a warning
+    (``write_report_file``).
+    """
+    for name in names:
+        if not is_report_file_name(name):
+            raise ReportPathRefused(
+                f"the report file name {name!r} is not a file in "
+                f"{Path(report_dir).as_posix()}"
+            )

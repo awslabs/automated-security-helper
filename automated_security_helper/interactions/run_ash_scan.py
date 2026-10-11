@@ -85,6 +85,7 @@ from automated_security_helper.utils.process_env import (
 )
 from automated_security_helper.utils.report_path_links import (
     ReportPathLinkRefused,
+    ReportPathRefused,
     linked_report_path,
 )
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
@@ -1158,7 +1159,7 @@ class ReportPathRefusedExit(SystemExit):
         self.reason = reason
 
 
-def _refuse_report_path_link(refusal: ReportPathLinkRefused) -> NoReturn:
+def _refuse_report_path_link(refusal: ReportPathRefused) -> NoReturn:
     print(f"[bold red]ERROR (1) {escape_markup(str(refusal))}[/bold red]")
     raise ReportPathRefusedExit(str(refusal)) from refusal
 
@@ -2107,9 +2108,10 @@ def _run_local_mode(
         # operator's config is fine.
         print(f"[bold red]ERROR (1) {e}[/bold red]")
         sys.exit(1)
-    except ReportPathLinkRefused as e:
+    except ReportPathRefused as e:
         # The report phase refused before any reporter wrote: a link is at the
-        # reports directory or at a report file. Not a fault, so no traceback.
+        # reports directory or at a report file, or a report file name is not a
+        # file in the reports directory. Not a fault, so no traceback.
         _refuse_report_path_link(e)
     except Exception as e:
         logger.exception(e)
@@ -2339,7 +2341,7 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
     except ASHConfigValidationError as exc:
         print(f"[bold red]ERROR (3) Invalid configuration: {exc}[/bold red]")
         sys.exit(int(WorkspaceExitCode.INVALID_PROJECT_CONFIG))
-    except ReportPathLinkRefused as exc:
+    except ReportPathRefused as exc:
         # Exit 1, as in a single-directory scan: a link at a report path is not a
         # workspace definition error.
         _refuse_report_path_link(exc)

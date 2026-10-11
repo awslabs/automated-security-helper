@@ -666,7 +666,11 @@
   it while setting up its directories, so a link left there by an earlier run is
   cleared rather than refused, as before. A regular file at a report path is still
   replaced. A reporter without an `extension` now writes `ash.txt`, the name the
-  workspace report step already gave it, rather than `ash.None`.
+  workspace report step already gave it, rather than `ash.None`. A reporter whose
+  report file name is not a file in the reports directory (an `extension` with a
+  `/`, `\` or `..` that its config did not replace, as a third-party reporter's
+  config may not) stops the run with exit 1 the same way, rather than leaving that
+  report unwritten.
 
 ### Breaking changes
 

@@ -53,7 +53,10 @@ file of an enabled reporter, a file a reporter writes beside its report (such as
 is already a symlink or a directory junction, the run exits 1 before any reporter
 writes, and the error names the link. A workspace run is refused before any project
 is scanned, and container and nix mode exit 1 when a link is left in `reports/` after
-the inner run. A regular file at one of those names is replaced as before.
+the inner run. A regular file at one of those names is replaced as before. A
+reporter's report file name that is not a file in the reports directory (an
+`extension` with `/`, `\` or `..` that its config did not replace with the
+default) stops the run with exit 1 the same way.
 
 ---
 

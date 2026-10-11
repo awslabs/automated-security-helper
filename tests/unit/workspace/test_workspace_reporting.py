@@ -1170,13 +1170,17 @@ class FakeSymlinkedReporter(FakeMergedReporter):
 
 class TestTheWorkspaceWriterStaysInTheReportsDirectory:
     def test_an_extension_with_a_path_writes_nothing_outside(self, workspace):
+        """Refused before any reporter writes, so the run fails rather than skips it."""
         _, output_dir, _ = workspace
         (output_dir / REPORTS_DIR_NAME / "ash.x").mkdir(parents=True)
 
-        outcome = _emit(workspace, FakeEscapingReporter)
+        with pytest.raises(ASHValidationError, match="is not a file in"):
+            _emit(workspace, FakeEscapingReporter)
 
         assert not (output_dir / "escaped-probe.txt").exists()
-        assert "fake-escaping" not in outcome.workspace_artifacts
+        assert [path.name for path in (output_dir / REPORTS_DIR_NAME).iterdir()] == [
+            "ash.x"
+        ]
 
     @pytest.mark.skipif(
         sys.platform == "win32", reason="creating symlinks needs privileges on Windows"

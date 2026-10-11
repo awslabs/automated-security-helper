@@ -177,7 +177,7 @@ from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.log import ASH_LOGGER, escape_markup, get_logger
-from automated_security_helper.utils.report_path_links import ReportPathLinkRefused
+from automated_security_helper.utils.report_path_links import ReportPathRefused
 
 #: The filename every ASH scan writes its aggregated results to. A ``--results``
 #: directory is searched for this name.
@@ -1293,9 +1293,9 @@ def merge_command(
             aggregated_results=merged,
             python_based_plugins_only=False,
         )
-    except ReportPathLinkRefused as exc:
+    except ReportPathRefused as exc:
         # Refused before any reporter wrote: a link at the reports directory or at
-        # a report file. Printed like the other refusals here, without a traceback.
+        # a report file, or a report file name outside it. Printed like the other refusals here, without a traceback.
         print(f"[red]Refusing to write reports: {escape_markup(str(exc))}[/red]")
         raise typer.Exit(1)
 

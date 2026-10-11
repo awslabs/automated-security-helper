@@ -18,6 +18,7 @@ from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_path_links import (
     refuse_linked_report_paths,
+    refuse_report_names_outside,
 )
 
 #: The reporter for this format is switched off in configuration. This is the
@@ -332,6 +333,16 @@ class ReportPhase(EnginePhase):
         # one of these reporters writes there (named by the reporter itself), stops
         # the run with ReportPathLinkRefused: the write through it would be refused
         # and the link left for the next reader. See utils/report_path_links.py.
+        # A report file name that is not a file in the reports directory (an
+        # extension that skipped its config's validation) refuses the run as
+        # well, rather than leaving that reporter's report unwritten.
+        refuse_report_names_outside(
+            report_dir,
+            [
+                reporter_file_name(plugin_instance)
+                for plugin_instance in enabled_reporters
+            ],
+        )
         refuse_linked_report_paths(
             report_dir,
             [
