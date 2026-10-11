@@ -178,8 +178,13 @@ TOOL_NOTES: dict[str, dict] = {
                 "- `config_policy_unreadable`: that policy cannot be established, for "
                 "example because the profile the session bound is no longer registered. "
                 "`error` starts with `A config an MCP client delivered cannot be checked:`.\n"
-                "- `config_env_not_resolved`: such a file uses `!ENV`. `error` names the "
-                "file and the line or key."
+                "- `config_env_not_resolved`: a file of the config uses an `!ENV` tag, or a "
+                "plain value that starts with a `${VAR}` or `${VAR:default}` reference, "
+                "where none is resolved: for a remote caller, any file outside the "
+                "directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names and a session's "
+                "`config/` directory, the scan target's own config included; for a "
+                "stdio caller, a file a client delivered. `error` names the file and "
+                "the line or key."
             ),
             (
                 "The target and source checks have their own `error_type` values too "
@@ -395,16 +400,22 @@ TOOL_NOTES: dict[str, dict] = {
     "validate_config": {
         "caveats": [
             (
-                "Each error is `{field, message, type}`. Besides schema and parse errors, "
-                "`type` can be `config_input_not_permitted` (a `config_path` this session "
-                "may not read), `config_env_not_resolved` (a client's file that uses "
-                "`!ENV`), `config_policy_unreadable` (the session's runtime-override policy "
-                "cannot be established), or `denied_by_runtime_policy`: a field that policy "
+                "Each error is `{field, message, type}`. A remote caller's "
+                "`config_content` counts as the client's config, and so does a "
+                "`config_path` that a client delivered or that is outside the directories "
+                "`ASH_MCP_ALLOWED_CONFIG_ROOTS` names and a session's `config/` directory. "
+                "On stdio, `config_content` is the caller's own, because the caller "
+                "started the server. Besides schema and parse errors, `type` can be "
+                "`config_input_not_permitted` (a `config_path` this session may not "
+                "read), `config_policy_unreadable` (the session's runtime-override policy "
+                "cannot be established for the client's config), "
+                "`denied_by_runtime_policy` (a field of the client's config that policy "
                 "denies, named in `field`, with the message `<field> may not be set by a "
-                "config an MCP client delivers: <reason>`. A `config_path` is checked "
-                "against the policy unless it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` "
-                "names or in the session's own `config/` directory, and `config_content` "
-                "only when the caller is remote: on stdio the caller started the server."
+                "config an MCP client delivers: <reason>`), or `config_env_not_resolved`. "
+                "A `${VAR}` or `${VAR:default}` reference at the start of a plain value, "
+                "or an `!ENV` tag, is an error of type `config_env_not_resolved` "
+                "anywhere in a remote caller's client config, and for a stdio caller "
+                "only in a file a client delivered."
             ),
         ],
     },
