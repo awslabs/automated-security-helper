@@ -220,23 +220,10 @@
               mkdir -p "$GRYPE_DB_CACHE_DIR" "$SEMGREP_RULES_CACHE_DIR" "$OPENGREP_RULES_CACHE_DIR" \
                 "$TRIVY_CACHE_DIR" "$ASH_CFN_GUARD_RULES_DIR"
 
-              # Announced rather than silent: these are network fetches inside what is
-              # otherwise a hermetic shell, and a reader deserves to know they happened.
-              if [ -z "$(ls -A "$GRYPE_DB_CACHE_DIR" 2>/dev/null)" ]; then
-                echo "ash: seeding grype vulnerability database (one time, needs network)" >&2
-                grype db update >/dev/null 2>&1 \
-                  || echo "ash: grype database download FAILED; grype will report ERROR" >&2
-              fi
-
-              # Refreshed on every entry, not only the first: nix mode scans offline,
-              # and ASH holds trivy's database to trivy's own 24-hour bound, so a
-              # database seeded once would fail every scan a day later. trivy returns
-              # at once when its database is current.
-              if [ -z "$(ls -A "$TRIVY_CACHE_DIR" 2>/dev/null)" ]; then
-                echo "ash: seeding trivy vulnerability database (needs network)" >&2
-              fi
-              trivy image --download-db-only --cache-dir "$TRIVY_CACHE_DIR" >/dev/null 2>&1 \
-                || echo "ash: trivy database update FAILED; trivy uses what is cached, or reports MISSING" >&2
+              # grype's and trivy's databases, each downloaded from an empty directory
+              # with an empty config of the script's own, so the result does not
+              # depend on where the shell was entered. See nix/refresh-content-dbs.sh.
+              sh ${self}/nix/refresh-content-dbs.sh
 
               if [ -z "$(ls -A "$ASH_CFN_GUARD_RULES_DIR" 2>/dev/null)" ]; then
                 echo "ash: seeding the AWS Guard Rules Registry for cfn-guard (one time, needs network)" >&2
