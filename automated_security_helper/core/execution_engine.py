@@ -293,6 +293,21 @@ class ScanExecutionEngine:
         }
         for k, v in self.plugins.items():
             ASH_LOGGER.verbose(f"Discovered {len(v)} {k} plugins at runtime")
+        # Named, because a plugin left out here otherwise leaves no trace: no row,
+        # no MISSING. The usual case is a module another scan in this process named;
+        # the one to notice is a plugin a named package registers from another
+        # package without listing it in its ASH_* declarations.
+        left_out = [
+            f"{kind} {plugin.__name__} ({plugin.__module__})"
+            for kind in ("converter", "scanner", "reporter")
+            for plugin in ash_plugin_manager.plugin_modules(kind)
+            if plugin not in self.plugins[kind]
+        ]
+        if left_out:
+            ASH_LOGGER.info(
+                "Registered plugins not used by this scan, because no module in its "
+                "ash_plugin_modules defines or lists them: " + ", ".join(left_out)
+            )
 
         self.ensure_initialized(self._context.config)
 

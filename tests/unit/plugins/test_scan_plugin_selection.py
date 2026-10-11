@@ -329,6 +329,85 @@ class TestALaterScansModulesTakePart:
         )
 
 
+_WRAPPER_INIT = """
+import zzhelper_scanners  # registers HelperScanner; this package does not list it
+"""
+
+_HELPER_INIT = """
+from automated_security_helper.plugins.decorators import ash_scanner_plugin
+
+
+@ash_scanner_plugin
+class HelperScanner:
+    pass
+"""
+
+
+def _left_out_messages(output_dir: Path) -> List[str]:
+    """The scan's "not used by this scan" log lines, from the ``ash.log`` it wrote.
+
+    Read from the file, one record per line, rather than the console, which wraps
+    long lines; and from this scan's own output directory, so another scan's log
+    line cannot count.
+    """
+    log_file = output_dir / "ash.log"
+    if not log_file.is_file():
+        return []
+    return [
+        line
+        for line in log_file.read_text(encoding="utf-8").splitlines()
+        if "not used by this scan" in line
+    ]
+
+
+class TestWhatAScanLeavesOutIsLogged:
+    """A registered plugin a scan does not select is named in that scan's log."""
+
+    def test_a_module_an_earlier_scan_named(self, tmp_path):
+        proc = _Process(tmp_path)
+        first, second = proc.tree("first"), proc.tree("second")
+        proc.run(
+            [
+                {
+                    "source_dir": str(first),
+                    "output_dir": str(tmp_path / "out1"),
+                    "modules": [FERRET_MODULE],
+                },
+                {"source_dir": str(second), "output_dir": str(tmp_path / "out2")},
+            ]
+        )
+
+        assert _left_out_messages(tmp_path / "out1") == []
+        (message,) = _left_out_messages(tmp_path / "out2")
+        assert "FerretScanScanner" in message
+
+    def test_a_scanner_a_named_package_registers_without_listing_it(self, tmp_path):
+        proc = _Process(tmp_path)
+        (proc.site / "zzwrap_ash_plugins").mkdir()
+        (proc.site / "zzwrap_ash_plugins" / "__init__.py").write_text(
+            _WRAPPER_INIT, encoding="utf-8"
+        )
+        (proc.site / "zzhelper_scanners").mkdir()
+        (proc.site / "zzhelper_scanners" / "__init__.py").write_text(
+            _HELPER_INIT, encoding="utf-8"
+        )
+        tree = proc.tree("tree")
+
+        (scan,) = proc.run(
+            [
+                {
+                    "source_dir": str(tree),
+                    "output_dir": str(tmp_path / "out"),
+                    "modules": ["zzwrap_ash_plugins"],
+                }
+            ]
+        )
+
+        assert "helperscanner" not in {name.lower() for name in scan["rows"] or {}}
+        messages = _left_out_messages(tmp_path / "out")
+        assert any("HelperScanner" in message for message in messages), messages
+
+
 class TestThePluginRootNamesNoPlugin:
     """ASH's plugin root holds every package ASH ships; naming it refuses the scan.
 

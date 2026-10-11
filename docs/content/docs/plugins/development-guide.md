@@ -462,6 +462,15 @@ The package name has to be inside ASH's plugin namespace, which `my_ash_plugins`
 because it ends in `_ash_plugins`; a name outside it refuses the scan with exit code 3
 (see [Custom Plugin Modules](../configuration-guide.md#custom-plugin-modules)).
 
+A scan that names your package uses the plugins defined in the package or in a module
+below it, plus the classes and event handlers the package lists in `ASH_SCANNERS`,
+`ASH_REPORTERS`, `ASH_CONVERTERS` or `ASH_EVENT_HANDLERS`. A plugin defined in another
+package, for example a helper library your `__init__.py` imports whose classes carry
+`@ash_scanner_plugin`, registers when it is imported but is not used unless your
+package lists it in one of those declarations. The scan logs each registered plugin it
+leaves out, in a line starting "Registered plugins not used by this scan", in the
+console and in `ash.log` in the output directory.
+
 ## Best Practices
 
 ### Plugin Design
