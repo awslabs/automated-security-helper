@@ -51,7 +51,9 @@ because the output directory is bind-mounted and the runtime there does not map 
 permissions onto that mount, so the non-root user could not write its reports and logs.
 Pass `--build-target non-root` (`-BuildTarget non-root`) to build the unprivileged image
 on Windows anyway. Running in CI does not change the default: `CI`, `IsCI`, `ISCI` and
-`CODEBUILD_BUILD_ID` play no part, and an explicit `--build-target` always wins. `--custom-containerfile` builds on
+`CODEBUILD_BUILD_ID` play no part, and an explicit `--build-target` always wins. The
+stage name is read in any case, as the build reads it: `NON-ROOT` is `non-root`, and is
+built, tagged and checked as `non-root`. `--custom-containerfile` builds on
 `ci` (see [Extending the image](#extending-the-image)).
 
 The `non-root` stage creates its user with the UID and GID of the account running ASH,

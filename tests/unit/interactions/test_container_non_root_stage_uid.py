@@ -66,6 +66,8 @@ def commands(monkeypatch, tmp_path) -> List[List[str]]:
     [
         pytest.param(None, None, id="default-target-as-root"),
         pytest.param(BuildTarget.NON_ROOT, None, id="explicit-non-root-as-root"),
+        # The build reads stage names in any case; a library caller may pass a string.
+        pytest.param("NON-ROOT", None, id="explicit-non-root-in-capitals-as-root"),
         pytest.param(None, "0", id="container-uid-0"),
         # The build reads UID=00 as 0 as well.
         pytest.param(None, "00", id="container-uid-00"),
@@ -208,6 +210,26 @@ def test_an_unprivileged_host_user_builds_non_root_as_itself(commands, monkeypat
     [build] = commands
     assert build[build.index("--target") + 1] == "non-root"
     assert "UID=1000" in build and "GID=1000" in build
+
+
+@pytest.mark.parametrize("written", ["Non-Root", "NON-ROOT", "CI"])
+def test_the_stage_is_built_by_its_lower_case_name(written, commands, monkeypatch):
+    monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 1000)
+    monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: 1000)
+
+    result = rac.run_ash_container(
+        source_dir="src",
+        output_dir="out",
+        ash_revision_to_install="v3.7.0",
+        build=True,
+        run=False,
+        build_target=written,
+    )
+
+    assert result.returncode == 0, result.stderr
+    [build] = commands
+    assert build[build.index("--target") + 1] == written.lower()
+    assert f"automated-security-helper:{written.lower()}" in build
 
 
 def test_the_gid_has_no_default():

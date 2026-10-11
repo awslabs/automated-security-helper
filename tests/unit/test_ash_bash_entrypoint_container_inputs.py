@@ -639,6 +639,33 @@ class TestANonRootBuildAsUid0IsRefused:
         assert calls == []
         assert "must be a numeric value" in output
 
+    @pytest.mark.parametrize("written", ["NON-ROOT", "Non-Root"])
+    def test_the_stage_name_in_any_case_is_refused_as_root(
+        self, written, fake_runner, project
+    ):
+        """The build reads stage names in any case, so --target NON-ROOT builds
+        ``non-root`` and would fail at ``adduser`` as root."""
+        rc, output, calls = _run_ash_status(
+            fake_runner,
+            project,
+            ["--no-run", "--build-target", written],
+            host_ids=("0", "0"),
+        )
+
+        assert rc != 0, output
+        assert calls == []
+        assert "--build-target ci" in output
+
+    @pytest.mark.parametrize("written", ["NON-ROOT", "CI"])
+    def test_the_stage_is_built_by_its_lower_case_name(
+        self, written, fake_runner, project
+    ):
+        calls = run_ash(fake_runner, project, ["--no-run", "--build-target", written])
+
+        [build] = calls
+        assert _flag(build, "--target") == written.lower()
+        assert _flag(build, "--tag") == f"automated-security-helper:{written.lower()}"
+
     def test_an_unprivileged_host_user_builds_non_root_as_itself(
         self, fake_runner, project
     ):

@@ -113,6 +113,10 @@ while (("$#")); do
   shift
 done
 
+# The build reads stage names in any case, so --build-target NON-ROOT is non-root:
+# lower-cased once, here, so every check below and the image tag see that name.
+TARGET_STAGE="$(printf '%s' "${TARGET_STAGE}" | tr '[:upper:]' '[:lower:]')"
+
 export ASH_IMAGE_NAME=${ASH_IMAGE_NAME:-"automated-security-helper:${TARGET_STAGE}"}
 
 # Default to the pwd

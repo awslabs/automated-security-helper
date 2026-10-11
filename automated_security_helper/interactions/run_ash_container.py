@@ -476,6 +476,9 @@ def _resolve_build_target(
     ``CODEBUILD_BUILD_ID`` do not change the stage, whatever their value. ``ci`` is
     built when it is asked for, or under ``--custom-containerfile``, which is
     documented to build on ``ci`` so the custom image keeps running as root.
+
+    The name is returned in lower case: the build reads stage names in any case,
+    so ``NON-ROOT`` from a library caller is ``non-root`` and is checked as such.
     """
     if custom_containerfile is not None:
         return BuildTarget.CI.value
@@ -483,7 +486,8 @@ def _resolve_build_target(
         return (
             BuildTarget.CI.value if _host_is_windows() else BuildTarget.NON_ROOT.value
         )
-    return build_target.value if hasattr(build_target, "value") else str(build_target)
+    name = build_target.value if hasattr(build_target, "value") else str(build_target)
+    return name.lower()
 
 
 def _non_root_stage_uid_refusal(

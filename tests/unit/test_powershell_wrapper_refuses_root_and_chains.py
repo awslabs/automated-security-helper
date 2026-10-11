@@ -185,6 +185,18 @@ def test_an_unprivileged_caller_builds_non_root(host):
 
 
 @pytestmark_posix
+@pytest.mark.parametrize("written", ["NON-ROOT", "Ci"])
+def test_the_stage_is_built_by_its_lower_case_name(written, host):
+    result, calls = host(f"-NoRun -BuildTarget {written}", uid="1000")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls[calls.index("--target") + 1] == written.lower()
+    assert calls[calls.index("--tag") + 1] == (
+        f"automated-security-helper:{written.lower()}"
+    )
+
+
+@pytestmark_posix
 @pytest.mark.parametrize(
     "arguments",
     [

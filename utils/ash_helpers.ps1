@@ -152,6 +152,9 @@ function Invoke-ASH {
         $AshArgs = $null
     )
     begin {
+        # ValidateSet and -eq ignore case, and so does the build: -BuildTarget NON-ROOT
+        # is non-root. Lower-cased once, so the --target value and the image tag are too.
+        $BuildTarget = $BuildTarget.ToLowerInvariant()
         $ashRoot = (Get-Item $PSScriptRoot).Parent.FullName
         $buildArgs = [System.Collections.Generic.List[string]]::new()
         $runArgs = [System.Collections.Generic.List[string]]::new()
