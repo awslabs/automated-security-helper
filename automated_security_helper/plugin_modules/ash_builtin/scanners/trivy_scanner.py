@@ -55,11 +55,14 @@ declared 24h.
   turns trivy's update off (``TRIVY_SKIP_DB_UPDATE``, or ``db.skip-update`` in an
   honored ``config_file``), ASH's update is left out with a warning and trivy reads
   the cached database as it is; the post-scan check still holds it to the bound.
-* Offline, ASH passes ``--skip-db-update`` (with ``--skip-java-db-update``,
-  ``--offline-scan`` and ``--skip-check-update``), which makes trivy use any
-  database it has. The post-scan check is what holds that database to the bound.
-  With no database at all trivy cannot scan offline, so the scanner reports
-  MISSING with the reason before trivy runs.
+* Offline, ASH passes ``--skip-db-update`` (with ``--skip-java-db-update`` and
+  ``--skip-check-update``), which makes trivy use any database it has. The
+  post-scan check is what holds that database to the bound. With no database at
+  all trivy cannot scan offline, so the scanner reports MISSING with the reason
+  before trivy runs.
+* Online or offline, trivy scans never contact package registries: every scan
+  gets ``--offline-scan`` (``SCAN_FLAGS`` in ``_trivy_scanner_base.py``), and the
+  database refresh is the separate step above.
 
 The database is only read by ``vuln``. With ``vuln`` turned off nothing is
 measured and the offline database check is skipped.

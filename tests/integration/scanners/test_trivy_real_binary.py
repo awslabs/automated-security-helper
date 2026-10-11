@@ -244,6 +244,114 @@ def test_an_unbounded_scan_timeout_scans(tmp_path, trivy_env):
     assert STABLE <= _pairs(report)
 
 
+class _RequestLog:
+    """An HTTP listener on 127.0.0.1 only, on a free port, that records every request
+    (and answers 404, or refuses a proxy CONNECT)."""
+
+    def __enter__(self):
+        import http.server
+        import threading
+
+        seen = self.requests = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 - the stdlib's name
+                seen.append((self.command, self.path))
+                self.send_response(404)
+                self.end_headers()
+
+            do_HEAD = do_GET
+            do_CONNECT = do_GET
+
+            def log_message(self, *args):
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        return self
+
+    def __exit__(self, *exc):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+def _pom_tree(root: Path, repository: str) -> Path:
+    """A pom.xml whose parent and dependency resolve only from *repository*."""
+    root.mkdir(parents=True)
+    (root / "pom.xml").write_text(
+        f"""<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.example.missing</groupId>
+    <artifactId>parent</artifactId>
+    <version>1.0.0</version>
+    <relativePath>nonexistent/pom.xml</relativePath>
+  </parent>
+  <groupId>com.example</groupId>
+  <artifactId>demo</artifactId>
+  <version>1.0.0</version>
+  <repositories>
+    <repository><id>local</id><url>{repository}/maven2</url></repository>
+  </repositories>
+  <dependencies>
+    <dependency>
+      <groupId>com.example.missing</groupId>
+      <artifactId>lib</artifactId>
+      <version>2.0.0</version>
+    </dependency>
+  </dependencies>
+</project>
+""",
+        encoding="utf-8",
+    )
+    return root
+
+
+def _scan_repo_direct(source: Path, output: Path, **options):
+    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+        TrivyRepoScanner,
+        TrivyRepoScannerConfig,
+        TrivyRepoScannerConfigOptions,
+    )
+
+    config = AshConfig()
+    record_provenance(config, in_tree=[], trusted=AshConfig())
+    context = PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=output / "converted",
+        config=config,
+    )
+    scanner = TrivyRepoScanner(
+        context=context,
+        config=TrivyRepoScannerConfig(
+            options=TrivyRepoScannerConfigOptions(**{"offline": False, **options})
+        ),
+    )
+    scanner.dependencies_satisfied = scanner.validate_plugin_dependencies()
+    return scanner, scanner.scan(target=source, target_type="source")
+
+
+@pytest.mark.parametrize("kind", ["trivy", "trivy-repo"])
+def test_an_online_scan_contacts_no_package_registry(
+    tmp_path, trivy_env, monkeypatch, kind
+):
+    """trivy scans never contact package registries; the database refresh is a
+    separate step. A repository a pom.xml declares is one such registry."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    with _RequestLog() as listener:
+        source = _pom_tree(tmp_path / "src", listener.url)
+        if kind == "trivy":
+            scanner, _ = _scan_direct(source, tmp_path / "out", operator=True)
+        else:
+            scanner, _ = _scan_repo_direct(source, tmp_path / "out", scanners=["vuln"])
+        requests = list(listener.requests)
+    assert scanner.exit_code == 0
+    assert requests == []
+
+
 def _debian_tree(root: Path, packages: tuple) -> Path:
     """A Debian 11 tree whose dpkg status lists *packages*, each at 0.0.1-1."""
     (root / "etc").mkdir(parents=True)
@@ -405,10 +513,13 @@ def test_ash_scan_runs_trivy_and_records_its_database(tmp_path, trivy_env):
     assert records and {r["scanner"] for r in records} == {"trivy"}, records
     assert not any(r["stale"] for r in records), records
     # Online: ASH updated the database first, under its lock, so the scan itself
-    # skipped the update; it is not an offline scan.
+    # skipped the update and read the cache the update wrote (--cache-dir, which an
+    # offline scan is not given). Every scan, online too, stays off package
+    # registries (--offline-scan).
     lines = _command_lines(data)
     assert any("--skip-db-update" in c for c in lines), lines
-    assert not any("--offline-scan" in c for c in lines), lines
+    assert any("--cache-dir=" in c for c in lines), lines
+    assert all("--offline-scan" in c for c in lines), lines
 
 
 def test_ash_scan_offline_uses_the_cached_database(tmp_path, trivy_env):

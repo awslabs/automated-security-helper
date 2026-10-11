@@ -86,14 +86,22 @@ SEVERITY_INCLUSION = {
     "CRITICAL": "CRITICAL",
 }
 
-#: The flags that keep trivy off the network. ``--skip-db-update`` makes trivy use
-#: whatever vulnerability database is in its cache, of any age; ASH's scan-time
+#: Flags every trivy scan gets, online or offline. ``--offline-scan``: trivy scans
+#: never contact package registries; the database refresh is a separate step
+#: (``_shared_update_flags``). Measured with trivy 0.75.0: an online ``trivy fs`` of a
+#: pom.xml requested its parent and dependency POMs from the repository the pom.xml
+#: declares and from Maven Central, and with the flag requested nothing. trivy then
+#: resolves Maven dependencies from the scanned tree and the local Maven repository
+#: (``~/.m2/repository``) only.
+SCAN_FLAGS = ("--offline-scan",)
+
+#: The flags that skip trivy's own updates offline. ``--skip-db-update`` makes trivy
+#: use whatever vulnerability database is in its cache, of any age; ASH's scan-time
 #: staleness check (``utils/content_db_staleness.py``) is what holds that database
 #: to its declared bound.
 OFFLINE_FLAGS = (
     "--skip-db-update",
     "--skip-java-db-update",
-    "--offline-scan",
     "--skip-check-update",
 )
 
@@ -454,6 +462,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                     value=SEVERITY_INCLUSION[threshold],
                 )
             )
+
+        for flag in SCAN_FLAGS:
+            self.args.extra_args.append(ToolExtraArg(key=flag, value=None))
 
         if self._offline():
             for flag in OFFLINE_FLAGS:

@@ -159,6 +159,9 @@
     An operator's `TRIVY_SKIP_DB_UPDATE=true` (or `db.skip-update: true` in the
     honored `config_file`) turns ASH's database update off too, with a warning;
     the scan reads the cached database, and the staleness check still applies.
+    Both scanners pass `--offline-scan` on every scan, online too: trivy scans never
+    contact package registries, and the database refresh is a separate step. Maven
+    dependencies are resolved from the scanned tree and `~/.m2/repository` only.
 
   Options that name something a tool executes or loads are not taken from a config
   file inside the scanned tree: actionlint's `shellcheck` and `pyflakes` accept only
