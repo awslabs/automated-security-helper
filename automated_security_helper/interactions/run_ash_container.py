@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import platform
+import posixpath
 import re
 import shlex
 import shutil
@@ -948,10 +949,7 @@ def _refuse_absolute_extends(config: str) -> None:
     the scan applies itself; a file that cannot be read ends the walk there, and the
     scan inside reports it.
     """
-    from automated_security_helper.config.config_sources import (
-        EXTENDS_KEY,
-        read_config_file,
-    )
+    from automated_security_helper.config.config_sources import EXTENDS_KEY
 
     pending = [Path(config).resolve()]
     seen = set()
@@ -961,13 +959,10 @@ def _refuse_absolute_extends(config: str) -> None:
             continue
         seen.add(current)
         try:
-            data = read_config_file(current)
+            refs = _extends_refs_of(current)
         except Exception:  # the scan inside reports why it cannot be read
             continue
-        refs = data.get(EXTENDS_KEY) if isinstance(data, dict) else None
-        for ref in [refs] if isinstance(refs, str) else refs or []:
-            if not isinstance(ref, str):
-                continue
+        for ref in refs:
             if Path(ref).is_absolute() or Path(ref).drive:
                 raise ContainerInputError(
                     f"'{EXTENDS_KEY}: {ref}' in {current} names a base by absolute "
@@ -1063,6 +1058,54 @@ def _written_by_the_scanned_repository(files: List[Path], source_dir: Path) -> b
     return bool(files_inside(files, scanned_trees(Path(source_dir))))
 
 
+def _extends_refs_of(path: Path) -> List[str]:
+    """The ``extends`` entries of one config file, as written."""
+    from automated_security_helper.config.config_sources import (
+        EXTENDS_KEY,
+        read_config_file,
+    )
+
+    data = read_config_file(path)
+    refs = data.get(EXTENDS_KEY) if isinstance(data, dict) else None
+    refs = [refs] if isinstance(refs, str) else refs or []
+    return [ref.strip() for ref in refs if isinstance(ref, str) and ref.strip()]
+
+
+def _chain_placements(resolved: Path, destination: str) -> List[Tuple[Path, str]]:
+    """Each file of a config's chain, with the container path the scan there reads it at.
+
+    The scan inside resolves a base from the extending file's own path in the
+    container, which is the mounted path (a bind-mounted file is no link). So a
+    base goes where the extending file names it, relative to that file's mount,
+    while its content comes from where the host resolves the same entry: the
+    real path of the extending file plus the entry, links followed. A base the
+    host reaches through a link therefore still sits where the scan inside looks.
+    """
+    placements: List[Tuple[Path, str]] = []
+    placed: dict = {}
+    pending = [(resolved, destination)]
+    while pending:
+        host_file, inner = pending.pop()
+        if inner in placed:
+            if placed[inner] != host_file:
+                raise ContainerInputError(
+                    f"Two files of the config's extends chain, {placed[inner]} and "
+                    f"{host_file}, would both be mounted at {inner}. Name each base "
+                    "by its own path."
+                )
+            continue
+        placed[inner] = host_file
+        placements.append((host_file, inner))
+        for ref in _extends_refs_of(host_file):
+            pending.append(
+                (
+                    (host_file.parent / ref).resolve(),
+                    posixpath.normpath(posixpath.join(posixpath.dirname(inner), ref)),
+                )
+            )
+    return placements
+
+
 def _host_file_in_container(
     host_path: str, source_dir: Path, mount_root: str, *, follow_extends: bool
 ) -> Tuple[List[str], str, List[Path]]:
@@ -1075,10 +1118,11 @@ def _host_file_in_container(
 
     A file outside it is mounted read-only under *mount_root* at its path relative
     to its confinement root, and with *follow_extends* each file of its ``extends``
-    chain is mounted the same way, so relative bases resolve inside the container
-    exactly as on the host. Only those files are mounted, not the directory they
-    are in. A chain that does not resolve on the host mounts the file alone: the
-    scan inside reaches the same error and reports it with its own exit code.
+    chain is mounted where the extending file names it (:func:`_chain_placements`),
+    so the bases resolve inside the container to the files the host reads. Only
+    those files are mounted, not the directory they are in. A chain that does not
+    resolve on the host mounts the file alone: the scan inside reaches the same
+    error and reports it with its own exit code.
 
     The path is resolved first, so a symlink is judged, and mounted, by its target.
     """
@@ -1093,26 +1137,29 @@ def _host_file_in_container(
     )
 
     root = default_confinement_root(resolved, source)
-    files = [resolved]
+    inner_config = f"{mount_root}/{resolved.relative_to(root).as_posix()}"
+    placements = [(resolved, inner_config)]
     if follow_extends:
         try:
-            chain = resolve_config_document(resolved, confine_to=root).chain
+            # Validated as the scan will validate it (confinement, bounds, cycles)
+            # before anything is placed.
+            resolve_config_document(resolved, confine_to=root)
+            placements = _chain_placements(resolved, inner_config)
+        except ContainerInputError:
+            raise
         except Exception as e:
             # See the docstring: the scan inside reports it.
             ASH_LOGGER.debug(
                 f"Mounting {resolved} alone: its chain did not resolve: {e}"
             )
-            chain = []
-        files = list(dict.fromkeys([*chain, resolved]))
 
     mounts: List[str] = []
-    for file in files:
+    for file, destination in placements:
         _require_mountable("config file", file)
-        destination = f"{mount_root}/{file.relative_to(root).as_posix()}"
         mounts.extend(
             ["--mount", f"type=bind,source={file},destination={destination},readonly"]
         )
-    return mounts, f"{mount_root}/{resolved.relative_to(root).as_posix()}", files
+    return mounts, inner_config, list(dict.fromkeys(file for file, _ in placements))
 
 
 def _assemble_run_command(

@@ -203,9 +203,10 @@ to `/out`.
 The config file named with `--config` (or `ASH_CONFIG`) is the one the scan inside the
 container reads. One inside `--source-dir` is read through `/src`. One outside it is
 mounted read-only under `/ash-config`, together with the files its `extends` chain
-names, each at the same place relative to the config's directory (the parent of `.ash/`
-for a file in `.ash/`), so relative bases resolve as they do on the host; only those
-files are mounted, not the directory. A `--config` that is not an existing file, or is
+names, each where the file that extends it names it (relative to the config's directory,
+the parent of `.ash/` for a file in `.ash/`), so the bases resolve inside to the files
+the host reads, including a base the host reaches through a link; only those files are
+mounted, not the directory. A `--config` that is not an existing file, or is
 empty, refuses the scan with exit 3 before anything is built, and so does an `extends`
 entry anywhere in the chain that names its base by absolute path: inside the container
 that path is not the same file. A `--config` named inside the scanned tree that is a link,

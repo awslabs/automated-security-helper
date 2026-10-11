@@ -25,6 +25,7 @@ Every test records the runner commands instead of starting them.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -459,3 +460,60 @@ def test_a_config_base_gate_is_refused_in_container_and_nix_mode(tmp_path, monke
                 mode=mode,
                 config_base_gate=lambda _path: True,
             )
+
+
+def _container_view(cmd: List[str], tmp_path: Path) -> Path:
+    """Lay the mounted config files out under a stand-in root, as the runner would."""
+    root = tmp_path / "container-root"
+    for destination, options in _mounts(cmd).items():
+        if destination.startswith("/ash-config/"):
+            target = root / destination.lstrip("/")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(str(options["source"]), target)
+    (root / "src").mkdir(parents=True, exist_ok=True)
+    return root
+
+
+class TestTheChainResolvesInsideAsItDoesOnTheHost:
+    """The scan inside resolves each base from the place the extending file names
+    it, so that is where each base has to be mounted, whatever links the host
+    followed to reach it."""
+
+    @pytest.mark.parametrize(
+        "layout",
+        ["relative-subdir", "symlinked-base", "dotdot-inside", "base-in-linked-dir"],
+    )
+    def test_the_inner_chain_reads_the_same_files(self, layout, tree, tmp_path):
+        from automated_security_helper.config.config_sources import (
+            default_confinement_root,
+            resolve_config_document,
+        )
+
+        ops = tree["operator"]
+        (ops / "sub").mkdir()
+        (ops / "real").mkdir()
+        (ops / "sub" / "b.yaml").write_text("project_name: sub\n", encoding="utf-8")
+        (ops / "real" / "b2.yaml").write_text(
+            "extends: c.yaml\nfail_on_findings: false\n", encoding="utf-8"
+        )
+        (ops / "real" / "c.yaml").write_text("project_name: c\n", encoding="utf-8")
+        (ops / "sym.yaml").symlink_to(ops / "real" / "b2.yaml")
+        (ops / "linked").symlink_to(ops / "real", target_is_directory=True)
+        body = {
+            "relative-subdir": "extends: sub/b.yaml\n",
+            "symlinked-base": "extends: sym.yaml\n",
+            "dotdot-inside": "extends: sub/../sub/b.yaml\n",
+            "base-in-linked-dir": "extends: linked/b2.yaml\n",
+        }[layout]
+        config = ops / "ash.yaml"
+        config.write_text(body, encoding="utf-8")
+        host = resolve_config_document(config.resolve()).data
+
+        cmd = _assemble(tree["source"], tree["output"], config=str(config))
+
+        root = _container_view(cmd, tmp_path)
+        inner = root / _flag(cmd, "--config").lstrip("/")
+        document = resolve_config_document(
+            inner, confine_to=default_confinement_root(inner, root / "src")
+        )
+        assert document.data == host
