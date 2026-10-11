@@ -500,6 +500,26 @@ class TestTheConfigRefStepRefusesWhatItCannotReadExactly:
         assert "::warning::" not in run.proc.stdout, (
             "the path was read as a missing file and fell back to the defaults"
         )
+        # The step's own check refuses it, not git failing on it later: git
+        # refuses some of these spellings by itself ("outside repository"), which
+        # would keep this test green with the step's check gone.
+        assert (
+            "::error::config must be a plain path inside the repository"
+            in run.proc.stdout
+        ), run.describe()
+
+    def test_a_regular_file_with_a_non_ascii_name_is_read(self, tmp_path):
+        """git ls-tree quotes such names unless -z is used; the file is still regular."""
+        name = ".ash/\u00e1sh.yaml"
+        repo = Repository(tmp_path, base_files={name: BASE_CONFIG})
+        context = _pull_request(repo.base_sha, fork=False)
+        run, steps = _run_config_ref_step(
+            repo, context, self._inputs(name, repo.base_sha)
+        )
+        assert run is not None, "no step reads the config from config-ref"
+        assert run.proc.returncode == 0, run.describe()
+        path = steps["config-ref"]["outputs"]["path"]
+        assert Path(path).read_text(encoding="utf-8") == BASE_CONFIG
 
     def test_no_step_runs_ash_after_the_config_ref_step_failed(self, tmp_path):
         """With no path from the step, the fallback would be the checkout's config."""

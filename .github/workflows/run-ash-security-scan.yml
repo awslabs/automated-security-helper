@@ -298,8 +298,19 @@ jobs:
           rm -rf "${DEST_ROOT}"
           mkdir -p "$(dirname "${DEST}")"
           git fetch --no-tags --no-recurse-submodules --depth=1 origin "${CONFIG_REF}"
-          ENTRY="$(git --literal-pathspecs ls-tree FETCH_HEAD -- "${RELATIVE}")"
-          if [ -z "${ENTRY}" ]; then
+          COMMIT="$(git rev-parse FETCH_HEAD)"
+          # -z, because without it git quotes a name holding non-ASCII bytes and the
+          # path comparison below would refuse a regular file. Listed to a file
+          # rather than read through a pipe, so that a failing ls-tree fails the
+          # step instead of reading as "no such file".
+          LISTING="${RUNNER_TEMP}/ash-config-ref.ls-tree"
+          git --literal-pathspecs ls-tree -z "${COMMIT}" -- "${RELATIVE}" > "${LISTING}"
+          ENTRIES=()
+          while IFS= read -r -d '' RECORD; do
+            ENTRIES+=("${RECORD}")
+          done < "${LISTING}"
+          rm -f -- "${LISTING}"
+          if [ "${#ENTRIES[@]}" -eq 0 ]; then
             if [ "${CONFIG_REF_MISSING}" != "defaults" ]; then
               echo "::error::${CONFIG_REF} has no ${RELATIVE}, so the config this scan was asked to use does not exist there; refusing to scan with ASH's defaults instead. Check the config input, or set config-ref-missing: defaults for the pull request that adds the first config."
               exit 1
@@ -307,15 +318,18 @@ jobs:
             printf '{}\n' > "${DEST}"
             echo "::warning::${CONFIG_REF} has no ${RELATIVE}, and config-ref-missing is defaults, so this scan uses ASH's default config, not the checkout's."
           else
-            read -r MODE TYPE OBJECT ENTRY_PATH <<< "${ENTRY}"
-            if [ "${TYPE}" != "blob" ] || [ "${MODE}" = "120000" ] || [ "${ENTRY_PATH}" != "${RELATIVE}" ]; then
-              echo "::error::${RELATIVE} at ${CONFIG_REF} is not a regular file (${ENTRY}); refusing to scan with it."
+            ENTRY="${ENTRIES[0]}"
+            ENTRY_PATH="${ENTRY#*$'\t'}"
+            read -r MODE TYPE OBJECT <<< "${ENTRY%%$'\t'*}"
+            if [ "${#ENTRIES[@]}" -ne 1 ] || [ "${TYPE}" != "blob" ] || [ "${MODE}" = "120000" ] || [ "${ENTRY_PATH}" != "${RELATIVE}" ]; then
+              echo "::error::${RELATIVE} at ${CONFIG_REF} is not a regular file (${MODE} ${TYPE}); refusing to scan with it."
               exit 1
             fi
             git cat-file blob "${OBJECT}" > "${DEST}"
-            echo "Scanning with ${RELATIVE} as of ${CONFIG_REF} (blob ${OBJECT}), not the checkout's copy"
+            echo "Scanning with ${RELATIVE} as of ${CONFIG_REF} (commit ${COMMIT}, blob ${OBJECT}), not the checkout's copy"
           fi
           echo "path=${DEST}" >> "$GITHUB_OUTPUT"
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
 
       - name: Install uv
         id: setup-uv
