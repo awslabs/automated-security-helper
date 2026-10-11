@@ -84,7 +84,12 @@ def test_a_config_above_the_scan_root_but_inside_the_checkout_is_the_trees(repo)
 
 
 def test_an_extends_base_inside_the_tree_makes_the_config_the_trees(repo, tmp_path):
-    """An operator file that pulls its value from an in-tree base is not vouched for."""
+    """An operator file that pulls its value from an in-tree base is not vouched for.
+
+    With ``permit_base`` allowing it, resolve_config applies the in-tree base, so the
+    value is there and must still count as the tree's. This used to catch any
+    exception and skip, which turned a resolve_config regression into a skip.
+    """
     base = repo / ".ash" / "base.yaml"
     base.parent.mkdir()
     base.write_text(_config_text())
@@ -93,13 +98,14 @@ def test_an_extends_base_inside_the_tree_makes_the_config_the_trees(repo, tmp_pa
         yaml.safe_dump({"extends": base.as_posix(), "project_name": "operator"})
     )
 
-    try:
-        config = resolve_config(
-            config_path=operator, source_dir=repo, permit_base=lambda path: True
-        )
-    except Exception as exc:  # the base may be refused outright, which is safe too
-        pytest.skip(f"extends across the tree boundary is refused: {exc}")
+    config = resolve_config(
+        config_path=operator, source_dir=repo, permit_base=lambda path: True
+    )
 
+    assert config.project_name == "operator"
+    assert config.scanners.actionlint.options.shellcheck == "sh", (
+        "the in-tree base was not applied, so nothing below tests its provenance"
+    )
     assert set_by_operator(config, KEY, "sh") is False
 
 
