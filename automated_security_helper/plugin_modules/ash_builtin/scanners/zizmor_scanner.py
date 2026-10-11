@@ -55,7 +55,11 @@ operator set ``options.config_file`` (``--config-overrides`` or a config file
 outside the scanned tree, ``utils/config_trust.py``), in which case that file is
 passed as ``--config``. A ``config_file`` set by a config in the scanned tree is
 ignored with a warning, and a ``zizmor.yml`` in the tree with a note; findings are
-tuned with ASH suppressions, which are reported and counted.
+tuned with ASH suppressions, which are reported and counted. The operator's file
+may be inside the scanned tree, but one there that resolves outside the tree
+through a symbolic link fails the scan without running zizmor: zizmor quotes a
+config it cannot parse (1.30.1: its first key), and the tree decides what that
+path leads to.
 
 zizmor's inline ``# zizmor: ignore[...]`` comments drop a finding the same way,
 so ASH also passes ``--no-ignores``, which turns off those comments and the
@@ -137,6 +141,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
 from automated_security_helper.utils.config_trust import (
+    LEADS_OUT_OF_THE_TREE,
     operator_path,
     set_by_operator,
 )
@@ -821,6 +826,11 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         """The operator's ``--config`` file, or None for ``--no-config``.
 
         See "Configuration" in the module docstring.
+
+        Raises:
+            ScannerError: the operator's file is inside the scanned tree and leads
+                out of it through a symbolic link (``LEADS_OUT_OF_THE_TREE``).
+            FileNotFoundError: the operator's file does not exist.
         """
         configured = self._options.config_file
         if configured is not None and str(configured).strip() != "":
@@ -833,6 +843,13 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 self._plugin_context.source_dir,
                 outside_tree=False,
             )
+            if chosen.refusal == LEADS_OUT_OF_THE_TREE:
+                raise ScannerError(
+                    f"scanners.zizmor.options.config_file is {str(configured)!r}, a "
+                    "path inside the scanned tree that resolves outside it through a "
+                    "symbolic link. The scanned repository decides what is at that "
+                    "path, so zizmor is not given it, and zizmor is not run."
+                )
             if chosen.path is not None:
                 if not chosen.path.is_file():
                     raise FileNotFoundError(

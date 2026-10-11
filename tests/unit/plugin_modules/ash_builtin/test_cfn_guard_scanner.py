@@ -537,8 +537,8 @@ class TestRuleSelection:
         scanner = _scanner(repo, rule_sets=[], rules_paths=["policy.guard"])
         with (
             patch(
-                "automated_security_helper.plugin_modules.ash_builtin.scanners."
-                "cfn_guard_scanner.leaves_the_tree_through_a_link",
+                "automated_security_helper.utils.config_trust."
+                "leaves_the_tree_through_a_link",
                 side_effect=check_then_swap,
             ),
             pytest.raises(RulesBundleUnavailable, match="cannot be used"),

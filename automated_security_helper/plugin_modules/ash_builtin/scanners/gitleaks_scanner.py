@@ -160,9 +160,8 @@ from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.config_trust import (
-    leaves_the_tree_through_a_link,
+    LEADS_OUT_OF_THE_TREE,
     operator_path,
-    scan_root,
     set_by_operator,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -450,7 +449,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         Raises:
             ScannerError: the operator's path is not a file, or is inside the
                 scanned tree and leads out of it through a symlink
-                (``config_trust.leaves_the_tree_through_a_link``).
+                (``config_trust.LEADS_OUT_OF_THE_TREE``).
         """
         value = getattr(self._options(), option)
         if not value:
@@ -463,6 +462,13 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             self._source_dir(),
             outside_tree=False,
         )
+        if chosen.refusal == LEADS_OUT_OF_THE_TREE:
+            raise ScannerError(
+                f"scanners.gitleaks.options.{option} is {str(value)!r}, a path "
+                "inside the scanned tree that resolves outside it through a "
+                "symbolic link. The scanned repository decides what is at that "
+                "path, so gitleaks is not given it, and gitleaks is not run."
+            )
         if chosen.path is None:
             self._plugin_log(
                 f"Ignoring scanners.gitleaks.options.{option} ({str(value)!r}): "
@@ -470,15 +476,6 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 level=logging.WARNING,
             )
             return None
-        if leaves_the_tree_through_a_link(
-            str(value), self._source_dir(), scan_root(config, self._source_dir())
-        ):
-            raise ScannerError(
-                f"scanners.gitleaks.options.{option} is {str(value)!r}, a path "
-                "inside the scanned tree that resolves outside it through a "
-                "symbolic link. The scanned repository decides what is at that "
-                "path, so gitleaks is not given it, and gitleaks is not run."
-            )
         if not chosen.path.is_file():
             raise ScannerError(
                 f"scanners.gitleaks.options.{option} is {str(value)!r}, which is "

@@ -345,3 +345,59 @@ def test_a_local_reference_out_of_the_tree_is_never_read(repo, tmp_path):
     ), messages
     assert not any("outside" in text for _, text in messages), messages
     assert not any(uri == ".github/workflows/out.yml" for uri, _ in messages)
+
+
+#: Text of a file outside the scanned tree. actionlint quotes the first seven
+#: characters of a value it cannot unmarshal, so the marker is in those.
+_OUTSIDE_MARKER = "QZXJWVK"
+
+
+def _files_mentioning(output: Path, text: str) -> list:
+    return sorted(
+        str(path.relative_to(output))
+        for path in output.rglob("*")
+        if path.is_file() and text in path.read_text(encoding="utf-8", errors="replace")
+    )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+@pytest.mark.parametrize(
+    "content",
+    [
+        # Parses; ASH logs the ignore pattern.
+        f"paths:\n  '**':\n    ignore:\n      - {_OUTSIDE_MARKER}-pattern\n",
+        # Does not unmarshal; actionlint quotes the start of the value.
+        f"self-hosted-runner:\n  labels: {_OUTSIDE_MARKER}-label\n",
+    ],
+    ids=["ignore-pattern", "unparseable"],
+)
+def test_an_operator_config_file_in_the_tree_that_links_out_is_not_read(
+    repo, tmp_path, content
+):
+    """Before, actionlint read the file a link in the tree pointed at, and its text
+    reached ash.log, the aggregated results and the console. Now actionlint is not
+    run, the scanner is ERROR, and nothing of that file is in the output."""
+    _require_actionlint()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "creds").write_text(content, encoding="utf-8")
+    (repo / "ci").mkdir()
+    (repo / "ci" / "actionlint.yaml").symlink_to(outside / "creds")
+    output = tmp_path / "out"
+
+    result = _scan(
+        repo,
+        output,
+        "--config-overrides",
+        "scanners.actionlint.options.config_file=ci/actionlint.yaml",
+    )
+
+    console = result.stdout + result.stderr
+    assert _files_mentioning(output, _OUTSIDE_MARKER) == [], console[-3000:]
+    assert _OUTSIDE_MARKER not in console
+    aggregated = json.loads(
+        (output / "ash_aggregated_results.json").read_text(encoding="utf-8")
+    )
+    assert aggregated["scanner_results"]["actionlint"]["status"] == "ERROR"
+    log = (output / "ash.log").read_text(encoding="utf-8", errors="replace")
+    assert "through a symbolic link" in log, console[-3000:]

@@ -81,7 +81,11 @@ Decisions, and why
    ``.github/actionlint.yml`` in the tree is ignored with a note; findings are tuned
    with ASH suppressions, which are reported and counted. An operator's file that
    does not exist is an error, not a silent fallback, and one whose ``paths``
-   section has ``ignore`` patterns is logged with the patterns.
+   section has ``ignore`` patterns is logged with the patterns. The operator's file
+   may be inside the scanned tree, but one there that resolves outside the tree
+   through a symbolic link is an error too, and actionlint is not run: actionlint
+   quotes the start of a value it cannot parse, ASH logs a config's ``ignore``
+   patterns, and the tree decides what that path leads to.
 
 4. Output is JSON, converted to SARIF here. actionlint 1.7.12 has no built-in SARIF
    writer; its documentation points at a Go template in its test data. ASH asks for
@@ -174,6 +178,7 @@ from automated_security_helper.utils.download_utils import (
 from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.utils.config_trust import (
     INSIDE_THE_TREE,
+    LEADS_OUT_OF_THE_TREE,
     operator_path,
     scan_root,
     set_by_operator,
@@ -851,6 +856,13 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 self._source_dir(),
                 outside_tree=False,
             )
+            if chosen.refusal == LEADS_OUT_OF_THE_TREE:
+                raise ScannerError(
+                    f"scanners.actionlint.options.config_file is {configured!r}, a "
+                    "path inside the scanned tree that resolves outside it through a "
+                    "symbolic link. The scanned repository decides what is at that "
+                    "path, so actionlint is not given it, and actionlint is not run."
+                )
             if chosen.path is None:
                 self._plugin_log(
                     f"Ignoring scanners.actionlint.options.config_file "

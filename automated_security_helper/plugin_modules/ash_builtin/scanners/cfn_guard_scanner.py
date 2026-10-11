@@ -105,8 +105,8 @@ from automated_security_helper.utils.download_utils import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.config_trust import (
+    LEADS_OUT_OF_THE_TREE,
     NOT_THE_OPERATORS,
-    leaves_the_tree_through_a_link,
     operator_paths,
     scan_root,
     set_by_operator,
@@ -307,8 +307,10 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         in after the check is never followed.
 
         Raises:
-            RulesBundleUnavailable: an operator's path does not exist, or a file it
-                names could not be read.
+            RulesBundleUnavailable: an operator's path does not exist, is inside the
+                scanned tree and leads out of it through a symbolic link
+                (``config_trust.LEADS_OUT_OF_THE_TREE``), or names a file that
+                could not be read.
         """
         options = self._options()
         if not options.rules_paths:
@@ -321,6 +323,14 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             source_dir,
             outside_tree=False,
         )
+        for raw, entry in zip(options.rules_paths, chosen):
+            if entry.refusal == LEADS_OUT_OF_THE_TREE:
+                raise RulesBundleUnavailable(
+                    f"scanners.cfn-guard.options.rules_paths names {raw!r}, a path "
+                    "inside the scanned tree that resolves outside the scanned tree "
+                    "through a symbolic link. The scanned repository decides what is "
+                    "at that path, so it is not read."
+                )
         refused = [
             (raw, entry.refusal)
             for raw, entry in zip(options.rules_paths, chosen)
@@ -342,19 +352,13 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     f"scanners.cfn-guard.options.rules_paths names {entry.path}, "
                     "which does not exist"
                 )
-            if leaves_the_tree_through_a_link(raw, source_dir, root):
-                raise RulesBundleUnavailable(
-                    f"scanners.cfn-guard.options.rules_paths names {raw!r}, a path "
-                    "inside the scanned tree that resolves outside the scanned tree "
-                    "through a symbolic link. The scanned repository decides what is "
-                    "at that path, so it is not read."
-                )
             if entry.path.is_dir():
                 rules.extend(self._rules_in_directory(entry.path))
             else:
                 # Inside the tree, read under the tree's root, so a link swapped in
-                # after the check above is refused when the file is opened. Outside
-                # it the operator controls the path and the link it may be.
+                # after operator_paths checked the path is refused when the file is
+                # opened. Outside it the operator controls the path and the link it
+                # may be.
                 read_root = (
                     real_root
                     if entry.path.is_relative_to(real_root)

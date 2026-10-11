@@ -65,7 +65,10 @@ scanners:
   which zizmor then never reports, so they would be neither in ASH's results nor
   counted as suppressed. `config_file` set by an ASH config inside the scanned tree
   is ignored with a warning. A configured file that
-  does not exist fails the scan rather than being ignored. zizmor quotes the
+  does not exist fails the scan rather than being ignored. The file may be inside
+  the scanned tree, but the scanned repository decides what is at such a path, so
+  one there that leads out of the tree through a symbolic link fails the scan with
+  `ERROR` and zizmor is not run. zizmor quotes the
   offending text of a config it cannot parse in its error, and that error reaches
   ASH's log and the scanner's stderr log, so do not point this at a file holding
   anything else.

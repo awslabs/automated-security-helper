@@ -603,6 +603,76 @@ def test_an_operator_config_file_is_passed_resolved_and_a_missing_one_fails(repo
         )
 
 
+_OUTSIDE_LINE = "first-line-of-a-file-outside-the-tree: ["
+
+
+def _config_linked_out(repo: Path, shape: str) -> str:
+    """A config_file value in the tree that leads to a file outside it."""
+    outside = repo.parent / "outside"
+    outside.mkdir()
+    (outside / "creds").write_text(f"{_OUTSIDE_LINE}\n")
+    if shape == "file":
+        _symlink_or_skip(repo / "zizmor-ci.yml", outside / "creds")
+        return "zizmor-ci.yml"
+    if shape == "chain":
+        _symlink_or_skip(repo / "second.yml", outside / "creds")
+        _symlink_or_skip(repo / "zizmor-ci.yml", repo / "second.yml")
+        return "zizmor-ci.yml"
+    if shape == "dangling":
+        _symlink_or_skip(repo / "zizmor-ci.yml", outside / "missing.yml")
+        return "zizmor-ci.yml"
+    if shape == "directory":
+        _symlink_or_skip(repo / "ci", outside)
+        return "ci/creds"
+    (repo / "deep").mkdir()
+    _symlink_or_skip(repo / "deep" / "up", outside)
+    return "deep/up/creds"
+
+
+@pytest.mark.parametrize(
+    "shape", ["file", "chain", "dangling", "directory", "nested directory"]
+)
+def test_an_operator_config_file_in_the_tree_cannot_link_out_of_it(repo, shape):
+    """The operator may name a config inside the scanned tree, but the tree decides
+    what is at that path. zizmor quotes a config it cannot parse in its error
+    (1.30.1: the first key), so a link there to a file outside the tree put a
+    line of that file into ash.log and the aggregated results. zizmor is not
+    run, and the scan is an error."""
+    value = _config_linked_out(repo, shape)
+    scanner = _scanner(repo, operator=True, config_file=value)
+    with pytest.raises(ScannerError) as excinfo:
+        _argv_and_env(scanner, repo)
+    message = str(excinfo.value)
+    assert "scanners.zizmor.options.config_file" in message
+    assert "symbolic link" in message and "zizmor is not run" in message
+    assert _OUTSIDE_LINE not in message
+    assert (repo.parent / "outside").as_posix() not in message
+
+
+def test_an_operator_config_file_in_the_tree_may_link_inside_it(repo):
+    (repo / "ci").mkdir()
+    (repo / "ci" / "zizmor.yml").write_text("rules: {}\n")
+    _symlink_or_skip(repo / "zizmor-ci.yml", Path("ci") / "zizmor.yml")
+    final_args, _, _ = _argv_and_env(
+        _scanner(repo, operator=True, config_file="zizmor-ci.yml"), repo
+    )
+    assert f"--config={(repo / 'ci' / 'zizmor.yml').resolve().as_posix()}" in (
+        final_args
+    )
+
+
+def test_an_operator_config_file_outside_the_tree_may_be_a_link(repo):
+    """Outside the tree the operator controls both the path and the link."""
+    shared = repo.parent / "shared"
+    shared.mkdir()
+    (shared / "zizmor.yml").write_text("rules: {}\n")
+    _symlink_or_skip(repo.parent / "zizmor.yml", shared / "zizmor.yml")
+    final_args, _, _ = _argv_and_env(
+        _scanner(repo, operator=True, config_file="../zizmor.yml"), repo
+    )
+    assert f"--config={(shared / 'zizmor.yml').resolve().as_posix()}" in final_args
+
+
 @pytest.mark.parametrize("operator", [False, None])
 def test_a_config_file_from_the_scanned_tree_is_ignored(repo, caplog, operator):
     (repo / "zizmor-ci.yml").write_text("rules: {}\n")

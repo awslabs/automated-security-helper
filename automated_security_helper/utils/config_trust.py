@@ -28,7 +28,9 @@ one that only tunes findings (a gitleaks baseline, a zizmor or actionlint config
 cfn-guard rules), go through ``operator_path`` or its list form ``operator_paths``:
 the value is used only when the operator set it, as the resolved path that was
 checked. A repository could otherwise hide its own findings, or, for a tool that
-prints a file it cannot parse, put any file the scan can read into the report.
+prints a file it cannot parse, put any file the scan can read into the report. For
+the same reason a path the operator writes inside the tree is refused when a
+symbolic link there leads it out of the tree (``leaves_the_tree_through_a_link``).
 
 This module and ``config/sandbox_grants.py`` share their idea of the tree and of the
 trusted base. ``set_by_operator`` is the only provenance call the scanners make, so a
@@ -233,6 +235,13 @@ NOT_THE_OPERATORS = (
 #: Why ``operator_path`` refused a path inside the scanned tree.
 INSIDE_THE_TREE = "it is inside the scanned tree"
 
+#: Why ``operator_path`` refused a path in the scanned tree that a symbolic link
+#: there leads out of it (``leaves_the_tree_through_a_link``).
+LEADS_OUT_OF_THE_TREE = (
+    "it is a path inside the scanned tree that resolves outside it through a "
+    "symbolic link, and the scanned repository decides what is at that path"
+)
+
 
 def leaves_the_tree_through_a_link(
     value: Any, source_dir: PathLike, root: PathLike
@@ -301,7 +310,11 @@ def operator_path(
     file is refused inside the tree even when the operator named it. Without it,
     the operator may name a file of their own in the tree (a findings config, a
     baseline, a rules directory), which is a choice about that tree's content
-    they are entitled to make.
+    they are entitled to make. What a path there leads to is the tree's choice,
+    though, so one that resolves outside the tree through a symbolic link in it
+    is refused with ``LEADS_OUT_OF_THE_TREE``. A scanner that must not run
+    without the operator's file turns that refusal into its own failure instead
+    of ignoring the option.
     """
     return _operator_candidate(
         config, value, source_dir, set_by_operator(config, key, value), outside_tree
@@ -346,7 +359,10 @@ def _operator_candidate(
 
     if not trusted:
         return OperatorPath(None, NOT_THE_OPERATORS)
+    root = scan_root(config, source_dir)
     candidate = resolved_path(value, Path(source_dir))
-    if outside_tree and in_scanned_tree(candidate, scan_root(config, source_dir)):
+    if outside_tree and in_scanned_tree(candidate, root):
         return OperatorPath(None, INSIDE_THE_TREE)
+    if not outside_tree and leaves_the_tree_through_a_link(value, source_dir, root):
+        return OperatorPath(None, LEADS_OUT_OF_THE_TREE)
     return OperatorPath(candidate)

@@ -13,8 +13,10 @@ leg pass with the scanner never having run.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -276,3 +278,64 @@ def test_an_inline_ignore_comment_applies_only_when_the_operator_turns_it_on(
     assert reported is not honored, found
     # The composite action's injection carries no comment and is reported either way.
     assert ("zizmor/template-injection", "actions/greet/action.yml") in found
+
+
+def test_an_operator_config_file_in_the_tree_that_links_out_is_not_read(
+    source, tmp_path
+):
+    """zizmor 1.30.1 quotes the first key of a config it cannot parse. Before, a
+    config_file in the tree linked to a file outside it put that line into
+    ash.log, the aggregated results and the console. Now zizmor is not run, the
+    scanner is ERROR, and nothing of that file is in the output."""
+    marker = "first-line-of-a-file-outside-the-tree"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "creds").write_text(f"{marker} = 1\n", encoding="utf-8")
+    try:
+        (source / "zizmor-ci.yml").symlink_to(outside / "creds")
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+    output = tmp_path / "out"
+
+    result = subprocess.run(  # nosec B603 - fixed argv
+        [
+            sys.executable,
+            "-m",
+            "automated_security_helper.cli.main",
+            "scan",
+            "--mode",
+            "local",
+            "--source-dir",
+            str(source),
+            "--output-dir",
+            str(output),
+            "--scanners",
+            "zizmor",
+            "--no-progress",
+            "--no-fail-on-findings",
+            "--config-overrides",
+            "scanners.zizmor.options.config_file=zizmor-ci.yml",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=600,
+        env={**os.environ, "ASH_OFFLINE": "true"},
+    )
+
+    console = result.stdout + result.stderr
+    leaked = sorted(
+        str(path.relative_to(output))
+        for path in output.rglob("*")
+        if path.is_file()
+        and marker in path.read_text(encoding="utf-8", errors="replace")
+    )
+    assert leaked == [], console[-3000:]
+    assert marker not in console
+    aggregated = json.loads(
+        (output / "ash_aggregated_results.json").read_text(encoding="utf-8")
+    )
+    assert aggregated["scanner_results"]["zizmor"]["status"] == "ERROR"
+    log = (output / "ash.log").read_text(encoding="utf-8", errors="replace")
+    assert "through a symbolic link" in log, console[-3000:]

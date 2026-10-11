@@ -458,3 +458,31 @@ def test_a_link_outside_the_tree_is_the_operators(tmp_path):
     repo, outside = _tree_and_outside(tmp_path)
     _link(tmp_path / "shared.yml", outside / "creds")
     assert leaves_the_tree_through_a_link("../shared.yml", repo, repo) is False
+
+
+def test_operator_path_refuses_a_path_in_the_tree_that_links_out_of_it(tmp_path):
+    """With the tree allowed, the operator may name a file in it, but a link there
+    to a file outside it is the tree's choice of file."""
+    from automated_security_helper.utils.config_trust import operator_path
+
+    repo, config = _operator_path_case(tmp_path, operator=True)
+    outside = tmp_path / "outside.yaml"
+    outside.write_text("", encoding="utf-8")
+    _link(repo / "tool.yaml", outside)
+    chosen = operator_path(
+        config, "scanners.x.options.config_file", "tool.yaml", repo, outside_tree=False
+    )
+    assert chosen.path is None
+    from automated_security_helper.utils.config_trust import LEADS_OUT_OF_THE_TREE
+
+    assert chosen.refusal == LEADS_OUT_OF_THE_TREE
+    # A link the operator keeps next to the tree is theirs.
+    _link(tmp_path / "shared.yaml", outside)
+    kept = operator_path(
+        config,
+        "scanners.x.options.config_file",
+        "../shared.yaml",
+        repo,
+        outside_tree=False,
+    )
+    assert kept.path == outside.resolve()

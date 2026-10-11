@@ -644,6 +644,95 @@ def test_an_operator_config_file_that_does_not_exist_is_an_error(
     assert scanner.targets_failed == scanner.targets_attempted == 2
 
 
+_OUTSIDE_PATTERN = "pattern-from-a-file-outside-the-tree"
+
+
+def _config_linked_out(repo: Path, shape: str) -> str:
+    """A config_file value in the tree that leads to a file outside it, an
+    actionlint config whose ``ignore`` pattern ASH would log."""
+    outside = repo.parent / "outside"
+    outside.mkdir()
+    (outside / "creds").write_text(
+        f"paths:\n  '**':\n    ignore:\n      - {_OUTSIDE_PATTERN}\n"
+    )
+    link = repo / "ci" / "actionlint.yaml"
+    if shape in ("file", "chain", "dangling"):
+        link.parent.mkdir()
+    if shape == "file":
+        link.symlink_to(outside / "creds")
+    elif shape == "chain":
+        (repo / "ci" / "second.yaml").symlink_to(outside / "creds")
+        link.symlink_to("second.yaml")
+    elif shape == "dangling":
+        link.symlink_to(outside / "missing.yaml")
+    elif shape == "directory":
+        (repo / "ci").symlink_to(outside, target_is_directory=True)
+        return "ci/creds"
+    else:
+        (repo / "ci").mkdir()
+        (repo / "ci" / "up").symlink_to(outside, target_is_directory=True)
+        return "ci/up/creds"
+    return "ci/actionlint.yaml"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks")
+@pytest.mark.parametrize(
+    "shape", ["file", "chain", "dangling", "directory", "nested directory"]
+)
+def test_an_operator_config_file_in_the_tree_cannot_link_out_of_it(
+    repo, monkeypatch, on_path, caplog, shape
+):
+    """The operator may name a config inside the scanned tree, but the tree decides
+    what is at that path. actionlint quotes the start of a value it cannot parse,
+    and ASH logs a config's ignore patterns, so a link there to a file outside the
+    tree put that file's text into ash.log. actionlint is not run, and the scan is
+    an error."""
+    value = _config_linked_out(repo, shape)
+    scanner = _scanner(repo, operator=True, config_file=value)
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    with caplog.at_level(logging.DEBUG), pytest.raises(ScannerError) as excinfo:
+        scanner.scan(target=repo, target_type="source")
+    assert fake.calls == []
+    message = str(excinfo.value)
+    assert "scanners.actionlint.options.config_file" in message
+    assert "symbolic link" in message and "actionlint is not run" in message
+    assert _OUTSIDE_PATTERN not in message + caplog.text
+    assert (repo.parent / "outside").as_posix() not in message
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks")
+def test_an_operator_config_file_in_the_tree_may_link_inside_it(
+    repo, monkeypatch, on_path
+):
+    (repo / "ci").mkdir()
+    (repo / "ci" / "real.yaml").write_text("self-hosted-runner:\n  labels: [x]\n")
+    (repo / "ci" / "actionlint.yaml").symlink_to("real.yaml")
+    scanner = _scanner(repo, operator=True, config_file="ci/actionlint.yaml")
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+    scanner.scan(target=repo, target_type="source")
+    ((argv, _),) = fake.calls
+    config = Path(argv[argv.index("-config-file") + 1])
+    assert config == (repo / "ci" / "real.yaml").resolve()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks")
+def test_an_operator_config_file_outside_the_tree_may_be_a_link(
+    repo, monkeypatch, on_path
+):
+    """Outside the tree the operator controls both the path and the link."""
+    shared = repo.parent / "shared"
+    shared.mkdir()
+    (shared / "actionlint.yaml").write_text("self-hosted-runner:\n  labels: [x]\n")
+    (repo.parent / "actionlint.yaml").symlink_to(shared / "actionlint.yaml")
+    scanner = _scanner(repo, operator=True, config_file="../actionlint.yaml")
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+    scanner.scan(target=repo, target_type="source")
+    ((argv, _),) = fake.calls
+    config = Path(argv[argv.index("-config-file") + 1])
+    assert config == (shared / "actionlint.yaml").resolve()
+
+
 def test_an_operator_config_that_ignores_findings_is_warned_about(
     repo, monkeypatch, on_path, caplog
 ):
