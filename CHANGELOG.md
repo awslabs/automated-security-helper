@@ -166,6 +166,15 @@
   `runtime_overrides.denied_paths` refuses MCP runtime overrides of them. Raise them
   with `--config-overrides` or a config file outside the tree.
 
+- **A workspace project counts incomplete conversion as a single-directory scan
+  does.** A project whose converter crashed, whose converter tool was absent with
+  inputs to convert (a missing nbconvert with notebooks in the project, for
+  example), or whose archive was refused for an extraction limit used to pass inside
+  a workspace while `ash --source-dir <project>` exited 1 on it. It is now
+  `scan_incomplete` under `fail_on_incomplete_scanners` and names the converter in
+  `incomplete_converters`, in the unified results, the workspace reports and the MCP
+  workspace tools' project coverage.
+
 - **An archive inside an archive is recorded as not scanned.** Extraction is one level
   deep, as before, but a member with a `.zip`, `.tar` or `.gz` suffix used to be left
   out without a trace. It is now a refused member of its archive, with a warning, and

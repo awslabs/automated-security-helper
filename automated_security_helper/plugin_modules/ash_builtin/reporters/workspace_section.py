@@ -129,6 +129,13 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             # convey.
             unrun = "did not complete: " + ", ".join(project.incomplete_scanners)
             detail = f"{detail}; {unrun}" if detail else unrun
+        converters = getattr(project, "incomplete_converters", None) or {}
+        if converters:
+            # Named for the same reason: a converter that lost coverage (an
+            # archive over an extraction limit, a tool that was absent) is the one
+            # fact the counts in the row cannot convey.
+            unconverted = "conversion incomplete: " + ", ".join(converters)
+            detail = f"{detail}; {unconverted}" if detail else unconverted
 
         rows.append(
             {

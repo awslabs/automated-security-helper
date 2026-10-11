@@ -1343,11 +1343,16 @@ Workspace mode applies the gate per project, so `ash --workspace` and
 `ash --source-dir <one project>` agree about whether that project's scan happened.
 A project that completed with a scanner at `ERROR` or `MISSING` is reported with
 `scan_incomplete: true` and the scanner named in `incomplete_scanners`, and the run
-exits `1`. A converter that did not process its inputs is named in the project's
-`incomplete_converters` and fails the project the same way. `--no-fail-on-incomplete-scanners` applies per project as well, and it
-clears only the verdict: `incomplete_scanners` still names the scanners that did
-not run, because turning the gate off accepts the risk rather than asserting the
-scan was complete.
+exits `1`. A project whose conversion was incomplete (a converter that crashed, one
+that could not convert some of its inputs, a converter tool that was absent with
+inputs to convert, or an archive refused for an extraction limit) is reported the
+same way, with the converter and the reason in `incomplete_converters`, exactly as
+`ash --source-dir <project>` fails on it; the MCP workspace tools report the same
+rows in each project's `incomplete_converters`.
+`--no-fail-on-incomplete-scanners` applies per project as well, and it
+clears only the verdict: `incomplete_scanners` and `incomplete_converters` still
+name what did not run, because turning the gate off accepts the risk rather than
+asserting the scan was complete.
 
 One difference from a single-project scan, and it is deliberate. Here findings
 outrank an incomplete project rather than the reverse: a workspace where project A
