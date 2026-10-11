@@ -417,6 +417,8 @@ mcp-resource-management:
   max_directory_size_mb: 1024       # 1GB
 ```
 
+The server reads its operator configuration from the file `ASH_CONFIG` names, for every scan that names no config of its own. If `ASH_CONFIG` names a path that is not a file, `ash mcp` refuses to start (exit 3) with an error naming the variable and the path.
+
 ### Configuration Options
 
 - `max_concurrent_scans`: Maximum number of concurrent scans

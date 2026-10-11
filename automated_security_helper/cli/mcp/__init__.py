@@ -17,6 +17,8 @@ supports multiple transports:
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Annotated, List, Optional
 import typer
 from rich.console import Console
@@ -767,6 +769,20 @@ def mcp_command(
             f"[red]Validation Error: {ASH_MCP_TRANSPORT_ENV}={unknown!r} names no "
             f"transport; use one of {sorted(KNOWN_TRANSPORTS)} (any case), or unset "
             f"it.[/red]"
+        )
+        raise typer.Exit(3)
+
+    # ASH_CONFIG is the operator's explicit policy for every scan that names no
+    # config of its own. A value that names no file would leave those scans on
+    # the built-in default, so the server refuses to start instead.
+    ash_config = os.environ.get("ASH_CONFIG")
+    if ash_config and not Path(ash_config).is_file():
+        _stderr.print(
+            f"[red]Validation Error: ASH_CONFIG={escape(ash_config)} names no config "
+            f"file. "
+            f"Point ASH_CONFIG at the operator's config file, or unset it to scan "
+            f"with the built-in default.[/red]",
+            highlight=False,
         )
         raise typer.Exit(3)
 
