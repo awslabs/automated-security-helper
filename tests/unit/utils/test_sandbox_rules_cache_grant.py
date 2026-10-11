@@ -235,3 +235,30 @@ def test_the_rule_cache_is_not_a_program_directory(layout, backend, monkeypatch)
 
     assert _covers(_readable(policy), rules)
     assert _real(rules) not in {_real(p) for p in policy.executable}
+
+
+def test_sandbox_exec_runs_no_program_from_the_rule_cache(layout, backend, monkeypatch):
+    """Under sandbox-exec exec is denied in the cache, even inside an executable root.
+
+    sandbox-exec is the backend that restricts exec (``_exec_rules``): programs run
+    from the policy's executable paths and are denied again in the scan's data. A
+    rules cache inside a directory that is itself executable (here an
+    ``extra_read_paths`` entry, like ``/opt`` or ``/usr/local``) stayed executable
+    through its parent. bwrap, firejail and Landlock do not restrict exec by path,
+    which the docs say.
+    """
+    from automated_security_helper.utils.sandbox.backends import (
+        _exec_rules,
+        _sbpl_string,
+    )
+
+    tmp, _home, _source, _output = layout
+    root = tmp / "tools-root"
+    rules = _rules_dir(root / "rules" / "semgrep")
+    monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(rules))
+
+    policy = _policy(layout, backend, "semgrep", extra_read_paths=[str(root)])
+    rules_text = "\n".join(_exec_rules(policy, tmp / "private-tmp"))
+
+    denied = [line for line in rules_text.splitlines() if line.startswith("(deny")]
+    assert denied and _sbpl_string(_real(rules)) in denied[0], rules_text

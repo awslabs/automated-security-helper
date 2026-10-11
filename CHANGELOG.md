@@ -98,7 +98,8 @@
   An offline sandboxed semgrep or opengrep scan reads its rules from the directory
   `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` names: the sandbox mounts it
   read-only for that scanner, wherever it is (the documented `$HOME/.cache/ash/...`
-  included), and not executable. Before, no grant covered it, so semgrep exited 7
+  included), and under sandbox-exec no program runs from it. Before, no grant
+  covered it, so semgrep exited 7
   ("unable to find a config") behind ASH's own cache check, which had already passed.
   Only the variable in ASH's environment grants it; a rules path in the scanner's
   options does not, an empty variable grants nothing, and one naming `/`, `$HOME` or a

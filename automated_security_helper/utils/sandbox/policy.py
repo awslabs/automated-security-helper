@@ -92,7 +92,8 @@ class SandboxRequirements:
             scanner's options (a token for an online check, for example). They are
             passed only when ``sandbox.env_scanners`` names the scanner.
         read_path_env: Variables in ASH's own environment that name a directory
-            the tool reads, mounted read-only: semgrep's offline rule cache,
+            the tool reads, mounted read-only and, under sandbox-exec, not
+            executable: semgrep's offline rule cache,
             ``SEMGREP_RULES_CACHE_DIR``. Read from ASH's process environment when
             the policy is built, never from the scanner's options, which the
             scanned repository can write, so no grant is needed. An unset or empty
@@ -211,9 +212,10 @@ class SandboxPolicy:
     scan's own data, so the system and tool paths. Programs run from there, and from
     the spawn's private uv cache, which the backend adds because ``uv tool run``
     keeps the environments of tools it was not asked to install there. ``scan_data`` is the scan's data
-    (the source tree, the output directory, the scan target and the working
-    directory), which stays non-executable even where a tool path contains it, so a
-    repository checked out under ``/opt`` cannot have its own binaries run.
+    (the source tree, the output directory, the scan target, the working
+    directory, and the directories ``read_path_env`` names), which stays
+    non-executable even where a tool path contains it, so a repository checked out
+    under ``/opt`` cannot have its own binaries run.
     """
 
     scanner_name: str
@@ -784,11 +786,12 @@ def build_scanner_policy(
     # The working directory the same way the read list takes it: a filesystem root
     # (checkov and ferret-scan run from one so that they read no config file from
     # the scanned tree) is not the scan's data.
-    scan_data = _existing([source_dir, output_dir, scan_target, _readable_cwd(cwd)])
-    not_programs = {
-        os.path.realpath(p)
-        for p in [*scan_data, *_DATA_SYSTEM_PATHS, *_existing(env_named_reads)]
-    }
+    # The offline rule cache too: data the tool reads, which sandbox-exec then
+    # denies exec in even where an executable root (/opt, /usr/local) contains it.
+    scan_data = _existing(
+        [source_dir, output_dir, scan_target, _readable_cwd(cwd), *env_named_reads]
+    )
+    not_programs = {os.path.realpath(p) for p in [*scan_data, *_DATA_SYSTEM_PATHS]}
     executable = [p for p in read_only if os.path.realpath(p) not in not_programs]
 
     extra_env: Dict[str, str] = {}

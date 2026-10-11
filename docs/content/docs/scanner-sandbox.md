@@ -105,7 +105,9 @@ it needs.
   directly under `$HOME` (`~/.nvm/versions/node/v22` yes, `~/.cargo` no).
 - The offline rule cache of semgrep and opengrep, the directory
   `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` names, is mounted read-only
-  for that scanner wherever it is, `$HOME` included, and is not executable. Only the
+  for that scanner wherever it is, `$HOME` included. Under sandbox-exec, the backend
+  that restricts which files may be executed, no program runs from it; bwrap,
+  firejail and Landlock restrict writes and reads, not exec, there. Only the
   variable in ASH's own environment grants it, never a path in the scanner's options;
   an empty variable grants nothing, and one naming `/`, `$HOME` or a directory above
   `$HOME` is not mounted, with a warning.
@@ -214,7 +216,8 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
         # The same for env_prefixes and env_names, with sandbox.env_scanners.
         env_requires_grant=False,
         # Variables in ASH's own environment naming a directory the tool reads
-        # (semgrep's SEMGREP_RULES_CACHE_DIR): mounted read-only, not executable.
+        # (semgrep's SEMGREP_RULES_CACHE_DIR): mounted read-only, and not
+        # executable under sandbox-exec.
         # An unset or empty variable, or one naming /, $HOME or a directory above
         # it, grants nothing.
         read_path_env=("MYTOOL_RULES_DIR",),
