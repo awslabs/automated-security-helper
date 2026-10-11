@@ -1346,14 +1346,24 @@ jobs:
           install-ash: "false"
       - name: Install dependencies
         run: uv sync --extra cdk --extra symbols
+      # The integration suite runs bandit for real, and nothing else in this job installs
+      # it, so the first test that needed it ran `uv tool install` from inside the suite.
+      # This is the installer users run, and it installs before any test starts.
+      - name: Install the scanners the integration suite runs for real
+        run: uv run ash dependencies install --tool bandit
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
       # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan.
+      #
+      # The installs above put the pinned binaries in ~/.ash/bin and the uv tools in
+      # ~/.local/bin. PATH gains both for this step only, not through GITHUB_PATH, so no
+      # later step of the job runs an executable by name from either directory.
       - name: Run the integration suite
         env:
           ASH_REQUIRE_CDK_EXTRA: "1"
           ASH_REQUIRE_SYMBOLS_EXTRA: "1"
         run: |
+          export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
           uv run pytest \
             tests/integration \
             tests/unit/cli/mcp/test_source_delivery_scan_e2e.py \
