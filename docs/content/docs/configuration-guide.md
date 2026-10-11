@@ -537,8 +537,9 @@ on which:
     way, naming the setting; an equal or tighter value scans.
   - What chooses a scanner's own config, which version of a tool ASH installs, or
     where findings go is in the default `denied_paths` too, so a file that sets
-    one is refused rather than scanned without it: each scanner's own config file (`config_file` for bandit, checkov, ferret-scan, grype and
-    syft, and trivy-repo's `secret_config_file`), snyk-code's
+    one is refused rather than scanned without it: each scanner's own config file
+    (`config_file` for bandit, checkov, ferret-scan, grype and syft, and
+    trivy-repo's `secret_config_file`), snyk-code's
     `honor_tree_exclusions`, every scanner's and the jupyter converter's
     `tool_version`, opengrep's `version` and `sha256`, opengrep's and semgrep's
     `metrics` (their `config` is in the table below), the AWS reporters'

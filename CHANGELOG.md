@@ -170,12 +170,10 @@
   a patch, or with an empty `patch_ops`, is still `config/ash.yaml` and the
   operator's, and it removes an earlier patched copy. A workspace tool's
   per-call `profile` is written to `config/call-profile.yaml` and no longer
-  replaces the session's bound config. Any file under the MCP workspace root
-  outside a session's `config/` directory is now confined as a delivered config
-  wherever it is resolved, and is never taken as the trusted base. A
-  `denied_value_patterns` entry no longer refuses a delivered file for a mapping
-  key the server's config already has, so a patched profile that repeats the
-  operator's keys is not refused for them. See
+  replaces the session's bound config. A `denied_value_patterns` entry does not
+  refuse the patched copy for a mapping key the server's config already has, so
+  a patched profile that repeats the operator's keys is not refused for them; a
+  key in any other delivered file is checked as before. See
   [A patched value is the client's](docs/content/docs/mcp/streamable-http.md#a-patched-value-is-the-clients).
 
 - **A delivered config's exclusions in a scanner's own options are reported,
@@ -298,7 +296,6 @@
     a `config_warning` validation checkpoint. To leave files out, list them in
     `global_settings.ignore_paths`; under the MCP server a client's entries there
     are marked `client_supplied`, as usual.
-    written as a string.
   - ferret-scan's `profile` and `use_default_config` are the operator's too. A
     profile chooses which checks ferret-scan runs and the lowest confidence it
     reports (with ferret-scan 2.5.3 on ASH's test files, the bundled config
