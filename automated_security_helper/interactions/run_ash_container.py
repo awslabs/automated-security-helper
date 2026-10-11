@@ -1037,6 +1037,33 @@ def _unreadable_config(config: str | None) -> str | None:
     return None
 
 
+def container_input_refusal(
+    source_dir: Path | str,
+    output_dir: Path | str,
+    config: str | None,
+    workspace_config: str | None = None,
+    workspace_relative_file: str | None = None,
+) -> str | None:
+    """Why a container scan cannot be given its inputs as they are, or None.
+
+    The config file (:func:`_unreadable_config`) and every host path the run would
+    mount (:func:`_require_mountable_inputs`). A refusal is exit 3, the code a local
+    scan gives an unusable config. ``run_ash_container`` checks this before it
+    builds anything; ``run_ash_scan`` checks it before it clears the previous run's
+    output, so a refused scan leaves that output as it was.
+    """
+    refusal = _unreadable_config(config)
+    if refusal is not None:
+        return refusal
+    try:
+        _require_mountable_inputs(
+            source_dir, output_dir, config, workspace_config, workspace_relative_file
+        )
+    except ContainerInputError as e:
+        return str(e)
+    return None
+
+
 #: Tells the scan inside the container that its --config was written by the
 #: repository being scanned; see _written_by_the_scanned_repository.
 CONFIG_FROM_SCANNED_REPOSITORY_FLAG = "--config-from-scanned-repository"
@@ -1661,18 +1688,13 @@ def run_ash_container(
 
     # Before any build: a scan that cannot be given its config, or whose paths the
     # runner cannot mount, is not worth one.
-    config_refusal = _unreadable_config(config) if run else None
-    if config_refusal is None and run:
-        try:
-            _require_mountable_inputs(
-                source_dir,
-                output_dir,
-                config,
-                workspace_config,
-                workspace_relative_file,
-            )
-        except ContainerInputError as e:
-            config_refusal = str(e)
+    config_refusal = (
+        container_input_refusal(
+            source_dir, output_dir, config, workspace_config, workspace_relative_file
+        )
+        if run
+        else None
+    )
     if config_refusal is not None:
         typer.secho(config_refusal, fg=typer.colors.RED)
         return _not_started(

@@ -186,6 +186,10 @@
   exit 3 before anything is built. `--mount` reads its value as comma-separated
   fields, so a directory named `x,readonly=false` used to add a mount option of its own.
   The same holds for `./ash` and `Invoke-ASH`.
+- **A container scan refused for its inputs keeps the previous run's output.** A
+  `--config` that could not be handed to the container, or a path `--mount` cannot
+  carry, refused the scan with exit 3 only after the previous run's results and reports
+  had been cleared from the output directory. The inputs are now checked first.
 - **`./ash` mounts the directory you named, or stops.** A `--source-dir` it could not
   enter (one that does not exist) left the working directory in its place, and that
   was mounted and scanned; it now exits 1, as `ash --source-dir` does, and so does an

@@ -62,6 +62,7 @@ from automated_security_helper.core.unified_metrics import (
     get_unified_scanner_metrics,
 )
 from automated_security_helper.interactions.run_ash_container import (
+    container_input_refusal,
     container_was_started,
     run_ash_container,
 )
@@ -1676,7 +1677,29 @@ def _run_container_mode(
         else resolved_fail_on_incomplete_scanners
     )
 
+    # The policy the host resolved for the plan. The container resolves the workspace
+    # again, and on its own it would find only a policy inside the root, so one named
+    # with --workspace-config elsewhere would not apply.
+    workspace_config = (
+        opts.workspace_plan.workspace_config_source
+        if opts.workspace_plan is not None
+        else None
+    )
+
     if opts.run:
+        # The inputs before the previous run's output: a scan refused for its config
+        # or for a path the runner cannot mount never starts, so it must not delete
+        # the reports of one that did. Exit 3, as run_ash_container would.
+        refusal = container_input_refusal(
+            opts.source_dir,
+            opts.output_dir,
+            opts.config,
+            workspace_config,
+            _workspace_relative_file(opts),
+        )
+        if refusal is not None:
+            typer.secho(refusal, fg=typer.colors.RED)
+            sys.exit(3)
         # Only when a scan is actually being asked for. --no-run builds an image and
         # stops; it never claims to have scanned anything, so it has no business
         # discarding a report from a run that did.
@@ -1727,14 +1750,7 @@ def _run_container_mode(
         allow_missing_projects=opts.allow_missing_projects,
         shard_index=opts.shard_index,
         shard_count=opts.shard_count,
-        # The policy the host resolved for the plan. The container resolves the
-        # workspace again, and on its own it would find only a policy inside the
-        # root, so one named with --workspace-config elsewhere would not apply.
-        workspace_config=(
-            opts.workspace_plan.workspace_config_source
-            if opts.workspace_plan is not None
-            else None
-        ),
+        workspace_config=workspace_config,
     )
 
     if opts.debug:
