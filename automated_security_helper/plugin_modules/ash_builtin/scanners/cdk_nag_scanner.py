@@ -718,9 +718,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             # "cdk-nag is not installed" as a bug in ASH and stops reading.
             #
             # Points at ASH's own command rather than at a pip install of
-            # "automated-security-helper[cdk]". That name belongs to an
-            # unrelated project on PyPI, so the old hint sent users to install a
-            # stranger's package to fix an ASH problem.
+            # "automated-security-helper[cdk]": on PyPI that name belongs to an
+            # unrelated project, which has no cdk extra.
             absent = ", ".join(_CDK_MISSING_DISTRIBUTIONS) or ", ".join(
                 _CDK_REQUIRED_DISTRIBUTIONS
             )
@@ -740,16 +739,14 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         Names aws-cdk-lib, cdk-nag and constructs directly rather than asking an
         index for ASH's own distribution with the extra. ASH is not published to
-        any index -- it installs from git, as the README documents -- so its
-        distribution name resolves to an unrelated third party's package there.
-        Naming the extra's real contents means this command cannot resolve ASH
-        by name at all, whoever ends up owning that name.
+        any index -- it installs from git, as the README documents -- and on
+        PyPI its distribution name belongs to an unrelated project, so naming
+        the extra's packages is what makes this command install what the extra
+        declares.
         """
         # This method used to install "automated-security-helper[cdk]", which
-        # made `ash dependencies install` resolve a distribution by that name
-        # from whatever index pip is pointed at, so an unrelated project's
-        # package was installed by a security scanner running inside CI with
-        # repository access.
+        # `ash dependencies install` resolved from the configured index, where
+        # that name belongs to an unrelated project.
         import sys
 
         commands = super().get_installation_commands(platform, arch)

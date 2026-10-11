@@ -480,11 +480,11 @@ def mcp_command(
             "MCP support is included by default in ASH v3. Try reinstalling ASH:"
         )
         # Reinstall from where the running ASH was installed from: its git
-        # commit, its checkout, or its archive. This hint used to read "pip
-        # install --force-reinstall automated-security-helper", which is an
-        # unrelated project's name on PyPI -- so following it replaced the
-        # user's working ASH install with a stranger's package. The command is
-        # escaped because a path can hold a "[" that rich would read as markup.
+        # commit, its checkout, or its archive. ASH's distribution name on its
+        # own ("pip install --force-reinstall automated-security-helper", the
+        # earlier text) is not a reinstall of ASH: on PyPI that name belongs to
+        # an unrelated project. The command is escaped because a path can hold
+        # a "[" that rich would read as markup.
         # soft_wrap keeps it on one line: stderr is rarely a terminal here, rich
         # then wraps at 80 columns, and a command split before its source is a
         # pip install with no requirement.

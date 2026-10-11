@@ -63,10 +63,11 @@ def symbols_extra_install_command() -> str:
     running distribution's metadata, so the command matches this ASH whatever
     its version or source.
     """
-    # This hint used to read "install automated-security-helper[symbols]",
-    # which PyPI resolves to an unrelated project that has no such extra. A git
-    # requirement pinned to v<version> replaced it and was wrong too: main
-    # reports the last release's version, and v3.7.0 has no symbols extra.
+    # Names the extra's packages rather than ASH's distribution with the extra
+    # (the earlier "install automated-security-helper[symbols]"): on PyPI that
+    # name belongs to an unrelated project with no such extra, and a git tag
+    # pinned to the version can lack the extra on a build between releases
+    # (v3.7.0 has none).
     return extra_install_command(SYMBOLS_EXTRA)
 
 

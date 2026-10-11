@@ -59,9 +59,9 @@ def _missing_library_reason() -> str:
     line, so the two cannot drift. A function rather than a module constant
     because the reinstall it names is where the running ASH was installed from.
     """
-    # It used to read "pip install --force-reinstall automated-security-helper",
-    # and PyPI resolves that name to an unrelated project, so following it
-    # replaced ASH.
+    # ASH's distribution name on its own ("pip install --force-reinstall
+    # automated-security-helper", the earlier text) is not a reinstall of ASH:
+    # on PyPI that name belongs to an unrelated project.
     return (
         "detect-secrets is not importable, so the detect-secrets scanner cannot run. "
         f"It ships as a dependency of ASH; reinstall ASH (`{ash_reinstall_command()}`) "
