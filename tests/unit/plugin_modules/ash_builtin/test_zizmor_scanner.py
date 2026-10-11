@@ -486,21 +486,34 @@ def test_default_argv_is_offline_sarif_with_inputs_after_double_dash(repo):
     assert scanner.targets_attempted == len(EXPECTED_INPUTS)
 
 
-def test_tokens_and_zizmor_env_never_reach_zizmor_offline(repo, monkeypatch):
-    for name in (*GITHUB_TOKEN_ENV_VARS, "ZIZMOR_CONFIG", "ZIZMOR_OFFLINE"):
-        monkeypatch.setenv(name, "value-that-must-not-leak")
+#: The variables zizmor reads a GitHub token from, spelled out here rather than
+#: read from the scanner, so a name dropped from its list fails these tests.
+TOKEN_VARIABLES = ["GH_TOKEN", "GITHUB_TOKEN", "ZIZMOR_GITHUB_TOKEN"]
+#: The variables that change zizmor's behavior, removed whatever online_audits is.
+BEHAVIOR_VARIABLES = ["ZIZMOR_CONFIG", "ZIZMOR_OFFLINE", "ZIZMOR_NO_ONLINE_AUDITS"]
+
+
+def test_the_scanner_strips_exactly_the_documented_variables():
+    assert sorted(GITHUB_TOKEN_ENV_VARS) == sorted(TOKEN_VARIABLES)
+    assert sorted(zizmor_module.ZIZMOR_BEHAVIOR_ENV_VARS) == sorted(BEHAVIOR_VARIABLES)
+
+
+@pytest.mark.parametrize("name", TOKEN_VARIABLES + BEHAVIOR_VARIABLES)
+def test_tokens_and_zizmor_env_never_reach_zizmor_offline(repo, monkeypatch, name):
+    monkeypatch.setenv(name, "value-that-must-not-leak")
     monkeypatch.setenv("UNRELATED_VARIABLE", "kept")
     _, _, env = _argv_and_env(_scanner(repo), repo)
-    for name in (*GITHUB_TOKEN_ENV_VARS, "ZIZMOR_CONFIG", "ZIZMOR_OFFLINE"):
-        assert name not in env
+    assert name not in env
     assert env["UNRELATED_VARIABLE"] == "kept"
 
 
-def test_token_variables_are_stripped_whatever_their_case(repo, monkeypatch):
+@pytest.mark.parametrize("name", TOKEN_VARIABLES)
+def test_token_variables_are_stripped_whatever_their_case(repo, monkeypatch, name):
     """Windows environment names are case-insensitive, so ``Gh_Token`` is GH_TOKEN."""
-    monkeypatch.setenv("Gh_Token", "value-that-must-not-leak")
+    mixed = "_".join(part.capitalize() for part in name.split("_"))
+    monkeypatch.setenv(mixed, "value-that-must-not-leak")
     _, _, env = _argv_and_env(_scanner(repo), repo)
-    assert not any(key.upper() == "GH_TOKEN" for key in env)
+    assert not any(key.upper() == name for key in env)
 
 
 def test_online_audits_drops_offline_and_passes_the_token_through(repo, monkeypatch):
@@ -527,14 +540,14 @@ def test_online_audits_from_the_scanned_tree_stay_offline_without_a_token(
     tree's.
     """
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
-    for name in GITHUB_TOKEN_ENV_VARS:
+    for name in TOKEN_VARIABLES:
         monkeypatch.setenv(name, "token-value")
     with caplog.at_level("WARNING"):
         final_args, _, env = _argv_and_env(
             _scanner(repo, operator=operator, online_audits=True), repo
         )
     assert "--offline" in final_args
-    for name in GITHUB_TOKEN_ENV_VARS:
+    for name in TOKEN_VARIABLES:
         assert name not in env
     assert "scanners.zizmor.options.online_audits" in caplog.text
 
