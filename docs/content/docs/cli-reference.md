@@ -1148,6 +1148,8 @@ ash mcp --transport streamable-http --host 0.0.0.0 --port 8000 \
   --allowed-host ash-mcp.internal.example.com
 ```
 
+On a loopback bind without `--allowed-host`, ASH accepts only the server's own origin: Host `127.0.0.1`, `localhost` or `[::1]` with the `--port` it is bound to, and those as `http://` origins. The SDK's own check would accept them on any port.
+
 The `Origin` allowlist is left empty rather than mirroring the host list. `Origin` is a browser-supplied header, and an MCP server reached through a proxy has no reason to trust one.
 
 `--trust-upstream-host-check` is the explicit alternative when a proxy or platform in front of ASH checks Host and Origin and cannot give ASH a fixed list of names, as on Bedrock AgentCore Runtime. With it ASH checks neither header. It is refused together with `--allowed-host`, which says the opposite, and on stdio.

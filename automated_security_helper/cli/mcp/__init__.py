@@ -198,12 +198,23 @@ def _validate_bind(
     )
 
 
+#: How a loopback server's own address is spelled in a Host header.
+_LOOPBACK_HOST_NAMES = ("127.0.0.1", "localhost", "[::1]")
+
+
 def _transport_security(
     host: str,
     allowed_hosts: Optional[List[str]],
     trust_upstream_host_check: bool,
+    port: int,
 ):
-    """The ``transport_security`` to build an app with, or None for the SDK's own.
+    """The ``transport_security`` to build an app with.
+
+    On a loopback bind with no allowlist the SDK's own check would accept any
+    ``localhost`` origin on any port, so a page served by any other local web
+    server could drive this one from the user's browser. The server accepts its
+    own origin only: Host ``127.0.0.1``, ``localhost`` or ``[::1]`` with the
+    port it is bound to, and the same as ``http://`` origins.
 
     Raises:
         ASHValidationError: per :func:`_validate_bind`.
@@ -225,8 +236,11 @@ def _transport_security(
         # Stated explicitly rather than left to the SDK's default for a
         # non-loopback host, so the decision is visible here.
         return TransportSecuritySettings(enable_dns_rebinding_protection=False)
-    # A loopback name: the SDK installs its loopback-only check.
-    return None
+    own = [f"{name}:{int(port)}" for name in _LOOPBACK_HOST_NAMES]
+    return TransportSecuritySettings(
+        allowed_hosts=own,
+        allowed_origins=[f"http://{name}" for name in own],
+    )
 
 
 def _workspace_ttl(session_workspace_ttl: Optional[int]) -> int:
@@ -304,6 +318,7 @@ def build_streamable_http_app(
     trust_upstream_session_id: bool = False,
     trust_upstream_host_check: bool = False,
     session_workspace_ttl: Optional[int] = None,
+    port: int = 8000,
 ):
     """Build the MCPServer streamable-HTTP ASGI app, optionally guarded by auth.
 
@@ -335,6 +350,9 @@ def build_streamable_http_app(
         session_workspace_ttl: Seconds a session workspace may go unused before
             it is swept; None is the default, 24 hours. See
             ``http_sessions.SessionBoundary`` for when sessions end.
+        port: The port the server will bind, the same value handed to uvicorn.
+            A loopback server accepts only its own origin, which includes the
+            port; see :func:`_transport_security`.
 
     The host argument is load-bearing, not cosmetic
     ----------------------------------------------
@@ -366,7 +384,7 @@ def build_streamable_http_app(
             "MCPServer is not installed. The 'mcp' package is required for "
             "the streamable-http transport."
         )
-    security = _transport_security(host, allowed_hosts, trust_upstream_host_check)
+    security = _transport_security(host, allowed_hosts, trust_upstream_host_check, port)
     # Import here to keep the stdio path zero-cost when the streamable-HTTP
     # transport is not used.
     from automated_security_helper.cli.mcp_server import mcp as _mcp_instance
@@ -382,8 +400,7 @@ def build_streamable_http_app(
         "stateless_http": stateless_http,
         "host": host,
     }
-    if security is not None:
-        app_kwargs["transport_security"] = security
+    app_kwargs["transport_security"] = security
     app = _mcp_instance.streamable_http_app(**app_kwargs)
     # Decides which session each request belongs to from what this app issued,
     # never from a header alone. Added before the auth middleware so an
@@ -410,6 +427,7 @@ def build_sse_app(
     allowed_hosts: Optional[List[str]] = None,
     trust_upstream_host_check: bool = False,
     session_workspace_ttl: Optional[int] = None,
+    port: int = 8000,
 ):
     """Build the MCPServer SSE ASGI app (legacy).
 
@@ -425,6 +443,7 @@ def build_sse_app(
         trust_upstream_host_check: A proxy or platform in front of ASH checks
             Host and Origin; as on the streamable-HTTP path.
         session_workspace_ttl: As on the streamable-HTTP path.
+        port: As on the streamable-HTTP path.
 
     Why sse_app gets host and allowed_hosts too
     -------------------------------------------
@@ -459,14 +478,13 @@ def build_sse_app(
             "MCPServer is not installed. The 'mcp' package is required for "
             "the sse transport."
         )
-    security = _transport_security(host, allowed_hosts, trust_upstream_host_check)
+    security = _transport_security(host, allowed_hosts, trust_upstream_host_check, port)
     from automated_security_helper.cli.mcp_server import mcp as _mcp_instance
 
     # Same v2 change as the streamable-HTTP path above: sse_path is a keyword
     # argument on sse_app() rather than a Settings field.
     app_kwargs = {"sse_path": mount_path, "host": host}
-    if security is not None:
-        app_kwargs["transport_security"] = security
+    app_kwargs["transport_security"] = security
     app = _mcp_instance.sse_app(**app_kwargs)
     # The session of an sse request is the one the server issued for its event
     # stream; a header on a message POST is ignored.
@@ -811,6 +829,7 @@ def mcp_command(
                 trust_upstream_session_id=trust_upstream_session_id,
                 trust_upstream_host_check=trust_upstream_host_check,
                 session_workspace_ttl=session_workspace_ttl,
+                port=port,
             )
             if not quiet:
                 _stderr.print(
@@ -835,6 +854,7 @@ def mcp_command(
                 allowed_hosts=allowed_host,
                 trust_upstream_host_check=trust_upstream_host_check,
                 session_workspace_ttl=session_workspace_ttl,
+                port=port,
             )
             if not quiet:
                 _stderr.print(

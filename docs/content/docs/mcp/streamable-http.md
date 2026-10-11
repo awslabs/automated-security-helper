@@ -53,6 +53,8 @@ The MCP SDK protects against DNS rebinding by checking the `Host` and `Origin` h
 - `--allowed-host NAME` (repeatable): ASH checks Host against the names given. Use the name clients and your proxy send.
 - `--trust-upstream-host-check`: something in front of ASH checks Host and Origin, and ASH checks neither.
 
+On a loopback bind with no `--allowed-host`, the server accepts only its own origin: Host `127.0.0.1:PORT`, `localhost:PORT` or `[::1]:PORT`, where PORT is `--port`, and the same as `http://` origins. The SDK's own loopback check accepts those names on any port, so a page served by any other local web server could otherwise drive the MCP server from your browser. A request with no `Origin` header, which is what every non-browser MCP client sends, needs only the right Host.
+
 The refusal names both options. The Terraform container entrypoint passes `--trust-upstream-host-check` by default when `ASH_MCP_ALLOWED_HOSTS` is empty, matching AgentCore; set `ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=false` on any other target so a missing allowlist refuses startup.
 
 ## Session identity
