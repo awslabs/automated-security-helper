@@ -683,6 +683,97 @@ def test_read_env_names_refuses_what_is_not_a_read(tmp_path: Path) -> None:
     assert _env_module().collect_env_reads(tree).image_env == {}
 
 
+def test_environment_page_survives_lines_moving(tmp_path: Path) -> None:
+    """Each read is cited by file and enclosing function, never by line number.
+
+    The page used to cite about a hundred ``path:line`` sites, so any change that
+    moved a line in a file with a read made the page stale on every other branch.
+    Here every file of a planted tree gains a line at its top between two renders,
+    and the page must not change; and each read's scope is the function, method or
+    script function around it.
+    """
+    files = {
+        "automated_security_helper/__init__.py": "",
+        "automated_security_helper/reads.py": """
+            import os
+
+            TOP = os.environ.get("PLANT_MODULE_LEVEL", "m")
+
+
+            class Loader:
+                def load(self):
+                    # PLANT_METHOD picks the loader.
+                    return os.environ.get("PLANT_METHOD")
+
+
+            def helper():
+                def inner():
+                    return os.getenv("PLANT_NESTED")
+
+                return inner() or os.environ[f"PLANT_{TOP}"]
+        """,
+        "ash": """
+            #!/bin/bash
+            echo "$PLANT_SH_TOP"
+            run_it() {
+              echo "${PLANT_SH_FUNC:-x}"
+            }
+        """,
+        "utils/helper.ps1": """
+            function Invoke-Plant {
+                $x = $env:PLANT_PS_FUNC
+            }
+            $y = $env:PLANT_PS_TOP
+        """,
+    }
+    tree = _plant(tmp_path, files)
+    module = _env_module()
+    scopes = {(r.name, r.scope) for r in module.collect_env_reads(tree).reads}
+    assert {
+        ("PLANT_MODULE_LEVEL", ""),
+        ("PLANT_METHOD", "Loader.load"),
+        ("PLANT_NESTED", "helper.inner"),
+        ("PLANT_SH_TOP", ""),
+        ("PLANT_SH_FUNC", "run_it"),
+        ("PLANT_PS_FUNC", "Invoke-Plant"),
+        ("PLANT_PS_TOP", ""),
+    } <= scopes, scopes
+
+    before, _stats = module.generate(tree, with_cli=False)
+    for rel in files:
+        path = tree / rel
+        path.write_text("\n" + path.read_text(encoding="utf-8"), encoding="utf-8")
+    after, _stats = module.generate(tree, with_cli=False)
+    assert after == before
+    assert "`Loader.load`" in before and "`run_it`" in before
+
+
+def test_environment_page_cites_no_line_numbers() -> None:
+    """The committed page names files and scopes, not lines (see the test above)."""
+    text = (REFERENCE_DIR / "environment-variables.md").read_text(encoding="utf-8")
+    cited = re.findall(r"(?:\.py|\.sh|\.ps1|\bash)`?:\s*\d+", text)
+    assert cited == [], f"line citations on the page: {cited[:5]}"
+
+
+@pytest.mark.parametrize("script", sorted(REFERENCE_PAGES))
+def test_check_refuses_stdout(script: str) -> None:
+    """``--check --output -`` would print the page and compare nothing, so it is refused."""
+    result = _run_generator(script, "--check", "--output", "-")
+    assert result.returncode != 0, f"{script} accepted --check --output -"
+    assert "--output -" in result.stderr, result.stderr
+    assert result.stdout == "", "a refused run must not print a page"
+
+
+@pytest.mark.parametrize("script", sorted(REFERENCE_PAGES))
+def test_check_compares_the_output_file(script: str, tmp_path: Path) -> None:
+    """``--check --output FILE`` compares FILE, and leaves a stale one as it was."""
+    stale = tmp_path / "stale.md"
+    stale.write_text("stale\n", encoding="utf-8")
+    result = _run_generator(script, "--check", "--output", str(stale))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert stale.read_text(encoding="utf-8") == "stale\n"
+
+
 def test_read_env_names_covers_this_tree() -> None:
     """On the real checkout the walk reaches the package and the entry scripts.
 

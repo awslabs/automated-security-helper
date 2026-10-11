@@ -377,11 +377,13 @@ def main() -> int:
     from _reference_docs import (
         add_docs_root_argument,
         prepare_environment,
+        refuse_check_to_stdout,
         write_or_check,
     )
 
     add_docs_root_argument(parser)
     args = parser.parse_args()
+    refuse_check_to_stdout(parser, args)
     docs_root = Path(args.docs_root).resolve()
     prepare_environment(docs_root)
     rows = registered_reporters()

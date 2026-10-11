@@ -737,15 +737,21 @@ def main() -> int:
         "--output",
         default=None,
         help=(
-            "Write only the docs-site page, to this path ('-' for stdout), and leave "
-            "the agent-facing file alone. For measuring another tree's MCP surface."
+            "Write (or with --check, compare) only the docs-site page, at this path "
+            "('-' for stdout), and leave the agent-facing file alone."
         ),
     )
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from _reference_docs import add_docs_root_argument, prepare_environment
+    from _reference_docs import (
+        add_docs_root_argument,
+        prepare_environment,
+        refuse_check_to_stdout,
+        write_or_check,
+    )
 
     add_docs_root_argument(parser)
     args = parser.parse_args()
+    refuse_check_to_stdout(parser, args)
 
     docs_root = Path(args.docs_root).resolve()
     prepare_environment(docs_root)
@@ -753,10 +759,8 @@ def main() -> int:
         page = render_reference_page()
         if args.output == "-":
             sys.stdout.write(page)
-        else:
-            with open(args.output, "w", encoding="utf-8", newline="\n") as handle:
-                handle.write(page)
-        return 0
+            return 0
+        return write_or_check(Path(args.output), page, args.check, GENERATOR)
     status = 0
     for target, expected, after in (
         (

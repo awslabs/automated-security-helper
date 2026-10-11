@@ -82,6 +82,7 @@ from _reference_docs import (  # noqa: E402
     md_prose,
     prepare_environment,
     reference_dir,
+    refuse_check_to_stdout,
     write_or_check,
 )
 
@@ -150,13 +151,23 @@ class EnvRead:
     default: Optional[str] = None
     via: Optional[str] = None
     comment: Optional[str] = None
+    #: The file the comment or docstring quoted as the purpose is in.
     comment_at: Optional[str] = None
+    #: The function, ``Class.method`` or script function the read is in; "" when it
+    #: is at module level or a script's top level.
+    scope: str = ""
+    #: The same, for where the quoted comment is.
+    comment_scope: str = ""
 
 
 @dataclass
 class EnvScan:
     reads: list[EnvRead] = field(default_factory=list)
+    #: ``path:line [shape] source`` per unresolved lookup: what read_env_names returns.
     dynamic: list[str] = field(default_factory=list)
+    #: The same lookups as ``(path, scope, shape, source)``, for the page, which
+    #: cites no line numbers.
+    dynamic_sites: list[tuple[str, str, str, str]] = field(default_factory=list)
     image_env: dict[str, list[tuple[str, str, int]]] = field(default_factory=dict)
 
 
@@ -259,6 +270,13 @@ class _Module:
     parents: dict[int, ast.AST]
     constants: dict[str, tuple[object, int]]
     imports: dict[str, tuple[str, Optional[str]]]
+    #: ``(first line, last line, qualified name)`` of every function and class.
+    spans: list[tuple[int, int, str]] = field(default_factory=list)
+
+    def scope_at(self, line: int) -> str:
+        """The innermost function or class around ``line``, dotted; "" at module level."""
+        inside = [span for span in self.spans if span[0] <= line <= span[1]]
+        return max(inside, key=lambda span: span[0])[2] if inside else ""
 
     def parent(self, node: ast.AST) -> Optional[ast.AST]:
         return self.parents.get(id(node))
@@ -384,8 +402,29 @@ def _load_module(repo_root: Path, path: Path) -> Optional[_Module]:
                     alias.name if alias.asname else alias.name.split(".")[0],
                     None,
                 )
+    spans: list[tuple[int, int, str]] = []
+
+    def collect(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                qualified = f"{prefix}{child.name}"
+                first = min([child.lineno, *(d.lineno for d in child.decorator_list)])
+                spans.append((first, child.end_lineno or child.lineno, qualified))
+                collect(child, qualified + ".")
+            else:
+                collect(child, prefix)
+
+    collect(tree, "")
     return _Module(
-        name, rel, tree, text.splitlines(), comments, parents, constants, imports
+        name,
+        rel,
+        tree,
+        text.splitlines(),
+        comments,
+        parents,
+        constants,
+        imports,
+        spans,
     )
 
 
@@ -942,12 +981,16 @@ def _python_reads(repo_root: Path, scan: EnvScan) -> None:
                 if not complete:
                     source = mod.lines[lineno - 1].strip() if lineno else ""
                     scan.dynamic.append(f"{mod.rel}:{lineno} [{shape}] {source}")
+                    scan.dynamic_sites.append(
+                        (mod.rel, mod.scope_at(lineno), shape, source)
+                    )
                 stmt = mod.statement(node)
                 for name, via, definition in names:
                     if not name:
                         continue
                     comment = mod.comment_for(lineno, getattr(stmt, "lineno", lineno))
-                    comment_at = f"{mod.rel}:{comment[1]}" if comment else None
+                    comment_at = mod.rel if comment else None
+                    comment_scope = mod.scope_at(comment[1]) if comment else ""
                     if comment is None and definition is not None:
                         def_mod = next(
                             (m for m in modules.values() if m.rel == definition[0]),
@@ -957,14 +1000,16 @@ def _python_reads(repo_root: Path, scan: EnvScan) -> None:
                             found = def_mod.comment_for(definition[1], definition[1])
                             if found:
                                 comment = found
-                                comment_at = f"{def_mod.rel}:{found[1]}"
+                                comment_at = def_mod.rel
+                                comment_scope = def_mod.scope_at(found[1])
                     if comment is None:
                         found = _docstring_mention(mod, node, name) or _module_mention(
                             mod, name, lineno
                         )
                         if found:
                             comment = found
-                            comment_at = f"{mod.rel}:{found[1]}"
+                            comment_at = mod.rel
+                            comment_scope = mod.scope_at(found[1])
                     scan.reads.append(
                         EnvRead(
                             name=name,
@@ -980,6 +1025,8 @@ def _python_reads(repo_root: Path, scan: EnvScan) -> None:
                             ),
                             comment=_first_sentences(comment[0]) if comment else None,
                             comment_at=comment_at,
+                            scope=mod.scope_at(lineno),
+                            comment_scope=comment_scope,
                         )
                     )
 
@@ -1075,6 +1122,7 @@ def _shell_reads(repo_root: Path, scan: EnvScan) -> None:
         parsed.append((rel, raw, code_lines))
 
     for rel, raw, code_lines in parsed:
+        scopes = _script_scopes(code_lines, _SH_FUNCTION)
         # Names this script assigns unconditionally (at column 0) before a line.
         # A defaulted expansion of such a name reads the script's own value, not
         # the environment: `RESOLVED=x` then `${RESOLVED:-none}`.
@@ -1106,7 +1154,9 @@ def _shell_reads(repo_root: Path, scan: EnvScan) -> None:
                         shape=f"${{{name}{operator}...}}" if operator else f"${name}",
                         default=default,
                         comment=_first_sentences(comment[0]) if comment else None,
-                        comment_at=f"{rel}:{comment[1]}" if comment else None,
+                        comment_at=rel if comment else None,
+                        scope=scopes[number - 1],
+                        comment_scope=scopes[comment[1] - 1] if comment else "",
                     )
                 )
             top = re.match(
@@ -1114,6 +1164,40 @@ def _shell_reads(repo_root: Path, scan: EnvScan) -> None:
             )
             if top:
                 set_before.add(top.group(1))
+
+
+#: A shell function definition: ``name() {`` or ``function name {``.
+_SH_FUNCTION = re.compile(
+    r"^(?P<indent>\s*)(?:function\s+(?P<a>[A-Za-z_][\w-]*)\s*(?:\(\s*\))?"
+    r"|(?P<b>[A-Za-z_][\w-]*)\s*\(\s*\))\s*\{?\s*$"
+)
+#: A PowerShell function definition: ``function Verb-Noun {``.
+_PS_FUNCTION = re.compile(
+    r"^(?P<indent>\s*)function\s+(?P<a>[A-Za-z_][\w-]*)(?P<b>)\s*(?:\([^)]*\))?\s*\{?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _script_scopes(lines: list[str], definition: re.Pattern) -> list[str]:
+    """The function each line of a shell or PowerShell script is in; "" at top level.
+
+    A function starts at its definition line and ends at the first line that is
+    only ``}`` at the definition's indentation, which is how the shipped scripts
+    are written. Nested definitions are dotted, as Python scopes are.
+    """
+    stack: list[tuple[str, str]] = []
+    scopes: list[str] = []
+    for line in lines:
+        match = definition.match(line)
+        if match:
+            stack.append((match.group("a") or match.group("b"), match.group("indent")))
+            scopes.append(".".join(name for name, _ in stack))
+            continue
+        scopes.append(".".join(name for name, _ in stack))
+        indent = line[: len(line) - len(line.lstrip())]
+        if stack and line.strip() == "}" and indent == stack[-1][1]:
+            stack.pop()
+    return scopes
 
 
 def _shell_comment_above(raw: list[str], number: int) -> Optional[tuple[str, int]]:
@@ -1144,13 +1228,21 @@ def _powershell_reads(repo_root: Path, scan: EnvScan) -> None:
         text = path.read_text(encoding="utf-8", errors="replace")
         # Blank block comments out line for line so reported line numbers still match.
         text = _PS_BLOCK_COMMENT.sub(lambda m: "\n" * m.group(0).count("\n"), text)
-        for number, line in enumerate(text.splitlines(), start=1):
-            stripped = re.sub(r"(^|\s)#.*$", "", line)
+        lines = [re.sub(r"(^|\s)#.*$", "", line) for line in text.splitlines()]
+        scopes = _script_scopes(lines, _PS_FUNCTION)
+        for number, stripped in enumerate(lines, start=1):
             for match in _PS_ENV.finditer(stripped):
                 if match.group(2):
                     continue
                 scan.reads.append(
-                    EnvRead(match.group(1), rel, number, "powershell", "$env:")
+                    EnvRead(
+                        match.group(1),
+                        rel,
+                        number,
+                        "powershell",
+                        "$env:",
+                        scope=scopes[number - 1],
+                    )
                 )
             for match in _PS_GETENV.finditer(stripped):
                 scan.reads.append(
@@ -1160,6 +1252,7 @@ def _powershell_reads(repo_root: Path, scan: EnvScan) -> None:
                         number,
                         "powershell",
                         "GetEnvironmentVariable",
+                        scope=scopes[number - 1],
                     )
                 )
 
@@ -1214,6 +1307,7 @@ def collect_env_reads(repo_root: Optional[Path] = None) -> EnvScan:
     scan.image_env = {k: v for k, v in _dockerfile_env(root).items() if k in names}
     scan.reads.sort(key=lambda r: (r.name, r.path, r.line, r.shape))
     scan.dynamic = sorted(set(scan.dynamic))
+    scan.dynamic_sites = sorted(set(scan.dynamic_sites))
     return scan
 
 
@@ -1264,13 +1358,26 @@ def _cli_envvars() -> dict[str, list[tuple[str, str, str, str]]]:
     return found
 
 
+def _scope_text(scope: str, language: str) -> str:
+    if scope:
+        return code(scope)
+    return "module level" if language == "python" else "top level"
+
+
 def _sites(reads: list[EnvRead]) -> str:
-    by_path: dict[str, list[int]] = {}
+    """Each file a variable is read in, with the functions it is read in.
+
+    No line numbers: a page that cited them went stale whenever any line above a
+    read moved, which is nearly every change to a file that reads a variable.
+    """
+    by_path: dict[str, set[tuple[str, str]]] = {}
     for r in reads:
-        by_path.setdefault(r.path, []).append(r.line)
+        by_path.setdefault(r.path, set()).add((r.scope, r.language))
     return "<br>".join(
-        f"{code(p)}:{', '.join(str(n) for n in sorted(set(lines)))}"
-        for p, lines in sorted(by_path.items())
+        f"{code(p)} ("
+        + ", ".join(_scope_text(s, lang) for s, lang in sorted(scopes))
+        + ")"
+        for p, scopes in sorted(by_path.items())
     )
 
 
@@ -1304,7 +1411,10 @@ def _purpose(name: str, reads: list[EnvRead], cli: list) -> tuple[str, bool]:
         return "<br>".join(parts), True
     for r in reads:
         if r.comment:
-            return f"{md_prose(r.comment)} ({code(r.comment_at)})", True
+            where = code(r.comment_at)
+            if r.comment_scope:
+                where += f", {code(r.comment_scope)}"
+            return f"{md_prose(r.comment)} ({where})", True
     return PURPOSE_UNDOCUMENTED, False
 
 
@@ -1382,12 +1492,14 @@ def generate(
             "in the `Dockerfile`, and the build stage that sets it."
         ),
         (
-            "- Read at: the file and line of each read. `ash` and `utils/` are the shell "
+            "- Read at: the file of each read and the function, method or script "
+            "function it is in, or module level or top level when it is in none. "
+            "`ash` and `utils/` are the shell "
             "and PowerShell entry scripts; everything else is the Python package."
         ),
         (
             "- Purpose: the option's help text, or the code comment or docstring at the "
-            f'read, quoted with its location. "{PURPOSE_UNDOCUMENTED}" means the code '
+            f'read, quoted with the file and function it is in. "{PURPOSE_UNDOCUMENTED}" means the code '
             "around the read does not say."
         ),
         "",
@@ -1425,8 +1537,16 @@ def generate(
         ),
         "",
     ]
-    if scan.dynamic:
-        lines += ["```text", *scan.dynamic, "```", ""]
+    if scan.dynamic_sites:
+        lines += [
+            "```text",
+            *(
+                f"{path} ({scope or 'module level'}) [{shape}] {source}"
+                for path, scope, shape, source in scan.dynamic_sites
+            ),
+            "```",
+            "",
+        ]
     else:
         lines += ["None.", ""]
 
@@ -1469,6 +1589,7 @@ def main() -> int:
     )
     add_docs_root_argument(parser)
     args = parser.parse_args()
+    refuse_check_to_stdout(parser, args)
 
     code_root = prepare_environment(Path(args.docs_root))
     output = Path(args.output) if args.output else reference_dir(args.docs_root) / PAGE

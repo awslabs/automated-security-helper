@@ -46,6 +46,7 @@ from _reference_docs import (  # noqa: E402
     md_prose,
     prepare_environment,
     reference_dir,
+    refuse_check_to_stdout,
     write_or_check,
 )
 
@@ -278,6 +279,7 @@ def main() -> int:
     )
     add_docs_root_argument(parser)
     args = parser.parse_args()
+    refuse_check_to_stdout(parser, args)
 
     docs_root = Path(args.docs_root).resolve()
     prepare_environment(docs_root)

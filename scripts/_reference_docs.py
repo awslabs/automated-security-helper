@@ -107,6 +107,20 @@ def add_docs_root_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def refuse_check_to_stdout(parser: argparse.ArgumentParser, args) -> None:
+    """Stop with a usage error when ``--check`` is combined with ``--output -``.
+
+    ``--check`` compares a page on disk with the regenerated one, and ``--output -``
+    sends the page to stdout instead of to any file, so together they compared
+    nothing and exited 0: a CI step written that way could never fail.
+    """
+    if getattr(args, "check", False) and getattr(args, "output", None) == "-":
+        parser.error(
+            "--check compares a page on disk with the regenerated one and cannot be "
+            "combined with --output -; name a file with --output, or drop it"
+        )
+
+
 def reference_dir(docs_root: Path) -> Path:
     return Path(docs_root) / REFERENCE_SUBDIR
 
