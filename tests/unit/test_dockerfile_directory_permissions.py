@@ -31,7 +31,7 @@ What each directory gets instead, and why:
 
 These are static assertions over the Dockerfile text: building the image needs
 minutes and an OCI runtime the unit suite does not have. CI builds it, and
-tests/snapshot/container/runtime/test_snapshot_container_image_permissions.py checks
+tests/snapshot/container/runtime/test_container_image_permissions.py checks
 the built image itself.
 """
 
@@ -40,7 +40,7 @@ from __future__ import annotations
 import re
 import shlex
 from pathlib import Path
-from typing import Dict, List, NamedTuple
+from typing import Dict, List, NamedTuple, Optional
 
 import pytest
 
@@ -111,15 +111,25 @@ def _expand(word: str, env: Dict[str, str]) -> str:
 
 
 def _commands(run_text: str) -> List[List[str]]:
-    """The simple commands in a RUN line, split on && ; || and ``then``/``fi``."""
+    """The simple commands in a RUN line, split on && ; || and ``then``/``fi``.
+
+    A command run through ``with-retry '<command>'`` or ``sh -c '<command>'`` is
+    parsed in its own right too, so a mode set inside one is seen.
+    """
     commands = []
     for part in re.split(r"&&|\|\||;|\bthen\b|\bfi\b|\bdo\b|\bdone\b", run_text):
         try:
             words = shlex.split(part)
         except ValueError:
             continue
-        if words:
-            commands.append(words)
+        if not words:
+            continue
+        commands.append(words)
+        if words[0] == "with-retry":
+            for inner in words[1:]:
+                commands.extend(_commands(inner))
+        elif words[0] in ("sh", "bash") and "-c" in words[1:-1]:
+            commands.extend(_commands(words[words.index("-c") + 1]))
     return commands
 
 
@@ -148,17 +158,59 @@ class Chmod(NamedTuple):
     paths: List[str]
 
 
+def _option_mode(words: List[str], short: str, long: str) -> Optional[str]:
+    """The value of ``-m MODE``, ``-mMODE`` or ``--mode=MODE`` in *words*, if given."""
+    for i, word in enumerate(words):
+        if word == short and i + 1 < len(words):
+            return words[i + 1]
+        if (
+            word.startswith(short)
+            and len(word) > len(short)
+            and not word.startswith("--")
+        ):
+            return word[len(short) :]
+        if word.startswith(long + "="):
+            return word.split("=", 1)[1]
+    return None
+
+
 def _chmods(instructions, env) -> List[Chmod]:
+    """Every mode the Dockerfile sets: chmod, install -m, mkdir -m, COPY/ADD --chmod."""
     found = []
     for instruction in instructions:
+        if instruction.keyword in ("COPY", "ADD"):
+            words = shlex.split(instruction.text)
+            mode = _option_mode(words, "--chmod", "--chmod")
+            if mode is not None:
+                found.append(Chmod(instruction.stage, mode, [_expand(words[-1], env)]))
+            continue
         if instruction.keyword != "RUN":
             continue
         for words in _commands(instruction.text):
-            if words[0] != "chmod":
-                continue
-            args = [w for w in words[1:] if not w.startswith("-")]
-            mode, paths = args[0], [_expand(p, env) for p in args[1:]]
-            found.append(Chmod(instruction.stage, mode, paths))
+            if words[0] == "chmod":
+                args = [w for w in words[1:] if not w.startswith("-")]
+                mode, paths = args[0], [_expand(p, env) for p in args[1:]]
+                found.append(Chmod(instruction.stage, mode, paths))
+            elif words[0] in ("install", "mkdir"):
+                mode = _option_mode(words, "-m", "--mode")
+                if mode is None:
+                    continue
+                operands = []
+                skip = False
+                for word in words[1:]:
+                    if skip:
+                        skip = False
+                        continue
+                    if word in ("-m", "-o", "-g", "-t", "-S"):
+                        skip = True
+                        continue
+                    if not word.startswith("-"):
+                        operands.append(word)
+                # install's last operand is the destination; mkdir's are all made.
+                targets = operands[-1:] if words[0] == "install" else operands
+                found.append(
+                    Chmod(instruction.stage, mode, [_expand(p, env) for p in targets])
+                )
     return found
 
 
@@ -283,3 +335,34 @@ def test_an_offline_image_keeps_its_database_root_owned(instructions):
 
     assert runs, "the non-root stage no longer hands over the grype cache"
     assert all(guarded.search(text) for text in runs), runs
+
+
+@pytest.mark.parametrize(
+    ("dockerfile", "path"),
+    [
+        pytest.param("RUN chmod 777 /deps\n", "/deps", id="chmod"),
+        pytest.param("RUN with-retry 'chmod -R 777 /deps'\n", "/deps", id="with-retry"),
+        pytest.param('RUN sh -c "chmod o+w /deps"\n', "/deps", id="sh-c"),
+        pytest.param("RUN install -d -m 777 /deps\n", "/deps", id="install-m"),
+        pytest.param(
+            "RUN install --mode=0777 tool /usr/bin/tool\n",
+            "/usr/bin/tool",
+            id="install-mode",
+        ),
+        pytest.param("RUN mkdir -p -m 777 /deps\n", "/deps", id="mkdir-m"),
+        pytest.param("RUN mkdir --mode=1777 /deps\n", "/deps", id="mkdir-mode-sticky"),
+        pytest.param(
+            "COPY --chmod=777 tool /usr/bin/tool\n", "/usr/bin/tool", id="copy-chmod"
+        ),
+        pytest.param(
+            "ADD --chmod=0666 file /deps/file\n", "/deps/file", id="add-chmod"
+        ),
+    ],
+)
+def test_the_parser_sees_every_way_to_set_a_mode(dockerfile, path):
+    """Every Dockerfile form that sets a mode, so a new one cannot slip past the rule."""
+    found = _chmods(_instructions("FROM scratch AS core\n" + dockerfile), {})
+
+    assert [
+        (change.paths, _grants_write_to_others(change.mode)) for change in found
+    ] == [([path], True)]
