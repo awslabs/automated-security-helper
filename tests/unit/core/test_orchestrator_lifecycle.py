@@ -572,6 +572,63 @@ class TestIgnoredConfigSources:
         ]
         assert len(logged) == 1, logged
 
+    @pytest.mark.parametrize(
+        "named", [pytest.param(False, id="discovered"), pytest.param(True, id="named")]
+    )
+    def test_an_unreadable_pyproject_behind_the_source_is_reported_once(
+        self, tmp_path, monkeypatch, caplog, named
+    ):
+        """Every reader in a scan runs discovery; the warning is still said once.
+
+        run_ash_scan discovers for each exit-code field and for the file it
+        passes, and resolution discovers again for the ignored sources. A
+        pyproject.toml it cannot read behind the selected source used to be
+        logged by each of them, and recorded by none.
+        """
+        import logging
+
+        from automated_security_helper.interactions import run_ash_scan as ras
+
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        src = tmp_path / "src"
+        used = src / ".ash" / ".ash.yaml"
+        used.parent.mkdir(parents=True)
+        used.write_text("project_name: used\n", encoding="utf-8")
+        (src / "pyproject.toml").symlink_to(tmp_path / "absent.toml")
+        engine = _EngineStub(phases_result=AshAggregatedResults())
+        opts = ras.ScanOptions(source_dir=src, output_dir=tmp_path / "out")
+
+        with caplog.at_level(logging.DEBUG):
+            ras._load_config_file(opts)
+            ras._load_config_file(opts)
+            discovered = ras._discovered_config_path(src, log_selection=True)
+            assert discovered == used.as_posix()
+            orch = _bare(
+                src, tmp_path / "out", config_path=discovered if named else None
+            )
+            with patch(
+                "automated_security_helper.core.orchestrator.ScanExecutionEngine",
+                return_value=engine,
+            ):
+                orch.initialize()
+        with patch(
+            "automated_security_helper.core.orchestrator.scan_set", return_value=[]
+        ):
+            returned = orch.execute_scan(phases=["scan"])
+
+        logged = [
+            r.getMessage()
+            for r in caplog.records
+            if r.levelno >= logging.WARNING and "pyproject.toml" in r.getMessage()
+        ]
+        assert len(logged) == 1, logged
+        checkpoints = [
+            c
+            for c in returned.validation_checkpoints
+            if c.get("type") == "config_warning" and "pyproject.toml" in c["message"]
+        ]
+        assert len(checkpoints) == 1, returned.validation_checkpoints
+
     def test_the_checkpoint_says_the_settings_are_not_applied(
         self, tmp_path, monkeypatch
     ):

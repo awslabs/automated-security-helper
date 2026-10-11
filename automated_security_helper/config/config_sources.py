@@ -338,10 +338,18 @@ class ConfigSource:
 
 @dataclass
 class ConfigDiscovery:
-    """The source discovery selected, and every other source it found."""
+    """The source discovery selected, and every other source it found.
+
+    ``notes`` are what discovery could not use behind the selected source, such
+    as a pyproject.toml it could not read. They are reported with the ignored
+    sources (``discovery_warnings``), so they are logged once per scan and
+    recorded with its results, rather than logged by each of the several readers
+    that run discovery.
+    """
 
     selected: Optional[ConfigSource] = None
     ignored: List[ConfigSource] = field(default_factory=list)
+    notes: List[str] = field(default_factory=list)
 
 
 def pyproject_has_ash_table(path: Path) -> bool:
@@ -388,9 +396,9 @@ def pyproject_has_ash_table(path: Path) -> bool:
 
 
 def _unreadable_pyproject(
-    path: Path, found_before: List[ConfigSource], exc: OSError
+    path: Path, found_before: List[ConfigSource], exc: OSError, notes: List[str]
 ) -> bool:
-    """Refuse a pyproject.toml that could not be read, or ignore it behind a source."""
+    """Refuse a pyproject.toml that could not be read, or note it behind a source."""
     if not found_before:
         refusal = (
             ASHConfigFileNotFoundError
@@ -402,14 +410,16 @@ def _unreadable_pyproject(
             "whether it holds a [tool.ash] table. Make it readable, remove "
             "it, or name a config file with --config."
         ) from exc
-    ASH_LOGGER.warning(
+    notes.append(
         f"Could not read {path.as_posix()} ({exc}); it is not used as an ASH "
         "config source."
     )
     return False
 
 
-def _pyproject_is_a_source(path: Path, found_before: List[ConfigSource]) -> bool:
+def _pyproject_is_a_source(
+    path: Path, found_before: List[ConfigSource], notes: List[str]
+) -> bool:
     """Probe pyproject.toml without letting it break an unrelated config.
 
     When a higher-precedence source already exists, pyproject.toml is probed
@@ -425,31 +435,35 @@ def _pyproject_is_a_source(path: Path, found_before: List[ConfigSource]) -> bool
     repository holds, and opening a device can act on it even when nothing is
     read: a watchdog arms, a tape rewinds. So a FIFO, a device or a directory at
     this name is told by its type, from ``stat``, and refused or ignored unopened.
+
+    What cannot be used behind a higher-precedence source is appended to
+    ``notes`` rather than logged; see ``ConfigDiscovery``.
     """
     try:
         regular = path.is_file()
     except OSError as exc:
-        return _unreadable_pyproject(path, found_before, exc)
+        return _unreadable_pyproject(path, found_before, exc, notes)
     if not regular:
         if not os.path.exists(path):
             # A name that exists but leads nowhere: a symbolic link to nothing.
             missing = FileNotFoundError(
                 errno.ENOENT, "a symbolic link to nothing", os.fspath(path)
             )
-            return _unreadable_pyproject(path, found_before, missing)
+            return _unreadable_pyproject(path, found_before, missing, notes)
         return _unreadable_pyproject(
             path,
             found_before,
             OSError(errno.EINVAL, "not a regular file", os.fspath(path)),
+            notes,
         )
     try:
         return pyproject_has_ash_table(path)
     except OSError as exc:
-        return _unreadable_pyproject(path, found_before, exc)
+        return _unreadable_pyproject(path, found_before, exc, notes)
     except ASHConfigSourceError as exc:
         if not found_before:
             raise
-        ASH_LOGGER.warning(
+        notes.append(
             f"Ignoring {path.as_posix()}: {found_before[0].label} takes precedence, "
             f"and the [tool.ash] table there could not be read ({exc})."
         )
@@ -559,22 +573,24 @@ def discover_config_source(
     candidates = _existing_candidates(search_dir, permit)
     _check_candidates(candidates, permit)
     found: List[ConfigSource] = []
+    notes: List[str] = []
     for candidate in candidates:
         if candidate.kind != SOURCE_KIND_PYPROJECT or _pyproject_is_a_source(
-            candidate.path, found
+            candidate.path, found, notes
         ):
             found.append(candidate)
     if not found:
         return ConfigDiscovery()
-    return ConfigDiscovery(selected=found[0], ignored=found[1:])
+    return ConfigDiscovery(selected=found[0], ignored=found[1:], notes=notes)
 
 
 def discovery_warnings(discovery: ConfigDiscovery) -> List[str]:
-    """One warning per source discovery found and did not select.
+    """One warning per source discovery found and did not select, then its notes.
 
     The settings in an ignored source are not applied, so a scan reports these
     with its results as well as in the log; see ``log_config_discovery`` and
-    ``resolve_config``.
+    ``resolve_config``. A note says what discovery could not use behind the
+    selected source (``ConfigDiscovery.notes``).
     """
     selected = discovery.selected
     if selected is None:
@@ -597,6 +613,7 @@ def discovery_warnings(discovery: ConfigDiscovery) -> List[str]:
                 "and delete the other."
             )
         warnings.append(message)
+    warnings.extend(discovery.notes)
     return warnings
 
 
