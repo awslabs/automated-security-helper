@@ -274,10 +274,16 @@ class ScanExecutionEngine:
         # This scan's plugins: ASH's built-in ones plus those of the modules this
         # scan names. The registry is process-wide and holds every module any scan
         # or `list_scanners` in this process imported; the filter selects this
-        # scan's share of it, and also decides which event handlers it notifies.
-        from automated_security_helper.plugins.loader import scan_plugin_filter
+        # scan's share of it. The handler filter decides which event handlers it
+        # notifies: those of the same plugins, plus handlers the program running
+        # the scan subscribed from outside the plugin namespace.
+        from automated_security_helper.plugins.loader import (
+            scan_handler_filter,
+            scan_plugin_filter,
+        )
 
         self._plugin_filter = scan_plugin_filter(combined_plugin_modules)
+        self._handler_filter = scan_handler_filter(combined_plugin_modules)
         self.plugins = {
             "converter": ash_plugin_manager.plugin_modules(
                 "converter", self._plugin_filter
@@ -483,7 +489,7 @@ class ScanExecutionEngine:
 
             ash_plugin_manager.notify(
                 AshEventType.EXECUTION_START,
-                handler_filter=self._plugin_filter,
+                handler_filter=self._handler_filter,
                 phases=ordered_phases,
                 plugin_context=self._context,
                 source_dir=self._context.source_dir,
@@ -510,7 +516,7 @@ class ScanExecutionEngine:
                         # Create and execute the Convert phase
                         convert_phase = ConvertPhase(
                             plugins=self.plugins["converter"],
-                            plugin_filter=self._plugin_filter,
+                            plugin_filter=self._handler_filter,
                             plugin_context=self._context,
                             progress_display=self.progress_display,
                             asharp_model=self._asharp_model,
@@ -524,7 +530,7 @@ class ScanExecutionEngine:
                         # Create and execute the Scan phase
                         scan_phase = ScanPhase(
                             plugins=self.plugins["scanner"],
-                            plugin_filter=self._plugin_filter,
+                            plugin_filter=self._handler_filter,
                             plugin_context=self._context,
                             progress_display=self.progress_display,
                             asharp_model=self._asharp_model,
@@ -598,7 +604,7 @@ class ScanExecutionEngine:
                         # Create and execute the Report phase
                         report_phase = ReportPhase(
                             plugins=self.plugins["reporter"],
-                            plugin_filter=self._plugin_filter,
+                            plugin_filter=self._handler_filter,
                             plugin_context=self._context,
                             progress_display=self.progress_display,
                             asharp_model=self._results,
@@ -615,7 +621,7 @@ class ScanExecutionEngine:
                         # Create and execute the Inspect phase
                         inspect_phase = InspectPhase(
                             plugins=[],  # No plugin support for the Inspect phase at this time.
-                            plugin_filter=self._plugin_filter,
+                            plugin_filter=self._handler_filter,
                             plugin_context=self._context,
                             progress_display=self.progress_display,
                             asharp_model=self._asharp_model,
@@ -637,7 +643,7 @@ class ScanExecutionEngine:
 
                 ash_plugin_manager.notify(
                     AshEventType.ERROR,
-                    handler_filter=self._plugin_filter,
+                    handler_filter=self._handler_filter,
                     phase="execution",
                     error=str(e),
                     exception=e,
@@ -666,7 +672,7 @@ class ScanExecutionEngine:
 
                 ash_plugin_manager.notify(
                     AshEventType.EXECUTION_COMPLETE,
-                    handler_filter=self._plugin_filter,
+                    handler_filter=self._handler_filter,
                     phases=ordered_phases,
                     results=self._results,
                     duration=scan_duration,

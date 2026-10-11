@@ -135,14 +135,25 @@ def _reports(output_dir: Path, extension: str) -> List[str]:
 #: argv[1] is a JSON list of steps. A scan is ``{"source_dir", "output_dir",
 #: "modules"}``, or ``{"workspace_file", "output_dir"}`` for a workspace scan;
 #: ``{"list": true}`` calls the MCP ``list_scanners`` tool function, which imports the
-#: community scanner packages. Prints one report line: per scan, the exit code and
-#: each scanner row's status.
+#: community scanner packages; ``{"subscribe": true}`` subscribes a handler defined in
+#: this program to EXECUTION_START, the way embedding code calls
+#: ``ash_plugin_manager.subscribe``, which writes ``embedded-<tree name>``. Prints one
+#: report line: per scan, the exit code and each scanner row's status.
 _PROGRAM = r"""
 import json
+import os
 import sys
 from pathlib import Path
 
 from automated_security_helper.plugins.loader import load_internal_plugins
+
+
+def record_embedded_start(*args, **kwargs):
+    name = "embedded-" + Path(str(kwargs.get("source_dir"))).name
+    Path(os.environ["PLUGIN_SELECTION_MARKERS"], name).write_text(
+        "started", encoding="utf-8"
+    )
+    return True
 
 
 def _config_name(cls):
@@ -167,6 +178,12 @@ for step in json.loads(sys.argv[1]):
         from automated_security_helper.cli.mcp_tools import mcp_list_scanners
 
         mcp_list_scanners()
+        continue
+    if step.get("subscribe"):
+        from automated_security_helper.plugins import ash_plugin_manager
+        from automated_security_helper.plugins.events import AshEventType
+
+        ash_plugin_manager.subscribe(AshEventType.EXECUTION_START, record_embedded_start)
         continue
     if "workspace_file" in step:
         from automated_security_helper.workspace.resolver import resolve_workspace
@@ -497,6 +514,37 @@ class TestEventHandlersFollowTheScansModules:
         assert "second" not in proc.started(), (
             "an event handler from a module only the first scan named fired for the "
             "second scan"
+        )
+
+    def test_a_handler_the_calling_program_subscribes_fires_in_every_scan(
+        self, tmp_path
+    ):
+        """Defined outside the plugin namespace: the program's own, not a plugin's."""
+        proc = _Process(tmp_path)
+        first, second = proc.tree("first"), proc.tree("second")
+        proc.run(
+            [
+                {"subscribe": True},
+                {
+                    "source_dir": str(first),
+                    "output_dir": str(tmp_path / "out1"),
+                    "modules": [HANDLER_PACKAGE],
+                },
+                {"source_dir": str(second), "output_dir": str(tmp_path / "out2")},
+            ]
+        )
+
+        started = proc.started()
+        assert "embedded-first" in started and "embedded-second" in started, (
+            (
+                "a handler the calling program subscribed did not fire in each of "
+                f"its scans: {started}"
+            ),
+            proc.output[-3000:],
+        )
+        assert "first" in started and "second" not in started, (
+            "control: the plugin module's handler still follows the scan's modules: "
+            f"{started}"
         )
 
 

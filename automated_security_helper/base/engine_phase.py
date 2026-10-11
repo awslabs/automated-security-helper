@@ -33,7 +33,7 @@ class EnginePhase(ABC):
             progress_display: Progress display to use for reporting progress
             asharp_model: AshAggregatedResults to update with results
             plugin_filter: The event handlers this phase's notifications reach;
-                the scan's ``plugins.loader.scan_plugin_filter``. None reaches
+                the scan's ``plugins.loader.scan_handler_filter``. None reaches
                 every subscriber.
         """
         if plugins is None:

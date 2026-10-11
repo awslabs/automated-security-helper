@@ -385,6 +385,26 @@ def scan_plugin_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
     return admits
 
 
+def scan_handler_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
+    """Which event handlers a scan naming *plugin_modules* notifies.
+
+    The handlers :func:`scan_plugin_filter` selects, plus every handler defined
+    outside ASH's plugin namespace, such as one the program running the scan
+    subscribed with ``ash_plugin_manager.subscribe``. That handler belongs to the
+    program rather than to a plugin module, so it is notified in each scan the
+    program runs. A handler defined in a plugin module (one inside the namespace)
+    that the scan does not name is not notified.
+    """
+    plugins = scan_plugin_filter(plugin_modules)
+
+    def admits(callback: Any) -> bool:
+        if plugins(callback):
+            return True
+        return not _is_allowed_module_path(getattr(callback, "__module__", None) or "")
+
+    return admits
+
+
 def load_additional_plugin_modules(plugin_modules: List[str] | None = None) -> dict:
     """Load additional plugin modules specified in configuration.
 

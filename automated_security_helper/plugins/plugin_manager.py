@@ -144,9 +144,9 @@ class AshPluginManager(BaseModel):
         Args:
             event_type: The event to notify.
             handler_filter: Which subscribers this notification reaches. A scan
-                passes its own (``plugins.loader.scan_plugin_filter``), so a handler
-                registered by a module only another scan named is not called for
-                it. None notifies every subscriber.
+                passes its own (``plugins.loader.scan_handler_filter``), so a
+                handler registered by a plugin module only another scan named is
+                not called for it. None notifies every subscriber.
         """
         if not hasattr(self.plugin_library, "event_handlers"):
             ASH_LOGGER.debug(

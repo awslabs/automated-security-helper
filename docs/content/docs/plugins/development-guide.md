@@ -369,6 +369,12 @@ def scan_complete_handler(**kwargs):
 ash_plugin_manager.subscribe(AshEventType.SCAN_COMPLETE, scan_complete_handler)
 ```
 
+Where the handler is defined decides which scans notify it. A handler defined in your
+own program, outside ASH's plugin namespace, is notified in every scan that program
+runs. A handler defined in a plugin package is notified only in scans whose
+`ash_plugin_modules` name that package, and only when the package defines, imports or
+lists it (see [Using Custom Plugin Packages](#using-custom-plugin-packages)).
+
 ## Plugin Configuration
 
 Plugins are configured through the ASH configuration file:

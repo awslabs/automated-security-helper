@@ -632,7 +632,10 @@ into its namespace, or lists in its `ASH_*` declarations; naming a package does 
 select a plugin that only one of its subpackages defines, so name that subpackage. This holds when one process runs several scans, as the
 MCP server does: a module that an earlier scan named, or that the MCP `list_scanners`
 tool loaded to describe the community scanners, takes no part in a scan that does not
-name it, and a module that only a later scan names takes part in that scan.
+name it, and a module that only a later scan names takes part in that scan. An event
+handler defined outside ASH's plugin namespace, such as one a program that calls
+`run_ash_scan` subscribes with `ash_plugin_manager.subscribe`, is notified in every
+scan that program runs.
 
 ## Settings a repository's config cannot choose
 
