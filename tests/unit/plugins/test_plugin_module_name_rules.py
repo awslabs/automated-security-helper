@@ -164,3 +164,93 @@ class TestBuiltInPlugins:
     )
     def test_a_plugin_elsewhere_in_the_package_is_not_built_in(self, module):
         assert not scan_plugin_filter([])(_plugin(module))
+
+
+class TestWhatANamedModuleSelects:
+    def test_a_class_another_package_defines_and_the_named_one_lists(self, site):
+        _write(
+            site,
+            "zzhelper_pkg/__init__.py",
+            "class HelperScanner:\n    ash_plugin_type = 'scanner'\n",
+        )
+        _write(
+            site,
+            "zzlists_ash_plugins/__init__.py",
+            "from zzhelper_pkg import HelperScanner\nASH_SCANNERS = [HelperScanner]\n",
+        )
+        importlib.invalidate_caches()
+        importlib.import_module("zzlists_ash_plugins")
+        helper = sys.modules["zzhelper_pkg"].HelperScanner
+
+        assert scan_plugin_filter(["zzlists_ash_plugins"])(helper)
+        assert not scan_plugin_filter([])(helper), "control: unnamed, unselected"
+
+    def test_a_class_only_in_a_submodule_with_no_declarations(self, site):
+        _write(site, "zzsub_ash_plugins/__init__.py")
+        _write(site, "zzsub_ash_plugins/scanners/__init__.py")
+        _write(
+            site,
+            "zzsub_ash_plugins/scanners/deep.py",
+            "class DeepScanner:\n    ash_plugin_type = 'scanner'\n",
+        )
+        importlib.invalidate_caches()
+        deep = importlib.import_module("zzsub_ash_plugins.scanners.deep").DeepScanner
+
+        assert scan_plugin_filter(["zzsub_ash_plugins"])(deep)
+        assert not scan_plugin_filter(["zzsub_ash_plugins_other"])(deep)
+
+    def test_a_handler_the_named_module_declares(self, site):
+        _write(
+            site, "zzhandlers_pkg/__init__.py", "def on_event(**kwargs):\n    pass\n"
+        )
+        _write(
+            site,
+            "zzevents2_ash_plugins/__init__.py",
+            "from zzhandlers_pkg import on_event\n"
+            "ASH_EVENT_HANDLERS = {'scan_complete': [on_event]}\n",
+        )
+        importlib.invalidate_caches()
+        importlib.import_module("zzevents2_ash_plugins")
+        handler = sys.modules["zzhandlers_pkg"].on_event
+
+        assert scan_plugin_filter(["zzevents2_ash_plugins"])(handler)
+        assert not scan_plugin_filter([])(handler)
+
+
+class TestTheWorkspacePrewarmRefusesBeforeImporting:
+    def test_an_accepted_name_beside_a_refused_one_is_not_imported(
+        self, site, tmp_path
+    ):
+        """The pre-warm refuses first; it does not import the names it accepts."""
+        from automated_security_helper.workspace.execution import (
+            ProjectScanSettings,
+            prewarm_plugin_registry,
+        )
+        from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+
+        for name in ("zzprewarm_ash_plugins", "zz_prewarm_refused"):
+            _write(site, f"{name}/__init__.py", "LOADED = True\n")
+        importlib.invalidate_caches()
+        plan = WorkspacePlan(
+            workspace_file=(tmp_path / "dev.code-workspace").as_posix(),
+            workspace_root=tmp_path.as_posix(),
+            projects=[
+                ProjectPlan(
+                    key="api",
+                    relative_path="api",
+                    path=(tmp_path / "api").as_posix(),
+                    label="api",
+                    display_label="api",
+                    severity_threshold="MEDIUM",
+                    ash_plugin_modules=["zzprewarm_ash_plugins", "zz_prewarm_refused"],
+                )
+            ],
+        )
+
+        with pytest.raises(PluginModuleNamespaceError):
+            prewarm_plugin_registry(
+                plan, ProjectScanSettings(output_dir=tmp_path / "out")
+            )
+
+        assert "zzprewarm_ash_plugins" not in sys.modules
+        assert "zz_prewarm_refused" not in sys.modules

@@ -160,6 +160,35 @@ class TestARegistrationDuringAResolve:
         ]
 
 
+class TestTheCopyIsTakenUnderTheLock:
+    def test_a_resolve_waits_while_the_registry_lock_is_held(self):
+        """A registration holds the lock while it inserts, so the copy must wait.
+
+        The forced mutation above lands inside ``import_module``, after the copy, so
+        it shows the resolve iterates a copy but not that the copy is taken under the
+        lock. Holding the lock shows that: the resolve cannot finish until it is
+        released.
+        """
+        manager = _manager(seed=3)
+        started = threading.Event()
+        finished = threading.Event()
+
+        def resolve() -> None:
+            started.set()
+            manager.plugin_modules("scanner")
+            finished.set()
+
+        with manager._registry_lock:
+            thread = threading.Thread(target=resolve)
+            thread.start()
+            assert started.wait(timeout=30)
+            assert not finished.wait(timeout=0.5), (
+                "plugin_modules copied the registrations without taking the lock"
+            )
+        thread.join(timeout=30)
+        assert finished.is_set()
+
+
 class TestTheCacheFollowsTheRegistrations:
     """What the cache does between resolves."""
 
