@@ -361,7 +361,9 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * refusal ASH makes, said before ASH starts.
  *
  * AND A REQUESTED ALLOWLIST IS ENFORCED OR NOTHING STARTS. When `ASH_MCP_ALLOWED_HOST`
- * is set and this ASH has no `--allowed-host`, the entrypoint refuses (exit 65). It
+ * is set and this ASH has no `--allowed-host`, the entrypoint refuses (exit 65), and
+ * so it does when the value names no host at all (`,`), which would otherwise pass
+ * no `--allowed-host` and leave an ASH without its own check serving every Host. It
  * used to warn and start, reasoning that the Fargate stack always substitutes the
  * load balancer's name, so no parameter value could satisfy a refusal. That is what
  * made the Fargate endpoint accept every Host header while its stack said DNS
@@ -421,7 +423,6 @@ set -- ash mcp --transport streamable-http \\
 if [ "\${ASH_MCP_STATELESS:-true}" = "true" ]; then
   if ash_mcp_supports '--stateless-http'; then
     set -- "$@" --stateless-http
-    # Only where the platform in front issues and authenticates Mcp-Session-Id.
     if [ "\${ASH_MCP_TRUST_UPSTREAM_SESSION_ID:-false}" = "true" ] && ash_mcp_supports '--trust-upstream-session-id'; then
       set -- "$@" --trust-upstream-session-id
     fi
@@ -444,14 +445,20 @@ if [ -n "\${ASH_MCP_ALLOWED_HOST:-}" ]; then
   fi
   ASH_SAVED_IFS=$IFS
   IFS=,
+  ash_hosts=""
   for ash_host in \${ASH_MCP_ALLOWED_HOST}; do
+    # Lower-cased because load balancers lowercase Host.
+    ash_host=$(printf '%s' "$ash_host" | tr -d ' \t' | tr 'A-Z' 'a-z')
     if [ -n "$ash_host" ]; then
-      # Lower-cased: a load balancer lowercases Host, the MCP SDK matches exactly.
-      ash_host=$(printf '%s' "$ash_host" | tr 'A-Z' 'a-z')
       set -- "$@" --allowed-host "$ash_host"
+      ash_hosts=1
     fi
   done
   IFS=$ASH_SAVED_IFS
+  if [ -z "$ash_hosts" ]; then
+    echo "ash-mcp-entrypoint: ASH_MCP_ALLOWED_HOST='\${ASH_MCP_ALLOWED_HOST}' names no host." >&2
+    exit 65
+  fi
 elif [ "\${ASH_MCP_TRUST_UPSTREAM_HOST_CHECK:-false}" = "true" ]; then
   if ash_mcp_supports '--trust-upstream-host-check'; then
     set -- "$@" --trust-upstream-host-check

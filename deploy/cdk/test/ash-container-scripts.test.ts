@@ -704,6 +704,13 @@ exit 1
     expect(argv).toEqual([]);
   });
 
+  test('an allowlist that names no host refuses rather than passing no --allowed-host', () => {
+    const { status, stderr, argv } = runEntrypoint({ FAKE_ASH_MODERN: '1', ASH_MCP_ALLOWED_HOST: ' , ,' });
+    expect(status).toBe(65);
+    expect(stderr).toContain('names no host');
+    expect(argv).toEqual([]);
+  });
+
   test('the host-check statement is not passed to an ASH that does not list it', () => {
     // A flag the image's `ash mcp` does not accept would stop the server binding.
     const { status, argv } = runEntrypoint({ ASH_MCP_STATELESS: 'false', ...HOST_CHECK_UPSTREAM });
