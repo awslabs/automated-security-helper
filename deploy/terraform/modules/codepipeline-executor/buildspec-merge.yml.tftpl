@@ -64,14 +64,20 @@ phases:
 
   build:
     commands:
+      # `collect` asks CodePipeline (ListActionExecutions) which build ran each shard
+      # action of this execution, downloads that build's keys to shard-results/shard-N,
+      # and fails on any key under the execution's prefix from a build the execution
+      # does not list.
       - |
         set -eu
         rm -rf shard-results merged
         mkdir -p shard-results merged
-        python3 ash_s3_sync.py download \
+        python3 ash_s3_sync.py collect \
           "$RESULTS_BUCKET" \
           "$RESULTS_PREFIX/$PIPELINE_EXECUTION_ID" \
-          shard-results
+          shard-results \
+          "$PIPELINE_EXECUTION_ID" \
+          "$SHARD_COUNT"
 
       # --results is repeatable and accepts a file or a directory. One flag per
       # shard directory rather than a single parent, so a shard whose upload never

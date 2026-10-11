@@ -48,6 +48,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from tests.unit.deploy.codepipeline_stub import CodePipelineStub, action_execution
 from tests.unit.deploy.buildspec_extraction import (
     TERRAFORM_S3_SYNC,
     heredoc_body,
@@ -483,6 +484,378 @@ class TestPathContainment:
         assert not landed.exists() or landed.read_bytes() == genuine
 
 
+# ---------------------------------------------------------------------------
+# collect: the merge's download, keyed by the builds CodePipeline reports
+# ---------------------------------------------------------------------------
+
+EXECUTION = "0f1e2d3c-4b5a-4968-8776-655443322110"
+OTHER_EXECUTION = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+PIPELINE = "ash-test-pipeline"
+#: A documentation-example account id, never a real one.
+ACCOUNT = "111122223333"
+MERGE_BUILD_ARN = (
+    f"arn:aws:codebuild:us-east-1:{ACCOUNT}:build/ash-test-merge:"
+    "5c4b3a29-1807-4f6e-9d5c-4b3a29180700"
+)
+
+
+def build_id(shard: int, suffix: str) -> str:
+    return f"ash-test-shard-{shard}:{suffix}-0000-4000-8000-000000000000"
+
+
+def build_arn(build: str) -> str:
+    return f"arn:aws:codebuild:us-east-1:{ACCOUNT}:build/{build}"
+
+
+@pytest.fixture
+def collect_env(child_env: dict[str, str]):
+    """The merge build's environment, with CodePipeline served by a local stub."""
+
+    def _make(stub: CodePipelineStub, **overrides: str) -> dict[str, str]:
+        env = dict(child_env)
+        env.update(
+            {
+                "AWS_ENDPOINT_URL_CODEPIPELINE": stub.url,
+                "CODEBUILD_INITIATOR": f"codepipeline/{PIPELINE}",
+                "CODEBUILD_BUILD_ARN": MERGE_BUILD_ARN,
+            }
+        )
+        env.update(overrides)
+        return env
+
+    return _make
+
+
+def put_result(
+    s3,
+    bucket: str,
+    shard: int,
+    build: str,
+    body: bytes,
+    name: str = "ash_aggregated_results.json",
+) -> str:
+    key = f"run/{EXECUTION}/shard-{shard}/{build_arn(build)}/{name}"
+    s3.put_object(Bucket=bucket, Key=key, Body=body)
+    return key
+
+
+class TestCollect:
+    """`collect` downloads each shard action's one succeeded build and refuses anything else.
+
+    A shard writes under its own build's ARN, which its role can do only for its own build
+    (`${codebuild:BuildArn}` in the grant). The merge asks CodePipeline which build ran each
+    shard action of this execution and reads only those. A key under a build the execution
+    does not list was written by something else, so it refuses the whole download.
+    """
+
+    def _run(
+        self,
+        helper: Helper,
+        bucket: str,
+        env: dict[str, str],
+        dest: pathlib.Path,
+        shards: int = 2,
+    ):
+        return run_helper(
+            helper,
+            ["collect", bucket, f"run/{EXECUTION}", str(dest), EXECUTION, str(shards)],
+            env,
+        )
+
+    def test_collect_reads_the_succeeded_build_of_each_shard_action(
+        self, helper: Helper, collect_env, bucket: str, s3, tmp_path: pathlib.Path
+    ):
+        """Control, and the lookup itself.
+
+        Shard 1 failed once and was retried, so its action has two runs in this execution.
+        Another execution's shard 0 build is in the stub's data too; the filter drops it.
+        """
+        details = [
+            action_execution(
+                action="Shard0",
+                status="Succeeded",
+                build_id=build_id(0, "aaaaaaaa"),
+                execution_id=EXECUTION,
+            ),
+            action_execution(
+                action="Shard1",
+                status="Failed",
+                build_id=build_id(1, "bbbbbbbb"),
+                execution_id=EXECUTION,
+            ),
+            action_execution(
+                action="Shard1",
+                status="Succeeded",
+                build_id=build_id(1, "cccccccc"),
+                execution_id=EXECUTION,
+            ),
+            action_execution(
+                action="Shard0",
+                status="Succeeded",
+                build_id=build_id(0, "dddddddd"),
+                execution_id=OTHER_EXECUTION,
+            ),
+        ]
+        put_result(s3, bucket, 0, build_id(0, "aaaaaaaa"), b'{"shard": 0}')
+        put_result(
+            s3,
+            bucket,
+            0,
+            build_id(0, "aaaaaaaa"),
+            b"# report",
+            name="reports/ash.summary.md",
+        )
+        put_result(s3, bucket, 1, build_id(1, "bbbbbbbb"), b'{"attempt": "failed"}')
+        put_result(s3, bucket, 1, build_id(1, "cccccccc"), b'{"shard": 1}')
+        s3.put_object(
+            Bucket=bucket,
+            Key=f"run/{EXECUTION}/merged/ash_aggregated_results.json",
+            Body=b"{}",
+        )
+
+        dest = tmp_path / "shard-results"
+        with CodePipelineStub(PIPELINE, details) as stub:
+            result = self._run(helper, bucket, collect_env(stub), dest)
+
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        assert json.loads(
+            (dest / "shard-0" / "ash_aggregated_results.json").read_text()
+        ) == {"shard": 0}
+        assert (
+            dest / "shard-0" / "reports" / "ash.summary.md"
+        ).read_bytes() == b"# report"
+        assert json.loads(
+            (dest / "shard-1" / "ash_aggregated_results.json").read_text()
+        ) == {"shard": 1}
+        assert sorted(
+            p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file()
+        ) == [
+            "shard-0/ash_aggregated_results.json",
+            "shard-0/reports/ash.summary.md",
+            "shard-1/ash_aggregated_results.json",
+        ]
+        calls = [r["body"] for r in stub.requests]
+        assert len(calls) >= 3, (
+            "the stub pages one detail at a time, so pagination was not followed"
+        )
+        assert all(c["pipelineName"] == PIPELINE for c in calls)
+        assert all(c.get("filter") == {"pipelineExecutionId": EXECUTION} for c in calls)
+
+    def test_collect_refuses_a_key_from_a_build_this_execution_does_not_list(
+        self, helper: Helper, collect_env, bucket: str, s3, tmp_path: pathlib.Path
+    ):
+        """Another execution's shard 0 build put an object under this execution's shard 0."""
+        details = [
+            action_execution(
+                action="Shard0",
+                status="Succeeded",
+                build_id=build_id(0, "aaaaaaaa"),
+                execution_id=EXECUTION,
+            ),
+            action_execution(
+                action="Shard1",
+                status="Succeeded",
+                build_id=build_id(1, "cccccccc"),
+                execution_id=EXECUTION,
+            ),
+            action_execution(
+                action="Shard0",
+                status="Succeeded",
+                build_id=build_id(0, "dddddddd"),
+                execution_id=OTHER_EXECUTION,
+            ),
+        ]
+        put_result(s3, bucket, 0, build_id(0, "aaaaaaaa"), b'{"shard": 0}')
+        put_result(s3, bucket, 1, build_id(1, "cccccccc"), b'{"shard": 1}')
+        stray = put_result(
+            s3, bucket, 0, build_id(0, "dddddddd"), b'{"shard": "other"}'
+        )
+
+        with CodePipelineStub(PIPELINE, details) as stub:
+            result = self._run(
+                helper, bucket, collect_env(stub), tmp_path / "shard-results"
+            )
+
+        assert result.returncode == 2, (result.returncode, result.stderr)
+        assert stray in result.stderr, result.stderr
+        assert "is not under a build this execution lists" in result.stderr, (
+            result.stderr
+        )
+
+    @pytest.mark.parametrize(
+        "suffix",
+        [
+            "other/ash_aggregated_results.json",
+            "shard-0/ash_aggregated_results.json",
+            "shard-2/x.json",
+        ],
+        ids=["outside-the-shards", "beside-the-builds", "shard-past-the-count"],
+    )
+    def test_collect_refuses_a_key_under_no_shard_build(
+        self,
+        helper: Helper,
+        collect_env,
+        bucket: str,
+        s3,
+        tmp_path: pathlib.Path,
+        suffix: str,
+    ):
+        details = [
+            action_execution(
+                action="Shard0",
+                status="Succeeded",
+                build_id=build_id(0, "aaaaaaaa"),
+                execution_id=EXECUTION,
+            ),
+            action_execution(
+                action="Shard1",
+                status="Succeeded",
+                build_id=build_id(1, "cccccccc"),
+                execution_id=EXECUTION,
+            ),
+        ]
+        put_result(s3, bucket, 0, build_id(0, "aaaaaaaa"), b'{"shard": 0}')
+        put_result(s3, bucket, 1, build_id(1, "cccccccc"), b'{"shard": 1}')
+        s3.put_object(Bucket=bucket, Key=f"run/{EXECUTION}/{suffix}", Body=b"{}")
+
+        with CodePipelineStub(PIPELINE, details) as stub:
+            result = self._run(
+                helper, bucket, collect_env(stub), tmp_path / "shard-results"
+            )
+
+        assert result.returncode == 2, (result.returncode, result.stderr)
+        assert f"run/{EXECUTION}/{suffix}" in result.stderr, result.stderr
+        assert "is not under a build this execution lists" in result.stderr, (
+            result.stderr
+        )
+
+    def test_collect_refuses_a_dot_segment_under_a_listed_build(
+        self, helper: Helper, collect_env, bucket: str, s3, tmp_path: pathlib.Path
+    ):
+        details = [
+            action_execution(
+                action="Shard0",
+                status="Succeeded",
+                build_id=build_id(0, "aaaaaaaa"),
+                execution_id=EXECUTION,
+            ),
+            action_execution(
+                action="Shard1",
+                status="Succeeded",
+                build_id=build_id(1, "cccccccc"),
+                execution_id=EXECUTION,
+            ),
+        ]
+        put_result(
+            s3,
+            bucket,
+            0,
+            build_id(0, "aaaaaaaa"),
+            b"{}",
+            name="../ash_aggregated_results.json",
+        )
+
+        with CodePipelineStub(PIPELINE, details) as stub:
+            result = self._run(
+                helper, bucket, collect_env(stub), tmp_path / "shard-results"
+            )
+
+        assert result.returncode == 2, (result.returncode, result.stderr)
+        assert "has an empty, '.' or '..' segment" in result.stderr, result.stderr
+
+    @pytest.mark.parametrize(
+        "statuses",
+        [["Failed"], ["Succeeded", "Succeeded"], []],
+        ids=["none", "two", "missing"],
+    )
+    def test_collect_needs_exactly_one_succeeded_run_of_each_shard_action(
+        self,
+        helper: Helper,
+        collect_env,
+        bucket: str,
+        tmp_path: pathlib.Path,
+        statuses: list[str],
+    ):
+        details = [
+            action_execution(
+                action="Shard0",
+                status="Succeeded",
+                build_id=build_id(0, "aaaaaaaa"),
+                execution_id=EXECUTION,
+            ),
+        ] + [
+            action_execution(
+                action="Shard1",
+                status=s,
+                build_id=build_id(1, f"c{n}cccccc"),
+                execution_id=EXECUTION,
+            )
+            for n, s in enumerate(statuses)
+        ]
+        with CodePipelineStub(PIPELINE, details) as stub:
+            result = self._run(
+                helper, bucket, collect_env(stub), tmp_path / "shard-results"
+            )
+
+        assert result.returncode == 2, (result.returncode, result.stderr)
+        assert (
+            f"one succeeded run of Shard1 in execution {EXECUTION}" in result.stderr
+        ), result.stderr
+
+    def test_collect_refuses_a_build_of_another_project(
+        self, helper: Helper, collect_env, bucket: str, tmp_path: pathlib.Path
+    ):
+        details = [
+            action_execution(
+                action="Shard0",
+                status="Succeeded",
+                build_id="ash-test-other:aaaaaaaa-0000-4000-8000-000000000000",
+                execution_id=EXECUTION,
+                project="ash-test-shard-0",
+            ),
+            action_execution(
+                action="Shard1",
+                status="Succeeded",
+                build_id=build_id(1, "cccccccc"),
+                execution_id=EXECUTION,
+            ),
+        ]
+        with CodePipelineStub(PIPELINE, details) as stub:
+            result = self._run(
+                helper, bucket, collect_env(stub), tmp_path / "shard-results"
+            )
+
+        assert result.returncode == 2, (result.returncode, result.stderr)
+        assert "is not a build of project 'ash-test-shard-0'" in result.stderr, (
+            result.stderr
+        )
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [{"CODEBUILD_INITIATOR": "a-user"}, {"CODEBUILD_BUILD_ARN": "not-an-arn"}],
+        ids=["not-started-by-a-pipeline", "no-build-arn"],
+    )
+    def test_collect_refuses_outside_a_pipeline_build(
+        self,
+        helper: Helper,
+        collect_env,
+        bucket: str,
+        tmp_path: pathlib.Path,
+        overrides: dict[str, str],
+    ):
+        with CodePipelineStub(PIPELINE, []) as stub:
+            result = self._run(
+                helper,
+                bucket,
+                collect_env(stub, **overrides),
+                tmp_path / "shard-results",
+            )
+
+        assert result.returncode == 2, (result.returncode, result.stderr)
+        assert next(iter(overrides)) in result.stderr, result.stderr
+        assert stub.requests == []
+
+
 class TestEmptyAndMissing:
     def test_download_of_a_missing_prefix_writes_nothing_and_succeeds(
         self,
@@ -651,9 +1024,10 @@ class TestCommittedBuildspecCommands:
         """The shard's real post_build command publishes ./ash-shard-output.
 
         The directory name, the bucket variable and the
-        `${ASH_RESULTS_PREFIX}/shard-${ASH_SHARD_INDEX}` key layout all come from
-        the template, so this fails if any of them is changed without the merge
-        side being changed to match.
+        `${ASH_RESULTS_PREFIX}/shard-${ASH_SHARD_INDEX}/${CODEBUILD_BUILD_ARN}` key
+        layout all come from the template, so this fails if any of them is changed
+        without the merge side being changed to match. The build ARN is the part the
+        shard's grant pins with `${codebuild:BuildArn}`.
         """
         workdir = tmp_path / "build"
         results = workdir / "ash-shard-output"
@@ -672,13 +1046,15 @@ class TestCommittedBuildspecCommands:
                 "ASH_RESULTS_BUCKET": bucket,
                 "ASH_RESULTS_PREFIX": "runs/abc123",
                 "ASH_SHARD_INDEX": "2",
+                "CODEBUILD_BUILD_ARN": build_arn(build_id(2, "eeeeeeee")),
             },
         )
 
         assert result.returncode == 0, f"{result.stdout!r} {result.stderr!r}"
+        own = f"runs/abc123/shard-2/{build_arn(build_id(2, 'eeeeeeee'))}"
         assert keys_under(s3, bucket, "runs/abc123/shard-2/") == [
-            "runs/abc123/shard-2/ash_aggregated_results.json",
-            "runs/abc123/shard-2/reports/ash.summary.md",
+            f"{own}/ash_aggregated_results.json",
+            f"{own}/reports/ash.summary.md",
         ]
 
     @posix_shell_only
@@ -688,33 +1064,49 @@ class TestCommittedBuildspecCommands:
         """The merge's real pre_build command collects all four shards.
 
         Proves the two halves agree: the keys this reads back are the ones the
-        shard command above writes, under the same prefix layout. It lands them
-        in `./shard-results/shard-N`, which is exactly where the merge's own
+        shard command above writes, under the same prefix layout, for the builds
+        CodePipeline reports for this execution. It lands them in
+        `./shard-results/shard-N`, which is exactly where the merge's own
         completeness check and `ash merge --results` look.
         """
+        details = []
         for shard in range(4):
+            build = build_id(shard, f"{shard}fffffff")
+            details.append(
+                action_execution(
+                    action=f"Shard{shard}",
+                    status="Succeeded",
+                    build_id=build,
+                    execution_id="abc123",
+                )
+            )
             s3.put_object(
                 Bucket=bucket,
-                Key=f"runs/abc123/shard-{shard}/ash_aggregated_results.json",
+                Key=f"runs/abc123/shard-{shard}/{build_arn(build)}/ash_aggregated_results.json",
                 Body=json.dumps({"shard": shard}).encode(),
             )
 
         workdir = tmp_path / "build"
         workdir.mkdir()
 
-        result = self._materialize_and_run(
-            _merge_buildspec(),
-            "pre_build",
-            "download",
-            tmp_path,
-            child_env,
-            cwd=workdir,
-            extra_env={
-                "ASH_RESULTS_BUCKET": bucket,
-                "ASH_RESULTS_PREFIX": "runs/abc123",
-                "ASH_SHARD_COUNT": "4",
-            },
-        )
+        with CodePipelineStub(PIPELINE, details) as stub:
+            result = self._materialize_and_run(
+                _merge_buildspec(),
+                "pre_build",
+                "collect",
+                tmp_path,
+                child_env,
+                cwd=workdir,
+                extra_env={
+                    "ASH_RESULTS_BUCKET": bucket,
+                    "ASH_RESULTS_PREFIX": "runs/abc123",
+                    "ASH_PIPELINE_EXECUTION_ID": "abc123",
+                    "ASH_SHARD_COUNT": "4",
+                    "AWS_ENDPOINT_URL_CODEPIPELINE": stub.url,
+                    "CODEBUILD_INITIATOR": f"codepipeline/{PIPELINE}",
+                    "CODEBUILD_BUILD_ARN": MERGE_BUILD_ARN,
+                },
+            )
 
         assert result.returncode == 0, f"{result.stdout!r} {result.stderr!r}"
         for shard in range(4):

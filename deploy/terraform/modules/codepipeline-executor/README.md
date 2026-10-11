@@ -197,14 +197,19 @@ shards with nothing to do. They still cost a CodeBuild start and still upload an
 empty result set, so nothing breaks — they are simply wasted. Size `shard_count`
 against the number of scanners your configuration enables.
 
-**One project and one role per shard.** Each shard can write only
-`<results_prefix>/<execution id>/shard-<index>/`, so no shard can replace another
-shard's results or the merged output the verdict is formed from. The execution id
-is matched by one `?` per character of CodePipeline's execution id format, because
-IAM has no variable that holds the running execution's id; a shard role could
-write under another execution's id, and it cannot list the bucket to learn one.
-IAM compares keys as strings, so the merge's download refuses any key with an
-empty, `.` or `..` segment. IAM cannot tell
+**One project and one role per shard.** Each shard build can write only
+`<results_prefix>/<execution id>/shard-<index>/<its own build ARN>/`, so no shard can
+replace another shard's results or the merged output the verdict is formed from.
+The grant ends in `${codebuild:BuildArn}`, which IAM replaces with the calling
+build's ARN, and the execution id is matched by one `?` per character of
+CodePipeline's execution id format. The merge calls
+`codepipeline:ListActionExecutions` on this pipeline to learn which build ran each
+shard action of its execution, downloads only that build's keys, skips the keys of
+a shard action's earlier failed runs, and fails on any other key under the
+execution's prefix. IAM has no variable for the execution id, so a shard build could
+write under another execution's id, but only under its own build ARN, which that
+execution's merge does not read. The merge also refuses a key with an empty, `.` or
+`..` segment. IAM cannot tell
 two actions of one role apart, and a CodeBuild action runs as its project's role,
 so this takes a project per shard. The index is a project environment variable;
 the execution id arrives as a per-action `EnvironmentVariables` override.

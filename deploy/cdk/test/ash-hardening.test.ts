@@ -357,8 +357,12 @@ describe('no IAM policy grants the same thing twice', () => {
     // `ImageBootstrapSsmAccess`: the image build reads CloudFormation's response URL
     // from a SecureString parameter, and that read is authored directly rather than
     // through the split (ash-image-build.ts says why).
+    //
+    // AshDistributedPipeline's 46th is the merge role's `MergeProjectRoleCodepipelineAccess`:
+    // `codepipeline:ListActionExecutions` on the pipeline, authored after the pipeline
+    // so the merge can look up which build ran each shard action.
     expect(policiesPerStack.map(([, policies]) => policies.length)).toEqual([
-      10, 14, 11, 9, 45,
+      10, 14, 11, 9, 46,
     ]);
   });
 

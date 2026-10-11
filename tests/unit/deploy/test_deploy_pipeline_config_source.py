@@ -31,6 +31,7 @@ import base64
 import json
 import os
 import pathlib
+import re
 import shlex
 import shutil
 import subprocess
@@ -40,6 +41,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 import yaml
 
+from tests.unit.deploy.codepipeline_stub import CodePipelineStub, action_execution
 from tests.unit.deploy.buildspec_extraction import (
     CDK_TEMPLATE_DIR,
     CONTAINER_HELPER_PATH,
@@ -82,6 +84,30 @@ IN_TREE_CONFIG = (
 )
 
 EXECUTION_ID = "exec-config-source"
+PIPELINE = "ash-config-source-pipeline"
+#: A documentation-example account id, never a real one.
+ACCOUNT = "111122223333"
+
+
+def _build_id(project: str, index: int) -> str:
+    return f"{project}:{index:08d}-0000-4000-8000-000000000000"
+
+
+def _build_arn(build_id: str) -> str:
+    return f"arn:aws:codebuild:us-east-1:{ACCOUNT}:build/{build_id}"
+
+
+def _shard_actions(project: str, count: int) -> list[dict]:
+    """What CodePipeline reports for the scan stage: one succeeded build per shard action."""
+    return [
+        action_execution(
+            action=f"Shard{i}",
+            status="Succeeded",
+            build_id=_build_id(f"{project}-{i}", i),
+            execution_id=EXECUTION_ID,
+        )
+        for i in range(count)
+    ]
 
 
 def _checkout(root: pathlib.Path) -> pathlib.Path:
@@ -320,6 +346,7 @@ def test_the_cdk_pipeline_reads_neither_shard_nor_merge_config_from_the_checkout
         source = _checkout(workdir / "src")
         env = _cdk_environment(shards[index], ash_env, workdir, bucket)
         env["CODEBUILD_SRC_DIR"] = str(source)
+        env["CODEBUILD_BUILD_ARN"] = _build_arn(_build_id(f"cdk-shard-{index}", index))
         helper = workdir / "ash-s3-sync.py"
         for phase in ("pre_build", "build", "post_build"):
             commands = _relocated(
@@ -331,7 +358,8 @@ def test_the_cdk_pipeline_reads_neither_shard_nor_merge_config_from_the_checkout
         list(pool.map(run_shard, range(len(shards))))
 
     for index in range(len(shards)):
-        key = f"executions/{EXECUTION_ID}/shard-{index}/ash_aggregated_results.json"
+        build = _build_arn(_build_id(f"cdk-shard-{index}", index))
+        key = f"executions/{EXECUTION_ID}/shard-{index}/{build}/ash_aggregated_results.json"
         body = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
         _assert_not_the_in_tree_config(json.loads(body), f"CDK shard {index}")
 
@@ -339,9 +367,15 @@ def test_the_cdk_pipeline_reads_neither_shard_nor_merge_config_from_the_checkout
     source = _checkout(workdir / "src")
     env = _cdk_environment(merge, ash_env, workdir, bucket)
     env["CODEBUILD_SRC_DIR"] = str(source)
+    env["ASH_PIPELINE_EXECUTION_ID"] = EXECUTION_ID
+    env["CODEBUILD_INITIATOR"] = f"codepipeline/{PIPELINE}"
+    env["CODEBUILD_BUILD_ARN"] = _build_arn(_build_id("cdk-merge", 99))
     helper = workdir / "ash-s3-sync.py"
     pre_build = _relocated(phase_commands(merge["buildspec"], "pre_build"), helper)
-    _ok(_run_phase(pre_build, env, source), "merge pre_build")
+    actions = _shard_actions("cdk-shard", len(shards))
+    with CodePipelineStub(PIPELINE, actions, page_size=10) as stub:
+        env["AWS_ENDPOINT_URL_CODEPIPELINE"] = stub.url
+        _ok(_run_phase(pre_build, env, source), "merge pre_build")
 
     build = _run_phase(
         _relocated(phase_commands(merge["buildspec"], "build"), helper), env, source
@@ -371,7 +405,11 @@ def _terraform_buildspec(name: str) -> dict:
     rendered = text.replace(
         placeholder, base64.b64encode(TERRAFORM_S3_SYNC.read_bytes()).decode()
     )
-    assert "${" not in rendered, f"{name} has a template variable this does not fill"
+    assert re.search(r"(?<!\$)\$\{", rendered) is None, (
+        f"{name} has a template variable this does not fill"
+    )
+    # templatefile renders the escape $${ as a literal ${.
+    rendered = rendered.replace("$${", "${")
     assert CONTAINER_INIT_PATH in rendered, f"{name} no longer runs ash-container-init"
     init = f"{shlex.quote(sys.executable)} {shlex.quote(str(CONTAINER_INIT))}"
     return yaml.safe_load(rendered.replace(CONTAINER_INIT_PATH, init))
@@ -413,6 +451,7 @@ def test_the_terraform_pipeline_reads_neither_shard_nor_merge_config_from_the_ch
         env = _terraform_environment(ash_env, workdir, bucket, shard_count)
         env["SHARD_INDEX"] = str(index)
         env["CODEBUILD_SRC_DIR"] = str(source)
+        env["CODEBUILD_BUILD_ARN"] = _build_arn(_build_id(f"tf-shard-{index}", index))
         for phase in ("pre_build", "build", "post_build"):
             _ok(
                 _run_phase(phase_commands(shard_spec, phase), env, source),
@@ -423,7 +462,8 @@ def test_the_terraform_pipeline_reads_neither_shard_nor_merge_config_from_the_ch
         list(pool.map(run_shard, range(shard_count)))
 
     for index in range(shard_count):
-        key = f"shard-results/{EXECUTION_ID}/shard-{index}/ash_aggregated_results.json"
+        build = _build_arn(_build_id(f"tf-shard-{index}", index))
+        key = f"shard-results/{EXECUTION_ID}/shard-{index}/{build}/ash_aggregated_results.json"
         body = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
         _assert_not_the_in_tree_config(json.loads(body), f"Terraform shard {index}")
 
@@ -431,10 +471,16 @@ def test_the_terraform_pipeline_reads_neither_shard_nor_merge_config_from_the_ch
     source = _checkout(workdir / "src")
     env = _terraform_environment(ash_env, workdir, bucket, shard_count)
     env["CODEBUILD_SRC_DIR"] = str(source)
-    for phase in ("pre_build", "build"):
-        _ok(
-            _run_phase(phase_commands(merge_spec, phase), env, source), f"merge {phase}"
-        )
+    env["CODEBUILD_INITIATOR"] = f"codepipeline/{PIPELINE}"
+    env["CODEBUILD_BUILD_ARN"] = _build_arn(_build_id("tf-merge", 99))
+    actions = _shard_actions("tf-shard", shard_count)
+    with CodePipelineStub(PIPELINE, actions, page_size=10) as stub:
+        env["AWS_ENDPOINT_URL_CODEPIPELINE"] = stub.url
+        for phase in ("pre_build", "build"):
+            _ok(
+                _run_phase(phase_commands(merge_spec, phase), env, source),
+                f"merge {phase}",
+            )
     post_build = _run_phase(phase_commands(merge_spec, "post_build"), env, source)
     assert post_build.returncode == 2, (
         f"expected the merge verdict to be exit 2 for the finding, got "

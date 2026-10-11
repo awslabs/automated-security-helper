@@ -110,9 +110,23 @@ function writableResources(shard: Shard): string[] {
     .flatMap((statement) => statement.resources);
 }
 
-function canWrite(shard: Shard, key: string): boolean {
+/** The policy variable the shard grants name, which IAM replaces with the calling build's ARN. */
+const BUILD_ARN_VARIABLE = '${codebuild:BuildArn}';
+
+/** A build of shard `index`'s project, as `${codebuild:BuildArn}` would resolve for it. */
+function buildArn(index: number, uuid = '6d1f0e2c-4b5a-4968-8776-655443322110'): string {
+  return `arn:aws:codebuild:us-east-1:000000000000:build/ash-shard-${index}:${uuid}`;
+}
+
+/**
+ * Whether the shard's role lets the build `caller` put `key`. IAM substitutes the caller's
+ * build ARN for `${codebuild:BuildArn}` before matching, so that is done here first.
+ */
+function canWrite(shard: Shard, key: string, caller: string = buildArn(shard.index)): boolean {
   const arn = `${RESULTS_ARN}/${key}`;
-  return writableResources(shard).some((pattern) => resourceCovers(pattern, arn));
+  return writableResources(shard).some((pattern) =>
+    resourceCovers(pattern.split(BUILD_ARN_VARIABLE).join(caller), arn),
+  );
 }
 
 test('the shard projects and the results bucket were found, so the cases below are not vacuous', () => {
@@ -137,20 +151,32 @@ function resourcesFor(shard: Shard, actions: string[]): string[] {
 describe.each(SHARDS.map((s) => [s.index, s] as const))('shard %i', (index, shard) => {
   const other = (index + 1) % SHARDS.length;
 
-  test('control: it can write its own results for an execution', () => {
-    expect(canWrite(shard, `executions/${EXECUTION}/shard-${index}/ash_aggregated_results.json`)).toBe(true);
-    expect(canWrite(shard, `executions/${EXECUTION}/shard-${index}/reports/ash.summary.md`)).toBe(true);
+  const own = buildArn(index);
+
+  test('control: it can write its own results for an execution, under its own build', () => {
+    expect(canWrite(shard, `executions/${EXECUTION}/shard-${index}/${own}/ash_aggregated_results.json`)).toBe(true);
+    expect(canWrite(shard, `executions/${EXECUTION}/shard-${index}/${own}/reports/ash.summary.md`)).toBe(true);
   });
 
-  test('it cannot write another shard results, the merged output, or outside an execution', () => {
+  test('its write grant names the calling build, so the build ARN is what pins the key', () => {
+    expect(writableResources(shard).filter((pattern) => pattern.includes(BUILD_ARN_VARIABLE))).toHaveLength(
+      writableResources(shard).filter((pattern) => pattern.startsWith(`${RESULTS_ARN}/`)).length,
+    );
+    expect(writableResources(shard).some((pattern) => pattern.includes(BUILD_ARN_VARIABLE))).toBe(true);
+  });
+
+  test('it cannot write under another build, another shard, the merged output, or outside an execution', () => {
+    const sibling = buildArn(index, '00000000-0000-4000-8000-000000000001');
     const forbidden = [
-      `executions/${EXECUTION}/shard-${other}/ash_aggregated_results.json`,
-      `executions/${EXECUTION}/merged/ash_aggregated_results.json`,
-      `executions/${EXECUTION}/shard-${index}0/ash_aggregated_results.json`,
-      `elsewhere/shard-${index}/ash_aggregated_results.json`,
-      `executions/${EXECUTION}/merged/shard-${index}/ash_aggregated_results.json`,
-      `executions/${EXECUTION}/shard-${other}/shard-${index}/ash_aggregated_results.json`,
-      `executions/not-an-execution-id/shard-${index}/ash_aggregated_results.json`,
+      `executions/${EXECUTION}/shard-${index}/${sibling}/ash_aggregated_results.json`,
+      `executions/${EXECUTION}/shard-${index}/ash_aggregated_results.json`,
+      `executions/${EXECUTION}/shard-${other}/${own}/ash_aggregated_results.json`,
+      `executions/${EXECUTION}/merged/${own}/ash_aggregated_results.json`,
+      `executions/${EXECUTION}/shard-${index}0/${own}/ash_aggregated_results.json`,
+      `elsewhere/shard-${index}/${own}/ash_aggregated_results.json`,
+      `executions/${EXECUTION}/merged/shard-${index}/${own}/ash_aggregated_results.json`,
+      `executions/${EXECUTION}/shard-${other}/shard-${index}/${own}/ash_aggregated_results.json`,
+      `executions/not-an-execution-id/shard-${index}/${own}/ash_aggregated_results.json`,
     ].filter((key) => canWrite(shard, key));
     expect(forbidden).toEqual([]);
   });
@@ -167,6 +193,43 @@ describe.each(SHARDS.map((s) => [s.index, s] as const))('shard %i', (index, shar
       .flatMap((statement) => statement.actions)
       .filter((action) => action === '*' || action.startsWith('codepipeline:'));
     expect({ listing, reading, pipeline }).toEqual({ listing: [], reading: [], pipeline: [] });
+  });
+});
+
+describe('the merge role', () => {
+  const merge = Object.entries(PIPELINE.Resources).find(
+    ([, resource]) =>
+      resource.Type === 'AWS::CodeBuild::Project' &&
+      String(resource.Properties?.Description ?? '').startsWith('Merges '),
+  );
+  const pipelineId = Object.keys(PIPELINE.Resources).find(
+    (id) => PIPELINE.Resources[id].Type === 'AWS::CodePipeline::Pipeline',
+  ) as string;
+  const role = roleOf(merge?.[1].Properties?.ServiceRole);
+
+  test('may list the action executions of this pipeline and no other', () => {
+    const resources = statementsForRole(PIPELINE, role, RESOLVER)
+      .filter((statement) => statement.effect === 'Allow')
+      .filter((statement) => statement.actions.some((a) => actionMatches(a, 'codepipeline:ListActionExecutions')))
+      .flatMap((statement) => statement.resources);
+    const pipelineArn = `arn:aws:codepipeline:us-east-1:000000000000:${RESOLVER.resolve({ Ref: pipelineId })}`;
+    expect(resources).toEqual([pipelineArn]);
+  });
+
+  test('is told which execution it merges, and collects by the builds CodePipeline reports', () => {
+    const stages = PIPELINE.Resources[pipelineId].Properties?.Stages as any[];
+    const action = stages.find((s) => s.Name === 'Merge').Actions[0];
+    const overrides = JSON.parse(String(RESOLVER.resolve(action.Configuration.EnvironmentVariables)));
+    expect(overrides).toContainEqual({
+      name: 'ASH_PIPELINE_EXECUTION_ID',
+      type: 'PLAINTEXT',
+      value: '#{codepipeline.PipelineExecutionId}',
+    });
+    const spec = JSON.parse(String(RESOLVER.resolve(merge?.[1].Properties?.Source?.BuildSpec)));
+    const collect = (spec.phases.pre_build.commands as string[]).filter((c) => c.includes(`${ASH_S3_SYNC_PATH} collect `));
+    expect(collect).toHaveLength(1);
+    expect(collect[0]).toContain('"$ASH_PIPELINE_EXECUTION_ID" "$ASH_SHARD_COUNT"');
+    expect((spec.phases.pre_build.commands as string[]).some((c) => c.includes(`${ASH_S3_SYNC_PATH} download `))).toBe(false);
   });
 });
 

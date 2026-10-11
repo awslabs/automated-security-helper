@@ -444,16 +444,18 @@ through pipeline artifacts. A CodeBuild pipeline action accepts
 [1 to 5 input artifacts](https://docs.aws.amazon.com/codepipeline/latest/userguide/reference-action-artifacts.html),
 so an artifact per shard cannot express a six-way split at all.
 
-Each shard's role may put objects only under
-`executions/<execution id>/shard-<its index>/` in that bucket, and delete nothing.
-The merge forms the verdict from what is under an execution's prefix, and every
-shard runs scanners over the repository being scanned, so no shard writes another
-shard's results or the merged output. The execution id is matched by one `?` per
-character of CodePipeline's execution id format, because IAM has no variable that
-holds the running execution's id. So a shard role could write under another
-execution's id, and nothing it is granted lists or reads the bucket to learn one.
-IAM also compares keys as strings, so the merge's download refuses any key with an
-empty, `.` or `..` segment rather than writing it where another key's file goes.
+Each shard build may put objects only under
+`executions/<execution id>/shard-<its index>/<its own build ARN>/` in that bucket,
+and delete nothing. The grant ends in `${codebuild:BuildArn}`, which IAM replaces
+with the ARN of the build making the request, and the execution id is matched by
+one `?` per character of CodePipeline's execution id format. The merge asks
+CodePipeline (`codepipeline:ListActionExecutions` on this pipeline) which build ran
+each shard action of the execution it merges, downloads only that build's results,
+skips the keys of a shard action's earlier failed runs, and fails on any other key
+under the execution's prefix. IAM has no variable for the execution id, so a shard
+build could still put objects under another execution's id, but only under its own
+build ARN, which that execution's merge does not read. The merge also refuses a key
+with an empty, `.` or `..` segment, which IAM's string match does not.
 
 Those transfers use `boto3`, not `aws s3 cp`, and that is not a style preference.
 The shard and merge actions run with the ASH image as their CodeBuild environment

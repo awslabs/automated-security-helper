@@ -149,7 +149,7 @@ describe('sharded scan contract', () => {
     }
 
     const [, mergeSpec] = Object.entries(specs).find(([, s]) => s.includes('ash merge'))!;
-    expect(mergeSpec).toContain('python3 /tmp/ash-s3-sync.py download');
+    expect(mergeSpec).toContain('python3 /tmp/ash-s3-sync.py collect');
     expect(mergeSpec).toContain('python3 /tmp/ash-s3-sync.py upload ./ash-merged-output');
   });
 

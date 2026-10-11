@@ -75,8 +75,9 @@ variables {
   shard_count               = 3
 }
 
-# Control: a shard can upload its own results, so the run below is not passing
-# because the shards lost their write grant.
+# Control: a shard build can upload its own results under its own build ARN, so the run
+# below is not passing because the shards lost their write grant. `$${codebuild:BuildArn}`
+# is replaced with the calling build's ARN before matching, as IAM does.
 run "each_shard_can_write_its_own_results" {
   command = plan
 
@@ -88,7 +89,7 @@ run "each_shard_can_write_its_own_results" {
           tolist(try(data.aws_iam_policy_document.build_common[i].statement, data.aws_iam_policy_document.build_common[tostring(i)].statement, data.aws_iam_policy_document.build_common.statement)),
           ) : anytrue([
             for resource in(statement.resources == null ? [] : tolist(statement.resources)) :
-            can(regex("^${replace(replace(replace(resource, ".", "\\."), "*", ".*"), "?", ".")}$", "arn:aws:s3:::ash-exec-artifacts/${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/shard-${i}/ash_aggregated_results.json"))
+            can(regex("^${replace(replace(replace(replace(resource, "$${codebuild:BuildArn}", "arn:aws:codebuild:us-east-1:000000000000:build/ash-scan-shard-${i}:6d1f0e2c-4b5a-4968-8776-655443322110"), ".", "\\."), "*", ".*"), "?", ".")}$", "arn:aws:s3:::ash-exec-artifacts/${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/shard-${i}/arn:aws:codebuild:us-east-1:000000000000:build/ash-scan-shard-${i}:6d1f0e2c-4b5a-4968-8776-655443322110/ash_aggregated_results.json"))
         ])
         if(statement.effect == null ? "Allow" : statement.effect) == "Allow" && anytrue([
           for action in(statement.actions == null ? [] : tolist(statement.actions)) :
@@ -96,24 +97,26 @@ run "each_shard_can_write_its_own_results" {
         ])
       ])
     ])
-    error_message = "Some shard has no grant that lets it upload its own results."
+    error_message = "Some shard has no grant that lets it upload its own results under its own build."
   }
 }
 
-run "no_shard_can_write_another_shards_results_or_the_merged_output" {
+run "no_shard_can_write_another_builds_or_shards_results_or_the_merged_output" {
   command = plan
 
   assert {
     condition = length(flatten([
       for i in range(var.shard_count) : [
         for key in [
-          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/shard-${(i + 1) % var.shard_count}/ash_aggregated_results.json",
-          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/merged/ash_aggregated_results.json",
-          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/shard-${i}0/ash_aggregated_results.json",
-          "elsewhere/shard-${i}/ash_aggregated_results.json",
-          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/merged/shard-${i}/ash_aggregated_results.json",
-          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/shard-${(i + 1) % var.shard_count}/shard-${i}/ash_aggregated_results.json",
-          "${var.results_prefix}/not-an-execution-id/shard-${i}/ash_aggregated_results.json",
+          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/shard-${i}/arn:aws:codebuild:us-east-1:000000000000:build/ash-scan-shard-${i}:00000000-0000-4000-8000-000000000001/ash_aggregated_results.json",
+          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/shard-${i}/ash_aggregated_results.json",
+          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/shard-${(i + 1) % var.shard_count}/arn:aws:codebuild:us-east-1:000000000000:build/ash-scan-shard-${i}:6d1f0e2c-4b5a-4968-8776-655443322110/ash_aggregated_results.json",
+          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/merged/arn:aws:codebuild:us-east-1:000000000000:build/ash-scan-shard-${i}:6d1f0e2c-4b5a-4968-8776-655443322110/ash_aggregated_results.json",
+          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/shard-${i}0/arn:aws:codebuild:us-east-1:000000000000:build/ash-scan-shard-${i}:6d1f0e2c-4b5a-4968-8776-655443322110/ash_aggregated_results.json",
+          "elsewhere/shard-${i}/arn:aws:codebuild:us-east-1:000000000000:build/ash-scan-shard-${i}:6d1f0e2c-4b5a-4968-8776-655443322110/ash_aggregated_results.json",
+          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/merged/shard-${i}/arn:aws:codebuild:us-east-1:000000000000:build/ash-scan-shard-${i}:6d1f0e2c-4b5a-4968-8776-655443322110/ash_aggregated_results.json",
+          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/shard-${(i + 1) % var.shard_count}/shard-${i}/arn:aws:codebuild:us-east-1:000000000000:build/ash-scan-shard-${i}:6d1f0e2c-4b5a-4968-8776-655443322110/ash_aggregated_results.json",
+          "${var.results_prefix}/not-an-execution-id/shard-${i}/arn:aws:codebuild:us-east-1:000000000000:build/ash-scan-shard-${i}:6d1f0e2c-4b5a-4968-8776-655443322110/ash_aggregated_results.json",
         ] : "shard ${i} can write ${key}"
         if anytrue([
           for statement in concat(
@@ -121,7 +124,7 @@ run "no_shard_can_write_another_shards_results_or_the_merged_output" {
             tolist(try(data.aws_iam_policy_document.build_common[i].statement, data.aws_iam_policy_document.build_common[tostring(i)].statement, data.aws_iam_policy_document.build_common.statement)),
             ) : anytrue([
               for resource in(statement.resources == null ? [] : tolist(statement.resources)) :
-              can(regex("^${replace(replace(replace(resource, ".", "\\."), "*", ".*"), "?", ".")}$", "arn:aws:s3:::ash-exec-artifacts/${key}"))
+              can(regex("^${replace(replace(replace(replace(resource, "$${codebuild:BuildArn}", "arn:aws:codebuild:us-east-1:000000000000:build/ash-scan-shard-${i}:6d1f0e2c-4b5a-4968-8776-655443322110"), ".", "\\."), "*", ".*"), "?", ".")}$", "arn:aws:s3:::ash-exec-artifacts/${key}"))
           ])
           if(statement.effect == null ? "Allow" : statement.effect) == "Allow" && anytrue([
             for action in(statement.actions == null ? [] : tolist(statement.actions)) :
@@ -130,7 +133,20 @@ run "no_shard_can_write_another_shards_results_or_the_merged_output" {
         ])
       ]
     ])) == 0
-    error_message = "A shard can write results that are not its own: ${jsonencode(flatten([for i in range(var.shard_count) : [for key in ["${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/shard-${(i + 1) % var.shard_count}/ash_aggregated_results.json", "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/merged/ash_aggregated_results.json"] : "shard ${i} can write ${key}" if anytrue([for statement in concat(tolist(data.aws_iam_policy_document.shard[i].statement), tolist(try(data.aws_iam_policy_document.build_common[i].statement, data.aws_iam_policy_document.build_common[tostring(i)].statement, data.aws_iam_policy_document.build_common.statement))) : anytrue([for resource in(statement.resources == null ? [] : tolist(statement.resources)) : can(regex("^${replace(replace(replace(resource, ".", "\\."), "*", ".*"), "?", ".")}$", "arn:aws:s3:::ash-exec-artifacts/${key}"))]) if anytrue([for action in(statement.actions == null ? [] : tolist(statement.actions)) : action == "*" || can(regex("^s3:(\\*|Put|Delete|Abort|Restore|Replicate)", action))])])]]))}"
+    error_message = "A shard build can write a key that is not its own results under its own build."
+  }
+}
+
+run "the_merge_may_list_only_this_pipelines_action_executions" {
+  command = plan
+
+  assert {
+    condition = flatten([
+      for statement in tolist(data.aws_iam_policy_document.merge.statement) :
+      tolist(statement.resources)
+      if contains(tolist(statement.actions), "codepipeline:ListActionExecutions")
+    ]) == ["arn:aws:codepipeline:us-east-1:000000000000:${var.name_prefix}"]
+    error_message = "The merge role must list action executions of this module's pipeline and nothing else."
   }
 }
 

@@ -344,13 +344,16 @@ data "aws_iam_policy_document" "shard" {
   # <execution id>/merged/shard-N/... or <execution id>/shard-M/shard-N/.... IAM has
   # no variable holding the running execution's id, so a shard can write under
   # another execution's id; it cannot list the bucket, so it has no way to learn one.
-  # IAM compares keys as strings, so <execution id>/shard-N/../x matches; the
-  # merge's download refuses any key with an empty, "." or ".." segment.
+  # After the shard segment comes ${codebuild:BuildArn}, which IAM replaces with the
+  # ARN of the build making the request, so a build writes only under its own ARN,
+  # and the merge reads only the builds CodePipeline reports for its execution.
+  # IAM compares keys as strings, so <execution id>/shard-N/<own ARN>/../x matches;
+  # the merge's download refuses any key with an empty, "." or ".." segment.
   statement {
     sid       = "WriteShardResults"
     effect    = "Allow"
     actions   = ["s3:PutObject"]
-    resources = ["${local.results_arn_prefix}/${local.execution_id_segment}/shard-${count.index}/*"]
+    resources = ["${local.results_arn_prefix}/${local.execution_id_segment}/shard-${count.index}/$${codebuild:BuildArn}/*"]
   }
 }
 
@@ -379,6 +382,16 @@ data "aws_iam_policy_document" "merge" {
     ]
 
     resources = ["${local.results_arn_prefix}/*"]
+  }
+
+  # Which build ran each shard action of the execution being merged. The pipeline
+  # ARN is built from its name, which is var.name_prefix, so this does not depend
+  # on the pipeline resource.
+  statement {
+    sid       = "ListShardBuilds"
+    effect    = "Allow"
+    actions   = ["codepipeline:ListActionExecutions"]
+    resources = ["arn:${data.aws_partition.current.partition}:codepipeline:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:${var.name_prefix}"]
   }
 
   # ListBucket is what lets the merge action discover which shards actually

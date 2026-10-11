@@ -1,6 +1,6 @@
 --- cdk/ash-container-scripts.ts:ASH_S3_SYNC_SCRIPT
 +++ terraform/codepipeline-executor/files/ash_s3_sync.py
-@@ -1,13 +1,15 @@
+@@ -1,14 +1,16 @@
  #!/usr/bin/env python3
  """Minimal recursive S3 upload and download, using boto3.
  
@@ -16,12 +16,14 @@
  Usage:
 -    ash-s3-sync.py upload   <local-dir> <bucket> <key-prefix>
 -    ash-s3-sync.py download <bucket> <key-prefix> <local-dir>
+-    ash-s3-sync.py collect  <bucket> <key-prefix> <local-dir> <execution-id> <shard-count>
 +    ash_s3_sync.py upload   <local-dir> <bucket> <key-prefix>
 +    ash_s3_sync.py download <bucket> <key-prefix> <local-dir>
++    ash_s3_sync.py collect  <bucket> <key-prefix> <local-dir> <execution-id> <shard-count>
  
  Both directions are recursive. Empty directories are not represented in S3 and
  are therefore not recreated on download.
-@@ -22,7 +24,7 @@
+@@ -24,7 +26,7 @@
  
  
  def _fail(message: str) -> None:
@@ -30,7 +32,7 @@
      raise SystemExit(2)
  
  
-@@ -43,7 +45,7 @@
+@@ -45,7 +47,7 @@
          client.upload_file(str(path), bucket, key)
          count += 1
  
@@ -39,7 +41,7 @@
      return count
  
  
-@@ -56,7 +58,9 @@
+@@ -58,7 +60,9 @@
      paginator = client.get_paginator("list_objects_v2")
      count = 0
  
@@ -50,7 +52,7 @@
          for obj in page.get("Contents", []):
              key = obj["Key"]
              if key.endswith("/"):
-@@ -85,7 +89,7 @@
+@@ -87,7 +91,7 @@
              client.download_file(bucket, key, str(destination))
              count += 1
  
@@ -58,4 +60,13 @@
 +    print(f"ash_s3_sync: downloaded {count} file(s) from s3://{bucket}/{prefix}/")
      return count
  
+ 
+@@ -214,7 +218,7 @@
+             count += 1
+ 
+     print(
+-        f"ash-s3-sync: collected {count} file(s) from {len(wanted)} shard build(s) of execution {execution_id}"
++        f"ash_s3_sync: collected {count} file(s) from {len(wanted)} shard build(s) of execution {execution_id}"
+     )
+     return count
  
