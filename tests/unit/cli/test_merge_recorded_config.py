@@ -253,8 +253,11 @@ class _Harness:
         argv += ["--output-dir", str(self.output_dir), *args]
         return CliRunner().invoke(app, argv)
 
+    def built_of(self, reporter_class: type) -> List[Any]:
+        return [item for item in self.built if isinstance(item, reporter_class)]
+
     def instance(self, reporter_class: type):
-        found = [item for item in self.built if isinstance(item, reporter_class)]
+        found = self.built_of(reporter_class)
         assert len(found) == 1, f"{reporter_class.__name__} built {len(found)} times"
         return found[0]
 
@@ -301,11 +304,16 @@ def _assert_merged(result, harness: _Harness) -> None:
 
 
 class TestRecordedReporterDestinations:
-    def test_a_shards_s3_bucket_is_not_used_and_the_warning_names_it(self, harness):
-        """The operator's base is the defaults: S3 gets no bucket, and nothing uploads."""
+    def test_a_shards_s3_destination_is_not_used_and_the_warning_names_it(
+        self, harness
+    ):
+        """The operator loads the AWS reporters and sets no destination: S3 gets none."""
         shard_paths = harness.write_shards(SHARD_CONFIG)
+        operator = _write_yaml(
+            harness.tmp_path / "operator" / "ash.yaml", {"ash_plugin_modules": [AWS]}
+        )
 
-        result = harness.merge(shard_paths)
+        result = harness.merge(shard_paths, "--config", str(operator))
 
         _assert_merged(result, harness)
         options = harness.options(harness.S3Reporter)
@@ -500,8 +508,9 @@ class TestTheOperatorsBase:
     ):
         """``--config`` inside the working directory's checkout is a repository's file.
 
-        As for ``ash report``: the trusted base is the defaults, so neither that
-        file's bucket nor the shard's is used.
+        As for ``ash report``: the trusted base is the defaults, so the AWS
+        reporters' package is not loaded, and neither that file's bucket nor the
+        shard's is used by an S3 reporter built in this process.
         """
         collector = Path.cwd()
         (collector / ".git").mkdir()
@@ -525,8 +534,13 @@ class TestTheOperatorsBase:
         result = harness.merge(shard_paths, "--config", str(in_checkout))
 
         _assert_merged(result, harness)
-        assert harness.options(harness.S3Reporter).get("bucket_name") is None
         assert harness.loaded_modules == [[]]
+        # The harness registers the S3 reporter whatever is loaded; a step that
+        # drops classes from a package the operator does not load may leave it
+        # unbuilt, which is stronger still.
+        for built in harness.built_of(harness.S3Reporter):
+            assert _section(built.config)["options"].get("bucket_name") is None
+        assert harness.uploads == []
         assert "reporters.s3.options.bucket_name" in harness.ignored_keys()
 
     def test_the_same_rules_as_a_config_file_inside_the_scanned_tree(self, harness):
