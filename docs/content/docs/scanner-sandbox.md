@@ -11,9 +11,10 @@ what it does not, read [Scanner sandbox](../concepts/sandbox.md) first.
 
 - Linux on x86_64 or aarch64, or macOS. Windows has no backend; see the Windows tab
   below.
-- Install the scanner tools before you scan. A sandboxed scan does not install tools, so
-  a tool that would otherwise be installed on first use is reported `MISSING`. Run
-  `ash dependencies install` once, or see [Install ASH](../how-to/install.md).
+- Install the scanner tools before you scan. A sandboxed scan does not install scanner
+  tools, so a scanner whose tool would otherwise be installed on first use is reported
+  `MISSING`. Run `ash dependencies install` once, or see
+  [Install ASH](../how-to/install.md).
 
 ## Turn the sandbox on for one scan
 
