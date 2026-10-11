@@ -650,21 +650,49 @@ def _assign_display_labels(projects: List[ProjectPlan]) -> None:
         )
 
 
+def _policy_document(
+    suppressions: Any, ignore_paths: Any, scanners: Any
+) -> Dict[str, Any]:
+    """A workspace policy's effect on a project, written as the config it amounts to.
+
+    Its suppressions and ignore paths land in ``global_settings``, and each
+    scanner it adds is a ``scanners.<name>.enabled: true``, so the rules that
+    govern a client's config file govern a client's policy file the same way.
+    """
+    document: Dict[str, Any] = {
+        "global_settings": {
+            "suppressions": [
+                entry.model_dump(mode="json", exclude={"client_supplied"})
+                for entry in suppressions or []
+            ],
+            "ignore_paths": [
+                entry.model_dump(mode="json", exclude={"client_supplied"})
+                for entry in ignore_paths or []
+            ],
+        }
+    }
+    if scanners:
+        document["scanners"] = {str(name): {"enabled": True} for name in scanners}
+    return document
+
+
 def _check_a_client_supplied_policy(
     source: Path,
-    workspace_policy: Any,
+    documents: List[Dict[str, Any]],
     root: Path,
     default_config: Optional[PathLike],
     client_config_rules: Optional[ClientConfigRules],
 ) -> None:
     """Hold a policy file an MCP client delivered to the rules a client's config file gets.
 
-    Its suppressions and ignore paths are checked as a delivered config's
-    ``global_settings.suppressions`` and ``global_settings.ignore_paths`` are:
-    under the default ``denied_paths`` they apply, marked, and an operator's
-    ``denied_value_patterns`` still hold; a profile whose own ``denied_paths``
-    lists them refuses the file. The policy's other fields only tighten the
-    threshold or add scanners.
+    ``documents`` are the policy as written and as each active project gets
+    it, after its patterns are rewritten for the project (``_policy_document``),
+    since a rewritten entry can be one the rules deny when the written one is
+    not. Under the default ``denied_paths`` its suppressions and ignore paths
+    apply, marked, and an operator's ``denied_value_patterns`` still hold; a
+    profile whose own ``denied_paths`` lists them, or a scanner's ``enabled``,
+    refuses the file. Its ceiling only tightens a project's threshold, and its
+    scanners gate only makes the verdict stricter, so neither is checked.
 
     Raises:
         ASHConfigFieldDeniedError: The file sets a field the rules deny.
@@ -681,17 +709,6 @@ def _check_a_client_supplied_policy(
         ASHConfigPolicyUnreadableError,
     )
 
-    if workspace_policy is None:
-        return
-    document = {
-        "global_settings": {
-            field: [
-                entry.model_dump(mode="json", exclude={"client_supplied"})
-                for entry in getattr(workspace_policy, field) or []
-            ]
-            for field in ("suppressions", "ignore_paths")
-        }
-    }
     rules = client_config_rules or rules_from(
         _trusted_config(default_config, root, None)
     )
@@ -700,12 +717,13 @@ def _check_a_client_supplied_policy(
             f"A workspace policy an MCP client delivered cannot be checked: "
             f"{rules.unreadable}"
         )
-    found = client_file_denials(
-        {source: document}, rules, scanned_root=root, all_delivered=True
-    )
-    if found:
-        path, denials = found[0]
-        raise ASHConfigFieldDeniedError(denied_fields_message(path, denials))
+    for document in documents:
+        found = client_file_denials(
+            {source: document}, rules, scanned_root=root, all_delivered=True
+        )
+        if found:
+            path, denials = found[0]
+            raise ASHConfigFieldDeniedError(denied_fields_message(path, denials))
 
 
 def _apply_workspace_policy(
@@ -757,10 +775,36 @@ def _apply_workspace_policy(
         ],
     )
     delivered = source is not None and config_is_client_supplied(source)
-    if delivered and source is not None and policy is not None:
+    workspace_policy = policy.workspace if policy else None
+
+    resolved_for: Dict[str, Any] = {}
+    for project in projects:
+        if project.skipped:
+            continue
+        resolved_for[project.key] = policy_for_project(
+            workspace_policy,
+            project_prefix=project.relative_path,
+            project_threshold=project.severity_threshold,
+            project_scanners=project.scanners,
+        )
+    if delivered and source is not None and workspace_policy is not None:
         _check_a_client_supplied_policy(
             source,
-            policy.workspace,
+            [
+                _policy_document(
+                    workspace_policy.suppressions,
+                    workspace_policy.ignore_paths,
+                    workspace_policy.additional_scanners,
+                )
+            ]
+            + [
+                _policy_document(
+                    resolved.suppressions,
+                    resolved.ignore_paths,
+                    resolved.policy_scanners,
+                )
+                for resolved in resolved_for.values()
+            ],
             definition.root,
             default_config,
             client_config_rules,
@@ -769,12 +813,7 @@ def _apply_workspace_policy(
     for project in projects:
         if project.skipped:
             continue
-        resolved = policy_for_project(
-            policy.workspace if policy else None,
-            project_prefix=project.relative_path,
-            project_threshold=project.severity_threshold,
-            project_scanners=project.scanners,
-        )
+        resolved = resolved_for[project.key]
         project.effective_severity_threshold = resolved.effective_threshold
         project.threshold_tightened_by_policy = resolved.threshold_tightened
         project.policy_suppressions = [

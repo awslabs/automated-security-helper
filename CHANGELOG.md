@@ -123,8 +123,9 @@
   there is kept as a marked, suppressed result. ASH sets the mark: a
   `client_supplied` value written in any config file or override is ignored.
   A workspace policy file a client delivered gets the same treatment, under the
-  MCP server or `ash --workspace`: its suppressions and ignore paths are marked
-  and checked against the runtime-override policy. The policy comes from the
+  MCP server or `ash --workspace`: its suppressions and ignore paths are marked,
+  and they and the scanners it adds are checked against the runtime-override
+  policy, as written and as each project gets them. The policy comes from the
   registered profile, never from the session's patched copy, and
   `/global_settings/mcp` joins the default `denied_paths`. Delivering source
   while a scan of the session runs is refused. See

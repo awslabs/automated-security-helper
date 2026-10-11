@@ -323,8 +323,9 @@ the client's config hid:
   is ignored.
 - A workspace policy file a client delivered (under the MCP workspace root) is
   handled the same way, including when `ash --workspace` reads one: its
-  suppressions and ignore paths are marked, and checked against the operator's
-  runtime-override policy as a delivered config's are.
+  suppressions and ignore paths are marked, and they and the scanners it adds
+  are checked against the operator's runtime-override policy as a delivered
+  config's are, both as written and as each project gets them.
 - A file under a client-supplied ignore path is still converted and scanned, and a
   finding there is kept as a suppressed result rather than dropped. An exclusion
   the client's config added to a scanner's own options is handled the same way.

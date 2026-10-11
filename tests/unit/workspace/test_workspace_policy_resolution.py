@@ -488,3 +488,78 @@ def test_an_operators_value_pattern_applies_to_a_delivered_policy(tmp_path, _mcp
 
     with pytest.raises(ASHConfigFieldDeniedError):
         resolve_workspace(workspace, client_config_rules=rules)
+
+
+def test_a_delivered_policy_is_checked_as_each_project_gets_it(tmp_path, _mcp_root):
+    """A rewritten entry the rules deny is refused even when the written one is not.
+
+    ``api/**`` is pushed down to the project ``api`` as ``**``, which the
+    operator's pattern denies.
+    """
+    from automated_security_helper.config.ash_config import (
+        AshConfig,
+        RuntimeOverridesConfig,
+    )
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    root = _mcp_root / "session-1" / "source"
+    _project(root, "api")
+    workspace = _workspace(root, ["api"])
+    _policy_file(
+        root,
+        "workspace:\n  suppressions:\n    - path: 'api/**'\n      reason: all of it\n",
+    )
+    rules = ClientConfigRules(
+        policy=RuntimeOverridesConfig(
+            denied_value_patterns={"/global_settings/suppressions": r"^\*\*$"}
+        ),
+        base=AshConfig(),
+    )
+
+    with pytest.raises(ASHConfigFieldDeniedError):
+        resolve_workspace(workspace, client_config_rules=rules)
+
+
+def test_a_delivered_policy_adding_a_scanner_the_operator_denies_is_refused(
+    tmp_path, _mcp_root
+):
+    """``additional_scanners`` is checked as ``scanners.<name>.enabled: true``."""
+    from automated_security_helper.config.ash_config import (
+        AshConfig,
+        RuntimeOverridesConfig,
+    )
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    root = _mcp_root / "session-1" / "source"
+    _project(root, "api", disabled_scanners=["bandit"])
+    workspace = _workspace(root, ["api"])
+    _policy_file(root, "workspace:\n  additional_scanners: [bandit]\n")
+    rules = ClientConfigRules(
+        policy=RuntimeOverridesConfig(denied_paths=["/scanners/bandit/enabled"]),
+        base=AshConfig.model_validate({"scanners": {"bandit": {"enabled": False}}}),
+    )
+
+    with pytest.raises(ASHConfigFieldDeniedError) as excinfo:
+        resolve_workspace(workspace, client_config_rules=rules)
+
+    assert "scanners.bandit.enabled" in str(excinfo.value)
+
+
+def test_a_delivered_policy_adding_a_scanner_scans_under_the_default_rules(
+    tmp_path, _mcp_root
+):
+    """Positive control: the default rules leave ``enabled`` to a client's config."""
+    root = _mcp_root / "session-1" / "source"
+    _project(root, "api", disabled_scanners=["bandit"])
+    workspace = _workspace(root, ["api"])
+    _policy_file(root, "workspace:\n  additional_scanners: [bandit]\n")
+
+    plan = resolve_workspace(workspace)
+
+    assert list(_by_key(plan)["api"].policy_scanners) == ["bandit"]
