@@ -18,11 +18,14 @@ case they name:
 
 The default-free ``${VAR}`` form and the quoted form are here because the
 reference text names them; the other forms are covered in
-``test_config_env_by_caller.py``.
+``test_config_env_by_caller.py``. So are the two edges of "set aside": a
+session's ``config/`` directory, which only the server writes, and a delivered
+file, which stays the client's even inside ``ASH_MCP_ALLOWED_CONFIG_ROOTS``.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -140,3 +143,38 @@ def test_a_delivered_file_is_refused_a_reference_on_stdio(_server) -> None:
     result = _validate(config_path=str(delivered), session_id=DEFAULT_SESSION_ID)
 
     assert "config_env_not_resolved" in _types(result), result
+
+
+def _in_session(session_id: str, *parts: str) -> Path:
+    from automated_security_helper.cli.mcp.source_delivery import (
+        resolve_workspace_root,
+    )
+
+    return resolve_workspace_root().joinpath(session_id, *parts)
+
+
+def test_a_sessions_config_directory_is_set_aside(_server) -> None:
+    denied = _write(_in_session(REMOTE, "config", "ash.yaml"), DENIED)
+    reference = _write(_in_session(REMOTE, "config", "ref.yaml"), NO_DEFAULT)
+
+    assert _validate(config_path=str(denied), session_id=REMOTE)["valid"] is True
+    assert _validate(config_path=str(reference), session_id=REMOTE)["valid"] is True
+
+
+@pytest.mark.parametrize("session_id", [DEFAULT_SESSION_ID, REMOTE])
+def test_a_delivered_config_is_the_clients_inside_the_config_roots(
+    _server, monkeypatch, session_id: str
+) -> None:
+    from automated_security_helper.cli.mcp.source_delivery import (
+        resolve_workspace_root,
+    )
+
+    monkeypatch.setenv(
+        "ASH_MCP_ALLOWED_CONFIG_ROOTS",
+        os.pathsep.join([str(_server["operator"]), str(resolve_workspace_root())]),
+    )
+    delivered = _write(_in_session(session_id, "source", "ash.yaml"), DENIED)
+
+    result = _validate(config_path=str(delivered), session_id=session_id)
+
+    assert "denied_by_runtime_policy" in _types(result), result

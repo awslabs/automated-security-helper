@@ -131,5 +131,5 @@ def test_a_clone_failure_still_has_no_busy_error_type(_server) -> None:
         )
 
     assert result["success"] is False, result
-    assert result.get("error_type") != "SourceDeliveryBusyError", result
+    assert "error_type" not in result, result
     assert "clone failed" in result["error"], result

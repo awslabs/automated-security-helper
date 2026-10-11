@@ -46,8 +46,13 @@ def test_ash_config_comes_before_the_defaults(source: Path) -> None:
 
 
 def test_the_defaults_come_last(source: Path, monkeypatch) -> None:
+    """Discovery reads the source directory only, never a parent's config."""
     from automated_security_helper.config.ash_config import AshConfig
 
     monkeypatch.delenv("ASH_CONFIG")
+    (source.parent / ".ash").mkdir()
+    (source.parent / ".ash" / ".ash.yaml").write_text(
+        "project_name: parent\n", encoding="utf-8"
+    )
 
     assert resolve_config(source_dir=source).project_name == AshConfig().project_name
