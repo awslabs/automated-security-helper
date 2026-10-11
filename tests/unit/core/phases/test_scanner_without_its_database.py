@@ -169,3 +169,32 @@ def test_a_current_database_is_graded_on_findings(layout, monkeypatch):
     row = _row(_context(tmp_path, "fail"), monkeypatch)
 
     assert row.status == ScannerStatus.PASSED, f"errors: {row.errors!r}"
+
+
+@pytest.mark.parametrize(
+    "scanners, expected",
+    [
+        (None, ["trivy-db"]),
+        (["vuln", "secret"], ["trivy-db"]),
+        (["secret", "misconfig", "license"], []),
+    ],
+    ids=["default", "with-vuln", "without-vuln"],
+)
+def test_trivy_repo_uses_its_database_only_when_it_looks_for_vulnerabilities(
+    layout, scanners, expected
+):
+    """A trivy-repo scan that does not look for vulnerabilities reads no trivy-db.
+
+    Without this, the absent database of a secrets-only scan would make it ERROR,
+    and a stale one would fail it, for a database the scan never opened.
+    """
+    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+        TrivyRepoScanner,
+    )
+
+    tmp_path, _bin_dir, _cache = layout
+    scanner = TrivyRepoScanner(context=_context(tmp_path, "fail"))
+    if scanners is not None:
+        scanner.config.options.scanners = scanners
+
+    assert [entry.name for entry in scanner.content_databases_in_use()] == expected

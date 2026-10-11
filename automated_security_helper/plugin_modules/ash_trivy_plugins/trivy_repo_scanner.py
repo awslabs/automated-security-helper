@@ -442,6 +442,16 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             for key, value in identity.items():
                 setattr(result.properties, key, value)
 
+    def content_databases_in_use(self) -> list:
+        """trivy-db, when the scan looks for vulnerabilities.
+
+        The secret, misconfiguration and license scanners never open it, so a scan
+        without ``vuln`` is not held to its age, or to its existence.
+        """
+        if "vuln" not in (self.config.options.scanners or []):
+            return []
+        return super().content_databases_in_use()
+
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — TrivyRepoScanner overrides scan() directly; this is unreachable."""
         raise NotImplementedError(
