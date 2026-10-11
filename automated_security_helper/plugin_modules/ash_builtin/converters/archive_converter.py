@@ -649,6 +649,23 @@ def _copy_tar_members(
             _copy_at_most(source, out, member.size)
 
 
+def _unused_target(results_dir: Path, name: str) -> Path:
+    """``results_dir / name``, or with ``-2``, ``-3`` ... appended if that exists.
+
+    The name comes from get_normalized_filename, which folds ``/`` and ``.`` to
+    ``__`` and other runs of non-word characters to ``-``, so two archives can map
+    to one name (``a b.zip`` and ``a-b.zip``). Each archive is extracted into a
+    directory no other archive wrote, so removing it on a failure removes only what
+    this archive wrote, and two archives never overwrite each other's members.
+    """
+    target = results_dir / name
+    counter = 2
+    while target.exists():
+        target = results_dir / f"{name}-{counter}"
+        counter += 1
+    return target
+
+
 def _member_name_problem(member_name: str) -> Optional[str]:
     """Why an archive member's name is unsafe to extract, or None.
 
@@ -880,8 +897,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # Shared by every archive below; only an archive that is extracted uses it.
         scan_budget = _ScanBudget()
         for archive_file in archive_files:
-            # Whether this iteration made the archive's target directory, so a
-            # failure part way through removes what it wrote and nothing else.
+            # The target directory once this iteration has made it: a directory
+            # no other archive wrote (see _unused_target), so a failure part way
+            # through removes what this archive wrote and nothing else.
             created_target: Optional[Path] = None
             archive_display = relative_display(archive_file, self.context.source_dir)
             try:
@@ -908,7 +926,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
                 short_archive_file = get_shortest_name(archive_file)
                 normalized_archive_file = get_normalized_filename(short_archive_file)
-                target_path = self.results_dir.joinpath(normalized_archive_file)
+                target_path = _unused_target(
+                    Path(self.results_dir), normalized_archive_file
+                )
                 ASH_LOGGER.verbose(
                     f"Extracting {archive_file} contents to target_path: {Path(target_path).as_posix()}"
                 )
@@ -958,9 +978,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             archive=archive_display,
                         ):
                             continue
-                        if not target_path.exists():
-                            created_target = target_path
-                        target_path.mkdir(parents=True, exist_ok=True)
+                        target_path.mkdir()
+                        created_target = target_path
                         _decompress_plain_gzip(
                             archive_handle, target_path / plain_gzip, plain_gzip, budget
                         )
@@ -978,9 +997,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             zip_members = zip_ref.infolist()
                             for info in zip_members:
                                 budget.admit(info.filename, info.file_size)
-                            if not target_path.exists():
-                                created_target = target_path
-                            target_path.mkdir(parents=True, exist_ok=True)
+                            target_path.mkdir()
+                            created_target = target_path
                             # zipfile stops each member's output at the size its
                             # entry declares, so the declared sizes admitted above
                             # bound what is written.
@@ -1000,9 +1018,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         with tar_ref:
                             tar_members = _tar_members_within(tar_ref, budget, stream)
                             stream.end_header_pass()
-                            if not target_path.exists():
-                                created_target = target_path
-                            target_path.mkdir(parents=True, exist_ok=True)
+                            target_path.mkdir()
+                            created_target = target_path
                             # Both paths below write no more than each member
                             # declares: _copy_tar_members copies at most that, and
                             # extractall does once inspect_members has refused a

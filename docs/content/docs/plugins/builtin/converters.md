@@ -41,6 +41,10 @@ converters:
   `.lzma`, `.7z`, `.rar`, `.jar`, `.war`, `.ear`, `.whl` or `.egg`.
 - Extraction limits, described below
 - Only members with a scannable extension are written, as regular files
+- Each archive is extracted into a directory of its own, named from its path. Two
+  archives whose names fold to the same directory name (`a b.zip` and `a-b.zip`)
+  get two directories, the second with `-2` appended, so neither overwrites the
+  other's members and removing one archive's output never touches the other's
 - Automatic cleanup after scanning
 
 #### Extraction limits
