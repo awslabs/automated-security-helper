@@ -104,9 +104,9 @@ from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
-from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.utils.config_trust import (
     NOT_THE_OPERATORS,
+    leaves_the_tree_through_a_link,
     operator_paths,
     scan_root,
     set_by_operator,
@@ -158,31 +158,6 @@ _RULE_SUFFIXES = (".guard", ".ruleset")
 
 #: Under the results directory, where the operator's rules are copied for cfn-guard.
 _STAGED_RULES_DIR = "cfn-guard-rules"
-
-
-def _enters_and_leaves_the_tree(value: str, source_dir: Path, root: Path) -> bool:
-    """Whether ``value``, resolved one component at a time, enters the scanned tree
-    and then leaves it.
-
-    ``operator_paths`` resolves an entry before it is checked, so a path the operator
-    names inside the scanned tree is judged by where it leads, and the tree decides
-    that: a ``policy.guard`` there can be a link to any file the scan can read, and
-    cfn-guard prints a rules file it cannot parse, whole. Each component is resolved
-    from its parent's resolved location, as the kernel does, so a link at any depth
-    inside the tree is seen, a directory link as much as a file link.
-    """
-    path = Path(os.path.expanduser(str(value)))
-    if not path.is_absolute():
-        path = Path(os.path.abspath(source_dir)) / path
-    current = Path(path.anchor)
-    entered = False
-    for part in path.parts[1:]:
-        current = Path(os.path.realpath(current / part))
-        inside = in_scanned_tree(current, root)
-        if entered and not inside:
-            return True
-        entered = entered or inside
-    return False
 
 
 @dataclass(frozen=True)
@@ -367,7 +342,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     f"scanners.cfn-guard.options.rules_paths names {entry.path}, "
                     "which does not exist"
                 )
-            if _enters_and_leaves_the_tree(raw, source_dir, root):
+            if leaves_the_tree_through_a_link(raw, source_dir, root):
                 raise RulesBundleUnavailable(
                     f"scanners.cfn-guard.options.rules_paths names {raw!r}, a path "
                     "inside the scanned tree that resolves outside the scanned tree "

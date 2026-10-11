@@ -337,3 +337,124 @@ def test_operator_paths_decides_provenance_for_the_list_and_checks_each_entry(
     ]
     relaxed = operator_paths(config, key, values, repo, outside_tree=False)
     assert [c.path for c in relaxed] == [outside.resolve(), (repo / "policy").resolve()]
+
+
+# --------------------------------------------------------------------------- #
+# leaves_the_tree_through_a_link: a path in the tree whose links lead out of it
+# --------------------------------------------------------------------------- #
+
+
+def _tree_and_outside(tmp_path):
+    """A checkout, and a file outside it."""
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "creds").write_text("x\n", encoding="utf-8")
+    return repo, outside
+
+
+def _link(link: Path, target) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=Path(target).is_dir())
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+
+
+@pytest.mark.parametrize(
+    "shape", ["file", "chain", "dangling", "directory", "nested directory"]
+)
+def test_a_link_in_the_tree_that_leads_out_of_it_is_found(tmp_path, shape):
+    from automated_security_helper.utils.config_trust import (
+        leaves_the_tree_through_a_link,
+    )
+
+    repo, outside = _tree_and_outside(tmp_path)
+    if shape == "file":
+        _link(repo / "named.yml", outside / "creds")
+        value = "named.yml"
+    elif shape == "chain":
+        # Both links are in the tree; only the last one leaves it.
+        _link(repo / "second.yml", outside / "creds")
+        _link(repo / "named.yml", repo / "second.yml")
+        value = "named.yml"
+    elif shape == "dangling":
+        _link(repo / "named.yml", outside / "missing")
+        value = "named.yml"
+    elif shape == "directory":
+        _link(repo / "linked", outside)
+        value = "linked/creds"
+    else:
+        (repo / "deep").mkdir()
+        _link(repo / "deep" / "up", outside)
+        value = "deep/up/creds"
+    assert leaves_the_tree_through_a_link(value, repo, repo) is True
+    assert leaves_the_tree_through_a_link(str(repo / value), repo, repo) is True
+
+
+@pytest.mark.parametrize(
+    "shape", ["plain file", "link inside", "dangling inside", "out and back"]
+)
+def test_a_path_that_ends_inside_the_tree_does_not_leave_it(tmp_path, shape):
+    from automated_security_helper.utils.config_trust import (
+        leaves_the_tree_through_a_link,
+    )
+
+    repo, outside = _tree_and_outside(tmp_path)
+    (repo / "real").mkdir()
+    (repo / "real" / "file.yml").write_text("", encoding="utf-8")
+    value = "named.yml"
+    if shape == "plain file":
+        value = "real/file.yml"
+    elif shape == "link inside":
+        _link(repo / "named.yml", Path("real") / "file.yml")
+    elif shape == "dangling inside":
+        _link(repo / "named.yml", repo / "missing.yml")
+    else:
+        # Through a directory outside the tree and back into it: the file the
+        # tool would open is in the tree.
+        _link(repo / "away", outside)
+        value = "away/../repo/real/file.yml"
+    assert leaves_the_tree_through_a_link(value, repo, repo) is False
+
+
+def test_a_path_that_leaves_by_dot_dot_with_no_link_is_the_operators(tmp_path):
+    """``../shared.toml`` names a file next to the tree; the tree chose nothing."""
+    from automated_security_helper.utils.config_trust import (
+        leaves_the_tree_through_a_link,
+    )
+
+    repo, outside = _tree_and_outside(tmp_path)
+    (repo / "sub").mkdir()
+    for value in (
+        "../outside/creds",
+        "sub/../../outside/creds",
+        str(outside / "creds"),
+    ):
+        assert leaves_the_tree_through_a_link(value, repo, repo) is False, value
+
+
+def test_a_dot_dot_that_a_link_in_the_tree_moved_out_of_it_is_found(tmp_path):
+    """As written, ``a/b/sub/../creds`` is ``a/b/creds``, in the tree. With ``sub``
+    a link to the tree's root, the ``..`` lands next to the tree instead."""
+    from automated_security_helper.utils.config_trust import (
+        leaves_the_tree_through_a_link,
+    )
+
+    repo, _ = _tree_and_outside(tmp_path)
+    (tmp_path / "creds").write_text("x\n", encoding="utf-8")
+    nested = repo / "a" / "b"
+    nested.mkdir(parents=True)
+    _link(nested / "sub", repo)
+    assert leaves_the_tree_through_a_link("a/b/sub/../creds", repo, repo) is True
+
+
+def test_a_link_outside_the_tree_is_the_operators(tmp_path):
+    """Outside the tree the operator controls the path and the links on it."""
+    from automated_security_helper.utils.config_trust import (
+        leaves_the_tree_through_a_link,
+    )
+
+    repo, outside = _tree_and_outside(tmp_path)
+    _link(tmp_path / "shared.yml", outside / "creds")
+    assert leaves_the_tree_through_a_link("../shared.yml", repo, repo) is False

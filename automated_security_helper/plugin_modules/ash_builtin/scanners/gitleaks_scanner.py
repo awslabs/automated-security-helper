@@ -159,8 +159,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
-from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.utils.config_trust import (
+    leaves_the_tree_through_a_link,
     operator_path,
     scan_root,
     set_by_operator,
@@ -292,31 +292,6 @@ def gitleaksignore_files(data: bytes) -> List[str]:
         if len(file_part) == 3 and file_part[0]:
             files.append(file_part[0])
     return files
-
-
-def _enters_and_leaves_the_tree(value: str, source_dir: Path, root: Path) -> bool:
-    """Whether ``value``, resolved one component at a time, enters the scanned tree
-    and then leaves it.
-
-    ``operator_path`` resolves a path before it is checked, so a path the operator
-    names inside the scanned tree is judged by where it leads, and the tree decides
-    that: a file there can be a link to any file the scan can read. Each component
-    is resolved from its parent's resolved location, as the kernel does, so a link
-    at any depth inside the tree is seen, a directory link as much as a file link.
-    The same rule the cfn-guard scanner applies to its rules paths.
-    """
-    path = Path(os.path.expanduser(str(value)))
-    if not path.is_absolute():
-        path = Path(os.path.abspath(source_dir)) / path
-    current = Path(path.anchor)
-    entered = False
-    for part in path.parts[1:]:
-        current = Path(os.path.realpath(current / part))
-        inside = in_scanned_tree(current, root)
-        if entered and not inside:
-            return True
-        entered = entered or inside
-    return False
 
 
 def _mask_quoted_ignore_entries(log_path: Path) -> None:
@@ -475,7 +450,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         Raises:
             ScannerError: the operator's path is not a file, or is inside the
                 scanned tree and leads out of it through a symlink
-                (``_enters_and_leaves_the_tree``).
+                (``config_trust.leaves_the_tree_through_a_link``).
         """
         value = getattr(self._options(), option)
         if not value:
@@ -495,7 +470,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 level=logging.WARNING,
             )
             return None
-        if _enters_and_leaves_the_tree(
+        if leaves_the_tree_through_a_link(
             str(value), self._source_dir(), scan_root(config, self._source_dir())
         ):
             raise ScannerError(

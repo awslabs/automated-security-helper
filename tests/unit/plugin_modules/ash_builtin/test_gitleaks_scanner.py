@@ -1570,6 +1570,22 @@ def test_a_link_inside_the_tree_to_a_file_inside_it_is_still_honored(tmp_path, o
     assert any(a.startswith(flag) and a.endswith("real/file.json") for a in args)
 
 
+@pytest.mark.parametrize("option", ["config_file", "baseline_path"])
+@pytest.mark.parametrize("written", ["relative", "absolute"])
+def test_an_operator_path_that_leaves_the_tree_by_dot_dot_is_honored(
+    tmp_path, option, written
+):
+    """``../shared.toml`` from the source directory names a file next to the tree.
+    No link in the tree is followed, so the tree did not choose it."""
+    source = tmp_path / "src"
+    value = "../shared.toml" if written == "relative" else f"{source}/../shared.toml"
+    scanner = _scanner(tmp_path, operator=True, **{option: value})
+    (tmp_path / "shared.toml").write_text("[]")
+    args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+    flag = "--config=" if option == "config_file" else "--baseline-path="
+    assert f"{flag}{(tmp_path / 'shared.toml').resolve().as_posix()}" in args
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
 def test_an_operator_path_outside_the_tree_may_be_a_link(tmp_path):
     """Outside the tree the operator controls both the path and the link."""

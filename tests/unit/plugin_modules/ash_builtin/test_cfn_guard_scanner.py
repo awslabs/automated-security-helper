@@ -538,7 +538,7 @@ class TestRuleSelection:
         with (
             patch(
                 "automated_security_helper.plugin_modules.ash_builtin.scanners."
-                "cfn_guard_scanner._enters_and_leaves_the_tree",
+                "cfn_guard_scanner.leaves_the_tree_through_a_link",
                 side_effect=check_then_swap,
             ),
             pytest.raises(RulesBundleUnavailable, match="cannot be used"),
@@ -571,6 +571,22 @@ class TestRuleSelection:
         (rule,) = scanner._selected_rules()
         assert rule.path == target.resolve()
         assert rule.content == "rule team { }\n"
+
+    @pytest.mark.parametrize("written", ["relative", "absolute"])
+    def test_a_path_that_leaves_the_tree_by_dot_dot_is_not_a_link_out(
+        self, rules_root, tmp_path, written
+    ):
+        """``../team.guard`` from the source directory names a file next to the
+        tree. No link in the tree is followed, so the tree did not choose it."""
+        # tmp_path, not ash_temp_path, which is inside this checkout.
+        repo = tmp_path / "repo"
+        shutil.copytree(FIXTURES / "repo", repo)
+        team = tmp_path / "team.guard"
+        team.write_text("rule team { }\n")
+        value = "../team.guard" if written == "relative" else f"{repo}/../team.guard"
+        scanner = _scanner(repo, rule_sets=[], rules_paths=[value])
+        (rule,) = scanner._selected_rules()
+        assert rule.path == team.resolve()
 
     def test_a_symlinked_subdirectory_is_not_walked(
         self, repo, rules_root, ash_temp_path
