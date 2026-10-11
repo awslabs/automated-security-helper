@@ -352,8 +352,10 @@ Every scan records the outcome in `ash_aggregated_results.json`, under
 `excluded_file_count` is the number of files the ignore files removed. Files ASH
 leaves out on its own are not counted. Each ignore file is listed by its path
 relative to the source directory, with 0 when it removed nothing. The files under a
-directory the root `.gitignore` excludes count for the root `.gitignore`. With
-`honor_ignore_files: false` the record reads `"honored": false` with a count of 0.
+directory the root `.gitignore` excludes count for the root `.gitignore`. A symlink
+(or junction) to a directory is never followed, so the files behind it are in no scan
+set and are not counted. With `honor_ignore_files: false` the record reads
+`"honored": false` with a count of 0.
 
 `ash.summary.txt` and `ash.summary.md` print the total in their scan metadata, for
 example `Ignore files: the scanned repository's .gitignore and .ignore files

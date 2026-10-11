@@ -197,6 +197,18 @@ def _is_bundled_cdk_path(
     return "/node_modules/aws-cdk" in _with_posix_separators(file_path, separators)
 
 
+def _is_link_to_directory(path: str | Path) -> bool:
+    """Whether *path* is a symlink, or a Windows junction, rather than a real directory.
+
+    ``os.walk`` lists such an entry among the directories and does not descend it,
+    so nothing behind it is ever in the scan set.
+    """
+    if os.path.islink(path):
+        return True
+    isjunction = getattr(os.path, "isjunction", None)
+    return bool(isjunction is not None and isjunction(path))
+
+
 def _ash_own_exclusion_spec(source_dir: str | Path) -> IgnoreParser:
     """``ASH_INCLUSIONS`` compiled on its own, the spec a scan has with no ignore files."""
     parser = IgnoreParser()
@@ -218,8 +230,11 @@ def _count_files_ash_would_scan(
     the whole spec. A file ASH leaves out on its own (``.git``, CDK assets, the
     bundled aws-cdk tree, its own output directory *own_output*) was not removed
     by the ignore file that pruned its directory, so it is not counted. Links to
-    directories are not followed, as in the walk that pruned the directory.
+    directories are not followed, as in the walk that pruned the directory: not
+    *directory* itself, which ``os.walk`` would follow, and not one below it.
     """
+    if _is_link_to_directory(directory):
+        return 0
     count = 0
     for root, dirs, files in os.walk(directory):
         if own_output is not None:
@@ -352,8 +367,10 @@ def _collect_ignorefiles_and_all_files(
             # The pruned files are still counted: they are missing from the scan set
             # because of the root .gitignore, and a count that left them out would
             # report less than the file removed. Counted, not listed, so a pruned
-            # node_modules costs a walk and no memory.
-            if pruned_counts is None:
+            # node_modules costs a walk and no memory. A link is not counted: the
+            # walk never enters one, so nothing behind it was going to be scanned,
+            # and following it would read wherever the repository points it.
+            if pruned_counts is None or _is_link_to_directory(Path(root) / d):
                 continue
             if own_spec is None or forced_inclusions is None:
                 own_spec = _ash_own_exclusion_spec(path)

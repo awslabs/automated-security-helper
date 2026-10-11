@@ -20,6 +20,7 @@ reach from outside:
 from __future__ import annotations
 
 import ast
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -48,6 +49,13 @@ def _build(root: Path, files: Dict[str, str]) -> Path:
 
 def _names(root: Path, files) -> set[str]:
     return {Path(f).relative_to(root).as_posix() for f in files}
+
+
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
 
 
 def _record(root: Path, **kwargs) -> dict:
@@ -138,6 +146,56 @@ class TestPrunedDirectoriesAreCounted:
         )
         record = _record(root)
         assert record["by_ignore_file"] == {".gitignore": 2}, record
+
+
+class TestAPrunedLinkIsNotFollowed:
+    """A directory the root ``.gitignore`` prunes can be a link, and its target is not read.
+
+    The scan-set walk never descends a link to a directory, so the files behind it
+    are in no scan set, with the ignore files or without them. Counting them would
+    walk wherever the repository's link points, outside the tree included, and put
+    the number of files found there into the results.
+    """
+
+    def test_a_link_out_of_the_tree_is_not_walked_or_counted(
+        self, tmp_path, monkeypatch
+    ):
+        outside = _build(tmp_path / "outside", {f"f{i}.txt": "x\n" for i in range(5)})
+        root = _build(
+            tmp_path / "src", {".gitignore": "vendor/\n", "app.py": "x = 1\n"}
+        )
+        _symlink_or_skip(root / "vendor", outside)
+        walked = []
+        real_walk = os.walk
+
+        def recording_walk(top, *args, **kwargs):
+            walked.append(os.path.abspath(top))
+            return real_walk(top, *args, **kwargs)
+
+        monkeypatch.setattr(gss.os, "walk", recording_walk)
+        record = _record(root)
+
+        assert record["excluded_file_count"] == 0, record
+        assert record["by_ignore_file"] == {".gitignore": 0}, record
+        assert walked == [os.path.abspath(root)], walked
+        assert _names(root, scan_set(source=str(root))) == {".gitignore", "app.py"}
+
+    def test_a_link_inside_the_tree_is_not_counted_twice(self, tmp_path):
+        root = _build(
+            tmp_path / "src",
+            {
+                ".gitignore": "mirror/\n",
+                "data/a.txt": "a\n",
+                "data/b.txt": "b\n",
+                "data/c.txt": "c\n",
+            },
+        )
+        _symlink_or_skip(root / "mirror", root / "data")
+        record = _record(root)
+        assert record["by_ignore_file"] == {".gitignore": 0}, record
+        assert {"data/a.txt", "data/b.txt", "data/c.txt"} <= _names(
+            root, scan_set(source=str(root))
+        )
 
 
 class TestTheBundledCdkTreeIsAshsOwnExclusion:
