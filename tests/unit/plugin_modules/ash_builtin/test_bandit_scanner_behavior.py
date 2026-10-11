@@ -362,6 +362,16 @@ def test_nonexistent_configured_config_file_warns_and_adds_no_flag(
     assert "--configfile" not in keys
 
 
+def _scan_argv(scanner, plugin_context):
+    """The argv the scanner would run bandit with for a scan of the source dir."""
+    final_args, _, _ = scanner._execute_scan(plugin_context.source_dir, "source", [])
+    return [str(arg) for arg in final_args]
+
+
+def _value_after(argv, flag):
+    return [argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg == flag]
+
+
 def test_dot_bandit_config_file_is_passed_as_ini(plugin_context, tmp_path):
     """A file literally named .bandit is ini-format, so it uses --ini."""
     config_file = tmp_path / ".bandit"
@@ -374,7 +384,8 @@ def test_dot_bandit_config_file_is_passed_as_ini(plugin_context, tmp_path):
         ),
     )
 
-    assert extra_arg_values(scanner, "--ini") == [config_file.as_posix()]
+    argv = _scan_argv(scanner, plugin_context)
+    assert _value_after(argv, "--ini") == [config_file.as_posix()]
     assert extra_arg_values(scanner, "--configfile") == []
 
 
@@ -398,42 +409,37 @@ def test_other_config_filenames_are_passed_as_configfile(
 
 
 @pytest.mark.parametrize(
-    "relative_path, expected_flag",
+    "relative_path",
     [
-        (".bandit", "--ini"),
-        (".ash/.bandit", "--ini"),
-        ("bandit.yaml", "--configfile"),
-        (".ash/bandit.yaml", "--configfile"),
-        ("bandit.toml", "--configfile"),
-        (".ash/bandit.toml", "--configfile"),
+        ".bandit",
+        ".ash/.bandit",
+        "bandit.yaml",
+        ".ash/bandit.yaml",
+        "bandit.toml",
+        ".ash/bandit.toml",
     ],
 )
-def test_config_file_is_discovered_in_the_source_directory(
-    plugin_context, relative_path, expected_flag, caplog
+def test_a_config_file_in_the_source_directory_is_not_used(
+    plugin_context, relative_path
 ):
-    """With no configured path, each known location is discovered in turn."""
-    discovered = plugin_context.source_dir / relative_path
-    discovered.parent.mkdir(parents=True, exist_ok=True)
-    discovered.write_text("# bandit config\n", encoding="utf-8")
+    """The repository being scanned does not choose bandit's config.
 
-    with caplog.at_level(logging.INFO):
-        scanner = BanditScanner(context=plugin_context, config=BanditScannerConfig())
+    ASH used to pass the first of these it found. Now none is passed, and bandit
+    gets an empty --ini written in the results directory, so it does not read a
+    .bandit under the target on its own either.
+    """
+    in_tree = plugin_context.source_dir / relative_path
+    in_tree.parent.mkdir(parents=True, exist_ok=True)
+    in_tree.write_text("[bandit]\nskips = B602\n", encoding="utf-8")
 
-    # Discovery builds these paths by interpolating source_dir into an f-string
-    # with a literal forward slash, so on Windows the value comes back with a
-    # backslashed prefix and a forward slash before the filename. Both
-    # separators resolve to the same file there, but the strings differ from the
-    # one a Path builds natively, so each side is normalized before comparing.
-    # The comparison stays a full-path list equality: a wrong flag, a wrong
-    # file, a wrong directory or a second emitted arg all still fail.
-    discovered_args = [
-        Path(value).as_posix() for value in extra_arg_values(scanner, expected_flag)
-    ]
-    assert discovered_args == [discovered.as_posix()], (
-        f"{relative_path} should be passed via {expected_flag}; "
-        f"extra_args={[(a.key, a.value) for a in scanner.args.extra_args]}"
-    )
-    assert any("Using bandit config file" in r.message for r in caplog.records)
+    scanner = BanditScanner(context=plugin_context, config=BanditScannerConfig())
+    argv = _scan_argv(scanner, plugin_context)
+
+    assert in_tree.as_posix() not in " ".join(argv)
+    assert "--configfile" not in argv
+    (ini,) = _value_after(argv, "--ini")
+    assert Path(ini).parent == Path(scanner.results_dir)
+    assert Path(ini).read_text(encoding="utf-8") == "[bandit]\n"
 
 
 def test_no_config_file_anywhere_adds_no_config_flag(scanner, plugin_context):

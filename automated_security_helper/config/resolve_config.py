@@ -27,6 +27,9 @@ from automated_security_helper.config.plugin_module_trust import (
 from automated_security_helper.config.reporter_trust import (
     confine_reporter_destinations,
 )
+from automated_security_helper.config.tool_config_trust import (
+    confine_scanner_config_files,
+)
 from automated_security_helper.config.sandbox_grants import (
     confine_sandbox_grants,
     files_inside,
@@ -312,6 +315,7 @@ def resolve_config(
         config, trusted, config_overrides, Path(scanned_root), in_tree
     )
     confine_reporter_destinations(config, trusted, config_overrides, in_tree)
+    confine_scanner_config_files(config, trusted, config_overrides, in_tree)
     return config
 
 

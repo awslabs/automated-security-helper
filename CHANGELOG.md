@@ -186,6 +186,19 @@
     file outside the tree can add it. This repository's
     `.ash/.ash_community_plugins.yaml` no longer lists it; its CI legs pass it with
     `--ash-plugin-modules`.
+  - bandit's, grype's and syft's own config files are the operator's.
+    `scanners.bandit.options.config_file`, `scanners.grype.options.config_file`
+    and `scanners.syft.options.config_file` from such a file are ignored; ASH no
+    longer looks for `.bandit`, `bandit.yaml` or `bandit.toml` (or their `.ash/`
+    copies), `.grype.yaml`, `.grype/config.yaml`, `.ash/.grype.yaml`,
+    `.ash/grype.yaml`, `.syft.yaml` or `.syft.yml` in the source directory; and
+    each tool is given an explicit config (`--ini` for bandit, `--config` for
+    grype and syft), so it does not read one from the tree on its own. A
+    repository that relied on one keeps it by naming it with `--config-overrides`,
+    for example `--config-overrides scanners.bandit.options.config_file=.bandit`,
+    or in a config file outside the tree; a file named that way is used even
+    inside the tree. `scanners.syft.options.config_file` now accepts a path
+    written as a string.
   - A reporter's `extension` has to be a filename suffix, from any source: a value
     with `/`, `\`, `..` or NUL is replaced by the reporter's default, with a
     warning naming the key. Reports, the files the unused-suppressions, S3 and

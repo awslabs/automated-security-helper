@@ -467,6 +467,7 @@ and module checks below: everything under the MCP workspace root
 | `scanners.detect-secrets.options.scan_settings` plugins and filters | An entry that names a file (`file://...`) is kept only when the file is outside the scanned tree. This includes entries read from a baseline file. detect-secrets' built-in plugins and filters are unaffected. |
 | trivy-repo's ignore file and secret config | trivy-repo always gets `--ignorefile` and `--secret-config`, so trivy does not read a `.trivyignore` or `trivy-secret.yaml` from the scanned repository. `scanners.trivy-repo.options.ignore_file` and `secret_config_file`, or `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`, name the files to use; each is passed only when it is outside the scanned tree, and a file that sets nothing is passed otherwise. |
 | `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.mode` | See [Scanner sandbox](scanner-sandbox.md). |
+| `scanners.bandit.options.config_file`, `scanners.grype.options.config_file`, `scanners.syft.options.config_file` | Taken from the defaults, `--config-overrides` or a config file outside the tree; a file named that way is used even inside the tree. ASH does not look for `.bandit`, `bandit.yaml`, `bandit.toml`, `.grype.yaml`, `.grype/config.yaml`, `.syft.yaml` or their `.ash/` copies by name, and otherwise passes each tool an empty config (`--ini` for bandit, `--config` for grype and syft), so the tool does not read one from the tree on its own. |
 | `reporters.<name>.extension` | Must be a filename suffix such as `json`, from every source, including `--config-overrides`: the report is written to `ash.<extension>` in the reports directory. A value containing `/`, `\`, `..` or NUL is replaced by the reporter's default. ASH also writes a report, and the files some reporters write beside it, only when the resolved file is directly inside the reports directory, and replaces a symlink at that name rather than writing through it. |
 | Reporter destinations and credentials: `aws_region` and `aws_profile` of `aws-security-hub`, `bedrock-summary-reporter` and `s3`; `aws-security-hub`'s `account_id`; `bedrock-summary-reporter`'s `model_id`, `output_file`, `output_executive_file` and `output_technical_file`; `s3`'s `bucket_name` and `key_prefix`; `cloudwatch-logs`' `aws_region`, `log_group_name` and `log_stream_name` (all under `reporters.<name>.options`) | Taken from the defaults, `--config-overrides` or a config file outside the tree, whichever spelling of the reporter's section the file uses (`BedrockSummary` is read as `bedrock-summary-reporter`, for example). These options choose where findings are sent or written and which credentials send them. The reporters' other options, including `enabled`, still apply. A third-party reporter's options are not covered. |
 
@@ -474,7 +475,8 @@ Each setting that is not honored is logged once, as a warning that names it.
 
 To set any of these for a repository you trust, use `--config-overrides`,
 `--ash-plugin-modules`, or a config file outside the scanned tree. A file path set
-that way still has to point outside the tree. Under `--sandbox`, a file outside the
+that way still has to point outside the tree, except a bandit, grype or syft config
+file. Under `--sandbox`, a file outside the
 system paths the sandbox already reads also has to be listed in
 `sandbox.extra_read_paths`, or the tool cannot open it and the scanner reports an
 error.

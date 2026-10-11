@@ -197,6 +197,12 @@ runs:
       with:
         ruby-version: "3.3"
 
+    # Every scan below names the repository's own bandit and grype configs with
+    # --config-overrides. A config file inside the scanned tree no longer chooses a
+    # scanner's own config file (config/tool_config_trust.py), so the operator has
+    # to; without these, bandit would report the asserts .ash/bandit.yaml skips in
+    # tests, and grype would drop .ash/.grype.yaml's only-fixed.
+    #
     # Community plugin tools
     #
     # The community legs scan with .ash/.ash_community_plugins.yaml, a config file
@@ -451,9 +457,9 @@ runs:
         # Teed so the cache report below can count the build steps the layer cache
         # served. pipefail (bash's default here) keeps ash's exit status.
         if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
-          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
+          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
         else
-          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
+          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml 2>&1 | tee "${RUNNER_TEMP}/ash-container-build.log"
         fi
 
     - name: "Cache report: image-layers"
@@ -550,9 +556,9 @@ runs:
         ash dependencies install
         ash config get
         if ("$env:ASH_TEST_CONFIG_FILE" -eq "community") {
-          ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
+          ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         } else {
-          ash --mode local --build-target ci --verbose --no-progress
+          ash --mode local --build-target ci --verbose --no-progress --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         }
 
     - name: Validate No Plugin Errors (Python Local Windows)
@@ -622,9 +628,9 @@ runs:
         ash dependencies install
         ash config get
         if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
-          ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
+          ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         else
-          ash --mode local --build-target ci --verbose --no-progress
+          ash --mode local --build-target ci --verbose --no-progress --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         fi
 
     - name: Validate No Plugin Errors (Python Local Unix)
@@ -661,9 +667,9 @@ runs:
         Get-Help Invoke-ASH -Full
         $runner = if ($env:OCI_RUNNER) { $env:OCI_RUNNER } else { "docker" }
         if ("$env:ASH_TEST_CONFIG_FILE" -eq "community") {
-          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner -ConfigFile ".ash/.ash_community_plugins.yaml" --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
+          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner -Config ".ash/.ash_community_plugins.yaml" --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         } else {
-          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner
+          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         }
 
     # This step used to read `$Results.scanners.<name>.result`. Neither the key nor
@@ -707,9 +713,9 @@ runs:
         echo "Testing ASH using Bash on ${ASH_TEST_OS} (${ASH_TEST_PLATFORM}) with config: ${ASH_TEST_CONFIG_FILE}"
         chmod +x ./ash
         if [ "${ASH_TEST_CONFIG_FILE}" = "community" ]; then
-          ./ash --build-target ci --verbose --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
+          ./ash --build-target ci --verbose --config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         else
-          ./ash --build-target ci --verbose
+          ./ash --build-target ci --verbose --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
         fi
 
     - name: Validate No Plugin Errors (Bash)

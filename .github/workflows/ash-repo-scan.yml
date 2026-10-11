@@ -58,6 +58,13 @@ jobs:
       collect-sarif-report: false
       # Set this to `false` if you would prefer that ASH does not comment on PRs with the findings.
       post-pr-comment: true
+      # The repository's own bandit and grype configs, named by the operator: a
+      # config file inside the scanned tree no longer chooses a scanner's own
+      # config file (config/tool_config_trust.py). .ash/.grype.yaml explains its
+      # only-fixed.
+      ash-args: >-
+        --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml
+        --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
       # Set this to `false` if you prefer less verbose log output
       verbose: true
       # Install Grype and Syft for comprehensive vulnerability scanning

@@ -897,7 +897,7 @@
             }
           ],
           "default": null,
-          "description": "Path to Bandit configuration file, relative to current source directory. Defaults to searching for `.bandit` (ini format), `bandit.yaml`, and `bandit.toml` in the root of the source directory if this is left empty.",
+          "description": "Path to Bandit configuration file, relative to the source directory. Used only when the operator sets it, in a config file outside the scanned tree or with --config-overrides: a config file inside the scanned tree, or one an MCP client delivered, does not choose it, and ASH does not look for one by name. Without one, bandit gets an empty `--ini`, so it does not read a `.bandit` file from the scanned tree.",
           "title": "Config File"
         },
         "excluded_paths": {
@@ -2183,7 +2183,7 @@
             }
           ],
           "default": null,
-          "description": "Path to Grype configuration file, relative to current source directory. Defaults to searching for `.grype.yaml` and `.grype.yml` in the root of the source directory.",
+          "description": "Path to Grype configuration file, relative to the source directory. Used only when the operator sets it, in a config file outside the scanned tree or with --config-overrides: a config file inside the scanned tree, or one an MCP client delivered, does not choose it, and ASH does not look for one by name. Without one, grype gets an empty config, so it does not read `.grype.yaml` from the scanned tree.",
           "title": "Config File"
         },
         "offline": {
@@ -4146,11 +4146,14 @@
               "type": "string"
             },
             {
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
           "default": null,
-          "description": "Path to Syft configuration file, relative to current source directory. Defaults to searching for `.syft.yaml` and `.syft.yml` in the root of the source directory.",
+          "description": "Path to Syft configuration file, relative to the source directory. Used only when the operator sets it, in a config file outside the scanned tree or with --config-overrides: a config file inside the scanned tree, or one an MCP client delivered, does not choose it, and ASH does not look for one by name. Without one, syft gets an empty config, so it does not read `.syft.yaml` from the scanned tree.",
           "title": "Config File"
         },
         "exclude": {

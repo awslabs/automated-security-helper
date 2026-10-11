@@ -10,6 +10,7 @@ from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -31,9 +32,10 @@ from automated_security_helper.utils.process_env import snapshot_environ
 
 class SyftScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
-        Path | None,
+        Path | str | None,
         Field(
-            description="Path to Syft configuration file, relative to current source directory. Defaults to searching for `.syft.yaml` and `.syft.yml` in the root of the source directory.",
+            description="Path to Syft configuration file, relative to the source directory."
+            " Used only when the operator sets it, in a config file outside the scanned tree or with --config-overrides: a config file inside the scanned tree, or one an MCP client delivered, does not choose it, and ASH does not look for one by name. Without one, syft gets an empty config, so it does not read `.syft.yaml` from the scanned tree.",
         ),
     ] = None
     exclude: Annotated[
@@ -124,14 +126,13 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
 
     def _process_config_options(self):
         # Syft config path
+        # Only the operator's config file. A config file inside the scanned tree
+        # does not choose it (config/tool_config_trust.py), and ASH no longer looks
+        # for .syft.yaml by name: its exclude would let the repository decide what
+        # the SBOM lists. With none, scan() passes syft an empty one, so syft does
+        # not read one from its working directory on its own.
         possible_config_paths = [
-            item
-            for item in [
-                self.config.options.config_file,
-                ".syft.yaml",
-                ".syft.yml",
-            ]
-            if item is not None
+            item for item in [self.config.options.config_file] if item is not None
         ]
 
         # Resolve config candidates against source_dir, not the process working
@@ -254,6 +255,11 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             # Re-apply config options (exclude paths, config file) that were
             # set during model_post_init but lost by the ToolArgs rebuild above.
             self._process_config_options()
+            if not any(arg.key == "--config" for arg in self.args.extra_args):
+                empty = empty_tool_config(self.results_dir, "syft-empty.yaml", "{}\n")
+                self.args.extra_args.append(
+                    ToolExtraArg(key="--config", value=empty.as_posix())
+                )
             conf: SyftScannerConfig = self.config
             opts: SyftScannerConfigOptions = conf.options
             for out in opts.additional_outputs:

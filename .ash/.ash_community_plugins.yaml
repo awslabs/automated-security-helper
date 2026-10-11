@@ -1192,10 +1192,12 @@ reporters:
 scanners:
   bandit:
     enabled: true
+    # .ash/bandit.yaml is named with --config-overrides where this repository
+    # scans itself: a config file inside the scanned tree does not choose a
+    # scanner's own config file.
     options:
       confidence_level: all
       ignore_nosec: false
-      config_file: .ash/bandit.yaml
   cdk-nag:
     enabled: false
     options:
@@ -1222,8 +1224,6 @@ scanners:
     enabled: false
   grype:
     enabled: false
-    options:
-      config_file: .ash/.grype.yaml
   opengrep:
     enabled: false
   semgrep:

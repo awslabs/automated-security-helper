@@ -12,6 +12,7 @@ from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -94,7 +95,8 @@ class GrypeScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
         Path | str | None,
         Field(
-            description="Path to Grype configuration file, relative to current source directory. Defaults to searching for `.grype.yaml` and `.grype.yml` in the root of the source directory.",
+            description="Path to Grype configuration file, relative to the source directory."
+            " Used only when the operator sets it, in a config file outside the scanned tree or with --config-overrides: a config file inside the scanned tree, or one an MCP client delivered, does not choose it, and ASH does not look for one by name. Without one, grype gets an empty config, so it does not read `.grype.yaml` from the scanned tree.",
         ),
     ] = None
     severity_threshold: Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None = (
@@ -269,16 +271,14 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
 
     def _process_config_options(self):
         # Grype config path
+        # Only the operator's config file. A config file inside the scanned tree
+        # does not choose it (config/tool_config_trust.py), and ASH no longer looks
+        # for .grype.yaml or .grype/config.yaml by name: their ignore and
+        # only-fixed would let the repository decide what its scan reports. With
+        # none, the scan passes grype an empty one (_execute_scan), so grype does
+        # not read one from its working directory on its own.
         possible_config_paths = [
-            item
-            for item in [
-                self.config.options.config_file,
-                ".grype.yaml",
-                ".grype/config.yaml",
-                ".ash/.grype.yaml",
-                ".ash/grype.yaml",
-            ]
-            if item is not None
+            item for item in [self.config.options.config_file] if item is not None
         ]
 
         # Resolve config candidates against source_dir, not the process working
@@ -388,11 +388,20 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         target_results_dir = self.results_dir.joinpath(target_type)
         results_file = target_results_dir.joinpath("results_sarif.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
-        final_args = self._resolve_arguments(
-            # Grype expects directory scans to have the target begin with `dir:`
-            target=f"dir:{target.as_posix()}",
-            results_file=results_file,
-        )
+        original_extra_args = list(self.args.extra_args)
+        if not any(arg.key == "--config" for arg in self.args.extra_args):
+            empty = empty_tool_config(self.results_dir, "grype-empty.yaml", "{}\n")
+            self.args.extra_args.append(
+                ToolExtraArg(key="--config", value=empty.as_posix())
+            )
+        try:
+            final_args = self._resolve_arguments(
+                # Grype expects directory scans to have the target begin with `dir:`
+                target=f"dir:{target.as_posix()}",
+                results_file=results_file,
+            )
+        finally:
+            self.args.extra_args = original_extra_args
         subprocess_env = (
             {**snapshot_environ(), **self.extra_env} if self.extra_env else None
         )
