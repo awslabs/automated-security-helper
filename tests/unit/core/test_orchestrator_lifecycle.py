@@ -529,6 +529,7 @@ class TestIgnoredConfigSources:
         assert ".ashrc.toml" in checkpoints[0]["message"]
         assert "takes precedence" in checkpoints[0]["message"]
         assert checkpoints[0]["metadata"]["source"] == "config_resolution"
+        assert checkpoints[0]["severity"] == "warning"
 
     @pytest.mark.parametrize(
         "named", [pytest.param(False, id="discovered"), pytest.param(True, id="named")]

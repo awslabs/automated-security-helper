@@ -24,7 +24,21 @@ import pytest
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.core.constants import (
+    ASH_CONFIG_FILE_NAMES,
+    ASH_PYPROJECT_FILE_NAME,
+    ASH_RC_FILE_NAMES,
+)
 from automated_security_helper.core.exceptions import ASHConfigValidationError
+
+#: Every name discovery looks for, where it looks: each dedicated name at the root
+#: and in .ash/, each ashrc name at the root, and pyproject.toml.
+EVERY_DISCOVERY_LOCATION = [
+    *ASH_CONFIG_FILE_NAMES,
+    *(f".ash/{name}" for name in ASH_CONFIG_FILE_NAMES),
+    *ASH_RC_FILE_NAMES,
+    ASH_PYPROJECT_FILE_NAME,
+]
 
 # One suppression and a non-default verdict field, so a config that was loaded can be
 # told apart from the defaults (no suppressions, fail_on_findings true).
@@ -164,14 +178,15 @@ class TestDiscoveredConfigFile:
         path = _write(tmp_path / relative, content)
         _assert_refused(*_resolve(source_dir=tmp_path), path)
 
-    def test_dangling_symlink_in_a_config_location_is_refused(self, tmp_path):
+    @pytest.mark.parametrize("relative", EVERY_DISCOVERY_LOCATION)
+    def test_dangling_symlink_in_a_config_location_is_refused(self, tmp_path, relative):
         """A config name that points at nothing is a config that cannot be read.
 
         Typical cause: ``.ash/.ash.yaml`` linked to a shared file that is not checked
         out in CI. Treating it as "no config" scans with the defaults.
         """
-        link = tmp_path / ".ash" / ".ash.yaml"
-        link.parent.mkdir()
+        link = tmp_path / relative
+        link.parent.mkdir(exist_ok=True)
         link.symlink_to(tmp_path / "shared" / "ash.yaml")
         _assert_refused(*_resolve(source_dir=tmp_path), link)
 

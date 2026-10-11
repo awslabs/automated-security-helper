@@ -269,6 +269,15 @@ class TestResolveWorkspaceExecutionConfig:
                 )
             )
 
+    def test_a_root_whose_only_source_cannot_be_read_refuses_the_scan(self, tmp_path):
+        """Discovery itself refuses here, before any file is loaded."""
+        (tmp_path / "pyproject.toml").symlink_to(tmp_path / "absent.toml")
+
+        with pytest.raises(ASHConfigValidationError, match="pyproject.toml"):
+            _resolve_workspace_execution_config(
+                ScanOptions(source_dir=tmp_path, output_dir=tmp_path / "out")
+            )
+
 
 # ---------------------------------------------------------------------------
 # _run_workspace_mode
@@ -330,6 +339,27 @@ class TestRunWorkspaceModeSettings:
         settings = recorded["settings"][0]
         assert settings.max_parallel_projects == 2
         assert settings.project_timeout == 60.0
+
+    def test_a_root_whose_discovery_refuses_exits_3_and_scans_no_project(
+        self, recorded_workspace_execution, logger, tmp_path
+    ):
+        (tmp_path / "pyproject.toml").symlink_to(tmp_path / "absent.toml")
+        (tmp_path / "api").mkdir()
+        (tmp_path / "api" / ".ash.yaml").write_text(
+            "project_name: api\n", encoding="utf-8"
+        )
+        recorded = recorded_workspace_execution(result=_run_result(tmp_path))
+        opts = ScanOptions(
+            source_dir=tmp_path,
+            output_dir=tmp_path / "out",
+            workspace_plan=_plan(tmp_path, "api"),
+        )
+
+        with pytest.raises(SystemExit) as excinfo:
+            _run_workspace_mode(opts, logger)
+
+        assert excinfo.value.code == 3
+        assert recorded["plans"] == []
 
     def test_an_empty_phase_list_falls_back_to_the_standard_three(
         self, recorded_workspace_execution, logger, tmp_path

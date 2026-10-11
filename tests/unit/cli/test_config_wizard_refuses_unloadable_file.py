@@ -45,6 +45,9 @@ def test_a_file_that_does_not_parse_is_left_alone(tmp_path):
 @pytest.mark.skipif(not hasattr(os, "symlink") or os.name == "nt", reason="symlinks")
 def test_a_link_to_nothing_is_not_written_through(tmp_path):
     target = tmp_path / "elsewhere" / "ash.yaml"
+    # The directory exists, so a wizard that wrote through the link would create
+    # the target and the assertion below could fail.
+    target.parent.mkdir()
     path = tmp_path / ".ash.yaml"
     path.symlink_to(target)
 

@@ -626,6 +626,22 @@ def _restore_ash_logger_switches():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _no_ash_config_from_the_shell(monkeypatch):
+    """Unset ``ASH_CONFIG`` for every test; a test that needs it sets it itself.
+
+    ``ASH_CONFIG`` names the config file ASH uses when none is named, and a file
+    it names that does not exist refuses resolution (exit 3) rather than being
+    replaced by the defaults. So a value left in the developer's shell, or in a
+    CI job's environment, reaches every test that resolves a config: with
+    ``ASH_CONFIG`` naming a missing file, 41 tests in six config, MCP and
+    orchestrator test files failed, none of them about ``ASH_CONFIG``. Tests that
+    exercise the variable set it with ``monkeypatch.setenv``, which runs after
+    this fixture.
+    """
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+
+
 @pytest.fixture
 def ash_temp_path():
     """Create a temporary directory using the gitignored tests/pytest-temp directory.

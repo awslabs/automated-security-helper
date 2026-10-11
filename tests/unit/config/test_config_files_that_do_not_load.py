@@ -13,11 +13,17 @@ with its results.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.core.constants import (
+    ASH_CONFIG_FILE_NAMES,
+    ASH_PYPROJECT_FILE_NAME,
+    ASH_RC_FILE_NAMES,
+)
 from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
     ASHConfigValidationError,
@@ -34,6 +40,38 @@ class TestOtherConfigInputs:
         """Path("") is the working directory; the refusal says the path is empty."""
         with pytest.raises(ASHConfigSourceError, match="path is empty"):
             resolve_config(config_path="", source_dir=tmp_path)
+
+    @pytest.mark.parametrize(
+        "names", ["a-missing-file", "a-link-to-nothing", "a-directory"]
+    )
+    def test_the_default_config_refuses_an_ash_config_that_names_no_file(
+        self, tmp_path, monkeypatch, names
+    ):
+        """get_default_config is the config when none is named or found; with
+        ASH_CONFIG set it is that file, and one that is not there is refused, never
+        replaced by the built-in defaults."""
+        from automated_security_helper.config.default_config import get_default_config
+
+        target = tmp_path / "ash.yaml"
+        if names == "a-link-to-nothing":
+            target.symlink_to(tmp_path / "absent.yaml")
+        elif names == "a-directory":
+            target.mkdir()
+        monkeypatch.setenv("ASH_CONFIG", str(target))
+
+        with pytest.raises(ASHConfigSourceError, match="ash.yaml"):
+            get_default_config()
+
+    @pytest.mark.parametrize("empty", ["", "   "])
+    def test_the_read_check_refuses_an_empty_path_as_empty(self, empty):
+        """check_config_path is what MCP config_load_error and get_config(raw) reach."""
+        from automated_security_helper.config.resolve_config import check_config_path
+
+        with pytest.raises(ASHConfigSourceError) as excinfo:
+            check_config_path(empty)
+
+        assert "path is empty" in str(excinfo.value)
+        assert str(Path.cwd()) not in str(excinfo.value)
 
     def test_a_named_trusted_config_that_does_not_exist_is_refused(self, tmp_path):
         """The operator's file the sandbox grants come from must exist when named.
@@ -85,9 +123,97 @@ class TestOtherConfigInputs:
         assert config.global_settings.suppressions == []
 
 
+needs_permissions = pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="needs POSIX permissions that root ignores",
+)
+
+
+@needs_permissions
+class TestAConfigFileThatCannotBeRead:
+    """A config file that exists but cannot be read refuses as a config error.
+
+    Every way a file reaches resolution is covered, because each takes a
+    different path to read_config_document: without its OSError arm, a named or
+    ASH_CONFIG file became the catch-all's generic refusal, and the operator's
+    trusted config and an MCP session profile raised a bare PermissionError (exit
+    1 from a workspace scan instead of 3).
+    """
+
+    @pytest.fixture
+    def unreadable(self, tmp_path):
+        path = tmp_path / "operator" / "locked.yaml"
+        path.parent.mkdir()
+        path.write_text("project_name: locked\n", encoding="utf-8")
+        path.chmod(0)
+        yield path
+        path.chmod(0o644)
+
+    def _assert_unreadable(self, error: BaseException) -> None:
+        assert isinstance(error, ASHConfigSourceError), repr(error)
+        assert "could not read" in str(error)
+
+    def test_a_named_file(self, tmp_path, unreadable):
+        with pytest.raises(Exception) as excinfo:
+            resolve_config(config_path=unreadable, source_dir=tmp_path)
+        self._assert_unreadable(excinfo.value)
+
+    def test_a_discovered_file(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        path = repo / ".ash.yaml"
+        path.write_text("project_name: locked\n", encoding="utf-8")
+        path.chmod(0)
+        try:
+            with pytest.raises(Exception) as excinfo:
+                resolve_config(source_dir=repo)
+        finally:
+            path.chmod(0o644)
+        self._assert_unreadable(excinfo.value)
+
+    def test_the_operators_trusted_config(self, tmp_path, unreadable):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".ash.yaml").write_text("project_name: in-tree\n", encoding="utf-8")
+
+        with pytest.raises(Exception) as excinfo:
+            resolve_config(
+                source_dir=repo, scanned_root=repo, trusted_config_path=unreadable
+            )
+        self._assert_unreadable(excinfo.value)
+
+    def test_the_file_ash_config_names(self, tmp_path, monkeypatch, unreadable):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.setenv("ASH_CONFIG", str(unreadable))
+
+        with pytest.raises(Exception) as excinfo:
+            resolve_config(source_dir=repo)
+        self._assert_unreadable(excinfo.value)
+
+    def test_an_mcp_session_profile_exits_3(self, unreadable):
+        from automated_security_helper.cli.mcp import workspace as mcp_workspace
+
+        with pytest.raises(Exception) as excinfo:
+            mcp_workspace._gate_client_overrides(["project_name=x"], str(unreadable))
+        self._assert_unreadable(excinfo.value)
+        assert mcp_workspace._exit_code_for(excinfo.value) == 3
+
+
+#: Every name discovery looks for, where it looks: each dedicated name at the root
+#: and in .ash/, each ashrc name at the root, and pyproject.toml.
+EVERY_DISCOVERY_LOCATION = [
+    *ASH_CONFIG_FILE_NAMES,
+    *(f".ash/{name}" for name in ASH_CONFIG_FILE_NAMES),
+    *ASH_RC_FILE_NAMES,
+    ASH_PYPROJECT_FILE_NAME,
+]
+
+
 class TestDiscoveryLocations:
-    def test_a_directory_at_a_config_name_is_refused(self, tmp_path):
-        (tmp_path / ".ash" / ".ash.yaml").mkdir(parents=True)
+    @pytest.mark.parametrize("relative", EVERY_DISCOVERY_LOCATION)
+    def test_a_directory_at_a_config_name_is_refused(self, tmp_path, relative):
+        (tmp_path / relative).mkdir(parents=True)
 
         with pytest.raises(ASHConfigSourceError, match="not a regular file"):
             resolve_config(source_dir=tmp_path)

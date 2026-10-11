@@ -23,6 +23,7 @@ Two deliberate choices:
 
 import asyncio
 import threading
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -153,6 +154,10 @@ class TestScanDirectoryValidation:
 
         assert result["success"] is False, f"a scan was started: {result}"
         assert result["operation"] == "scan_directory"
+        # Named as empty: Path("") is the working directory, and a refusal that
+        # treated it as a path would name the server's working directory.
+        assert "path is empty" in result["error"]
+        assert str(Path.cwd()) not in result["error"]
         registry.register_scan.assert_not_called()
         run_scan_async.assert_not_called()
 
