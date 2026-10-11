@@ -111,3 +111,24 @@ def test_a_busy_directory_refusal_names_the_scan_only_to_its_owner(
         other.value.context
     ), other.value.context
     assert same.value.context.get("scan_id") == owner_scan, same.value.context
+
+
+def test_the_progress_monitor_reads_the_scan_in_the_session_that_started_it(
+    registry, tmp_path
+) -> None:
+    """run_ash_scan's monitor polls the scan it started, so it asks as its session."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from automated_security_helper.cli.mcp.progress_monitor import (
+        _fetch_initial_scan_info,
+    )
+
+    scan_id = _register(registry, tmp_path, "monitored", "session-a")
+    ctx = MagicMock()
+    ctx.error = AsyncMock()
+
+    found = asyncio.run(_fetch_initial_scan_info(ctx, scan_id, "session-a"))
+    unscoped = asyncio.run(_fetch_initial_scan_info(ctx, scan_id))
+
+    assert found is not None, ctx.error.call_args_list
+    assert unscoped is None, "the default session must not see session-a's scan"

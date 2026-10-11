@@ -418,7 +418,9 @@ async def run_ash_scan(
         except Exception as e:
             logger.warning(f"Failed to send initial progress update: {str(e)}")
 
-        monitor_task = asyncio.create_task(monitor_scan_progress(ctx, scan_id))
+        monitor_task = asyncio.create_task(
+            monitor_scan_progress(ctx, scan_id, session_id=session_id)
+        )
         if not hasattr(run_ash_scan, "_monitor_tasks"):
             run_ash_scan._monitor_tasks = set()
         run_ash_scan._monitor_tasks.add(monitor_task)
