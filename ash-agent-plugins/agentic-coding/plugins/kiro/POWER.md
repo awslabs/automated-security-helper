@@ -115,7 +115,7 @@ The ASH MCP server exposes twenty-two tools and five resources.
 
 ## run_ash_scan
 
-Starts a scan asynchronously. Returns a `scan_id` immediately — the scan continues in the background regardless of MCP connection state.
+Starts a scan in the server process and returns a `scan_id` at once. The scan stops if the server process exits; over stdio, that is when the client disconnects.
 
 <!-- doctest: options of=mcp.run_ash_scan -->
 | Param | Type | Default | Notes |
@@ -214,9 +214,9 @@ Fetch finalized results with filtering. Run only after `get_scan_progress` repor
 | `filter_level` | string | `"full"` | `full`, `summary`, `minimal` |
 | `scanners` | string | not set | Comma-separated subset; not set means every scanner |
 | `severities` | string | not set | Comma-separated subset of `critical,high,medium,low,info,suppressed`; not set means every severity |
-| `actionable_only` | boolean | `false` | Drop suppressed findings |
+| `actionable_only` | boolean | `false` | Sets the suppressed counts to zero. The `findings` list it adds is always empty, because the response does not carry the SARIF it is built from |
 
-Returns full or filtered findings depending on `filter_level`.
+With `filter_level` `full`, `raw_results` is the aggregated results document without its `sarif`, `cyclonedx` and `ash_config` sections; `summary` returns the metadata and the counts by severity and by scanner, and `minimal` the status. Individual findings are in the report files: `get_scan_result_paths` lists them, and the `flat-json` reporter, which is enabled by default, writes `reports/ash.flat.json` under `output_dir`.
 
 `status` is `completed` or `incomplete`, decided by the same rule as the scan's exit code, with `coverage_complete` and `incomplete_scanners` as in `get_scan_progress`. An `incomplete` scan's findings are returned in full.
 
@@ -427,7 +427,7 @@ Read these via the standard MCP resource read mechanism for context-free help.
 
 `CRITICAL` > `HIGH` > `MEDIUM` > `LOW` > `INFO` > `SUPPRESSED`
 
-`actionable_only=True` drops `SUPPRESSED` findings (false positives, accepted risks).
+`actionable_only=True` on `get_scan_results` sets the `SUPPRESSED` counts (false positives, accepted risks) to zero; the `findings` list it adds is always empty.
 
 
 # ASH Troubleshooting
