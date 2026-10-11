@@ -19,6 +19,9 @@ asks for one that is not a link.
 
 The ASH MCP server provides multiple tools for accessing scan results with different levels of detail. The `get_scan_results` tool now includes a filter parameter for flexible response sizing, and two new specialized tools provide lightweight alternatives.
 
+### Which output directories a caller may read
+All three tools read a caller-named output directory, and the same roots that bound scanning bound reading: an output directory lives at `<source_dir>/.ash/ash_output`, so a directory a caller may scan is one whose results it may read. On stdio the single local client may read anything outside a short list of system directories unless `ASH_MCP_ALLOWED_ROOTS` narrows it. On a network transport (sse or streamable-HTTP) every caller is remote, whatever headers it sends: it may read the directories in `ASH_MCP_ALLOWED_ROOTS` and its own session workspace, never another session's. The session is the one the server issued, not a header the client chose; see [Session identity](mcp/streamable-http.md#session-identity). A refusal has `error_type: scan_target_not_permitted`.
+
 ## Tool 1: `get_scan_results` (Enhanced with Filter Parameter)
 
 ### Purpose

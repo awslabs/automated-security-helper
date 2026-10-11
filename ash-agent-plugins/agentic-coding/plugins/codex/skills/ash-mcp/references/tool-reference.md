@@ -240,9 +240,9 @@ Clone a repository into this session's workspace and make it the scan target.
 
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
-| `url` | string | *required* | Repository URL |
+| `url` | string | *required* | Repository URL: `https://`, `ssh://` or `user@host:path`, on a host the operator listed in `ASH_MCP_GIT_ALLOWED_HOSTS` |
 | `ref` | string \| null | default branch | Branch, tag, or commit |
-| `ssh_key_id` | string \| null | none | Operator-registered key id for private repos |
+| `ssh_key_id` | string \| null | none | Must be omitted: the server registers no ssh keys |
 | `depth` | integer | `1` | Clone depth; `0` for a full clone |
 
 ## set_source_zip_chunk
