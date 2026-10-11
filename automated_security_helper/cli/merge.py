@@ -1626,9 +1626,13 @@ def _print_merge_summary(
         # was empty enough to be refused outright. Naming the scanners matters
         # more here than in a single scan: the operator has n CI jobs and no other
         # way to tell which one to look at.
+        from rich.markup import escape as escape_markup
+
         from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_converters,
             incomplete_scanners,
         )
+        from automated_security_helper.utils.converter_refusals import inert_text
 
         incomplete = incomplete_scanners(merged)
         if incomplete:
@@ -1644,3 +1648,19 @@ def _print_merge_summary(
             )
             for name, status in incomplete:
                 print(f"  [red]{name}: {status}[/red]")
+        # _merged_exit_code counts these too, so the summary names them: a
+        # merge that fails for an archive over a limit or one that could not be
+        # read otherwise prints only the counts. Their reasons hold file names
+        # from the scanned tree, so they are printed as inert text.
+        converters = incomplete_converters(merged)
+        if converters:
+            print(
+                f"[bold red]ERROR (1) Exiting because conversion in the merged scan "
+                f"was incomplete: {len(converters)} converter(s) did not process "
+                f"the files they were given[/bold red]"
+            )
+            for name, reason in converters:
+                print(
+                    f"  [red]{escape_markup(inert_text(name))}: "
+                    f"{escape_markup(inert_text(reason))}[/red]"
+                )
