@@ -843,3 +843,17 @@ def test_the_baseline_read_is_the_file_that_was_checked(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "fstat", another_file)
     with pytest.raises(OSError, match="changed while it was being read"):
         DetectSecretsScanner._read_baseline(baseline)
+
+
+def test_a_baseline_that_is_not_a_regular_file_is_refused_without_blocking(tmp_path):
+    """A FIFO named .secrets.baseline (an extracted archive can hold one) would
+    block an open() forever; it is refused before ASH opens it."""
+    import os
+
+    fifo = tmp_path / ".secrets.baseline"
+    try:
+        os.mkfifo(fifo)
+    except (AttributeError, OSError):
+        pytest.skip("FIFOs are not available here")
+    with pytest.raises(OSError, match="not a regular file"):
+        DetectSecretsScanner._read_baseline(fifo)

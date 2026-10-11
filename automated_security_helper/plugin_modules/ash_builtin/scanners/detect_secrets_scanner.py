@@ -8,6 +8,7 @@ import os
 import multiprocessing
 from pathlib import Path
 import re
+import stat
 import sys
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Union
 
@@ -303,11 +304,16 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     def _read_baseline(real: Path) -> Dict[str, Any]:
         """Parse the baseline at ``real``, the resolved path that was checked.
 
-        Opened without following a link at its last component, and compared by
-        device and inode with what ``real`` named when it was resolved, so the file
-        parsed is the file ``_baseline_allowed`` judged.
+        Only a regular file is opened (a FIFO would block the scan), without
+        following a link at its last component, and the opened file must have the
+        device and inode ``real`` named just before. That binds the read to the
+        resolved path; a directory above it swapped for a link between the check
+        and this stat is not detected, which needs a writer to the source tree
+        while the scan runs, and a sandboxed scanner may only read it.
         """
         checked = os.stat(real)
+        if not stat.S_ISREG(checked.st_mode):
+            raise OSError(f"{real.as_posix()} is not a regular file")
         fd = os.open(real, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         with os.fdopen(fd, "r") as handle:
             opened = os.fstat(handle.fileno())
