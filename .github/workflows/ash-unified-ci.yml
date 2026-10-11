@@ -1354,6 +1354,9 @@ jobs:
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
       # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan.
+      # ASH_REQUIRE_PREINSTALLED_TOOLS names what the step above installed: the suite
+      # fails at start if it cannot find them, and a test fails if it installs one, so a
+      # pre-install that stops reaching the scanner shows up instead of being redone.
       #
       # The installs above put the pinned binaries in ~/.ash/bin and the uv tools in
       # ~/.local/bin. PATH gains both for this step only, not through GITHUB_PATH, so no
@@ -1362,6 +1365,7 @@ jobs:
         env:
           ASH_REQUIRE_CDK_EXTRA: "1"
           ASH_REQUIRE_SYMBOLS_EXTRA: "1"
+          ASH_REQUIRE_PREINSTALLED_TOOLS: bandit
         run: |
           export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
           uv run pytest \
