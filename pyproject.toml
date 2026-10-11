@@ -160,6 +160,13 @@ dev = [
  "types-boto3-sqs>=1.43,<2.0.0",
  "types-boto3-sts>=1.43.94,<2.0.0",
  "mkdocs-awesome-nav>=3.3,<4.0.0",
+ # Versioned docs: the docs workflow publishes each release, and main, with mike, which
+ # builds a version into its own directory of the gh-pages branch and records it in
+ # versions.json. Material's version selector (extra.version.provider in mkdocs.yml)
+ # reads that file, and scripts/docs_versions.py check builds the two together on every
+ # pull request. The floor is the version that check and the deploy were verified
+ # against; the cap is this group's next-major convention.
+ "mike>=2.2,<3.0.0",
  "pytest-xdist>=3.8,<4.0.0",
  "toml>=0.10",
  "hatchling>=1.32.4",
