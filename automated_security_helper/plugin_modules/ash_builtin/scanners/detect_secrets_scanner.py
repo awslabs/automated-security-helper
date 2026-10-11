@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import stat
 import sys
-from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Union
+from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Union
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -19,7 +19,10 @@ from automated_security_helper.config.path_trust import (
     scanned_tree_reason,
 )
 from automated_security_helper.config.secret_verification_trust import (
+    UntrustedDetectSecretsSettings,
+    drop_untrusted_entries,
     is_verification_filter,
+    same_baseline,
 )
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
@@ -186,6 +189,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     # checked path. The scan uses this copy and never reopens the file, so a path
     # swapped for a link after the check is not followed.
     _baseline_document: Optional[Dict[str, Any]] = PrivateAttr(default=None)
+
+    # Whether the settings, as configured, may verify secrets with their issuers.
+    # Decided once from where each setting came from (_apply_settings_trust); the scan
+    # checks it again, so a verification filter added afterwards does not run.
+    _verification_permitted: bool = PrivateAttr(default=False)
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
@@ -399,7 +407,15 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # into scan_settings so they are applied during scanning.
         # SecretsCollection.load_from_baseline() only loads results, not settings,
         # so we must propagate the baseline's configuration explicitly.
-        filters_from_baseline = False
+        settings_from_baseline = False
+        # The config's own filters, told apart from the baseline's by identity
+        # (_drop_in_tree_settings_paths keeps the same objects), so that
+        # _apply_settings_trust judges each by its own source. When the baseline's
+        # filters replace the config's, the config's verification filter is kept
+        # beside them: an operator who names only that filter still verifies.
+        config_filter_ids = {
+            id(item) for item in self.config.options.scan_settings.filters_used
+        }
         if real_baseline is not None:
             try:
                 baseline_data = self._read_baseline(real_baseline)
@@ -417,13 +433,19 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                             DetectSecretsScanSettingsPluginsUsed(**plugin)
                             for plugin in baseline_data["plugins_used"]
                         ]
+                        settings_from_baseline = True
                     # Load filters from baseline (includes should_exclude_file, etc.)
                     if "filters_used" in baseline_data:
+                        config_verification = [
+                            item
+                            for item in self.config.options.scan_settings.filters_used
+                            if is_verification_filter(item.path)
+                        ]
                         self.config.options.scan_settings.filters_used = [
                             DetectSecretsScanSettingsFiltersUsed(**f)
                             for f in baseline_data["filters_used"]
-                        ]
-                        filters_from_baseline = True
+                        ] + config_verification
+                        settings_from_baseline = True
                     ASH_LOGGER.debug(
                         f"Loaded settings from baseline: "
                         f"{len(self.config.options.scan_settings.plugins_used)} plugins, "
@@ -436,7 +458,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 )
 
         self._drop_in_tree_settings_paths()
-        self._drop_refused_verification(filters_from_baseline=filters_from_baseline)
+        self._apply_settings_trust(
+            settings_from_baseline=settings_from_baseline,
+            config_entries={
+                id(item)
+                for item in self.config.options.scan_settings.filters_used
+                if id(item) in config_filter_ids
+            },
+        )
 
         # Skipped when the library is absent: the plugin list has to be read out of
         # detect-secrets itself, and there is no scan to configure for a scanner that
@@ -564,65 +593,131 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 filters.append(item)
         settings.filters_used = filters
 
-    def _verification_refusal(self, *, filters_from_baseline: bool) -> Optional[str]:
-        """Why this scan may not verify secrets with their issuers, or None.
+    def _untrusted_baseline_reason(
+        self, record: Optional[UntrustedDetectSecretsSettings]
+    ) -> Optional[str]:
+        """Why the baseline's settings are not the operator's, or None when they are.
 
-        Verification sends each candidate secret, and for an AWS key the key pair
-        itself, to the service that issued it, so the scanning host contacts that
-        service with credentials found in the scanned tree. It runs only when the
-        operator asked for it and the scan is online:
-
-        * offline mode turns it off, whatever any config or baseline says;
-        * a config built from a file the scanned repository or an MCP client wrote
-          cannot turn it on (``config/secret_verification_trust.py`` records why),
-          including through a baseline outside the tree that the config names;
-        * a baseline inside the scanned tree cannot turn it on, whichever config
-          named it. ``detect-secrets scan`` writes the filter into every baseline it
-          generates, so a repository's ``.secrets.baseline`` normally carries it.
+        A baseline inside the scanned tree is the repository's whichever config named
+        it; ``detect-secrets scan`` writes the verification filter into every baseline
+        it generates, so a repository's ``.secrets.baseline`` normally carries it. One
+        outside the tree is the operator's when the config is, or when the operator's
+        own settings name that same ``baseline_file`` (``--config-overrides``, or a
+        workspace's default config, beside a repository's own config).
         """
-        if self._scanner_offline():
-            return "ASH is running in offline mode"
+        baseline = self.config.options.baseline_file
+        if baseline is None:
+            return None
         config = getattr(self.context, "config", None)
-        refusal = getattr(config, "_secret_verification_refusal", None)
-        if refusal:
-            return refusal
-        if filters_from_baseline and self.config.options.baseline_file is not None:
-            root = getattr(config, "_scanned_root", None) or self.context.source_dir
-            why = scanned_tree_reason(Path(self.config.options.baseline_file), root)
-            if why is not None:
-                return (
-                    f"the baseline {Path(self.config.options.baseline_file).as_posix()} "
-                    f"turns it on, and {why}"
-                )
-        return None
+        root = getattr(config, "_scanned_root", None) or self.context.source_dir
+        why = scanned_tree_reason(Path(baseline), root)
+        if why is not None:
+            return f"the baseline {Path(baseline).as_posix()} is used, and {why}"
+        if record is None or same_baseline(
+            record.operator_baseline, baseline, self.context.source_dir
+        ):
+            return None
+        return (
+            f"the baseline {Path(baseline).as_posix()} was named by a config the "
+            f"operator did not write ({record.reason})"
+        )
 
-    def _drop_refused_verification(self, *, filters_from_baseline: bool) -> None:
-        """Remove the verification filter from the settings when it may not run.
+    def _apply_settings_trust(
+        self, *, settings_from_baseline: bool, config_entries: Set[int]
+    ) -> None:
+        """Keep only what each setting's source may turn on.
 
-        See ``_verification_refusal``. The rest of the settings, the baseline's
-        exclusions included, still apply, and candidates the filter would have
-        dropped as rejected by their issuer are reported.
+        Two settings act on the scanning host rather than the scanned files, and only
+        the operator's own settings may supply them (config/secret_verification_trust.py):
+
+        * the verification filter, which sends each candidate secret, and for an AWS
+          key the key pair itself, to the service that issued it;
+        * a plugin or filter named by ``file://``, which the worker imports.
+
+        resolve_config has already removed them from the settings of a config the
+        operator did not write, and recorded what the operator's settings name. Here
+        the same rule is applied to the baseline's settings, which resolve_config
+        never sees, and offline mode turns verification off whatever any source
+        says. The rest of the
+        settings, the baseline's exclusions included, still apply, and candidates the
+        filter would have dropped as rejected by their issuer are reported.
+
+        Args:
+            settings_from_baseline: The plugins and filters were loaded from the
+                baseline, replacing the config's.
+            config_entries: ``id()`` of the filter entries that came from the config
+                rather than the baseline.
         """
         settings = self.config.options.scan_settings
-        if not any(is_verification_filter(item.path) for item in settings.filters_used):
-            return
-        refusal = self._verification_refusal(
-            filters_from_baseline=filters_from_baseline
+        record = getattr(
+            getattr(self.context, "config", None),
+            "_untrusted_detect_secrets_settings",
+            None,
         )
-        if refusal is None:
-            return
-        settings.filters_used = [
-            item
-            for item in settings.filters_used
-            if not is_verification_filter(item.path)
-        ]
-        self._plugin_log(
-            f"Not verifying candidate secrets with their issuers: {refusal}. "
-            "Verification runs only online, when the operator's own ASH config names "
-            "the filter in scanners.detect-secrets.options.scan_settings.filters_used "
-            "or names a baseline outside the scanned tree that does.",
-            level=logging.INFO if self._scanner_offline() else logging.WARNING,
+        notes: List[tuple] = []
+        if settings_from_baseline:
+            why = self._untrusted_baseline_reason(record)
+            if why is not None:
+                own = [
+                    item for item in settings.filters_used if id(item) in config_entries
+                ]
+                settings.filters_used = [
+                    item
+                    for item in settings.filters_used
+                    if id(item) not in config_entries
+                ]
+                removed = drop_untrusted_entries(
+                    settings,
+                    UntrustedDetectSecretsSettings(reason=why),
+                    keep_verification=False,
+                )
+                settings.filters_used = settings.filters_used + own
+                if removed:
+                    notes.append((removed, why))
+            if record is not None and not record.operator_verifies:
+                settings.filters_used = [
+                    item
+                    for item in settings.filters_used
+                    if id(item) not in config_entries
+                    or not is_verification_filter(item.path)
+                ]
+        offline = self._scanner_offline()
+        if offline:
+            dropped = [
+                str(item.path)
+                for item in settings.filters_used
+                if is_verification_filter(item.path)
+            ]
+            settings.filters_used = [
+                item
+                for item in settings.filters_used
+                if not is_verification_filter(item.path)
+            ]
+            if dropped:
+                notes.append((dropped, "ASH is running in offline mode"))
+        self._verification_permitted = any(
+            is_verification_filter(item.path) for item in settings.filters_used
         )
+        for removed, why in notes:
+            verification = [path for path in removed if is_verification_filter(path)]
+            files = [path for path in removed if path not in verification]
+            if verification and not self._verification_permitted:
+                self._plugin_log(
+                    f"Not verifying candidate secrets with their issuers: {why}. "
+                    "Verification runs only online, when the operator's own ASH "
+                    "config names the filter in "
+                    "scanners.detect-secrets.options.scan_settings.filters_used or "
+                    "names a baseline outside the scanned tree that does.",
+                    level=logging.INFO if offline else logging.WARNING,
+                )
+            if files:
+                self._plugin_log(
+                    f"Not loading the detect-secrets plugin or filter files "
+                    f"{', '.join(files)}: {why}. A plugin or filter named by file is "
+                    "loaded only from the operator's own ASH config, or a baseline "
+                    "outside the scanned tree that it names.",
+                    level=logging.WARNING,
+                )
 
     @staticmethod
     def _get_baseline_exclude_patterns(
@@ -1034,14 +1129,12 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
             # Verification is decided again on the settings the worker gets, because
             # offline mode is read when it is used and the settings can change
-            # after the scanner was configured. See _verification_refusal.
+            # after the scanner was configured. See _apply_settings_trust.
             verify = any(
                 is_verification_filter(item.get("path"))
                 for item in scan_settings_dict.get("filters_used", [])
             )
-            if verify and (
-                self._verification_refusal(filters_from_baseline=False) is not None
-            ):
+            if verify and (self._scanner_offline() or not self._verification_permitted):
                 scan_settings_dict["filters_used"] = [
                     item
                     for item in scan_settings_dict["filters_used"]

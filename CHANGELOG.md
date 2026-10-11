@@ -193,7 +193,15 @@
   (`select_profile` patches and override YAML, workspace `config_overrides`) cannot set
   detect-secrets' `filters_used`, `plugins_used` or `baseline_file` either: the shipped
   `runtime_overrides.denied_paths` deny them, as they deny the sandbox and
-  `ash_plugin_modules`. To keep verifying, name the filter in
+  `ash_plugin_modules`. The same rule now decides which plugin and filter files
+  detect-secrets imports: a `file://` entry in `plugins_used` or `filters_used` from a
+  repository's config, its `.secrets.baseline`, an MCP client's config or a baseline
+  any of them names is removed with a warning, wherever the file is (one outside the
+  tree is any file on the host, and the worker imports it); the operator's own entries
+  are kept. An operator's `--config-overrides` naming a baseline outside the tree
+  verifies beside a repository's own config, and an operator's verification filter is
+  kept when the tree's `.secrets.baseline` supplies the plugins and other filters. To
+  keep verifying, name the filter in
   `scanners.detect-secrets.options.scan_settings.filters_used` of your own config. See
   [Secret verification](docs/content/docs/configuration-guide.md#secret-verification).
 

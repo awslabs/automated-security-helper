@@ -1120,11 +1120,12 @@ class AshConfig(BaseModel):
     # no option value counts as the operator's.
     _operator_paths: Optional[Any] = PrivateAttr(default=None)
 
-    # Why detect-secrets may not verify secrets with this config, or None when the
-    # operator's own sources built it. Set by config/secret_verification_trust.py
-    # for a config built from a file the scanned repository or an MCP client wrote.
-    # Private, so no config file can set or clear it.
-    _secret_verification_refusal: Optional[str] = PrivateAttr(default=None)
+    # What the detect-secrets settings of this config may turn on, when a file the
+    # scanned repository or an MCP client wrote built it (an
+    # UntrustedDetectSecretsSettings from config/secret_verification_trust.py), or
+    # None when the operator's own sources built it. Private, so no config file can
+    # set or clear it.
+    _untrusted_detect_secrets_settings: Optional[Any] = PrivateAttr(default=None)
 
     # Project information
     project_name: Annotated[

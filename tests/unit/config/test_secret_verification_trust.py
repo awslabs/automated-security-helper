@@ -67,8 +67,8 @@ def repo(tmp_path) -> Path:
     return root
 
 
-def _refusal(config):
-    return config._secret_verification_refusal
+def _record(config):
+    return config._untrusted_detect_secrets_settings
 
 
 @pytest.mark.parametrize(
@@ -102,8 +102,9 @@ def test_a_repository_config_cannot_turn_verification_on(repo):
     config = resolve_config(source_dir=repo)
 
     assert not names_verification(config)
-    assert _refusal(config) is not None
-    assert ".ash.yaml" in _refusal(config)
+    assert _record(config) is not None
+    assert ".ash.yaml" in _record(config).reason
+    assert _record(config).operator_verifies is False
 
 
 def test_a_repository_config_is_refused_even_without_the_filter(repo):
@@ -112,7 +113,7 @@ def test_a_repository_config_is_refused_even_without_the_filter(repo):
 
     config = resolve_config(source_dir=repo)
 
-    assert _refusal(config) is not None
+    assert _record(config) is not None
 
 
 def test_an_mcp_client_config_cannot_turn_verification_on(repo, tmp_path):
@@ -123,7 +124,7 @@ def test_an_mcp_client_config_cannot_turn_verification_on(repo, tmp_path):
     )
 
     assert not names_verification(config)
-    assert _refusal(config) is not None
+    assert _record(config) is not None
 
 
 def test_an_operator_config_outside_the_tree_turns_it_on(repo, tmp_path):
@@ -132,13 +133,13 @@ def test_an_operator_config_outside_the_tree_turns_it_on(repo, tmp_path):
     config = resolve_config(config_path=operator, source_dir=repo)
 
     assert names_verification(config)
-    assert _refusal(config) is None
+    assert _record(config) is None
 
 
 def test_no_config_file_at_all_is_the_operators(repo):
     config = resolve_config(source_dir=repo)
 
-    assert _refusal(config) is None
+    assert _record(config) is None
 
 
 def test_config_overrides_are_the_operators(repo):
@@ -149,7 +150,7 @@ def test_config_overrides_are_the_operators(repo):
     config = resolve_config(source_dir=repo, config_overrides=[VERIFICATION_OVERRIDE])
 
     assert names_verification(config)
-    assert _refusal(config) is None
+    assert _record(config).operator_verifies is True
 
 
 def test_an_unrelated_override_does_not_turn_it_on(repo):
@@ -161,7 +162,7 @@ def test_an_unrelated_override_does_not_turn_it_on(repo):
     )
 
     assert not names_verification(config)
-    assert _refusal(config) is not None
+    assert _record(config).operator_verifies is False
 
 
 def test_the_operators_default_config_decides_for_a_projects_own_config(repo, tmp_path):
@@ -179,7 +180,7 @@ def test_the_operators_default_config_decides_for_a_projects_own_config(repo, tm
     )
 
     assert names_verification(config)
-    assert _refusal(config) is None
+    assert _record(config).operator_verifies is True
 
 
 def test_an_operator_default_config_without_the_filter_refuses_it(repo, tmp_path):
@@ -193,4 +194,73 @@ def test_an_operator_default_config_without_the_filter_refuses_it(repo, tmp_path
     )
 
     assert not names_verification(config)
-    assert _refusal(config) is not None
+    assert _record(config).operator_verifies is False
+
+
+def test_an_override_naming_a_baseline_records_it_as_the_operators(repo, tmp_path):
+    _config_file(repo / ".ash" / ".ash.yaml", None)
+    outside = tmp_path / "shared" / "verifying.baseline"
+
+    config = resolve_config(
+        source_dir=repo,
+        config_overrides=[
+            f"scanners.detect-secrets.options.baseline_file={outside.as_posix()}"
+        ],
+    )
+
+    assert _record(config).operator_baseline == outside.as_posix()
+
+
+FILE_SETTINGS = {
+    "version": "1.5.0",
+    "plugins_used": [
+        {"name": "AWSKeyDetector"},
+        {"name": "AnyPlugin", "path": "file:///opt/any/module.py"},
+    ],
+    "filters_used": [{"path": "file:///opt/any/module.py::anyfilter"}],
+}
+
+
+def _file_paths(config):
+    settings = config.scanners.detect_secrets.options.scan_settings
+    return [
+        getattr(item, "path", None)
+        for item in [*settings.plugins_used, *settings.filters_used]
+        if getattr(item, "path", None)
+    ]
+
+
+def test_a_repository_config_names_no_plugin_or_filter_file(repo):
+    _config_file(repo / ".ash" / ".ash.yaml", FILE_SETTINGS)
+
+    config = resolve_config(source_dir=repo)
+
+    assert _file_paths(config) == []
+    plugins = config.scanners.detect_secrets.options.scan_settings.plugins_used
+    assert [plugin.name for plugin in plugins] == ["AWSKeyDetector"]
+
+
+def test_a_file_the_operator_names_too_is_kept(repo, tmp_path):
+    _config_file(repo / ".ash" / ".ash.yaml", FILE_SETTINGS)
+    operator_default = _config_file(
+        tmp_path / "operator" / "default.yaml", FILE_SETTINGS
+    )
+
+    config = resolve_config(
+        config_path=repo / ".ash" / ".ash.yaml",
+        source_dir=repo,
+        trusted_config_path=operator_default,
+    )
+
+    assert _file_paths(config) == [
+        "file:///opt/any/module.py",
+        "file:///opt/any/module.py::anyfilter",
+    ]
+
+
+def test_an_operator_config_keeps_its_plugin_and_filter_files(repo, tmp_path):
+    operator = _config_file(tmp_path / "operator" / "ash.yaml", FILE_SETTINGS)
+
+    config = resolve_config(config_path=operator, source_dir=repo)
+
+    assert len(_file_paths(config)) == 2

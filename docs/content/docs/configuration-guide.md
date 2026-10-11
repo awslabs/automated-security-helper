@@ -798,14 +798,25 @@ asks for it, and never in offline mode:
   MCP client's runtime overrides cannot set these detect-secrets settings: the shipped
   `runtime_overrides.denied_paths` deny them, whatever `allowed_paths` says. It
   can be in `scan_settings.filters_used`, or in a `baseline_file` outside the scanned
-  tree that such a config names. `scan_settings` replaces the baseline's own settings,
-  so list the plugins and other filters you want there as well.
+  tree that the operator names, including through `--config-overrides` beside a
+  repository's own config.
+- When `scan_settings` sets `plugins_used` or `version`, it replaces the baseline's
+  plugins and filters. Otherwise the baseline's are used, and a verification filter
+  the operator's `scan_settings.filters_used` names is kept beside them.
 - A `.secrets.baseline` inside the scanned tree, a config file the scanned repository
   holds (`.ash/.ash.yaml` and the other discovered names, including a workspace
   project's own config), and a config an MCP client supplied cannot turn verification
   on, whatever baseline they name. ASH removes the filter, keeps the rest of the
   settings, and logs a warning that names the source.
 - Under `--offline` (or `ASH_OFFLINE`) nothing turns it on.
+
+The same sources decide which plugin and filter files detect-secrets may import. A
+`plugins_used` or `filters_used` entry named by `file://` path is a Python file the
+detect-secrets worker loads, so only the operator's own configuration, or a baseline
+outside the scanned tree that the operator names, may name one. A `file://` entry in a
+repository's config or `.secrets.baseline`, or in a baseline such a config names, is
+removed with a warning, wherever the file is; the built-in detectors it lists by name
+still run.
 
 When verification is off, candidates the filter would have dropped are reported, so a
 repository whose own baseline used to verify can show more findings. The
