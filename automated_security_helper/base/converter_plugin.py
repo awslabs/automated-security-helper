@@ -103,6 +103,7 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         refusal: TreeInputRefused,
         member: str | None = None,
         limit: str | None = None,
+        scan_incomplete: bool = False,
     ) -> None:
         """Warn once about a refused input and keep it for the results row.
 
@@ -113,6 +114,9 @@ class ConverterPluginBase(PluginBase, Generic[T]):
             limit: The name of the extraction-limit option the input exceeded, when
                 that is why it was refused. Such a refusal leaves the scan
                 incomplete; see ``RefusedInputInfo.limit``.
+            scan_incomplete: The refusal left the input's whole content unscanned
+                for another reason, such as an archive that could not be read. Set
+                as well whenever ``limit`` is.
         """
         # The names come from the scanned tree, so they are logged as data.
         if member is None:
@@ -128,7 +132,11 @@ class ConverterPluginBase(PluginBase, Generic[T]):
             )
         self.refused_inputs.append(
             RefusedInputInfo(
-                path=refusal.path, member=member, reason=refusal.reason, limit=limit
+                path=refusal.path,
+                member=member,
+                reason=refusal.reason,
+                limit=limit,
+                scan_incomplete=scan_incomplete or limit is not None,
             )
         )
 

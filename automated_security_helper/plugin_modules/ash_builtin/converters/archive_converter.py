@@ -4,6 +4,7 @@
 """Module containing the ArchiveConverter implementation."""
 
 import os
+import shutil
 import stat
 from pathlib import Path, PurePosixPath
 import tarfile
@@ -129,6 +130,14 @@ class _ExtractionLimitExceeded(Exception):
     def __init__(self, option: str, reason: str):
         super().__init__(reason)
         self.option = option
+        self.reason = reason
+
+
+class _UnreadableArchive(Exception):
+    """An archive the converter cannot read, with why, for its refusal record."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
         self.reason = reason
 
 
@@ -485,6 +494,10 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
         for archive_file in archive_files:
+            # Whether this iteration made the archive's target directory, so a
+            # failure part way through removes what it wrote and nothing else.
+            created_target: Optional[Path] = None
+            archive_display = relative_display(archive_file, self.context.source_dir)
             try:
                 skip_item = False
                 # Skip directories
@@ -506,10 +519,6 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             break
                 if skip_item:
                     continue
-
-                archive_display = relative_display(
-                    archive_file, self.context.source_dir
-                )
 
                 short_archive_file = get_shortest_name(archive_file)
                 normalized_archive_file = get_normalized_filename(short_archive_file)
@@ -546,6 +555,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             zip_members = zip_ref.infolist()
                             for info in zip_members:
                                 budget.admit(info.filename, info.file_size)
+                            if not target_path.exists():
+                                created_target = target_path
                             target_path.mkdir(parents=True, exist_ok=True)
                             # zipfile stops each member's output at the size its
                             # entry declares, so the declared sizes admitted above
@@ -565,6 +576,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             fileobj=archive_handle, mode="r:*", encoding="utf-8"
                         ) as tar_ref:
                             tar_members = _tar_members_within(tar_ref, budget)
+                            if not target_path.exists():
+                                created_target = target_path
                             target_path.mkdir(parents=True, exist_ok=True)
                             # Both paths below write no more than each member
                             # declares: _copy_tar_members copies at most that, and
@@ -593,14 +606,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                                 "not an archive"
                             )
                             continue
-                        # Named as an archive and not one zipfile or tarfile can
-                        # read: a corrupt or truncated archive, so lost coverage
-                        # rather than a file to pass over in the debug log.
-                        self.record_failed_input(
-                            archive_file,
-                            "it is not a zip or tar archive Python can read",
+                        raise _UnreadableArchive(
+                            "it is not a zip or tar archive that can be read"
                         )
-                        continue
 
                 # Add the extracted directory to results
                 results.append(target_path)
@@ -615,9 +623,20 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     limit=exceeded.option,
                 )
             except Exception as e:
-                # Recorded, not only logged: the completeness gate reads
-                # failed_inputs, and an archive that could not be extracted is
-                # coverage lost.
-                self.record_failed_input(archive_file, f"{type(e).__name__}: {e}")
+                # Named for the converter, a .zip, .tar or .gz it could not read: a
+                # bad CRC, a truncated or damaged stream, a gzip-compressed file
+                # that is not a tarball, an empty file. None of it is scanned, and
+                # whatever was written before the failure is removed, so the
+                # scanners do not read a partial extraction as the archive.
+                if created_target is not None:
+                    shutil.rmtree(created_target, ignore_errors=True)
+                reason = (
+                    e.reason
+                    if isinstance(e, _UnreadableArchive)
+                    else f"it could not be read as an archive ({type(e).__name__}: {e})"
+                )
+                self.record_refused_input(
+                    TreeInputRefused(archive_display, reason), scan_incomplete=True
+                )
 
         return results

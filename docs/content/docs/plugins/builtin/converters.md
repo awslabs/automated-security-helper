@@ -228,13 +228,23 @@ tree, the archive member's name where there is one, and the reason:
   {"path": "notebooks/report.ipynb", "member": null, "reason": "it is a symbolic link"},
   {"path": "dist/app.tar", "member": "../setup.py", "reason": "its path contains a '..' component"},
   {"path": "dist/app.zip", "member": "vendor/lib.tar.gz", "reason": "it is named as an archive (.zip, .tar or .gz), and an archive inside an archive is not extracted, so its contents are not scanned"},
-  {"path": "data/dump.zip", "member": null, "reason": "its members declare more than 1073741824 bytes, the max_total_bytes extraction limit", "limit": "max_total_bytes"}
+  {"path": "data/dump.zip", "member": null, "reason": "its members declare more than 1073741824 bytes, the max_total_bytes extraction limit", "limit": "max_total_bytes", "scan_incomplete": true},
+  {"path": "dist/old.tar", "member": null, "reason": "it could not be read as an archive (ReadError: unexpected end of data)", "scan_incomplete": true}
 ]
 ```
 
-`limit` is present only for an archive refused for an extraction limit, which is the
-one kind of refusal that leaves the scan incomplete. The others are reported in the
-summaries and reports as well, and do not change the exit code.
+`limit` is present only for an archive refused for an extraction limit. That record
+and the record of an archive that could not be read carry `"scan_incomplete": true`:
+those are the refusals that leave a whole archive unscanned, and the completeness
+gate counts them. The others are reported in the summaries and reports as well, and
+do not change the exit code.
+
+An archive that zipfile and tarfile cannot read is refused whole: a bad CRC, a
+truncated or damaged stream, a `.gz` that is a single compressed file rather than a
+tarball (such as `data.json.gz`), or an empty file. Anything already written from it
+is removed, so the scanners never read a partial extraction as the archive, and the
+scan exits 1 with `fail_on_incomplete_scanners` on. Exclude such a file with
+`global_settings.ignore_paths` if its contents need not be scanned.
 
 To have a skipped file converted, replace the link with the file itself. To have a
 nested archive's contents scanned, extract it into the tree before the scan.
@@ -286,7 +296,7 @@ ash analysis.ipynb --scanners bandit,detect-secrets
 ```yaml
 converters:
   archive:
-    enabled: true                # An archive that fails to extract is a failed input
+    enabled: true                # An archive that cannot be read is refused and fails the completeness gate
 ```
 
 **Large archives**: an archive over an extraction limit is refused and the scan exits

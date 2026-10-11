@@ -352,6 +352,21 @@ class RefusedInputInfo(BaseModel):
             ),
         ),
     ] = None
+    # Left out of a dump when False, as limit is when None.
+    scan_incomplete: Annotated[
+        bool,
+        Field(
+            default=False,
+            exclude_if=lambda value: value is False,
+            description=(
+                "True when refusing the input left its whole content unscanned: an "
+                "archive over an extraction limit (limit names it) or one that "
+                "could not be read. The completeness gate counts these as "
+                "incomplete conversion; the other refusals, of one link or member "
+                "ASH does not read by design, it does not."
+            ),
+        ),
+    ] = False
 
 
 class FailedInputInfo(BaseModel):

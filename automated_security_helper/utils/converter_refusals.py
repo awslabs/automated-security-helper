@@ -11,8 +11,10 @@ records reached ``ash.log`` and ``ash_aggregated_results.json`` only, so a reade
 the summary or of a SARIF or flat JSON report could not tell that part of the tree
 went unscanned.
 
-Every record is reported. One that names a ``limit`` is marked as leaving the scan
-incomplete: the archive's contents were not scanned at all, and the completeness
+Every record is reported. One with ``scan_incomplete`` set (an archive over an
+extraction limit, which ``limit`` names, or one that could not be read) is marked
+as leaving the scan incomplete: the archive's contents were not scanned at all, and
+the completeness
 gate (``run_ash_scan.incomplete_converters``) counts it, so under
 ``fail_on_incomplete_scanners`` the scan exits 1. The others refuse one input or
 member that ASH does not read by design, and are reported without failing the
@@ -58,10 +60,12 @@ class ConverterRefusal:
     reason: str
     limit: Optional[str] = None
 
+    unreadable: bool = False
+
     @property
     def scan_incomplete(self) -> bool:
         """Whether this refusal is counted by the completeness gate."""
-        return bool(self.limit)
+        return bool(self.limit) or self.unreadable
 
     def subject(self) -> str:
         if self.member:
@@ -98,6 +102,8 @@ def converter_refusals(model: "AshAggregatedResults") -> List[ConverterRefusal]:
                     member=getattr(item, "member", None),
                     reason=str(getattr(item, "reason", "") or ""),
                     limit=getattr(item, "limit", None) or None,
+                    unreadable=bool(getattr(item, "scan_incomplete", False))
+                    and not getattr(item, "limit", None),
                 )
             )
     refusals.sort(

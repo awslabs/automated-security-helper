@@ -123,7 +123,8 @@ reporters:
 The report also carries `converter_refusals`, always present: every input a converter
 did not read, as `{"converter", "path", "member", "reason", "limit",
 "scan_incomplete"}`. `scan_incomplete` is true for an archive refused for an
-extraction limit, which fails the completeness gate; see
+extraction limit or because it could not be read, which fails the completeness
+gate; see
 [Inputs a converter does not read](converters.md#inputs-a-converter-does-not-read).
 
 **Use Cases**:

@@ -176,6 +176,14 @@
   `incomplete_converters`, in the unified results, the workspace reports and the MCP
   workspace tools' project coverage.
 
+- **An archive the converter cannot read makes the scan incomplete.** A `.zip`,
+  `.tar` or `.gz` that zipfile and tarfile cannot read (a bad CRC, a truncated or
+  damaged stream, a `.gz` that is one compressed file rather than a tarball, an empty
+  file) used to leave a log line, and a zip that failed part way left its first
+  members on disk, where the scanners read them. It is now refused whole, with
+  `scan_incomplete` in its `refused_inputs` record; anything written from it is
+  removed; and with `fail_on_incomplete_scanners` on the scan exits 1 naming it.
+
 - **An archive inside an archive is recorded as not scanned.** Extraction is one level
   deep, as before, but a member with a `.zip`, `.tar` or `.gz` suffix used to be left
   out without a trace. It is now a refused member of its archive, with a warning, and

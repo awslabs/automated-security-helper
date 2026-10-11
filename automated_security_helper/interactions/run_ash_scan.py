@@ -626,17 +626,30 @@ def _failed_inputs_reason(failed_inputs: Sequence[Any], shown: int = 5) -> str:
     return f"could not convert {len(paths)} {noun}: {named}"
 
 
+def _leaves_scan_incomplete(item: Any) -> bool:
+    """Whether a refused input's record says its whole content went unscanned."""
+    return bool(getattr(item, "scan_incomplete", False) or getattr(item, "limit", None))
+
+
 def _limit_refusals_reason(refused_inputs: Sequence[Any], shown: int = 5) -> str:
-    """``refused 1 input over an extraction limit: a.zip (max_total_bytes)``."""
+    """``refused 1 input over an extraction limit: a.zip (max_total_bytes)``.
+
+    An input refused because it could not be read is named with ``(unreadable)``,
+    and the sentence then says the inputs were not extracted rather than that they
+    were over a limit.
+    """
+    limits = [getattr(item, "limit", None) for item in refused_inputs]
     named = [
-        f"{getattr(item, 'path', '?')} ({getattr(item, 'limit', '?')})"
-        for item in refused_inputs
+        f"{getattr(item, 'path', '?')} ({limit or 'unreadable'})"
+        for item, limit in zip(refused_inputs, limits)
     ]
     listed = ", ".join(named[:shown])
     if len(named) > shown:
         listed += f" and {len(named) - shown} more"
     noun = "input" if len(named) == 1 else "inputs"
-    return f"refused {len(named)} {noun} over an extraction limit: {listed}"
+    if all(limits):
+        return f"refused {len(named)} {noun} over an extraction limit: {listed}"
+    return f"refused {len(named)} {noun} that could not be extracted: {listed}"
 
 
 def incomplete_converters(
@@ -659,12 +672,13 @@ def incomplete_converters(
        could not be converted: nbconvert exited non-zero on a notebook, or an
        archive could not be extracted. Each one is a file the scanners never saw in
        converted form, which is the same loss as condition 1 at a smaller scale.
-    3. A ``refused_inputs`` entry names a ``limit`` -- an archive over one of the
-       archive converter's extraction limits, which is refused whole, so none of
-       its contents reached the scanners. A refusal without a limit (a symlinked
-       input, a link or ``..`` member, a nested archive) does not count: those
-       refuse one input or member that is not to be read at all, and the scan
-       reports them without failing on them.
+    3. A ``refused_inputs`` entry has ``scan_incomplete`` set -- an archive over
+       one of the archive converter's extraction limits (``limit`` names it) or
+       one that could not be read, refused whole, so none of its contents reached
+       the scanners. A refusal without it (a symlinked input, a link or ``..``
+       member, a nested archive) does not count: those refuse one input or member
+       that is not to be read at all, and the scan reports them without failing
+       on them.
     4. ``dependencies_satisfied`` is False -- its external tool was not available.
 
     ``excluded`` is checked first and wins over all of them. It is the converter-side
@@ -697,7 +711,7 @@ def incomplete_converters(
         over_limit = [
             item
             for item in getattr(row, "refused_inputs", None) or []
-            if getattr(item, "limit", None)
+            if _leaves_scan_incomplete(item)
         ]
         if failure:
             listed.append((name, str(failure)))

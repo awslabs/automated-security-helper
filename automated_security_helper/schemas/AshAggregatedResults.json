@@ -13363,6 +13363,12 @@
           "description": "Why the input was not read.",
           "title": "Reason",
           "type": "string"
+        },
+        "scan_incomplete": {
+          "default": false,
+          "description": "True when refusing the input left its whole content unscanned: an archive over an extraction limit (limit names it) or one that could not be read. The completeness gate counts these as incomplete conversion; the other refusals, of one link or member ASH does not read by design, it does not.",
+          "title": "Scan Incomplete",
+          "type": "boolean"
         }
       },
       "required": [
