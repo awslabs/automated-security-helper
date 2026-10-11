@@ -81,10 +81,15 @@ def test_process_config_options_with_config_files(
     )
     scanner._process_config_options()
 
-    # Check that the correct config argument was added
     config_args_keys = [arg.key for arg in scanner.args.extra_args]
-    # The config args are now in the format "--configfile" or "--ini"
-    assert any(arg.startswith(config_arg) for arg in config_args_keys)
+    if config_arg == "--ini":
+        # The INI file is passed for the scan only (BanditScanner._execute_scan),
+        # so it is recorded here rather than added to extra_args.
+        assert scanner._ini_file is not None
+        assert Path(scanner._ini_file).resolve() == config_path.resolve()
+        assert "--ini" not in config_args_keys
+    else:
+        assert any(arg.startswith(config_arg) for arg in config_args_keys)
 
 
 def test_process_config_options_exclusions(test_plugin_context):
