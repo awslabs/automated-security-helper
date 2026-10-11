@@ -130,6 +130,13 @@
   package itself or from the installer's `direct_url.json`; an installation with no
   such tree (for example, one from a wheel file) is refused with what to do instead.
   See [Which Dockerfile ASH builds](docs/content/docs/building-your-own-image.md#which-dockerfile-ash-builds).
+- **Container mode always mounts the source directory read-only.** `ash --mode
+  container`, `./ash` and `Invoke-ASH` used to mount `/src` read-write whenever the
+  output directory was inside the source directory, which the default
+  `.ash/ash_output` is, and the test was a string prefix, so a sibling such as
+  `<src>-out` counted as inside too (`Invoke-ASH` matched a substring anywhere in the
+  path). The output directory has its own mount at `/out`, so `/src` is now read-only
+  in every case. See [Running a scan in a container](docs/content/docs/cli-reference.md#running-a-scan-in-a-container).
 - **A repository-written config file can no longer choose what ASH installs,
   imports or hands a scanner as its own configuration.** It applies to a discovered
   `.ash/.ash.yaml`, a `--config` path, an `extends` base, or `ASH_CONFIG`, when the

@@ -184,6 +184,20 @@ ash [options]
 | `--dry-run`                   | Print the resolved workspace plan and exit without scanning | `False`           |                         |
 | `--allow-in-tree-tools`       | Let ASH start tools found inside the scanned directory; see Common Parameters | `False` | `ASH_ALLOW_IN_TREE_TOOLS` |
 
+### Running a scan in a container
+
+`--mode container`, the `./ash` wrapper and `Invoke-ASH` in `utils/ash_helpers.ps1` run
+the scan inside the ASH image with these bind mounts:
+
+| Mount  | Host path        | Access     |
+|--------|------------------|------------|
+| `/src` | `--source-dir`   | read-only  |
+| `/out` | `--output-dir`   | read-write |
+
+The source is mounted read-only wherever the output directory is, including the default
+`.ash/ash_output` inside the source directory: the scan inside the container writes only
+to `/out`.
+
 ### Workspace Mode
 
 A [VS Code workspace file](https://code.visualstudio.com/docs/editor/workspaces) lists several project folders. Passing it to `--workspace` tells ASH to treat each folder as its own project, with its own configuration, rather than as one directory tree:

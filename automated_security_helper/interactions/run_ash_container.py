@@ -900,11 +900,11 @@ def _assemble_run_command(
         ]
     )
 
-    # Source dir mount
-    mount_source = f"type=bind,source={source_dir},destination=/src"
-    if not str(output_dir).startswith(str(source_dir)):
-        mount_source += ",readonly"
-    cmd.extend(["--mount", mount_source])
+    # Source dir mount: read-only wherever the output directory is. The output has
+    # its own mount at /out and the inner scan is told to write there, so nothing
+    # has to write through /src -- also when the host output directory is inside
+    # the source tree, which is the default (<source>/.ash/ash_output).
+    cmd.extend(["--mount", f"type=bind,source={source_dir},destination=/src,readonly"])
 
     # Output dir mount
     cmd.extend(["--mount", f"type=bind,source={output_dir},destination=/out"])

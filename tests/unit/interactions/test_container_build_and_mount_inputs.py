@@ -35,7 +35,14 @@ from typing import Any, Dict, List, Optional
 import pytest
 from typer.testing import CliRunner
 
+from automated_security_helper.core.enums import (
+    ExecutionPhase,
+    ExecutionStrategy,
+)
 from automated_security_helper.interactions import run_ash_container as rac
+from automated_security_helper.interactions.run_ash_container import (
+    _assemble_run_command,
+)
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
@@ -336,3 +343,147 @@ class TestTheImageIsBuiltFromAshsOwnDockerfile:
             assert not _within(build[-1], project)
         if not builds:
             assert outcome["returncode"] != 0
+
+
+# ---------------------------------------------------------------------------
+# The source mount
+# ---------------------------------------------------------------------------
+
+
+def _assemble(source_dir: Path, output_dir: Path, **overrides: Any) -> List[str]:
+    kwargs: Dict[str, Any] = {
+        "oci_command_prefix": [],
+        "resolved_oci_runner": "/usr/bin/docker",
+        "image_name": "automated-security-helper:non-root",
+        "source_dir": source_dir,
+        "output_dir": output_dir,
+        "offline": False,
+        "debug": False,
+        "color": False,
+        "quiet": True,
+        "progress": False,
+        "verbose": False,
+        "simple": True,
+        "python_based_plugins_only": False,
+        "cleanup": False,
+        "inspect": False,
+        "fail_on_findings": None,
+        "phases": [ExecutionPhase.SCAN],
+        "scanners": [],
+        "exclude_scanners": [],
+        "output_formats": [],
+        "config": None,
+        "config_overrides": [],
+        "existing_results": None,
+        "ash_plugin_modules": [],
+        "strategy": ExecutionStrategy.PARALLEL,
+        "ctx": None,
+    }
+    kwargs.update(overrides)
+    return _assemble_run_command(**kwargs)
+
+
+class TestTheSourceIsMountedReadOnly:
+    @pytest.mark.parametrize(
+        "output_relative",
+        [
+            pytest.param(Path("project/.ash/ash_output"), id="default-output-inside"),
+            pytest.param(Path("project/reports"), id="output-inside"),
+            pytest.param(Path("project-out"), id="sibling-sharing-the-prefix"),
+        ],
+    )
+    def test_the_run_command_mounts_the_source_read_only(
+        self, output_relative, tmp_path
+    ):
+        source = (tmp_path / "project").resolve()
+        output = (tmp_path / output_relative).resolve()
+
+        cmd = _assemble(source, output)
+
+        src = _mount(cmd, "/src")
+        assert src["source"] == str(source)
+        assert "readonly" in src, f"/src is writable: {src}"
+        assert _mount(cmd, "/out")["source"] == str(output)
+
+    def test_the_run_command_mounts_the_source_read_only_with_output_outside(
+        self, tmp_path
+    ):
+        """Control: an output directory outside the source already gets a read-only /src."""
+        source = (tmp_path / "project").resolve()
+        output = (tmp_path / "elsewhere" / "out").resolve()
+
+        cmd = _assemble(source, output)
+
+        assert "readonly" in _mount(cmd, "/src")
+        out = _mount(cmd, "/out")
+        assert out["source"] == str(output)
+        assert "readonly" not in out
+
+    def test_workspace_mode_mounts_the_workspace_root_read_only(self, tmp_path):
+        root = (tmp_path / "workspace").resolve()
+        output = root / ".ash" / "ash_output"
+
+        cmd = _assemble(root, output, workspace_relative_file="dev.code-workspace")
+
+        assert "readonly" in _mount(cmd, "/src"), "/src is writable in workspace mode"
+
+    def test_run_ash_container_defaults_leave_the_source_read_only(
+        self, commands, monkeypatch, tmp_path
+    ):
+        """No output directory given: the default is inside the source."""
+        project = _project(tmp_path / "project")
+        monkeypatch.chdir(project)
+
+        rac.run_ash_container(source_dir=str(project), build=False, run=True)
+
+        run = _only(commands, "run")
+        assert "readonly" in _mount(run, "/src"), "/src is writable by default"
+
+    def test_a_symlinked_source_is_mounted_read_only(
+        self, commands, monkeypatch, tmp_path
+    ):
+        project = _project(tmp_path / "project")
+        link = tmp_path / "link"
+        link.symlink_to(project, target_is_directory=True)
+        monkeypatch.chdir(tmp_path)
+
+        rac.run_ash_container(
+            source_dir=str(link),
+            output_dir=str(link / "out"),
+            build=False,
+            run=True,
+        )
+
+        run = _only(commands, "run")
+        assert "readonly" in _mount(run, "/src")
+
+    @pytest.mark.parametrize(
+        "output_args",
+        [
+            pytest.param([], id="cli-default-output"),
+            pytest.param(["--output-dir", "src"], id="output-equal-to-source"),
+        ],
+    )
+    def test_the_cli_mounts_the_source_read_only(
+        self, output_args, commands, monkeypatch, tmp_path
+    ):
+        project = _project(tmp_path / "project")
+        monkeypatch.chdir(project)
+
+        _invoke_cli(
+            [
+                "scan",
+                "--mode",
+                "container",
+                "--no-progress",
+                "--no-build",
+                "--source-dir",
+                "src",
+                *output_args,
+            ]
+        )
+
+        run = _only(commands, "run")
+        src = _mount(run, "/src")
+        assert Path(str(src["source"])).resolve() == (project / "src").resolve()
+        assert "readonly" in src, f"/src is writable: {src}"

@@ -385,15 +385,10 @@ function Invoke-ASH {
                         "-e", "ASH_OUTPUT_FORMAT=`"$OutputFormat`""
                     )
 
-                    # Add source directory mount
-                    $mountSourceDir = "--mount `"type=bind,source=$sourceDirFull,destination=/src"
-
-                    # Make source dir readonly if output dir is not a subdirectory
-                    if ($outputDirFull -notmatch [regex]::Escape($sourceDirFull)) {
-                        $mountSourceDir += ",readonly"
-                    }
-                    $mountSourceDir += '"'
-                    $runCmd += $mountSourceDir
+                    # Add source directory mount, read-only wherever the output
+                    # directory is: the output has its own mount at /out and the scan
+                    # inside writes there, also when OutputDir is inside SourceDir.
+                    $runCmd += "--mount `"type=bind,source=$sourceDirFull,destination=/src,readonly`""
 
                     # Add output directory mount
                     $runCmd += "--mount `"type=bind,source=$outputDirFull,destination=/out`""

@@ -235,16 +235,11 @@ else
     # Run the image if the --no-run flag is not set
     RC=0
     if [ "${NO_RUN}" = "NO" ]; then
+      # The source dir is mounted read-only wherever the output dir is. The output
+      # dir has its own mount at /out and the scan inside writes there, so nothing
+      # writes through /src, also when OUTPUT_DIR is inside SOURCE_DIR (the default
+      # .ash/ash_output is).
 
-
-      # Only make source dir readonly if output dir is not a subdirectory of source
-      # dir, otherwise writing to the output dir will fail due to attempting to write
-      # to a readonly fs.
-      SOURCE_READONLY=""
-      if [[ "${OUTPUT_DIR}" != "${SOURCE_DIR}"* ]]; then
-        # add readonly source mount when --output-dir is outside source dir
-        SOURCE_READONLY=",readonly"
-      fi
       # Capture terminal size if tput is available so the container experience can be improved
       if command -v tput >/dev/null 2>&1 && [ -t 1 ]; then
         DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -e COLUMNS=$(tput cols) -e LINES=$(tput lines)"
@@ -259,7 +254,7 @@ else
           -e "ASH_ACTUAL_OUTPUT_DIR=${OUTPUT_DIR}" \
           -e "ASH_DEBUG=${DEBUG}" \
           -e "ASH_OUTPUT_FORMAT=${OUTPUT_FORMAT}" \
-          --mount source="${SOURCE_DIR}",type=bind,destination=/src${SOURCE_READONLY} \
+          --mount source="${SOURCE_DIR}",type=bind,destination=/src,readonly \
           --mount source="${OUTPUT_DIR}",type=bind,destination=/out \
           ${MOUNT_OUTPUT_DIR} \
           ${DOCKER_RUN_EXTRA_ARGS} \
