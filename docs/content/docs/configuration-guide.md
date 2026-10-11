@@ -893,8 +893,10 @@ asks for it, and never in offline mode:
 - The filter counts when the operator's own configuration names it: a config file
   outside the scanned directory and every git checkout (`--config` or `ASH_CONFIG`),
   `--config-overrides`, or for the MCP server the profile the session is bound to. An
-  MCP client's runtime overrides cannot set these detect-secrets settings: the shipped
-  `runtime_overrides.denied_paths` deny them, whatever `allowed_paths` says. It
+  MCP client's runtime overrides cannot set these detect-secrets settings: they are
+  always in `runtime_overrides.denied_paths`, whatever `allowed_paths` says. A profile
+  that sets its own `denied_paths` adds to them and cannot remove them, as for the
+  scanner sandbox and `ash_plugin_modules`. It
   can be in `scan_settings.filters_used`, or in a `baseline_file` outside the scanned
   tree that the operator names, including through `--config-overrides` beside a
   repository's own config.

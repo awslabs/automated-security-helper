@@ -1251,6 +1251,16 @@
 
 ### Fixes
 
+- **A profile's own `runtime_overrides.denied_paths` no longer drops the shipped
+  denials that trust depends on.** A list set in a profile replaced the default list
+  whole, so an operator who added one entry let MCP clients turn on detect-secrets
+  verification (the client's override is then replayed as the operator's setting, and
+  a candidate secret found in the project was sent to its issuer), import a plugin or
+  filter from a file, switch off the scanner sandbox, or load `ash_plugin_modules`.
+  Those entries (`ALWAYS_DENIED_PATHS` in `config/ash_config.py`) are now added to any
+  list, so a profile can add denials but not remove them. A root-pointer replace is
+  now always refused, even with an empty list, since it writes every one of them.
+
 - **snyk-code on a tree with no file Snyk supports is SKIPPED, not ERROR.**
   `snyk code test` exits 3 when the target holds no file it reads ("no supported
   projects detected"), for example a Terraform-only tree. scan() raised on every

@@ -596,14 +596,18 @@ class TestRootPointerRefused:
             )
         assert "root pointer" in excinfo.value.rule
 
-    def test_root_replace_refused_for_the_archive_limits_with_an_empty_denylist(
-        self,
-    ) -> None:
-        """Naming the root in `allowed_paths` with an empty denylist still leaves
-        ALWAYS_DENIED_RUNTIME_PATHS: a whole-config swap writes the archive
-        extraction limits, which no runtime override may set, so it is refused
-        and names the limit. Before those were always denied, this swap was
-        allowed; a field below the root (`/project_name`) still is.
+    def test_root_replace_refused_even_with_an_empty_denylist(self) -> None:
+        """Naming the root in `allowed_paths` clears the structural refusal, but an
+        empty `denied_paths` no longer leaves nothing to constrain: the entries ASH
+        always denies (ALWAYS_DENIED_PATHS: the sandbox, ash_plugin_modules, the
+        detect-secrets verification settings) are added to any list, and a root
+        write carries every one of them. So a whole-config swap is refused. (The
+        archive extraction limits, ALWAYS_DENIED_RUNTIME_PATHS, are refused on top
+        of the list as well; test_archive_limits_always_denied.py covers them.)
+        A field below the root (`/project_name`) is still allowed.
+
+        This test used to assert the swap succeeded with `denied_paths=[]`, which
+        was the case the always-denied entries exist to close.
         """
         base = _base_config()
         allowlist = RuntimeOverridesConfig(
@@ -613,13 +617,12 @@ class TestRootPointerRefused:
         )
         swapped = base.model_dump(mode="json", by_alias=False)
         swapped["project_name"] = "swapped"
-        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+        with pytest.raises(RuntimePatchDeniedError, match="/sandbox"):
             apply_runtime_patch(
                 base,
                 [{"op": "replace", "path": "", "value": swapped}],
                 allowlist=allowlist,
             )
-        assert "/converters/archive/options/max_members" in excinfo.value.rule
         renamed = apply_runtime_patch(
             base,
             [{"op": "replace", "path": "/project_name", "value": "swapped"}],

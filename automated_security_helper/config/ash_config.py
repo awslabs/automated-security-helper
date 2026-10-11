@@ -641,6 +641,28 @@ ALWAYS_DENIED_RUNTIME_PATHS: Tuple[str, ...] = tuple(
     f"/converters/archive/options/{name}" for name in EXTRACTION_LIMIT_OPTIONS
 )
 
+#: Runtime-override denials no profile can remove: RuntimeOverridesConfig adds any of
+#: them its denied_paths leaves out. A client override that gets past the gate is
+#: replayed as the operator's own setting (resolve_config, the session's profile), so
+#: these are the settings that trust depends on. The scanner sandbox. Plugin modules,
+#: imported into ASH's own process. The detect-secrets settings that turn on secret
+#: verification (each candidate secret is sent to its issuer) or import a plugin or
+#: filter from a file, and the baseline that can carry both.
+#:
+#: A floor rather than the default alone: denied_paths was replaced whole by a
+#: profile's own list, so adding one entry dropped every shipped one.
+ALWAYS_DENIED_PATHS = (
+    "/sandbox",
+    "/sandbox/**",
+    "/ash_plugin_modules",
+    "/ash_plugin_modules/**",
+    "/scanners/detect-secrets/options/scan_settings/filters_used",
+    "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+    "/scanners/detect-secrets/options/scan_settings/plugins_used",
+    "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+    "/scanners/detect-secrets/options/baseline_file",
+)
+
 
 class RuntimeOverridesConfig(BaseModel):
     """Allowlist + denylist controlling which JSON-Patch ops the MCP server accepts.
@@ -675,7 +697,11 @@ class RuntimeOverridesConfig(BaseModel):
         Field(
             description=(
                 "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). "
-                "Defaults block the most dangerous fields on the real AshConfig schema."
+                "Defaults block the most dangerous fields on the real AshConfig schema. "
+                "A list set here replaces the defaults, except for the entries ASH "
+                "always denies (the scanner sandbox, ash_plugin_modules, and the "
+                "detect-secrets verification, plugin and baseline settings): those "
+                "are added to any list."
             )
         ),
     ] = [
@@ -733,6 +759,20 @@ class RuntimeOverridesConfig(BaseModel):
             )
         ),
     ] = {}
+
+    @model_validator(mode="after")
+    def _keep_the_always_denied_paths(self) -> "RuntimeOverridesConfig":
+        """Add each ALWAYS_DENIED_PATHS entry the list leaves out, at its end.
+
+        Assigned only when one is missing, so a default policy (which holds them all)
+        is the shipped list unchanged and keeps its serialized shape.
+        """
+        missing = [
+            entry for entry in ALWAYS_DENIED_PATHS if entry not in self.denied_paths
+        ]
+        if missing:
+            self.denied_paths = [*self.denied_paths, *missing]
+        return self
 
 
 class SandboxConfig(BaseModel):

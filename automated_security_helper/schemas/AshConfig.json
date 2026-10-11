@@ -3231,7 +3231,7 @@
             "/converters/archive/options/max_total_bytes",
             "/converters/archive/options/max_compression_ratio"
           ],
-          "description": "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). Defaults block the most dangerous fields on the real AshConfig schema.",
+          "description": "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). Defaults block the most dangerous fields on the real AshConfig schema. A list set here replaces the defaults, except for the entries ASH always denies (the scanner sandbox, ash_plugin_modules, and the detect-secrets verification, plugin and baseline settings): those are added to any list.",
           "items": {
             "type": "string"
           },
