@@ -267,6 +267,10 @@ class SessionBoundary:
             return
         if self._sweep_lock is None:
             self._sweep_lock = anyio.Lock()
+        if self._sweep_lock.locked():
+            # Another request is sweeping; only the request that started the
+            # sweep waits for it.
+            return
         async with self._sweep_lock:
             if time.monotonic() < self._next_sweep:
                 return

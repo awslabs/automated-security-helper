@@ -155,3 +155,66 @@ def test_an_unusable_ttl_is_refused_at_startup(monkeypatch, kwargs) -> None:
         mcp_command(ctx=_Ctx(), host="127.0.0.1", quiet=True, **kwargs)
 
     assert excinfo.value.exit_code == 3
+
+
+async def _answer_ok(scope, receive, send) -> None:
+    await send({"type": "http.response.start", "status": 200, "headers": []})
+    await send({"type": "http.response.body", "body": b""})
+
+
+async def _request(boundary, answered: list, name: str) -> None:
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message) -> None:
+        if message["type"] == "http.response.body":
+            answered.append(name)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/mcp",
+        "headers": [],
+        "query_string": b"",
+    }
+    await boundary(scope, receive, send)
+
+
+def test_a_request_does_not_wait_for_another_requests_sweep(monkeypatch) -> None:
+    """Only the request that starts a sweep waits for it."""
+    import threading
+
+    import anyio
+
+    from automated_security_helper.cli.mcp.http_sessions import (
+        MODE_STATELESS,
+        SessionBoundary,
+    )
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_sweep(ttl_seconds, now=None):
+        started.set()
+        release.wait(30)
+        return []
+
+    monkeypatch.setattr(sessions, "sweep_stale_workspaces", slow_sweep)
+    boundary = SessionBoundary(_answer_ok, mode=MODE_STATELESS)
+    answered: list = []
+
+    async def main() -> bool:
+        async with anyio.create_task_group() as group:
+            group.start_soon(_request, boundary, answered, "starts-the-sweep")
+            await anyio.to_thread.run_sync(started.wait, 30)
+            try:
+                with anyio.fail_after(5):
+                    await _request(boundary, answered, "arrives-during-it")
+                return not release.is_set()
+            finally:
+                release.set()
+
+    answered_while_sweeping = anyio.run(main)
+
+    assert answered_while_sweeping
+    assert answered == ["arrives-during-it", "starts-the-sweep"], answered
