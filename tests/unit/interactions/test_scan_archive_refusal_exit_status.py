@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.utils.archive_builders import TEBIBYTE, zip_bytes
+from tests.utils.archive_builders import TEBIBYTE, tar_bytes, zip_bytes
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -223,7 +223,16 @@ def corrupt(tmp_path_factory):
 
     second = raw.rfind(b"PK\x01\x02")
     struct.pack_into("<I", raw, second + 16, 0xDEADBEEF)
-    return _scan(tmp_path_factory.mktemp("corrupt"), {"crc.zip": bytes(raw)})
+    # A tar cut off where its second member's header starts: tarfile reads it as a
+    # one-member archive without an error.
+    whole = tar_bytes({"ok_tar.py": "print(3)\n", "rest.py": "print(4)\n"})
+    cut = whole[: 2 * 512]
+    # A zip whose second member, a file, is named like the directory its first made.
+    clash = zip_bytes({"ok_clash.py/a.py": "print(5)\n", "ok_clash.py": "print(6)\n"})
+    return _scan(
+        tmp_path_factory.mktemp("corrupt"),
+        {"crc.zip": bytes(raw), "cut.tar": cut, "clash.zip": clash},
+    )
 
 
 def test_a_corrupt_archive_is_a_failed_input_that_fails_the_scan(corrupt):
@@ -232,6 +241,13 @@ def test_a_corrupt_archive_is_a_failed_input_that_fails_the_scan(corrupt):
     assert code == 1, out[-4000:]
     results = json.loads((output / "ash_aggregated_results.json").read_text())
     row = results["converter_results"]["archive"]
-    assert [item["path"] for item in row.get("failed_inputs") or []] == ["crc.zip"]
-    assert not list((output / "converted").rglob("ok.py")), "partial output left"
-    assert "could not convert 1 input: crc.zip" in out
+    assert sorted(item["path"] for item in row.get("failed_inputs") or []) == [
+        "clash.zip",
+        "crc.zip",
+        "cut.tar",
+    ]
+    for leftover in ("ok.py", "ok_tar.py", "a.py"):
+        assert not list((output / "converted").rglob(leftover)), (
+            f"partial output left: {leftover}"
+        )
+    assert "could not convert 3 inputs:" in out
