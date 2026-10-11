@@ -64,6 +64,32 @@ reporters:
 """
 
 
+#: Every option each cloud reporter's dependency check needs, and no ``enabled``,
+#: so that only the reporters' default of ``enabled: false`` keeps them off.
+COMPLETE_OPTIONS_NO_ENABLED = f"""
+ash_plugin_modules:
+  - {AWS_PLUGIN_MODULE}
+reporters:
+  aws-security-hub:
+    options:
+      aws_region: us-east-1
+      account_id: "123456789012"
+  cloudwatch-logs:
+    options:
+      aws_region: us-east-1
+      log_group_name: g
+      max_retries: 0
+  s3:
+    options:
+      bucket_name: b
+      aws_region: us-east-1
+      max_retries: 0
+  bedrock-summary-reporter:
+    options:
+      aws_region: us-east-1
+"""
+
+
 class CloudCalls:
     """What the reporters asked of boto3 and botocore."""
 
@@ -131,6 +157,26 @@ def reports_run(monkeypatch):
     return ran
 
 
+@pytest.fixture
+def constructed(monkeypatch):
+    """Names of the cloud reporters the run built, whether or not it ran them.
+
+    A check that a reporter contacted nothing passes vacuously if the run never
+    built it, for example because the run's plugin modules left the AWS package
+    out; a test asserts on this first.
+    """
+    built = []
+    for cls in CLOUD_REPORTERS:
+        original = cls.model_post_init
+
+        def recording_post_init(self, context, _original=original, _name=cls.__name__):
+            built.append(_name)
+            return _original(self, context)
+
+        monkeypatch.setattr(cls, "model_post_init", recording_post_init)
+    return built
+
+
 def _source_tree(root):
     source_dir = root / "src"
     source_dir.mkdir(parents=True, exist_ok=True)
@@ -181,7 +227,7 @@ class TestCloudReportersNeedTheOperator:
         assert reports_run == []
 
     def test_rerendering_stored_results_contacts_nothing(
-        self, tmp_path, cloud, reports_run
+        self, tmp_path, cloud, reports_run, constructed
     ):
         from automated_security_helper.config.default_config import get_default_config
         from automated_security_helper.interactions.run_ash_scan import run_ash_scan
@@ -193,11 +239,15 @@ class TestCloudReportersNeedTheOperator:
         stored.ash_config = get_default_config()
         results_file = output_dir / "ash_aggregated_results.json"
         results_file.write_text(stored.model_dump_json(by_alias=True), encoding="utf-8")
+        operator_config = tmp_path / "operator" / "ash.yaml"
+        operator_config.parent.mkdir()
+        operator_config.write_text(COMPLETE_OPTIONS_NO_ENABLED, encoding="utf-8")
 
         run_ash_scan(
             source_dir=str(_source_tree(tmp_path)),
             output_dir=str(output_dir),
             existing_results=str(results_file),
+            config=str(operator_config),
             offline=True,
             progress=False,
             quiet=True,
@@ -205,9 +255,15 @@ class TestCloudReportersNeedTheOperator:
             fail_on_findings=False,
             fail_on_incomplete_scanners=False,
             color=False,
+            # Named, not left to whatever this process happened to import, so the
+            # run builds the AWS reporters however the plugin registry is scoped.
+            ash_plugin_modules=[AWS_PLUGIN_MODULE],
         )
 
         assert (output_dir / "reports" / "ash.sarif").exists()
+        # Precondition: the run built every cloud reporter, so "contacted
+        # nothing" is about reporters it had, not ones it never saw.
+        assert set(constructed) == {cls.__name__ for cls in CLOUD_REPORTERS}
         assert not cloud.any(), cloud.summary()
         assert reports_run == []
 
