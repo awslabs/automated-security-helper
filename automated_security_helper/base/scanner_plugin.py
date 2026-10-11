@@ -491,6 +491,35 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return False
         return self.exit_code in success_codes
 
+    def _record_target_exit_code(self, response: Any) -> None:
+        """Make ``exit_code`` the code of the run that scanned this target.
+
+        ``_process_command_response`` keeps the largest code any run of this plugin
+        returned, and the sets are not ordered: with grype's ``{0, 2}`` a 2 from one
+        target would accept a 1 from the next. A response without a code (a test
+        double, the runner's own failure) leaves the value as it is.
+        """
+        code = response.get("returncode") if isinstance(response, dict) else None
+        if isinstance(code, int) and not isinstance(code, bool):
+            self.exit_code = abs(code)
+
+    def _refuse_rejected_exit_code(self) -> None:
+        """Raise ScannerError when the tool's exit code is outside its success set.
+
+        For a scanner that overrides ``scan()`` and runs one tool per target, as the
+        template does: call it after the run and before reading the results file. A
+        tool that failed can still leave a results file -- semgrep writes SARIF that
+        holds only error notifications when it cannot read its rules, and grype a
+        zero-byte report when it cannot load its database -- and "found nothing"
+        and "never scanned" read the same in it. The message names the code and the
+        accepted set; ``_describe_scan_failure`` adds the tool's stderr.
+        """
+        if not self._exit_code_accepted():
+            raise ScannerError(
+                f"its tool exited with code {self.exit_code}, which this scanner "
+                "does not accept as a completed run, so its results file is not read"
+            )
+
     # Log level used for the empty-target preamble message. Defaults to INFO;
     # bandit overrides to VERBOSE since python-only repos commonly trip it.
     empty_target_log_level: ClassVar[int] = logging.INFO
@@ -815,6 +844,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     f"{self.__class__.__name__} could not start its tool, so it "
                     f"produced no results file: {response.get('stderr') or response.get('error')}"
                 )
+
+            # Before the results file is read: a failed tool's file decides nothing.
+            self._record_target_exit_code(response)
+            self._refuse_rejected_exit_code()
 
             raw = self._read_results_file(results_file)
             if raw is None:

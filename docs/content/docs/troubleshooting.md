@@ -119,6 +119,47 @@ The grype config at .grype.yaml sets db.cache-dir, which ASH does not use: grype
 
 To keep the database somewhere else, set `GRYPE_DB_CACHE_DIR` instead.
 
+## A Scanner Is ERROR With an Exit Code It Does Not Accept
+
+**Symptom**
+
+A scanner's row is `ERROR`, and its error names the tool's exit code:
+
+```
+Failed to execute semgrep scanner on source: SemgrepScanner scan failed: its tool exited with code 7, which this scanner does not accept as a completed run, so its results file is not read (exit code 7: not an accepted exit code; success_exit_codes=[0, 1]). Stderr: ...
+```
+
+**Cause**
+
+The tool reported that it failed. Each scanner accepts the exit codes its tool uses
+for a run that completed, with or without findings, and nothing else. A failed tool
+can still leave a results file (semgrep exits 7 and writes SARIF holding only error
+notifications when it cannot read a rule configuration; grype exits 1 and writes a
+zero-byte report when it cannot load its database), so ASH does not read the file of
+a run with any other code: an empty or error-only file would otherwise be graded
+`PASSED` with no findings.
+
+| Scanner | Accepted exit codes | What the tool uses other codes for |
+|---|---|---|
+| bandit | 0, 1 (issues found) | 2: any error (`bandit/cli/main.py`) |
+| checkov | 0, 1 (failed checks) | 2: the run crashed (`checkov/main.py`) |
+| grype | 0, 2 (a match at or above `--fail-on`) | 1: any error, such as a database it cannot load (`cmd/grype/cli/cli.go`) |
+| semgrep | 0, 1 (findings) | 2: fatal; 3 and up: specific failures, 7 for a rule configuration it cannot read (`semgrep/error.py`) |
+| opengrep | 0, 1 | the same values as semgrep (`src/osemgrep/core/Exit_code.ml`) |
+
+**Fix**
+
+Read the stderr in the message, or the `<Scanner>.stderr.log` it names under
+`scanners/<name>/<target>/` in the output directory, and fix what the tool reported.
+For semgrep and opengrep under `--offline`, see
+[Seeding the semgrep and opengrep rule cache](advanced-usage.md#seeding-the-semgrep-and-opengrep-rule-cache).
+For grype, see [Grype Cannot Fetch Vulnerability Database](#grype-cannot-fetch-vulnerability-database).
+
+The scan exits 1 for an `ERROR` scanner while `fail_on_incomplete_scanners` is on,
+which is the default. With it off, the exit code comes from the findings alone, so a
+scan whose only problem is the failed scanner exits 0; see
+[Failing on an incomplete scan](configuration-guide.md#failing-on-an-incomplete-scan).
+
 ## Container Image Build Fails
 
 **Symptom**

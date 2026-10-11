@@ -176,8 +176,19 @@ all-clear is not. A host that genuinely cannot provide a scanner's tool says so 
 with the key below or `--no-fail-on-incomplete-scanners`, and keeps its old exit codes.
 
 It selects on status, so it covers a failure only once that failure has reached the
-status. A tool that exits non-zero but writes an empty report is graded `PASSED` from
-its zero findings, and this key does not change that in any position.
+status. A tool's own failure does reach it: a scanner whose tool exits with a code
+outside the codes that scanner accepts for a completed run is `ERROR`, whatever its
+results file holds, and the row records the exit code and the tool's stderr. A failed
+tool can still leave a results file behind (semgrep writes SARIF holding only error
+notifications when it cannot read its rules, grype a zero-byte report when it cannot
+load its database), and "found nothing" and "never scanned" look the same in it, so
+that file is not read. The accepted codes per scanner are in
+[Scanner exit codes](troubleshooting.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
+
+With the key off, an `ERROR` scanner no longer fails the scan: the exit code comes from
+the findings alone, so a scan whose only problem is a failed scanner exits 0, the same
+code as a clean scan. That is what turning the gate off means, and the summary table
+still shows the `ERROR` row.
 
 It covers converters too: a converter that crashed, one that could not convert some of
 its inputs (`converter_results.<name>.failed_inputs`), and one whose tool is missing

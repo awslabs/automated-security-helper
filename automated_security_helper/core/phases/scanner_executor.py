@@ -455,6 +455,9 @@ class ScannerExecutor:
                             f"{target_type} ({spawn_failure}): {e}"
                         )
                     ASH_LOGGER.error(err_str)
+                    # On the row as well as in raw_results: the row is what says why
+                    # it is ERROR (a rejected exit code, a timeout, a missing file).
+                    container.add_error(err_str)
                     raw_results = {
                         "errors": [err_str, *scanner_plugin.errors],
                         "output": scanner_plugin.output,
@@ -490,6 +493,9 @@ class ScannerExecutor:
                         f"{scanner_plugin.__class__.__name__} raw_results for {target_type}: {raw_results}"
                     )
                     if raw_results is None:
+                        container.add_error(
+                            f"{scanner_config_name} returned no result on {target_type}"
+                        )
                         raw_results = {
                             "errors": scanner_plugin.errors or [],
                             "output": scanner_plugin.output or [],

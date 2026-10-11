@@ -540,13 +540,9 @@
   affected are the ones where it mattered most: a container or air-gapped host that
   can run one scanner out of ten was reporting success for scanning almost nothing.
 
-  **What this does not reach.** The gate selects on scanner status, so it covers a
-  failure only once that failure has reached the status. A tool that exits non-zero
-  and writes an empty report is still graded `PASSED` from its zero findings, and
-  this default is the same exit code on, off or unset for that case — the empty
-  results branch in `base/scanner_plugin.py` returns a successful empty report
-  without consulting the exit code. That is a separate defect, not fixed here, and
-  turning this default on should not be read as having fixed it.
+  The gate selects on scanner status, so it covers a failure once that failure has
+  reached the status. A tool that exits with a code its scanner does not accept now
+  does: see the entry below on rejected exit codes.
 
   To keep the previous exit codes, set `fail_on_incomplete_scanners: false` or pass
   `--no-fail-on-incomplete-scanners`. Prefer `--exclude-scanners` for a tool you do
@@ -576,6 +572,24 @@
 
   `--no-fail-on-incomplete-scanners`, or `fail_on_incomplete_scanners: false`, turns
   off all of them together.
+
+- **A scanner whose tool exits with a code it does not accept is `ERROR`, whatever
+  its results file holds.** Each scanner accepts the exit codes its tool uses for a
+  completed run (0, and the code some tools use for "findings found"). A tool that
+  fails can still leave a results file: semgrep exits 7 and writes SARIF holding only
+  error notifications when it cannot read its rules, and grype exits 1 and writes a
+  zero-byte report when it cannot load its database. That file was read and graded,
+  so both were `PASSED` with no findings and the scan exited 0, even with
+  `--fail-on-findings` and the completeness gate on. The results file of such a run
+  is no longer read; the row is `ERROR`, keeps the exit code, and its error names the
+  code, the accepted set and the tool's stderr. Each target is judged by its own
+  run's exit code. The accepted codes per scanner, with their sources, are in
+  [A Scanner Is ERROR With an Exit Code It Does Not Accept](docs/content/docs/troubleshooting.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
+
+  **A scan that exited 0 can now exit 1.** That is a scanner whose tool was failing
+  all along. With `fail_on_incomplete_scanners: false` the `ERROR` row does not fail
+  the scan and the exit code comes from the findings alone, so such a scan still
+  exits 0; that is what turning the gate off means.
 
 - **`--fail-on-incomplete-scanners` now also fails a scan that lost only part of
   its input.** The flag selected on scanner status, and a scanner that failed on

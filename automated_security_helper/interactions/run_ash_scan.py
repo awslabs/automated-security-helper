@@ -977,15 +977,14 @@ def _resolve_fail_on_incomplete_scanners(
     and keeps its old exit codes; what it no longer gets is that outcome by saying
     nothing.
 
-    What the default does NOT reach, because this gate selects on status: a tool
-    that failed hard without that failure reaching its status. ``scanner_plugin``'s
-    empty-results branch returns a successful empty report for a tool that exited
-    non-zero and wrote nothing, so ``determine_status`` grades it PASSED from its
-    zero findings and there is no ERROR or MISSING here to find. Pinned by
-    ``TestTheGateCannotSeeAHardFailureGradedPassed`` in
-    ``tests/unit/interactions/test_fail_on_incomplete_scanners.py``, which asserts
-    that this flag returns the same exit code in all three positions for that case.
-    Turning the default on does not fix it and is not a reason to think it fixed.
+    This gate selects on status, so it sees a tool's hard failure only because the
+    failure reaches the status: a tool that exits with a code outside its scanner's
+    ``success_exit_codes`` is recorded ERROR whatever its results file holds
+    (``ScannerPluginBase._refuse_rejected_exit_code``). With the gate off, that ERROR
+    row still leaves the exit code to the findings, so a scan whose only problem is a
+    failed scanner exits 0. Pinned by ``TestAHardFailureReachesTheGate`` in
+    ``tests/unit/interactions/test_fail_on_incomplete_scanners.py``, in all three
+    positions of this flag.
     """
     if opts.fail_on_incomplete_scanners is not None:
         return opts.fail_on_incomplete_scanners
