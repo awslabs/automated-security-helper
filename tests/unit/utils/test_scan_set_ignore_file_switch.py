@@ -28,6 +28,7 @@ from typing import Dict
 from unittest.mock import patch
 
 import pytest
+from igittigitt import IgnoreParser
 
 from automated_security_helper.utils import get_scan_set as gss
 from automated_security_helper.utils.get_scan_set import (
@@ -146,6 +147,79 @@ class TestPrunedDirectoriesAreCounted:
         )
         record = _record(root)
         assert record["by_ignore_file"] == {".gitignore": 2}, record
+
+
+class TestPrunedCountsMatchTheSwitch:
+    """The total is exactly what turning the ignore files off would add back.
+
+    Asserted as that property over trees that put each of ASH's own exclusions
+    under a directory the root ``.gitignore`` prunes, which is where the count
+    is taken without the parser: the bundled aws-cdk tree in a pruned
+    ``node_modules`` (the usual CDK project layout), CDK assets and their
+    templates in a pruned build directory, and a ``.git`` below one.
+    """
+
+    TREES = {
+        "bundled-cdk": {
+            ".gitignore": "node_modules/\n",
+            "app.py": "x = 1\n",
+            "node_modules/aws-cdk/lib/x.json": "{}\n",
+            "node_modules/aws-cdk-lib/y.js": "y\n",
+            "node_modules/left-pad/index.js": "z\n",
+        },
+        "cdk-assets": {
+            ".gitignore": "build/\n",
+            "app.py": "x = 1\n",
+            "build/cdk.out/asset.123/handler.py": "h\n",
+            "build/cdk.out/asset.123/nested.template.json": "{}\n",
+            "build/cdk.out/Stack.template.json": "{}\n",
+            "build/other.txt": "o\n",
+        },
+        "vendored-checkout": {
+            ".gitignore": "vendor/\n",
+            "app.py": "x = 1\n",
+            "vendor/lib/.git/HEAD": "ref\n",
+            "vendor/lib/.git/objects/ab": "o\n",
+            "vendor/lib/src.py": "s\n",
+        },
+    }
+
+    @pytest.mark.parametrize("name", sorted(TREES))
+    def test_the_total_is_what_the_switch_adds_back(self, tmp_path, name):
+        root = _build(tmp_path / "src", self.TREES[name])
+        honored = set(scan_set(source=str(root)))
+        everything = set(scan_set(source=str(root), honor_ignore_files=False))
+        record = _record(root)
+        assert record["excluded_file_count"] == len(everything - honored), (
+            record,
+            sorted(_names(root, everything - honored)),
+        )
+        assert record["by_ignore_file"] == {".gitignore": len(everything - honored)}
+
+    def test_a_pruned_directory_is_counted_without_matching_each_file(
+        self, tmp_path, monkeypatch
+    ):
+        """One parser match per pruned file stats each one: 100,000 took 2.3 s."""
+        root = _build(
+            tmp_path / "src",
+            {".gitignore": "node_modules/\n", "app.py": "x = 1\n"},
+        )
+        pruned = root / "node_modules"
+        for index in range(50):
+            _build(pruned, {f"pkg{index}/index.js": "x\n"})
+        matched_below = []
+        real_match = IgnoreParser.match
+
+        def recording_match(self, file_path):
+            candidate = Path(str(file_path))
+            if candidate.name != "placeholder" and pruned in candidate.parents:
+                matched_below.append(candidate)
+            return real_match(self, file_path)
+
+        monkeypatch.setattr(IgnoreParser, "match", recording_match)
+        record = _record(root)
+        assert record["excluded_file_count"] == 50, record
+        assert matched_below == [], matched_below[:3]
 
 
 class TestAPrunedLinkIsNotFollowed:
@@ -339,7 +413,9 @@ class TestAshsOwnExclusionsByName:
 
     def test_the_name_test_agrees_with_the_parser(self, tmp_path):
         root = _build(tmp_path / "src", dict.fromkeys(self.PATHS, "x\n"))
-        own_spec = gss._ash_own_exclusion_spec(root)
+        own_spec = IgnoreParser()
+        for entry in gss.ASH_INCLUSIONS:
+            own_spec.add_rule(entry, base_path=root)
         forced = gss._forced_inclusion_spec(root)
         disagree = []
         for path in self.PATHS:

@@ -304,52 +304,61 @@ def _files_removed_by_ignore_files(
     )
 
 
-def _ash_own_exclusion_spec(source_dir: str | Path) -> IgnoreParser:
-    """``ASH_INCLUSIONS`` compiled on its own, the spec a scan has with no ignore files."""
-    parser = IgnoreParser()
-    base_path = Path(source_dir)
-    for entry in ASH_INCLUSIONS:
-        parser.add_rule(entry, base_path=base_path)
-    return parser
+def _count_templates(directory: str) -> int:
+    """``*.template.json`` files under *directory*: the forced inclusion keeps them."""
+    return sum(
+        1
+        for root, _dirs, files in os.walk(directory)
+        for name in files
+        if name.endswith(".template.json")
+        and not _is_bundled_cdk_path(os.path.join(root, name))
+    )
 
 
 def _count_files_ash_would_scan(
     directory: Path,
-    own_spec: IgnoreParser,
-    forced_inclusions: IgnoreParser,
+    source: str,
     own_output: Optional[tuple[int, int]] = None,
 ) -> int:
     """How many files under *directory* stay in the scan set when no ignore file applies.
 
-    The test is :func:`get_files_not_matching_spec`'s, with ``ASH_INCLUSIONS`` as
-    the whole spec. A file ASH leaves out on its own (``.git``, CDK assets, the
-    bundled aws-cdk tree, its own output directory, whose
-    :func:`_directory_identity` is *own_output*) was not removed
-    by the ignore file that pruned its directory, so it is not counted. Links to
-    directories are not followed, as in the walk that pruned the directory: not
-    *directory* itself, which ``os.walk`` would follow, and not one below it.
+    The answer :func:`get_files_not_matching_spec` gives with ``ASH_INCLUSIONS`` as
+    the whole spec, decided from names (:func:`_excluded_by_ash_itself`) and not by
+    matching each file against a parser. A file ASH leaves out on its own (``.git``,
+    CDK assets, the bundled aws-cdk tree, its own output directory, whose
+    :func:`_directory_identity` is *own_output*) was not removed by the ignore file
+    that pruned *directory*, so it is not counted.
+
+    ASH's own exclusions are applied a directory at a time, so a pruned
+    ``node_modules`` costs a walk and a string test per file: a directory on the
+    bundled aws-cdk path is not entered, and a ``.git`` directory or a CDK asset
+    directory is only searched for the ``*.template.json`` files the forced
+    inclusion keeps. Links to directories are not followed, as in the walk that
+    pruned *directory*: not *directory* itself, which ``os.walk`` would follow, and
+    not one below it.
     """
     if _is_link_to_directory(directory):
         return 0
     count = 0
     for root, dirs, files in os.walk(directory):
-        if own_output is not None:
-            dirs[:] = [
-                d
-                for d in dirs
-                if _directory_identity(os.path.join(root, d)) != own_output
-            ]
-        for name in files:
-            full_path = os.path.join(root, name)
-            if _is_bundled_cdk_path(full_path):
+        parts = _relative_parts(root, source)
+        kept_dirs = []
+        for d in dirs:
+            candidate = os.path.join(root, d)
+            if own_output is not None and _directory_identity(candidate) == own_output:
                 continue
-            file_path = Path(full_path)
-            try:
-                if own_spec.match(file_path) and not forced_inclusions.match(file_path):
-                    continue
-            except (ValueError, TypeError, IndexError, re.error):
-                pass
-            count += 1
+            if _is_bundled_cdk_path(candidate):
+                continue
+            if d == ".git" or (
+                d.startswith("asset.") and parts and parts[-1] == "cdk.out"
+            ):
+                count += _count_templates(candidate)
+                continue
+            kept_dirs.append(d)
+        dirs[:] = kept_dirs
+        count += sum(
+            1 for name in files if not _excluded_by_ash_itself(parts + (name,))
+        )
     return count
 
 
@@ -434,9 +443,6 @@ def _collect_ignorefiles_and_all_files(
                 debug=debug,
             )
 
-    # Built only when a directory is pruned, for counting what the pruning removed.
-    own_spec: Optional[IgnoreParser] = None
-    forced_inclusions: Optional[IgnoreParser] = None
     pruned_key = os.path.join(path, ".gitignore")
     # The output directory is followed if it is a link: it is where ASH writes,
     # whatever it is called. The orchestrator refuses a symlinked one anyway.
@@ -481,12 +487,7 @@ def _collect_ignorefiles_and_all_files(
             # and following it would read wherever the repository points it.
             if pruned_counts is None or _is_link_to_directory(Path(root) / d):
                 continue
-            if own_spec is None or forced_inclusions is None:
-                own_spec = _ash_own_exclusion_spec(path)
-                forced_inclusions = _forced_inclusion_spec(path)
-            removed = _count_files_ash_would_scan(
-                Path(root) / d, own_spec, forced_inclusions, own_output_id
-            )
+            removed = _count_files_ash_would_scan(Path(root) / d, path, own_output_id)
             pruned_counts[pruned_key] = pruned_counts.get(pruned_key, 0) + removed
 
         for f in files:
