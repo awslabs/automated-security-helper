@@ -150,6 +150,17 @@ export const SSM_STANDARD_TIER_MAX_BYTES = 4096;
  * The spelling is the Dockerfile's, not ours: `ARG OFFLINE="NO"` fans out into
  * `ASH_OFFLINE`, `OFFLINE_AT_BUILD_TIME` and friends inside the image. Passing
  * `true` here would build an image that quietly stayed online.
+ *
+ * WHAT IT DOES NOT DO: restrict the network. It decides where scanner data comes
+ * from, not where the workload can connect. The Fargate tasks keep TCP 443 egress
+ * through a NAT gateway, AgentCore runs in `PUBLIC` network mode, the CodeBuild
+ * projects have no VPC, and the gate has none unless `VpcId` is set. This
+ * description used to say offline scans "need no network egress", which an
+ * operator scanning untrusted code could read as an egress control. Making offline
+ * mode impose one instead was rejected: it needs VPC endpoints (an hourly charge
+ * per endpoint per Availability Zone) and a network layout these templates cannot
+ * choose for an adopter, and the gate's opt-in VPC placement already exists for
+ * operators who want egress confined.
  */
 export function ashOfflineMode(scope: Stack): CfnParameter {
   return new CfnParameter(scope, ASH_PARAMETER_NAMES.ashOfflineMode, {
@@ -157,10 +168,9 @@ export function ashOfflineMode(scope: Stack): CfnParameter {
     default: 'NO',
     allowedValues: ['YES', 'NO'],
     description:
-      'Build the ASH image in offline mode, vendoring scanner rulesets and tools ' +
-      'into the image so scans need no network egress. Forwarded to the ASH ' +
-      "Dockerfile's OFFLINE build argument. Offline images are larger and slower " +
-      'to build.',
+      "Bake scanner rulesets, databases and tools into the image (the ASH Dockerfile's " +
+      'OFFLINE build argument) so scans do not fetch them. Does not restrict network ' +
+      'egress; VPC placement does. Larger, slower builds.',
   });
 }
 

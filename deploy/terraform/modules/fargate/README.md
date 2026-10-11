@@ -81,7 +81,7 @@ requires Terraform >= 1.9.0. Note that it fires at **plan** time —
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash-mcp"` | Max 25 characters; ALB and target group names derive from it. |
 | `container_command` | — | `list(string)` | MCP launcher | Override for an image not built by `ash-image-pipeline`. |
-| `internal` | — | `bool` | `true` | Internet exposure should be deliberate. |
+| `internal` | — | `bool` | `true` | Internet exposure should be deliberate. `false` is refused at plan time unless `mcp_auth_header_name` and `mcp_auth_header_value` are both set (and so `certificate_arn`), whatever `ingress_cidr_blocks` lists. |
 | `certificate_arn` | — | `string` | `null` | Set to get an HTTPS listener. |
 | `allow_plaintext_auth_header` | — | `bool` | `false` | Opt out of the TLS requirement above. |
 | `ssl_policy` | — | `string` | TLS 1.3 policy | HTTPS listeners only. |

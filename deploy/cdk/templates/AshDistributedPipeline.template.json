@@ -14,7 +14,7 @@
     "YES",
     "NO"
    ],
-   "Description": "Build the ASH image in offline mode, vendoring scanner rulesets and tools into the image so scans need no network egress. Forwarded to the ASH Dockerfile's OFFLINE build argument. Offline images are larger and slower to build."
+   "Description": "Bake scanner rulesets, databases and tools into the image (the ASH Dockerfile's OFFLINE build argument) so scans do not fetch them. Does not restrict network egress; VPC placement does. Larger, slower builds."
   },
   "RebuildSchedule": {
    "Type": "String",

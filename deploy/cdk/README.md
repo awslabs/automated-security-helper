@@ -97,7 +97,7 @@ change for adopters and desynchronizes the two implementations.
 | --- | --- | --- |
 | `AshVersion` | `v3.7.0` | Git ref cloned and built. Not a PyPI version. |
 | `AshImageTag` | empty | ECR tag the **workload** pulls. Empty tracks the moving tag. Not offered by `AshImagePipeline`, which runs no workload. See below. |
-| `AshOfflineMode` | `NO` | `YES`/`NO`, forwarded to the ASH Dockerfile's `OFFLINE` build argument. The spelling is the Dockerfile's; a boolean would build an image that stayed online. |
+| `AshOfflineMode` | `NO` | `YES`/`NO`, forwarded to the ASH Dockerfile's `OFFLINE` build argument. The spelling is the Dockerfile's; a boolean would build an image that stayed online. It bakes scanner data into the image and does not restrict network egress: Fargate tasks keep TCP 443 through the NAT gateway, AgentCore runs in `PUBLIC` mode, and the gate has open egress unless `VpcId` is set. |
 | `AshBaseConfigYaml` | empty | An ASH configuration document. See the size note below. |
 | `McpStatelessHttp` | `true` | Keep `true` on AgentCore, and behind any load balancer with more than one replica. See below for what is measured and what is inferred. |
 | `McpMountPath` | `/mcp` | AgentCore routes only `/mcp`, so change this only for Fargate. |

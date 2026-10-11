@@ -68,9 +68,23 @@ variable "internal" {
     a security scanner over an API that has no authentication of its own beyond
     what you configure, so exposing it to the internet should be a deliberate
     act.
+
+    internal = false is refused unless mcp_auth_header_name and
+    mcp_auth_header_value are both set, whatever ingress_cidr_blocks lists: a
+    CIDR list does not bound an internet-facing listener (0.0.0.0/0 can be
+    written as two /1 ranges, and any public range is a population you do not
+    control). The auth value in turn requires certificate_arn.
   EOT
   type        = bool
   default     = true
+
+  # The scheme decides, not the CIDR. Checking ingress_cidr_blocks for 0.0.0.0/0
+  # was rejected: it is defeated by splitting the range, and an internet-facing
+  # listener that names one public /24 is still reachable by everyone in it.
+  validation {
+    condition     = var.internal || (var.mcp_auth_header_name != null && nonsensitive(var.mcp_auth_header_value != null))
+    error_message = "internal = false requires mcp_auth_header_value and mcp_auth_header_name. An internet-facing load balancer puts the MCP endpoint, which accepts source code and returns findings about it, on a listener the internet can route to, and ingress_cidr_blocks does not bound that. Set both (with certificate_arn), or keep internal = true."
+  }
 }
 
 variable "certificate_arn" {
