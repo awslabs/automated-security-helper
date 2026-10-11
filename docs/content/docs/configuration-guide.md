@@ -475,8 +475,11 @@ Under the MCP server, a config file a client delivered (an upload or a file in a
 delivered tree, named as `config_path`) is limited the same way, wherever it is. A
 file any MCP client delivered also counts as inside the scanned tree for the path
 and module checks below: everything under the MCP workspace root
-(`$ASH_MCP_WORKSPACE_ROOT`, by default `~/.cache/ash-mcp/`) except each session's
-`config/` directory, which only the server writes. A profile a client patched with
+(`$ASH_MCP_WORKSPACE_ROOT`, by default `~/.cache/ash-mcp/`) except the profile files
+the server writes in each session's `config/` directory: `ash.yaml`, the profile
+`select_profile` binds, and `call-profile.yaml`, a workspace tool's per-call profile.
+Any other file there is the client's, and neither `config/` nor `client-config/` may
+be a scan target or an output directory. A profile a client patched with
 `select_profile` is written to the session's `client-config/` directory instead, so
 it counts as the client's.
 
@@ -538,8 +541,8 @@ on which:
 - **An MCP client**: a file the client delivered, such as an upload named as
   `config_path`, a delivered tree's own `.ash/.ash.yaml`, or a project config in
   a delivered workspace. So is any other config path a client names, unless it
-  is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or in the session's own
-  `config/` directory: a config in another checkout the server may scan is that
+  is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or is a profile file the
+  server writes in the session's own `config/` directory: a config in another checkout the server may scan is that
   checkout's, not the operator's. A path is judged where it sits, at each
   symlink on the way, and by the file it reaches, so a link a client delivered is
   the client's wherever it points, and so is a file reached through a linked

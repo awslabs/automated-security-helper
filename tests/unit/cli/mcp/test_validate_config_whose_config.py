@@ -9,8 +9,8 @@ case they name:
 
 * The runtime-override policy applies to a remote caller's ``config_content``, and
   to a ``config_path`` that a client delivered or that is outside the directories
-  ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names and a session's ``config/`` directory,
-  from any caller. A stdio caller's ``config_content`` is its own.
+  ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, other than a profile file the server
+  wrote in the calling session's ``config/`` directory, from any caller. A stdio caller's ``config_content`` is its own.
 * A ``${VAR}`` or ``${VAR:default}`` reference at the start of a plain value, or an
   ``!ENV`` tag, is ``config_env_not_resolved`` anywhere in a remote caller's
   client config, and for a stdio caller only in a file a client delivered
@@ -18,9 +18,11 @@ case they name:
 
 The default-free ``${VAR}`` form and the quoted form are here because the
 reference text names them; the other forms are covered in
-``test_config_env_by_caller.py``. So are the two edges of "set aside": a
-session's ``config/`` directory, which only the server writes, and a delivered
-file, which stays the client's even inside ``ASH_MCP_ALLOWED_CONFIG_ROOTS``.
+``test_config_env_by_caller.py``. So are the two edges of "set aside": the
+profile files the server writes in the session's ``config/`` directory (any
+other file there is the client's; ``test_session_config_dir_is_server_only.py``),
+and a delivered file, which stays the client's even inside
+``ASH_MCP_ALLOWED_CONFIG_ROOTS``.
 """
 
 from __future__ import annotations
@@ -154,8 +156,10 @@ def _in_session(session_id: str, *parts: str) -> Path:
 
 
 def test_a_sessions_config_directory_is_set_aside(_server) -> None:
+    """The two profile files the server writes there; any other file is the
+    client's (``test_session_config_dir_is_server_only.py``)."""
     denied = _write(_in_session(REMOTE, "config", "ash.yaml"), DENIED)
-    reference = _write(_in_session(REMOTE, "config", "ref.yaml"), NO_DEFAULT)
+    reference = _write(_in_session(REMOTE, "config", "call-profile.yaml"), NO_DEFAULT)
 
     assert _validate(config_path=str(denied), session_id=REMOTE)["valid"] is True
     assert _validate(config_path=str(reference), session_id=REMOTE)["valid"] is True

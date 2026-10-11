@@ -312,11 +312,14 @@ def config_is_client_supplied(config_path: str | Path) -> bool:
     """True when ``config_path`` is a file an MCP client delivered.
 
     Everything under the shared workspace root got there through a client: a
-    delivered source tree, a zip upload and its staging. The exception is each
-    session's ``config/`` directory, which only the server writes, with the
-    operator's profile that ``select_profile`` materializes. Any session's
-    sandbox counts, not only the caller's, because a sibling session's upload is
-    no more the operator's than the caller's own.
+    delivered source tree, a zip upload and its staging. The exception is the
+    profile files the server writes in each session's ``config/`` directory
+    (``_server_written_config_names``): the operator's profile that
+    ``select_profile`` materializes, and a workspace tool's per-call profile.
+    Any other file there is the client's, and no scan may write there
+    (``_server_config_dir_refusal``). Any session's sandbox counts, not only the
+    caller's, because a sibling session's upload is no more the operator's than
+    the caller's own.
 
     A scan whose selected config is client-supplied resolves it with
     ``resolve_config(untrusted_config=True)``, which keeps its sandbox settings
@@ -341,9 +344,33 @@ def config_is_client_supplied(config_path: str | Path) -> bool:
         Path(config_path).resolve(),
     ):
         parts = _parts_below(candidate, shared)
-        if parts is not None and not (len(parts) >= 2 and parts[1] == CONFIG_DIR_NAME):
+        if parts is not None and not _is_server_written_config(parts[1:]):
             return True
     return False
+
+
+def _server_written_config_names() -> Tuple[str, ...]:
+    """The files the server writes in a session's ``config/`` directory.
+
+    Read from ``profile_registry``, which writes them
+    (``materialize_session_config``): the bound profile and a workspace tool's
+    per-call profile.
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        CALL_PROFILE_FILENAME,
+        SESSION_CONFIG_FILENAME,
+    )
+
+    return (SESSION_CONFIG_FILENAME, CALL_PROFILE_FILENAME)
+
+
+def _is_server_written_config(parts: Tuple[str, ...]) -> bool:
+    """Whether ``parts``, below a session's sandbox, name a file the server writes."""
+    return (
+        len(parts) == 2
+        and parts[0] == CONFIG_DIR_NAME
+        and parts[1] in _server_written_config_names()
+    )
 
 
 def client_named_config_is_untrusted(
@@ -352,10 +379,11 @@ def client_named_config_is_untrusted(
     """Whether a config path an MCP client named is the client's choice, not the operator's.
 
     A path a client names is the client's unless the operator set it aside: it is
-    in a directory ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, or in the ``config/``
-    directory of the calling session, ``session_id``, which only the server
-    writes (``DEFAULT_SESSION_ID``'s when None, as ``select_profile`` writes it).
-    Another session's ``config/`` directory is not set aside for this caller. A
+    in a directory ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, or it is one of the
+    profile files the server writes in the ``config/`` directory of the calling
+    session, ``session_id`` (``DEFAULT_SESSION_ID``'s when None, as
+    ``select_profile`` writes it). Another file in that directory, and another
+    session's profile files, are not set aside for this caller. A
     file a client delivered (``config_is_client_supplied``) is always the
     client's. So is a config in another repository under the allowed scan roots:
     the operator let the server scan it, not take its config as their own. Both
@@ -372,14 +400,16 @@ def client_named_config_is_untrusted(
 
     if config_is_client_supplied(config_path):
         return True
-    config_roots = list(operator_config_roots())
+    config_roots = operator_config_roots()
     # Resolved as the gates resolve it, so an id that cannot name one directory
     # owns no config directory here either.
     own = _sandbox_for_gate(session_id or DEFAULT_SESSION_ID).root
-    if own is not None:
-        config_roots.append(own / CONFIG_DIR_NAME)
 
     def chosen_by_operator(candidate: Path) -> bool:
+        if own is not None:
+            parts = _parts_below(candidate, own)
+            if parts is not None and _is_server_written_config(parts):
+                return True
         return any(_parts_below(candidate, root) is not None for root in config_roots)
 
     return not all(
@@ -678,6 +708,41 @@ def _sibling_refusal(
     )
 
 
+def _server_config_dir_refusal(
+    sandbox: SessionSandbox, path: object, resolved: Path
+) -> Optional[MCPResourceError]:
+    """Refuse this session's ``config/`` or ``client-config/`` as a scan target.
+
+    A scan target is written into (``<target>/.ash``), and so is a workspace
+    ``output_dir``, which this gate checks too. The server writes the session's
+    profiles in those two directories, and the files it writes in ``config/`` are
+    the operator's (``_is_server_written_config``), so no scan may write there,
+    whatever the grants and the transport. Checked after ``_sibling_refusal``,
+    which has already refused another session's.
+    """
+    if sandbox.root is None:
+        return None
+    for name in (CONFIG_DIR_NAME, CLIENT_CONFIG_DIR_NAME):
+        server_dir = sandbox.root / name
+        # By file identity too, as _parts_below matches ancestors, so a spelling
+        # that differs only in case on a case-insensitive volume is refused.
+        if (
+            resolved == server_dir
+            or resolved.is_relative_to(server_dir)
+            or _parts_below(resolved, server_dir) is not None
+        ):
+            return _refusal(
+                "Scan target",
+                path,
+                resolved,
+                f"The session's {name}/ directory holds the profiles the server "
+                "writes for this session, so it is not a scan target or an output "
+                "directory. Use the delivered source directory or one outside the "
+                "session workspace.",
+            )
+    return None
+
+
 def validate_scan_target_in_sandbox(
     directory_path: str | Path,
     session_id: Optional[str] = None,
@@ -707,6 +772,10 @@ def validate_scan_target_in_sandbox(
     sibling = _sibling_refusal(sandbox, directory_path, resolved)
     if sibling is not None:
         return sibling
+
+    server_owned = _server_config_dir_refusal(sandbox, directory_path, resolved)
+    if server_owned is not None:
+        return server_owned
 
     if sandbox.permits_scan(resolved):
         return None

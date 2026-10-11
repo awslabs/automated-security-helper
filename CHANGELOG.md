@@ -125,8 +125,9 @@
 
 - **Under the MCP server, a config file the operator did not set aside resolves no
   `!ENV` for a remote client.** `!ENV` reads the server's environment. For a remote
-  caller, every file outside `ASH_MCP_ALLOWED_CONFIG_ROOTS` and the session's own
-  `config/` directory is refused with a config error naming the file if it uses
+  caller, every file outside `ASH_MCP_ALLOWED_CONFIG_ROOTS`, other than the profile
+  files the server writes in the session's own `config/` directory, is refused with
+  a config error naming the file if it uses
   `!ENV` (`error_type: config_env_not_resolved`): a file the client delivered or
   names, one found in a directory it names, a scan target's own `.ash.yaml`, and
   every base such a file extends. Before, each resolved, and `get_config` returned
@@ -151,9 +152,12 @@
   file that changes a denied field is refused with the field named
   (`error_type: config_field_denied`), and `validate_config` reports it. A config
   path a client names counts as the client's unless it is in a directory
-  `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or the session's own `config/` directory,
-  so a config in another checkout the server may scan is checked the same way,
-  and so is a link a client delivered, wherever it points. To use such a file as
+  `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or is a profile file the server writes in
+  the session's own `config/` directory (`ash.yaml` or `call-profile.yaml`), so a
+  config in another checkout the server may scan is checked the same way, and so
+  is a link a client delivered, wherever it points. Neither the session's
+  `config/` nor its `client-config/` directory may be a scan target or a
+  workspace `output_dir`, so no scan writes a file there. To use such a file as
   the operator's, put it in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names. A
   profile whose `denied_paths` equals a default ASH shipped earlier gets the
   current default list. When
@@ -449,8 +453,9 @@
     with a warning naming the key.
 
   Under the MCP server, a config a client delivered is limited the same way, and a
-  file any MCP client delivered (under the MCP workspace root, except each session's
-  `config/` directory) counts as inside the scanned tree for these checks, as
+  file any MCP client delivered (under the MCP workspace root, except the profile
+  files the server writes in each session's `config/` directory) counts as inside
+  the scanned tree for these checks, as
   does a config path a client names outside the directories
   `ASH_MCP_ALLOWED_CONFIG_ROOTS` names. So does a `--config` or `ASH_CONFIG`
   naming a file under the MCP workspace root on the CLI, while scanning any

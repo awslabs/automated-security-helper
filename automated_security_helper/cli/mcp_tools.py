@@ -1554,7 +1554,8 @@ def mcp_validate_config(
     The client's config is also checked against the session's runtime-override
     policy, as a scan of it would be: ``config_content`` from a remote caller,
     and a ``config_path`` a client delivered or outside the directories
-    ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names and a session's ``config/`` directory
+    ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, unless it is a profile file the server
+    wrote in the calling session's ``config/`` directory
     (``sandbox.client_named_config_is_untrusted``). Each field it denies is a
     ``denied_by_runtime_policy`` error. A ``${VAR}`` or ``${VAR:default}``
     reference at the start of a plain value, or an ``!ENV`` tag, is a

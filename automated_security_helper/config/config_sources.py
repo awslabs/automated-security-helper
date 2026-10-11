@@ -129,15 +129,16 @@ the MCP server's two:
 
 * For a remote caller (``cli/mcp/sandbox.caller_is_remote``), every file the
   operator did not set aside: anything outside ``ASH_MCP_ALLOWED_CONFIG_ROOTS``
-  and the calling session's ``config/`` directory
-  (``cli/mcp/sandbox.client_named_config_is_untrusted``). That covers a path the
+  except the profile files the server writes in the calling session's
+  ``config/`` directory (``cli/mcp/sandbox.client_named_config_is_untrusted``).
+  That covers a path the
   client names, a file discovered in a directory it names, and a scan target's
   own config, as well as anything it delivered.
 * For any other caller, the CLI included, and the default when none is passed:
   a file an MCP client delivered (``cli/mcp/sandbox.config_is_client_supplied``),
-  that is anything under the MCP workspace root outside the sessions'
-  ``config/`` directories, judged on the path as named and on the file it
-  resolves to. A local stdio caller launched the server and holds its
+  that is anything under the MCP workspace root except the profile files the
+  server writes in the sessions' ``config/`` directories, judged on the path as
+  named and on the file it resolves to. A local stdio caller launched the server and holds its
   environment already, so its own repository config keeps ``!ENV``.
 
 ``validate_config``'s ``config_content`` from a remote caller is refused
@@ -563,8 +564,8 @@ def env_refused_for(remote_client: bool, session_id: Optional[str] = None) -> Re
 
     ``remote_client`` is ``cli.mcp.sandbox.caller_is_remote`` for the MCP call
     the config is read for, and False for everything else. ``session_id`` is
-    that call's session: of the sessions' ``config/`` directories, only its own
-    is set aside for a remote caller.
+    that call's session: of the profile files the server writes in the sessions'
+    ``config/`` directories, only its own are set aside for a remote caller.
     """
     if not remote_client:
         return config_is_client_delivered

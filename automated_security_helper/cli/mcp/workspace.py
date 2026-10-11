@@ -441,8 +441,9 @@ def _refuse_a_client_chosen_policy(
     the runtime-override denylist keeps from a client. Under the MCP tools the
     client names the definition and may name the policy, so either way the
     policy file is the client's choice unless it sits where the operator keeps
-    config: a directory ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, or the calling
-    session's own ``config/`` directory (``client_named_config_is_untrusted``). A file a
+    config: a directory ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, or a profile file
+    the server writes in the calling session's ``config/`` directory
+    (``client_named_config_is_untrusted``). A file a
     client delivered is always the client's, and so is a policy in a checkout
     the server may scan, named or found beside the definition.
 
