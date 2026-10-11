@@ -613,9 +613,14 @@ export class AshImageBuild extends Construct {
           commands: [
             'echo "Building ASH ${ASH_VERSION} for ${ASH_BUILD_PLATFORM}: ${ASH_BUILD_FLAVORS}"',
             `aws ecr get-login-password --region ${Aws.REGION} | docker login --username AWS --password-stdin ${Aws.ACCOUNT_ID}.dkr.ecr.${Aws.REGION}.${Aws.URL_SUFFIX}`,
-            // Shallow, single-ref clone of the public repository. No credential
+            // Shallow fetch of one ref of the public repository. No credential
             // needed, which is the whole reason the project takes no source.
-            'git clone --depth 1 --branch "${ASH_VERSION}" "${ASH_REPOSITORY_URL}" ash-src',
+            //
+            // `git fetch <ref>` and not `git clone --branch <ref>`: clone takes a
+            // tag or a branch and refuses a commit SHA ("Remote branch <sha> not
+            // found"), and a commit is the one value that pins an exact build. The
+            // Terraform image pipeline fetches the same way.
+            'git init -q ash-src && git -C ash-src fetch -q --depth 1 "${ASH_REPOSITORY_URL}" "${ASH_VERSION}" && git -C ash-src checkout -q FETCH_HEAD',
           ],
         },
         build: {
@@ -634,13 +639,19 @@ export class AshImageBuild extends Construct {
             // explicit even though the compute already matches, so a build on the
             // wrong fleet fails loudly instead of producing an image AgentCore
             // will refuse.
+            //
+            // INSTALL_ASH_REVISION=LOCAL builds the tree fetched above. Any other
+            // value makes the Dockerfile clone again with `git clone --branch`,
+            // which cannot take a commit SHA and whose failure the Dockerfile
+            // swallows with `|| echo` (Dockerfile:99-103), so a SHA pin would not
+            // have built the commit it names.
             ...targetsNeeded.map(
               (target) =>
                 'docker build ' +
                 '--platform "linux/${ASH_BUILD_PLATFORM}" ' +
                 `--target ${target} ` +
                 '--build-arg "OFFLINE=${ASH_OFFLINE}" ' +
-                '--build-arg "INSTALL_ASH_REVISION=${ASH_VERSION}" ' +
+                '--build-arg INSTALL_ASH_REVISION=LOCAL ' +
                 `-t "ash-base-${target}:local" ash-src`,
             ),
 
@@ -663,7 +674,7 @@ export class AshImageBuild extends Construct {
    *
    * WHY THIS EXISTS — A REAL DEPLOYMENT, NOT A HYPOTHETICAL
    * ------------------------------------------------------
-   * `AshVersion` is a git ref handed to `git clone --branch`, and branch refs
+   * `AshVersion` is a git ref handed to `git fetch`, and branch refs
    * routinely contain a `/`, which a Docker tag may not. Deployed with
    * `AshVersion=feat/distributed-execute-and-collect`, a CodeBuild run built the
    * image successfully and then died on the version-qualified tag:

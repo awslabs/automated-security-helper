@@ -95,7 +95,7 @@ change for adopters and desynchronizes the two implementations.
 
 | Parameter | Default | Notes |
 | --- | --- | --- |
-| `AshVersion` | `v3.7.0` | Git ref cloned and built. Not a PyPI version. |
+| `AshVersion` | `v3.7.0` | Git ref fetched and built: a tag, a branch, or a full commit SHA. Not a PyPI version. |
 | `AshImageTag` | empty | ECR tag the **workload** pulls. Empty tracks the moving tag. Not offered by `AshImagePipeline`, which runs no workload. See below. |
 | `AshOfflineMode` | `NO` | `YES`/`NO`, forwarded to the ASH Dockerfile's `OFFLINE` build argument. The spelling is the Dockerfile's; a boolean would build an image that stayed online. It bakes scanner data into the image and does not restrict network egress: Fargate tasks keep TCP 443 through the NAT gateway, AgentCore runs in `PUBLIC` mode, and the gate has open egress unless `VpcId` is set. |
 | `AshBaseConfigYaml` | empty | An ASH configuration document. See the size note below. |
@@ -109,7 +109,7 @@ change for adopters and desynchronizes the two implementations.
 | `CodeCommitRepositoryArn` | required | An **existing** repository. The gate stack never creates or deletes one. |
 | `VpcId` | empty | Gate only. The VPC for the scan function, set together with `VpcSubnetIds`; setting only one is refused at launch. The stack creates a security group there whose only egress is TCP 443 to `ScanEgressCidr`, exported as `ScanSecurityGroupId` so you can widen it. Empty keeps the function outside any VPC, with open egress. See below. |
 | `VpcSubnetIds` | empty | Gate only. Comma-separated subnets for the scan function, in `VpcId`. Your routes there must reach what `ScanEgressCidr` names (NAT or interface endpoints). |
-| `ScanEgressCidr` | empty | Gate only, and required with `VpcId`; setting one without the other is refused at launch. The IPv4 CIDR the scan function may reach on TCP 443. The function itself calls CodeCommit (the API and `git-codecommit`), and Systems Manager for its config parameter; the Lambda service, not the function's network interfaces, pulls the image and delivers its logs. With `AshOfflineMode=NO` the scanners also download rules and vulnerability databases from public hosts outside AWS. So: your VPC CIDR if the image is offline and you have interface endpoints for those services, or `0.0.0.0/0` behind a NAT gateway with an online image. There is no default because the right value depends on your network. |
+| `ScanEgressCidr` | empty | Gate only, and required with `VpcId`; setting one without the other is refused at launch. The IPv4 CIDR the scan function may reach on TCP 443. The function itself calls CodeCommit (the API and `git-codecommit`), and, when `AshBaseConfigYaml` is set, Systems Manager for its config parameter on every invocation; the Lambda service, not the function's network interfaces, pulls the image and delivers its logs. With `AshOfflineMode=NO` the scanners also download rules and vulnerability databases from public hosts outside AWS. So: your VPC CIDR if the image is offline and you have interface endpoints for those services, or `0.0.0.0/0` behind a NAT gateway with an online image. There is no default because the right value depends on your network. |
 
 **VPC attachment for the gate has not been deploy-tested.** The network-interface grant it adds keeps `Resource: "*"`, as Lambda documents, and pins the calls to the stack's Region with `aws:RequestedRegion`. AWS does not document whether Lambda's service-side network-interface calls carry that key. It is a global key present on signed requests, so this is expected to work. If attaching the function fails with a permissions error on `ec2:CreateNetworkInterface`, please report it: the condition is the first suspect. The Terraform module carries the same condition.
 
@@ -121,7 +121,10 @@ into the container at start, applied through `ASH_CONFIG` so it covers every sca
 the process runs. CloudFormation caps a parameter value at 4096 bytes, so that is
 the real ceiling on what you can paste. Advanced tier holds 8 KB, so a larger
 config can be pasted into Parameter Store after deployment; the next container
-start picks it up. ASH selects one config source rather than merging them, so what
+start, or on the gate the next pull request, picks it up. Deploy with a short
+document such as `{}` rather than empty if you mean to do that: a stack deployed with
+`AshBaseConfigYaml` empty does not tell its workload the parameter's name, so an
+edit to the parameter is read by nothing. ASH selects one config source rather than merging them, so what
 `ASH_CONFIG` means depends on how the target runs ASH. An MCP scan of a directory
 that carries its own `.ash.yaml` uses that file; `ASH_CONFIG` is the default for
 directories without one. The pipeline's shard and merge projects run `ash scan`,
