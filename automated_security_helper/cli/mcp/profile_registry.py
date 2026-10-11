@@ -135,14 +135,15 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
         # are handled by Issue #82 — discriminated-union plugin config
         # validation — once that lands. Until then, a top-level gate
         # catches the common case (typos at the AshConfig root).
+        #
+        # Read by the loader's own reader, as from_file read it, so a profile that
+        # uses !ENV or is TOML is checked rather than refused by a plain parser.
         try:
-            with open(path, mode="r", encoding="utf-8") as f:
-                if str(path).endswith(".json"):
-                    import json as _json
+            from automated_security_helper.config.config_sources import (
+                read_config_file,
+            )
 
-                    raw = _json.load(f)
-                else:
-                    raw = yaml.safe_load(f)
+            raw = read_config_file(path)
             allowed = set(AshConfig.model_fields.keys())
             for finfo in AshConfig.model_fields.values():
                 if finfo.alias:

@@ -994,6 +994,11 @@
   given with `--profile`, but `ash mcp` did not accept the option and exited 2 with
   `No such option: --profile`, so `list_profiles` always returned an empty list.
 
+- `ash mcp --profile` registers a profile that uses tagged `!ENV` or is a TOML file.
+  The check for unknown top-level fields read the profile with a plain YAML parser,
+  which refused the `!ENV` tag and misread TOML; it now reads the file as the
+  profile itself is loaded.
+
 - `ash dependencies install --tool ArchiveConverter` works again. Building each plugin
   from its own config section renamed the archive converter's selector to `archive`,
   so the old spelling exited 2 as an unknown tool. It is now accepted as a deprecated

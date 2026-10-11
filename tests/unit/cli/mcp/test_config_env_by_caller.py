@@ -440,3 +440,151 @@ def test_a_suppression_shaped_like_a_reference_is_written_literally(tmp_path):
     loaded = AshConfig.from_file(config).global_settings.suppressions[0]
     assert loaded.path == f"{reference}/a.py"
     assert loaded.reason == reference
+
+
+# ---------------------------------------------------------------------------
+# The server's own config keeps !ENV for a remote caller
+# ---------------------------------------------------------------------------
+#
+# The remote rule reaches only the chains a client can influence. ASH_CONFIG and
+# the registered profile behind a session are the operator's, wherever they are,
+# so each is read with the default rule even outside ASH_MCP_ALLOWED_CONFIG_ROOTS.
+
+MODE_VAR = "ASH_ENV_MODE_PROBE"
+OPERATOR_TEXT = (
+    f"project_name: !ENV ${{{PROBE_VAR}:unset}}\n"
+    f"sandbox:\n  mode: !ENV ${{{MODE_VAR}:off}}\n"
+)
+
+
+def _outside_the_config_roots(path: Path) -> Path:
+    from automated_security_helper.cli.mcp.sandbox import (
+        client_named_config_is_untrusted,
+    )
+
+    # The remote rule would refuse the file if it reached it.
+    assert client_named_config_is_untrusted(path)
+    return path
+
+
+def test_an_operator_ash_config_resolves_env_for_a_remote_caller(_server, monkeypatch):
+    from automated_security_helper.cli.mcp.profile_registry import (
+        session_client_rules,
+    )
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+    server = _outside_the_config_roots(
+        _write(_server["tmp"] / "server" / "ash.yaml", OPERATOR_TEXT)
+    )
+    monkeypatch.setenv("ASH_CONFIG", str(server))
+    monkeypatch.setenv(MODE_VAR, "bwrap")
+    empty = _server["scan_root"] / "empty"
+    empty.mkdir()
+    untrusted = _write(_server["other"] / "ash.yaml", "project_name: other\n")
+
+    # As the default config: nothing found in the directory searched, and a scan
+    # of a target with no config of its own.
+    got = mcp_get_config(search_dir=str(empty), session_id=SESSION)
+    _, default = _scan(_server["target"], None, SESSION)
+    # As the trusted base a client's config is held to, and the policy source.
+    _, held = _scan(_server["target"], untrusted, SESSION)
+
+    assert got.get("project_name") == PROBE, got
+    assert isinstance(default[-1], AshConfig), default
+    assert default[-1].project_name == PROBE
+    assert isinstance(held[-1], AshConfig), held
+    assert held[-1].project_name == "other"
+    assert held[-1].sandbox.mode == "bwrap"
+    assert session_client_rules(SESSION).unreadable is None
+
+
+def test_the_registered_profile_behind_a_session_resolves_env_for_a_remote_caller(
+    _server, monkeypatch
+):
+    import yaml
+
+    from automated_security_helper.cli.mcp.profile_registry import (
+        register_profiles,
+        resolve_session_config_path,
+        resolve_session_trusted_config_path,
+        session_client_rules,
+        session_profile_entry,
+        set_profile_registry,
+    )
+    from automated_security_helper.cli.mcp.sandbox import config_base_gate
+    from automated_security_helper.cli.mcp_tools import (
+        mcp_get_config,
+        mcp_select_profile,
+    )
+    from automated_security_helper.config.client_config_policy import _trusted_config
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.setenv(MODE_VAR, "bwrap")
+    _write(_server["other"] / "client.yaml", "project_name: client\n")
+    profile = _outside_the_config_roots(
+        _write(
+            _server["tmp"] / "profiles" / "op.yaml",
+            OPERATOR_TEXT
+            + yaml.safe_dump(
+                {
+                    "global_settings": {
+                        "mcp": {
+                            "runtime_overrides": {
+                                "enabled": True,
+                                "allowed_paths": ["/project_name"],
+                            }
+                        }
+                    }
+                }
+            ),
+        )
+    )
+    set_profile_registry(register_profiles([f"op={profile}"]))
+
+    # Bound as registered: the session's config/ copy.
+    assert mcp_select_profile("op", session_id=SESSION)["success"] is True
+    copy = Path(resolve_session_config_path(SESSION))
+    got = mcp_get_config(config_path=str(copy), session_id=SESSION)
+    _, bound = _scan(_server["target"], copy, SESSION)
+
+    assert got.get("project_name") == PROBE, got
+    assert isinstance(bound[-1], AshConfig), bound
+    assert bound[-1].project_name == PROBE
+
+    # Patched by the client: the copy is the client's, and the session's config/
+    # copy of the registered profile is the trusted base it is held to.
+    patched = mcp_select_profile(
+        "op",
+        patch_ops=[{"op": "replace", "path": "/project_name", "value": "patched"}],
+        session_id=SESSION,
+    )
+    assert patched["success"] is True, patched
+    trusted = resolve_session_trusted_config_path(SESSION)
+    assert trusted is not None
+    _, held = _scan(
+        _server["target"], Path(resolve_session_config_path(SESSION)), SESSION
+    )
+
+    assert isinstance(held[-1], AshConfig), held
+    assert held[-1].project_name == "patched"
+    assert held[-1].sandbox.mode == "bwrap"
+    assert session_profile_entry(SESSION).config.project_name == PROBE
+    assert session_client_rules(SESSION).unreadable is None
+    for base in (trusted, profile):
+        # The trusted base as the trust checks read it, whichever operator file
+        # it is: the config/ copy, or a registered profile that uses !ENV itself.
+        trusted_config = _trusted_config(
+            base, _server["target"], config_base_gate(SESSION)
+        )
+        assert trusted_config.project_name == PROBE
+        assert trusted_config.sandbox.mode == "bwrap"
+        resolved = resolve_config(
+            config_path=_server["other"] / "client.yaml",
+            source_dir=_server["target"],
+            permit_base=config_base_gate(SESSION),
+            trusted_config_path=base,
+            untrusted_config=True,
+            remote_client=True,
+        )
+        assert resolved.project_name == "client"
+        assert resolved.sandbox.mode == "bwrap"
