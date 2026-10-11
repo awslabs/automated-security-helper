@@ -35,6 +35,9 @@ from automated_security_helper.core.resource_management.error_handling import (
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
+from automated_security_helper.cli.mcp.session_identity import (
+    UNIDENTIFIED_SESSION_ID,
+)
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.output_dir_links import (
@@ -370,7 +373,8 @@ async def _run_scan_async(
     # check_scan_progress lets a RUNNING entry's runner decide its status, so an
     # entry left RUNNING would read as running forever.
     session_lock = None
-    if session_id is not None:
+    # A caller the server could not identify has no session to serialize on.
+    if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
         from automated_security_helper.cli.mcp.sessions import (
             get_default_registry as _get_session_registry,
         )

@@ -464,8 +464,13 @@ resolved before the comparison, so a link inside an allowed root that points
 outside it is refused. The per-session MCP workspace root is always allowed as
 well, so source trees delivered over the protocol stay scannable.
 
-With it unset, ASH refuses a short fixed list of system directories as scan
-targets — on Linux and macOS `/boot`, `/dev`, `/etc`, `/proc`, `/root`, `/sys`
+With it unset, a caller on a network transport (sse or streamable-HTTP) may
+scan only its own session workspace: every network caller is remote, whatever
+headers it sends, and gets no fallback. See
+[Session identity](mcp/streamable-http.md#session-identity).
+
+With it unset on stdio, ASH refuses a short fixed list of system directories as
+scan targets — on Linux and macOS `/boot`, `/dev`, `/etc`, `/proc`, `/root`, `/sys`
 and the filesystem root; on Windows the Windows directory, `Program Files`,
 `ProgramData` and a bare drive root. To scan one of these deliberately, name it
 in `ASH_MCP_ALLOWED_ROOTS`, which replaces the list rather than adding to it.

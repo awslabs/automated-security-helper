@@ -24,6 +24,7 @@ import re
 
 import pytest
 import typer
+from starlette.applications import Starlette
 from starlette.testclient import TestClient
 from typer.testing import CliRunner
 
@@ -81,7 +82,8 @@ class TestWiring:
 
         def _fake_app(**kwargs):
             captured.update(kwargs)
-            return object()
+            # A real (empty) app: the builder installs its own middleware on it.
+            return Starlette()
 
         monkeypatch.setattr(mcp_server.mcp, "streamable_http_app", _fake_app)
         build_streamable_http_app(mount_path="/mcp", stateless_http=True)
@@ -95,7 +97,8 @@ class TestWiring:
 
         def _fake_app(**kwargs):
             captured.update(kwargs)
-            return object()
+            # A real (empty) app: the builder installs its own middleware on it.
+            return Starlette()
 
         monkeypatch.setattr(mcp_server.mcp, "streamable_http_app", _fake_app)
         build_streamable_http_app(mount_path="/mcp")

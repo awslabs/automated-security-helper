@@ -318,6 +318,15 @@ def materialize_session_config(session_id: Optional[str], config: AshConfig) -> 
 
     from automated_security_helper.cli.mcp.sandbox import session_sandbox
 
+    from automated_security_helper.cli.mcp.session_identity import (
+        UNIDENTIFIED_SESSION_ID,
+    )
+
+    if session_id == UNIDENTIFIED_SESSION_ID:
+        raise RuntimeError(
+            "cannot materialize a session config: this caller has no session the "
+            "server issued, so it has no session workspace to hold one"
+        )
     sandbox = session_sandbox(session_id or DEFAULT_SESSION_ID)
     if sandbox.root is None:
         raise RuntimeError(

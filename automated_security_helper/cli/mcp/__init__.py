@@ -22,6 +22,12 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 
+from automated_security_helper.cli.mcp.http_sessions import (
+    MODE_SSE,
+    MODE_STATEFUL,
+    MODE_STATELESS,
+    SessionBoundary,
+)
 from automated_security_helper.cli.mcp.profile_registry import (
     register_profiles,
     set_profile_registry,
@@ -125,6 +131,30 @@ def _validate_stateless_http(transport: str, stateless_http: bool) -> None:
         )
 
 
+def _validate_trust_upstream_session_id(
+    transport: str, stateless_http: bool, trust_upstream_session_id: bool
+) -> None:
+    """Reject ``--trust-upstream-session-id`` where the server issues the session.
+
+    Only a stateless streamable-HTTP server has no session of its own. On a
+    stateful server and on sse the server issues the session id, and stdio has
+    one client, so the flag would claim something about a header nothing reads.
+    Refused rather than ignored, for the reason ``_validate_stateless_http`` gives.
+
+    Raises:
+        ASHValidationError: if the flag is set anywhere but stateless
+            streamable-HTTP.
+    """
+    if trust_upstream_session_id and not (
+        transport == "streamable-http" and stateless_http
+    ):
+        raise ASHValidationError(
+            "--trust-upstream-session-id only applies to '--transport "
+            "streamable-http --stateless-http'. A stateful server and an sse server "
+            "issue their own session ids, and stdio has a single client."
+        )
+
+
 def _build_auth_middleware(header_name: str, header_value: str):
     """Build a Starlette middleware class that enforces a static header.
 
@@ -181,6 +211,7 @@ def build_streamable_http_app(
     stateless_http: bool = False,
     host: str = "127.0.0.1",
     allowed_hosts: Optional[List[str]] = None,
+    trust_upstream_session_id: bool = False,
 ):
     """Build the MCPServer streamable-HTTP ASGI app, optionally guarded by auth.
 
@@ -201,6 +232,11 @@ def build_streamable_http_app(
         allowed_hosts: Explicit Host-header allowlist. When given, DNS-rebinding
             protection stays on and accepts exactly these hosts, which is the
             right posture behind a proxy whose hostname is known.
+        trust_upstream_session_id: Stateless only. Take the ``Mcp-Session-Id``
+            header as the caller's session identity, because a platform in front
+            of ASH issues and authenticates it. Without it a stateless server
+            identifies no session, and the tools that need one refuse; see
+            ``cli/mcp/http_sessions.py``.
 
     The host argument is load-bearing, not cosmetic
     ----------------------------------------------
@@ -253,6 +289,14 @@ def build_streamable_http_app(
             allowed_origins=[],
         )
     app = _mcp_instance.streamable_http_app(**app_kwargs)
+    # Decides which session each request belongs to from what this app issued,
+    # never from a header alone. Added before the auth middleware so an
+    # unauthenticated request is refused before it is identified.
+    app.add_middleware(
+        SessionBoundary,
+        mode=MODE_STATELESS if stateless_http else MODE_STATEFUL,
+        trust_upstream_session_id=trust_upstream_session_id,
+    )
 
     if auth_header_name and auth_header_value:
         middleware_cls = _build_auth_middleware(auth_header_name, auth_header_value)
@@ -329,6 +373,9 @@ def build_sse_app(
             allowed_origins=[],
         )
     app = _mcp_instance.sse_app(**app_kwargs)
+    # The session of an sse request is the one the server issued for its event
+    # stream; a header on a message POST is ignored.
+    app.add_middleware(SessionBoundary, mode=MODE_SSE)
 
     if auth_header_name and auth_header_value:
         middleware_cls = _build_auth_middleware(auth_header_name, auth_header_value)
@@ -428,6 +475,17 @@ def mcp_command(
             "with --transport streamable-http.",
         ),
     ] = False,
+    trust_upstream_session_id: Annotated[
+        bool,
+        typer.Option(
+            "--trust-upstream-session-id",
+            help="Stateless streamable-HTTP only. Declare that a platform in front "
+            "of ASH issues and authenticates the Mcp-Session-Id header, so it can "
+            "name the caller's session. Without it a stateless server identifies "
+            "no session, and tools that need one (source delivery, profiles, the "
+            "scan registry) refuse.",
+        ),
+    ] = False,
     allowed_host: Annotated[
         Optional[List[str]],
         typer.Option(
@@ -522,14 +580,18 @@ def mcp_command(
     # transport, which is the operator's actual mistake.
     try:
         _validate_stateless_http(transport, stateless_http)
+        _validate_trust_upstream_session_id(
+            transport, stateless_http, trust_upstream_session_id
+        )
     except ASHValidationError as e:
         _stderr.print(f"[red]Validation Error: {str(e)}[/red]")
         raise typer.Exit(3)
 
     # Deliberately NOT recording the transport here. The scan-target and
     # config-input boundaries decide "is this caller remote" per call, from the
-    # session id the transport supplied -- see cli/mcp/sandbox.py::caller_is_remote
-    # -- which is request-scoped and needs nothing from this function.
+    # session the transport supplied -- cli/mcp/http_sessions.py stamps each HTTP
+    # request with it, per app -- which is request-scoped and needs nothing from
+    # this function.
     #
     # An earlier version did set it, and process-wide state turned out to be the
     # wrong shape: the value outlives the server object, so a process that ran this
@@ -538,10 +600,9 @@ def mcp_command(
     # accepts -- 32 tests, none of them about transports -- but a boundary whose
     # answer depends on what ran earlier in the process is not one worth having.
     #
-    # ASH_MCP_TRANSPORT remains available as an operator override for the one gap
-    # the session-id signal leaves (an HTTP client that sends no session header at
-    # all). Like ASH_MCP_ALLOWED_ROOTS it is read and never written, which is what
-    # keeps it from leaking.
+    # ASH_MCP_TRANSPORT remains available as an operator override that makes every
+    # caller remote. Like ASH_MCP_ALLOWED_ROOTS it is read and never written, which
+    # is what keeps it from leaking.
 
     # Load and validate every --profile now, so an operator's typo fails startup
     # with a message about the profile rather than surfacing later as a scan that
@@ -593,6 +654,7 @@ def mcp_command(
                 # exists to prevent.
                 host=host,
                 allowed_hosts=allowed_host,
+                trust_upstream_session_id=trust_upstream_session_id,
             )
             if not quiet:
                 _stderr.print(

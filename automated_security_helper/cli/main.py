@@ -101,6 +101,15 @@ def _mcp_wrapper(
         "that inject their own Mcp-Session-Id. Only valid with "
         "--transport streamable-http.",
     ),
+    trust_upstream_session_id: bool = typer.Option(
+        False,
+        "--trust-upstream-session-id",
+        help="Stateless streamable-HTTP only. Declare that a platform in front of "
+        "ASH issues and authenticates the Mcp-Session-Id header, so it can name "
+        "the caller's session. Without it a stateless server identifies no "
+        "session, and tools that need one (source delivery, profiles, the scan "
+        "registry) refuse.",
+    ),
     allowed_host: list[str] | None = typer.Option(
         None,
         "--allowed-host",
@@ -127,6 +136,7 @@ def _mcp_wrapper(
         auth_header_name=auth_header_name,
         auth_header_value=auth_header_value,
         stateless_http=stateless_http,
+        trust_upstream_session_id=trust_upstream_session_id,
         allowed_host=allowed_host,
     )
 

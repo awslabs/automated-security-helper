@@ -35,9 +35,13 @@ confinement wrong -- ``test_an_unconfigured_policy_does_not_refuse_an_ordinary_w
 has pinned that since workspace mode landed.
 
 "Remote" is decided per call by :func:`caller_is_remote`, from the session id
-rather than from recorded server state. That function carries the reasoning; the
-short version is that process-wide transport state outlives the server object and
-made the answer depend on what ran earlier in the process.
+rather than from recorded server state. The session id is in turn decided by the
+transport the call arrived on (``session_identity.resolve_caller_session_id``):
+every network caller resolves to a server-issued id or to
+``UNIDENTIFIED_SESSION_ID``, never to stdio's default, so it is remote whatever
+headers it sends. That function carries the reasoning; the short version is that
+process-wide transport state outlives the server object and made the answer
+depend on what ran earlier in the process.
 
 **Ambient rather than capability.** Authority was whatever the launching process
 happened to have. A :class:`SessionSandbox` is an object resolved for a named
@@ -75,17 +79,16 @@ refusal message names the variable to set.
 
 Failure modes and known limitations
 -----------------------------------
-* Isolation is only as strong as two callers' session ids differing. The id comes
-  from a client-supplied header and is a namespace, never an identity assertion
-  -- see ``session_identity.py``. On AgentCore that is the platform's job; on a
-  self-hosted deployment it is the fronting proxy's. This module guarantees that
-  an id names one directory and not a path, and that one id cannot reach
-  another's, and nothing about who may claim an id.
-* "Remote" is inferred from the session id, so a streamable-HTTP client that
-  sends no ``Mcp-Session-Id`` at all is treated as local. The MCP spec has the
-  server assign one at ``initialize`` and AgentCore injects one, so this is not
-  the normal case; ``ASH_MCP_TRANSPORT=streamable-http`` closes it explicitly, and
-  so does any ``ASH_MCP_ALLOWED_ROOTS`` grant.
+* Isolation is only as strong as two callers' session ids differing. On sse and
+  stateful streamable-HTTP the server issues the id; on a stateless server the id
+  is the ``Mcp-Session-Id`` header only when the operator declared, with
+  ``--trust-upstream-session-id``, that a platform in front issues and
+  authenticates it, and then isolation is the platform's job. This module
+  guarantees that an id names one directory and not a path, and that one id
+  cannot reach another's.
+* A network caller with no session identity resolves to
+  ``UNIDENTIFIED_SESSION_ID``: remote, with no sandbox of its own, so the
+  operator's grants are all it can reach.
 * A caller that reaches these functions with no session id at all gets the local
   default. That is deliberate -- an in-process caller of the tool functions is not
   a server, and importing this module must not tighten behavior for it -- but it
@@ -216,12 +219,11 @@ def caller_is_remote(session_id: Optional[str]) -> bool:
     and 31 other tests with it -- but it was still wrong, and a boundary whose
     answer depends on what ran earlier in the process is not one worth having.
 
-    The env var is kept as a second trigger, ORed in, for the gap this leaves: a
-    streamable-HTTP client that sends no session header at all resolves to the
-    sentinel and would otherwise get the local default. The MCP spec has the
-    server assign an id at ``initialize`` and AgentCore injects one, so that
-    combination is not the normal case -- but "not normal" is not "impossible", and
-    an operator can close it explicitly.
+    A network caller never resolves to the sentinel: the transport supplies a
+    server-issued id or ``UNIDENTIFIED_SESSION_ID`` (see
+    ``session_identity.resolve_caller_session_id``), and both are remote. The
+    env var is kept as an operator override, ORed in, that makes every caller
+    remote, in-process ones included.
     """
 
     from automated_security_helper.cli.mcp.profile_registry import (
@@ -451,8 +453,14 @@ def session_sandbox(session_id: Optional[str] = None) -> SessionSandbox:
             directory.
     """
 
+    from automated_security_helper.cli.mcp.session_identity import (
+        UNIDENTIFIED_SESSION_ID,
+    )
+
     root: Optional[Path] = None
-    if session_id:
+    # A caller the server could not identify owns no sandbox: it is remote, and
+    # the operator's grant is all it may reach.
+    if session_id and session_id != UNIDENTIFIED_SESSION_ID:
         _validated_session_component(session_id)
         shared = shared_workspace_root()
         if shared is not None:

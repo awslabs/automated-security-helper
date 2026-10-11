@@ -16,6 +16,13 @@ header on every request, including the first. A stateful MCP server rejects a
 session id it never issued with 404 "Session not found"; a stateless server
 accepts it and returns 200. The platform contract states the server must accept
 the platform-provided session id rather than reject it.
+
+Why ASH_MCP_TRUST_UPSTREAM_SESSION_ID defaults to false: a stateless server
+issues no session, so it takes the header as the caller's session only when told
+that the platform in front issues and authenticates it. That is a statement
+about the deployment this file cannot check, so the AgentCore modules set it and
+every other target leaves it off. Without it, source delivery and the scan
+registry tools refuse on a stateless server.
 """
 
 from __future__ import annotations
@@ -29,6 +36,7 @@ DEFAULT_HOST = "0.0.0.0"  # noqa: S104 - the AgentCore contract requires this bi
 DEFAULT_PORT = "8000"
 DEFAULT_MOUNT_PATH = "/mcp"
 DEFAULT_STATELESS = "true"
+DEFAULT_TRUST_UPSTREAM_SESSION_ID = "false"
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off"}
@@ -87,6 +95,12 @@ def build_argv() -> list[str]:
     if transport == "streamable-http":
         stateless = _env_bool("ASH_MCP_STATELESS_HTTP", DEFAULT_STATELESS)
         argv.append("--stateless-http" if stateless else "--no-stateless-http")
+        # ash refuses the declaration on a server that issues its own sessions,
+        # so it is emitted for stateless streamable-http only.
+        if stateless and _env_bool(
+            "ASH_MCP_TRUST_UPSTREAM_SESSION_ID", DEFAULT_TRUST_UPSTREAM_SESSION_ID
+        ):
+            argv.append("--trust-upstream-session-id")
 
     header_name = _env("ASH_MCP_AUTH_HEADER_NAME", "")
     header_value = _env("ASH_MCP_AUTH_HEADER_VALUE", "")

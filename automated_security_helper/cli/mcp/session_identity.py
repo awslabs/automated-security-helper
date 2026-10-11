@@ -40,19 +40,24 @@ image change.
 
 stdio carries no headers and serves a single client, so it resolves to
 ``DEFAULT_SESSION_ID``, the sentinel the profile registry already uses for
-callers that name no session. That is also what a transport supplying no header
-at all resolves to, which keeps delivery coherent (every call agrees on one
-workspace) at the cost of isolation between concurrent callers.
+callers that name no session.
 
-The header is client-supplied input and is treated strictly as a namespace,
-never as an identity assertion -- it selects which directory beneath the
-workspace root a call may read and write, and decides nothing else. Isolation
-between two callers is therefore only as strong as their ids differing, which on
-AgentCore is the platform's job and on a self-hosted deployment is the fronting
-proxy's. What this module does guarantee is that an id names one directory and
-not a path: an id that could traverse, or that carries a separator or a control
-character, is refused rather than sanitized. Sanitizing would map two distinct
-ids onto one workspace and silently merge two callers' source trees.
+Which session a network call belongs to is decided by the transport, never by
+the header alone: see :func:`resolve_caller_session_id` and
+``cli/mcp/http_sessions.py``. A header a client sets on sse, or on a stateless
+streamable-HTTP server, names no session; a stateful server's header counts only
+when the server issued it. A network caller with no session identity resolves
+to :data:`UNIDENTIFIED_SESSION_ID`, which is remote and owns no sandbox, so it
+never falls back to stdio's local trust.
+
+Where a header is the identity -- a stateless server whose operator declared
+with ``--trust-upstream-session-id`` that a platform in front issues and
+authenticates it -- isolation between two callers is only as strong as the
+platform makes it. What this module guarantees is that an id names one
+directory and not a path: an id that could traverse, or that carries a separator
+or a control character, is refused rather than sanitized. Sanitizing would map
+two distinct ids onto one workspace and silently merge two callers' source
+trees.
 
 That guarantee lives in ``session_paths.validated_path_component``, the one
 implementation shared by the transport, the ``sessions`` registry and
@@ -69,6 +74,16 @@ from typing import Mapping, Optional
 # Lowercase because HTTP header names are case-insensitive and this is compared
 # against a lowercased key.
 MCP_SESSION_ID_HEADER = "mcp-session-id"
+
+#: The session id of a network caller the server cannot identify: stateless
+#: streamable-HTTP without ``--trust-upstream-session-id``, or a header the
+#: server never issued. Remote, owns no sandbox, and every tool that needs a
+#: session refuses it. Never accepted from a client.
+UNIDENTIFIED_SESSION_ID = "__unidentified__"
+
+#: ``error_type`` of the refusal a session-dependent tool returns for
+#: :data:`UNIDENTIFIED_SESSION_ID`.
+SESSION_IDENTITY_REQUIRED = "session_identity_required"
 
 
 def validate_path_component(value: str, label: str) -> str:
@@ -159,8 +174,105 @@ def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
     return validate_path_component(candidate, MCP_SESSION_ID_HEADER)
 
 
+def _reserved_session_ids() -> tuple:
+    from automated_security_helper.cli.mcp.profile_registry import (
+        DEFAULT_SESSION_ID,
+    )
+
+    return (DEFAULT_SESSION_ID, UNIDENTIFIED_SESSION_ID)
+
+
+def _is_sdk_context(ctx: object) -> bool:
+    """True for a Context the MCP SDK built, False for a stand-in.
+
+    ``type()`` rather than ``isinstance``: a ``MagicMock(spec=Context)`` passes
+    ``isinstance``, and a stand-in carries no request a transport produced.
+    """
+    try:
+        from mcp.server.mcpserver import Context as SdkContext
+    except ImportError:  # pragma: no cover - only when the mcp package is absent
+        return False
+    return issubclass(type(ctx), SdkContext)
+
+
+def resolve_caller_session_id(ctx: object) -> str:
+    """The session a tool call acts for, decided by the transport it arrived on.
+
+    * No request object (stdio, the SDK's in-memory client): the single local
+      client, :data:`DEFAULT_SESSION_ID`.
+    * An HTTP request: the session ``http_sessions.SessionBoundary`` stamped on
+      it -- one the server issued, or, on a stateless server run with
+      ``--trust-upstream-session-id``, the platform's header. A request with no
+      stamp (an HTTP app ASH did not build) or no session in it is
+      :data:`UNIDENTIFIED_SESSION_ID`: remote, with no sandbox.
+    * Anything that is not a Context the SDK built (an in-process caller's
+      stand-in): the ``Mcp-Session-Id`` in its ``headers``, as
+      :func:`resolve_session_id` reads it.
+
+    Raises:
+        ValueError: if the identity is a header value that could not name one
+            directory, or names one of the reserved sentinels.
+    """
+
+    from automated_security_helper.cli.mcp.http_sessions import caller_of
+    from automated_security_helper.cli.mcp.profile_registry import (
+        DEFAULT_SESSION_ID,
+    )
+
+    if not _is_sdk_context(ctx):
+        return resolve_session_id(getattr(ctx, "headers", None))
+
+    try:
+        request = ctx.request_context.request  # type: ignore[attr-defined]
+    except ValueError:
+        # A Context used outside a request has no transport behind it.
+        return DEFAULT_SESSION_ID
+    if request is None:
+        return DEFAULT_SESSION_ID
+
+    caller = caller_of(getattr(request, "scope", None))
+    if caller is None or caller.session_id is None:
+        return UNIDENTIFIED_SESSION_ID
+    candidate = caller.session_id.strip()
+    if not candidate:
+        return UNIDENTIFIED_SESSION_ID
+    if candidate in _reserved_session_ids():
+        raise ValueError(
+            f"{MCP_SESSION_ID_HEADER} {candidate!r} is reserved and cannot name a "
+            f"session"
+        )
+    return validate_path_component(candidate, MCP_SESSION_ID_HEADER)
+
+
+def session_identity_refusal(session_id: str, operation: str) -> Optional[dict]:
+    """The refusal a session-dependent tool returns for an unidentified caller.
+
+    Returns None when ``session_id`` names a session.
+    """
+
+    if session_id != UNIDENTIFIED_SESSION_ID:
+        return None
+    return {
+        "success": False,
+        "operation": operation,
+        "error_type": SESSION_IDENTITY_REQUIRED,
+        "error": (
+            f"{operation} needs a session, and this call carries none the server "
+            f"issued. A stateless streamable-HTTP server issues no session, and an "
+            f"Mcp-Session-Id header the server did not issue does not name one. "
+            f"Use a stateful server (without --stateless-http), or, when a "
+            f"platform in front of ASH issues and authenticates Mcp-Session-Id, "
+            f"start the server with --trust-upstream-session-id."
+        ),
+    }
+
+
 __all__ = [
     "MCP_SESSION_ID_HEADER",
+    "SESSION_IDENTITY_REQUIRED",
+    "UNIDENTIFIED_SESSION_ID",
+    "resolve_caller_session_id",
     "resolve_session_id",
+    "session_identity_refusal",
     "validate_path_component",
 ]

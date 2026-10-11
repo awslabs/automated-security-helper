@@ -58,6 +58,9 @@ import zipfile
 from pathlib import Path
 from typing import Dict, Optional
 
+from automated_security_helper.cli.mcp.session_identity import (
+    UNIDENTIFIED_SESSION_ID,
+)
 from automated_security_helper.cli.mcp.session_paths import (
     session_directory,
     validated_path_component,
@@ -163,8 +166,18 @@ def _session_workspace(workspace_root: Path, session_id: str) -> Path:
 
     The return value is the unresolved join, unchanged from before, so a caller
     comparing it against its own spelling of the path still matches.
+
+    Raises:
+        ValueError: for ``UNIDENTIFIED_SESSION_ID``, the caller the server could
+            not identify, which owns no workspace; or for an id that does not
+            name one directory.
     """
 
+    if session_id == UNIDENTIFIED_SESSION_ID:
+        raise ValueError(
+            "this caller has no session the server issued, so it has no session "
+            "workspace"
+        )
     return session_directory(workspace_root, session_id)
 
 

@@ -158,6 +158,7 @@ Start the ASH MCP server (Model Context Protocol).
 | `--auth-header-name` | str |  |  | Required HTTP header name for single-tenant auth (HTTP transports only). |
 | `--auth-header-value` | str |  |  | Expected value of --auth-header-name. |
 | `--stateless-http/--no-stateless-http` | bool | False |  | Handle each streamable-HTTP request independently instead of binding it to a server-held session. Required behind a load balancer that may route consecutive requests to different replicas, and by managed runtimes that inject their own Mcp-Session-Id. Only valid with --transport streamable-http. |
+| `--trust-upstream-session-id` | bool | False |  | Stateless streamable-HTTP only. Declare that a platform in front of ASH issues and authenticates the Mcp-Session-Id header, so it can name the caller's session. Without it a stateless server identifies no session, and tools that need one (source delivery, profiles, the scan registry) refuse. |
 | `--allowed-host` | List[str] |  |  | Host header value to accept, repeatable. Keeps DNS-rebinding protection enabled while allowing a known proxy or load balancer hostname. Without this, protection is enabled only when --host is loopback, matching the MCP SDK's own default. |
 
 ### `ash get-genai-guide`
@@ -372,7 +373,7 @@ Get a lightweight summary of scan results without detailed findings.
 
 ### `list_active_scans`
 
-List all active and recent scans with their current status.
+List this session's active and recent scans with their current status.
 
 ### `list_profiles`
 

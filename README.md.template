@@ -312,8 +312,10 @@ The ASH MCP server provides these tools:
 The last four matter only on a network transport, where the client has no path on
 the server to name. Deliver a tree with them, then call `run_ash_scan` with no
 `source_dir` and it scans what you delivered. Each takes its session from the
-transport's `Mcp-Session-Id` header rather than from an argument, so one client
-cannot name another's workspace. See
+transport (the session the server issued, never a client-chosen header) rather
+than from an argument, so one client cannot name another's workspace; a
+stateless server issues no session unless started with
+`--trust-upstream-session-id`. See
 [the streamable-HTTP guide](docs/content/docs/mcp/streamable-http.md) for the
 limits and the security boundary.
 

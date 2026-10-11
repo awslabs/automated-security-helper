@@ -1118,6 +1118,7 @@ honored by `ash mcp`. See
 | `--auth-header-name`                        | Required HTTP header name for single-tenant auth. Must be set with `--auth-header-value` | None              |
 | `--auth-header-value`                       | Expected value of `--auth-header-name`                                              | None                   |
 | `--stateless-http` / `--no-stateless-http`  | Handle each streamable-HTTP request independently instead of binding it to a server-held session | `--no-stateless-http` |
+| `--trust-upstream-session-id`               | Stateless streamable-HTTP only: a platform in front of ASH issues and authenticates `Mcp-Session-Id`, so the header names the caller's session | `False` |
 | `--allowed-host`                            | Host header value to accept. Repeatable                                             | None                   |
 | `--log-level`                               | Set the log level                                                                   | `INFO`                 |
 | `--verbose`, `-v`                           | Enable verbose logging                                                              | `False`                |
@@ -1132,6 +1133,8 @@ Everything this command writes goes to stderr. On the `stdio` transport stdout i
 ### Session Handling and Host Allowlisting
 
 `--stateless-http` makes the server handle each request on its own instead of binding it to a session the server is holding. Two situations require it: a load balancer that may route consecutive requests from one client to different replicas, where the next request reaches a replica that never saw the session; and managed runtimes that inject their own `Mcp-Session-Id`, which a stateful server refuses as a session it did not issue. The difference is observable — given a session id the server never issued, a stateful server answers `404` and a stateless one answers `200`.
+
+A stateless server issues no session, so by default its callers have no session identity: the `Mcp-Session-Id` they send is client-chosen and is ignored, and the tools that need a session (source delivery, `select_profile`, the scan registry tools) refuse with `error_type: session_identity_required`. Pass `--trust-upstream-session-id` when a platform in front of ASH issues and authenticates that header, as Bedrock AgentCore Runtime does; the header then names the caller's session. See [Session identity](mcp/streamable-http.md#session-identity).
 
 The flag is only valid with `--transport streamable-http`, and passing it on another transport is refused rather than ignored. `stdio` has a single implicit session and `sse` holds an open connection per client, so neither has a session to make stateless; silently dropping the flag would leave you running a stateful server and finding out only when a request landed on the wrong replica in production. `--no-stateless-http` is indistinguishable from the default, so it is accepted on every transport.
 

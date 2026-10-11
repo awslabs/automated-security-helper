@@ -63,7 +63,10 @@ from automated_security_helper.cli.mcp.scan_target import (
     validate_output_tree,
     validate_scan_target,
 )
-from automated_security_helper.cli.mcp.session_identity import resolve_session_id
+from automated_security_helper.cli.mcp.session_identity import (
+    resolve_caller_session_id,
+    session_identity_refusal,
+)
 from automated_security_helper.cli.mcp.source_delivery import (
     delivered_session_count,
     get_session_source_dir,
@@ -172,8 +175,9 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
         )
 
     if session_id == DEFAULT_SESSION_ID:
-        # No session header at all: a single local client, where the working
-        # directory is the documented default and is the tree the caller means.
+        # stdio's single local client, where the working directory is the
+        # documented default and is the tree the caller means. A network caller
+        # never resolves to this id; see session_identity.resolve_caller_session_id.
         #
         # Checked BEFORE the cross-session diagnostic below, and the order is
         # load-bearing. The other-sessions signal is only meaningful for a caller
@@ -279,7 +283,7 @@ async def run_ash_scan(
     """
     try:
         try:
-            session_id = resolve_session_id(ctx.headers)
+            session_id = resolve_caller_session_id(ctx)
         except ValueError as e:
             await ctx.error(str(e))
             return {
@@ -289,6 +293,11 @@ async def run_ash_scan(
             }
 
         if source_dir is None:
+            # "The tree this session delivered" needs a session.
+            refusal = session_identity_refusal(session_id, "run_ash_scan")
+            if refusal is not None:
+                await ctx.error(refusal["error"])
+                return refusal
             resolved = _resolve_omitted_source_dir(session_id)
             if resolved.error is not None:
                 await ctx.error(resolved.error["error"])
@@ -500,7 +509,7 @@ async def resolve_ash_workspace(
         whose own config is invalid or an unknown profile.
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         await ctx.error(str(e))
         return _session_error(e)
@@ -600,7 +609,7 @@ async def run_ash_workspace_scan(
         whether the scan ran; the verdict is `exit_code`.
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         await ctx.error(str(e))
         return _session_error(e)
@@ -713,10 +722,16 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
           count alone cannot distinguish the two.
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         await ctx.error(str(e))
         return _session_error(e)
+
+    # Needs a session: its result belongs to one, and this call may carry none.
+    refusal = session_identity_refusal(session_id, "get_scan_progress")
+    if refusal is not None:
+        await ctx.error(refusal["error"])
+        return refusal
 
     try:
         await ctx.info(f"Getting progress for scan: {scan_id}")
@@ -859,7 +874,7 @@ async def get_scan_results(
                         that have been marked as false positives or accepted risks. Default is False.
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         await ctx.error(str(e))
         return _session_error(e)
@@ -1000,7 +1015,7 @@ async def get_scan_result_paths(
         output_dir: Path to the scan output directory (absolute path recommended)
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         await ctx.error(str(e))
         return _session_error(e)
@@ -1129,10 +1144,16 @@ async def list_active_scans(ctx: Context) -> Dict[str, Any]:
     visible, and the statistics count only this session's.
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         await ctx.error(str(e))
         return _session_error(e)
+
+    # Needs a session: its result belongs to one, and this call may carry none.
+    refusal = session_identity_refusal(session_id, "list_active_scans")
+    if refusal is not None:
+        await ctx.error(refusal["error"])
+        return refusal
 
     try:
         await ctx.info("Listing active scans")
@@ -1159,10 +1180,16 @@ async def cancel_scan(ctx: Context, scan_id: str) -> Dict[str, Any]:
         scan_id: The scan ID to cancel
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         await ctx.error(str(e))
         return _session_error(e)
+
+    # Needs a session: its result belongs to one, and this call may carry none.
+    refusal = session_identity_refusal(session_id, "cancel_scan")
+    if refusal is not None:
+        await ctx.error(refusal["error"])
+        return refusal
 
     try:
         await ctx.info(f"Cancelling scan: {scan_id}")
@@ -1218,7 +1245,7 @@ async def explain_finding(
         and scanner_metadata.
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         return _session_error(e)
 
@@ -1250,7 +1277,7 @@ async def get_config(
         raw: If True, returns the user file contents without merging defaults.
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         return _session_error(e)
 
@@ -1321,7 +1348,7 @@ async def diff_scan_results(
         Dict with keys new, resolved, and severity_changed.
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         return _session_error(e)
 
@@ -1354,7 +1381,7 @@ def validate_config(
         Dict with valid (bool) and errors (list of {field, message, type}).
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         return {
             "valid": False,
@@ -1425,7 +1452,7 @@ async def suggest_suppression(
         justification: Human-readable reason for the suppression.
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         return _session_error(e)
 
@@ -1512,10 +1539,16 @@ async def set_source_git(
         Dict with success and source_dir, or success=False and error.
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         await ctx.error(str(e))
         return _session_error(e)
+
+    # Needs a session: its result belongs to one, and this call may carry none.
+    refusal = session_identity_refusal(session_id, "set_source_git")
+    if refusal is not None:
+        await ctx.error(refusal["error"])
+        return refusal
 
     try:
         result = mcp_set_source_git(
@@ -1564,10 +1597,16 @@ async def set_source_zip_chunk(
         and error on an out-of-order, oversize, or malformed chunk.
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         await ctx.error(str(e))
         return _session_error(e)
+
+    # Needs a session: its result belongs to one, and this call may carry none.
+    refusal = session_identity_refusal(session_id, "set_source_zip_chunk")
+    if refusal is not None:
+        await ctx.error(refusal["error"])
+        return refusal
 
     try:
         return _with_session(
@@ -1610,10 +1649,16 @@ async def set_source_zip_finalize(
         Dict with success and source_dir, or success=False and error.
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         await ctx.error(str(e))
         return _session_error(e)
+
+    # Needs a session: its result belongs to one, and this call may carry none.
+    refusal = session_identity_refusal(session_id, "set_source_zip_finalize")
+    if refusal is not None:
+        await ctx.error(refusal["error"])
+        return refusal
 
     try:
         result = mcp_set_source_zip_finalize(
@@ -1647,10 +1692,16 @@ async def clear_source(ctx: Context) -> Dict[str, Any]:
         Dict with success.
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         await ctx.error(str(e))
         return _session_error(e)
+
+    # Needs a session: its result belongs to one, and this call may carry none.
+    refusal = session_identity_refusal(session_id, "clear_source")
+    if refusal is not None:
+        await ctx.error(refusal["error"])
+        return refusal
 
     try:
         result = mcp_clear_source(session_id=session_id)
@@ -1734,10 +1785,16 @@ async def select_profile(
         override, or YAML that does not validate.
     """
     try:
-        session_id = resolve_session_id(ctx.headers)
+        session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
         await ctx.error(str(e))
         return _session_error(e)
+
+    # Needs a session: its result belongs to one, and this call may carry none.
+    refusal = session_identity_refusal(session_id, "select_profile")
+    if refusal is not None:
+        await ctx.error(refusal["error"])
+        return refusal
 
     try:
         result = mcp_select_profile(

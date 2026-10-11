@@ -165,6 +165,15 @@ class MCPSessionRegistry:
         create branch would admit the id for the lifetime of the process the
         moment a first call had registered it.
         """
+        from automated_security_helper.cli.mcp.session_identity import (
+            UNIDENTIFIED_SESSION_ID,
+        )
+
+        if session_id == UNIDENTIFIED_SESSION_ID:
+            raise ValueError(
+                "this caller has no session the server issued, so it has no "
+                "session state"
+            )
         session_id = validated_path_component(session_id)
         with self._lock:
             existing = self._sessions.get(session_id)

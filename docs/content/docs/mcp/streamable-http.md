@@ -36,9 +36,29 @@ Flags:
 - `--port` — TCP port. Defaults are deliberately omitted; pick an explicit port that matches your proxy/firewall config.
 - `--mount-path` — path under which the FastMCP app is mounted. Defaults to `/mcp`. Clients must connect to `http(s)://host:port<mount-path>`.
 - `--auth-header-name` / `--auth-header-value` — single-tenant header gate. Connections missing this header (or carrying a wrong value) are rejected before any tool dispatch. See [Auth](#auth).
+- `--stateless-http` — handle each request on its own instead of binding it to a server-held session, for a load balancer or a platform such as AgentCore. A stateless server issues no session; see [Session identity](#session-identity).
+- `--trust-upstream-session-id` — stateless only: a platform in front of ASH issues and authenticates `Mcp-Session-Id`, so the header names the caller's session. See [Session identity](#session-identity).
 - `--profile NAME=path/to/ash.yaml` — register a config profile under `NAME`. Repeatable. The YAML is loaded and validated through `AshConfig.from_file` at startup; bad profiles fail fast and the server refuses to start. See [Config profiles](#config-profiles).
 
 The server logs the bound address and the registered profile names on startup. It does not log header values or profile contents.
+
+## Session identity
+
+Source delivery, a bound profile and the scan registry all belong to a session, so the server has to know which session a call is part of. It decides that from the transport, never from a header alone:
+
+| Transport | The caller's session |
+| --- | --- |
+| stdio | the single local client (`__default__`), with local trust |
+| sse | the session the server issued for the event stream; an `Mcp-Session-Id` header on a message is ignored |
+| streamable-HTTP, stateful | the `Mcp-Session-Id` the server issued at `initialize`; a value it did not issue is ignored |
+| streamable-HTTP, `--stateless-http` | none: the server issues no session and the header is client-chosen |
+| streamable-HTTP, `--stateless-http --trust-upstream-session-id` | the `Mcp-Session-Id` header, which the operator declares a platform in front of ASH issues and authenticates |
+
+Every caller on a network transport is remote, whatever headers it sends: it is confined to the operator's grants (`ASH_MCP_ALLOWED_ROOTS`, `ASH_MCP_ALLOWED_CONFIG_ROOTS`) plus its own session workspace, and never gets stdio's local trust.
+
+A caller with no session can still use the tools that take a path, inside the operator's grants. The tools that need a session refuse it with `error_type: session_identity_required` and an error naming `--trust-upstream-session-id`: `set_source_git`, `set_source_zip_chunk`, `set_source_zip_finalize`, `clear_source`, `select_profile`, `list_active_scans`, `get_scan_progress`, `cancel_scan`, and `run_ash_scan` without `source_dir`. A stateless server behind a plain load balancer therefore scans named, granted directories and reads results by path; source delivery needs a stateful server or a platform that issues the session header.
+
+With `--trust-upstream-session-id`, isolation between two callers is exactly as strong as the platform makes the header: ASH cannot tell a header the platform set from one a client set. The reserved values `__default__` and `__unidentified__` are refused. The flag is refused with any transport other than `streamable-http --stateless-http`, where the server issues its own sessions.
 
 ## Config profiles
 
@@ -83,7 +103,7 @@ Sessions do not share a binding, and re-binding replaces the previous one for th
 
 A streamable-HTTP client typically does not share a filesystem with the server, so the source tree to scan must arrive over the protocol. ASH offers two paths (Track 10.2).
 
-Both land the tree in the calling session's own workspace and record it as that session's `source_dir`. The session is taken from the `Mcp-Session-Id` request header, not from a tool argument — so a client cannot name someone else's session. On stdio there is no header and a single client, so everything resolves to one default session.
+Both land the tree in the calling session's own workspace and record it as that session's `source_dir`. The session is the one the transport identifies (see [Session identity](#session-identity)), not a tool argument and not a header the server did not issue, so a client cannot name someone else's session. On stdio there is a single client, so everything resolves to one default session.
 
 Having delivered a tree, call `run_ash_scan` with **no** `source_dir`:
 
@@ -94,18 +114,19 @@ await mcp__ash__run_ash_scan()
 
 An omitted `source_dir` means "the tree I just gave you" whenever the session has one. Passing a path explicitly still works and still has to satisfy [the root policy](#restricting-scan-targets). Naming a path you never delivered is how you scan a repository the operator mounted into the server, not one you uploaded.
 
-The no-argument form depends on the session id being the same on both calls, which holds whenever the client's own connection carries a stable `Mcp-Session-Id`. When it does not hold, the call is **refused rather than redirected**:
+The no-argument form depends on the session id being the same on both calls, which holds whenever the client's own connection keeps its session. When it does not hold, the call is **refused rather than redirected**:
 
 | Situation | Result |
 | --- | --- |
 | This session delivered a tree | it is scanned |
-| No session header at all (stdio) and nothing delivered | the working directory is scanned, as it always has been |
+| stdio and nothing delivered | the working directory is scanned, as it always has been |
+| A network caller with no session (see [Session identity](#session-identity)) | refused, `error_type: session_identity_required` |
 | This session delivered nothing, another session did | refused, `error_type: session_source_mismatch` |
 | This session delivered nothing, nor has any other | refused, `error_type: no_source_delivered` |
 
 The two refusals exist because the alternative is worse than an error. Falling back to the server's working directory on a network transport scans a tree that holds none of the caller's code, completes normally, and reports no findings — a result a caller cannot distinguish from a clean repository. A scan that examined nothing and reads as clean is the failure mode this whole surface is meant to avoid, so the ambiguous cases say so instead. The mismatch error reports how many *other* sessions hold source, never which, so it diagnoses a rotating session id without disclosing one caller's session to another.
 
-This matters most on Bedrock AgentCore Runtime, where it is **not** established that the id is stable: that platform mints its own session ids and, measured against live runtimes, returns a fresh one on nearly every response while honoring only the id from `initialize`. What the container sees per request could not be determined from outside. On that target, capture the `source_dir` the delivery tool returns and pass it back to `run_ash_scan(source_dir=...)`; see [deploy/cdk/README.md](../../../../deploy/cdk/README.md) for the detail and for a two-call probe that settles the question.
+This matters most on Bedrock AgentCore Runtime, where it is **not** established that the id is stable: that platform mints its own session ids and, measured against live runtimes, returns a fresh one on nearly every response while honoring only the id from `initialize`. What the container sees per request could not be determined from outside. A stateless server identifies sessions there only when started with `--trust-upstream-session-id`, the declaration that the platform issues the header. On that target, capture the `source_dir` the delivery tool returns and pass it back to `run_ash_scan(source_dir=...)`; see [deploy/cdk/README.md](../../../../deploy/cdk/README.md) for the detail and for a two-call probe that settles the question.
 
 ### Git ref
 
