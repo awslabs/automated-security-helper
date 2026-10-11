@@ -69,21 +69,26 @@ variable "internal" {
     what you configure, so exposing it to the internet should be a deliberate
     act.
 
-    internal = false is refused unless mcp_auth_header_name and
-    mcp_auth_header_value are both set, whatever ingress_cidr_blocks lists: a
-    CIDR list does not bound an internet-facing listener (0.0.0.0/0 can be
-    written as two /1 ranges, and any public range is a population you do not
-    control). The auth value in turn requires certificate_arn.
+    internal = false is refused unless mcp_auth_header_name (not blank),
+    mcp_auth_header_value and certificate_arn are all set, whatever
+    ingress_cidr_blocks lists: a CIDR list does not bound an internet-facing
+    listener (0.0.0.0/0 can be written as two /1 ranges, and any public range is
+    a population you do not control), and the header is a bearer secret that
+    must not cross the internet in the clear. allow_plaintext_auth_header does
+    not lift the certificate requirement here.
   EOT
   type        = bool
   default     = true
 
   # The scheme decides, not the CIDR. Checking ingress_cidr_blocks for 0.0.0.0/0
   # was rejected: it is defeated by splitting the range, and an internet-facing
-  # listener that names one public /24 is still reachable by everyone in it.
+  # listener that names one public /24 is still reachable by everyone in it. The
+  # certificate is required here even with allow_plaintext_auth_header, because on
+  # this listener the shared header would cross the internet in the clear. A blank
+  # header name counts as none: the launcher refuses to start without one.
   validation {
-    condition     = var.internal || (var.mcp_auth_header_name != null && nonsensitive(var.mcp_auth_header_value != null))
-    error_message = "internal = false requires mcp_auth_header_value and mcp_auth_header_name. An internet-facing load balancer puts the MCP endpoint, which accepts source code and returns findings about it, on a listener the internet can route to, and ingress_cidr_blocks does not bound that. Set both (with certificate_arn), or keep internal = true."
+    condition     = var.internal || (try(trimspace(var.mcp_auth_header_name), "") != "" && nonsensitive(var.mcp_auth_header_value != null) && var.certificate_arn != null)
+    error_message = "internal = false requires mcp_auth_header_value, a non-blank mcp_auth_header_name and certificate_arn. An internet-facing load balancer puts the MCP endpoint, which accepts source code and returns findings about it, on a listener the internet can route to, and ingress_cidr_blocks does not bound that; the shared header must reach it over TLS. Set all three, or keep internal = true."
   }
 }
 

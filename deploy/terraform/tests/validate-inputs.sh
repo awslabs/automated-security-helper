@@ -318,6 +318,21 @@ run_case "internet-facing + auth header + certificate -> allowed" mustnot \
 run_case "internal + 0.0.0.0/0 + no auth -> allowed (not internet-facing)" mustnot \
   "internal = false requires mcp_auth_header_value" \
   "$MODULES/fargate" "${FARGATE_BASE[@]}" -var 'ingress_cidr_blocks=["0.0.0.0/0"]'
+# The shared header is a bearer secret, so on an internet-facing listener it must
+# travel over TLS: allow_plaintext_auth_header does not lift the certificate
+# requirement there.
+run_case "internet-facing + auth header + plaintext opt-out, no certificate -> refused" must \
+  "internal = false requires mcp_auth_header_value" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var internal=false -var 'ingress_cidr_blocks=["0.0.0.0/0"]' \
+  -var mcp_auth_header_name=X-ASH-Auth -var mcp_auth_header_value=placeholder \
+  -var allow_plaintext_auth_header=true
+# A blank header name is no header: the container refuses to start without one,
+# and the plan should say so first.
+run_case "internet-facing + blank header name + certificate -> refused" must \
+  "internal = false requires mcp_auth_header_value" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var internal=false -var 'ingress_cidr_blocks=["10.0.0.0/8"]' \
+  -var 'mcp_auth_header_name= ' -var mcp_auth_header_value=placeholder \
+  -var certificate_arn=arn:aws:acm:us-east-1:0:certificate/placeholder
 # The value alone authenticates nothing: with no header name the module passes no
 # auth flag to ASH, so the rule requires both.
 run_case "internet-facing + auth value but no header name -> refused" must \
