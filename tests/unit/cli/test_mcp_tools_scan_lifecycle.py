@@ -150,6 +150,66 @@ class TestScanDirectoryValidation:
         assert result["error_category"] == "invalid_format"
         assert "Invalid configuration file extension" in result["error"]
 
+    @pytest.mark.parametrize(
+        ("name", "content"),
+        [
+            pytest.param(
+                "ash.yaml", "project_name: demo\nscanners: [bandit\n", id="yaml_syntax"
+            ),
+            pytest.param("ash.json", '{"project_name": "demo",', id="json_syntax"),
+            pytest.param(
+                "ash.yaml", b"project_name: demo\n# \xff\xfe\n", id="not_utf8"
+            ),
+        ],
+    )
+    def test_config_file_that_cannot_be_parsed_is_rejected(
+        self, allowed_root, registry, name, content
+    ):
+        """Refused before a scan is registered, as a missing config file is.
+
+        Accepting it started a scan that then ran with the default config.
+        """
+        config = allowed_root / name
+        if isinstance(content, bytes):
+            config.write_bytes(content)
+        else:
+            config.write_text(content, encoding="utf-8")
+        registry.register_scan.return_value = "scan-1"
+
+        with (
+            patch(f"{_TOOLS}.get_scan_registry", return_value=registry),
+            patch(f"{_TOOLS}._run_scan_async", new=AsyncMock()) as run_scan_async,
+        ):
+            result = asyncio.run(
+                mcp_scan_directory(str(allowed_root), config_path=str(config))
+            )
+
+        assert result["success"] is False, f"a scan was started: {result}"
+        assert result["operation"] == "scan_directory"
+        assert name in result["error"]
+        assert result["error_category"] != "unexpected_error"
+        registry.register_scan.assert_not_called()
+        run_scan_async.assert_not_called()
+
+    def test_control_config_file_that_parses_starts_the_scan(
+        self, allowed_root, registry
+    ):
+        config = allowed_root / "ash.yaml"
+        config.write_text("project_name: demo\n", encoding="utf-8")
+        registry.register_scan.return_value = "scan-1"
+
+        with (
+            patch(f"{_TOOLS}.get_scan_registry", return_value=registry),
+            patch(f"{_TOOLS}._run_scan_async", new=AsyncMock()) as run_scan_async,
+        ):
+            result = asyncio.run(
+                mcp_scan_directory(str(allowed_root), config_path=str(config))
+            )
+
+        assert result["success"] is True
+        registry.register_scan.assert_called_once()
+        run_scan_async.assert_called_once()
+
 
 class TestScanDirectoryRegistryFailures:
     def test_registration_conflict_is_surfaced_with_its_own_message(

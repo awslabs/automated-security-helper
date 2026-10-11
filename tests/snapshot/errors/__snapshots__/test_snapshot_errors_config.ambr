@@ -116,7 +116,7 @@
                               in "ash.yaml", line 2, column 11
                             expected ',' or ']', but got '<stream end>'
                               in "ash.yaml", line 3, column 1
-      Config file '<TMP>/ash.yaml' is not valid: while parsing a flow sequence
+      Config file '<TMP>/ash.yaml' is not valid: could not parse ash.yaml: while parsing a flow sequence
         in "ash.yaml", line 2, column 11
       expected ',' or ']', but got '<stream end>'
         in "ash.yaml", line 3, column 1

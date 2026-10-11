@@ -7,11 +7,13 @@ from pydantic import ValidationError
 import yaml
 from automated_security_helper.config.ash_config import AshConfig, SandboxConfig
 from automated_security_helper.config.config_sources import (
+    ResolvedConfigDocument,
     _resolve_dict_key,
     deep_merge,
     default_confinement_root,
     describe_config_path,
     discover_config_source,
+    discovery_warnings,
     log_config_discovery,
     read_config_file,
     resolve_config_document,
@@ -37,7 +39,15 @@ from automated_security_helper.config.sandbox_grants import (
 
 #: Why a config an MCP client supplied may not grant, for the confinement warning.
 CLIENT_SUPPLIED = "an MCP client supplied the file, not the operator"
-from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.core.constants import (
+    ASH_CONFIG_FILE_NAMES,
+    ASH_PYPROJECT_FILE_NAME,
+    ASH_RC_FILE_NAMES,
+)
+from automated_security_helper.core.exceptions import (
+    ASHConfigSourceError,
+    ASHConfigValidationError,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -54,6 +64,133 @@ def find_config_file(search_dir: Path | None = None) -> Optional[Path]:
         search_dir = Path.cwd()
     selected = discover_config_source(search_dir).selected
     return selected.path if selected is not None else None
+
+
+def _empty_config_path() -> ASHConfigSourceError:
+    # Path("") is the working directory, so an empty path is named as what it is
+    # rather than reported as a directory that cannot be read.
+    return ASHConfigSourceError(
+        "The configuration file path is empty. Name a config file, or leave the "
+        "path unset to use the configuration ASH discovers in the source directory."
+    )
+
+
+def _config_file_not_loadable(config_path: Path) -> ASHConfigSourceError:
+    """The refusal for a config path that is missing or is not a regular file."""
+    where = describe_config_path(config_path)
+    if config_path.is_symlink() and not config_path.exists():
+        return ASHConfigSourceError(
+            f"Configuration file not found: {where} is a symbolic link to a file "
+            "that does not exist."
+        )
+    if not config_path.exists():
+        return ASHConfigSourceError(f"Configuration file not found: {where}")
+    return ASHConfigSourceError(
+        f"Configuration file {where} is not a regular file, so it cannot be read."
+    )
+
+
+def read_config_document(
+    config_path: Path | str,
+    confine_to: Optional[Path] = None,
+    permit_base: Optional[Callable[[Path], bool]] = None,
+    *,
+    log_failure: bool = True,
+) -> ResolvedConfigDocument:
+    """``resolve_config_document``, refusing a config file that does not load.
+
+    ``resolve_config_document`` raises ``ASHConfigSourceError`` for a TOML file
+    and for anything wrong in an ``extends`` chain, but lets the root YAML or JSON
+    file's own read and parse errors through as the reader raised them. Here a
+    named file that is missing or not a regular file, and one that cannot be read
+    or parsed (including one that is not UTF-8), raise ``ASHConfigSourceError``
+    too. Every config file a scan reads comes through here, so none of them is
+    ever replaced by the default config, which would scan with that file's
+    suppressions, ignore paths and settings switched off and still report
+    success.
+
+    ``log_failure`` False leaves out the "Failed to load configuration file" log
+    line, for a caller that reads the file ahead of the resolution that reports
+    the same failure.
+    """
+    if isinstance(config_path, str) and not config_path.strip():
+        raise _empty_config_path()
+    path = Path(config_path)
+    if not path.is_file():
+        raise _config_file_not_loadable(path)
+    try:
+        return resolve_config_document(
+            path, confine_to=confine_to, permit_base=permit_base
+        )
+    except (OSError, UnicodeDecodeError, yaml.YAMLError, json.JSONDecodeError) as e:
+        # json.JSONDecodeError and UnicodeDecodeError are ValueErrors, but a bare
+        # ValueError is not caught: pydantic's ValidationError is one too.
+        if log_failure:
+            ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
+        verb = "read" if isinstance(e, OSError) else "parse"
+        raise ASHConfigSourceError(
+            f"could not {verb} {describe_config_path(path)}: {e}"
+        ) from e
+
+
+def _warnings_when_discovered(config_path: Path, source_dir: Path) -> List[str]:
+    """Discovery's warnings for ``source_dir`` when ``config_path`` is the source it selects.
+
+    ``ash scan`` and workspace mode run discovery themselves and pass the file it
+    selected as the config path, so the sources it ignored are reported for
+    them as they are when resolve_config discovers. Discovery is run again only
+    for a file at one of its locations, and the ignored sources are not logged
+    again: the caller that discovered them already did.
+    """
+    names = {*ASH_CONFIG_FILE_NAMES, *ASH_RC_FILE_NAMES, ASH_PYPROJECT_FILE_NAME}
+    if config_path.name not in names:
+        return []
+    root = source_dir.resolve()
+    if config_path.parent.resolve() not in (root, root / ".ash"):
+        return []
+    try:
+        discovery = discover_config_source(source_dir)
+    except ASHConfigValidationError:
+        return []
+    selected = discovery.selected
+    if selected is None or selected.path.resolve() != config_path.resolve():
+        return []
+    return discovery_warnings(discovery)
+
+
+def _validate_config_document(
+    document: ResolvedConfigDocument, config_path: Path | str
+) -> AshConfig:
+    try:
+        return AshConfig.model_validate(document.data, strict=True)
+    except ValidationError as e:
+        raise ASHConfigValidationError(
+            f"Configuration validation failed for "
+            f"'{describe_config_path(Path(config_path))}': {str(e)}. "
+            "Run 'ash config lint' to identify and fix issues."
+        ) from e
+
+
+def load_config_file(
+    config_path: Path | str,
+    confine_to: Optional[Path] = None,
+    permit_base: Optional[Callable[[Path], bool]] = None,
+    *,
+    log_failure: bool = True,
+) -> AshConfig:
+    """``AshConfig.from_file``, with every way the file can fail to load refused.
+
+    A missing, unreadable or unparseable file raises ``ASHConfigSourceError``
+    (see ``read_config_document``) and one that does not validate raises
+    ``ASHConfigValidationError``, both exit 3 from ``ash scan``.
+    """
+    document = read_config_document(
+        config_path,
+        confine_to=confine_to,
+        permit_base=permit_base,
+        log_failure=log_failure,
+    )
+    return _validate_config_document(document, config_path)
 
 
 def _apply_config_override(
@@ -217,10 +354,18 @@ def resolve_config(
     """
     Load configuration from file or return default configuration.
 
+    The default configuration is returned only when there is no config file at
+    all: none named and none discovered. A file that is named (``config_path``,
+    ``ASH_CONFIG``) or discovered and cannot be loaded -- missing, a dangling
+    link, not a regular file, unreadable, not UTF-8, not valid YAML, JSON or
+    TOML, or not a valid config -- raises instead, whatever
+    ``fallback_to_default`` says.
+
     Args:
         config_path: Path to the configuration file
         source_dir: Source directory to search for configuration files
-        fallback_to_default: Whether to fall back to default configuration if no config file is found
+        fallback_to_default: Whether to return the default configuration when no
+            config file is named or found. When False, that case raises too.
         config_overrides: List of configuration overrides in the format 'key.path=value'
         permit_base: Optional check every ``extends`` base must also pass. The
             MCP server passes the calling session's; see
@@ -250,6 +395,11 @@ def resolve_config(
 
     Returns:
         The resolved AshConfig object
+
+    Raises:
+        ASHConfigValidationError: The config could not be resolved (exit 3 from
+            ``ash scan``). ``ASHConfigSourceError``, a subclass, when a config file
+            could not be loaded at all.
     """
     chain: List[Path] = []
     named: List[Path] = []
@@ -453,25 +603,24 @@ def _load_operator_config(
 ) -> Optional[Tuple[AshConfig, List[Path], List[Path]]]:
     """The operator's config file, the files it was built from, and their names.
 
-    Loaded the way _resolve_config loads a config file, and refused the same way
-    when it does not validate.
+    None only when no operator config was named. One that was named is loaded
+    the way _resolve_config loads a config file, and refused the same way when it
+    is missing, does not load or does not validate: dropping it would take the
+    sandbox grants from the defaults instead of from the file the operator named.
     """
-    if trusted_config_path is None or not Path(trusted_config_path).is_file():
+    if trusted_config_path is None:
         return None
     path = Path(trusted_config_path)
-    document = resolve_config_document(
+    document = read_config_document(
         path,
         confine_to=default_confinement_root(path, source_dir),
         permit_base=permit_base,
     )
-    try:
-        config = AshConfig.model_validate(document.data, strict=True)
-    except ValidationError as e:
-        raise ASHConfigValidationError(
-            f"Configuration validation failed for '{describe_config_path(path)}': "
-            f"{str(e)}. Run 'ash config lint' to identify and fix issues."
-        ) from e
-    return config, list(document.chain), list(document.named)
+    return (
+        _validate_config_document(document, path),
+        list(document.chain),
+        list(document.named),
+    )
 
 
 def _resolve_config(
@@ -529,12 +678,15 @@ def _resolve_config(
         # why sources are selected rather than merged, is documented in
         # config/config_sources.py.
         confine_to = None
+        # The sources discovery found and did not use. Their settings are not
+        # applied, so they are reported with the scan's results as well as logged.
+        ignored_sources: List[str] = []
         if config_path is None:
             ASH_LOGGER.verbose(
                 "No configuration file provided, checking for default paths"
             )
             discovery = discover_config_source(source_dir)
-            log_config_discovery(discovery)
+            ignored_sources = log_config_discovery(discovery)
             if discovery.selected is not None:
                 config_path = discovery.selected.path
                 confine_to = source_dir
@@ -554,6 +706,12 @@ def _resolve_config(
             else:
                 raise ValueError("Configuration file not found or provided")
 
+        # A config file that was named or discovered and cannot be loaded refuses
+        # resolution (read_config_document below); only "no config file at all"
+        # above falls back to the defaults.
+        if isinstance(config_path, str) and not config_path.strip():
+            raise _empty_config_path()
+
         # Process config file
         try:
             config_path = (
@@ -561,22 +719,15 @@ def _resolve_config(
             )
             ASH_LOGGER.debug(f"Loading configuration from {config_path.as_posix()}")
 
-            if not config_path.exists():
-                ASH_LOGGER.warning(
-                    f"Configuration file not found: {config_path.as_posix()}"
-                )
-                # Apply overrides to default config if provided
-                if config_overrides and config:
-                    return apply_config_overrides(config, config_overrides)
-                return config  # Return default config if specified file doesn't exist
-
             ASH_LOGGER.debug("Validating file config")
             if confine_to is None:
                 confine_to = default_confinement_root(
                     config_path, confinement_source_dir
                 )
+                if confinement_source_dir is not None:
+                    ignored_sources = _warnings_when_discovered(config_path, source_dir)
             # AshConfig.from_file, keeping the list of files the config came from.
-            document = resolve_config_document(
+            document = read_config_document(
                 Path(config_path), confine_to=confine_to, permit_base=permit_base
             )
             config = AshConfig.model_validate(document.data, strict=True)
@@ -590,22 +741,8 @@ def _resolve_config(
             if config_overrides:
                 config = apply_config_overrides(config, config_overrides)
 
+            config._resolution_warnings.extend(ignored_sources)
             return config
-
-        except (IOError, yaml.YAMLError, json.JSONDecodeError) as e:
-            ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
-            if fallback_to_default:
-                ASH_LOGGER.warning("Using default configuration due to file load error")
-                # Apply overrides to default config if provided
-                if config_overrides and config:
-                    config = apply_config_overrides(config, config_overrides)
-                config._resolution_warnings.append(
-                    f"Failed to load configuration file: {str(e)}. "
-                    "Using default configuration — suppressions and custom settings are NOT active."
-                )
-                return config  # Return default config on file error
-            else:
-                raise e
 
         except ValidationError as e:
             ASH_LOGGER.error(f"Configuration validation failed: {str(e)}")
@@ -620,12 +757,12 @@ def _resolve_config(
     except ASHConfigValidationError:
         raise
     except Exception as e:
-        # Always return a valid config, even in case of unexpected errors
-        if fallback_to_default:
-            ASH_LOGGER.error(f"Unexpected error in resolve_config: {str(e)}")
-            config = get_default_config()
-            # Apply overrides to default config if provided
-            if config_overrides:
-                return apply_config_overrides(config, config_overrides)
-            return config
-        raise e
+        if not fallback_to_default:
+            raise e
+        # Refused, never answered with the default config: a scan with the
+        # defaults in place of a config that failed to resolve runs with that
+        # config's suppressions and settings switched off and reports success.
+        ASH_LOGGER.error(f"Unexpected error in resolve_config: {str(e)}")
+        raise ASHConfigValidationError(
+            f"The configuration could not be resolved: {type(e).__name__}: {e}"
+        ) from e

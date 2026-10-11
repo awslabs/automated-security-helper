@@ -142,6 +142,7 @@ def _handle_workspace_mode(
     dry_run: bool,
     workspace_config: str | None = None,
     config_overrides: tuple[str, ...] = (),
+    default_config: str | None = None,
 ) -> "WorkspacePlan":
     """Resolve a workspace and return the plan, or exit.
 
@@ -185,6 +186,11 @@ def _handle_workspace_mode(
             # reflects an override. The ceiling applies to that, and --dry-run
             # prints the value the scan will actually enforce.
             config_overrides=config_overrides,
+            # --config: the config of a project that declares none. Resolved here
+            # as the scan resolves it, so a missing or broken file is refused at
+            # planning, --dry-run included, and the plan's thresholds are the
+            # ones the scan applies.
+            default_config=default_config,
         )
     except WorkspaceDefinitionError as exc:
         _fail_workspace(str(exc))
@@ -700,6 +706,7 @@ def run_ash_scan_cli_command(
             dry_run=dry_run,
             workspace_config=workspace_config,
             config_overrides=tuple(config_overrides),
+            default_config=config,
         )
         # The workspace root is the scan root: it is what container mode mounts at
         # /src, and what every workspace-relative finding path is relative to.

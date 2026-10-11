@@ -701,6 +701,27 @@ def _apply_workspace_policy(
     return source
 
 
+def _refuse_missing_default_config(default_config: Optional[PathLike]) -> None:
+    """Refuse a named default config that is not a file, before any project is read.
+
+    Checked here, not only where a project falls back to it, because every project
+    may have its own config, and the file is also the trusted base those projects'
+    sandbox grants come from. A missing one used to be skipped without a word, so
+    the plan, and ``--dry-run``, described a run with the built-in defaults where
+    the operator had named a file. Whether the file parses is left to the
+    projects' own resolution, which reads it with the confinement a scan uses.
+    """
+    if default_config is None:
+        return
+    if not str(default_config).strip() or not Path(default_config).is_file():
+        raise ASHConfigValidationError(
+            f"The default configuration file '{default_config}' (--config, or the "
+            "profile bound to the MCP session) does not exist or is not a regular "
+            "file. Name an existing config file, or omit it so that projects "
+            "without their own config use ASH's built-in defaults."
+        )
+
+
 def resolve_workspace(
     workspace_file: PathLike,
     *,
@@ -757,7 +778,9 @@ def resolve_workspace(
             key, or pins a scanner version irreconcilable with another project's.
             The message names every offending entry.
         ASHConfigValidationError: Exit code 3. The workspace is fine but one
-            project's own config is invalid. The message names the project.
+            project's own config is invalid, or cannot be loaded, or
+            ``default_config`` names a file that does not exist. The message
+            names the project or the file.
     """
     definition = load_workspace_file(workspace_file)
 
@@ -765,6 +788,7 @@ def resolve_workspace(
     _validate_no_overlap(definition, candidates)
     _validate_unique_keys(definition, candidates)
     _apply_existence_checks(definition, candidates, allow_missing_projects)
+    _refuse_missing_default_config(default_config)
 
     if all(candidate.skipped for candidate in candidates):
         raise WorkspaceDefinitionError(

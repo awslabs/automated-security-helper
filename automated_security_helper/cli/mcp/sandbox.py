@@ -748,8 +748,9 @@ def validate_config_chain(
     resolved under :func:`config_base_gate`, with the confinement root a scan of
     ``source_dir`` would use, so a refusal is reported before a scan starts rather
     than as a failed scan. Any other chain error (a cycle, a missing base, a
-    malformed ``patch``) is left to the caller's own resolution, which reports it
-    as it always has.
+    malformed ``patch``) or a file that does not parse is left to
+    :func:`config_load_error`, which reports it as a config that cannot be
+    loaded rather than as a refusal.
 
     Args:
         config_path: Caller-supplied path to a config file.
@@ -806,6 +807,62 @@ def config_chain_refusal(config_path: object, exc: Exception) -> MCPResourceErro
             "error_category": ErrorCategory.INVALID_PATH.value,
         },
     )
+
+
+def config_load_error(
+    config_path: str | Path,
+    session_id: Optional[str] = None,
+    source_dir: Optional[str | Path] = None,
+) -> Optional[MCPResourceError]:
+    """Why a scan could not load the config file at ``config_path``, or None.
+
+    The file and its ``extends`` chain are read as the scan reads them
+    (``resolve_config.read_config_document``), against the confinement root
+    :func:`validate_config_chain` uses. A file that cannot be read or parsed, and
+    a chain that does not resolve, are reported here, before a scan is
+    registered: the scan's own resolution refuses them, so starting one would only
+    turn a configuration error into a failed scan. Call it after
+    :func:`validate_config_chain`, which reports a base outside the session's
+    grant as a refusal; that case is not reported again here.
+
+    Args:
+        config_path: Caller-supplied path to a config file.
+        session_id: The session this call acts for.
+        source_dir: The scan target the config will be resolved against, if any.
+
+    Returns:
+        None if the config loads, otherwise an :class:`MCPResourceError`.
+    """
+
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+    )
+    from automated_security_helper.config.resolve_config import read_config_document
+    from automated_security_helper.core.exceptions import (
+        ASHConfigInputNotPermittedError,
+        ASHConfigValidationError,
+    )
+
+    path = Path(config_path)
+    try:
+        read_config_document(
+            path,
+            confine_to=default_confinement_root(
+                path, Path(source_dir) if source_dir is not None else None
+            ),
+            permit_base=config_base_gate(session_id),
+        )
+    except ASHConfigInputNotPermittedError:
+        return None
+    except ASHConfigValidationError as exc:
+        return MCPResourceError(
+            f"Configuration file {config_path} cannot be loaded: {exc}",
+            context={
+                "config_path": str(config_path),
+                "error_category": ErrorCategory.INVALID_FORMAT.value,
+            },
+        )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -873,6 +930,7 @@ __all__ = [
     "config_base_gate",
     "config_chain_refusal",
     "config_is_client_supplied",
+    "config_load_error",
     "get_server_transport",
     "KNOWN_TRANSPORTS",
     "unknown_transport_override",

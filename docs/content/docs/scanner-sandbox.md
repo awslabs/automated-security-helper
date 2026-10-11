@@ -19,7 +19,10 @@ sandbox:
 
 If you ask for a sandbox and ASH cannot provide one, the affected scanners are recorded
 `MISSING` with the reason, and the scan exits 1 like any other incomplete scan. ASH
-never falls back to running a scanner unsandboxed after you asked for a sandbox.
+never falls back to running a scanner unsandboxed after you asked for a sandbox. That
+includes asking in a config file that cannot be loaded: a scan whose config file is
+missing or does not parse stops with exit code 3, rather than running with the default
+configuration, whose mode is `off`.
 
 ## Modes
 

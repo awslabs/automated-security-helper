@@ -198,7 +198,10 @@ async def mcp_scan_directory(
     # Validate config path if provided. Confinement first, covering every base the
     # config extends, so a refused path is reported as refused and not as missing.
     if config_path:
-        from automated_security_helper.cli.mcp.sandbox import validate_config_chain
+        from automated_security_helper.cli.mcp.sandbox import (
+            config_load_error,
+            validate_config_chain,
+        )
 
         chain_error = validate_config_chain(
             config_path, session_id=session_id, source_dir=resolved_target
@@ -215,6 +218,21 @@ async def mcp_scan_directory(
                     "Check that the configuration file exists and is accessible",
                     "Verify that the path is correct",
                     "Ensure the file has a valid extension (.yaml, .yml, or .json)",
+                ],
+            )
+
+        # Refused here rather than by the scan: a file that does not load would
+        # otherwise start a scan that fails on its first read of the config.
+        load_error = config_load_error(
+            config_path, session_id=session_id, source_dir=resolved_target
+        )
+        if load_error:
+            return create_error_response(
+                error=load_error,
+                operation="scan_directory",
+                suggestions=[
+                    "Fix the error the message names; a syntax error names its line",
+                    "Run 'ash config lint' on the file to check it",
                 ],
             )
 
@@ -1275,7 +1293,10 @@ def mcp_get_config(
         Its ``sandbox`` section is the one a scan of this session's default
         target would apply, so a file the client delivered shows no grants of
         its own. A refused path returns ``success`` False with ``error_type``
-        ``config_input_not_permitted``.
+        ``config_input_not_permitted``. A named file that does not exist, and a
+        named or discovered file that cannot be loaded, return ``success`` False
+        with ``error_category`` ``file_not_found`` or ``invalid_format``; the
+        default config is returned only when no file is named or found.
     """
     import yaml as _yaml
     from automated_security_helper.cli.mcp.profile_registry import (
@@ -1303,6 +1324,7 @@ def mcp_get_config(
     from automated_security_helper.config.default_config import get_default_config
     from automated_security_helper.core.exceptions import (
         ASHConfigInputNotPermittedError,
+        ASHConfigValidationError,
     )
 
     if config_path is not None:
@@ -1313,7 +1335,19 @@ def mcp_get_config(
             return _config_refusal(refusal, "get_config")
         path: Optional[Path] = Path(config_path)
         if not path.exists():
-            return get_default_config().model_dump()
+            # A named file that is gone is an error, as it is for a scan, not the
+            # default config: answering with the defaults would tell the client
+            # that file resolves to a config with none of its settings.
+            return create_error_response(
+                MCPResourceError(
+                    f"Configuration file not found: {config_path}",
+                    context={
+                        "config_path": str(config_path),
+                        "error_category": ErrorCategory.FILE_NOT_FOUND.value,
+                    },
+                ),
+                "get_config",
+            )
     else:
         search = Path(search_dir) if search_dir else Path.cwd()
         # For a remote caller the directory is checked first, so a refusal names
@@ -1380,6 +1414,17 @@ def mcp_get_config(
         )
     except ASHConfigInputNotPermittedError as exc:
         return _config_refusal(config_chain_refusal(path, exc), "get_config")
+    except ASHConfigValidationError as exc:
+        return create_error_response(
+            MCPResourceError(
+                f"Configuration file {path} cannot be loaded: {exc}",
+                context={
+                    "config_path": str(path),
+                    "error_category": ErrorCategory.INVALID_FORMAT.value,
+                },
+            ),
+            "get_config",
+        )
     return resolved.model_dump()
 
 

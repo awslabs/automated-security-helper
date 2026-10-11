@@ -505,20 +505,20 @@ class TestTheSchedulingKnobsComeFromTheWorkspaceRoot:
         assert settings.max_parallel_projects == 4
         assert settings.project_timeout is None
 
-    def test_an_unreadable_config_falls_back_rather_than_raising(
-        self, tmp_path, monkeypatch
-    ):
-        """These are scheduling knobs, so a bad config must not refuse the scan.
+    def test_a_config_that_does_not_load_is_refused_as_a_config_error(self, tmp_path):
+        """A bad config refuses the run, as the same file refuses a single scan.
 
-        ``_resolve_workspace_execution_config`` warns and uses the defaults. The
-        builder inherits that, and the MCP path depends on it: raising here would
-        be an exception with no workspace-level meaning, which the exit-code
-        mapping would have to report as an internal error for what is really a
-        typo in a config file.
-
-        CPU count patched for the same reason as the test above.
+        ``_resolve_workspace_execution_config`` used to warn and use the defaults,
+        which ran the workspace without the settings the file was there to
+        apply. The builder now raises ``ASHConfigValidationError``, and the MCP
+        path maps that class to exit code 3, an invalid configuration, not to an
+        internal error.
         """
-        monkeypatch.setattr("os.cpu_count", lambda: 8)
+        from automated_security_helper.cli.mcp.workspace import _exit_code_for
+        from automated_security_helper.core.exceptions import (
+            ASHConfigValidationError,
+        )
+
         root = tmp_path / "broken"
         root.mkdir()
         (root / ".ash.yaml").write_text(
@@ -526,10 +526,10 @@ class TestTheSchedulingKnobsComeFromTheWorkspaceRoot:
         )
         opts = _opts(tmp_path).model_copy(update={"source_dir": root, "config": None})
 
-        settings = _builder()(opts)
+        with pytest.raises(ASHConfigValidationError, match=r"\.ash\.yaml") as excinfo:
+            _builder()(opts)
 
-        assert settings.max_parallel_projects == 4
-        assert settings.project_timeout is None
+        assert _exit_code_for(excinfo.value) == 3
 
 
 # ---------------------------------------------------------------------------

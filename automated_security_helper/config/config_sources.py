@@ -106,10 +106,19 @@ holds for every value in the merged result, whichever file it came from.
 Failure
 -------
 Every failure here raises ``ASHConfigSourceError``, which ``resolve_config``
-re-raises instead of falling back to the default config. A root config file
-that fails to parse as YAML or JSON keeps its existing behavior (default config
-plus a resolution warning); a base that fails to parse is an error, because the
-file that names it was not loaded as written.
+re-raises instead of falling back to the default config. A root YAML or JSON
+file that cannot be read or parsed raises what the reader raised;
+``resolve_config.read_config_document`` turns that into an
+``ASHConfigSourceError`` too, so a root file that does not load refuses the
+scan just as a base that does not load does. Neither is replaced by the
+defaults, which would scan with the file's suppressions and settings off.
+
+Discovery selects a config name that exists, not only one that is a regular
+file: a dangling symbolic link or a directory at ``.ash/.ash.yaml`` is selected
+and then refused when it is read, rather than skipped as though the repository
+had no config. A ``pyproject.toml`` that cannot be read refuses the same way
+when it would be the selected source, because whether it holds a ``[tool.ash]``
+table cannot be told.
 """
 
 from __future__ import annotations
@@ -321,13 +330,22 @@ def _pyproject_is_a_source(path: Path, found_before: List[ConfigSource]) -> bool
     only to report it as ignored, so nothing about it may fail the load: before
     #313 a repository with .ash/.ash.yaml was unaffected by whatever its
     pyproject.toml held. When it would be the selected source, a pyproject that
-    declares [tool.ash] but cannot be parsed fails closed. One that cannot be
-    read at all is skipped with a warning either way, because there is no way
-    to tell whether it configures ASH, and most pyproject.toml files do not.
+    declares [tool.ash] but cannot be parsed fails closed, and so does one that
+    cannot be read at all (a dangling link, a directory, no permission): there
+    is no way to tell whether it configures ASH, and skipping it would scan with
+    the defaults while its [tool.ash] table, if it has one, sat unread.
     """
     try:
+        if not path.is_file():
+            raise OSError(f"{path.as_posix()} is not a regular file")
         return pyproject_has_ash_table(path)
     except OSError as exc:
+        if not found_before:
+            raise ASHConfigSourceError(
+                f"Could not read {path.as_posix()} ({exc}), so ASH cannot tell "
+                "whether it holds a [tool.ash] table. Make it readable, remove "
+                "it, or name a config file with --config."
+            ) from exc
         ASH_LOGGER.warning(
             f"Could not read {path.as_posix()} ({exc}); it is not used as an ASH "
             "config source."
@@ -344,38 +362,40 @@ def _pyproject_is_a_source(path: Path, found_before: List[ConfigSource]) -> bool
 
 
 def discover_config_source(search_dir: Path) -> ConfigDiscovery:
-    """Find every config source in `search_dir` and select one by precedence."""
+    """Find every config source in `search_dir` and select one by precedence.
+
+    A name counts when it exists, whatever it is; see "Failure" in the module
+    docstring for why a dangling link is selected rather than skipped.
+    """
     search_dir = Path(search_dir)
     found: List[ConfigSource] = []
     for name in ASH_CONFIG_FILE_NAMES:
         for candidate in (search_dir / name, search_dir / ".ash" / name):
-            if candidate.is_file():
+            if os.path.lexists(candidate):
                 found.append(ConfigSource(candidate, SOURCE_KIND_DEDICATED))
     for name in ASH_RC_FILE_NAMES:
         candidate = search_dir / name
-        if candidate.is_file():
+        if os.path.lexists(candidate):
             found.append(ConfigSource(candidate, SOURCE_KIND_ASHRC))
     pyproject = search_dir / ASH_PYPROJECT_FILE_NAME
-    if pyproject.is_file() and _pyproject_is_a_source(pyproject, found):
+    if os.path.lexists(pyproject) and _pyproject_is_a_source(pyproject, found):
         found.append(ConfigSource(pyproject, SOURCE_KIND_PYPROJECT))
     if not found:
         return ConfigDiscovery()
     return ConfigDiscovery(selected=found[0], ignored=found[1:])
 
 
-def log_config_discovery(
-    discovery: ConfigDiscovery, announce_selected: bool = True
-) -> None:
-    """Say which source is used and which were found but ignored.
+def discovery_warnings(discovery: ConfigDiscovery) -> List[str]:
+    """One warning per source discovery found and did not select.
 
-    ``announce_selected`` is False for a caller that reports the selected file
-    through its own logger; the ignored sources are always reported here.
+    The settings in an ignored source are not applied, so a scan reports these
+    with its results as well as in the log; see ``log_config_discovery`` and
+    ``resolve_config``.
     """
     selected = discovery.selected
     if selected is None:
-        return
-    if announce_selected:
-        ASH_LOGGER.info(f"Using ASH configuration from {selected.label}")
+        return []
+    warnings: List[str] = []
     for other in discovery.ignored:
         message = (
             f"Ignoring ASH configuration at {other.label}: {selected.label} takes "
@@ -392,7 +412,28 @@ def log_config_discovery(
                 f"{ASH_PYPROJECT_FILE_NAME}. Move the settings into one source "
                 "and delete the other."
             )
+        warnings.append(message)
+    return warnings
+
+
+def log_config_discovery(
+    discovery: ConfigDiscovery, announce_selected: bool = True
+) -> List[str]:
+    """Say which source is used and which were found but ignored.
+
+    ``announce_selected`` is False for a caller that reports the selected file
+    through its own logger; the ignored sources are always reported here.
+    Returns the warnings logged, ``discovery_warnings(discovery)``.
+    """
+    selected = discovery.selected
+    if selected is None:
+        return []
+    if announce_selected:
+        ASH_LOGGER.info(f"Using ASH configuration from {selected.label}")
+    warnings = discovery_warnings(discovery)
+    for message in warnings:
         ASH_LOGGER.warning(message)
+    return warnings
 
 
 def _resolve_toml_env(value: Any) -> Any:
@@ -695,7 +736,8 @@ def _resolve(
         )
 
     if not stack:
-        # The root config: parse errors behave exactly as they always have.
+        # The root config: a read or parse error propagates as the reader raised
+        # it, and resolve_config.read_config_document refuses it.
         data = read_config_file(path)
     else:
         extending = stack[-1]

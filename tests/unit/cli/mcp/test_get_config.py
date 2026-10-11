@@ -10,6 +10,7 @@ import yaml
 
 from automated_security_helper.cli.mcp_tools import mcp_get_config
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 
 
 def _write_config(path: Path, data: dict) -> None:
@@ -70,16 +71,23 @@ class TestGetConfigRaw:
 
 
 class TestGetConfigMissingFile:
-    def test_missing_explicit_path_returns_default(self, tmp_path):
-        result = mcp_get_config(config_path=str(tmp_path / "nonexistent.yaml"))
+    def test_missing_explicit_path_is_refused(self, tmp_path):
+        """A named file that does not exist is an error, not ASH's default config.
 
-        default = get_default_config().model_dump()
-        assert isinstance(result, dict)
-        assert (
-            result["global_settings"]["severity_threshold"]
-            == default["global_settings"]["severity_threshold"]
-        )
-        assert "scanners" in result
+        Answering with the defaults told the client the file it named resolved to a
+        config with no suppressions, which is what a scan named with it used to run.
+        Either a config error or a refusal response satisfies this; a config does not.
+        """
+        try:
+            result = mcp_get_config(config_path=str(tmp_path / "nonexistent.yaml"))
+        except ASHConfigValidationError as exc:
+            refusal = str(exc)
+        else:
+            assert "scanners" not in result, (
+                "mcp_get_config answered with a config for a file that does not exist"
+            )
+            refusal = str(result.get("error", ""))
+        assert "nonexistent.yaml" in refusal
 
     def test_no_config_in_directory_returns_default(self, tmp_path):
         # Pass no config_path — auto-discovery in tmp_path finds nothing

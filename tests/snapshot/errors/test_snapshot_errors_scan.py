@@ -73,6 +73,14 @@ class TestArgumentRefusals:
         assert run_cli(["scna", "--source-dir", "src"]) == snapshot
 
 
+def _report_scan_started(self, phases=None):
+    suppressions = len(self.config.global_settings.suppressions or [])
+    raise RuntimeError(
+        f"probe: the scan started, with {suppressions} suppressions and "
+        f"fail_on_findings={self.config.fail_on_findings}"
+    )
+
+
 def _report_orchestrator_reached(*_args, source_dir, **_kwargs):
     relative = Path(os.path.relpath(source_dir, Path.cwd())).as_posix()
     raise RuntimeError(
@@ -210,6 +218,32 @@ class TestScanFailures:
         assert (
             run_cli([*SCAN, "--config", "bad.yaml", "--output-dir", "out"]) == snapshot
         )
+
+    @pytest.mark.parametrize(
+        ("name", "content"),
+        [
+            pytest.param("missing.yaml", None, id="missing"),
+            pytest.param(
+                "bad.yaml", "project_name: snapshot\nscanners: [bandit\n", id="not_yaml"
+            ),
+        ],
+    )
+    def test_configuration_that_cannot_be_loaded(
+        self, run_cli, snapshot, in_tmp, monkeypatch, name, content
+    ):
+        # Exit 3 before any scanner, as for the schema-invalid file above. The scan
+        # used to go ahead with the default configuration; it is replaced by a probe
+        # so that reaching it fails the exit-code assertion instead of running every
+        # scanner.
+        if content is not None:
+            _write(in_tmp / name, content)
+        monkeypatch.setattr(
+            "automated_security_helper.core.orchestrator.ASHScanOrchestrator.execute_scan",
+            _report_scan_started,
+        )
+        seen = run_cli([*SCAN, "--config", name, "--output-dir", "out"])
+        assert seen["exit_code"] == 3, seen["stdout"][-1500:]
+        assert seen == snapshot
 
     def test_unknown_scanner(self, run_cli, snapshot):
         assert (

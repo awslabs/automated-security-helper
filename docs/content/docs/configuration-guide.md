@@ -40,7 +40,10 @@ one without that table is not a config source. The lists come from
 `automated_security_helper/core/constants.py`.
 
 Sources are never merged. If more than one exists, ASH logs which one it used
-and logs a warning naming each one it ignored. The names in items 1-12 are
+and logs a warning naming each one it ignored. The scan repeats each of those
+warnings under "CONFIGURATION WARNING" in its summary and records it in the
+results as a `config_warning` entry of `validation_checkpoints`, because the
+settings in an ignored source are not applied. The names in items 1-12 are
 deprecated in favor of an `ashrc` file or `[tool.ash]`, and the warning says so
 when one of them shadows a newer source. They still take precedence, so adding a
 `[tool.ash]` table to a repository that already has `.ash/.ash.yaml` does not
@@ -53,6 +56,33 @@ You can also specify a custom configuration file path using the `--config` optio
 ```bash
 ash --config /path/to/my-config.yaml
 ```
+
+### A config file that cannot be loaded stops the scan
+
+ASH uses its built-in default configuration only when there is no config file at
+all: none named and none found in the source directory. A config file that is
+named or found and cannot be loaded stops the scan with exit code 3 before any
+scanner runs, and the message names the file. That covers:
+
+- a file named by `--config`, `ASH_CONFIG`, the `config` argument of
+  `run_ash_scan()` or an MCP tool's `config_path` that does not exist, and an
+  empty `--config ""`. An empty `ASH_CONFIG` counts as unset;
+- a named or discovered file that is not valid YAML, JSON or TOML, is not UTF-8,
+  cannot be read, or is a directory or other non-regular file. A syntax error
+  names its line;
+- a dangling symbolic link at one of the names above, for example
+  `.ash/.ash.yaml` linked to a shared file that is not checked out. It is not
+  treated as "no config";
+- a `pyproject.toml` that cannot be read at all, when it would be the source ASH
+  uses: ASH cannot tell whether it holds a `[tool.ash]` table.
+
+Scanning with the defaults instead would run without the file's suppressions,
+ignore paths, thresholds and sandbox settings, and report the scan as completed.
+The same applies to `ash report`, `ash plugin list`, `ash dependencies install`
+and `ash config get` (each exits 3), to workspace mode (see
+[Workspace mode](cli-reference.md#workspace-mode)), and to the MCP server:
+`scan_directory` refuses such a file before it starts a scan, and `get_config`
+returns an error instead of the default configuration.
 
 ### Configuring ASH in pyproject.toml
 
@@ -88,7 +118,9 @@ than rewrite it; edit `[tool.ash]` by hand.
 
 A `pyproject.toml` that is not valid TOML is skipped, unless its text declares a
 `[tool.ash]` table, in which case the scan fails instead of running with the
-default configuration.
+default configuration. One that cannot be read at all (a dangling link, no
+permission) fails the scan when it would be the source ASH uses; behind a
+higher-precedence file it is only logged.
 
 ## Creating a Configuration File
 

@@ -11,7 +11,10 @@ from unittest.mock import patch
 import pytest
 
 from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.core.exceptions import ASHValidationError
+from automated_security_helper.core.exceptions import (
+    ASHConfigValidationError,
+    ASHValidationError,
+)
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
@@ -74,6 +77,21 @@ def _initialized(source_dir, output_dir, engine, config=None, **overrides):
     return orch
 
 
+def _initialize_from_file(source_dir, output_dir, engine, config_path):
+    """Construct and initialize with the real config resolution; only the engine is stubbed.
+
+    Returns the orchestrator and the engine-class patch, so a test can tell whether
+    initialize() got as far as building the engine.
+    """
+    orch = _bare(source_dir, output_dir, config_path=str(config_path))
+    with patch(
+        "automated_security_helper.core.orchestrator.ScanExecutionEngine",
+        return_value=engine,
+    ) as engine_cls:
+        orch.initialize()
+    return orch, engine_cls
+
+
 class TestModelPostInitPathCoercion:
     """model_post_init normalizes source_dir/output_dir to Path.
 
@@ -118,22 +136,47 @@ class TestModelPostInitPathCoercion:
 class TestInitialize:
     """initialize() resolves config, cleans stale output, and builds the engine."""
 
-    def test_resolution_warnings_are_logged(self, tmp_path):
-        """Each warning on the resolved config is surfaced through the logger."""
+    def test_unparseable_config_file_refuses_initialize(self, tmp_path):
+        """A config file that does not parse stops initialize() with a config error.
+
+        It used to be replaced by the defaults, with a logged warning, and the scan
+        went ahead with the file's suppressions and settings switched off.
+        """
         src = tmp_path / "src"
         src.mkdir()
         out = tmp_path / "out"
-        cfg = AshConfig(project_name="test")
-        cfg._resolution_warnings = ["suppressions file missing", "unknown key foo"]
+        config = tmp_path / "ash.yaml"
+        config.write_text(
+            "global_settings:\n  suppressions: [unclosed\n", encoding="utf-8"
+        )
 
-        with patch(
-            "automated_security_helper.core.orchestrator.ASH_LOGGER"
-        ) as mock_logger:
-            _initialized(src, out, _EngineStub(), config=cfg)
+        with (
+            patch(
+                "automated_security_helper.core.orchestrator.ASH_LOGGER"
+            ) as mock_logger,
+            pytest.raises(ASHConfigValidationError, match="ash.yaml"),
+        ):
+            _initialize_from_file(src, out, _EngineStub(), config)
 
         warned = [str(c.args[0]) for c in mock_logger.warning.call_args_list]
-        assert any("suppressions file missing" in m for m in warned)
-        assert any("unknown key foo" in m for m in warned)
+        assert not any("CONFIG WARNING" in m for m in warned)
+
+    def test_loadable_config_file_is_resolved_by_initialize(self, tmp_path):
+        """Control for the test above: the same path with a file that parses."""
+        src = tmp_path / "src"
+        src.mkdir()
+        out = tmp_path / "out"
+        config = tmp_path / "ash.yaml"
+        config.write_text(
+            "global_settings:\n  suppressions:\n"
+            "    - rule_id: B101\n      path: '**'\n      reason: fixture\n",
+            encoding="utf-8",
+        )
+
+        orch, engine_cls = _initialize_from_file(src, out, _EngineStub(), config)
+
+        engine_cls.assert_called_once()
+        assert [s.rule_id for s in orch.config.global_settings.suppressions] == ["B101"]
 
     def test_stale_result_files_are_removed(self, tmp_path):
         """Known stale artifacts in output_dir are unlinked; others survive."""
@@ -351,32 +394,26 @@ class TestExecuteScan:
         with pytest.raises(ASHValidationError, match="Failed to load existing results"):
             orch.execute_scan(phases=["report"])
 
-    def test_config_warnings_become_validation_checkpoints(self, tmp_path):
-        """Resolution warnings are appended to the results as checkpoint entries."""
+    def test_missing_config_file_never_reaches_the_engine(self, tmp_path):
+        """A named config file that does not exist refuses the scan before any phase.
+
+        It used to resolve to the defaults, so the scan ran every phase and recorded
+        "config file ignored" as a warning checkpoint in otherwise normal results.
+        """
         src = tmp_path / "src"
         src.mkdir()
         out = tmp_path / "out"
-        cfg = AshConfig(project_name="test")
-        cfg._resolution_warnings = ["config file ignored"]
+        engine = _EngineStub(phases_result=AshAggregatedResults())
 
-        results = AshAggregatedResults()
-        engine = _EngineStub(phases_result=results)
-        orch = _initialized(src, out, engine, config=cfg)
+        with pytest.raises(ASHConfigValidationError, match="absent.yaml"):
+            orch, _ = _initialize_from_file(src, out, engine, tmp_path / "absent.yaml")
+            with patch(
+                "automated_security_helper.core.orchestrator.scan_set",
+                return_value=[],
+            ):
+                orch.execute_scan(phases=["scan"])
 
-        with patch(
-            "automated_security_helper.core.orchestrator.scan_set", return_value=[]
-        ):
-            returned = orch.execute_scan(phases=["scan"])
-
-        checkpoints = [
-            c
-            for c in returned.validation_checkpoints
-            if c.get("type") == "config_warning"
-        ]
-        assert len(checkpoints) == 1
-        assert checkpoints[0]["message"] == "config file ignored"
-        assert checkpoints[0]["severity"] == "warning"
-        assert checkpoints[0]["metadata"]["source"] == "config_resolution"
+        assert engine.execute_phases_calls == []
 
     def test_work_dir_is_removed_when_cleanup_enabled(self, tmp_path):
         """With no_cleanup False, an existing work_dir is deleted after the scan."""
@@ -433,3 +470,90 @@ class TestExecuteScan:
 
         assert "inner cause" in str(excinfo.value)
         assert "Scan execution failed" not in str(excinfo.value)
+
+
+class TestIgnoredConfigSources:
+    """A config source discovery found and did not use is reported with the scan.
+
+    The settings in it are not applied, so resolve_config records discovery's
+    warning as a resolution warning; initialize() logs it and execute_scan() adds
+    it to the results as a ``config_warning`` validation checkpoint, which the
+    end-of-scan summary prints. Covered both ways a scan gets its config: the
+    orchestrator discovering it, and ``ash scan`` passing the file it discovered.
+    """
+
+    @staticmethod
+    def _two_sources(src: Path) -> Path:
+        (src / ".ash").mkdir(parents=True)
+        used = src / ".ash" / ".ash.yaml"
+        used.write_text("project_name: used\n", encoding="utf-8")
+        (src / ".ashrc.toml").write_text('project_name = "ignored"\n', encoding="utf-8")
+        return used
+
+    @pytest.mark.parametrize(
+        "named", [pytest.param(False, id="discovered"), pytest.param(True, id="named")]
+    )
+    def test_the_ignored_source_becomes_a_checkpoint(
+        self, tmp_path, monkeypatch, named
+    ):
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        src = tmp_path / "src"
+        used = self._two_sources(src)
+        engine = _EngineStub(phases_result=AshAggregatedResults())
+        orch = _bare(
+            src, tmp_path / "out", config_path=used.as_posix() if named else None
+        )
+
+        with (
+            patch(
+                "automated_security_helper.core.orchestrator.ScanExecutionEngine",
+                return_value=engine,
+            ),
+            patch(
+                "automated_security_helper.core.orchestrator.ASH_LOGGER"
+            ) as mock_logger,
+        ):
+            orch.initialize()
+        with patch(
+            "automated_security_helper.core.orchestrator.scan_set", return_value=[]
+        ):
+            returned = orch.execute_scan(phases=["scan"])
+
+        assert orch.config.project_name == "used"
+        warned = [str(c.args[0]) for c in mock_logger.warning.call_args_list]
+        assert any("CONFIG WARNING" in m and ".ashrc.toml" in m for m in warned)
+        checkpoints = [
+            c
+            for c in returned.validation_checkpoints
+            if c.get("type") == "config_warning"
+        ]
+        assert len(checkpoints) == 1, checkpoints
+        assert ".ashrc.toml" in checkpoints[0]["message"]
+        assert "takes precedence" in checkpoints[0]["message"]
+        assert checkpoints[0]["metadata"]["source"] == "config_resolution"
+
+    def test_control_a_single_source_adds_no_checkpoint(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        src = tmp_path / "src"
+        (src / ".ash").mkdir(parents=True)
+        (src / ".ash" / ".ash.yaml").write_text(
+            "project_name: only\n", encoding="utf-8"
+        )
+        engine = _EngineStub(phases_result=AshAggregatedResults())
+        orch = _bare(src, tmp_path / "out")
+
+        with patch(
+            "automated_security_helper.core.orchestrator.ScanExecutionEngine",
+            return_value=engine,
+        ):
+            orch.initialize()
+        with patch(
+            "automated_security_helper.core.orchestrator.scan_set", return_value=[]
+        ):
+            returned = orch.execute_scan(phases=["scan"])
+
+        assert [
+            c
+            for c in returned.validation_checkpoints
+            if c.get("type") == "config_warning"
+        ] == []

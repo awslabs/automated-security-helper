@@ -21,6 +21,7 @@ from automated_security_helper.config.resolve_config import (
     resolve_config,
 )
 from automated_security_helper.core.constants import ASH_CONFIG_SOURCES_DESCRIPTION
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.plugins.loader import (
     PluginModuleNamespaceError,
     load_plugins,
@@ -298,6 +299,12 @@ def list_plugins(
         # ash_plugin_modules names a module outside the plugin namespace, and
         # nothing was imported.
         typer.secho(f"Invalid configuration: {e}", err=True)
+        raise typer.Exit(3)
+    except ASHConfigValidationError as e:
+        # Exit 3, the code every ASH command uses for an unusable configuration:
+        # listing the plugins of the default config instead would describe a
+        # configuration other than the one named or found.
+        typer.secho(f"Invalid configuration: {e}", err=True, fg=typer.colors.RED)
         raise typer.Exit(3)
     except Exception as e:
         typer.secho(

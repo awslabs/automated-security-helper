@@ -1265,21 +1265,27 @@ def _ash_config_fallback(source_dir: Path) -> Optional[str]:
 
 
 def _load_with_confinement(
-    ash_config_cls,
     config_path_str: str,
     source_dir: Path,
     permit_base: Optional[Callable[[Path], bool]] = None,
+    log_failure: bool = True,
 ):
-    """Load a config file with its `extends` bases confined as a scan would."""
+    """Load a config file with its `extends` bases confined as a scan would.
+
+    A file that is missing or does not load raises ``ASHConfigValidationError``,
+    as it does when the scan resolves it; see ``resolve_config.load_config_file``.
+    """
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
     )
+    from automated_security_helper.config.resolve_config import load_config_file
 
     config_path = Path(config_path_str)
-    return ash_config_cls.from_file(
+    return load_config_file(
         config_path,
         confine_to=default_confinement_root(config_path, source_dir),
         permit_base=permit_base,
+        log_failure=log_failure,
     )
 
 
@@ -1290,12 +1296,13 @@ def _load_config_file(opts: ScanOptions):
     candidate search was the alternative, and it would let the two fields be read
     from different files the moment the search changed in one copy.
 
-    Returns None when no config file is found or when it cannot be parsed --
-    parsing failures surface later through the orchestrator's own validation with
-    a message that names the problem, so swallowing them here loses nothing.
+    Returns None when no config file is found, and also when the file cannot be
+    loaded. That is not a fallback: resolution refuses the same file with exit 3
+    before any scanner runs -- the orchestrator's resolve_config in local mode,
+    and the inner ASH in container and nix mode, which is handed the same path
+    or discovers the same file -- so the value read here is never used for a
+    scan. Refusing here as well would only duplicate that message.
     """
-    from automated_security_helper.config.ash_config import AshConfig
-
     config_path_str = opts.config
     if config_path_str is None:
         try:
@@ -1308,8 +1315,9 @@ def _load_config_file(opts: ScanOptions):
         return None
 
     try:
+        # Not logged: the resolution that refuses the file logs it once.
         return _load_with_confinement(
-            AshConfig, config_path_str, opts.source_dir, opts.config_base_gate
+            config_path_str, opts.source_dir, opts.config_base_gate, log_failure=False
         )
     except Exception:
         return None
@@ -2172,39 +2180,24 @@ def _resolve_workspace_execution_config(opts: ScanOptions):
 
     The workspace root's config, not a project's: how many projects run at once
     is not a project's decision, and a project that set it would be overriding a
-    sibling. Falls back to the defaults when there is no config file or it cannot
-    be read -- these are scheduling knobs, so refusing to scan over an unreadable
-    one would be a poor trade.
+    sibling. The defaults apply when there is no config file. A config file that
+    is named (``--config``, an MCP profile) or discovered and cannot be loaded
+    raises ``ASHConfigValidationError`` (exit 3), the way the same file refuses a
+    single-directory scan: the file was meant to configure this run, and running
+    without it is not the run the operator asked for.
     """
-    from automated_security_helper.config.ash_config import (
-        AshConfig,
-        WorkspaceExecutionConfig,
-    )
+    from automated_security_helper.config.ash_config import WorkspaceExecutionConfig
 
     config_path_str = opts.config
     if config_path_str is None:
-        try:
-            config_path_str = _discovered_config_path(opts.source_dir)
-        except Exception as exc:  # noqa: BLE001 -- scheduling knobs, not policy
-            logging.getLogger(__name__).warning(
-                f"Could not locate the workspace config ({exc}); using the default "
-                "workspace execution settings."
-            )
-            return WorkspaceExecutionConfig()
+        config_path_str = _discovered_config_path(opts.source_dir)
 
     if config_path_str is None:
         return WorkspaceExecutionConfig()
 
-    try:
-        return _load_with_confinement(
-            AshConfig, config_path_str, opts.source_dir, opts.config_base_gate
-        ).workspace
-    except Exception as exc:  # noqa: BLE001 -- scheduling knobs, not policy
-        logging.getLogger(__name__).warning(
-            f"Could not read workspace execution settings from "
-            f"'{config_path_str}' ({exc}); using defaults."
-        )
-        return WorkspaceExecutionConfig()
+    return _load_with_confinement(
+        config_path_str, opts.source_dir, opts.config_base_gate
+    ).workspace
 
 
 def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
@@ -2241,11 +2234,12 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
 
     Failure modes
     -------------
-    An unreadable ASH config at the workspace root does not raise here.
-    ``_resolve_workspace_execution_config`` warns and falls back to the defaults,
-    because these are scheduling knobs -- refusing the whole scan over a typo in
-    one would be a poor trade, and on the MCP path it would surface as an
-    internal error for what is really an operator's config file.
+    An ASH config at the workspace root (or named by ``opts.config``) that cannot
+    be loaded raises ``ASHConfigValidationError`` from
+    ``_resolve_workspace_execution_config``, as the same file does for a
+    single-directory scan. ``_run_workspace_mode`` exits 3 on it, and the MCP
+    path maps it to exit code 3 (``cli/mcp/workspace._EXIT_CODE_BY_EXCEPTION``),
+    so it is reported as an invalid configuration, not an internal error.
     """
     from automated_security_helper.workspace.execution import ProjectScanSettings
 
@@ -2359,7 +2353,11 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
     # Built before ASH_OFFLINE is set, preserving the order the inline
     # construction had: the builder reads a config file off disk, and doing that
     # with the offline flag already in the environment is a different read.
-    settings = build_project_scan_settings(opts)
+    try:
+        settings = build_project_scan_settings(opts)
+    except ASHConfigValidationError as exc:
+        print(f"[bold red]ERROR (3) Invalid configuration: {exc}[/bold red]")
+        sys.exit(int(WorkspaceExitCode.INVALID_PROJECT_CONFIG))
 
     # Set and restored through utils/process_env.py; see _run_local_mode.
     _offline_previous = None

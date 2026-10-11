@@ -753,8 +753,33 @@
   were the file's contents. It now prints `Invalid configuration: could not parse
   <path>: <error>` and exits 3, the code for an invalid configuration and the one it
   already used for a file that parses but does not validate. With no configuration
-  file at all it still prints the defaults. `ash scan` is unchanged: it still falls
-  back to the defaults and records a warning.
+  file at all it still prints the defaults. `ash scan` now refuses such a file the
+  same way; see the next entry.
+
+- **A config file that cannot be loaded stops the scan with exit 3 instead of
+  being replaced by the default configuration.** A file named by `--config`,
+  `ASH_CONFIG`, `run_ash_scan(config=...)` or an MCP `config_path` that does not
+  exist, an empty `--config ""`, and a named or discovered file that is not valid
+  YAML or JSON, is not UTF-8, cannot be read, or is a dangling symbolic link (for
+  example `.ash/.ash.yaml` linked to a file that is not checked out) used to be
+  logged and scanned with the defaults: no suppressions, no ignore paths,
+  `fail_on_findings` on and the sandbox off, and the scan reported completed.
+  `ASH_CONFIG` naming an unparseable file crashed with a traceback (exit 1). Each
+  now exits 3 before any scanner runs, with a message naming the file, as a TOML
+  syntax error and a schema error already did. A `pyproject.toml` that cannot be
+  read is refused when it would be the source used. The defaults apply only when
+  there is no config file at all; an empty `ASH_CONFIG` counts as unset. The same
+  refusal applies to `ash report`, `ash plugin list` and `ash dependencies install`
+  (each exits 3), to workspace mode (planning, `--dry-run` included, and execution;
+  `--config` is now passed to planning and must name an existing file even when
+  every project has its own config; the workspace execution settings read from the
+  workspace root's config no longer fall back to their defaults), and to the MCP
+  server, where `scan_directory` refuses the file before starting a scan and
+  `get_config` returns an error instead of the default configuration. A config
+  source that discovery found and ignored is now also reported as a
+  `config_warning` in the scan's results and summary, since its settings are not
+  applied. **A CI job that set `ASH_CONFIG` to a file it only sometimes writes now
+  fails when the file is absent; unset the variable instead.**
 
 - **A `**` at either end of a multi-segment `ignore_paths` or `suppressions` pattern
   now takes effect.** The matcher anchored the first and last segments of a pattern

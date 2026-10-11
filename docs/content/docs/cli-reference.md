@@ -288,6 +288,8 @@ Folder paths are relative to the directory holding the workspace file, which bec
 
 `--dry-run` resolves and validates the workspace, prints the resulting plan, and exits 0 without scanning anything. Without it, the same plan is what gets scanned — resolved once, so what you inspect is what runs.
 
+In workspace mode `--config` names the config of each project that has none of its own; a project's own config file still wins. The file must exist even when every project has its own config, because it is also the trusted base those projects' sandbox settings come from: a `--config` that names no file, and any project config that cannot be loaded, exit 3 at planning, `--dry-run` included.
+
 #### Workspace policy
 
 Each project is judged against its own configuration, so there is nowhere in a project's config to say something about the workspace as a whole. That goes in a workspace policy file, which ASH looks for at `ash-workspace.yaml` (or `.yml`/`.json`) in the workspace root or its `.ash` directory. Having none is not an error.
@@ -387,7 +389,7 @@ If a reporter declares that it cannot produce a correct workspace-level artefact
 
 #### Concurrency
 
-Set these in the ASH config resolved for the workspace **root** — how many projects run at once is not a project's decision:
+Set these in the ASH config resolved for the workspace **root** (the file `--config` names, or the one found in the workspace root) — how many projects run at once is not a project's decision. A config file there that cannot be loaded stops the run with exit code 3, as it would stop a single-directory scan:
 
 ```yaml
 workspace:

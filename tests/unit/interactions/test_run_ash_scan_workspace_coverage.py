@@ -34,7 +34,6 @@ does with each outcome.
 
 from __future__ import annotations
 
-import logging
 import os
 import re
 import time
@@ -247,21 +246,30 @@ class TestResolveWorkspaceExecutionConfig:
 
         assert config.max_parallel_projects == 2
 
-    def test_an_unreadable_config_falls_back_rather_than_refusing_the_scan(
-        self, tmp_path, caplog
-    ):
-        """These are scheduling knobs; refusing to scan over one would be a poor trade."""
+    def test_an_unparseable_config_refuses_the_scan(self, tmp_path):
+        """The same file refuses a single-directory scan, so it refuses this one.
+
+        It used to be replaced by the defaults with a warning, and the workspace
+        was scanned without the settings the file was there to apply.
+        """
         (tmp_path / ".ash.yaml").write_text(
             "workspace: [this: is: not: valid\n", encoding="utf-8"
         )
 
-        with caplog.at_level(logging.WARNING):
-            config = _resolve_workspace_execution_config(
+        with pytest.raises(ASHConfigValidationError, match=r"\.ash\.yaml"):
+            _resolve_workspace_execution_config(
                 ScanOptions(source_dir=tmp_path, output_dir=tmp_path / "out")
             )
 
-        assert config.max_parallel_projects is None
-        assert "using defaults" in caplog.text
+    def test_a_named_config_that_does_not_exist_refuses_the_scan(self, tmp_path):
+        with pytest.raises(ASHConfigValidationError, match="profile.yaml"):
+            _resolve_workspace_execution_config(
+                ScanOptions(
+                    source_dir=tmp_path,
+                    output_dir=tmp_path / "out",
+                    config=(tmp_path / "profile.yaml").as_posix(),
+                )
+            )
 
 
 # ---------------------------------------------------------------------------

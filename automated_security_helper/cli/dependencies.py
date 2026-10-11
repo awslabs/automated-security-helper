@@ -32,6 +32,7 @@ from automated_security_helper.core.constants import (
     ASH_CONFIG_SOURCES_DESCRIPTION,
     ASH_WORK_DIR_NAME,
 )
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import (
     PluginModuleNamespaceError,
@@ -63,6 +64,8 @@ err_console = Console(stderr=True)
 EXIT_OK = 0
 EXIT_INSTALL_FAILED = 1
 EXIT_BAD_SELECTION = 2
+# The code every ASH command uses for a configuration that cannot be used.
+EXIT_INVALID_CONFIG = 3
 
 # `--tool` names that stopped working when this command began building each plugin
 # from its own config section (#766), mapped to the config key that replaced them.
@@ -308,11 +311,17 @@ def install_dependencies(
     # `ash dependencies install --config .ash/.ash_community_plugins.yaml` resolved
     # the default config instead and installed dependencies for the wrong set of
     # plugins.
-    resolved_config = resolve_config(
-        config_path=config,
-        source_dir=source_dir,
-        config_overrides=config_overrides,
-    )
+    try:
+        resolved_config = resolve_config(
+            config_path=config,
+            source_dir=source_dir,
+            config_overrides=config_overrides,
+        )
+    except ASHConfigValidationError as e:
+        # Installing for the built-in plugin set instead would report success for
+        # a config whose own plugins got nothing.
+        print(f"[red]Invalid configuration: {escape(str(e))}[/red]")
+        raise typer.Exit(EXIT_INVALID_CONFIG)
 
     # Import the plugin modules the config names before enumerating anything.
     #
