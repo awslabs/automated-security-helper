@@ -191,11 +191,21 @@
 
 - **An archive the converter cannot read makes the scan incomplete.** A `.zip`,
   `.tar` or `.gz` that zipfile and tarfile cannot read (a bad CRC, a truncated or
-  damaged stream, a `.gz` that is one compressed file rather than a tarball, an empty
-  file) used to leave a log line, and a zip that failed part way left its first
-  members on disk, where the scanners read them. It is now refused whole, with
-  `scan_incomplete` in its `refused_inputs` record; anything written from it is
-  removed; and with `fail_on_incomplete_scanners` on the scan exits 1 naming it.
+  damaged stream, an empty file) used to leave a log line, and a zip that failed part
+  way left its first members on disk, where the scanners read them. It is now refused
+  whole, with `scan_incomplete` in its `refused_inputs` record; anything written from
+  it is removed; and with `fail_on_incomplete_scanners` on the scan exits 1 naming it.
+
+- **A single-file `.gz` is decompressed and scanned.** A `.gz` that is one compressed
+  file rather than a tarball, such as `data.json.gz`, used to be passed over. It is
+  decompressed to `data.json` within the extraction limits and the scan's budget,
+  and scanned. A `.tar.gz` that holds no tar is refused as unreadable.
+
+- **A Git LFS pointer named like an archive is reported, not failed.** A checkout
+  without its LFS objects holds a pointer file where each LFS-tracked `.zip` or
+  `.tar.gz` should be. It is recorded as a refused input naming the file and the
+  remedy (fetch the LFS objects before the scan), and does not fail the
+  completeness gate. Only a whole file in the LFS pointer format counts.
 
 - **An archive inside an archive is recorded as not scanned.** Extraction is one level
   deep, as before, but a member named as an archive or compressed file (`.zip`,

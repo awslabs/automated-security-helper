@@ -170,3 +170,46 @@ def test_a_nested_archive_is_reported_and_the_scan_still_passes(nested_only):
         for row in flat["converter_refusals"]
     ] == [("nested.zip", "inner.zip", False)]
     assert "Not scanned: archive: member 'inner.zip' of 'nested.zip'" in out
+
+
+#: Assembled at run time, so this file holds no private key header of its own.
+_KEY_HEADER = "-----BEGIN " + "RSA PRIVATE" + " KEY-----"
+_LFS_POINTER = (
+    b"version https://git-lfs.github.com/spec/v1\n"
+    b"oid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\n"
+    b"size 12345\n"
+)
+
+
+@pytest.fixture(scope="module")
+def gzip_and_lfs(tmp_path_factory):
+    import gzip
+
+    secret = f"KEY = '''{_KEY_HEADER}\nMIIEowIBAAKCAQEA\n'''\n".encode()
+    return _scan(
+        tmp_path_factory.mktemp("gzip-and-lfs"),
+        {
+            "settings.py.gz": gzip.compress(secret, mtime=0),
+            "assets.zip": _LFS_POINTER,
+        },
+    )
+
+
+def test_a_plain_gzip_is_scanned_and_an_lfs_pointer_does_not_fail_the_scan(
+    gzip_and_lfs,
+):
+    code, out, output = gzip_and_lfs
+
+    assert code == 0, out[-4000:]
+    doc = json.loads((output / "reports" / "ash.sarif").read_text())
+    found = [
+        location["physicalLocation"]["artifactLocation"]["uri"].rsplit("/", 1)[-1]
+        for run in doc["runs"]
+        for result in run.get("results") or []
+        for location in result.get("locations") or []
+    ]
+    assert "settings.py" in found, found
+    assert [(level, uri) for level, uri, _ in _notifications(output)] == [
+        ("warning", "assets.zip")
+    ]
+    assert "git lfs pull" in out

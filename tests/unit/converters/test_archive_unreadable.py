@@ -4,7 +4,7 @@
 """An archive the converter cannot read is refused, cleaned up, and fails the gate.
 
 A `.zip`, `.tar` or `.gz` that zipfile and tarfile cannot read (a bad CRC, a
-truncated stream, a gzip-compressed file that is not a tarball, an empty file) used
+truncated stream, a damaged gzip file, an empty file) used
 to leave only a log line, and a zip that failed part way left the members already
 written on disk, where the scanners read them as if the archive had been
 extracted. Each is now one refused input with ``scan_incomplete`` set, nothing it
@@ -84,7 +84,11 @@ def empty_valid_zip() -> bytes:
 UNREADABLE = [
     pytest.param("crc.zip", bad_crc_zip(), id="bad-crc-zip"),
     pytest.param("cut.tar", truncated_tar(), id="truncated-tar"),
-    pytest.param("data.json.gz", gzip.compress(b'{"a": 1}\n'), id="plain-gzip"),
+    pytest.param(
+        "data.json.gz",
+        gzip.compress(b'{"a": 1}\n' * 200)[:-30],
+        id="damaged-plain-gzip",
+    ),
     pytest.param("empty.zip", b"", id="empty-file"),
     pytest.param("noise.tar.gz", b"\x1f\x8b" + b"\x00" * 64, id="damaged-gzip"),
 ]

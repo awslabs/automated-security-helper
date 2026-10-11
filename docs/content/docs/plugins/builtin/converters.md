@@ -273,11 +273,27 @@ those are the refusals that leave a whole archive unscanned, and the completenes
 gate counts them. The others are reported in the summaries and reports as well, and
 do not change the exit code.
 
-An archive that zipfile and tarfile cannot read is refused whole: a bad CRC, a
-truncated or damaged stream, a `.gz` that is a single compressed file rather than a
-tarball (such as `data.json.gz`), or an empty file. Anything already written from it
-is removed, so the scanners never read a partial extraction as the archive, and the
-scan exits 1 with `fail_on_incomplete_scanners` on. Exclude such a file with
+A `.gz` that is one gzip-compressed file rather than a tarball, such as
+`data.json.gz`, is decompressed to the name without `.gz` (`data.json`) and that file
+is scanned, within the extraction limits and the scan's budget like an archive with
+one member. Its size is known only by reading it, so at most the limit is written
+before it is refused. A name ending `.tar.gz` says the content is a tarball, and a
+`.tar.gz` that holds no tar is refused as unreadable.
+
+A Git LFS pointer named like an archive, which is what a checkout without its LFS
+objects holds in place of each LFS-tracked `.zip` or `.tar.gz`, is recorded as a
+refused input naming the file, with the remedy: fetch the LFS objects (`git lfs
+pull`, or `lfs: true` on the CI checkout step) before the scan. It does not fail the
+completeness gate, because the archive is not in the tree to scan. Only a whole file
+in the pointer format counts: under 1024 bytes, UTF-8 text, the
+`version https://git-lfs.github.com/spec/v1` line first, `key value` lines, and an
+`oid sha256:` and a `size` line.
+
+Any other archive that zipfile and tarfile cannot read is refused whole: a bad CRC, a
+truncated or damaged stream (a damaged single-file gzip included), an empty file, or
+headers over the read limits above. Anything already written from it is removed, so
+the scanners never read a partial extraction as the archive, and the scan exits 1
+with `fail_on_incomplete_scanners` on. Exclude such a file with
 `global_settings.ignore_paths` if its contents need not be scanned.
 
 To have a skipped file converted, replace the link with the file itself. To have a

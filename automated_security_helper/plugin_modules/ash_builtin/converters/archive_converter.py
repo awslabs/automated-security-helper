@@ -10,6 +10,7 @@ import importlib
 import io
 import lzma
 import os
+import re
 import shutil
 import stat
 from pathlib import Path, PurePosixPath
@@ -232,6 +233,28 @@ class _ExtractionBudget:
         # Bytes the members declare, which the compression ratio is taken over.
         self.declared = 0
 
+    def room(self) -> int:
+        """The most bytes one more member could declare and still be admitted.
+
+        For a member whose size is known only by reading it, such as the content of
+        a plain gzip file: read at most this plus one byte, then ``admit`` what was
+        read, which names the limit when it is over.
+        """
+        options = self.options
+        limits = [
+            options.max_member_bytes,
+            options.max_total_bytes - self.total,
+            max(RATIO_FLOOR_BYTES, options.max_compression_ratio * self.archive_size)
+            - self.declared,
+        ]
+        if self.scan is not None:
+            limits.append(
+                SCAN_BUDGET_ARCHIVES * options.max_total_bytes
+                - self.scan.total
+                - self.total
+            )
+        return max(0, min(limits))
+
     def admit(self, name: str, size: int) -> None:
         options = self.options
         self.members += 1
@@ -406,6 +429,73 @@ def _tar_members_within(
     return members
 
 
+#: The first line of a Git LFS pointer file, version 1 of the pointer format.
+_LFS_POINTER_FIRST_LINE = b"version https://git-lfs.github.com/spec/v1\n"
+#: "Pointer files must be less than 1024 bytes in size", in the LFS spec.
+_LFS_POINTER_MAX_BYTES = 1024
+_LFS_POINTER_LINE = re.compile(rb"[a-z0-9.-]+ [^\r\n]*\n")
+_LFS_POINTER_OID = re.compile(rb"^oid sha256:[0-9a-f]{64}\n", re.MULTILINE)
+_LFS_POINTER_SIZE = re.compile(rb"^size [0-9]+\n", re.MULTILINE)
+_LFS_POINTER_REASON = (
+    "it is a Git LFS pointer file, not the archive it stands for, so the archive's "
+    "contents are not scanned; fetch the LFS objects (git lfs pull) before the scan "
+    "to have them scanned"
+)
+
+
+def _is_git_lfs_pointer(head: bytes, size: int) -> bool:
+    """Whether a file is a Git LFS pointer: the whole file, in the pointer format.
+
+    Strict on purpose, because a pointer is reported rather than failing the scan:
+    under 1024 bytes, UTF-8 text, the version line first, every line ``key value``,
+    and an ``oid sha256:`` and a ``size`` line. A zip, tar or gzip file cannot meet
+    it: each holds bytes that are not such text.
+    """
+    if size >= _LFS_POINTER_MAX_BYTES or len(head) != size:
+        return False
+    if not head.startswith(_LFS_POINTER_FIRST_LINE):
+        return False
+    try:
+        head.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    lines = head.splitlines(keepends=True)
+    if not all(_LFS_POINTER_LINE.fullmatch(line) for line in lines):
+        return False
+    return bool(_LFS_POINTER_OID.search(head) and _LFS_POINTER_SIZE.search(head))
+
+
+def _plain_gzip_name(archive_file: str) -> Optional[str]:
+    """The file a ``.gz`` would decompress to, or None when its name says tarball.
+
+    ``data.json.gz`` is ``data.json``. A name ending ``.tar.gz`` says the content is
+    a tarball, so it is read as one and never as a single compressed file.
+    """
+    base = archive_file.replace("\\", "/").rsplit("/", 1)[-1]
+    lowered = base.lower()
+    if not lowered.endswith(".gz") or lowered.endswith(".tar.gz"):
+        return None
+    inner = base[: -len(".gz")]
+    return inner or None
+
+
+def _gzip_holds_a_tar(handle: BinaryIO) -> bool:
+    """Whether a gzip file's content starts with a tar header.
+
+    Reads one block of the decompressed content. A damaged stream raises, and the
+    archive is then refused as unreadable.
+    """
+    handle.seek(0)
+    with gzip.GzipFile(fileobj=handle, mode="rb") as stream:
+        block = stream.read(tarfile.BLOCKSIZE)
+    handle.seek(0)
+    try:
+        tarfile.TarInfo.frombuf(block, "utf-8", "surrogateescape")
+    except tarfile.HeaderError:
+        return False
+    return True
+
+
 def _is_archive_name(name: str) -> bool:
     """Whether a member's name marks it as an archive or compressed file of its own."""
     base = name.replace("\\", "/").rsplit("/", 1)[-1]
@@ -475,6 +565,37 @@ def _copy_at_most(source: BinaryIO, out: BinaryIO, limit: int) -> None:
             return
         out.write(chunk)
         remaining -= len(chunk)
+
+
+def _decompress_plain_gzip(
+    handle: BinaryIO, destination: Path, name: str, budget: "_ExtractionBudget"
+) -> None:
+    """Decompress a single-file gzip to ``destination`` within ``budget``.
+
+    Its size is known only by reading it (the size in the gzip trailer is the
+    writer's claim, modulo 4 GiB), so at most ``budget.room()`` plus one byte is
+    written and then admitted, which refuses it, naming the limit, when it is over.
+    The file is created without following a link at its name.
+    """
+    handle.seek(0)
+    room = budget.room()
+    fd = os.open(
+        destination,
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_TRUNC
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_BINARY", 0),
+        0o644,
+    )
+    with gzip.GzipFile(fileobj=handle, mode="rb") as source, os.fdopen(fd, "wb") as out:
+        _copy_at_most(source, out, room + 1)
+        written = out.tell()
+        if written <= room:
+            # Read to the end, so a damaged stream or a bad CRC raises here.
+            if source.read(1):
+                written += 1
+    budget.admit(name, written)
 
 
 def _copy_tar_members(
@@ -783,14 +904,50 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     continue
 
                 with archive_handle, contextlib.ExitStack() as stack:
+                    archive_size = os.fstat(archive_handle.fileno()).st_size
                     # Every member is admitted against the extraction limits before
                     # anything is written, and the target directory is created only
                     # after that, so a refused archive leaves nothing behind.
                     budget = _ExtractionBudget(
                         self._extraction_limits(),
-                        os.fstat(archive_handle.fileno()).st_size,
+                        archive_size,
                         scan=scan_budget,
                     )
+
+                    # A checkout without its LFS objects holds a pointer where each
+                    # LFS-tracked archive should be. Reported, naming the remedy,
+                    # and not counted as lost coverage: the archive is not in the
+                    # tree to scan.
+                    head = archive_handle.read(_LFS_POINTER_MAX_BYTES)
+                    archive_handle.seek(0)
+                    if _is_git_lfs_pointer(head, archive_size):
+                        self.record_refused_input(
+                            TreeInputRefused(archive_display, _LFS_POINTER_REASON)
+                        )
+                        continue
+
+                    plain_gzip = _plain_gzip_name(archive_file)
+                    if (
+                        plain_gzip is not None
+                        and head[:2] == b"\x1f\x8b"
+                        and not _gzip_holds_a_tar(archive_handle)
+                    ):
+                        # One compressed file, not an archive of files.
+                        if not self.inspect_members(
+                            [plain_gzip],
+                            target_path=target_path,
+                            archive=archive_display,
+                        ):
+                            continue
+                        if not target_path.exists():
+                            created_target = target_path
+                        target_path.mkdir(parents=True, exist_ok=True)
+                        _decompress_plain_gzip(
+                            archive_handle, target_path / plain_gzip, plain_gzip, budget
+                        )
+                        results.append(target_path)
+                        scan_budget.commit(budget)
+                        continue
 
                     # Extract ZIP to target path after inspecting members
                     is_zip = archive_file.lower().endswith(
@@ -853,7 +1010,10 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             except _ExtractionLimitExceeded as exceeded:
                 # The whole archive, not a member: none of it reaches the scanners,
                 # so the record carries the limit, which the completeness gate
-                # reads.
+                # reads. A plain gzip file is admitted as it is decompressed, so
+                # what it wrote before going over is removed.
+                if created_target is not None:
+                    shutil.rmtree(created_target, ignore_errors=True)
                 self.record_refused_input(
                     TreeInputRefused(archive_display, exceeded.reason),
                     limit=exceeded.option,

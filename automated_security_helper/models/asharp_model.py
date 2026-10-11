@@ -475,7 +475,9 @@ class ConverterStatusInfo(BaseModel):
             "file that is not a regular file or has more than one hard link, or "
             "an archive member that is a link, would be extracted outside its "
             "destination, or is itself an archive. An archive over an extraction "
-            "limit is recorded here too, with the limit named in limit."
+            "limit is recorded here too, with the limit named in limit, and so is "
+            "one that could not be read; both have scan_incomplete set. A Git LFS "
+            "pointer named like an archive is recorded without it."
         ),
     )
 
