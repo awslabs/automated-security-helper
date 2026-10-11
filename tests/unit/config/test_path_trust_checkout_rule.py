@@ -235,10 +235,12 @@ def _plugin_package(root: Path, name: str) -> None:
 def test_one_config_is_confined_by_both_rules(tmp_path, monkeypatch, supplied_by):
     # One config that asks for sandbox grants and for a plugin module the scanned
     # repository could have written. Both rules apply in the same resolution: the
-    # grants come from the trusted base, and the module is not imported.
+    # grants come from the trusted base, and the module is not imported. The name is
+    # inside the plugin namespace, so this filter is what drops it; a name outside it
+    # is kept for the scan's exit-3 refusal (test_refused_plugin_modules_in_tree.py).
     target = tmp_path / "target"
     target.mkdir()
-    module = f"acme_combined_{supplied_by.replace('-', '_')}"
+    module = f"acme_combined_{supplied_by.replace('-', '_')}_ash_plugins"
     _plugin_package(target / "plugins", module)
     monkeypatch.syspath_prepend(str(target / "plugins"))
     text = (
