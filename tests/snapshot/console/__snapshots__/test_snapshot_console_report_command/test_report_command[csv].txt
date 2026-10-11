@@ -3,7 +3,7 @@ $ ash report --format csv --log-level ERROR
 id,title,description,severity,scanner,scanner_type,rule_id,file_path,line_start,line_end,cve_id,cwe_
 id,fix_available,is_suppressed,suppression_kind,suppression_justification,detected_at,code_snippet,t
 ags,properties,references,raw_data,package_name,package_version,package_path
-bandit-B602-e7207a83,B602,subprocess call with
+bandit-B602-v2-65b7d6bbc9d94661723acb97754ce18f,B602,subprocess call with
 shell=True,HIGH,bandit,UNKNOWN,B602,src/app.py,12,12,,,,False,,,,,,"{""tags"": [], ""scanner_name"":
 ""bandit"", ""issue_severity"":
 ""HIGH""}",,"{""ruleId"":""B602"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error"",""message""
@@ -14,7 +14,7 @@ shell=True"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{"
 ""codeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""attach
 ments"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""bandit"",""issue_
 severity"":""HIGH""}}",,,
-bandit-B105-29fb4f6e,B105,Possible hardcoded
+bandit-B105-v2-6a17b8bb52a84ca0b08c09d7d0c9bbcb,B105,Possible hardcoded
 password,MEDIUM,bandit,UNKNOWN,B105,src/config.py,3,3,,,,False,,,,,,"{""tags"": [],
 ""scanner_name"": ""bandit"", ""issue_severity"":
 ""MEDIUM""}",,"{""ruleId"":""B105"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error"",""message
@@ -25,7 +25,7 @@ password"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""a
 "codeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""attachm
 ents"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""bandit"",""issue_s
 everity"":""MEDIUM""}}",,,
-bandit-B108-dc820a43,B108,Probable insecure usage of temp
+bandit-B108-v2-b8af210e8a0da9414b040d4efa27b046,B108,Probable insecure usage of temp
 file,MEDIUM,bandit,UNKNOWN,B108,src/app.py,40,40,,,,False,,,,,,"{""tags"": [], ""scanner_name"":
 ""bandit"", ""issue_severity"":
 ""MEDIUM""}",,"{""ruleId"":""B108"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error"",""message
@@ -36,7 +36,7 @@ Offset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}],
 Flows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""attachments"
 ":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""bandit"",""issue_severi
 ty"":""MEDIUM""}}",,,
-bandit-B101-b5dd5202,B101,Use of assert
+bandit-B101-v2-115c0f84c719048bc5eba068c207cd8b,B101,Use of assert
 detected,LOW,bandit,UNKNOWN,B101,tests/test_app.py,8,8,,,,False,,,,,,"{""tags"": [],
 ""scanner_name"": ""bandit"", ""issue_severity"":
 ""LOW""}",,"{""ruleId"":""B101"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error"",""message"":
@@ -47,7 +47,7 @@ detected"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""a
 [],""codeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""att
 achments"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""bandit"",""iss
 ue_severity"":""LOW""}}",,,
-bandit-B311-4e7b184b,B311,Standard pseudo-random
+bandit-B311-v2-7b95c65767d52401e1fee5b01cd904c9,B311,Standard pseudo-random
 generator,LOW,bandit,UNKNOWN,B311,src/util.py,5,5,,,,True,external,Accepted risk: test
 fixture,,,,"{""tags"": [], ""scanner_name"": ""bandit"", ""issue_severity"":
 ""LOW""}",,"{""ruleId"":""B311"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error"",""message"":
@@ -59,7 +59,8 @@ codeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""su
 d"":""external"",""justification"":""Accepted risk: test
 fixture""}],""rank"":-1.0,""attachments"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""
 scanner_name"":""bandit"",""issue_severity"":""LOW""}}",,,
-semgrep-python.lang.security.eval-fccd4cc9,python.lang.security.eval,Detected use of
+semgrep-python.lang.security.eval-v2-577fce831bb9f4186586c0301de1270a,python.lang.security.eval,Dete
+cted use of
 eval(),CRITICAL,semgrep,UNKNOWN,python.lang.security.eval,src/app.py,77,77,,,,False,,,,,,"{""tags"":
 [], ""scanner_name"": ""semgrep"", ""issue_severity"":
 ""CRITICAL""}",,"{""ruleId"":""python.lang.security.eval"",""ruleIndex"":-1,""kind"":""fail"",""leve
@@ -70,9 +71,9 @@ teOffset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}
 deFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""attachment
 s"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""semgrep"",""issue_sev
 erity"":""CRITICAL""}}",,,
-semgrep-generic.secrets.gitleaks-bbf70ebd,generic.secrets.gitleaks,Example key in
-docs,INFO,semgrep,UNKNOWN,generic.secrets.gitleaks,README.md,1,1,,,,False,,,,,,"{""tags"": [],
-""scanner_name"": ""semgrep"", ""issue_severity"":
+semgrep-generic.secrets.gitleaks-v2-cf2e9972a97abb4308a93b3511c7033b,generic.secrets.gitleaks,Exampl
+e key in docs,INFO,semgrep,UNKNOWN,generic.secrets.gitleaks,README.md,1,1,,,,False,,,,,,"{""tags"":
+[], ""scanner_name"": ""semgrep"", ""issue_severity"":
 ""INFO""}",,"{""ruleId"":""generic.secrets.gitleaks"",""ruleIndex"":-1,""kind"":""fail"",""level"":"
 "error"",""message"":{""text"":""Example key in
 docs"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""artifactLocation"":{""uri
@@ -81,7 +82,8 @@ set"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]}],""s
 ws"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""attachments"":[
 ],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""semgrep"",""issue_severity
 "":""INFO""}}",,,
-semgrep-python.lang.best-practice.open-b79f7651,python.lang.best-practice.open,open() without
+semgrep-python.lang.best-practice.open-v2-6c3fba2cdcbbaacb4bf0c105c665d8f5,python.lang.best-practice
+.open,open() without
 encoding,INFO,semgrep,UNKNOWN,python.lang.best-practice.open,src/util.py,9,9,,,,False,,,,,,"{""tags"
 ": [], ""scanner_name"": ""semgrep"", ""issue_severity"":
 ""INFO""}",,"{""ruleId"":""python.lang.best-practice.open"",""ruleIndex"":-1,""kind"":""fail"",""lev
@@ -92,7 +94,7 @@ yteOffset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[]
 odeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""attachmen
 ts"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""semgrep"",""issue_se
 verity"":""INFO""}}",,,
-semgrep-python.flask.debug-be9d4a9e,python.flask.debug,Flask debug
+semgrep-python.flask.debug-v2-664663bf0ecc002a814e8309bfcb7987,python.flask.debug,Flask debug
 mode,HIGH,semgrep,UNKNOWN,python.flask.debug,src/web.py,4,4,,,,True,external,Accepted risk: test
 fixture,,,,"{""tags"": [], ""scanner_name"": ""semgrep"", ""issue_severity"":
 ""HIGH""}",,"{""ruleId"":""python.flask.debug"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error
@@ -104,7 +106,8 @@ ows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""suppress
 external"",""justification"":""Accepted risk: test
 fixture""}],""rank"":-1.0,""attachments"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""
 scanner_name"":""semgrep"",""issue_severity"":""HIGH""}}",,,
-semgrep-python.requests.no-timeout-9f83bd69,python.requests.no-timeout,Request without
+semgrep-python.requests.no-timeout-v2-94cfba6d2e334bbda3a6ac06d239c0d8,python.requests.no-timeout,Re
+quest without
 timeout,MEDIUM,semgrep,UNKNOWN,python.requests.no-timeout,src/web.py,20,20,,,,True,external,Accepted
 risk: test fixture,,,,"{""tags"": [], ""scanner_name"": ""semgrep"", ""issue_severity"":
 ""MEDIUM""}",,"{""ruleId"":""python.requests.no-timeout"",""ruleIndex"":-1,""kind"":""fail"",""level
@@ -116,7 +119,7 @@ odeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""sup
 "":""external"",""justification"":""Accepted risk: test
 fixture""}],""rank"":-1.0,""attachments"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""
 scanner_name"":""semgrep"",""issue_severity"":""MEDIUM""}}",,,
-checkov-CKV_AWS_18-440a870e,CKV_AWS_18,S3 access logging
+checkov-CKV_AWS_18-v2-9d60e669151c41d840be71ceef2335f3,CKV_AWS_18,S3 access logging
 disabled,LOW,checkov,UNKNOWN,CKV_AWS_18,infra/bucket.yaml,6,6,,,,False,,,,,,"{""tags"": [],
 ""scanner_name"": ""checkov"", ""issue_severity"":
 ""LOW""}",,"{""ruleId"":""CKV_AWS_18"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error"",""mess
@@ -127,7 +130,7 @@ disabled"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""a
 [],""codeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""att
 achments"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""checkov"",""is
 sue_severity"":""LOW""}}",,,
-checkov-CKV_AWS_21-dd5d6906,CKV_AWS_21,S3 versioning
+checkov-CKV_AWS_21-v2-a0d71dc4c4fa53cb9cdb290815617d88,CKV_AWS_21,S3 versioning
 disabled,LOW,checkov,UNKNOWN,CKV_AWS_21,infra/bucket.yaml,6,6,,,,False,,,,,,"{""tags"": [],
 ""scanner_name"": ""checkov"", ""issue_severity"":
 ""LOW""}",,"{""ruleId"":""CKV_AWS_21"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error"",""mess
@@ -138,7 +141,7 @@ disabled"",""arguments"":[]},""locations"":[{""id"":-1,""physicalLocation"":{""a
 [],""codeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""att
 achments"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""checkov"",""is
 sue_severity"":""LOW""}}",,,
-checkov-CKV_AWS_144-6c3d87b2,CKV_AWS_144,Cross-region replication
+checkov-CKV_AWS_144-v2-bdd44ccac374e46563a9d57a224c7853,CKV_AWS_144,Cross-region replication
 off,INFO,checkov,UNKNOWN,CKV_AWS_144,infra/bucket.yaml,6,6,,,,False,,,,,,"{""tags"": [],
 ""scanner_name"": ""checkov"", ""issue_severity"":
 ""INFO""}",,"{""ruleId"":""CKV_AWS_144"",""ruleIndex"":-1,""kind"":""fail"",""level"":""error"",""me
@@ -149,7 +152,8 @@ byteOffset"":-1}},""logicalLocations"":[],""annotations"":[],""relationships"":[
 codeFlows"":[],""graphs"":[],""graphTraversals"":[],""relatedLocations"":[],""rank"":-1.0,""attachme
 nts"":[],""fixes"":[],""taxa"":[],""properties"":{""tags"":[],""scanner_name"":""checkov"",""issue_s
 everity"":""INFO""}}",,,
-opengrep-javascript.express.xss-ef8684f2,javascript.express.xss,Unescaped user
+opengrep-javascript.express.xss-v2-22d6bbe68d27dfe350e25f1aa40b8756,javascript.express.xss,Unescaped
+user
 input,HIGH,opengrep,UNKNOWN,javascript.express.xss,web/server.js,31,31,,,,False,,,,,,"{""tags"": [],
 ""scanner_name"": ""opengrep"", ""issue_severity"":
 ""HIGH""}",,"{""ruleId"":""javascript.express.xss"",""ruleIndex"":-1,""kind"":""fail"",""level"":""e

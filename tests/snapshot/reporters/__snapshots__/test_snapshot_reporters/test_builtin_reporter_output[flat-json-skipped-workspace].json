@@ -101,7 +101,7 @@
   ],
   "findings": [
     {
-      "id": "bandit-B602-e9f369ff",
+      "id": "bandit-B602-v2-437b0b9b4ee94e3085d34f963aff8faf",
       "title": "B602",
       "description": "subprocess call with shell=True identified, security issue.",
       "severity": "HIGH",
@@ -119,7 +119,7 @@
       "raw_data": "{\"ruleId\":\"B602\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"error\",\"message\":{\"text\":\"subprocess call with shell=True identified, security issue.\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"app.py\",\"uriBaseId\":\"PROJECTROOT\",\"index\":-1},\"region\":{\"startLine\":7,\"endLine\":7,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[\"bandit\"],\"issue_severity\":\"HIGH\",\"issue_confidence\":\"HIGH\",\"scanner_name\":\"bandit\",\"scanner_version\":\"1.8.6\",\"scanner_details\":{\"tool_name\":\"bandit\",\"tool_version\":\"1.8.6\",\"tool_invocation\":{\"exit_code\":0,\"duration\":1.0,\"start_time\":\"2026-01-15T12:00:00+00:00\",\"end_time\":\"2026-01-15T12:00:01+00:00\"}},\"workspace_project\":\"api\",\"workspace_uri\":\"api/app.py\"}}"
     },
     {
-      "id": "checkov-CKV_AWS_20-89534355",
+      "id": "checkov-CKV_AWS_20-v2-4389a5f1f16105568e76a78c12cab3f7",
       "title": "CKV_AWS_20",
       "description": "S3 Bucket has an ACL defined which allows public READ access.",
       "severity": "HIGH",
@@ -137,7 +137,7 @@
       "raw_data": "{\"ruleId\":\"CKV_AWS_20\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"error\",\"message\":{\"text\":\"S3 Bucket has an ACL defined which allows public READ access.\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"main.tf\",\"uriBaseId\":\"PROJECTROOT\",\"index\":-1},\"region\":{\"startLine\":1,\"endLine\":4,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[\"checkov\"],\"issue_severity\":\"HIGH\",\"scanner_name\":\"checkov\",\"scanner_version\":\"3.2.469\",\"scanner_details\":{\"tool_name\":\"checkov\",\"tool_version\":\"3.2.469\",\"tool_invocation\":{\"exit_code\":0,\"duration\":2.0,\"start_time\":\"2026-01-15T12:00:00+00:00\",\"end_time\":\"2026-01-15T12:00:02+00:00\"}},\"workspace_project\":\"web\",\"workspace_uri\":\"web/main.tf\"}}"
     },
     {
-      "id": "semgrep-terraform.aws.best-practice.s3-bucket-name-hardcoded-2ffa28f7",
+      "id": "semgrep-terraform.aws.best-practice.s3-bucket-name-hardcoded-v2-84c1563b468382bd592b6d3694fa317f",
       "title": "terraform.aws.best-practice.s3-bucket-name-hardcoded",
       "description": "Bucket name is hardcoded; derive it from a variable.",
       "severity": "MEDIUM",
