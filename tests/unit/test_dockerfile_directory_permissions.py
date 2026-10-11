@@ -8,7 +8,7 @@ Why this file exists
 The Dockerfile used to ``chmod 777`` /deps, the grype database cache and the
 offline semgrep and opengrep rule caches under it, and ``chmod -R 777`` ASH_BIN_PATH
 (/.ash/bin), which is first on PATH. Any user in the container could then replace a
-scanner binary, the rules a scan trusts or the vulnerability database a scan reads,
+scanner binary, the rules a scan trusts or grype's database a scan reads,
 and the next scan would run with them.
 
 What each directory gets instead, and why:

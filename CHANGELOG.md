@@ -189,7 +189,7 @@
 - **The container image no longer has directories every user can write.** `/deps`,
   the grype database cache and the offline semgrep and opengrep rule caches under it
   were mode 777, and `/.ash/bin`, first on `PATH`, was `chmod -R 777`, so any user in
-  the container could replace a bundled tool, the rules or the vulnerability database
+  the container could replace a bundled tool, the rules or grype's database
   a later scan used. They are root-owned and writable by root only. The grype database
   cache is owned by the user the image runs as (root in `ci`, the unprivileged user in
   `non-root`), because its update writes it at scan time; in an offline image, which never
