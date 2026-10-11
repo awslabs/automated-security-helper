@@ -101,6 +101,50 @@ def checkout_containing(path: Path) -> Optional[Path]:
     return None
 
 
+#: Symlinks followed before resolution gives up, as the kernel's ELOOP limit does.
+_MAX_LINKS = 40
+
+
+def links_followed(path: Path) -> List[Path]:
+    """Every symlink resolving ``path`` follows, by the link's own location.
+
+    Resolves one component at a time, as the kernel does, so a link reached only
+    through another link is found too: ``ops/cur.yaml -> repo/.ash/.ash.yaml ->
+    ../../other.yaml`` follows ``repo/.ash/.ash.yaml``, which neither the name
+    ``ops/cur.yaml`` nor the resolved ``other.yaml`` shows. Whoever can write the
+    directory a link sits in chooses where it points. Each location is returned
+    with its directory resolved.
+    """
+    absolute = Path(path).absolute()
+    resolved = Path(absolute.anchor)
+    rest = list(absolute.parts[1:])
+    links: List[Path] = []
+    while rest:
+        part = rest.pop(0)
+        if part in ("", "."):
+            continue
+        if part == "..":
+            resolved = resolved.parent
+            continue
+        candidate = resolved / part
+        if not os.path.islink(candidate):
+            resolved = candidate
+            continue
+        if len(links) >= _MAX_LINKS:
+            break
+        links.append(candidate)
+        try:
+            target = Path(os.readlink(candidate))
+        except OSError:
+            break
+        if target.is_absolute():
+            resolved = Path(target.anchor)
+            rest = list(target.parts[1:]) + rest
+        else:
+            rest = list(target.parts) + rest
+    return links
+
+
 def in_any_checkout(path: Path) -> bool:
     """True when ``path`` is inside a git checkout, by its own or its resolved path."""
     return checkout_containing(path) is not None
@@ -167,9 +211,10 @@ def untrusted_reason(path: Path, scan_root: Path) -> Optional[str]:
     """Why the scanned repository could have written ``path``, or None if it could not.
 
     Inside any git checkout, by the path as given or as resolved, or inside the
-    scan root by any of the root's names. Pass the path as it was named, not
-    resolved: both spellings are checked here, and resolving first would hide a
-    symlink's own location.
+    scan root by any of the root's names; or reached through a symlink that sits
+    in one (``links_followed``). Pass the path as it was named, not resolved: every
+    spelling is checked here, and resolving first would hide a symlink's own
+    location.
     """
     checkout = checkout_containing(path)
     if checkout is not None:
@@ -177,6 +222,18 @@ def untrusted_reason(path: Path, scan_root: Path) -> Optional[str]:
     names = scan_root_names(scan_root)
     if any(is_within(path, name) for name in names) or _named_within(path, names):
         return f"it is inside the scanned directory {Path(scan_root).as_posix()}"
+    for link in links_followed(path):
+        checkout = checkout_containing(link.parent)
+        if checkout is not None:
+            return (
+                f"it is reached through {link.as_posix()}, a link inside the git "
+                f"checkout at {checkout.as_posix()}"
+            )
+        if any(is_within(link.parent, name) for name in names):
+            return (
+                f"it is reached through {link.as_posix()}, a link inside the "
+                f"scanned directory {Path(scan_root).as_posix()}"
+            )
     return None
 
 

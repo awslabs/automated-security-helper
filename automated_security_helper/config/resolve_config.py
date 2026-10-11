@@ -296,7 +296,9 @@ def resolve_config(
             trusted, wrote_mode = _with_own_sandbox(
                 trusted, default_config_chain()[-1], root, ash_config_named
             )
-            own_mode = own_mode or wrote_mode
+            # ASH_CONFIG's own mode is the floor only when no operator file sets
+            # one: below, the floor is the operator file's mode when there is one.
+            own_mode = own_mode or (wrote_mode and operator is None)
         if operator is not None:
             trusted, wrote_mode = _with_own_sandbox(
                 trusted, operator[1][-1], root, [Path(trusted_config_path)]

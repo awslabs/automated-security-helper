@@ -158,9 +158,10 @@
   tool: a `.trivyignore` kept there, for example, no longer removes findings. Keep
   such files outside every checkout. A virtualenv inside a git checkout counts as
   inside it for `ash_plugin_modules`, and the warning names the module's location
-  and the checkout. A file a setting names is judged by the path as written as well
-  as by the file it resolves to, so a symlink the scanned repository planted counts
-  as inside the tree wherever it points.
+  and the checkout. A file a setting names is judged by the path as written, by the
+  file it resolves to, and by every symlink resolving it follows, so a symlink the
+  scanned repository planted counts as inside the tree wherever it points, and so
+  does a path of the operator's that leads through one.
 
   Under the MCP server, a config a client delivered is limited the same way, and a
   file any MCP client delivered (under the MCP workspace root, except each session's

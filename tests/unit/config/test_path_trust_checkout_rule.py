@@ -134,6 +134,28 @@ def test_a_link_inside_another_checkout_to_a_file_outside_is_not_passed(tmp_path
     )
 
 
+def test_a_tool_config_reached_through_a_link_inside_a_checkout_is_not_passed(
+    tmp_path,
+):
+    # The operator names their own link, which leads to a link inside someone's
+    # checkout, which leads on to a file outside: the link in between decides
+    # which file the tool reads.
+    rules = tmp_path / "semgrep.yml"
+    rules.write_text("rules: []\n")
+    other = _checkout(tmp_path / "other")
+    try:
+        (other / "semgrep.yml").symlink_to(rules)
+        (tmp_path / "mine.yml").symlink_to(other / "semgrep.yml")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available on this platform")
+    target = tmp_path / "target"
+    target.mkdir()
+    assert (
+        honored_path(str(tmp_path / "mine.yml"), source_dir=target, key="config")
+        is None
+    )
+
+
 def test_a_tool_config_outside_every_checkout_and_the_target_is_passed(tmp_path):
     rules = tmp_path / "etc" / "semgrep.yml"
     rules.parent.mkdir()

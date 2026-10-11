@@ -458,9 +458,10 @@ config file outside every checkout. A file that one of the path settings below n
 is judged by where the file is, whoever names it, `--config-overrides` included: a
 tool config or ignore file kept in an ops repository is not passed to the tool, so,
 for example, its ignore rules stop removing findings. Keep such a file outside every
-checkout. It is judged by the path as written, relative to the source directory, as
-well as by the file it resolves to, so a symlink the scanned repository planted
-counts as inside the tree wherever it points.
+checkout. It is judged by the path as written, relative to the source directory, by
+the file it resolves to, and by every symlink resolving it follows, so a symlink the
+scanned repository planted counts as inside the tree wherever it points, and so
+does a path of your own that leads through one.
 
 Under the MCP server, a config file a client delivered (an upload or a file in a
 delivered tree, named as `config_path`) is limited the same way, wherever it is. A

@@ -278,7 +278,10 @@ A config file is judged by the name it was found under as well as by the file it
 resolves to, so a `.ash/.ash.yaml` that is a symlink out of the scanned directory
 still counts as inside it. An `extends` base is judged the same way, by the path its
 `extends` entry names as well as by the file it resolves to, so a base the repository
-turns into a symlink to some other file still counts as inside the checkout.
+turns into a symlink to some other file still counts as inside the checkout. Every
+symlink met on the way counts too: a path that leads through a link inside a
+checkout, even from a link of your own, counts as inside that checkout, and the
+reason names the link.
 Tool config files that scanner options name, and plugin modules, are judged by the
 same rule; see
 [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose).

@@ -324,6 +324,75 @@ def test_a_base_the_repository_links_elsewhere_is_judged_by_its_link(tmp_path, c
     }
 
 
+def _repository_links_its_config_to(tmp_path: Path, target: Path) -> Path:
+    """A checkout whose .ash/.ash.yaml the repository made a link to ``target``."""
+    source = tmp_path / "repo"
+    (source / ".git").mkdir(parents=True)
+    (source / ".ash").mkdir()
+    _symlink(source / ".ash" / ".ash.yaml", target)
+    return source
+
+
+@pytest.mark.parametrize("hop", ["file-link", "directory-link", "root-link"])
+def test_a_link_the_repository_owns_counts_when_reached_through_another(
+    tmp_path, monkeypatch, hop
+):
+    # The operator's own link leads into the repository, and the repository's link
+    # there leads on to another operator file that grants. Neither the operator's
+    # name for the file nor the file it resolves to is in the checkout; the link in
+    # between is, and whoever writes it chooses the file that grants.
+    other = tmp_path / "other.yaml"
+    other.write_text(BASE_GRANTS)
+    source = _repository_links_its_config_to(tmp_path, other)
+    if hop == "directory-link":
+        _symlink(tmp_path / "r", source / ".ash")
+        ref = "r/.ash.yaml"
+    else:
+        _symlink(tmp_path / "cur.yaml", source / ".ash" / ".ash.yaml")
+        ref = "cur.yaml"
+    if hop == "root-link":
+        config_path = tmp_path / ref
+    else:
+        config_path = tmp_path / "ash.yaml"
+        config_path.write_text(f"project_name: operator\nextends: {ref}\n")
+    sandbox = resolve_config(config_path=config_path, source_dir=source).sandbox
+    assert sandbox.extra_read_paths == []
+    assert sandbox.env_scanners == []
+
+
+def test_ash_config_reached_through_a_repository_link_cannot_grant(
+    tmp_path, monkeypatch
+):
+    other = tmp_path / "other.yaml"
+    other.write_text(BASE_GRANTS)
+    source = _repository_links_its_config_to(tmp_path, other)
+    _symlink(tmp_path / "cur.yaml", source / ".ash" / ".ash.yaml")
+    monkeypatch.setenv("ASH_CONFIG", str(tmp_path / "cur.yaml"))
+    target = tmp_path / "target"
+    target.mkdir()
+    sandbox = resolve_config(source_dir=target).sandbox
+    assert sandbox.extra_read_paths == []
+    assert sandbox.env_scanners == []
+
+
+def test_the_reason_names_the_link_inside_the_checkout(tmp_path):
+    other = tmp_path / "other.yaml"
+    other.write_text("x: 1\n")
+    source = _repository_links_its_config_to(tmp_path, other)
+    _symlink(tmp_path / "cur.yaml", source / ".ash" / ".ash.yaml")
+    reason = sandbox_grants.untrusted_reason(tmp_path / "cur.yaml", tmp_path / "t")
+    link = Path(os.path.realpath(source / ".ash")) / ".ash.yaml"
+    assert reason == (
+        f"it is reached through {link.as_posix()}, a link inside the git checkout "
+        f"at {Path(os.path.realpath(source)).as_posix()}"
+    )
+    # A link outside every checkout to a file outside every checkout is fine.
+    _symlink(tmp_path / "plain.yaml", other)
+    assert (
+        sandbox_grants.untrusted_reason(tmp_path / "plain.yaml", tmp_path / "t") is None
+    )
+
+
 def test_an_operator_section_spelled_with_dashes_keeps_its_grants(tmp_path):
     # Merging the chain spells a key the way the base does; the operator's own
     # section is read the same way, so a dashed key is the same setting.
@@ -880,6 +949,38 @@ def test_an_operator_config_extending_into_the_tree_still_sets_the_mode_floor(
     # The operator's file is outside the workspace and writes this grant itself;
     # only what its base in the workspace would add is dropped.
     assert sandbox.network_scanners == ["checkov"]
+
+
+def test_ash_configs_own_mode_off_does_not_lift_the_operator_files_floor(
+    tmp_path, monkeypatch
+):
+    # Workspace mode: the operator's file is in an ops checkout and sets bwrap, so
+    # its mode is the floor. ASH_CONFIG is outside every checkout, writes
+    # mode 'off' and extends a base in the scanned checkout. Its own 'off' must not
+    # outrank the operator file's floor; without the extends it does not either.
+    from automated_security_helper.workspace.execution import (
+        ProjectScanSettings,
+        _project_config_with_policy,
+    )
+
+    workspace = tmp_path / "workspace"
+    project = _workspace_project(workspace, REPO_OFF)
+    (workspace / ".git").mkdir()
+    (workspace / "shared.yaml").write_text("project_name: shared\n")
+    ash_config = tmp_path / "ashcfg.yaml"
+    ash_config.write_text(
+        "project_name: a\nextends: workspace/shared.yaml\nsandbox:\n  mode: 'off'\n"
+    )
+    monkeypatch.setenv("ASH_CONFIG", str(ash_config))
+    ops = tmp_path / "ops"
+    (ops / ".git").mkdir(parents=True)
+    operator = ops / "operator.yaml"
+    operator.write_text(TRUSTED_BWRAP)
+    settings = ProjectScanSettings(
+        output_dir=tmp_path / "out", default_config_path=str(operator)
+    )
+    sandbox = _project_config_with_policy(project, settings).sandbox
+    assert sandbox.mode == "bwrap"
 
 
 def test_an_invalid_operator_config_is_refused_like_any_config(tmp_path):
