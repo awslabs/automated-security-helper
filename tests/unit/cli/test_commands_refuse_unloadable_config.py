@@ -133,3 +133,72 @@ def test_config_get_on_an_empty_path_says_the_path_is_empty(tmp_path):
 
     assert result.exit_code == 3, result.output
     assert "pathisempty" in _flat(result.output)
+
+
+class TestConfigGetConfigOption:
+    """``ash config get`` takes ``--config``/``-c`` and ``ASH_CONFIG`` as ``ash scan`` does.
+
+    A named file that does not exist exits 3, the code ``ash scan`` uses for it.
+    The positional path is still accepted; it wins over ``ASH_CONFIG``, and naming
+    two different files on one command line is refused.
+    """
+
+    @pytest.mark.parametrize("flag", ["--config", "-c"])
+    def test_a_named_file_that_does_not_exist_exits_three(self, tmp_path, flag):
+        result = CliRunner().invoke(
+            app, ["config", "get", flag, str(tmp_path / "missing.yaml")]
+        )
+
+        assert result.exit_code == 3, result.output
+        assert "Configurationfilenotfound" in _flat(result.output)
+        assert "missing.yaml" in _flat(result.output)
+
+    def test_a_named_file_that_loads_is_printed(self, tmp_path):
+        config = tmp_path / "named.yaml"
+        config.write_text("project_name: named-by-option\n", encoding="utf-8")
+
+        result = CliRunner().invoke(app, ["config", "get", "--config", str(config)])
+
+        assert result.exit_code == 0, result.output
+        assert "named-by-option" in result.output
+
+    def test_the_ash_config_variable_names_the_file(self, tmp_path):
+        config = tmp_path / "from-env.yaml"
+        config.write_text("project_name: named-by-variable\n", encoding="utf-8")
+        (tmp_path / ".ash.yaml").write_text(
+            "project_name: discovered\n", encoding="utf-8"
+        )
+
+        result = CliRunner().invoke(
+            app, ["config", "get"], env={"ASH_CONFIG": str(config)}
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "named-by-variable" in result.output
+
+    def test_the_positional_path_wins_over_the_variable(self, tmp_path):
+        positional = tmp_path / "positional.yaml"
+        positional.write_text("project_name: named-by-argument\n", encoding="utf-8")
+        from_env = tmp_path / "from-env.yaml"
+        from_env.write_text("project_name: named-by-variable\n", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            app, ["config", "get", str(positional)], env={"ASH_CONFIG": str(from_env)}
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "named-by-argument" in result.output
+
+    def test_two_different_files_on_one_command_line_are_refused(self, tmp_path):
+        first = tmp_path / "first.yaml"
+        second = tmp_path / "second.yaml"
+        for path in (first, second):
+            path.write_text(f"project_name: {path.stem}\n", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            app, ["config", "get", str(first), "--config", str(second)]
+        )
+
+        assert result.exit_code == 2, result.output
+        assert "first.yaml" in _flat(result.output)
+        assert "second.yaml" in _flat(result.output)

@@ -196,6 +196,7 @@ Download the ASH GenAI Integration Guide for use with AI assistants and LLMs.
 
 | Flag | Type | Default | Env Var | Description |
 |------|------|---------|---------|-------------|
+| `--config`, `-c` | str |  | ASH_CONFIG | The path to the configuration file to get, as for `ash scan --config`. The same as the positional path; when both name a file on the command line they must name the same one. The positional path wins over ASH_CONFIG. |
 | `--config-overrides` | List[str] | [] |  | Configuration overrides specified as key-value pairs (e.g., 'global_settings.severity_threshold=LOW') |
 | `--verbose` | bool | False |  | Enable verbose logging |
 | `--debug` | bool | False |  | Enable debug logging |

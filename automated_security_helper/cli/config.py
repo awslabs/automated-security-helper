@@ -192,10 +192,20 @@ def init(
 
 @config_app.command()
 def get(
+    ctx: typer.Context,
     config_path: Annotated[
         str,
         typer.Argument(
             help=f"The name of the config file to get. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_SOURCES_DESCRIPTION}. If  a different filename is specified, it must be provided when running ASH via the `--config` option or by setting the `ASH_CONFIG` environment variable.",
+        ),
+    ] = None,
+    config: Annotated[
+        str | None,
+        typer.Option(
+            "--config",
+            "-c",
+            help="The path to the configuration file to get, as for `ash scan --config`. The same as the positional path; when both name a file on the command line they must name the same one. The positional path wins over ASH_CONFIG.",
+            envvar="ASH_CONFIG",
         ),
     ] = None,
     config_overrides: Annotated[
@@ -214,6 +224,19 @@ def get(
         show_progress=False,
         use_color=color,
     )
+    # The positional path, else --config / ASH_CONFIG, as `ash scan --config`
+    # takes it. Two different files named on one command line are refused rather
+    # than one of them silently ignored; ASH_CONFIG yields to the argument, as it
+    # yields to --config in `ash scan`.
+    if config_path is not None and config is not None and config_path != config:
+        if getattr(ctx.get_parameter_source("config"), "name", None) == "COMMANDLINE":
+            typer.secho(
+                f"Name one configuration file: the argument {config_path} and "
+                f"--config {config} differ.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+    named = config_path if config_path is not None else config
     # The file this command is about: the one named, or the one resolve_config
     # would discover. resolve_config refuses either when it cannot be loaded --
     # missing, empty, unreadable or unparseable -- and so does discovery for a
@@ -222,8 +245,8 @@ def get(
     # as the working directory.
     config_file = None
     try:
-        config_file = config_path if config_path is not None else find_config_file()
-        config = resolve_config(
+        config_file = named if named is not None else find_config_file()
+        resolved = resolve_config(
             config_file,
             config_overrides=config_overrides,
             fallback_to_default=config_file is None,
@@ -244,7 +267,7 @@ def get(
     print(
         Syntax(
             code=yaml.dump(
-                config.model_dump(
+                resolved.model_dump(
                     by_alias=True,
                     exclude_defaults=False,
                     exclude_none=False,

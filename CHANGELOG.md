@@ -1023,7 +1023,14 @@
   file at all it still prints the defaults. A named file that does not exist, and
   a discovered source discovery cannot read, now exit 3 too (they exited 1, the
   latter with a traceback, as `ash plugin list` did). `ash scan` now refuses such
-  a file the same way; see the next entry.
+  a file the same way; see the next entry. `ash config get` also takes
+  `--config`/`-c` and reads `ASH_CONFIG`, as `ash scan` does, so
+  `ash config get --config <missing>` exits 3 as `ash scan --config <missing>`
+  does. It used to reject the option (exit 2, `No such option`) although the CLI
+  reference showed it, and it printed the discovered file even when `ASH_CONFIG`
+  named another one. The positional path still works and wins over
+  `ASH_CONFIG`; a positional path and a different `--config` on one command line
+  exit 2.
 
 - **A config file that cannot be loaded stops the scan with exit 3 instead of
   being replaced by the default configuration.** A file named by `--config`,
