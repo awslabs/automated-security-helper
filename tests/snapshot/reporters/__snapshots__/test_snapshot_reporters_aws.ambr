@@ -1414,6 +1414,7 @@
                 }),
                 'npm-audit': dict({
                   'actionable_finding_count': 0,
+                  'dependencies_satisfied': False,
                   'duration': 0.0,
                   'finding_count': 0,
                   'severity_counts': dict({
@@ -1767,6 +1768,7 @@
             }),
             'npm-audit': dict({
               'actionable_finding_count': 0,
+              'dependencies_satisfied': False,
               'duration': 0.0,
               'finding_count': 0,
               'severity_counts': dict({

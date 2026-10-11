@@ -566,6 +566,16 @@ def _populate_scanner_results_from_unified_metrics(
             # Assigned rather than passed, so the field is set only when it has a
             # value and an exclude_unset dump of every other row is unchanged.
             consolidated_target_info.missing_reason = missing_reason
+        # Carried because every later reader of this scanner -- the report phase,
+        # and the exit-code gate through get_unified_scanner_metrics -- takes it from
+        # this row before the per-target reports. Left at its default of True, a
+        # scanner recorded MISSING during its scan (scan() returned False) read as
+        # having its dependencies, and one target that evaluated nothing then graded
+        # it SKIPPED, which the completeness gate lets through. Assigned only when
+        # missing, so every other row keeps its serialized shape (dumps that exclude
+        # unset fields, such as the S3 and CloudWatch payloads, leave it out).
+        if metrics.dependencies_missing:
+            consolidated_target_info.dependencies_satisfied = False
 
         # Update scanner_results with consolidated information.
         #

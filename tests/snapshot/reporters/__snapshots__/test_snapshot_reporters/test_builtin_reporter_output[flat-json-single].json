@@ -142,7 +142,7 @@
       "actionable": 0,
       "status": "MISSING",
       "excluded": false,
-      "dependencies_missing": false,
+      "dependencies_missing": true,
       "duration": 0.0,
       "targets_attempted": null,
       "targets_failed": 0

@@ -1149,6 +1149,17 @@
 
 ### Fixes
 
+- **A scanner that turns out MISSING while it runs stays MISSING.** A scanner whose
+  scan finds a dependency unavailable (its `scan()` returns False, or its sandbox
+  cannot be set up) is recorded MISSING per target. Consolidating the results then
+  rebuilt its `scanner_results` row with `dependencies_satisfied: true`, and every
+  later reader, the exit-code gate included, takes that row first. So when another
+  of its targets evaluated nothing, the scanner was reported SKIPPED, which the
+  completeness gate lets through. The consolidated row now says
+  `dependencies_satisfied: false` for a MISSING scanner, in
+  `ash_aggregated_results.json` and the S3 and CloudWatch payloads, and `ash.flat.json`
+  says `dependencies_missing: true`. Rows of other scanners are unchanged.
+
 - **Offline mode turns off the scanner tools' own update, version and telemetry
   checks.** Measured with a refusing proxy and empty tool caches, an `--offline` scan
   still contacted check.trivy.dev (trivy's version check; `--skip-check-update` only

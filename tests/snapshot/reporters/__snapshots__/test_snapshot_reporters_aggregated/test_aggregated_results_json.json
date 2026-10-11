@@ -420,7 +420,7 @@
   "scanner_results": {
     "npm-audit": {
       "status": "MISSING",
-      "dependencies_satisfied": true,
+      "dependencies_satisfied": false,
       "excluded": false,
       "severity_counts": {
         "suppressed": 0,

@@ -2113,7 +2113,7 @@ scanner_results:
     suppressed_finding_count: 0
   npm-audit:
     actionable_finding_count: 0
-    dependencies_satisfied: true
+    dependencies_satisfied: false
     duration: 0.0
     excluded: false
     exit_code: 0
