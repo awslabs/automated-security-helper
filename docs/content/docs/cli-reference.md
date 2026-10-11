@@ -229,7 +229,9 @@ when the config or a file it extends is inside a git checkout, the one holding
 the container cannot see that, the host passes it `--config-from-scanned-repository`
 (`./ash` and `Invoke-ASH` do the same for the config file). In workspace mode the
 policy file the host resolved (`--workspace-config`, or the one found in the workspace
-root) is handed to the container the same way. The `./ash` wrapper and `Invoke-ASH`
+root) is handed to the container the same way, and is refused with exit 3, as a
+`--config` is, when it is named inside the workspace's tree but its real path is
+outside it. The `./ash` wrapper and `Invoke-ASH`
 mount a config from outside the source directory on its own, without the files it
 extends, so they refuse one with an `extends` entry with exit 3; use
 `ash --mode container` for such a chain. A program that

@@ -137,3 +137,50 @@ def test_a_config_ash_cannot_read_is_refused(layout, commands, tmp_path):
 
     _refused(result, commands)
     assert "read" in result.stderr
+
+
+class TestAWorkspacePolicyLinkedOutOfTheTreeIsRefused:
+    """The same rule for the workspace policy a container scan mounts at
+    /ash-workspace-config: named inside the workspace's tree, its real path has to
+    be inside that tree too."""
+
+    @pytest.fixture
+    def workspace(self, tmp_path, monkeypatch):
+        root = tmp_path / "workspace"
+        (root / "app").mkdir(parents=True)
+        (root / "w.code-workspace").write_text('{"folders": [{"path": "app"}]}')
+        outside = tmp_path / "other" / "policy.yaml"
+        outside.parent.mkdir(parents=True)
+        outside.write_text("projects: {}\n")
+        monkeypatch.chdir(tmp_path)
+        return {"root": root, "outside": outside}
+
+    def _run(self, workspace):
+        return rac.run_ash_container(
+            source_dir=str(workspace["root"]),
+            output_dir="out",
+            workspace_relative_file="w.code-workspace",
+            workspace_config=str(workspace["root"] / "ash-workspace.yaml"),
+            build=False,
+            run=True,
+        )
+
+    def test_a_policy_linked_out_of_the_workspace_is_refused(self, workspace, commands):
+        (workspace["root"] / "ash-workspace.yaml").symlink_to(workspace["outside"])
+
+        result = self._run(workspace)
+
+        _refused(result, commands)
+        assert "link" in result.stderr
+        assert "workspace policy" in result.stderr
+
+    def test_a_policy_link_inside_the_workspace_still_runs(self, workspace, commands):
+        """Control."""
+        (workspace["root"] / "policies").mkdir()
+        (workspace["root"] / "policies" / "p.yaml").write_text("projects: {}\n")
+        (workspace["root"] / "ash-workspace.yaml").symlink_to("policies/p.yaml")
+
+        result = self._run(workspace)
+
+        assert result.returncode == 0, result.stderr
+        assert [cmd[1] for cmd in commands] == ["run"]

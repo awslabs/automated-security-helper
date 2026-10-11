@@ -372,7 +372,10 @@
   which hands `ASH_CONFIG`'s file to the container when the source directory has no
   config of its own, as a local scan uses it. In workspace mode, a `--workspace-config` policy outside the
   workspace root was not passed to the container at all, so its ceiling and policy
-  scanners did not apply there; it is mounted and forwarded the same way. A
+  scanners did not apply there; it is mounted and forwarded the same way, and a
+  policy file named inside the workspace's tree whose real path is outside it, such as
+  an `ash-workspace.yaml` that is a symbolic link out of the workspace, is refused with
+  exit 3. A
   `config_base_gate` passed to `run_ash_scan` with container or nix mode is refused,
   because the ASH those modes run would read the config without it. See
   [Running a scan in a container](docs/content/docs/cli-reference.md#running-a-scan-in-a-container).

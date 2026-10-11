@@ -940,14 +940,17 @@ def _scanned_tree_roots(source_dir: Path) -> List[Path]:
     return [*scanned_checkouts(Path(source_dir)), *scan_root_names(Path(source_dir))]
 
 
-def _refuse_config_linked_out_of_the_tree(config: str, source_dir: Path) -> None:
-    """Refuse a config named inside the scanned tree whose real path is outside it.
+def _refuse_config_linked_out_of_the_tree(
+    config: str, source_dir: Path, label: str = "config file"
+) -> None:
+    """Refuse a file named inside the scanned tree whose real path is outside it.
 
-    The scanned tree is the outermost checkout at or above the source directory,
-    and the source directory itself (``_scanned_tree_roots``). A config path inside
-    it is mounted only when its real path, every link on the way resolved, is inside
-    it too; a link that stays inside the tree is followed. A config path outside the
-    tree is followed wherever it points.
+    The scanned tree is the outermost checkout at or above the source directory (the
+    workspace root, in workspace mode), and the source directory itself
+    (``_scanned_tree_roots``). A config or workspace policy path inside it is mounted
+    only when its real path, every link on the way resolved, is inside it too; a link
+    that stays inside the tree is followed. A path outside the tree is followed
+    wherever it points.
     """
     from automated_security_helper.config.sandbox_grants import is_within
 
@@ -959,10 +962,10 @@ def _refuse_config_linked_out_of_the_tree(config: str, source_dir: Path) -> None
     if any(is_within(resolved, tree) for tree in trees):
         return
     raise ContainerInputError(
-        f"The config file {config!r} is inside the scanned tree but is a link, or "
+        f"The {label} {config!r} is inside the scanned tree but is a link, or "
         f"is reached through one, to {resolved}, which is outside it. ASH does not "
         "mount a file the repository being scanned points it at. Name the file "
-        "itself, outside the repository, or a config inside it."
+        "itself, outside the repository, or one inside it."
     )
 
 
@@ -1031,6 +1034,9 @@ def _require_mountable_inputs(
             config, source, CONTAINER_CONFIG_ROOT, follow_extends=True
         )
     if workspace_config and workspace_relative_file is not None:
+        _refuse_config_linked_out_of_the_tree(
+            workspace_config, source, "workspace policy"
+        )
         _host_file_in_container(
             workspace_config,
             source,
@@ -1403,6 +1409,9 @@ def _assemble_run_command(
         )
     inner_workspace_config = None
     if workspace_config and workspace_relative_file is not None:
+        _refuse_config_linked_out_of_the_tree(
+            workspace_config, source_dir, "workspace policy"
+        )
         policy_mounts, inner_workspace_config, _ = _host_file_in_container(
             workspace_config,
             source_dir,
