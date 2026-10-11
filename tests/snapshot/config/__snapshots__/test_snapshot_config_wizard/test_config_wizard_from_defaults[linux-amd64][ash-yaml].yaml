@@ -64,11 +64,7 @@ global_settings:
       - /scanners/semgrep/options/metrics
       - /reporters/bedrock-summary-reporter/options/aws_*
       - /reporters/cloudwatch-logs/**
-      - /reporters/aws-security-hub/options/aws_region
-      - /reporters/aws-security-hub/options/aws_profile
-      - /reporters/aws-security-hub/options/account_id
-      - /reporters/aws-security-hub/options/archive_resolved_findings
-      - /reporters/aws-security-hub/options/findings_scope
+      - /reporters/aws-security-hub/**
       - /reporters/bedrock-summary-reporter/options/model_id
       - /reporters/bedrock-summary-reporter/options/output_file
       - /reporters/bedrock-summary-reporter/options/output_executive_file
@@ -80,7 +76,6 @@ global_settings:
       - /reporters/s3/options/max_retries
       - /reporters/s3/options/base_delay
       - /reporters/s3/options/max_delay
-      - /reporters/aws-security-hub/enabled
       - /reporters/s3/enabled
       - /reporters/bedrock-summary-reporter/**
       - /reporters/gitlab-sast/options/exclude_suppressed

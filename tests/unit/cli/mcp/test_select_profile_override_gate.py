@@ -518,8 +518,8 @@ _REPORTER_DENIALS: Dict[str, Any] = {
 }
 _REPORTER_DENIALS.update(
     {
-        "/reporters/aws-security-hub/enabled": True,
         "/reporters/s3/enabled": True,
+        "/reporters/aws-security-hub/**": True,
         "/reporters/bedrock-summary-reporter/**": True,
     }
 )
@@ -547,7 +547,7 @@ for _pointer, _value in _REPORTER_DENIALS.items():
     if _option == "enabled":
         _section = {"enabled": _value}
     elif _option == "**":
-        _section = {"options": {"include_code_snippets": _value}}
+        _section = {"options": {REPORTER_DESTINATION_OPTIONS[_reporter][0]: _value}}
     else:
         _section = {"enabled": True, "options": {_option: _value}}
     _DENIED_CASES[_pointer] = (
@@ -562,7 +562,7 @@ _CONFIGURED_REPORTER_CASES: Dict[str, Tuple[str, Any, str]] = {
     "security hub on": (
         "/reporters/aws-security-hub/enabled",
         True,
-        "/reporters/aws-security-hub/enabled",
+        "/reporters/aws-security-hub/**",
     ),
     "s3 on": ("/reporters/s3/enabled", True, "/reporters/s3/enabled"),
     "bedrock on": (

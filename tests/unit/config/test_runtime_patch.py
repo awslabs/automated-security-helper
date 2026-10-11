@@ -426,18 +426,8 @@ class TestDefaults:
                 return False
             return True
 
-        # Listed before the reporter's options model defines them (another
-        # branch adds them), so a client's config cannot set them once it does;
-        # see _LISTED_BEFORE_DEFINED in
-        # tests/unit/config/test_reporter_destinations_from_repo_config.py. Each
-        # has to leave this list when its option becomes reachable.
-        listed_before_defined = {
-            "/reporters/aws-security-hub/options/archive_resolved_findings",
-            "/reporters/aws-security-hub/options/findings_scope",
-        }
-        assert listed_before_defined <= set(denied)
         unreachable = [p for p in denied if not _resolve_prefix(p)]
-        assert sorted(unreachable) == sorted(listed_before_defined), (
+        assert unreachable == [], (
             f"default denied_paths contains unreachable entries: {unreachable}"
         )
 

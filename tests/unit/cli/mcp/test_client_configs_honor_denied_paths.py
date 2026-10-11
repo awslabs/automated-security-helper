@@ -601,6 +601,16 @@ def test_an_upload_may_turn_an_off_host_reporter_off(_server, reporter) -> None:
     assert config.get_plugin_config("reporter", reporter)["enabled"] is False
 
 
+def test_an_upload_changing_any_security_hub_setting_is_refused(_server) -> None:
+    """Every setting of the section is the operator's, so it is denied as a whole."""
+    text = "reporters:\n  aws-security-hub:\n    extension: other.asff.json\n"
+    source = _upload({"ash.yaml": text})
+    _assert_refused(
+        _scan_resolution(_server["target"], str(source / "ash.yaml")),
+        key="reporters.aws-security-hub.extension",
+    )
+
+
 def test_an_upload_repeating_the_servers_reporter_settings_scans(_server) -> None:
     """A delivered value equal to the server's changes nothing."""
     settings = (

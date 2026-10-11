@@ -17,7 +17,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import pytest
 import yaml
@@ -901,6 +901,119 @@ def test_no_listed_option_has_an_alias(reporter_fields):
         and (field["alias"] is not None or field["validation_alias"] is not None)
     ]
     assert not aliased
+
+
+_MODEL_PARAMETER = (
+    "a model parameter: how the model writes the summary, not what it is sent"
+)
+_SUMMARY_SHAPE = (
+    "the shape of the summary ASH writes locally, or which sections it asks for"
+)
+_FINDINGS_SENT = (
+    "chooses which findings, or how many, are sent to the model with them; still "
+    "set from the tree, as only include_code_snippets and custom_prompt of this "
+    "kind are the operator's"
+)
+_CONTEXT_SENT = (
+    "text added to every prompt, as custom_prompt is; still set from the tree, as "
+    "only include_code_snippets and custom_prompt of this kind are the operator's"
+)
+
+#: Options of the off-host reporters that a repository's config may still set,
+#: each with why. Every other option of their models is in
+#: REPORTER_DESTINATION_OPTIONS. Under the MCP server a delivered config may set
+#: one only where no default denied_paths entry covers it
+#: (``test_the_coverage_table_is_what_the_default_list_gives``).
+_OPEN_OFF_HOST_OPTIONS: Dict[Tuple[str, str], str] = {
+    ("s3", "file_format"): (
+        "picks JSON or YAML for the uploaded object's content; where it goes and "
+        "what it holds are unchanged"
+    ),
+    ("bedrock-summary-reporter", "temperature"): _MODEL_PARAMETER,
+    ("bedrock-summary-reporter", "top_p"): _MODEL_PARAMETER,
+    ("bedrock-summary-reporter", "max_tokens"): _MODEL_PARAMETER,
+    ("bedrock-summary-reporter", "summary_style"): _SUMMARY_SHAPE,
+    ("bedrock-summary-reporter", "group_by_severity"): _SUMMARY_SHAPE,
+    ("bedrock-summary-reporter", "add_section_headers"): _SUMMARY_SHAPE,
+    ("bedrock-summary-reporter", "add_table_of_contents"): _SUMMARY_SHAPE,
+    ("bedrock-summary-reporter", "output_markdown"): _SUMMARY_SHAPE,
+    ("bedrock-summary-reporter", "include_sections"): _SUMMARY_SHAPE,
+    ("bedrock-summary-reporter", "exclude_sections"): _SUMMARY_SHAPE,
+    ("bedrock-summary-reporter", "enable_caching"): (
+        "whether ASH reuses a response it already has for the same request"
+    ),
+    ("bedrock-summary-reporter", "enable_fallback_models"): (
+        "whether ASH tries another model of the same family from its own list "
+        "when model_id is unavailable; still set from the tree"
+    ),
+    ("bedrock-summary-reporter", "max_findings_to_analyze"): _FINDINGS_SENT,
+    ("bedrock-summary-reporter", "max_findings_per_severity"): _FINDINGS_SENT,
+    ("bedrock-summary-reporter", "actionable_only"): _FINDINGS_SENT,
+    ("bedrock-summary-reporter", "exclude_scanner_types"): _FINDINGS_SENT,
+    ("bedrock-summary-reporter", "summarize_findings"): _FINDINGS_SENT,
+    ("bedrock-summary-reporter", "batch_processing"): _FINDINGS_SENT,
+    ("bedrock-summary-reporter", "industry_context"): _CONTEXT_SENT,
+    ("bedrock-summary-reporter", "compliance_frameworks"): _CONTEXT_SENT,
+    ("bedrock-summary-reporter", "custom_context"): _CONTEXT_SENT,
+}
+
+#: How each off-host reporter's settings stand under the MCP server's default
+#: denied_paths: "section" when every setting of the section is denied (with
+#: ``enabled: false`` still accepted), else "options" when each operator-only
+#: option and ``enabled`` are denied one by one.
+_MCP_COVERAGE: Dict[str, str] = {
+    "aws-security-hub": "section",
+    "bedrock-summary-reporter": "section",
+    "cloudwatch-logs": "section",
+    "s3": "options",
+}
+
+
+def test_every_option_of_an_off_host_reporter_is_classified(reporter_fields):
+    """A new option fails here until it is made the operator's or listed as open."""
+    unclassified = [
+        (reporter, field["path"])
+        for reporter in REPORTER_ENABLED_DEFAULTS
+        for field in reporter_fields[reporter]["options"]
+        if "." not in field["path"]
+        and field["path"] not in REPORTER_DESTINATION_OPTIONS[reporter]
+        and (reporter, field["path"]) not in _OPEN_OFF_HOST_OPTIONS
+    ]
+    assert not unclassified
+    stale = [
+        key
+        for key in _OPEN_OFF_HOST_OPTIONS
+        if key[1] not in {f["path"] for f in reporter_fields[key[0]]["options"]}
+        or key[1] in REPORTER_DESTINATION_OPTIONS[key[0]]
+    ]
+    assert not stale
+
+
+def test_a_reporter_with_nothing_open_is_denied_as_a_whole_section():
+    """So an option added later is denied to a client before anyone lists it."""
+    with_open = {reporter for reporter, _ in _OPEN_OFF_HOST_OPTIONS}
+    for reporter in REPORTER_ENABLED_DEFAULTS:
+        if reporter not in with_open:
+            assert _MCP_COVERAGE[reporter] == "section", reporter
+
+
+def test_the_coverage_table_is_what_the_default_list_gives():
+    from automated_security_helper.config.ash_config import RuntimeOverridesConfig
+    from automated_security_helper.config.client_config_policy import _names
+
+    shipped = RuntimeOverridesConfig().denied_paths
+    for reporter, mode in _MCP_COVERAGE.items():
+        whole = f"/reporters/{reporter}/**" in shipped
+        assert whole is (mode == "section"), reporter
+        if mode == "options":
+            assert f"/reporters/{reporter}/enabled" in shipped, reporter
+            for open_reporter, name in _OPEN_OFF_HOST_OPTIONS:
+                if open_reporter == reporter:
+                    pointer = f"/reporters/{reporter}/options/{name}"
+                    assert not any(_names(e, pointer) for e in shipped), pointer
+    # enabled is denied for the off-host reporters only: a client may still turn
+    # a local reporter on or off.
+    assert not any(_names(e, "/reporters/sarif/enabled") for e in shipped)
 
 
 def test_every_section_level_field_is_reviewed(reporter_fields):

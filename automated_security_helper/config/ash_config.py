@@ -828,19 +828,17 @@ class RuntimeOverridesConfig(BaseModel):
         "/scanners/semgrep/options/metrics",
         # AWS-credential-bearing reporter options (plugin-provided, hyphenated
         # names), and every other destination and credential option of the
-        # built-in AWS reporters (config/reporter_trust.py). Then whether each of
-        # them runs, since each sends findings off the host (cloudwatch-logs'
-        # and the Bedrock reporter's are under their /** entries), and every
-        # other Bedrock option: what is sent to the model (code snippets, the
-        # prompt) and the model parameters. A client may still set enabled to
-        # false (client_config_policy._writes_a_tightening).
+        # built-in AWS reporters (config/reporter_trust.py). Security Hub's,
+        # CloudWatch Logs' and the Bedrock reporter's whole sections are denied:
+        # every option of the first two is the operator's, and the Bedrock
+        # reporter's others choose what is sent to the model and how. Then
+        # whether S3 runs, since it sends findings off the host as the others
+        # do. A client may still set enabled to false
+        # (client_config_policy._writes_a_tightening), and a local reporter's
+        # enabled is not denied.
         "/reporters/bedrock-summary-reporter/options/aws_*",
         "/reporters/cloudwatch-logs/**",
-        "/reporters/aws-security-hub/options/aws_region",
-        "/reporters/aws-security-hub/options/aws_profile",
-        "/reporters/aws-security-hub/options/account_id",
-        "/reporters/aws-security-hub/options/archive_resolved_findings",
-        "/reporters/aws-security-hub/options/findings_scope",
+        "/reporters/aws-security-hub/**",
         "/reporters/bedrock-summary-reporter/options/model_id",
         "/reporters/bedrock-summary-reporter/options/output_file",
         "/reporters/bedrock-summary-reporter/options/output_executive_file",
@@ -852,7 +850,6 @@ class RuntimeOverridesConfig(BaseModel):
         "/reporters/s3/options/max_retries",
         "/reporters/s3/options/base_delay",
         "/reporters/s3/options/max_delay",
-        "/reporters/aws-security-hub/enabled",
         "/reporters/s3/enabled",
         "/reporters/bedrock-summary-reporter/**",
         # The GitLab SAST report leaves suppressed findings out with this set, so

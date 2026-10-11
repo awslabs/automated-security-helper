@@ -555,8 +555,10 @@ on which:
     destinations and credentials listed in the table above, whether
     `aws-security-hub`, `s3`, `cloudwatch-logs` and `bedrock-summary-reporter` run
     (`enabled`; `false` is accepted, here and in a client's runtime overrides,
-    since it only sends less), every other `bedrock-summary-reporter` option,
-    such as its model parameters, and the GitLab SAST reporter's
+    since it only sends less, and a reporter that writes only local files is not
+    covered), every other `aws-security-hub` and `bedrock-summary-reporter`
+    setting (each section is a whole-section entry, as `cloudwatch-logs` is),
+    and the GitLab SAST reporter's
     `exclude_suppressed`, which would leave the findings a client's
     suppressions are marked on out of that report. The options a reporter from a
     plugin module declares in `destination_options` are not default entries,
