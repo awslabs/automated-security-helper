@@ -607,9 +607,11 @@ under `automated_security_helper.` or `ash_plugins`, or a top-level package name
 `ash_plugins` or ending in `_ash_plugins` (`my_ash_plugins`, but not `myash_plugins`).
 ASH's plugin root `automated_security_helper.plugin_modules` holds every plugin package
 ASH ships and names none of them, so name the package below it (for example
-`automated_security_helper.plugin_modules.ash_trivy_plugins`). Any other entry, such as
-`another_plugin_module`, the plugin root, or a name with a space or a comma in it,
-refuses the scan with exit code 3 (invalid configuration) before any module is
+`automated_security_helper.plugin_modules.ash_trivy_plugins`). A namespace package (a
+directory with no `__init__.py`, which can gather packages from several distributions)
+declares no plugins either, so name the packages it holds. Any other entry, such as
+`another_plugin_module`, the plugin root, a namespace package, or a name with a space or
+a comma in it, refuses the scan with exit code 3 (invalid configuration) before any module is
 imported, whether it comes from a config file, `--config-overrides`,
 `--ash-plugin-modules` or `ASH_PLUGIN_MODULES`. The same name refuses `ash plugin list`, `ash dependencies
 install`, `ash report` and `ash merge` with exit code 3. When the list comes from
@@ -622,9 +624,7 @@ reporters and event handlers of the modules its own `ash_plugin_modules` (from i
 `--ash-plugin-modules`) names. This holds when one process runs several scans, as the
 MCP server does: a module that an earlier scan named, or that the MCP `list_scanners`
 tool loaded to describe the community scanners, takes no part in a scan that does not
-name it, and a module that only a later scan names takes part in that scan. A
-namespace package (one with no `__init__.py`, which can gather packages from several
-distributions) selects nothing below it; name the packages it holds.
+name it, and a module that only a later scan names takes part in that scan.
 
 ## Settings a repository's config cannot choose
 

@@ -185,9 +185,9 @@ You can add custom plugins to ASH by specifying them in the `ash_plugin_modules`
 Each entry must be a dotted path of Python identifiers inside ASH's plugin namespace:
 under `automated_security_helper.` or `ash_plugins`, or a top-level package named
 `ash_plugins` or ending in `_ash_plugins` (`my_ash_plugins`, `acme_ash_plugins`). A
-name outside that namespace, such as `my_plugins`, or ASH's plugin root
-`automated_security_helper.plugin_modules`, refuses the scan with exit code 3 before
-any module is imported.
+name outside that namespace, such as `my_plugins`, ASH's plugin root
+`automated_security_helper.plugin_modules`, or a namespace package (a directory with no
+`__init__.py`) refuses the scan with exit code 3 before any module is imported.
 
 ```yaml
 ash_plugin_modules:

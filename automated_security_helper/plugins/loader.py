@@ -218,33 +218,74 @@ class PluginModuleNamespaceError(ASHConfigValidationError):
     """
 
 
-def refuse_plugin_modules_outside_namespace(plugin_modules: Iterable[str]) -> None:
-    """Refuse a scan whose ``ash_plugin_modules`` names a module outside the namespace.
+def _namespace_package_refusal(module_path: str) -> Optional[str]:
+    """Why *module_path* is refused as a namespace package, or None.
 
-    Checked before any of them is imported, so a refused name runs no code and an
-    accepted name beside it is not imported either. Empty entries (a trailing
-    comma) name nothing and are ignored.
+    A namespace package (a directory with no ``__init__.py``, whose portions can
+    come from several distributions) declares no ``ASH_*`` lists, and a scan selects
+    nothing below it (:func:`scan_plugin_filter`), so it adds no plugin to a scan.
+
+    Each level of the name is located without importing its parent packages
+    (``config.plugin_module_trust._spec_without_importing``), so the check runs no
+    code. A name that cannot be located is left to the import, which reports it.
+    """
+    from automated_security_helper.config.plugin_module_trust import (
+        _spec_without_importing,
+    )
+
+    parts = module_path.split(".")
+    spec = None
+    for depth in range(1, len(parts) + 1):
+        try:
+            spec = _spec_without_importing(".".join(parts[:depth]), spec)
+        except (ImportError, ValueError):
+            return None
+        if spec is None:
+            return None
+    if spec.submodule_search_locations is not None and spec.origin is None:
+        return (
+            "a namespace package, with no __init__.py: it declares no plugins and a "
+            "scan selects none of the packages it holds, so name those packages"
+        )
+    return None
+
+
+def refuse_plugin_modules_outside_namespace(plugin_modules: Iterable[str]) -> None:
+    """Refuse a scan whose ``ash_plugin_modules`` names something that is not a plugin module.
+
+    Refused: a name outside the plugin namespace or not spelled as a module path
+    (:func:`_module_path_refusal`), and a namespace package
+    (:func:`_namespace_package_refusal`). Checked before any of them is imported,
+    so a refused name runs no code and an accepted name beside it is not imported
+    either. Empty entries (a trailing comma) name nothing and are ignored.
 
     Raises:
         PluginModuleNamespaceError: Naming every refused entry. A scan maps it to
             exit code 3, invalid configuration.
     """
-    refused = [
-        f"{name!r} ({reason})"
-        for name in dict.fromkeys(plugin_modules)
-        if name
-        for reason in [_module_path_refusal(name)]
-        if reason is not None
-    ]
-    if refused:
-        raise PluginModuleNamespaceError(
-            "ash_plugin_modules names "
-            + ", ".join(refused)
-            + f", which is not a plugin module ASH imports. {_namespace_rule()} "
-            "Nothing was imported and nothing was scanned. Rename the package, or "
-            "remove the entry from the config file, --config-overrides, "
-            "--ash-plugin-modules or ASH_PLUGIN_MODULES."
-        )
+    misnamed: List[str] = []
+    namespace_packages: List[str] = []
+    for name in dict.fromkeys(plugin_modules):
+        if not name:
+            continue
+        reason = _module_path_refusal(name)
+        if reason is not None:
+            misnamed.append(f"{name!r} ({reason})")
+            continue
+        reason = _namespace_package_refusal(name)
+        if reason is not None:
+            namespace_packages.append(f"{name!r} ({reason})")
+    if not misnamed and not namespace_packages:
+        return
+    rule = f" {_namespace_rule()}" if misnamed else ""
+    raise PluginModuleNamespaceError(
+        "ash_plugin_modules names "
+        + ", ".join(misnamed + namespace_packages)
+        + f", which is not a plugin module ASH imports.{rule} Nothing was imported "
+        "and nothing was scanned. Rename the package or name the packages inside it, "
+        "or remove the entry from the config file, --config-overrides, "
+        "--ash-plugin-modules or ASH_PLUGIN_MODULES."
+    )
 
 
 #: ASH's built-in plugin package. Every scan selects its plugins without naming it.

@@ -30,8 +30,9 @@ filtered here.
 from __future__ import annotations
 
 import importlib.util
+import pkgutil
 import sys
-from importlib.machinery import ModuleSpec, PathFinder
+from importlib.machinery import ModuleSpec
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable, List, Optional, Sequence
 
@@ -78,7 +79,7 @@ def _spec_without_importing(
 
     A top-level name, or one whose parent is already imported, goes through
     ``importlib.util.find_spec``, which then imports nothing. Otherwise the
-    parent's spec gives the directories to search, and ``PathFinder`` looks there
+    parent's spec gives the directories to search, and :func:`_find_spec_in` looks there
     directly. A package that adds to its ``__path__`` when imported, or a submodule
     only a custom finder can see, is then reported as not importable, which
     refuses it.
@@ -88,7 +89,36 @@ def _spec_without_importing(
         return importlib.util.find_spec(name)
     if parent is None or not parent.submodule_search_locations:
         return None
-    return PathFinder.find_spec(name, list(parent.submodule_search_locations))
+    return _find_spec_in(name, list(parent.submodule_search_locations))
+
+
+def _find_spec_in(name: str, locations: Sequence[str]) -> Optional[ModuleSpec]:
+    """The spec for ``name`` in ``locations``, the way ``PathFinder`` finds it.
+
+    The first location holding a module or a regular package wins. A directory with
+    no ``__init__`` in any of them makes ``name`` a namespace package, returned as a
+    spec with no origin and those directories as its search locations.
+    ``PathFinder.find_spec`` builds such a spec's search path from the parent
+    package's ``__path__``, so it fails when the parent is not imported, which is
+    the case here.
+    """
+    portions: List[str] = []
+    for location in locations:
+        finder = pkgutil.get_importer(location)
+        find_spec = getattr(finder, "find_spec", None)
+        if find_spec is None:
+            continue
+        spec = find_spec(name)
+        if spec is None:
+            continue
+        if spec.loader is not None:
+            return spec
+        portions.extend(spec.submodule_search_locations or ())
+    if not portions:
+        return None
+    spec = ModuleSpec(name, None, is_package=True)
+    spec.submodule_search_locations = portions
+    return spec
 
 
 def refusal_reason(name: str, scanned_root: Path) -> Optional[str]:
