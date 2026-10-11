@@ -43,6 +43,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.package_identity import scan_relative_path
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
@@ -968,7 +969,17 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
             # Populate the Results list with findings from the scan
             results: List[Result] = []
+            root = Path(self._secrets_collection.root)
             for filename, detections in self._secrets_collection.data.items():
+                # scan_files() keys a multi-file scan relative to root and a
+                # single-file scan by the absolute name it was handed. Anchor
+                # on root either way: the old get_shortest_name() call made the
+                # URI relative to the process working directory instead, so a
+                # suppression written against the source dir missed it (#770).
+                uri = (
+                    scan_relative_path(filename, root)
+                    or root.joinpath(filename).as_posix()
+                )
                 for finding in detections:
                     rule_id = re.sub(
                         pattern=r"\W+", repl="-", string=finding.type
@@ -998,7 +1009,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                                     id=1,
                                     physicalLocation=PhysicalLocation(
                                         artifactLocation=ArtifactLocation(
-                                            uri=get_shortest_name(input=filename),
+                                            uri=uri,
                                         ),
                                         region=Region(
                                             startLine=finding.line_number,

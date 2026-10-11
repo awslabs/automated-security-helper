@@ -240,3 +240,52 @@ def test_ntpath_relpath_has_no_answer_across_drives():
     # Anchored on the directory the file was enumerated from, the same call is a
     # plain filename.
     assert ntpath.relpath(scanned, r"C:\some\tree") == "first.py"
+
+
+def _uris(report) -> set:
+    """The artifact URI of every result in the report."""
+    return {
+        result.locations[0].physicalLocation.root.artifactLocation.uri
+        for result in report.runs[0].results
+    }
+
+
+def test_single_file_scan_reports_the_uri_relative_to_root(tmp_path, monkeypatch):
+    """One file takes the ``scan_file()`` branch, whose key is the absolute name.
+
+    The URI used to be that name through ``get_shortest_name()``, which is
+    relative to the working directory: launched from the parent of the source
+    dir it read ``src/tests/fixture_creds.py``, so a suppression written as
+    ``tests/**`` never matched (#770). Anchored on root it is
+    ``tests/fixture_creds.py`` from any working directory.
+    """
+    source_dir = tmp_path / "src"
+    output_dir = tmp_path / "out"
+    (source_dir / "tests").mkdir(parents=True)
+    (source_dir / "tests" / "fixture_creds.py").write_text(_KEYWORD_LINE)
+    output_dir.mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    scanner = _scanner(source_dir, output_dir)
+    report = scanner.scan(target=source_dir, target_type="source")
+
+    assert report is not False
+    assert _uris(report) == {"tests/fixture_creds.py"}
+
+
+def test_multi_file_scan_uris_do_not_depend_on_the_working_directory(
+    tmp_path, monkeypatch
+):
+    """A multi-file scan is keyed relative to root already; the URIs built from
+    those keys must be exactly those keys from any working directory."""
+    source_dir = tmp_path / "src"
+    output_dir = tmp_path / "out"
+    _write_secret_files(source_dir)
+    output_dir.mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    scanner = _scanner(source_dir, output_dir)
+    report = scanner.scan(target=source_dir, target_type="source")
+
+    assert report is not False
+    assert _uris(report) == _EXPECTED_KEYS
