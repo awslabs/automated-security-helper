@@ -301,3 +301,28 @@ def test_a_written_out_default_list_missing_an_entry_names_it(ash_log) -> None:
 def test_a_list_of_extra_entries_only_is_not_warned_about(ash_log) -> None:
     _policy(denied_paths=["/project_name"])
     assert not [r for r in ash_log if "leaves out" in r.getMessage()]
+
+
+@pytest.mark.parametrize(
+    "entry,field,other",
+    [
+        (
+            "/global_settings/suppressions/0",
+            "/global_settings/suppressions",
+            "/global_settings/ignore_paths",
+        ),
+        (
+            "/global_settings/ignore_paths/*/reason",
+            "/global_settings/ignore_paths",
+            "/global_settings/suppressions",
+        ),
+    ],
+)
+def test_an_entry_inside_a_list_field_decides_the_whole_field(
+    entry: str, field: str, other: str
+) -> None:
+    """An entry naming one item, or a key of every item, takes the list field out."""
+    exempt = ccp.exempt_paths(_policy(denied_paths=[entry]))
+    assert field not in exempt and f"{field}/**" not in exempt
+    assert other in exempt
+    assert "/sandbox" in exempt
