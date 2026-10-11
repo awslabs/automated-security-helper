@@ -74,6 +74,10 @@ def bound(monkeypatch) -> Dict[str, object]:
     return seen
 
 
+#: What deploy/terraform/modules/agentcore sets: the platform restricts Host.
+AGENTCORE = {"ASH_MCP_TRUST_UPSTREAM_HOST_CHECK": "true"}
+
+
 def _starts(argv: List[str]) -> None:
     result = CliRunner().invoke(ash_app, argv[1:])
     assert result.exit_code == 0, f"{argv}\n{result.output}"
@@ -84,7 +88,9 @@ class TestTrustUpstreamSessionId:
         assert "--trust-upstream-session-id" not in _argv(monkeypatch, {})
 
     def test_set_for_a_stateless_server(self, monkeypatch, bound) -> None:
-        argv = _argv(monkeypatch, {"ASH_MCP_TRUST_UPSTREAM_SESSION_ID": "true"})
+        argv = _argv(
+            monkeypatch, {**AGENTCORE, "ASH_MCP_TRUST_UPSTREAM_SESSION_ID": "true"}
+        )
 
         assert "--trust-upstream-session-id" in argv
         _starts(argv)
@@ -107,13 +113,29 @@ class TestTrustUpstreamSessionId:
 
 
 class TestTrustUpstreamHostCheck:
-    def test_the_agentcore_default_declares_the_upstream_check(
-        self, monkeypatch, bound
-    ) -> None:
+    def test_off_by_default(self, monkeypatch, bound) -> None:
         argv = _argv(monkeypatch, {})
+
+        assert "--trust-upstream-host-check" not in argv
+
+    def test_declared_when_set_true(self, monkeypatch, bound) -> None:
+        argv = _argv(monkeypatch, AGENTCORE)
 
         assert "--trust-upstream-host-check" in argv
         _starts(argv)
+
+    @pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1"])
+    def test_never_declared_for_a_loopback_bind(self, monkeypatch, bound, host) -> None:
+        """A loopback server checks its own origin; the declaration would undo that."""
+        argv = _argv(monkeypatch, {**AGENTCORE, "ASH_MCP_HOST": host})
+
+        assert "--trust-upstream-host-check" not in argv
+        _starts(argv)
+
+    def test_never_declared_for_stdio(self, monkeypatch, bound) -> None:
+        argv = _argv(monkeypatch, {**AGENTCORE, "ASH_MCP_TRANSPORT": "stdio"})
+
+        assert "--trust-upstream-host-check" not in argv
 
     def test_an_allowlist_replaces_the_declaration(self, monkeypatch, bound) -> None:
         argv = _argv(monkeypatch, {"ASH_MCP_ALLOWED_HOSTS": "ash-mcp.example.com"})
@@ -121,10 +143,15 @@ class TestTrustUpstreamHostCheck:
         assert "--trust-upstream-host-check" not in argv
         _starts(argv)
 
-    def test_turning_it_off_without_an_allowlist_refuses_startup(
-        self, monkeypatch, bound
+    @pytest.mark.parametrize(
+        "env",
+        [{}, {"ASH_MCP_TRUST_UPSTREAM_HOST_CHECK": "false"}],
+        ids=["unset", "false"],
+    )
+    def test_without_it_or_an_allowlist_startup_is_refused(
+        self, monkeypatch, bound, env
     ) -> None:
-        argv = _argv(monkeypatch, {"ASH_MCP_TRUST_UPSTREAM_HOST_CHECK": "false"})
+        argv = _argv(monkeypatch, env)
 
         assert "--trust-upstream-host-check" not in argv
         result = CliRunner().invoke(ash_app, argv[1:])
@@ -137,7 +164,9 @@ class TestSessionWorkspaceTtl:
         assert "--session-workspace-ttl" not in _argv(monkeypatch, {})
 
     def test_set_is_passed_through(self, monkeypatch, bound) -> None:
-        argv = _argv(monkeypatch, {"ASH_MCP_SESSION_WORKSPACE_TTL": "7200"})
+        argv = _argv(
+            monkeypatch, {**AGENTCORE, "ASH_MCP_SESSION_WORKSPACE_TTL": "7200"}
+        )
 
         at = argv.index("--session-workspace-ttl")
         assert argv[at + 1] == "7200"
@@ -146,7 +175,7 @@ class TestSessionWorkspaceTtl:
 
 
 def test_the_transport_is_passed_in_its_canonical_spelling(monkeypatch, bound) -> None:
-    argv = _argv(monkeypatch, {"ASH_MCP_TRANSPORT": "Streamable-HTTP"})
+    argv = _argv(monkeypatch, {**AGENTCORE, "ASH_MCP_TRANSPORT": "Streamable-HTTP"})
 
     assert argv[argv.index("--transport") + 1] == "streamable-http"
     _starts(argv)

@@ -225,6 +225,9 @@ def _terraform_entrypoint_argv(monkeypatch, env: Dict[str, str]) -> List[str]:
         "ASH_MCP_AUTH_HEADER_NAME",
         "ASH_MCP_AUTH_HEADER_VALUE",
         "ASH_MCP_ALLOWED_HOSTS",
+        "ASH_MCP_TRUST_UPSTREAM_HOST_CHECK",
+        "ASH_MCP_TRUST_UPSTREAM_SESSION_ID",
+        "ASH_MCP_SESSION_WORKSPACE_TTL",
     ):
         monkeypatch.delenv(name, raising=False)
     for name, value in env.items():
@@ -238,8 +241,13 @@ def _terraform_entrypoint_argv(monkeypatch, env: Dict[str, str]) -> List[str]:
 
 @pytest.mark.parametrize(
     "env",
-    [{}, {"ASH_MCP_ALLOWED_HOSTS": "ash-mcp.example.com"}],
-    ids=["agentcore-defaults", "with-allowed-hosts"],
+    [
+        # The environment deploy/terraform/modules/agentcore sets: the platform
+        # restricts Host, so the module declares that check is upstream.
+        {"ASH_MCP_TRUST_UPSTREAM_HOST_CHECK": "true"},
+        {"ASH_MCP_ALLOWED_HOSTS": "ash-mcp.example.com"},
+    ],
+    ids=["agentcore", "with-allowed-hosts"],
 )
 def test_the_terraform_entrypoint_command_line_starts(
     startup, monkeypatch, env
@@ -254,3 +262,15 @@ def test_the_terraform_entrypoint_command_line_starts(
         f"{result.output}"
     )
     assert startup["bound"] is True
+
+
+def test_the_terraform_entrypoint_defaults_refuse_a_wildcard_bind(
+    startup, monkeypatch
+) -> None:
+    """An empty environment binds 0.0.0.0 with no Host check declared: refused."""
+    argv = _terraform_entrypoint_argv(monkeypatch, {})
+
+    result = CliRunner().invoke(ash_app, argv[1:])
+
+    assert result.exit_code == 3, (argv, result.output)
+    assert startup["bound"] is False

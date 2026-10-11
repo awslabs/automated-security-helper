@@ -9,7 +9,11 @@ rather than image-build-time settings on one of them.
 
 Defaults match the AgentCore container contract (streamable-http on 0.0.0.0:8000
 at POST /mcp, stateless), because that is the one target that cannot express
-anything else. The other three targets set these variables explicitly.
+anything else. The other three targets set these variables explicitly. The two
+trust declarations, ASH_MCP_TRUST_UPSTREAM_HOST_CHECK and
+ASH_MCP_TRUST_UPSTREAM_SESSION_ID, are the exception: each states something
+about the platform in front that this file cannot check, so both default to
+false and the AgentCore module sets them.
 
 Why stateless defaults to true: AgentCore injects its own ``Mcp-Session-Id``
 header on every request, including the first. A stateful MCP server rejects a
@@ -37,7 +41,10 @@ DEFAULT_PORT = "8000"
 DEFAULT_MOUNT_PATH = "/mcp"
 DEFAULT_STATELESS = "true"
 DEFAULT_TRUST_UPSTREAM_SESSION_ID = "false"
-DEFAULT_TRUST_UPSTREAM_HOST_CHECK = "true"
+DEFAULT_TRUST_UPSTREAM_HOST_CHECK = "false"
+
+#: Bind names for which ash checks Host and Origin itself (its own origin only).
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off"}
@@ -130,14 +137,17 @@ def build_argv() -> list[str]:
         argv += ["--allowed-host", host]
 
     # ash refuses a non-loopback --host with no --allowed-host unless it is told
-    # that something in front of it checks Host and Origin. AgentCore restricts
-    # Host itself and cannot be given a Host allowlist in advance, so the
-    # default here is the AgentCore one. Every other target either names its
-    # hosts in ASH_MCP_ALLOWED_HOSTS or sets this to false, so that a missing
-    # allowlist refuses startup instead of serving any Host.
+    # that something in front of it checks Host and Origin. Off by default, so an
+    # image run without a Host allowlist refuses to start rather than serving
+    # any Host. The AgentCore module sets it true: that platform restricts Host
+    # itself and cannot be given an allowlist in advance. Never emitted for a
+    # loopback bind, where ash checks its own origin, and never with an
+    # allowlist, which says the opposite.
+    host = _env("ASH_MCP_HOST", DEFAULT_HOST)
     if (
         transport != "stdio"
         and not allowed_hosts
+        and host not in LOOPBACK_HOSTS
         and _env_bool(
             "ASH_MCP_TRUST_UPSTREAM_HOST_CHECK", DEFAULT_TRUST_UPSTREAM_HOST_CHECK
         )
