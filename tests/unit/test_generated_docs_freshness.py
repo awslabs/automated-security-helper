@@ -459,6 +459,36 @@ def test_default_values_read_back_as_themselves(value) -> None:
     assert yaml.safe_load(_config_generator().yaml_value(value)) == value
 
 
+def test_bounds_are_written_with_digit_grouping() -> None:
+    """A Type cell's bounds are grouped, ``at most 1,048,576``, never run together.
+
+    Every kind of bound goes through the same formatting: ge, gt, le, lt and the
+    length bounds, integers and floats. Run together, the nine-digit upper bound of
+    ``max_message_size_bytes`` was reported as a Social Security number by the
+    secret scanner the repository's own scan runs. Default cells keep the raw value,
+    which the docs checks compare with the model.
+    """
+    from typing import Annotated
+
+    from pydantic import BaseModel, Field
+
+    class Bounded(BaseModel):
+        size: Annotated[int, Field(ge=1024, le=1_048_576)] = 2048
+        ratio: Annotated[float, Field(gt=0.5, lt=1234.5)] = 1.0
+        name: Annotated[str, Field(min_length=1, max_length=10_000)] = "x"
+
+    generator = _config_generator()
+    assert {
+        name: generator.constraints_text(info)
+        for name, info in Bounded.model_fields.items()
+    } == {
+        "size": "at least 1,024, at most 1,048,576",
+        "ratio": "greater than 0.5, less than 1,234.5",
+        "name": "length at least 1, length at most 10,000",
+    }
+    assert generator.default_cell(Bounded.model_fields["size"]) == "`2048`"
+
+
 def test_env_and_platform_defaults_are_found_in_the_model_source(
     tmp_path: Path,
 ) -> None:

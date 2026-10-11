@@ -197,6 +197,17 @@ def _scalar(value: Any) -> str:
     return str(value)
 
 
+def number_text(value: Any) -> str:
+    """A number as the pages write it, with digit grouping: ``104,857,600``.
+
+    Ungrouped, a nine-digit bound reads as a Social Security number to the secret
+    scanners ASH runs on its own repository.
+    """
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return f"{value:,}"
+    return str(value)
+
+
 def constraints_text(field) -> str:
     """Bounds and patterns pydantic recorded for the field, as a phrase."""
     parts = []
@@ -212,7 +223,7 @@ def constraints_text(field) -> str:
         ):
             value = getattr(item, attr, None)
             if value is not None:
-                parts.append(f"{label} {value}")
+                parts.append(f"{label} {number_text(value)}")
         pattern = getattr(item, "pattern", None)
         if pattern:
             parts.append(f"matches {code(pattern)}")
@@ -1085,8 +1096,8 @@ def generate() -> tuple[str, dict]:
     lines += [
         (
             f"A config file can name base files with `extends`. A chain may be at most "
-            f"{ASH_CONFIG_EXTENDS_MAX_DEPTH} levels deep and read at most "
-            f"{ASH_CONFIG_EXTENDS_MAX_FILES} files."
+            f"{number_text(ASH_CONFIG_EXTENDS_MAX_DEPTH)} levels deep and read at most "
+            f"{number_text(ASH_CONFIG_EXTENDS_MAX_FILES)} files."
         ),
         "",
         "## Top-level keys",

@@ -82,8 +82,8 @@ import subprocess
 DEPLOY_COMMAND = "make deploy"
 subprocess.call(DEPLOY_COMMAND, shell=True)  # ash-ignore: B602 fixed command
 
-# ash-ignore-next-line: B105 test fixture, not a real password
-TEST_PASSWORD = "not-a-real-password"
+# ash-ignore-next-line: B108 the build container's own scratch directory
+SCRATCH_DIR = "/tmp/ash-build"
 ```
 
 - Write the comment with `#` or `//`. Other comment styles, such as `/* */` and `<!-- -->`, are not recognized.
