@@ -775,6 +775,14 @@
 
 ### Fixes
 
+- **detect-secrets finds its baseline in the source directory.** A relative
+  `scanners.detect-secrets.options.baseline_file`, and the default
+  `.ash/.secrets.baseline` and `.secrets.baseline`, were looked up from ASH's working
+  directory, although the option's description says the source directory. So
+  `ash --source-dir repo` run from elsewhere missed the repository's baseline, and
+  used one in the working directory if there was one. They are now taken from the
+  source directory.
+
 - `ash dependencies install --tool ArchiveConverter` works again. Building each plugin
   from its own config section renamed the archive converter's selector to `archive`,
   so the old spelling exited 2 as an unknown tool. It is now accepted as a deprecated

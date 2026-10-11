@@ -141,12 +141,13 @@ def test_execute_scan_stub_raises_not_implemented(scanner):
 @pytest.mark.parametrize(
     "baseline_name", [".secrets.baseline", ".ash/.secrets.baseline"]
 )
-def test_baseline_is_discovered_in_the_working_directory(
+def test_baseline_is_discovered_in_the_source_directory(
     plugin_context, tmp_path, monkeypatch, baseline_name
 ):
-    """Both default baseline locations are found, relative to the cwd."""
+    """Both default baseline locations are found in the source directory, whatever
+    ASH's working directory is."""
     monkeypatch.chdir(tmp_path)
-    baseline = tmp_path / baseline_name
+    baseline = plugin_context.source_dir / baseline_name
     baseline.parent.mkdir(parents=True, exist_ok=True)
     baseline.write_text(json.dumps(baseline_document()), encoding="utf-8")
 
@@ -154,7 +155,45 @@ def test_baseline_is_discovered_in_the_working_directory(
         context=plugin_context, config=DetectSecretsScannerConfig()
     )
 
-    assert Path(scanner.config.options.baseline_file) == Path(baseline_name)
+    assert Path(scanner.config.options.baseline_file) == baseline
+
+
+def test_a_baseline_in_the_working_directory_is_not_the_scans(
+    plugin_context, tmp_path, monkeypatch
+):
+    """``ash --source-dir repo`` run from elsewhere reads repo's baseline, not one
+    that happens to sit in the working directory."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".secrets.baseline").write_text(
+        json.dumps(baseline_document(plugins=[{"name": "AWSKeyDetector"}])),
+        encoding="utf-8",
+    )
+
+    scanner = DetectSecretsScanner(
+        context=plugin_context, config=DetectSecretsScannerConfig()
+    )
+
+    assert scanner.config.options.baseline_file is None
+
+
+def test_a_relative_configured_baseline_is_taken_from_the_source_directory(
+    plugin_context, tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "custom.baseline").write_text(
+        json.dumps(baseline_document()), encoding="utf-8"
+    )
+    in_source = plugin_context.source_dir / "custom.baseline"
+    in_source.write_text(json.dumps(baseline_document()), encoding="utf-8")
+
+    scanner = DetectSecretsScanner(
+        context=plugin_context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(baseline_file="custom.baseline")
+        ),
+    )
+
+    assert Path(scanner.config.options.baseline_file) == in_source
 
 
 def test_explicitly_configured_baseline_wins_over_the_defaults(
@@ -162,7 +201,7 @@ def test_explicitly_configured_baseline_wins_over_the_defaults(
 ):
     """A configured baseline_file is checked before the conventional names."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / ".secrets.baseline").write_text(
+    (plugin_context.source_dir / ".secrets.baseline").write_text(
         json.dumps(baseline_document()), encoding="utf-8"
     )
     chosen = tmp_path / "custom.baseline"
@@ -204,7 +243,7 @@ def test_baseline_plugins_and_filters_are_loaded_into_scan_settings(
     baseline's configuration silently fails to apply during scanning.
     """
     monkeypatch.chdir(tmp_path)
-    (tmp_path / ".secrets.baseline").write_text(
+    (plugin_context.source_dir / ".secrets.baseline").write_text(
         json.dumps(
             baseline_document(
                 plugins=[{"name": "AWSKeyDetector"}, {"name": "JwtTokenDetector"}],
@@ -231,7 +270,7 @@ def test_explicit_scan_settings_are_not_overwritten_by_the_baseline(
 ):
     """A user-provided scan_settings takes precedence over the baseline's."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / ".secrets.baseline").write_text(
+    (plugin_context.source_dir / ".secrets.baseline").write_text(
         json.dumps(baseline_document(plugins=[{"name": "AWSKeyDetector"}])),
         encoding="utf-8",
     )
@@ -261,7 +300,7 @@ def test_baseline_without_plugins_or_filters_falls_back_to_all_plugins(
 ):
     """An empty baseline still leaves the scanner with a usable plugin set."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / ".secrets.baseline").write_text(
+    (plugin_context.source_dir / ".secrets.baseline").write_text(
         json.dumps({"version": "1.5.0", "results": {}}), encoding="utf-8"
     )
 
@@ -277,7 +316,9 @@ def test_unreadable_baseline_warns_and_falls_back_to_defaults(
 ):
     """A corrupt baseline must not take the scanner down with it."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / ".secrets.baseline").write_text("{not valid json", encoding="utf-8")
+    (plugin_context.source_dir / ".secrets.baseline").write_text(
+        "{not valid json", encoding="utf-8"
+    )
 
     with caplog.at_level(logging.WARNING):
         scanner = DetectSecretsScanner(
@@ -782,3 +823,23 @@ def test_an_unexpected_failure_is_wrapped_in_scanner_error(scanner, monkeypatch)
 
     assert "DetectSecretsScanner failed" in str(excinfo.value)
     assert "transient settings failed" in str(excinfo.value)
+
+
+def test_the_baseline_read_is_the_file_that_was_checked(tmp_path, monkeypatch):
+    """_read_baseline parses only the file the containment check judged: one whose
+    device and inode differ when it is opened is refused."""
+    import os
+
+    baseline = tmp_path / ".secrets.baseline"
+    baseline.write_text(json.dumps(baseline_document()), encoding="utf-8")
+    assert DetectSecretsScanner._read_baseline(baseline)["version"]
+
+    real_fstat = os.fstat
+
+    def another_file(fd):
+        stat = real_fstat(fd)
+        return os.stat_result((stat.st_mode, stat.st_ino + 1, *tuple(stat)[2:]))
+
+    monkeypatch.setattr(os, "fstat", another_file)
+    with pytest.raises(OSError, match="changed while it was being read"):
+        DetectSecretsScanner._read_baseline(baseline)

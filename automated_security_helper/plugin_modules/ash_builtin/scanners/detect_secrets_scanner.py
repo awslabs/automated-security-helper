@@ -9,7 +9,7 @@ import multiprocessing
 from pathlib import Path
 import re
 import sys
-from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional
+from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -268,12 +268,23 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             )
         return True
 
-    def _baseline_allowed(self, baseline: Path) -> bool:
-        """Whether ASH may read ``baseline`` on this scanner's behalf.
+    def _baseline_path(self, value: Union[str, Path]) -> Path:
+        """``value`` as the option means it: ``~`` expanded, and a relative path
+        taken from the source directory, not from ASH's working directory."""
+        path = Path(os.path.expanduser(str(value)))
+        if path.is_absolute():
+            return path
+        source_dir = getattr(getattr(self, "context", None), "source_dir", None)
+        return Path(source_dir if source_dir is not None else os.getcwd()) / path
+
+    def _baseline_allowed(self, real: Path) -> bool:
+        """Whether ASH may read the baseline that resolves to ``real`` for this scanner.
 
         ASH reads the baseline itself, outside the sandbox, and hands its contents
         to the sandboxed worker. Under a sandbox it does that only for a file inside
         the source tree, unless sandbox.read_path_scanners names detect-secrets.
+        Judged by the file the path resolves to, the file ASH then reads
+        (``_read_baseline``).
         """
         context = getattr(self, "context", None)
         sandbox = getattr(getattr(context, "config", None), "sandbox", None)
@@ -286,12 +297,29 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             return False
         from automated_security_helper.config.sandbox_grants import is_within
 
-        return is_within(baseline.absolute(), Path(os.path.realpath(source_dir)))
+        return is_within(real, Path(os.path.realpath(source_dir)))
+
+    @staticmethod
+    def _read_baseline(real: Path) -> Dict[str, Any]:
+        """Parse the baseline at ``real``, the resolved path that was checked.
+
+        Opened without following a link at its last component, and compared by
+        device and inode with what ``real`` named when it was resolved, so the file
+        parsed is the file ``_baseline_allowed`` judged.
+        """
+        checked = os.stat(real)
+        fd = os.open(real, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "r") as handle:
+            opened = os.fstat(handle.fileno())
+            if (opened.st_dev, opened.st_ino) != (checked.st_dev, checked.st_ino):
+                raise OSError(f"{real.as_posix()} changed while it was being read")
+            return json.load(handle)
 
     def _process_config_options(self):
-        # Check detect-secrets baseline path
+        # The configured baseline, else the default names, each taken from the
+        # source directory; the first that exists is used.
         possible_baseline_paths = [
-            item
+            self._baseline_path(item)
             for item in [
                 self.config.options.baseline_file,
                 ".ash/.secrets.baseline",
@@ -301,43 +329,34 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         ]
         ASH_LOGGER.debug(f"Possible baseline file paths: {possible_baseline_paths}")
 
-        # Look through each baseline file path to see if it exists and configure
-        # the scan settings according to the first baseline file found
         for baseline_path in possible_baseline_paths:
-            ASH_LOGGER.debug(
-                f"Checking for detect-secrets config @ {Path(baseline_path).absolute()}"
-            )
-            if Path(baseline_path).absolute().exists():
-                ASH_LOGGER.debug(
-                    f"Identified detect-secrets config @ {Path(baseline_path).absolute()}"
-                )
-
-                self.config.options.baseline_file = Path(baseline_path)
+            if baseline_path.exists():
+                ASH_LOGGER.debug(f"Identified detect-secrets config @ {baseline_path}")
+                self.config.options.baseline_file = baseline_path
                 break
 
-        if self.config.options.baseline_file is not None and not self._baseline_allowed(
-            Path(self.config.options.baseline_file)
-        ):
-            ASH_LOGGER.warning(
-                f"Not reading the detect-secrets baseline "
-                f"{Path(self.config.options.baseline_file).absolute()}: it is outside "
-                "the source tree, and under the sandbox a file outside the tree is "
-                "read only for a scanner named in sandbox.read_path_scanners. "
-                "Candidates the baseline would have marked are reported."
-            )
-            self.config.options.baseline_file = None
+        real_baseline: Optional[Path] = None
+        if self.config.options.baseline_file is not None:
+            baseline = self._baseline_path(self.config.options.baseline_file)
+            real_baseline = Path(os.path.realpath(baseline))
+            if not self._baseline_allowed(real_baseline):
+                ASH_LOGGER.warning(
+                    f"Not reading the detect-secrets baseline {baseline.as_posix()}: "
+                    "it is outside the source tree, and under the sandbox a file "
+                    "outside the tree is read only for a scanner named in "
+                    "sandbox.read_path_scanners. Candidates the baseline would have "
+                    "marked are reported."
+                )
+                self.config.options.baseline_file = None
+                real_baseline = None
 
         # If a baseline file was found, load its plugins_used and filters_used
         # into scan_settings so they are applied during scanning.
         # SecretsCollection.load_from_baseline() only loads results, not settings,
         # so we must propagate the baseline's configuration explicitly.
-        if self.config.options.baseline_file is not None:
+        if real_baseline is not None:
             try:
-                real_baseline = Path(
-                    os.path.realpath(Path(self.config.options.baseline_file).absolute())
-                )
-                with open(real_baseline, "r") as f:
-                    baseline_data = json.load(f)
+                baseline_data = self._read_baseline(real_baseline)
                 self._baseline_document = baseline_data
 
                 # Only apply baseline settings if scan_settings was not explicitly
