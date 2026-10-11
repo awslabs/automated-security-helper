@@ -68,12 +68,21 @@ EXIT_BAD_SELECTION = 2
 # The code every ASH command uses for a configuration that cannot be used.
 EXIT_INVALID_CONFIG = 3
 
-# Set to exactly `skip`, an unknown `--tool` name is named and skipped rather than
-# refused. ASH's own CI sets it for a scan that installs ASH from an older commit than
-# the workflow that asks for the tools: a tool that ASH does not know has no scanner in
-# it either, so the scan needs nothing from that tool. Unset, the refusal stands, which
-# is what catches a typo.
+# Set to exactly `skip`, a `--tool` name that no plugin of this ASH has, of any type,
+# is named and skipped rather than refused. ASH's own required check sets it, because
+# it installs ASH from an older commit than the workflow that asks for the tools: a
+# tool that ASH has no plugin for is not run by it either, so the scan needs nothing
+# from that tool. Unset, the refusal stands, which is what catches a typo.
 UNKNOWN_TOOLS_SETTING = "ASH_DEPENDENCIES_UNKNOWN_TOOLS"
+
+# The plugin registry's kinds, which --plugin-type selects among.
+PLUGIN_KINDS = ("converter", "scanner", "reporter")
+
+
+def _plugin_kind(plugin_type: str) -> str:
+    """The registry kind a --plugin-type value selects; anything else means scanner."""
+    return plugin_type if plugin_type in ("converter", "reporter") else "scanner"
+
 
 # `--tool` names that stopped working when this command began building each plugin
 # from its own config section (#766), mapped to the config key that replaced them.
@@ -358,17 +367,11 @@ def install_dependencies(
         print(f"[red]Invalid configuration: {escape(str(e))}[/red]")
         raise typer.Exit(3)
 
-    outcomes: List[PluginInstallOutcome] = []
-    construction_failures: List[PluginInstallOutcome] = []
-    discovered: List[tuple] = []
-    for plugin_type in plugin_types:
-        plugin_module_input = (
-            "converter"
-            if plugin_type == "converter"
-            else "reporter"
-            if plugin_type == "reporter"
-            else "scanner"
-        )
+    def discover(plugin_type: str, warn: bool = True):
+        """The plugins of one type, each built from its own section of the config."""
+        found: List[tuple] = []
+        failed: List[PluginInstallOutcome] = []
+        plugin_module_input = _plugin_kind(plugin_type)
         for plugin_class in ash_plugin_manager.plugin_modules(plugin_module_input):
             try:
                 # The plugin's own section of the resolved config, looked up the way
@@ -398,16 +401,17 @@ def install_dependencies(
                     getattr(plugin_instance.config, "name", None)
                     or plugin_class.__name__
                 )
-                discovered.append((plugin_type, plugin_name, plugin_instance))
+                found.append((plugin_type, plugin_name, plugin_instance))
             except Exception as e:
                 # Reported as a warning here and weighed by the verdict later, because
                 # whether it is fatal depends on the run: a --tool run answers only for
                 # what it was asked about, so an unrelated plugin that will not
                 # construct is information rather than this run's failure.
-                print(
-                    f"[bold yellow]Plugin {escape(plugin_class.__name__)} could not "
-                    f"be loaded: {escape(str(e))}[/bold yellow]",
-                )
+                if warn:
+                    print(
+                        f"[bold yellow]Plugin {escape(plugin_class.__name__)} could "
+                        f"not be loaded: {escape(str(e))}[/bold yellow]",
+                    )
                 # Held aside rather than added to `outcomes` directly. `outcomes` is
                 # what the verdict is computed from, and a plugin that failed to
                 # construct is unrelated to a `--tool` request for a different one --
@@ -415,13 +419,22 @@ def install_dependencies(
                 # `ash dependencies install --tool trivy-repo` exit 1 because some
                 # other community plugin would not import, and name that other plugin
                 # in the failure panel.
-                construction_failures.append(
+                failed.append(
                     PluginInstallOutcome(
                         name=plugin_class.__name__,
                         plugin_type=plugin_type,
                         errors=[str(e)],
                     )
                 )
+        return found, failed
+
+    outcomes: List[PluginInstallOutcome] = []
+    construction_failures: List[PluginInstallOutcome] = []
+    discovered: List[tuple] = []
+    for plugin_type in plugin_types:
+        found, failed = discover(plugin_type)
+        discovered += found
+        construction_failures += failed
 
     # --tool selection. Validated against the names actually discovered rather than
     # a hardcoded list, so it cannot drift from the plugin registry. An unknown name
@@ -440,17 +453,55 @@ def install_dependencies(
             for typed, resolved_name in tool_resolution.items()
             if resolved_name not in available
         ]
-        skip_unknown = os.environ.get(UNKNOWN_TOOLS_SETTING, "").strip() == "skip"
-        if unknown and skip_unknown and not construction_failures:
-            # Named, not silent: the reader sees which requested tools this ASH lacks.
-            # Not when a plugin failed to load: the unknown name could be that plugin's,
-            # and skipping it would skip a tool this ASH does have.
+        # A name missing from the selected types may still be a plugin of a type that
+        # --plugin-type left out. That name is not unknown to this ASH, so it is never
+        # skipped as unknown, and the refusal says which type it is.
+        selected_kinds = {_plugin_kind(t) for t in plugin_types}
+        elsewhere: dict = {}
+        lookup_failures: List[PluginInstallOutcome] = []
+        if unknown:
+            for kind in PLUGIN_KINDS:
+                if kind in selected_kinds:
+                    continue
+                found, failed = discover(kind, warn=False)
+                lookup_failures += failed
+                names = {name for _, name, _ in found}
+                for typed in unknown:
+                    if tool_resolution[typed] in names:
+                        elsewhere.setdefault(typed, []).append(kind)
+        if elsewhere:
             console.print(
                 Panel(
-                    f"[yellow]Not known to this ASH, so not installed:[/yellow] "
+                    "[bold red]Not of the selected plugin type "
+                    f"(--plugin-type {escape(' '.join(plugin_types))}):[/bold red]\n"
+                    + "\n".join(
+                        f"{escape(typed)} is a {escape(' and '.join(kinds))} plugin"
+                        for typed, kinds in sorted(elsewhere.items())
+                    )
+                    + "\nAdd its --plugin-type, or leave --plugin-type out.",
+                    title="Nothing installed",
+                    expand=False,
+                )
+            )
+            raise typer.Exit(EXIT_BAD_SELECTION)
+        # Exactly `skip`, as the docs say: not a value that only strips to it.
+        skip_unknown = os.environ.get(UNKNOWN_TOOLS_SETTING, "") == "skip"
+        if (
+            unknown
+            and skip_unknown
+            and not construction_failures
+            and not lookup_failures
+        ):
+            # Named, not silent: the reader sees which requested tools this ASH lacks.
+            # Not when a plugin failed to load, of any type: the unknown name could be
+            # that plugin's, and skipping it would skip a tool this ASH does have.
+            console.print(
+                Panel(
+                    "[yellow]Not known to this ASH (no converter, scanner or reporter "
+                    "plugin has these names), so not installed:[/yellow] "
                     f"{escape(', '.join(sorted(unknown)))}\n"
-                    f"{UNKNOWN_TOOLS_SETTING}=skip is set. This ASH has no scanner for "
-                    "these tools, so nothing it runs needs them.",
+                    f"{UNKNOWN_TOOLS_SETTING}=skip is set, and nothing this ASH runs "
+                    "needs a tool it has no plugin for.",
                     title="Skipped",
                     expand=False,
                 )
@@ -467,14 +518,15 @@ def install_dependencies(
             # unknowable here -- only its class name is. Rather than claim a match that
             # cannot be established, say that some plugins failed to load, so a
             # requested name missing for that reason is not misreported as a typo.
+            failed_to_load = construction_failures + lookup_failures
             broken_note = (
                 ""
-                if not construction_failures
+                if not failed_to_load
                 else (
                     "\n[yellow]Note:[/yellow] "
-                    f"{len(construction_failures)} plugin(s) failed to load and are "
+                    f"{len(failed_to_load)} plugin(s) failed to load and are "
                     "absent from that list: "
-                    + escape(", ".join(sorted(o.name for o in construction_failures)))
+                    + escape(", ".join(sorted(o.name for o in failed_to_load)))
                 )
             )
             console.print(

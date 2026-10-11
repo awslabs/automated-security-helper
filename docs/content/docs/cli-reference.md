@@ -883,7 +883,7 @@ ash dependencies install --plugin-type scanner
 ash dependencies install --bin-path ~/tools/ash-bin
 ```
 
-A `--tool` name that no loaded plugin has is refused with exit 2 and nothing is installed, so a typo cannot report success. With `ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip` (exactly that value), such names are listed as skipped and the known tools are installed; a run that names only unknown tools installs nothing and exits 0. The refusal stands while any plugin failed to load, because the unknown name may be that plugin's. ASH's reusable CI workflow sets the variable only when its caller passes `skip-unknown-tools: true` with `config-ref`, as ASH's own required check does: that check installs an older ASH than the workflow files it runs, so the workflow can ask for a tool that ASH does not have yet.
+A `--tool` name that no loaded plugin has is refused with exit 2 and nothing is installed, so a typo cannot report success. With `ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip` (exactly that value), such names are listed as skipped and the known tools are installed; a run that names only unknown tools installs nothing and exits 0. The refusal stands while any plugin failed to load, because the unknown name may be that plugin's. A name that is a plugin of a type `--plugin-type` left out is not unknown: it is refused with exit 2 whether or not the variable is set, and the message names its type. ASH's reusable CI workflow sets the variable only when its caller passes `skip-unknown-tools: true` with `config-ref`, as ASH's own required check does: that check installs an older ASH than the workflow files it runs, so the workflow can ask for a tool that ASH does not have yet.
 
 ## Inspect Command
 

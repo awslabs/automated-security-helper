@@ -22,9 +22,12 @@ What this asserts
 2. With it, the known tools are selected and judged as before, the unknown ones are
    named in the output and not selected, and a run naming only unknown tools installs
    nothing and succeeds.
-3. Only the exact value ``skip`` turns it on.
+3. Only the exact value ``skip`` turns it on; a value that only strips to it does not.
 4. When some plugin failed to load, an unknown name is still refused: it may be that
    plugin's, so skipping it could skip a tool the ASH does have.
+5. Under ``--plugin-type``, a name that is a plugin of a type left out is not unknown to
+   this ASH: with or without the setting it is refused, and the message names its type.
+   A name no plugin of any type has is skipped, and the message says exactly that.
 """
 
 import io
@@ -99,11 +102,48 @@ class TestWithTheRealRegistry:
         assert self.verdicts == [], "an unknown-only run selected something"
         assert "not-a-real-tool" in self._output(result)
 
-    @pytest.mark.parametrize("value", ["", "1", "true", "Skip", "skipped", "refuse"])
+    @pytest.mark.parametrize(
+        "value",
+        ["", "1", "true", "Skip", "skipped", "refuse", " skip", "skip ", "skip\n"],
+    )
     def test_only_the_value_skip_turns_it_on(self, monkeypatch, value):
         monkeypatch.setenv(SETTING, value)
         result = self._invoke("--tool", "not-a-real-tool")
         assert result.exit_code == EXIT_BAD_SELECTION, (value, self._output(result))
+
+    @pytest.mark.parametrize("skip", [False, True], ids=["without skip", "with skip"])
+    def test_a_tool_of_an_unselected_plugin_type_is_refused_as_such(
+        self, monkeypatch, skip
+    ):
+        """bandit is a scanner here. Under --plugin-type converter it is not missing from
+        this ASH, so it is never skipped as unknown, and the refusal says what it is."""
+        if skip:
+            monkeypatch.setenv(SETTING, "skip")
+        result = self._invoke("--plugin-type", "converter", "--tool", "bandit")
+        output = self._output(result)
+        assert result.exit_code == EXIT_BAD_SELECTION, output
+        assert self.verdicts == [], self.verdicts
+        assert "not known" not in output.lower(), output
+        assert "bandit is a scanner plugin" in output, output
+        assert "--plugin-type" in output, output
+
+    def test_under_plugin_type_the_skip_names_only_tools_no_plugin_has(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv(SETTING, "skip")
+        result = self._invoke(
+            "--plugin-type",
+            "converter",
+            "--tool",
+            "archive",
+            "--tool",
+            "not-a-real-tool",
+        )
+        output = self._output(result)
+        assert result.exit_code == EXIT_OK, output
+        assert self.verdicts == [(["archive"], ["archive"])], self.verdicts
+        assert "no converter, scanner or reporter plugin" in output, output
+        assert "no scanner for" not in output, output
 
 
 def test_a_plugin_that_failed_to_load_keeps_the_refusal(tmp_path, monkeypatch):
