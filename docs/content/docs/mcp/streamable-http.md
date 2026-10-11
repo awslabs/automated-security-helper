@@ -69,6 +69,8 @@ Source delivery, a bound profile and the scan registry all belong to a session, 
 
 Every caller on a network transport is remote, whatever headers it sends: it is confined to the operator's grants (`ASH_MCP_ALLOWED_ROOTS`, `ASH_MCP_ALLOWED_CONFIG_ROOTS`) plus its own session workspace, and never gets stdio's local trust.
 
+`ASH_MCP_TRANSPORT` is an operator override on top of that: set to `streamable-http` or `sse`, it makes every caller in the process remote, in-process ones included. It is read stripped and in any case. A value that names no transport (`streamable_http`, say) is treated as remote by an in-process caller, and `ash mcp` refuses to start with it (exit 3) rather than serve with the override in an unknown state.
+
 A caller with no session can still use the tools that take a path, inside the operator's grants. The tools that need a session refuse it with `error_type: session_identity_required` and an error naming `--trust-upstream-session-id`: `set_source_git`, `set_source_zip_chunk`, `set_source_zip_finalize`, `clear_source`, `select_profile`, `list_active_scans`, `get_scan_progress`, `cancel_scan`, and `run_ash_scan` without `source_dir`. A stateless server behind a plain load balancer therefore scans named, granted directories and reads results by path; source delivery needs a stateful server or a platform that issues the session header.
 
 With `--trust-upstream-session-id`, isolation between two callers is exactly as strong as the platform makes the header: ASH cannot tell a header the platform set from one a client set. The reserved values `__default__` and `__unidentified__` are refused. The flag is refused with any transport other than `streamable-http --stateless-http`, where the server issues its own sessions.

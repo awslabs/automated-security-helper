@@ -143,3 +143,10 @@ class TestSessionWorkspaceTtl:
         assert argv[at + 1] == "7200"
         _starts(argv)
         assert bound["kwargs"]["session_workspace_ttl"] == 7200
+
+
+def test_the_transport_is_passed_in_its_canonical_spelling(monkeypatch, bound) -> None:
+    argv = _argv(monkeypatch, {"ASH_MCP_TRANSPORT": "Streamable-HTTP"})
+
+    assert argv[argv.index("--transport") + 1] == "streamable-http"
+    _starts(argv)

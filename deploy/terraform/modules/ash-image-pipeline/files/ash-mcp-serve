@@ -75,7 +75,9 @@ def _split_hosts(raw: str) -> list[str]:
 
 
 def build_argv() -> list[str]:
-    transport = _env("ASH_MCP_TRANSPORT", DEFAULT_TRANSPORT)
+    # The same variable is ash's own override of caller trust, which ash reads
+    # in any case; the flag needs the canonical spelling.
+    transport = _env("ASH_MCP_TRANSPORT", DEFAULT_TRANSPORT).lower()
 
     argv = [
         "ash",

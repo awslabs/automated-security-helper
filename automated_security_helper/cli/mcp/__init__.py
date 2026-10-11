@@ -694,6 +694,25 @@ def mcp_command(
         )
         raise typer.Exit(3)
 
+    # ASH_MCP_TRANSPORT is the operator's override that makes every caller
+    # remote. A value it cannot read would be ignored by nothing and obeyed by
+    # nobody: refuse to start rather than serve with an override in an unknown
+    # state.
+    from automated_security_helper.cli.mcp.sandbox import (
+        ASH_MCP_TRANSPORT_ENV,
+        KNOWN_TRANSPORTS,
+        unknown_transport_override,
+    )
+
+    unknown = unknown_transport_override()
+    if unknown is not None:
+        _stderr.print(
+            f"[red]Validation Error: {ASH_MCP_TRANSPORT_ENV}={unknown!r} names no "
+            f"transport; use one of {sorted(KNOWN_TRANSPORTS)} (any case), or unset "
+            f"it.[/red]"
+        )
+        raise typer.Exit(3)
+
     # After the transport check, not with the auth options above: an unknown
     # transport combined with --stateless-http should be reported as an unknown
     # transport, which is the operator's actual mistake.

@@ -149,6 +149,9 @@ CONFIG_DIR_NAME = "config"
 #: Transports that carry callers the server does not otherwise trust.
 _NETWORKED_TRANSPORTS = frozenset({"streamable-http", "sse"})
 
+#: Every value ``ASH_MCP_TRANSPORT`` may hold, once stripped and lower-cased.
+KNOWN_TRANSPORTS = frozenset({"stdio"}) | _NETWORKED_TRANSPORTS
+
 #: Which transport this process serves. Held in the environment rather than in a
 #: module global, for two reasons that a global got wrong.
 #:
@@ -184,19 +187,38 @@ def set_server_transport(name: str) -> None:
 
 
 def get_server_transport() -> str:
-    """Return the transport this process serves, or the default if unset."""
+    """Return ``ASH_MCP_TRANSPORT`` stripped and lower-cased, or the default if unset.
 
-    return os.environ.get(ASH_MCP_TRANSPORT_ENV) or DEFAULT_TRANSPORT
+    Normalized because the variable is typed by an operator: ``Streamable-HTTP``
+    or a trailing newline from a secrets file names the same transport, and
+    compared verbatim it named none, which kept local trust.
+    """
+
+    return (os.environ.get(ASH_MCP_TRANSPORT_ENV) or "").strip().lower() or (
+        DEFAULT_TRANSPORT
+    )
 
 
 def transport_is_networked() -> bool:
-    """True when ``ASH_MCP_TRANSPORT`` explicitly names a networked transport.
+    """True unless ``ASH_MCP_TRANSPORT`` is unset or names stdio.
 
     An operator override, and the secondary signal. :func:`caller_is_remote` is
-    the primary one, because it is request-scoped and this is not.
+    the primary one, because it is request-scoped and this is not. A value that
+    names no known transport counts as networked: the operator set the variable
+    to say something about trust, and the safe reading of a typo is the
+    stricter one. ``ash mcp`` refuses to start with such a value
+    (:func:`unknown_transport_override`).
     """
 
-    return get_server_transport() in _NETWORKED_TRANSPORTS
+    return get_server_transport() != DEFAULT_TRANSPORT
+
+
+def unknown_transport_override() -> Optional[str]:
+    """The raw ``ASH_MCP_TRANSPORT`` value when it names no known transport."""
+
+    if get_server_transport() in KNOWN_TRANSPORTS:
+        return None
+    return os.environ.get(ASH_MCP_TRANSPORT_ENV)
 
 
 def caller_is_remote(session_id: Optional[str]) -> bool:
@@ -853,6 +875,8 @@ __all__ = [
     "config_chain_refusal",
     "config_is_client_supplied",
     "get_server_transport",
+    "KNOWN_TRANSPORTS",
+    "unknown_transport_override",
     "operator_config_roots",
     "operator_scan_roots",
     "session_sandbox",
