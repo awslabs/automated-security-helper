@@ -352,6 +352,19 @@ class RefusedInputInfo(BaseModel):
             ),
         ),
     ] = None
+    unlisted_members: Annotated[
+        int | None,
+        Field(
+            default=None,
+            exclude_if=lambda value: value is None,
+            description=(
+                "Set on a record that stands for several members: how many more "
+                "members of the archive were refused for the same reason without "
+                "a record of their own. An archive lists the first 20 refusals of "
+                "each reason one by one and counts the rest here."
+            ),
+        ),
+    ] = None
     # Left out of a dump when False, as limit is when None.
     scan_incomplete: Annotated[
         bool,

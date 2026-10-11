@@ -187,8 +187,10 @@
 - **An archive inside an archive is recorded as not scanned.** Extraction is one level
   deep, as before, but a member named as an archive or compressed file (`.zip`,
   `.tar`, `.gz`, `.tgz`, `.tar.bz2`, `.tar.xz`, `.jar`, `.whl`, `.7z`, `.rar` and the
-  like, in any case) used to be left out without a trace. It is now a refused member of its archive, with a warning, and
-  does not change the exit code.
+  like, in any case) used to be left out without a trace. It is now a refused member
+  of its archive, with a warning, and does not change the exit code. Past the first
+  20 refusals of a reason in one archive, the rest are counted in one record
+  (`unlisted_members`) rather than listed.
 
 - **Every input a converter did not read is in the reports.** The console summary,
   `ash.summary.txt`, `ash.summary.md`, `ash.flat.json` (`converter_refusals`, always

@@ -235,6 +235,11 @@ tree, the archive member's name where there is one, and the reason:
 ]
 ```
 
+Within one archive, the first 20 members refused for each reason are listed one by
+one, with a warning each. The rest are one record, with `member` null and
+`unlisted_members` set to how many more there were, and one warning, so an archive
+of thousands of links or nested archives does not produce thousands of records.
+
 `limit` is present only for an archive refused for an extraction limit. That record
 and the record of an archive that could not be read carry `"scan_incomplete": true`:
 those are the refusals that leave a whole archive unscanned, and the completeness

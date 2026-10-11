@@ -8,7 +8,7 @@ import shutil
 import stat
 from pathlib import Path, PurePosixPath
 import tarfile
-from typing import Annotated, BinaryIO, List, Literal, Optional, Tuple
+from typing import Annotated, BinaryIO, Dict, List, Literal, Optional, Tuple
 import zipfile
 
 from pydantic import Field, PositiveInt
@@ -252,6 +252,11 @@ _MEMBER_NESTED_ARCHIVE = (
 
 _COPY_CHUNK = 1024 * 1024
 
+#: How many refused members of one archive are listed one by one for each reason.
+#: The rest are counted in one record, so an archive of many links or nested
+#: archives does not produce a record, a warning and a SARIF notification apiece.
+MEMBER_REFUSALS_LISTED = 20
+
 
 def _sparse_map_problem(member: tarfile.TarInfo) -> Optional[str]:
     """Why a sparse tar member's map cannot be extracted within its size, or None.
@@ -424,6 +429,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         """
         ASH_LOGGER.verbose(f"Inspecting {len(members)} members from archive")
         filtered_members = []
+        # Refusals by reason: how many were listed, and how many more were not.
+        listed: Dict[str, int] = {}
+        unlisted: Dict[str, int] = {}
         for member in members:
             if isinstance(member, tarfile.TarInfo):
                 member_name = member.name
@@ -471,11 +479,22 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             if problem is None and nested:
                 problem = _MEMBER_NESTED_ARCHIVE
             if problem is not None:
-                self._refuse_member(archive, member_name, problem)
+                if listed.get(problem, 0) < MEMBER_REFUSALS_LISTED:
+                    listed[problem] = listed.get(problem, 0) + 1
+                    self._refuse_member(archive, member_name, problem)
+                else:
+                    unlisted[problem] = unlisted.get(problem, 0) + 1
                 continue
 
             ASH_LOGGER.verbose(f"Found .{member_ext} file: {member}")
             filtered_members.append(member)
+        for problem, count in unlisted.items():
+            if archive is None:
+                ASH_LOGGER.warning(f"Skipped {count} more archive members: {problem}")
+            else:
+                self.record_refused_input(
+                    TreeInputRefused(archive, problem), unlisted_members=count
+                )
         return filtered_members
 
     def convert(self) -> List[Path]:

@@ -61,6 +61,7 @@ class ConverterRefusal:
     limit: Optional[str] = None
 
     unreadable: bool = False
+    unlisted_members: Optional[int] = None
 
     @property
     def scan_incomplete(self) -> bool:
@@ -68,6 +69,8 @@ class ConverterRefusal:
         return bool(self.limit) or self.unreadable
 
     def subject(self) -> str:
+        if self.unlisted_members is not None:
+            return f"{self.unlisted_members} more members of '{self.path}'"
         if self.member:
             return f"member '{self.member}' of '{self.path}'"
         return f"'{self.path}'"
@@ -83,6 +86,7 @@ class ConverterRefusal:
             "reason": self.reason,
             "limit": self.limit,
             "scan_incomplete": self.scan_incomplete,
+            "unlisted_members": self.unlisted_members,
         }
 
 
@@ -104,6 +108,7 @@ def converter_refusals(model: "AshAggregatedResults") -> List[ConverterRefusal]:
                     limit=getattr(item, "limit", None) or None,
                     unreadable=bool(getattr(item, "scan_incomplete", False))
                     and not getattr(item, "limit", None),
+                    unlisted_members=getattr(item, "unlisted_members", None),
                 )
             )
     refusals.sort(

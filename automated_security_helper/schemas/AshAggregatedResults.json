@@ -13369,6 +13369,19 @@
           "description": "True when refusing the input left its whole content unscanned: an archive over an extraction limit (limit names it) or one that could not be read. The completeness gate counts these as incomplete conversion; the other refusals, of one link or member ASH does not read by design, it does not.",
           "title": "Scan Incomplete",
           "type": "boolean"
+        },
+        "unlisted_members": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set on a record that stands for several members: how many more members of the archive were refused for the same reason without a record of their own. An archive lists the first 20 refusals of each reason one by one and counts the rest here.",
+          "title": "Unlisted Members"
         }
       },
       "required": [

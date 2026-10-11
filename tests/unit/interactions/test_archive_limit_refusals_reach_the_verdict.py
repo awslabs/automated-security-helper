@@ -158,6 +158,7 @@ class TestTheReports:
                 "reason": OVER_LIMIT.reason,
                 "limit": "max_member_bytes",
                 "scan_incomplete": True,
+                "unlisted_members": None,
             },
             {
                 "converter": "archive",
@@ -166,6 +167,7 @@ class TestTheReports:
                 "reason": NESTED.reason,
                 "limit": None,
                 "scan_incomplete": False,
+                "unlisted_members": None,
             },
         ]
 

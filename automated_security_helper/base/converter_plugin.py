@@ -104,6 +104,7 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         member: str | None = None,
         limit: str | None = None,
         scan_incomplete: bool = False,
+        unlisted_members: int | None = None,
     ) -> None:
         """Warn once about a refused input and keep it for the results row.
 
@@ -117,9 +118,17 @@ class ConverterPluginBase(PluginBase, Generic[T]):
             scan_incomplete: The refusal left the input's whole content unscanned
                 for another reason, such as an archive that could not be read. Set
                 as well whenever ``limit`` is.
+            unlisted_members: The record stands for this many more members of the
+                archive, refused for the same reason and not listed one by one.
         """
         # The names come from the scanned tree, so they are logged as data.
-        if member is None:
+        if unlisted_members is not None:
+            ASH_LOGGER.warning(
+                f"Skipped {unlisted_members} more members of archive "
+                f"'{refusal.path}', not listed one by one: {refusal.reason}",
+                extra=NO_MARKUP,
+            )
+        elif member is None:
             ASH_LOGGER.warning(
                 f"Skipped converter input '{refusal.path}': {refusal.reason}",
                 extra=NO_MARKUP,
@@ -137,6 +146,7 @@ class ConverterPluginBase(PluginBase, Generic[T]):
                 reason=refusal.reason,
                 limit=limit,
                 scan_incomplete=scan_incomplete or limit is not None,
+                unlisted_members=unlisted_members,
             )
         )
 
