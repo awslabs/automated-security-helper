@@ -26,8 +26,10 @@ Decisions, and why
    and ``.ignore`` files, then drops ``global_settings.ignore_paths`` matches and
    anything under ASH's own output directory. A workflow that is a symlink resolving
    outside the scan root is skipped with a warning, because actionlint follows it and
-   copies its lines into the report. ``--`` ends the flags, so a path that
-   begins with ``-`` is read as a file. A scan root with no workflow files does not
+   copies its lines into the report, and so is one that resolves to no file (a
+   missing target, or a loop), on which actionlint exits 3 and lints nothing.
+   ``--`` ends the flags, so a path that begins with ``-`` is read as a file. A
+   scan root with no workflow files does not
    run actionlint at all and reports SKIPPED ("evaluated nothing"), not PASSED.
 
 2. shellcheck and pyflakes are OFF by default. actionlint runs ``shellcheck`` on
@@ -643,6 +645,16 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 continue
             rel = path.relative_to(target_abs).as_posix()
             if not is_workflow_file(rel):
+                continue
+            # A link whose target is missing, or that loops, is a file actionlint
+            # cannot open: it exits 3 and no workflow in the run is linted. Checked
+            # before resolve(), which raises on a loop before Python 3.13.
+            if path.is_symlink() and not path.is_file():
+                self._plugin_log(
+                    f"Not linting {rel}: it is a symbolic link that does not "
+                    "resolve to a file.",
+                    level=logging.WARNING,
+                )
                 continue
             # A symlinked workflow is followed by actionlint, which copies the
             # target's lines into the SARIF snippet. Only pass files whose real

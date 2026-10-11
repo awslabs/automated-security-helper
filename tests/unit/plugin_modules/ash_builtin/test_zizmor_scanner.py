@@ -347,6 +347,33 @@ def test_an_input_that_resolves_outside_the_target_is_not_passed(
     # never becomes a candidate; held here so a change there cannot let it through.
 
 
+@pytest.mark.parametrize(
+    "links",
+    [
+        [(".github/workflows/broken.yml", "missing.yml")],
+        [("actions/broken/action.yml", "missing.yml")],
+        [
+            (".github/workflows/broken.yml", "loop.yml"),
+            (".github/workflows/loop.yml", "broken.yml"),
+        ],
+    ],
+    ids=["dangling-workflow", "dangling-action", "looping-workflow"],
+)
+def test_an_input_link_that_resolves_to_no_file_is_skipped_with_a_warning(
+    repo, caplog, links
+):
+    """zizmor cannot open such an input and fails the whole run, so it is skipped
+    with a warning, as a link pointing outside the scan root is."""
+    for link, points_at in links:
+        (repo / link).parent.mkdir(parents=True, exist_ok=True)
+        _symlink_or_skip(repo / link, Path(points_at))
+    scanner = _scanner(repo)
+    with caplog.at_level("WARNING"):
+        inputs = _relative(scanner._collect_inputs(repo, "source", []), repo)
+    assert inputs == EXPECTED_INPUTS
+    assert f"Not auditing {links[0][0]}" in caplog.text
+
+
 def test_a_symlink_inside_the_target_is_still_an_input(repo):
     """Only where a link points matters: one into the tree stays an input."""
     real = repo / ".github" / "workflows"

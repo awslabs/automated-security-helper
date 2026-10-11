@@ -121,7 +121,8 @@
   - zizmor (`>=1.29.0,<2.0.0`) on workflows and composite
     actions, run with `--offline`; GitHub tokens are withheld unless the operator
     sets `options.online_audits` (a config in the scanned tree cannot). A workflow
-    or action that resolves outside the scan root is skipped with a warning.
+    or action that resolves outside the scan root, or is a broken symlink, is
+    skipped with a warning.
   - trivy: `trivy fs` (0.75.0), `vuln` only by default, held to
     the trivy database's 24h bound; offline with no database it is MISSING with the
     reason. A scanner-level `severity_threshold` is passed as `--severity`, so lower

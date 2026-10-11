@@ -25,7 +25,8 @@ ASH passes zizmor two kinds of file, taken from its scan set so `.gitignore`,
 
 Files under directories named `node_modules`, `.venv` or `venv` are skipped, and so is a
 file that is a symlink resolving outside the scan root, with a warning: zizmor
-would read it where it points. A repository
+would read it where it points. A broken symlink (its target is missing, or links
+loop) is skipped with a warning too, since zizmor would fail the whole run on it. A repository
 with neither kind of file does not start zizmor; the scanner reports `SKIPPED`
 with zero findings, the same as cfn-nag on a repository with no templates.
 

@@ -809,6 +809,33 @@ def test_a_workflow_symlinked_outside_the_root_is_not_passed(
     assert files == [".github/workflows/clean.yml", ".github/workflows/vulnerable.yml"]
 
 
+@pytest.mark.parametrize("kind", ["dangling", "loop"])
+def test_a_workflow_link_that_resolves_to_no_file_is_skipped_with_a_warning(
+    repo, monkeypatch, on_path, caplog, kind
+):
+    """actionlint exits 3 on a file it cannot open, failing the whole run.
+
+    So a broken or looping link is skipped with a warning, as a link pointing
+    outside the scan root is, and the other workflows are still linted.
+    """
+    workflows = repo / ".github" / "workflows"
+    if kind == "dangling":
+        (workflows / "broken.yml").symlink_to("missing.yml")
+    else:
+        (workflows / "broken.yml").symlink_to("loop.yml")
+        (workflows / "loop.yml").symlink_to("broken.yml")
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, '{"version":"1.7.12","errors":[]}', 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    files = argv[argv.index("--") + 1 :]
+    assert files == [".github/workflows/clean.yml", ".github/workflows/vulnerable.yml"]
+    assert "Not linting .github/workflows/broken.yml" in caplog.text
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
 def test_a_non_executable_integration_path_is_missing(
     repo, monkeypatch, on_path, tmp_path

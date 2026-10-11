@@ -18,8 +18,9 @@ The files come from ASH's scan set, so ``.gitignore``, ``.ignore`` and the
 global ``ignore_paths`` exclusions apply, and are passed to zizmor explicitly. A
 directory input would make zizmor walk the tree itself and skip ASH's ignore
 rules. zizmor reads a symlinked input where it points, so a file whose real path
-is outside the real scan root is skipped with a warning, as actionlint's are. A target holding neither kind of file completes with zero findings and
-never starts zizmor.
+is outside the real scan root is skipped with a warning, as actionlint's are, and
+so is a link that resolves to no file, which zizmor could not open. A target
+holding neither kind of file completes with zero findings and never starts zizmor.
 
 Builtin, enabled by default
 ---------------------------
@@ -672,6 +673,16 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 continue
             relative = candidate.relative_to(target_abs)
             if not is_zizmor_input(relative):
+                continue
+            # A link whose target is missing, or that loops, is an input zizmor
+            # cannot open, and it fails the whole run. Checked before resolve(),
+            # which raises on a loop before Python 3.13.
+            if candidate.is_symlink() and not candidate.is_file():
+                self._plugin_log(
+                    f"Not auditing {relative.as_posix()}: it is a symbolic link "
+                    "that does not resolve to a file.",
+                    level=logging.WARNING,
+                )
                 continue
             # zizmor reads a symlinked input where it points. Only pass files whose
             # real path is inside the real scan root.
