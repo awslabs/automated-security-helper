@@ -203,8 +203,8 @@ scanners:
 | `checks` | string | `"all"` | Specific checks to run (comma-separated) |
 | `recursive` | bool | `true` | Recursively scan directories |
 | `config_file` | string | `null` | Path to custom Ferret YAML config file |
-| `use_default_config` | bool | `true` | Use the default config bundled with this plugin |
-| `profile` | string | `null` | Profile name from config file |
+| `use_default_config` | bool | `true` | Use the default config bundled with this plugin. Set by the operator only; see [Using profiles](#using-profiles) |
+| `profile` | string | `null` | Profile name from config file. Set by the operator only; see [Using profiles](#using-profiles) |
 | `exclude_patterns` | list | `[]` | Glob patterns to exclude |
 | `show_match` | bool | `false` | ⚠️ Display matched text in findings (see security warning below) |
 | `enable_preprocessors` | bool | `true` | Enable text extraction from documents (PDF, Office) |
@@ -306,7 +306,7 @@ scanners:
       checks: "CREDIT_CARD,SECRETS,SSN,PASSPORT"
       recursive: true
       profile: "security-audit"
-      config_file: "my-ferret-config.yaml"
+      config_file: "/etc/ash/ferret-config.yaml"  # outside the scanned tree
       # show_match: false  # Keep disabled to avoid logging sensitive data
       enable_preprocessors: true  # Extract text from PDFs, Office docs
       exclude_patterns:
@@ -315,6 +315,11 @@ scanners:
         - "vendor/**"
         - ".git/**"
 ```
+
+`profile`, `use_default_config` and `config_file` take effect only from the
+operator: `profile` and `use_default_config` from `--config-overrides` or a config
+file outside the scanned tree, and `config_file` only when the file it names is
+outside the tree.
 
 Note: Do NOT configure bare `debug`, `verbose`, `format`, or suppression options at the plugin level. Use `ferret_debug`/`ferret_verbose` for ferret-scan's own log output. Other options are managed by ASH globally.
 
@@ -379,6 +384,26 @@ The default configuration includes these pre-defined profiles:
 
 ### Using Profiles
 
+A profile changes what is reported: it can run fewer checks and report only
+higher-confidence findings. On ASH's ferret-scan test files, with ferret-scan
+2.5.3, the bundled config reported 111 findings with no profile, 30 with `quick`,
+and none with six of its profiles. The bundled `redaction` and `secure-redaction`
+profiles also have ferret-scan write redacted copies of the files it scans.
+`use_default_config: false` changes what is reported too, since the empty config
+it gives ferret-scan has none of the bundled validators' patterns.
+
+So `profile` and `use_default_config` are the operator's choice. A config file
+inside the scanned tree, or one an MCP client delivered, does not set them, and
+the scan's warnings name the value that was ignored (see
+[Settings a repository's config cannot choose](../../configuration-guide.md#settings-a-repositorys-config-cannot-choose)).
+Set them with `--config-overrides`:
+
+```bash
+ash --config-overrides 'scanners.ferret-scan.options.profile=security-audit'
+```
+
+or in a config file outside the scanned tree, named with `--config`:
+
 ```yaml
 scanners:
   ferret-scan:
@@ -401,13 +426,12 @@ scanners:
 
 ### Option 2: Config File in Source Directory
 
-The plugin searches for config files in this order:
-1. Explicitly specified `config_file` path
-2. `ferret.yaml` or `.ferret.yaml` in the source directory
-3. `.ash/ferret.yaml` or `.ash/ferret-scan.yaml` in the source directory
-4. Default config bundled with this plugin
-
-Simply create a `ferret.yaml` or `.ferret.yaml` in your project root to override the defaults.
+A config file inside the scanned tree is not passed to ferret-scan, whether
+`config_file` names it or the plugin finds it by name (`ferret.yaml`,
+`ferret.yml`, `.ferret.yaml`, `.ferret.yml`, `.ash/ferret.yaml` or
+`.ash/ferret-scan.yaml` in the source directory). The bundled config is used
+instead, and the scan's warnings name the file. Put the file outside the scanned
+tree and name it with `config_file`.
 
 ### Option 3: Disable Default Config
 
@@ -418,6 +442,9 @@ scanners:
     options:
       use_default_config: false  # Use ferret-scan's built-in defaults only
 ```
+
+Like `profile`, this is honored only from the operator: `--config-overrides` or a
+config file outside the scanned tree.
 
 ### Creating a Custom Config File
 

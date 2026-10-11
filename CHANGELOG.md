@@ -241,6 +241,17 @@
     a `config_warning` validation checkpoint. To leave files out, list them in
     `global_settings.ignore_paths`; under the MCP server a client's entries there
     are marked `client_supplied`, as usual.
+    written as a string.
+  - ferret-scan's `profile` and `use_default_config` are the operator's too. A
+    profile chooses which checks ferret-scan runs and the lowest confidence it
+    reports (with ferret-scan 2.5.3 on ASH's test files, the bundled config
+    reported 111 findings with no profile, 30 with `quick` and none with six of
+    its profiles), and `use_default_config: false` drops the bundled config's
+    validator patterns. From such a file both are ignored, with a warning naming
+    the key; set them with `--config-overrides`, for example
+    `--config-overrides scanners.ferret-scan.options.profile=security-audit`, or
+    in a config file outside the tree. ferret-scan's `checks`,
+    `confidence_levels` and other options still apply from the tree.
   - A reporter's `extension` has to be a filename suffix, from any source: a value
     with `/`, `\`, `..` or NUL is replaced by the reporter's default, with a
     warning naming the key. Reports, the files the unused-suppressions, S3 and

@@ -182,6 +182,13 @@ scanners:
 > v2.4.5). Set `false` to rely only on ferret-scan's built-in defaults plus your explicit
 > ASH options; keep it `true` (or use `profile`) to pick up the bundled validator patterns.
 
+> **`use_default_config` and `profile` are the operator's**: both change what is
+> reported (with ferret-scan 2.5.3 on ASH's test files, the bundled config reported 111
+> findings with no profile, 30 with `quick` and none with six of its profiles), so a
+> config file inside the scanned tree, or one an MCP client delivered, does not set
+> them. Set them with `--config-overrides` or in a config file outside the tree. See
+> "Settings a repository's config cannot choose" in the configuration guide.
+
 > **Note on `exclude_patterns`**: Ferret-scan's `--exclude` matches each pattern with
 > Go's `filepath.Match` glob (`*`, `?`, `[abc]` — `**` globstar is **not** supported)
 > **and** as a plain substring of the full path. So `.venv` excludes any path containing
@@ -197,8 +204,8 @@ scanners:
 | `checks` | string | `"all"` | Specific checks to run (comma-separated) |
 | `recursive` | bool | `true` | Recursively scan directories |
 | `config_file` | string | `null` | Path to custom Ferret YAML config file |
-| `use_default_config` | bool | `true` | Use the default config bundled with this plugin |
-| `profile` | string | `null` | Profile name from config file |
+| `use_default_config` | bool | `true` | Use the default config bundled with this plugin. Set by the operator only (see above) |
+| `profile` | string | `null` | Profile name from config file. Set by the operator only (see above) |
 | `exclude_patterns` | list | `[]` | Patterns to exclude from scanning (directory names or file patterns, e.g., `.venv`, `*.log`) |
 | `show_match` | bool | `false` | ⚠️ Display matched text in findings (see security warning above) |
 | `enable_preprocessors` | bool | `true` | Enable text extraction from documents |
@@ -235,15 +242,14 @@ scanners:
       config_file: "/path/to/your/custom-ferret.yaml"
 ```
 
-#### Option 2: Place a config file in your source directory
+#### Option 2: A config file in your source directory is not used
 
-The plugin searches for config files in this order:
-1. Explicitly specified `config_file` path
-2. `ferret.yaml` or `.ferret.yaml` in the source directory
-3. `.ash/ferret.yaml` or `.ash/ferret-scan.yaml` in the source directory
-4. Default config bundled with this plugin
-
-Simply create a `ferret.yaml` or `.ferret.yaml` in your project root to override the defaults.
+A config file inside the scanned tree is not passed to ferret-scan, whether
+`config_file` names it or the plugin finds it by name (`ferret.yaml`,
+`ferret.yml`, `.ferret.yaml`, `.ferret.yml`, `.ash/ferret.yaml` or
+`.ash/ferret-scan.yaml` in the source directory). The bundled config is used
+instead, and the scan's warnings name the file. Put the file outside the scanned
+tree and name it with `config_file`.
 
 #### Option 3: Disable the default config entirely
 
@@ -266,7 +272,7 @@ scanners:
       checks: "CREDIT_CARD,SECRETS,SSN,PASSPORT"
       recursive: true
       profile: "security-audit"  # Use predefined profile from config
-      config_file: "my-ferret-config.yaml"  # Custom config file
+      config_file: "/etc/ash/ferret-config.yaml"  # Custom config file, outside the scanned tree
       # show_match: false  # Keep disabled to avoid logging sensitive data
       enable_preprocessors: true  # Extract text from PDFs, Office docs
       exclude_patterns:

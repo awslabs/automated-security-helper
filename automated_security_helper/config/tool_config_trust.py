@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A scanner's own config file comes from the operator, not from the scanned tree.
+"""A scanner's own config file, and which part of it the tool uses, come from the operator.
 
 Why this exists
 ---------------
@@ -17,11 +17,21 @@ chose what its own scan reported. A repository's tool configs are now ignored
 unless the operator sets them, as checkov's and ferret-scan's already are
 (``config/path_trust.py``).
 
+ferret-scan's ``profile`` and ``use_default_config`` are the same kind of choice
+made a different way: they pick which part of the config ASH passes ferret-scan is
+used. With ferret-scan 2.5.3 on one set of test files, the bundled config reported
+111 findings, its ``quick`` profile 30 and six of its profiles none; ``redaction``
+and ``secure-redaction`` also have ferret-scan write redacted copies of the files
+it scans into its working directory. ``use_default_config: false`` swaps the
+bundled config for an empty one, which leaves out findings the bundled config's
+validators report.
+
 What happens now
 ----------------
 * When the config was built from a file inside the scanned tree, or from a file
   an MCP client delivered, ``config_file`` of each scanner in
-  ``SCANNER_CONFIG_FILE_OPTIONS`` comes from the trusted base ``resolve_config``
+  ``SCANNER_CONFIG_FILE_OPTIONS``, and each option in
+  ``SCANNER_CONFIG_CHOICE_OPTIONS``, comes from the trusted base ``resolve_config``
   builds (the defaults, or an operator config outside the tree), with
   ``--config-overrides`` replayed onto it (``confine_scanner_config_files``). An
   operator who wants a repository's own file names it with
@@ -48,6 +58,10 @@ Failure modes and known limitations
   ``config/path_trust.py`` still refuses one inside the tree whoever names it.
   A baseline or tool config the scanner finds by name in the tree is
   ``path_trust``'s, not this module's.
+* ferret-scan's ``checks``, ``confidence_levels`` and ``exclude_patterns`` still
+  apply from a repository's config, as other scanners' own filter options do:
+  they are ASH options the config states, not a choice inside the tool's config.
+  Under the MCP server they are default ``denied_paths`` entries.
 """
 
 from __future__ import annotations
@@ -82,7 +96,27 @@ SCANNER_CONFIG_FILE_OPTIONS: Dict[str, Tuple[str, ...]] = {
 #: worker loads code from (``file://<path>``).
 _SETTINGS_FILE_LISTS: Tuple[str, ...] = ("plugins_used", "filters_used")
 
+#: Options that choose which part of a scanner's own config the tool uses, each
+#: with its default, which is what applies when the operator sets nothing.
+SCANNER_CONFIG_CHOICE_OPTIONS: Dict[str, Dict[str, Any]] = {
+    "ferret-scan": {"profile": None, "use_default_config": True},
+}
+
 _MISSING = object()
+
+
+def _confined_options() -> Dict[str, Dict[str, Any]]:
+    confined: Dict[str, Dict[str, Any]] = {
+        scanner: dict.fromkeys(names)
+        for scanner, names in SCANNER_CONFIG_FILE_OPTIONS.items()
+    }
+    for scanner, defaults in SCANNER_CONFIG_CHOICE_OPTIONS.items():
+        confined.setdefault(scanner, {}).update(defaults)
+    return confined
+
+
+def _or_default(value: Any, default: Any) -> Any:
+    return default if value is _MISSING or value is None else value
 
 
 def _options_of(section: Any) -> Any:
@@ -98,14 +132,14 @@ def _get(options: Any, name: str) -> Any:
     return getattr(options, name, _MISSING)
 
 
-def _set(options: Any, name: str, value: Any) -> None:
+def _set(options: Any, name: str, value: Any, default: Any) -> None:
     if isinstance(options, dict):
         if value is _MISSING:
             options.pop(name, None)
         else:
             options[name] = value
     else:
-        setattr(options, name, None if value is _MISSING else value)
+        setattr(options, name, _or_default(value, default))
 
 
 def confine_scanner_config_files(
@@ -114,7 +148,7 @@ def confine_scanner_config_files(
     config_overrides: Optional[Sequence[str]],
     in_tree: Sequence[Path],
 ) -> None:
-    """Replace the tool config files an in-tree or delivered file named with the trusted base's.
+    """Replace the tool config choices an in-tree or delivered file made with the trusted base's.
 
     Args:
         config: The resolved AshConfig, changed in place.
@@ -143,36 +177,34 @@ def confine_scanner_config_files(
         trusted_config = apply_config_overrides(trusted_config, scanner_overrides)
 
     ignored: List[str] = []
-    for scanner, option_names in SCANNER_CONFIG_FILE_OPTIONS.items():
+    for scanner, option_defaults in _confined_options().items():
         trusted_section = trusted_config.get_plugin_config("scanner", scanner)
         trusted_options = (trusted_section or {}).get("options") or {}
         for key, section in _scanner_sections(config, scanner):
             options = _options_of(section)
             if options is None:
                 continue
-            for name in option_names:
+            for name, default in option_defaults.items():
                 wanted = trusted_options.get(name, _MISSING)
-                current = _get(options, name)
-                if current in (_MISSING, None) and wanted in (_MISSING, None):
-                    continue
-                if current == wanted or (
-                    current not in (_MISSING, None)
+                current = _or_default(_get(options, name), default)
+                if current == _or_default(wanted, default) or (
+                    current is not None
                     and wanted not in (_MISSING, None)
                     and str(current) == str(wanted)
                 ):
                     continue
-                if current not in (_MISSING, None):
+                if current != default:
                     ignored.append(f"scanners.{key}.options.{name}")
-                _set(options, name, wanted)
+                _set(options, name, wanted, default)
     ignored.extend(_confine_settings_files(config, trusted_config))
     if ignored:
         files = ", ".join(describe_config_path(path) for path in in_tree)
         ASH_LOGGER.warning(
             f"Ignoring {', '.join(sorted(set(ignored)))} from {files}: a scanner's "
-            "own config file, the rules it runs and whether it sends metrics are "
-            "the operator's choice, and that config is inside the scanned tree or "
-            "was delivered by an MCP client. Set them with --config-overrides or in "
-            "a config file outside the tree."
+            "own config file, which part of it the tool uses, the rules it runs and "
+            "whether it sends metrics are the operator's choice, and that config is "
+            "inside the scanned tree or was delivered by an MCP client. Set them with "
+            "--config-overrides or in a config file outside the tree."
         )
 
 
