@@ -14,7 +14,10 @@ def _ash_config_file() -> Optional[Path]:
     value counts as unset, as click treats an empty ``--config`` environment
     variable, so a CI template that passes an empty input keeps working.
     """
-    from automated_security_helper.core.exceptions import ASHConfigSourceError
+    from automated_security_helper.core.exceptions import (
+        ASHConfigFileNotFoundError,
+        ASHConfigSourceError,
+    )
 
     config_env_var = os.environ.get("ASH_CONFIG", None)
     if not config_env_var:
@@ -26,7 +29,7 @@ def _ash_config_file() -> Optional[Path]:
         )
     path = Path(config_env_var)
     if not path.exists():
-        raise ASHConfigSourceError(
+        raise ASHConfigFileNotFoundError(
             f"ASH_CONFIG names {config_env_var}, which does not exist. Point "
             "ASH_CONFIG at an existing config file, or unset it to use ASH's "
             "built-in defaults."

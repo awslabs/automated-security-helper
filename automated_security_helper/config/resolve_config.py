@@ -46,6 +46,7 @@ from automated_security_helper.core.constants import (
     ASH_RC_FILE_NAMES,
 )
 from automated_security_helper.core.exceptions import (
+    ASHConfigFileNotFoundError,
     ASHConfigSourceError,
     ASHConfigValidationError,
 )
@@ -86,11 +87,11 @@ def _config_file_not_loadable(config_path: Path) -> ASHConfigSourceError:
         os.stat(config_path)
     except FileNotFoundError:
         if os.path.islink(config_path):
-            return ASHConfigSourceError(
+            return ASHConfigFileNotFoundError(
                 f"Configuration file not found: {where} is a symbolic link to a "
                 "file that does not exist."
             )
-        return ASHConfigSourceError(f"Configuration file not found: {where}")
+        return ASHConfigFileNotFoundError(f"Configuration file not found: {where}")
     except OSError as exc:
         if exc.errno == errno.ELOOP:
             return ASHConfigSourceError(
@@ -103,6 +104,20 @@ def _config_file_not_loadable(config_path: Path) -> ASHConfigSourceError:
     return ASHConfigSourceError(
         f"Configuration file {where} is not a regular file, so it cannot be read."
     )
+
+
+def check_config_path(config_path: Path | str) -> Path:
+    """``config_path`` as a Path, refused when it is empty or not a regular file.
+
+    The checks ``read_config_document`` makes before reading, for a caller that
+    reads the file some other way (MCP ``get_config`` with ``raw``).
+    """
+    if isinstance(config_path, str) and not config_path.strip():
+        raise _empty_config_path()
+    path = Path(config_path)
+    if not path.is_file():
+        raise _config_file_not_loadable(path)
+    return path
 
 
 def read_config_document(
@@ -128,11 +143,7 @@ def read_config_document(
     line, for a caller that reads the file ahead of the resolution that reports
     the same failure.
     """
-    if isinstance(config_path, str) and not config_path.strip():
-        raise _empty_config_path()
-    path = Path(config_path)
-    if not path.is_file():
-        raise _config_file_not_loadable(path)
+    path = check_config_path(config_path)
     try:
         return resolve_config_document(
             path, confine_to=confine_to, permit_base=permit_base

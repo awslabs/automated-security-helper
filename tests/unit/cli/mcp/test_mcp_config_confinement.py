@@ -323,6 +323,43 @@ class TestRunAshScanConfinesTheChain:
         assert result["error_type"] == _CONFIG_REFUSED
         started.assert_not_called()
 
+    def test_an_unparseable_config_outside_the_grant_is_refused_unread(self, layout):
+        """Confinement is checked before the file is parsed, so a file outside the
+        grant is refused as outside it, and nothing about its contents -- not even
+        that it does not parse -- reaches the client."""
+        from automated_security_helper.cli.mcp_tools import mcp_scan_directory
+
+        layout.far.write_text(f"project_name: [{_OUTSIDE_MARKER}\n", encoding="utf-8")
+        with patch(
+            "automated_security_helper.cli.mcp_tools._run_scan_async"
+        ) as started:
+            result = _run(
+                mcp_scan_directory(
+                    directory_path=str(layout.scan),
+                    config_path=str(layout.far),
+                    session_id=_SESSION,
+                )
+            )
+
+        assert result["success"] is False
+        assert result["error_type"] == _CONFIG_REFUSED
+        # The path holds the test's name, so look for the parser's own words.
+        assert "could not parse" not in json.dumps(result)
+        assert "while parsing" not in json.dumps(result)
+        _assert_carries_nothing_from(result)
+        started.assert_not_called()
+
+    def test_the_load_check_does_not_read_a_file_outside_the_grant(self, layout):
+        """config_load_error leaves a refused file to validate_config_chain, unread."""
+        layout.far.write_text(f"project_name: [{_OUTSIDE_MARKER}\n", encoding="utf-8")
+
+        assert (
+            sandbox.config_load_error(
+                layout.far, session_id=_SESSION, source_dir=layout.scan
+            )
+            is None
+        )
+
     def test_the_scan_itself_receives_the_sessions_gate(self, layout):
         """The preflight is not the only check: the scan resolves under the grant too."""
         from automated_security_helper.cli import mcp_tools

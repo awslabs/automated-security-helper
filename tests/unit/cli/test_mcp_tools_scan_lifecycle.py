@@ -138,6 +138,26 @@ class TestScanDirectoryValidation:
             in result["suggestions"]
         )
 
+    def test_an_empty_config_path_is_rejected_before_a_scan_is_registered(
+        self, allowed_root, registry
+    ):
+        """An empty config_path is a config input, not "no config"; refused up front.
+
+        It used to skip the checks, register a scan, and fail that scan with exit 3.
+        """
+        registry.register_scan.return_value = "scan-1"
+
+        with (
+            patch(f"{_TOOLS}.get_scan_registry", return_value=registry),
+            patch(f"{_TOOLS}._run_scan_async", new=AsyncMock()) as run_scan_async,
+        ):
+            result = asyncio.run(mcp_scan_directory(str(allowed_root), config_path=""))
+
+        assert result["success"] is False, f"a scan was started: {result}"
+        assert result["operation"] == "scan_directory"
+        registry.register_scan.assert_not_called()
+        run_scan_async.assert_not_called()
+
     def test_config_file_with_a_rejected_extension_is_reported(self, allowed_root):
         bad_config = allowed_root / "ash.txt"
         bad_config.write_text("project_name: demo\n")

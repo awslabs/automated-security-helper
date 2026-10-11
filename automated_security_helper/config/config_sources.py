@@ -158,6 +158,7 @@ from automated_security_helper.core.constants import (
     ASH_RC_FILE_NAMES,
 )
 from automated_security_helper.core.exceptions import (
+    ASHConfigFileNotFoundError,
     ASHConfigInputNotPermittedError,
     ASHConfigSourceError,
 )
@@ -383,12 +384,17 @@ def _pyproject_is_a_source(path: Path, found_before: List[ConfigSource]) -> bool
     the defaults while its [tool.ash] table, if it has one, sat unread.
     """
     try:
-        if not path.is_file():
-            raise OSError(f"{path.as_posix()} is not a regular file")
+        # read_config_bytes refuses a FIFO, a directory or a device unread.
         return pyproject_has_ash_table(path)
     except OSError as exc:
         if not found_before:
-            raise ASHConfigSourceError(
+            # A name that exists but leads nowhere: a symbolic link to nothing.
+            refusal = (
+                ASHConfigFileNotFoundError
+                if isinstance(exc, FileNotFoundError)
+                else ASHConfigSourceError
+            )
+            raise refusal(
                 f"Could not read {path.as_posix()} ({exc}), so ASH cannot tell "
                 "whether it holds a [tool.ash] table. Make it readable, remove "
                 "it, or name a config file with --config."

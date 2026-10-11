@@ -780,8 +780,9 @@
   `--config` is now passed to planning and must name an existing file even when
   every project has its own config; the workspace execution settings read from the
   workspace root's config no longer fall back to their defaults), and to the MCP
-  server, where `scan_directory` refuses the file before starting a scan and
-  `get_config` returns an error instead of the default configuration. A config
+  server, where `scan_directory` refuses the file (and an empty `config_path`)
+  before starting a scan and `get_config` returns an error instead of the default
+  configuration, also with `raw` and when discovery itself refuses. A config
   source that discovery found and ignored is now also reported as a
   `config_warning` in the scan's results and summary, since its settings are not
   applied. **A CI job that set `ASH_CONFIG` to a file it only sometimes writes now

@@ -65,6 +65,30 @@ MCP_SCAN_OUTPUT_REMEDY = (
 CONFIG_INPUT_NOT_PERMITTED = "config_input_not_permitted"
 
 
+def _config_load_failure(error: Exception, path: Optional[Path]) -> Dict[str, Any]:
+    """The get_config response for a config that could not be loaded.
+
+    ``file_not_found`` when the file does not exist (a missing path, a link to
+    nothing), ``invalid_format`` for anything else. ``path`` is None when
+    discovery itself refused, before a file was selected.
+    """
+    from automated_security_helper.core.exceptions import ASHConfigFileNotFoundError
+
+    not_found = isinstance(error, (ASHConfigFileNotFoundError, FileNotFoundError))
+    category = (
+        ErrorCategory.FILE_NOT_FOUND if not_found else ErrorCategory.INVALID_FORMAT
+    )
+    context: Dict[str, Any] = {"error_category": category.value}
+    if path is not None:
+        context["config_path"] = str(path)
+        message = f"Configuration file {path} cannot be loaded: {error}"
+    else:
+        message = f"The configuration cannot be loaded: {error}"
+    return create_error_response(
+        MCPResourceError(message, context=context), "get_config"
+    )
+
+
 def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
     """The response for a config input outside the permitted roots.
 
@@ -197,11 +221,26 @@ async def mcp_scan_directory(
 
     # Validate config path if provided. Confinement first, covering every base the
     # config extends, so a refused path is reported as refused and not as missing.
-    if config_path:
+    # `is not None`: an empty path is a config input too, and is refused here
+    # rather than starting a scan that fails on it.
+    if config_path is not None:
         from automated_security_helper.cli.mcp.sandbox import (
             config_load_error,
             validate_config_chain,
         )
+
+        if not config_path.strip():
+            return create_error_response(
+                error=MCPResourceError(
+                    "The configuration file path is empty. Name a config file, or "
+                    "omit config_path to use the configuration found in the "
+                    "directory.",
+                    context={
+                        "error_category": ErrorCategory.INVALID_PARAMETER.value,
+                    },
+                ),
+                operation="scan_directory",
+            )
 
         chain_error = validate_config_chain(
             config_path, session_id=session_id, source_dir=resolved_target
@@ -1314,11 +1353,13 @@ def mcp_get_config(
         get_session_source_dir,
     )
     from automated_security_helper.config.resolve_config import (
+        check_config_path,
         resolve_config,
         find_config_file,
     )
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
+        read_config_bytes,
         read_config_file,
     )
     from automated_security_helper.config.default_config import get_default_config
@@ -1361,7 +1402,11 @@ def mcp_get_config(
         )
         path = None
         if refusal is None:
-            path = find_config_file(search_dir=search)
+            try:
+                path = find_config_file(search_dir=search)
+            except ASHConfigValidationError as exc:
+                # Discovery refused a source it could not read.
+                return _config_load_failure(exc, None)
             if path is not None:
                 refusal = validate_config_input(path, session_id=session_id)
         if refusal is not None:
@@ -1371,10 +1416,19 @@ def mcp_get_config(
         return get_default_config().model_dump()
 
     if raw:
-        if path.name.endswith(".toml"):
-            # pyproject.toml yields its [tool.ash] table, as when it is loaded.
-            return read_config_file(path) or {}
-        return _yaml.safe_load(path.read_text()) or {}
+        try:
+            check_config_path(path)
+            if path.name.endswith(".toml"):
+                # pyproject.toml yields its [tool.ash] table, as when it is loaded.
+                return read_config_file(path) or {}
+            return _yaml.safe_load(read_config_bytes(path).decode("utf-8")) or {}
+        except (
+            ASHConfigValidationError,
+            OSError,
+            UnicodeDecodeError,
+            _yaml.YAMLError,
+        ) as exc:
+            return _config_load_failure(exc, path)
 
     # resolve_config short-circuits to default when source_dir is None, so
     # supply one to force it to read the specified file. It is also where
@@ -1415,16 +1469,7 @@ def mcp_get_config(
     except ASHConfigInputNotPermittedError as exc:
         return _config_refusal(config_chain_refusal(path, exc), "get_config")
     except ASHConfigValidationError as exc:
-        return create_error_response(
-            MCPResourceError(
-                f"Configuration file {path} cannot be loaded: {exc}",
-                context={
-                    "config_path": str(path),
-                    "error_category": ErrorCategory.INVALID_FORMAT.value,
-                },
-            ),
-            "get_config",
-        )
+        return _config_load_failure(exc, path)
     return resolved.model_dump()
 
 

@@ -84,8 +84,12 @@ ignore paths, thresholds and sandbox settings, and report the scan as completed.
 The same applies to `ash report`, `ash plugin list`, `ash dependencies install`
 and `ash config get` (each exits 3), to workspace mode (see
 [Workspace mode](cli-reference.md#workspace-mode)), and to the MCP server:
-`scan_directory` refuses such a file before it starts a scan, and `get_config`
-returns an error instead of the default configuration.
+`scan_directory` refuses such a file, and an empty `config_path`, before it
+starts a scan, and `get_config` (with or without `raw`) returns an error instead
+of the default configuration, with `error_category` `file_not_found` for a file
+that does not exist and `invalid_format` for one that does not load. A config
+file outside the session's allowed config roots is refused as outside them
+before anything reads it, so the response says nothing about its contents.
 
 ### Configuring ASH in pyproject.toml
 

@@ -822,8 +822,10 @@ def config_load_error(
     a chain that does not resolve, are reported here, before a scan is
     registered: the scan's own resolution refuses them, so starting one would only
     turn a configuration error into a failed scan. Call it after
-    :func:`validate_config_chain`, which reports a base outside the session's
-    grant as a refusal; that case is not reported again here.
+    :func:`validate_config_chain`, which reports a file or a base outside the
+    session's grant as a refusal; that case is not reported again here, and a file
+    the session may not read is not read here either, so its contents cannot
+    shape this answer.
 
     Args:
         config_path: Caller-supplied path to a config file.
@@ -843,6 +845,8 @@ def config_load_error(
         ASHConfigValidationError,
     )
 
+    if validate_config_input(config_path, session_id=session_id) is not None:
+        return None
     path = Path(config_path)
     try:
         read_config_document(
