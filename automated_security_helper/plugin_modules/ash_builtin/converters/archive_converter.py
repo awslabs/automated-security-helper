@@ -337,6 +337,8 @@ class _BoundedTarStream(io.RawIOBase):
         self._allowance: Optional[int] = (
             _TAR_HEADER_BYTES_BASE + _TAR_HEADER_BYTES_PER_MEMBER
         )
+        # Where the header pass's last read started, and what it returned.
+        self._last_read: Tuple[int, bytes] = (-1, b"")
 
     def readable(self) -> bool:
         return True
@@ -357,6 +359,19 @@ class _BoundedTarStream(io.RawIOBase):
     def end_header_pass(self) -> None:
         self._allowance = None
 
+    def block_at(self, offset: int) -> bytes:
+        """The tar block at ``offset``: up to 512 bytes, fewer where the stream ends.
+
+        Taken from the header pass's last read when that read was this block, which
+        it is when tarfile stopped there, so a compressed stream is not decompressed
+        again from the start to seek back to it.
+        """
+        start, data = self._last_read
+        if start == offset and len(data) == tarfile.BLOCKSIZE:
+            return data
+        self._raw.seek(offset)
+        return self._raw.read(tarfile.BLOCKSIZE)
+
     def read(self, size: Optional[int] = -1) -> bytes:
         if self._allowance is None:
             return self._raw.read(size)
@@ -365,7 +380,9 @@ class _BoundedTarStream(io.RawIOBase):
                 f"its headers ask for a read of {size} bytes, more than the "
                 f"{_TAR_READ_CAP} ASH reads at once for an archive header"
             )
+        start = self._raw.tell()
         data = self._raw.read(size)
+        self._last_read = (start, data)
         self._allowance -= len(data)
         if self._allowance < 0:
             raise _UnreadableArchive(
@@ -408,6 +425,12 @@ def _tar_members_within(
 
     A member's extended header has been applied to it by the time it is returned,
     so it is dropped rather than kept for every member until extraction.
+
+    tarfile ends the member list without an error where a header after the first
+    has a bad checksum, is cut short or is missing, so a damaged or truncated tar
+    would read as one with fewer members. The list has to end at an end-of-archive
+    block (512 zero bytes, which every tar writer puts after the last member), or
+    the archive is unreadable.
     """
     members = []
     for member in tar_ref:
@@ -416,6 +439,12 @@ def _tar_members_within(
         members.append(member)
         if stream is not None:
             stream.allow_another_member()
+    if stream is not None:
+        if stream.block_at(tar_ref.offset) != tarfile.NUL * tarfile.BLOCKSIZE:
+            raise _UnreadableArchive(
+                "its members stop before the end-of-archive block, so it is "
+                "truncated or one of its headers is damaged"
+            )
     return members
 
 

@@ -206,7 +206,11 @@
 - **An archive the converter cannot read makes the scan incomplete.** A `.zip`,
   `.tar` or `.gz` that zipfile and tarfile cannot read (a bad CRC, a truncated or
   damaged stream, an empty file) used to leave a log line, and a zip that failed part
-  way left its first members on disk, where the scanners read them. It is now
+  way left its first members on disk, where the scanners read them. A tar cut off
+  between members or inside a header, or with a damaged header after the first, was
+  read as a shorter archive: its first members were extracted and nothing was
+  recorded. A tar's members must now end at an end-of-archive block, which GNU tar,
+  bsdtar, `git archive` and Python's tarfile all write. Each of these is now
   recorded in `converter_results.archive.failed_inputs` (the record a converter's
   input that could not be converted gets); anything written from it is removed; and
   with `fail_on_incomplete_scanners` on the scan exits 1 naming it. The summaries,

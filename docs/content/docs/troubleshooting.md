@@ -594,8 +594,8 @@ One of three things, named in `converter_results.archive` in
 
 1. The archive is over an extraction limit: its `refused_inputs` record names the
    limit, such as `max_total_bytes`.
-2. The archive cannot be read (damaged, truncated, empty, or a `.tar.gz` that is not
-   a tarball): it is in `failed_inputs`.
+2. The archive cannot be read (damaged, truncated, a tar cut off between members,
+   empty, or a `.tar.gz` that is not a tarball): it is in `failed_inputs`.
 3. The file is a Git LFS pointer rather than the archive, because the checkout did not
    fetch the LFS objects. This is reported but does not fail the scan.
 

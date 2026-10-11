@@ -292,9 +292,15 @@ nested archive's contents scanned, extract it into the tree before the scan.
 
 ## Inputs a converter could not convert
 
-A notebook nbconvert could not convert (it exited non-zero, timed out, or wrote no
-output) and an archive that zipfile and tarfile cannot read are recorded under
-`converter_results.<converter>.failed_inputs`, with the reason:
+An archive that zipfile and tarfile cannot read is not extracted at all: a bad CRC, a
+truncated or damaged stream (a damaged single-file gzip included), an empty file, a
+`.tar.gz` that holds no tar, or headers over the read limits above. A tar's members
+must end at an end-of-archive block (512 zero bytes, which every common tar writer
+puts after the last member): tarfile stops reading members without an error at a
+damaged header or where the archive is cut off, so a tar that stops anywhere else is
+truncated or damaged, and is not extracted either. Such an archive, and a notebook
+nbconvert could not convert (it exited non-zero, timed out, or wrote no output), are
+recorded under `converter_results.<converter>.failed_inputs`, with the reason:
 
 ```json
 "failed_inputs": [
