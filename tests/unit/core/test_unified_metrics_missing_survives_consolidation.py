@@ -14,14 +14,19 @@ returns False is recorded MISSING per target by the executor, and that is the ca
 offline npm-audit with a lockfile.
 """
 
+# The models first, and the order matters. Imported first in a fresh process,
+# core.unified_metrics loads the built-in plugin modules part-way through its own
+# import; the reporters module imports it back, finds it partly initialized, and is
+# not registered, so every later test in that process (an xdist worker) runs with no
+# reporters. Measured: 107 snapshot tests failed with this file collected first.
+from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.scan_results_container import (
+    ScanResultsContainer,
+)
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.unified_metrics import (
     get_unified_scanner_metrics,
     populate_metrics_from_unified_source,
-)
-from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.models.scan_results_container import (
-    ScanResultsContainer,
 )
 
 
