@@ -26,7 +26,9 @@ Why the community tools are fakes
 ``snyk``, ``trivy`` and ``ferret-scan`` on PATH are recorders that write their
 argv and cwd to a log and talk to no network. HOME is a temporary directory and
 PATH holds only the fakes and the interpreter's own directory, so no real tool or
-credential on the host is reachable. A tool "started against the tree" is one
+credential on the host is reachable. Every directory a tool or installer writes to,
+and stubs for the installers themselves, come from ``tests/utils/isolated_tool_env.py``,
+so nothing is written outside the test's temporary directory. A tool "started against the tree" is one
 whose argv names the scanned directory or whose cwd is inside it; a version probe
 is neither, and is allowed.
 
@@ -46,6 +48,11 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, List
+
+from tests.utils.isolated_tool_env import (
+    install_refusing_installers,
+    isolated_tool_env,
+)
 
 SNYK_MODULE = "automated_security_helper.plugin_modules.ash_snyk_plugins"
 
@@ -189,31 +196,6 @@ raise SystemExit(0)
 """
 
 
-def _uv_without_network() -> Dict[str, str]:
-    """Environment that keeps uv off the network and in the user's own directories.
-
-    Listing and building scan tasks probe, and when missing install, each
-    uv-managed scanner (``uv tool run`` / ``uv tool install``), even for scanners a
-    scan excludes. HOME is replaced below, and on POSIX uv keeps its cache, tools and
-    managed Pythons under HOME unless the XDG directories say otherwise, so every
-    case would refill an empty cache and tool directory. The XDG directories are
-    pinned to the real home's, which is where a normal run on this machine puts
-    them, and ``UV_OFFLINE`` makes a cache miss fail fast instead of fetching. On
-    Windows uv uses ``%LOCALAPPDATA%`` and ``%APPDATA%``, which HOME does not move.
-    """
-    env = {"UV_OFFLINE": "1"}
-    if platform.system().lower() == "windows":
-        return env
-    home = Path.home()
-    for name, default in (
-        ("XDG_CACHE_HOME", home / ".cache"),
-        ("XDG_DATA_HOME", home / ".local" / "share"),
-        ("XDG_BIN_HOME", home / ".local" / "bin"),
-    ):
-        env[name] = os.environ.get(name) or str(default)
-    return env
-
-
 _FAKE_TOOLS = ("snyk", "trivy", "ferret-scan")
 
 
@@ -256,6 +238,7 @@ class _Sequence:
         self.bin_dir.mkdir()
         for name in _FAKE_TOOLS:
             _install_fake(self.bin_dir, name)
+        install_refusing_installers(self.bin_dir)
         self.home = tmp_path / "home"
         self.home.mkdir()
         self.log = tmp_path / "fake-tools.log"
@@ -287,7 +270,7 @@ class _Sequence:
                 "SELECTION_FAKE_TOOL_LOG": str(self.log),
                 "ASH_MCP_ALLOWED_ROOTS": str(self.root),
                 "PYTHONIOENCODING": "utf-8",
-                **_uv_without_network(),
+                **isolated_tool_env(self.root / "tool-env"),
             }
         )
         return env

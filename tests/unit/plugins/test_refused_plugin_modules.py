@@ -27,7 +27,9 @@ keeps them and the namespace rule is the one under test.
 
 Each end-to-end scan runs ``detect-secrets`` only, which is a Python dependency of
 ASH, with HOME a temporary directory, PATH reduced to the interpreter's directory and
-uv held offline, so nothing reaches the network.
+stub installers, and every tool directory under the test's temporary directory
+(``tests/utils/isolated_tool_env.py``), so nothing reaches the network or the real
+home.
 """
 
 from __future__ import annotations
@@ -49,6 +51,10 @@ from automated_security_helper.workspace.execution import (
     prewarm_plugin_registry,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+from tests.utils.isolated_tool_env import (
+    install_refusing_installers,
+    isolated_tool_env,
+)
 
 #: Refused by the loader. The second and third are what a prefix test written as
 #: ``startswith("ash_plugins")`` or ``startswith("automated_security_helper")`` would
@@ -253,31 +259,6 @@ raise SystemExit("unknown mode " + mode)
 """
 
 
-def _uv_without_network() -> Dict[str, str]:
-    """Environment that keeps uv off the network and in the user's own directories.
-
-    Listing and building scan tasks probe, and when missing install, each
-    uv-managed scanner (``uv tool run`` / ``uv tool install``), even for scanners a
-    scan excludes. HOME is replaced below, and on POSIX uv keeps its cache, tools and
-    managed Pythons under HOME unless the XDG directories say otherwise, so every
-    case would refill an empty cache and tool directory. The XDG directories are
-    pinned to the real home's, which is where a normal run on this machine puts
-    them, and ``UV_OFFLINE`` makes a cache miss fail fast instead of fetching. On
-    Windows uv uses ``%LOCALAPPDATA%`` and ``%APPDATA%``, which HOME does not move.
-    """
-    env = {"UV_OFFLINE": "1"}
-    if platform.system().lower() == "windows":
-        return env
-    home = Path.home()
-    for name, default in (
-        ("XDG_CACHE_HOME", home / ".cache"),
-        ("XDG_DATA_HOME", home / ".local" / "share"),
-        ("XDG_BIN_HOME", home / ".local" / "bin"),
-    ):
-        env[name] = os.environ.get(name) or str(default)
-    return env
-
-
 class _Run:
     """One ASH process in a fresh interpreter, with the packages on its path."""
 
@@ -288,6 +269,8 @@ class _Run:
         self.markers.mkdir()
         self.home = tmp_path / "home"
         self.home.mkdir()
+        self.stubs = tmp_path / "stubs"
+        install_refusing_installers(self.stubs)
         self.workdir = tmp_path / "cwd"
         self.workdir.mkdir()
         self.tree = tmp_path / "tree"
@@ -301,8 +284,10 @@ class _Run:
             python_path.append(env["PYTHONPATH"])
         if platform.system().lower() != "windows":
             env["PATH"] = os.pathsep.join(
-                [str(Path(sys.executable).parent), "/usr/bin", "/bin"]
+                [str(self.stubs), str(Path(sys.executable).parent), "/usr/bin", "/bin"]
             )
+        else:
+            env["PATH"] = os.pathsep.join([str(self.stubs), env.get("PATH", "")])
         env.update(
             {
                 "PYTHONPATH": os.pathsep.join(python_path),
@@ -311,7 +296,7 @@ class _Run:
                 _MARKER_ENV: str(self.markers),
                 "ASH_MCP_ALLOWED_ROOTS": str(self.root),
                 "PYTHONIOENCODING": "utf-8",
-                **_uv_without_network(),
+                **isolated_tool_env(self.root / "tool-env"),
             }
         )
         env.update(extra or {})

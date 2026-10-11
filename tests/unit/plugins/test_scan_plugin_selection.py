@@ -25,9 +25,10 @@ Why the end-to-end cases run in a fresh interpreter
 ---------------------------------------------------
 The registry is process-global and what is under test is the order of scans in one
 process, so each sequence runs in its own subprocess. HOME is a temporary
-directory, PATH holds only the interpreter's directory and the system directories,
-uv is held offline and every scan runs with ``offline=True``, so no tool reaches
-the network. The built-in scanners are excluded so that each scan is quick.
+directory, PATH holds stub installers, the interpreter's directory and the system
+directories, every tool directory is under the test's temporary directory
+(``tests/utils/isolated_tool_env.py``) and every scan runs with ``offline=True``,
+so no tool reaches the network or writes to the real home. The built-in scanners are excluded so that each scan is quick.
 """
 
 from __future__ import annotations
@@ -42,6 +43,10 @@ from pathlib import Path
 from typing import Dict, List
 
 from automated_security_helper.plugins.plugin_manager import AshPluginManager
+from tests.utils.isolated_tool_env import (
+    install_refusing_installers,
+    isolated_tool_env,
+)
 
 SNYK_MODULE = "automated_security_helper.plugin_modules.ash_snyk_plugins"
 FERRET_MODULE = "automated_security_helper.plugin_modules.ash_ferret_plugins"
@@ -173,21 +178,6 @@ print("PLUGIN-SELECTION-REPORT " + json.dumps(scans), flush=True)
 """
 
 
-def _uv_without_network() -> Dict[str, str]:
-    """Keep uv off the network and in the user's own directories (see the module doc)."""
-    env = {"UV_OFFLINE": "1"}
-    if platform.system().lower() == "windows":
-        return env
-    home = Path.home()
-    for name, default in (
-        ("XDG_CACHE_HOME", home / ".cache"),
-        ("XDG_DATA_HOME", home / ".local" / "share"),
-        ("XDG_BIN_HOME", home / ".local" / "bin"),
-    ):
-        env[name] = os.environ.get(name) or str(default)
-    return env
-
-
 class _Process:
     """One interpreter running a sequence of scans."""
 
@@ -206,6 +196,8 @@ class _Process:
         self.markers.mkdir()
         self.home = tmp_path / "home"
         self.home.mkdir()
+        self.stubs = tmp_path / "stubs"
+        install_refusing_installers(self.stubs)
         self.workdir = tmp_path / "cwd"
         self.workdir.mkdir()
 
@@ -226,8 +218,10 @@ class _Process:
             python_path.append(env["PYTHONPATH"])
         if platform.system().lower() != "windows":
             env["PATH"] = os.pathsep.join(
-                [str(Path(sys.executable).parent), "/usr/bin", "/bin"]
+                [str(self.stubs), str(Path(sys.executable).parent), "/usr/bin", "/bin"]
             )
+        else:
+            env["PATH"] = os.pathsep.join([str(self.stubs), env.get("PATH", "")])
         env.update(
             {
                 "PYTHONPATH": os.pathsep.join(python_path),
@@ -242,7 +236,7 @@ class _Process:
                 "AWS_EC2_METADATA_DISABLED": "true",
                 "AWS_ENDPOINT_URL": "http://127.0.0.1:9",
                 "AWS_REGION": "us-east-1",
-                **_uv_without_network(),
+                **isolated_tool_env(self.root / "tool-env"),
             }
         )
         return env
