@@ -175,38 +175,59 @@ class VersionTemplateManager:
     # the release, and an example copied from them would not run against it.
     #
     # Blocks do not nest, and an unbalanced or malformed marker is an error rather
-    # than text, so a typo cannot publish both branches. `convert` cannot recreate a
-    # block from a generated doc; edit the template, never regenerate it with
-    # `convert`.
-    _AFTER_OPEN = re.compile(r"^\{\{#after (?P<threshold>[^}]*)\}\}$")
+    # than text, so a typo cannot publish both branches. A line that holds anything
+    # resembling a marker (`{{#after`, `{{else`, `{{/after`, in any case and with any
+    # spacing, anywhere on the line) must be exactly one of the three markers above,
+    # alone on its line. `convert` cannot recreate a block from a generated doc; edit
+    # the template, never regenerate it with `convert`.
+    _AFTER_OPEN = re.compile(r"\{\{#after (?P<threshold>\d+\.\d+\.\d+)\}\}")
     _AFTER_ELSE = "{{else}}"
     _AFTER_CLOSE = "{{/after}}"
+    _MARKER_LIKE = re.compile(r"\{\{\s*(?:#\s*after|/\s*after|else)\b", re.IGNORECASE)
+    # A release or a PEP 440 prerelease, development or post release of one; the
+    # whole string, so "3.8.0junk" or "3.8.0.1" is not read as 3.8.0.
+    _VERSION = re.compile(
+        r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)"
+        r"(?:(?:a|b|rc)\d+)?(?:\.post\d+)?(?:\.dev\d+)?"
+    )
 
-    @staticmethod
-    def _release(version: str, what: str) -> Tuple[int, int, int]:
-        match = re.match(r"^(\d+)\.(\d+)\.(\d+)", version.strip())
+    @classmethod
+    def _release(cls, version: str, what: str) -> Tuple[int, int, int]:
+        match = cls._VERSION.fullmatch(version)
         if not match:
             raise ValueError(f"{what} {version!r} is not a major.minor.patch version")
-        return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        return (int(match["major"]), int(match["minor"]), int(match["patch"]))
 
     def render(self, content: str, version: str) -> str:
-        """The template text with its version blocks resolved and the placeholder filled."""
-        release = self._release(version, "version")
+        """The template text with its version blocks resolved and the placeholder filled.
+
+        The version is checked only when a block needs it, so a template without one
+        renders for any version string.
+        """
+        release = None
         out: List[str] = []
         block = None  # (shown when after, in else branch)
         for number, line in enumerate(content.splitlines(keepends=True), 1):
             marker = line.strip()
-            opened = self._AFTER_OPEN.match(marker)
-            if opened or marker.startswith("{{#after"):
+            if not self._MARKER_LIKE.search(line):
+                if block is None or block[0] != block[1]:
+                    out.append(line)
+                continue
+            opened = self._AFTER_OPEN.fullmatch(marker)
+            if opened:
                 if block is not None:
                     raise ValueError(f"line {number}: version blocks do not nest")
-                if not opened:
-                    raise ValueError(
-                        f"line {number}: malformed version block {marker!r}"
-                    )
+                if release is None:
+                    release = self._release(version, "version")
                 threshold = self._release(opened.group("threshold"), "threshold")
                 block = [release > threshold, False]
                 continue
+            if marker not in (self._AFTER_ELSE, self._AFTER_CLOSE):
+                raise ValueError(
+                    f"line {number}: malformed version block marker {marker!r}; a "
+                    "marker is {{#after X.Y.Z}}, {{else}} or {{/after}}, alone on "
+                    "its line"
+                )
             if marker == self._AFTER_ELSE:
                 if block is None or block[1]:
                     raise ValueError(
@@ -220,9 +241,6 @@ class VersionTemplateManager:
                         f"line {number}: {{{{/after}}}} without a version block"
                     )
                 block = None
-                continue
-            if block is None or block[0] != block[1]:
-                out.append(line)
         if block is not None:
             raise ValueError("a version block is not closed with {{/after}}")
         return "".join(out).replace(self.version_placeholder, version)

@@ -138,6 +138,74 @@ class TestTheConditionalBlock:
         with pytest.raises(ValueError):
             _render(self.TEXT, "main")
 
+    # Each of these looks like a marker but is not exactly one. Read as text, it would
+    # publish a marker on the page, or both branches, so each is an error.
+    MALFORMED_MARKERS = [
+        "{{else }}",
+        "{{ else}}",
+        "{{Else}}",
+        "{{else}} more",
+        "text {{else}}",
+        "{{/after }}",
+        "{{ /after}}",
+        "{{/After}}",
+        "{{/after}} more",
+        "text {{/after}}",
+        "{{/after 3.7.1}}",
+        "{{/after}}{{/after}}",
+    ]
+
+    @pytest.mark.parametrize("marker", MALFORMED_MARKERS)
+    def test_a_malformed_else_or_close_marker_is_an_error(self, marker):
+        text = f"a\n{{{{#after 3.7.1}}}}\nnew\n{marker}\nold\n{{{{/after}}}}\nz\n"
+        with pytest.raises(ValueError, match="malformed"):
+            _render(text, "3.8.0")
+
+    @pytest.mark.parametrize(
+        "opening",
+        [
+            "{{#After 3.7.1}}",
+            "{{ #after 3.7.1}}",
+            "{{#after 3.7.1 }}",
+            "{{#after  3.7.1}}",
+            "{{#after 3.7.1}} more",
+            "text {{#after 3.7.1}}",
+            "{{#after 3.7.1junk}}",
+            "{{#after 3.7}}",
+            "{{#after 3.7.1.2}}",
+            "{{#after 3.7.1rc1}}",
+            "{{#after v3.7.1}}",
+            "{{#after}}",
+        ],
+    )
+    def test_a_malformed_opening_marker_is_an_error(self, opening):
+        text = f"a\n{opening}\nnew\n{{{{/after}}}}\nz\n"
+        with pytest.raises(ValueError):
+            _render(text, "3.8.0")
+
+    def test_a_second_else_in_one_block_is_an_error(self):
+        text = "{{#after 3.7.1}}\nx\n{{else}}\ny\n{{else}}\nw\n{{/after}}\n"
+        with pytest.raises(ValueError):
+            _render(text, "3.8.0")
+
+    @pytest.mark.parametrize(
+        "version", ["3.8.0junk", "3.8", "3.8.0.1", "v3.8.0", " 3.8.0", "3.8.0\n"]
+    )
+    def test_with_a_block_the_whole_version_must_be_a_release(self, version):
+        with pytest.raises(ValueError):
+            _render(self.TEXT, version)
+
+    @pytest.mark.parametrize(
+        "version",
+        ["3.8.0", "3.8.0rc1", "3.8.0a1", "3.8.0b2", "3.8.0.dev1", "3.8.0.post1"],
+    )
+    def test_a_release_or_prerelease_version_renders(self, version):
+        assert _render(self.TEXT, version) == f"a\nnew\nz {version}\n"
+
+    def test_without_a_block_any_version_only_fills_the_placeholder(self):
+        assert _render("a {{VERSION}}\n", "main") == "a main\n"
+        assert _render("plain\n", "not a version") == "plain\n"
+
 
 class TestTheTutorialMatchesTheReleaseItDocuments:
     @pytest.mark.parametrize("version", ["3.7.0", "3.7.1"])
