@@ -131,15 +131,15 @@ _COMMIT = "0123456789abcdef0123456789abcdef01234567"
             "git+https://github.com/awslabs/automated-security-helper.git@" + _COMMIT,
         ),
         (
-            {"url": Path("/work/ash").as_uri(), "dir_info": {"editable": True}},
-            "-e " + str(Path("/work/ash")),
+            {"url": "{checkout_url}", "dir_info": {"editable": True}},
+            "-e {checkout}",
         ),
         (None, f"git+{ASH_REPO_URL}.git@v{{version}}"),
     ],
     ids=["git-install-pins-its-commit", "editable-names-its-directory", "no-record"],
 )
 def test_missing_library_reason_names_installs_that_resolve_to_ash(
-    plugin_context, monkeypatch, direct_url, reinstall
+    plugin_context, monkeypatch, tmp_path, direct_url, reinstall
 ):
     """Without the library, the recorded reason's install advice resolves to ASH.
 
@@ -152,6 +152,12 @@ def test_missing_library_reason_names_installs_that_resolve_to_ash(
     """
     from automated_security_helper.utils import ash_install
 
+    # An editable record names a checkout that exists; a recorded path that is
+    # gone is not offered as a reinstall source.
+    checkout = tmp_path / "ash"
+    checkout.mkdir()
+    if direct_url is not None and direct_url["url"] == "{checkout_url}":
+        direct_url = {**direct_url, "url": checkout.as_uri()}
     monkeypatch.setattr(ash_install, "_direct_url", lambda: direct_url)
     # A None entry in sys.modules makes `from detect_secrets import ...` raise
     # ImportError, which is what an environment without the library does.
@@ -164,7 +170,7 @@ def test_missing_library_reason_names_installs_that_resolve_to_ash(
     assert "detect-secrets is not importable" in reason
     assert find_bare_installs(reason) == []
     expected = "pip install --force-reinstall " + reinstall.format(
-        version=get_ash_version()
+        version=get_ash_version(), checkout=checkout
     )
     assert f"`{expected}`" in reason, reason
 

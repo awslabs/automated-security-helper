@@ -41,13 +41,19 @@ from importlib.metadata import (
     PackageNotFoundError,
     distribution,
     distributions,
-    packages_distributions,
     requires,
 )
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import url2pathname
+
+# From the backport rather than the standard library. On Python 3.10 the standard
+# library's packages_distributions() reads only top_level.txt, which hatchling
+# does not write, so a non-editable ASH install was not found there and every
+# hint fell back to the release tag. The backport, a declared dependency, also
+# reads RECORD on every Python version.
+from importlib_metadata import packages_distributions
 
 from automated_security_helper.core.constants import ASH_REPO_URL
 from automated_security_helper.utils.get_ash_version import get_ash_version
@@ -319,11 +325,13 @@ def _without_credentials(url: str) -> str:
 def _recorded_source(record: Any) -> Optional[Tuple[str, str]]:
     """``(kind, source)`` for a PEP 610 record, or None if it cannot be used.
 
-    ``kind`` is ``"url"`` for a git commit or a remote archive, ``"path"`` for a
-    local directory or archive, and ``"editable"`` for an editable directory.
-    A record without the field its kind needs (a git record with no commit, a
-    directory record whose URL is not a local path) is unusable rather than
-    guessed at.
+    ``kind`` is ``"url"`` for a git commit or an archive (a local archive as a
+    ``file:`` URL), ``"path"`` for a local directory, and ``"editable"`` for an
+    editable directory. A record without the field its kind needs (a git record
+    with no commit, a directory record whose URL is not a local path) is
+    unusable rather than guessed at, and so is a local directory or archive that
+    no longer exists: the container image installs ASH from a wheel and then
+    deletes it.
     """
     if not isinstance(record, dict):
         return None
@@ -346,13 +354,13 @@ def _recorded_source(record: Any) -> Optional[Tuple[str, str]]:
     local = _local_path_from_file_url(url)
     dir_info = record.get("dir_info")
     if isinstance(dir_info, dict):
-        if local is None:
+        if local is None or not local.is_dir():
             return None
         return ("editable" if dir_info.get("editable") is True else "path"), str(local)
 
     if isinstance(record.get("archive_info"), dict):
         if local is not None:
-            return "path", str(local)
+            return ("url", local.as_uri()) if local.is_file() else None
         if urlsplit(url).scheme in ("http", "https"):
             return "url", _without_credentials(url)
     return None
@@ -363,7 +371,8 @@ def ash_install_arguments(extra: Optional[str] = None) -> str:
 
     With ``extra``, the same source with that extra. From the install's own
     record when it has one: a git commit, an editable directory (``-e <dir>``),
-    a local directory or archive, a remote archive. Without a usable record,
+    a local directory, a local or remote archive, as long as a local one still
+    exists. Without a usable record,
     ``git+<repo>.git@v<version>``, and without a known version the repository
     URL with no ref; ``get_version()`` returns the literal "unknown" then, and
     there is no tag ``vunknown``. It never names ASH's distribution without a

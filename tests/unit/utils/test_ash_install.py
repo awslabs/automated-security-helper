@@ -51,19 +51,53 @@ GIT_INSTALL = {
     "url": "https://github.com/awslabs/automated-security-helper.git",
     "vcs_info": {"vcs": "git", "commit_id": COMMIT, "requested_revision": "main"},
 }
-EDITABLE_INSTALL = {
-    "url": Path("/work/automated-security-helper").as_uri(),
-    "dir_info": {"editable": True},
-}
-LOCAL_DIRECTORY_INSTALL = {"url": Path("/src").as_uri(), "dir_info": {}}
-LOCAL_WHEEL_INSTALL = {
-    "url": Path("/ash/automated_security_helper-3.7.0-py3-none-any.whl").as_uri(),
-    "archive_info": {},
-}
+WHEEL_NAME = "automated_security_helper-3.7.0-py3-none-any.whl"
 REMOTE_WHEEL_INSTALL = {
     "url": "https://example.invalid/automated_security_helper-3.7.0-py3-none-any.whl",
     "archive_info": {},
 }
+
+
+def _editable(path: Path) -> dict:
+    return {"url": path.as_uri(), "dir_info": {"editable": True}}
+
+
+def _local_directory(path: Path) -> dict:
+    return {"url": path.as_uri(), "dir_info": {}}
+
+
+def _local_wheel(path: Path) -> dict:
+    return {"url": path.as_uri(), "archive_info": {}}
+
+
+@pytest.fixture
+def checkout(tmp_path) -> Path:
+    """A directory an editable or local install was made from, still present."""
+    path = tmp_path / "automated-security-helper"
+    path.mkdir()
+    return path
+
+
+@pytest.fixture
+def wheel(tmp_path) -> Path:
+    """A local wheel an archive install was made from, still present."""
+    path = tmp_path / "dist" / WHEEL_NAME
+    path.parent.mkdir()
+    path.write_bytes(b"PK")
+    return path
+
+
+@pytest.fixture
+def records(checkout, wheel) -> dict:
+    """Every record shape, by name, with local paths that exist."""
+    return {
+        "git": GIT_INSTALL,
+        "editable": _editable(checkout),
+        "local-directory": _local_directory(checkout),
+        "local-archive": _local_wheel(wheel),
+        "remote-archive": REMOTE_WHEEL_INSTALL,
+        "no-record": None,
+    }
 
 
 def _origin(monkeypatch, direct_url, version=None):
@@ -104,25 +138,46 @@ class TestReinstallNamesWhereThisAshCameFrom:
         assert "token" not in command and "user" not in command, command
         assert f"git+https://github.example/ash.git@{COMMIT}" in command
 
-    def test_an_editable_install_names_its_directory(self, monkeypatch):
-        _origin(monkeypatch, EDITABLE_INSTALL, version="3.7.0")
+    def test_an_editable_install_names_its_directory(self, monkeypatch, checkout):
+        _origin(monkeypatch, _editable(checkout), version="3.7.0")
         assert _words(ash_install.ash_reinstall_command()) == [
             "pip",
             "install",
             "--force-reinstall",
             "-e",
-            str(Path("/work/automated-security-helper")),
+            str(checkout),
         ]
 
-    def test_a_local_directory_install_names_its_directory(self, monkeypatch):
-        _origin(monkeypatch, LOCAL_DIRECTORY_INSTALL, version="3.7.0")
-        assert _words(ash_install.ash_install_arguments()) == [str(Path("/src"))]
+    def test_a_local_directory_install_names_its_directory(self, monkeypatch, checkout):
+        _origin(monkeypatch, _local_directory(checkout), version="3.7.0")
+        assert _words(ash_install.ash_install_arguments()) == [str(checkout)]
 
-    def test_a_local_archive_install_names_its_archive(self, monkeypatch):
-        _origin(monkeypatch, LOCAL_WHEEL_INSTALL, version="3.7.0")
-        assert _words(ash_install.ash_install_arguments()) == [
-            str(Path("/ash/automated_security_helper-3.7.0-py3-none-any.whl"))
-        ]
+    def test_a_local_archive_install_names_its_archive(self, monkeypatch, wheel):
+        _origin(monkeypatch, _local_wheel(wheel), version="3.7.0")
+        assert _words(ash_install.ash_install_arguments()) == [wheel.as_uri()]
+
+    @pytest.mark.parametrize(
+        "shape", [_editable, _local_directory, _local_wheel], ids=lambda f: f.__name__
+    )
+    def test_a_local_path_that_is_gone_falls_back_to_the_release_tag(
+        self, monkeypatch, tmp_path, shape
+    ):
+        """A recorded local source that no longer exists is not named.
+
+        The container image installs ASH from a wheel and then deletes it, so a
+        reinstall naming that wheel cannot work. No commit is recorded for a
+        wheel install (assets/ASH_INSTALLED_REVISION holds a branch name), so
+        the release tag of the running version is the remaining source.
+        """
+        gone = tmp_path / "deleted" / WHEEL_NAME
+        _origin(monkeypatch, shape(gone), version="3.9.1")
+        for extra, expected in (
+            (None, f"git+{ASH_REPO_URL}.git@v3.9.1"),
+            ("cdk", f"automated-security-helper[cdk] @ git+{ASH_REPO_URL}.git@v3.9.1"),
+        ):
+            arguments = ash_install.ash_install_arguments(extra)
+            assert _words(arguments) == [expected], arguments
+            assert str(gone) not in arguments
 
     def test_a_remote_archive_install_names_its_url(self, monkeypatch):
         _origin(monkeypatch, REMOTE_WHEEL_INSTALL, version="3.7.0")
@@ -169,45 +224,47 @@ class TestReinstallNamesWhereThisAshCameFrom:
 
 class TestAnExtraGoesOnTheSameSource:
     @pytest.mark.parametrize(
-        "record, expected",
+        "shape, expected",
         [
             (
-                GIT_INSTALL,
+                "git",
                 [f"automated-security-helper[cdk] @ git+{GIT_INSTALL['url']}@{COMMIT}"],
             ),
+            ("editable", ["-e", "{checkout}[cdk]"]),
+            ("local-directory", ["{checkout}[cdk]"]),
+            ("local-archive", ["automated-security-helper[cdk] @ {wheel_url}"]),
             (
-                EDITABLE_INSTALL,
-                ["-e", f"{Path('/work/automated-security-helper')}[cdk]"],
-            ),
-            (LOCAL_DIRECTORY_INSTALL, [f"{Path('/src')}[cdk]"]),
-            (
-                REMOTE_WHEEL_INSTALL,
+                "remote-archive",
                 [f"automated-security-helper[cdk] @ {REMOTE_WHEEL_INSTALL['url']}"],
             ),
             (
-                None,
+                "no-record",
                 [f"automated-security-helper[cdk] @ git+{ASH_REPO_URL}.git@v3.9.1"],
             ),
         ],
-        ids=["git", "editable", "local-directory", "remote-archive", "no-record"],
     )
-    def test_each_source_takes_the_extra(self, monkeypatch, record, expected):
-        _origin(monkeypatch, record, version="3.9.1")
+    def test_each_source_takes_the_extra(
+        self, monkeypatch, records, checkout, wheel, shape, expected
+    ):
+        _origin(monkeypatch, records[shape], version="3.9.1")
         arguments = ash_install.ash_install_arguments("cdk")
-        assert _words(arguments) == expected
+        assert _words(arguments) == [
+            word.format(checkout=checkout, wheel_url=wheel.as_uri())
+            for word in expected
+        ]
         assert find_bare_installs(f"pip install {arguments}") == []
 
 
 @pytest.mark.parametrize(
-    "record",
+    "shape",
     [
-        GIT_INSTALL,
-        EDITABLE_INSTALL,
-        LOCAL_DIRECTORY_INSTALL,
-        REMOTE_WHEEL_INSTALL,
-        None,
+        "git",
+        "editable",
+        "local-directory",
+        "local-archive",
+        "remote-archive",
+        "no-record",
     ],
-    ids=["git", "editable", "local-directory", "remote-archive", "no-record"],
 )
 @pytest.mark.parametrize(
     "template",
@@ -218,8 +275,8 @@ class TestAnExtraGoesOnTheSameSource:
         "uv tool install {}",
     ],
 )
-def test_every_installer_form_resolves_to_ash(monkeypatch, record, template):
-    _origin(monkeypatch, record, version="3.7.0")
+def test_every_installer_form_resolves_to_ash(monkeypatch, records, shape, template):
+    _origin(monkeypatch, records[shape], version="3.7.0")
     for extra in (None, "symbols"):
         command = template.format(ash_install.ash_install_arguments(extra))
         assert find_bare_installs(command) == [], command
@@ -242,6 +299,25 @@ def test_this_installation_is_reinstalled_from_its_own_record():
     else:
         expected = str(Path(url2pathname(record["url"].removeprefix("file://"))))
     assert any(expected in word for word in _words(command)), (expected, command)
+
+
+def test_distributions_are_found_from_their_record_on_every_python():
+    """ASH's distribution is found by what it installed, not by top_level.txt.
+
+    On Python 3.10 the standard library's ``packages_distributions()`` reads only
+    ``top_level.txt``, and hatchling writes none, so on 3.10 a non-editable
+    install (a wheel, ``pip install git+...``, ``uv tool install``, uvx) was not
+    found and every hint fell back to the release tag. The ``importlib_metadata``
+    backport, already a dependency, also reads RECORD. Runners on 3.11 and later
+    cannot observe the difference, so this pins the function in use; the
+    behavior on 3.10 is measured by
+    tests/integration/test_install_hints_on_python310.py.
+    """
+    import importlib_metadata
+
+    assert (
+        ash_install.packages_distributions is importlib_metadata.packages_distributions
+    )
 
 
 class TestExtraRequirementsFromMetadata:
