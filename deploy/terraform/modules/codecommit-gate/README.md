@@ -52,6 +52,16 @@ the shared image's successful builds through an EventBridge rule on
 Lambda on an image whose base has been replaced — which is the staleness the
 schedule exists to prevent.
 
+## The scan runs with the operator's configuration
+
+Without `--config` or `ASH_CONFIG`, ASH looks for a config inside the scanned tree,
+which here is the pull request, so a pull request could choose the rules it is
+judged by. The handler always passes `--config`: the base config
+`ash-container-init` wrote from `base_config_ssm_parameter_name`, or, with none set,
+a `{}` document beside the clone, which is ASH's defaults. A pull request's own
+`.ash/.ash.yaml` is never read. A base config that names no file, or resolves inside
+the clone, refuses the scan (outcome `error`, approval revoked).
+
 ## The scan runs without the function's credentials
 
 The function's role can comment on and approve pull requests, and on Lambda its
@@ -159,7 +169,7 @@ fetch what it needs.
 | `base_image_uri` | — | `string` | *required* | Shared ASH image, the base for the gate image. |
 | `base_image_codebuild_project_arn` | — | `string` | `null` | Set it to chain the gate rebuild off the base rebuild. |
 | `ash_offline_mode` | `AshOfflineMode` | `bool` | `false` | Sets `ASH_OFFLINE`. |
-| `base_config_ssm_parameter_name` | `AshBaseConfigYaml` (indirect) | `string` | `null` | From the image module. |
+| `base_config_ssm_parameter_name` | `AshBaseConfigYaml` (indirect) | `string` | `null` | From the image module. The scan's `--config`; `{}` when null. |
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash-pr-gate"` | |
 | `trigger_events` | — | `list(string)` | created + source branch updated | The two that change what would merge. |
@@ -173,7 +183,7 @@ fetch what it needs.
 | `lambda_ephemeral_storage_mb` | — | `number` | `4096` | `/tmp` holds the clone and the output. |
 | `lambda_architecture` | — | `string` | `"x86_64"` | Must match the base image. |
 | `reserved_concurrent_executions` | — | `number` | `-1` | Worth setting on a busy repository. |
-| `ash_scan_extra_args` | — | `string` | `""` | `--changed-files-only --base-ref ...` recommended. |
+| `ash_scan_extra_args` | — | `string` | `""` | Options the gate owns are refused, `--changed-files-only` and `--base-ref` among them; see limitations. |
 | `max_comment_chars` | — | `number` | `10000` | Defensive; the API documents no limit. |
 | `image_tag` | — | `string` | `"latest"` | |
 | `ecr_image_tag_mutability` | — | `string` | `"MUTABLE"` | Needed for the chained rebuild. |
@@ -196,14 +206,15 @@ fetch what it needs.
 ## Constraints and known limitations
 
 **Lambda's 900 second ceiling is the real constraint on this target, and it is
-not adjustable.** The clone plus the scan has to fit. Two things make that
-reachable, and a third is the fallback:
+not adjustable.** The clone plus the scan has to fit:
 
-1. `ash_scan_extra_args = "--changed-files-only --base-ref origin/<default>"`,
-   so scan time scales with the change rather than the repository.
+1. The scan cannot be narrowed to the pull request's changes. The handler
+   refuses `--changed-files-only` and `--base-ref` in `ash_scan_extra_args`,
+   because a narrowed scan switches off the completeness check without switching
+   off the gate's report of a pass.
 2. More `lambda_memory_mb`, since Lambda allocates CPU in proportion to memory
    and ASH is CPU-bound.
-3. For repositories where neither is enough, use the `codepipeline-executor`
+3. For repositories where that is not enough, use the `codepipeline-executor`
    module instead. CodeBuild's action timeout is measured in hours, not minutes.
 
 **The clone is not shallow.** CodeCommit does not reliably permit fetching an

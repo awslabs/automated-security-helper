@@ -87,8 +87,8 @@ other architecture.
 stable endpoint, with your own network boundary and TLS.
 
 **CodeCommit gate** — you want every pull request scanned and commented. Bounded by
-Lambda's hard 900-second timeout, so best with
-`--changed-files-only --base-ref <default-branch>`.
+Lambda's hard 900-second timeout, and it scans the whole tree, so it suits
+repositories whose full scan fits in that time (the gate refuses `--changed-files-only` and `--base-ref`).
 
 **CodePipeline executor** — you want a full scan of a large repository, and wall
 clock matters more than simplicity. Scales across up to 100 parallel shards, with

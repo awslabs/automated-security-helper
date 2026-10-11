@@ -526,6 +526,9 @@ export class AshDistributedPipelineStack extends Stack {
               // no results), a scanner crashed (no results), findings were found
               // (results present) or the shard was clean (results present).
               [
+                // See MATERIALIZE_CONFIG_COMMAND: ASH refuses an ASH_CONFIG that names
+                // no file, and pre_build writes one only when a base config exists.
+                '[ -f "$ASH_CONFIG" ] || unset ASH_CONFIG',
                 'set +e',
                 'ash scan --source-dir "$CODEBUILD_SRC_DIR" --output-dir ./ash-shard-output \\',
                 '  --shard-index "$ASH_SHARD_INDEX" --shard-count "$ASH_SHARD_COUNT" \\',
@@ -672,7 +675,12 @@ export class AshDistributedPipelineStack extends Stack {
               // --results is repeatable and accepts a file or a directory. One
               // flag per shard directory, so a shard that vanished between the
               // check above and here still fails rather than being skipped.
-              ['ash merge \\', ...resultsFlags, '  --output-dir ./ash-merged-output'].join('\n'),
+              [
+                '[ -f "$ASH_CONFIG" ] || unset ASH_CONFIG',
+                'ash merge \\',
+                ...resultsFlags,
+                '  --output-dir ./ash-merged-output',
+              ].join('\n'),
             ],
           },
           post_build: {
@@ -705,8 +713,11 @@ export class AshDistributedPipelineStack extends Stack {
  * `ASH_CONFIG` is set as a PROJECT environment variable, not exported here. An
  * `export` inside one buildspec command is not guaranteed to reach a later
  * phase's shell, so the path is always set and only the FILE is conditional.
- * That is safe because ASH's `get_default_config` tests the path for existence
- * before reading it and falls through to its defaults when it is absent.
+ * The command that runs ASH therefore unsets it, in its own shell, when the file is
+ * absent: ASH treats an explicit config path that names no file as a config error
+ * and refuses the scan, so a pipeline deployed without `AshBaseConfigYaml` would
+ * otherwise fail every shard. `unset` has the same phase limit as `export`, which is
+ * why it sits in the build command itself rather than here.
  *
  * THE READ IS THE SAME ONE THE ENTRYPOINT MAKES, DELIBERATELY. Character for
  * character the same `python3 -c` as `MCP_ENTRYPOINT_SCRIPT`, for two reasons.

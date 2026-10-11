@@ -587,6 +587,41 @@ def clone_source(
     return source_dir
 
 
+def scan_config(source_dir: pathlib.Path) -> pathlib.Path:
+    """The config file the scan is given: the operator's, never the pull request's.
+
+    Without ``--config`` or ``ASH_CONFIG``, ASH looks for a config INSIDE the scanned
+    tree, so the pull request under judgment would choose the rules it is judged by:
+    measured during the deploy audit, a pull request adding
+    ``global_settings.ignore_paths`` turned a failing scan into exit 0, "pass" and
+    an APPROVE. ash-container-init exports ``ASH_CONFIG`` only after writing a base
+    config, so a gate deployed without one had nothing to say.
+
+    So the scan always gets ``--config``: the base config ash-container-init wrote
+    when there is one, and otherwise ``{}`` written beside the clone, which is ASH's
+    defaults. ``{}`` and not an empty file, which ASH refuses as a config. A base
+    config that is missing, or that resolves inside the clone, refuses the scan.
+    """
+    base = os.environ.get("ASH_CONFIG", "").strip()
+    if base:
+        path = pathlib.Path(base)
+        if not path.is_file():
+            raise RuntimeError(
+                f"ASH_CONFIG names {base}, which is not a file, so the base config "
+                "this gate was deployed with cannot be read. Refusing to scan rather "
+                "than run with a configuration the operator did not choose."
+            )
+    else:
+        path = WORK_ROOT / "ash-config.yaml"
+        path.write_text("{}\n", encoding="utf-8")
+    if path.resolve().is_relative_to(source_dir.resolve()):
+        raise RuntimeError(
+            f"The scan config {path} is inside the cloned pull request, which would "
+            "let the pull request choose the rules it is judged by. Refusing to scan."
+        )
+    return path
+
+
 def run_scan(
     source_dir: pathlib.Path, min_severity: str, fail_on_findings: bool
 ) -> tuple[int, pathlib.Path, str]:
@@ -597,6 +632,7 @@ def run_scan(
     """
     output_dir = WORK_ROOT / "out"
     output_dir.mkdir(parents=True, exist_ok=True)
+    config_path = scan_config(source_dir)
 
     # Held apart from the operator's extra args below and emitted after them, so that
     # last-occurrence-wins resolution lands on the gate's value.
@@ -610,6 +646,9 @@ def run_scan(
         str(source_dir),
         "--output-dir",
         str(output_dir),
+        # Always, so ASH never discovers a config inside the clone; see scan_config.
+        "--config",
+        str(config_path),
         "--min-severity",
         min_severity,
         # Passed explicitly rather than left to ASH's default, which falls back to
@@ -656,7 +695,9 @@ def run_scan(
     # PATH merged with the image's ENVs, which point every scanner's cache at the
     # read-only root filesystem. See _scan_env. It raises when an offline scan's
     # caches are unreachable, which handler reads as outcome "error".
-    result = _run(argv, env=_scan_env())
+    env = _scan_env()
+    env["ASH_CONFIG"] = str(config_path)
+    result = _run(argv, env=env)
     log_tail = (result.stderr or result.stdout or "").strip()[-4000:]
     LOGGER.info("ash scan exited %d", result.returncode)
     return result.returncode, output_dir, log_tail

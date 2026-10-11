@@ -39,9 +39,16 @@
  * `get_default_config()` in ASH reads `ASH_CONFIG` from the process environment
  * directly, so the deployment-wide default applies to every scan the process
  * runs — including MCP-initiated scans of arbitrary directories, which never see
- * a config placed next to the server. A `.ash.yaml` inside the scanned
- * repository still wins, which is the precedence adopters expect: project config
- * overrides the deployment default.
+ * a config placed next to the server.
+ *
+ * What it does NOT do is override a config the scanned directory carries. ASH
+ * selects one config source rather than merging them: an MCP scan of a directory
+ * with its own `.ash.yaml` discovers and uses that file, and `ASH_CONFIG` is the
+ * default for directories without one. `ash scan` is different, because its
+ * `--config` option reads `ASH_CONFIG` as its value, so the shard and merge
+ * projects, which run `ash scan` with this variable set, never read the
+ * repository's config. The CodeCommit gate passes `--config` itself, always; see
+ * `CODECOMMIT_GATE_HANDLER`.
  */
 export const ASH_MATERIALIZED_CONFIG_PATH = '/tmp/ash-config/.ash.yaml';
 
@@ -555,6 +562,25 @@ exec "$@"
  * An ONLINE scan whose caches are empty is logged and allowed: grype can still
  * fetch a database, so the scan is slow rather than blind.
  *
+ * THE SCAN ALWAYS RUNS WITH THE OPERATOR'S CONFIG
+ * -----------------------------------------------
+ * Without `--config` or `ASH_CONFIG`, ASH looks for a config INSIDE the scanned
+ * tree, which here is the pull request. So the pull request under judgment chose
+ * the rules it was judged by: measured, a committed `fail_on_findings: false`
+ * turned exit 2 into exit 0, "passed" and, with ApprovalGate on, an APPROVE. And
+ * `AshBaseConfigYaml` reached this function only as a parameter name nothing read.
+ *
+ * `_scan_config` now writes the config the scan is given into the invocation's
+ * workdir, beside the clone and never inside it, and the argv names it with
+ * `--config`, which makes ASH skip discovery. With `AshBaseConfigYaml` set, the
+ * parameter is read on every invocation, so an edit to it applies to the next
+ * pull request without an image rebuild; this image's ENTRYPOINT is the runtime
+ * interface client, which runs no script of ours at start. Without it the file is
+ * `{}`, ASH's defaults. Not the SSM placeholder: it is a comment-only YAML
+ * document, which ASH refuses as a config. A parameter that cannot be read
+ * refuses the scan, through the same comment-and-REVOKE path as the offline
+ * refusal below, rather than falling back to defaults the operator did not choose.
+ *
  * THE SCAN RUNS WITHOUT THE FUNCTION ROLE'S CREDENTIALS
  * -----------------------------------------------------
  * On Lambda the execution role's credentials are in the function's environment
@@ -727,6 +753,25 @@ def _verdict(exit_code):
     return "errored", "ASH exited with unexpected code %d." % exit_code
 
 
+def _scan_config(workdir):
+    """The operator's config for this scan, outside the clone. See the .ts note."""
+    name = os.environ.get("ASH_BASE_CONFIG_SSM_PARAMETER", "")
+    document = "{}\\n"
+    if name:
+        try:
+            document = boto3.client("ssm").get_parameter(
+                Name=name, WithDecryption=True)["Parameter"]["Value"]
+        except Exception as exc:
+            raise RuntimeError(
+                "Could not read the base configuration from %s, so this scan is "
+                "refused rather than run with a configuration the operator did not "
+                "choose: %s" % (name, exc))
+    path = os.path.join(workdir, "ash-config.yaml")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(document)
+    return path
+
+
 def handler(event, context):
     detail = event.get("detail") or {}
     pull_request_id = detail.get("pullRequestId")
@@ -751,6 +796,8 @@ def handler(event, context):
     # standing approval rather than failing the invocation silently.
     try:
         scan_env = _scan_env(workdir)
+        config_path = _scan_config(workdir)
+        scan_env["ASH_CONFIG"] = config_path
     except RuntimeError as exc:
         _post(codecommit, pull_request_id, repository_name, destination_commit,
               source_commit, "## ASH scan errored\\n\\n%s\\n" % exc)
@@ -771,7 +818,7 @@ def handler(event, context):
         raise RuntimeError("could not check out %s: %s" % (source_commit, checkout.stderr))
 
     argv = ["ash", "scan", "--source-dir", source_dir, "--output-dir", output_dir,
-            "--no-progress", "--simple", "--compact-report"]
+            "--config", config_path, "--no-progress", "--simple", "--compact-report"]
     if os.environ.get("ASH_CHANGED_FILES_ONLY", "true") == "true":
         # Diff against the pull request's destination commit, which is what the
         # reviewer is being asked to merge into.

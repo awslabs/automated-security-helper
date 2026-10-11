@@ -121,8 +121,16 @@ into the container at start, applied through `ASH_CONFIG` so it covers every sca
 the process runs. CloudFormation caps a parameter value at 4096 bytes, so that is
 the real ceiling on what you can paste. Advanced tier holds 8 KB, so a larger
 config can be pasted into Parameter Store after deployment; the next container
-start picks it up. A `.ash.yaml` inside a scanned repository still wins, which is
-the precedence you want.
+start picks it up. ASH selects one config source rather than merging them, so what
+`ASH_CONFIG` means depends on how the target runs ASH. An MCP scan of a directory
+that carries its own `.ash.yaml` uses that file; `ASH_CONFIG` is the default for
+directories without one. The pipeline's shard and merge projects run `ash scan`,
+whose `--config` option reads `ASH_CONFIG`, so there the repository's own config is
+not read. The CodeCommit gate always passes `--config`: the base config, read from
+the parameter on every invocation, or `{}` (ASH's defaults) when none was supplied,
+so a pull request never chooses the rules it is judged by. A base config the gate
+cannot read refuses the scan, comments on the pull request and revokes its
+approval.
 
 The CloudFormation quotas page suggests working around the 4096-byte cap by
 declaring several parameters and rejoining them with `Fn::Join`. That is lossless,
