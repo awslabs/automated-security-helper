@@ -247,6 +247,7 @@ def test_default_argv(tmp_path):
         "vuln",
         "--disable-telemetry",
         "--offline-scan",
+        "--skip-version-check",
         "--timeout=1800s",
         "--skip-dirs=.ash/ash_output",
         f"--config={(scanner.results_dir / 'trivy-config.yaml').resolve().as_posix()}",
@@ -507,6 +508,17 @@ def test_every_scan_is_offline_for_package_registries(tmp_path, offline, kind):
     assert args.count("--offline-scan") == 1
 
 
+@pytest.mark.parametrize("offline", [False, True])
+@pytest.mark.parametrize("kind", ["trivy", "trivy-repo"])
+def test_every_scan_skips_trivys_version_check(tmp_path, offline, kind):
+    if kind == "trivy":
+        scanner = _scanner(tmp_path, offline=offline)
+    else:
+        scanner = _repo_scanner(tmp_path, offline=offline)
+    args = scanner._resolve_arguments(target="/t", results_file="/r.sarif")
+    assert args.count("--skip-version-check") == 1
+
+
 def test_a_stale_report_is_removed_before_the_run(tmp_path):
     scanner = _scanner(tmp_path)
     stale = scanner.results_dir / "source" / "results_sarif.sarif"
@@ -529,7 +541,7 @@ def test_a_failing_exit_code_refuses_even_a_present_report(tmp_path):
 
 def test_the_community_plugin_command_line_is_unchanged(tmp_path):
     """trivy-repo's flags, in order, as before the shared base existed, plus
-    --offline-scan, which every trivy scan gets."""
+    --offline-scan and --skip-version-check, which every trivy scan gets."""
     scanner = TrivyRepoScanner(
         context=_context(tmp_path), config=TrivyRepoScannerConfig()
     )
@@ -545,6 +557,7 @@ def test_the_community_plugin_command_line_is_unchanged(tmp_path):
         "--ignore-unfixed",
         "--disable-telemetry",
         "--offline-scan",
+        "--skip-version-check",
         "/t",
         "--output",
         "/r.sarif",
@@ -908,7 +921,8 @@ def _repo_scanner(tmp_path: Path, **options) -> TrivyRepoScanner:
 
 def test_the_community_plugin_offline_command_line_is_unchanged(tmp_path):
     """Every flag trivy-repo can emit, in the order it always emitted them, with
-    --offline-scan, which every trivy scan gets, ahead of the offline flags."""
+    --offline-scan and --skip-version-check, which every trivy scan gets, ahead of
+    the offline flags."""
     scanner = _repo_scanner(tmp_path, offline=True, severity_threshold="MEDIUM")
     args = scanner._resolve_arguments(target="/t", results_file="/r.sarif")
     assert args == [
@@ -924,6 +938,7 @@ def test_the_community_plugin_offline_command_line_is_unchanged(tmp_path):
         "--severity",
         "MEDIUM,HIGH,CRITICAL",
         "--offline-scan",
+        "--skip-version-check",
         "--skip-db-update",
         "--skip-java-db-update",
         "--skip-check-update",

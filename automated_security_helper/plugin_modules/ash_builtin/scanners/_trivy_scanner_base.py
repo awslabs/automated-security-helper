@@ -92,8 +92,10 @@ SEVERITY_INCLUSION = {
 #: pom.xml requested its parent and dependency POMs from the repository the pom.xml
 #: declares and from Maven Central, and with the flag requested nothing. trivy then
 #: resolves Maven dependencies from the scanned tree and the local Maven repository
-#: (``~/.m2/repository``) only.
-SCAN_FLAGS = ("--offline-scan",)
+#: (``~/.m2/repository``) only. ``--skip-version-check``: without it trivy asks
+#: check.trivy.dev about new versions and announcements (measured through a proxy on
+#: 127.0.0.1, online), which a scan has no use for.
+SCAN_FLAGS = ("--offline-scan", "--skip-version-check")
 
 #: The flags that skip trivy's own updates offline. ``--skip-db-update`` makes trivy
 #: use whatever vulnerability database is in its cache, of any age; ASH's scan-time

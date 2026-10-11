@@ -352,6 +352,28 @@ def test_an_online_scan_contacts_no_package_registry(
     assert requests == []
 
 
+@pytest.mark.parametrize("kind", ["trivy", "trivy-repo"])
+def test_a_scan_makes_no_version_check(tmp_path, trivy_env, monkeypatch, kind):
+    """trivy asks check.trivy.dev about new versions and announcements unless told not
+    to. A proxy on 127.0.0.1 sees every request trivy makes; the database update is
+    left out (TRIVY_SKIP_DB_UPDATE) so that only the scan's own requests reach it."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("TRIVY_SKIP_DB_UPDATE", "true")
+    source = _copy_fixture(tmp_path)
+    with _RequestLog() as proxy:
+        for name in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"):
+            monkeypatch.setenv(name, proxy.url)
+        for name in ("NO_PROXY", "no_proxy"):
+            monkeypatch.delenv(name, raising=False)
+        if kind == "trivy":
+            scanner, _ = _scan_direct(source, tmp_path / "out", operator=True)
+        else:
+            scanner, _ = _scan_repo_direct(source, tmp_path / "out", scanners=["vuln"])
+        requests = list(proxy.requests)
+    assert scanner.exit_code == 0
+    assert requests == []
+
+
 def _debian_tree(root: Path, packages: tuple) -> Path:
     """A Debian 11 tree whose dpkg status lists *packages*, each at 0.0.1-1."""
     (root / "etc").mkdir(parents=True)
