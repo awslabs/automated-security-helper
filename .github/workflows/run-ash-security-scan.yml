@@ -303,6 +303,11 @@ jobs:
         id: setup-uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          # Named here, because with no `version` setup-uv installs the uv that the
+          # checkout's pyproject.toml or uv.toml asks for (`required-version`), and
+          # this uv installs the ASH that scans that checkout. `latest` is what it
+          # installs for a checkout that asks for nothing.
+          version: latest
           enable-cache: true
           # Save only from a push; a pull request restores its base branch's entry.
           # The same unpruned key as the lint job in ash-unified-ci.yml, which
@@ -349,6 +354,17 @@ jobs:
       # If the ASH revision in use predates the registry, the key comes back empty
       # and the grype cache is simply skipped: grype then downloads its database,
       # as it does on any miss.
+      #
+      # Every `uv run` in this job passes --no-config and every python it or the
+      # job starts passes -I, because both run in the checkout. Without
+      # --no-config, `uv run --no-project` still reads `[tool.uv]` in the
+      # checkout's pyproject.toml and its uv.toml, so the scanned repository chose
+      # the package index the helper's dependencies came from. Without -I, `-m`
+      # and `-c` put the working directory first on sys.path, so an
+      # `automated_security_helper/` in the checkout (ASH scanning itself: the pull
+      # request's tree) replaced the one ASH_UVX_SOURCE installed, and a `json.py`
+      # at its root replaced the standard library's. The OpenGrep pin lookup below
+      # has the measurement.
       - name: Compute cache keys
         id: cachekeys
         env:
@@ -359,8 +375,8 @@ jobs:
           # to one build indefinitely.
           echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
           if [ "${INSTALL_GRYPE}" = "true" ]; then
-            if grype_db="$(uv run --no-project --with "${ASH_UVX_SOURCE}" -- \
-                python -m automated_security_helper.utils.content_databases cache-key grype-db)"; then
+            if grype_db="$(uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- \
+                python -I -m automated_security_helper.utils.content_databases cache-key grype-db)"; then
               echo "grype-db=${grype_db}" >> "$GITHUB_OUTPUT"
               echo "grype database cache bucket: ${grype_db}"
             else
@@ -440,6 +456,13 @@ jobs:
       # them would mean interpolating booleans into shell to rebuild the condition.
       # The second `uvx` call reuses the environment the first one resolved.
       #
+      # Both run from RUNNER_TEMP with ASH_CONFIG unset, as Install OpenGrep below
+      # does. `ash dependencies install` takes its source directory from the working
+      # directory, resolves its config from ASH_CONFIG or by discovery there, and
+      # imports every plugin module that config names. Run from the checkout with
+      # the caller's config, the scanned repository chose what this step installed
+      # and what code ran while installing it.
+      #
       # ASH_TOOL_BIN is added to PATH the same way the OpenGrep step below does it.
       # The previous form installed into /usr/local/bin, which is already on PATH, so
       # without this a later step that expects grype or syft there would regress.
@@ -450,9 +473,10 @@ jobs:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
           set -euo pipefail
-          uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
-            --tool grype \
-            --bin-path "${ASH_TOOL_BIN}"
+          (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+            uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
+              --tool grype \
+              --bin-path "${ASH_TOOL_BIN}")
           echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
 
       # A restored database is used only if it is inside the declared bound NOW.
@@ -468,9 +492,9 @@ jobs:
         run: |
           set -uo pipefail
           built="$("${ASH_TOOL_BIN}/grype" db status -o json 2>/dev/null \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
-          if [ -n "${built}" ] && uv run --no-project --with "${ASH_UVX_SOURCE}" -- \
-              python -m automated_security_helper.utils.content_databases \
+            | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
+          if [ -n "${built}" ] && uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- \
+              python -I -m automated_security_helper.utils.content_databases \
               check-age grype-db --built "${built}" --for use; then
             echo "restored grype database built ${built} is inside its bound; using it"
           else
@@ -484,9 +508,10 @@ jobs:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
           set -euo pipefail
-          uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
-            --tool syft \
-            --bin-path "${ASH_TOOL_BIN}"
+          (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+            uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
+              --tool syft \
+              --bin-path "${ASH_TOOL_BIN}")
           echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
 
       # OpenGrep goes through the same verified installer as Grype and Syft above.
@@ -532,8 +557,10 @@ jobs:
           # checkout -- first on sys.path, so an `automated_security_helper/` directory
           # in the repository being scanned would supply the pin. Measured: run from
           # an ASH checkout, the pin came from the checkout rather than from
-          # ASH_UVX_SOURCE.
-          if ! PINNED="$(uv run --no-project --with "${ASH_UVX_SOURCE}" -- python -I -c \
+          # ASH_UVX_SOURCE. `--no-config` for the same reason one level up: uv
+          # would otherwise resolve the pin lookup's dependencies from whatever
+          # index the checkout's `[tool.uv]` or uv.toml names.
+          if ! PINNED="$(uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- python -I -c \
               'import sys; from automated_security_helper.utils.tool_downloads import get_tool_asset; print(get_tool_asset("opengrep", "linux", sys.argv[1]).sha256)' \
               "${ARCH}")" || [ -z "${PINNED}" ]; then
             echo "::error::this ASH revision (${ASH_UVX_SOURCE}) pins no SHA256 for OpenGrep, so there is nothing to verify the binary against, and it will not be installed unverified. To fix: set the ash-version input to a revision that pins OpenGrep (main, or the first release after v3.7.1), or set install-opengrep: false."
@@ -834,9 +861,9 @@ jobs:
         run: |
           set -uo pipefail
           built="$("${ASH_TOOL_BIN}/grype" db status -o json 2>/dev/null \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
-          if [ -n "${built}" ] && uv run --no-project --with "${ASH_UVX_SOURCE}" -- \
-              python -m automated_security_helper.utils.content_databases \
+            | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
+          if [ -n "${built}" ] && uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- \
+              python -I -m automated_security_helper.utils.content_databases \
               check-age grype-db --built "${built}" --for save; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
