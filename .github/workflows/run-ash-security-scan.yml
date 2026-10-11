@@ -216,6 +216,10 @@ jobs:
     name: SAST, SCA, and IaC Scan
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Read only. This job runs ASH, the scanners and whatever ASH loads, so it holds
+    # no token that can write; the reporting steps are in the `report` job below.
+    permissions:
+      contents: read
     env:
       COLUMNS: 140
       # NO CACHE IS RESTORED ON A PULL REQUEST OR IN THE MERGE QUEUE
@@ -1097,11 +1101,68 @@ jobs:
           cat "${ASH_OUTPUT_DIR}/reports/ash.summary.md" >> "${GITHUB_STEP_SUMMARY}"
           tree "${ASH_OUTPUT_DIR}"
 
+      - name: Collect ASH output artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: success() || failure()
+        with:
+          name: ash_output
+          path: ${{ inputs.output-dir }}
+          retention-days: 7
+          if-no-files-found: error
+
+  # THE REPORTING JOB
+  #
+  # The PR comment, the JUnit check run and the SARIF upload need checks: write and
+  # pull-requests: write. They used to be steps of the scan job, so the job that
+  # runs ASH, the scanners and anything ASH loads held a token that can create a
+  # check run or a comment under any name, the required check's included. The token
+  # is in the persisted checkout credentials and in the runner process, so switching
+  # these inputs off did not take it away; in ash-repo-scan-pr-head.yml that code is
+  # the pull request's own ASH.
+  #
+  # Here they run in a job that runs nothing from the scan: it downloads the scan's
+  # ash_output artifact and hands those files to pinned actions. It runs after a
+  # scan that passed or failed (a scan that fails on findings has still written its
+  # reports), and only when the caller asked for something to be reported, so a
+  # caller that reports nothing never starts it. Its result is a check run of its
+  # own, `<caller> / Report ASH results`; a reporting failure no longer fails the
+  # scan's check.
+  report:
+    name: Report ASH results
+    needs: ash
+    if: >-
+      !cancelled()
+      && (needs.ash.result == 'success' || needs.ash.result == 'failure')
+      && (inputs.post-pr-comment || inputs.collect-junit-xml-report || inputs.collect-sarif-report)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    steps:
+      # upload-sarif reads the commit it reports on from a checkout; the other two
+      # steps need none. No credentials are left in it.
+      - name: Checkout
+        if: inputs.collect-sarif-report
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Into the same path the scan wrote, so every `inputs.output-dir` path below
+      # reads the file it always read.
+      - name: Download ASH output artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash_output
+          path: ${{ inputs.output-dir }}
+
       # GITHUB_TOKEN is read-only for pull requests opened from a fork, whatever
       # `permissions:` the caller declares -- GitHub downgrades it so untrusted
       # code cannot write to the base repository. Commenting therefore cannot
-      # work on a fork PR, and because this job is a required status check, the
-      # failure took the whole check down *after the scan had already passed*:
+      # work on a fork PR, and while this step was in the scan job, which is a
+      # required status check, the failure took the whole check down *after the
+      # scan had already passed*:
       #
       #   ##[error]Resource not accessible by integration
       #   https://docs.github.com/rest/issues/comments#create-an-issue-comment
@@ -1137,15 +1198,6 @@ jobs:
         shell: bash
         run: |
           echo "::notice::Scan results were not posted as a PR comment: GITHUB_TOKEN is read-only for fork pull requests. The full report is in this job's summary and in the ash_output artifact."
-
-      - name: Collect ASH output artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: success() || failure()
-        with:
-          name: ash_output
-          path: ${{ inputs.output-dir }}
-          retention-days: 7
-          if-no-files-found: error
 
       # THE CHECKS-PERMISSION PROBE THAT USED TO GATE THIS STEP IS GONE
       #

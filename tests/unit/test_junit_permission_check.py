@@ -81,10 +81,14 @@ def workflow():
 
 
 def _get_steps(workflow):
-    """Extract the step list from the single job in the workflow."""
+    """Every step of every job in the workflow.
+
+    The publish step is in the reporting job, not the scan job ``ash``: the scan job
+    holds a read-only token (tests/unit/test_scan_workflow_runs_code_without_a_write_token.py).
+    """
     jobs = workflow["jobs"]
     assert "ash" in jobs, "Expected 'ash' job in workflow"
-    return jobs["ash"]["steps"]
+    return [step for job in jobs.values() for step in job.get("steps") or []]
 
 
 def _junit_publish_step(workflow):

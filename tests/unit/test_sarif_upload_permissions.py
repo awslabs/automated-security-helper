@@ -138,7 +138,13 @@ def test_upload_reads_what_the_scan_writes(scan, upload):
     # The artifact root is the scan's output-dir, so the report sits at the same
     # relative path the scan workflow's own upload step reads.
     assert artifact_step["with"]["path"] == "${{ inputs.output-dir }}"
-    (scan_sarif_step,) = _steps_using(scan["jobs"]["ash"], UPLOAD_SARIF_ACTION)
+    # In the reporting job, which downloads the scan job's artifact into the same
+    # output-dir, so the path relative to output-dir is still the scan's.
+    (scan_sarif_step,) = [
+        s
+        for job in scan["jobs"].values()
+        for s in _steps_using(job, UPLOAD_SARIF_ACTION)
+    ]
     relative = scan_sarif_step["with"]["sarif_file"].removeprefix(
         "${{ inputs.output-dir }}/"
     )

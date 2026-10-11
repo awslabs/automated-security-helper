@@ -106,8 +106,17 @@ def test_the_reusable_scan_workflow_asks_callers_for_nothing_new():
         "checks": "write",
         "pull-requests": "write",
     }
+    # A job may narrow the token (the scan job holds contents: read only), but no
+    # job may ask for a scope the workflow does not declare, because that is what
+    # callers have to grant.
+    rank = {"none": 0, "read": 1, "write": 2}
     for job in data["jobs"].values():
-        assert "permissions" not in job, job.get("name")
+        for scope, level in (job.get("permissions") or {}).items():
+            assert rank[level] <= rank[data["permissions"].get(scope, "none")], (
+                job.get("name"),
+                scope,
+                level,
+            )
 
 
 def _jobs_steps() -> Iterator[tuple[str, list[dict[str, Any]]]]:
