@@ -694,11 +694,32 @@ class TestEveryConsumerPassesTheSwitch:
             "plugin_modules/ash_builtin/converters/jupyter_converter.py",
         } <= modules, sorted(modules)
 
-    def test_each_call_passes_honor_ignore_files(self):
+    def test_each_call_passes_the_configs_switch(self):
+        """The keyword alone is not enough: ``honor_ignore_files=True`` passes the name.
+
+        Each call has to hand on what its config says, through
+        ``honors_ignore_files(<config>)``.
+        """
+
+        def passes_the_switch(call: ast.Call) -> bool:
+            for keyword in call.keywords:
+                if keyword.arg != "honor_ignore_files":
+                    continue
+                value = keyword.value
+                return (
+                    isinstance(value, ast.Call)
+                    and isinstance(value.func, ast.Name)
+                    and value.func.id == "honors_ignore_files"
+                    and len(value.args) == 1
+                    and isinstance(value.args[0], ast.Attribute)
+                    and value.args[0].attr == "config"
+                )
+            return False
+
         missing = [
             f"{module}:{call.lineno}"
             for module, call in _consumers()
-            if "honor_ignore_files" not in {keyword.arg for keyword in call.keywords}
+            if not passes_the_switch(call)
         ]
         assert missing == [], missing
 
