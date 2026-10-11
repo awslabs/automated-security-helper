@@ -417,7 +417,7 @@ mcp-resource-management:
   max_directory_size_mb: 1024       # 1GB
 ```
 
-The server reads its operator configuration from the file `ASH_CONFIG` names, for every scan that names no config of its own. If `ASH_CONFIG` names a path that is not a file, `ash mcp` refuses to start (exit 3) with an error naming the variable and the path.
+The server reads its operator configuration from the file `ASH_CONFIG` names, for every scan that names no config of its own. It loads that file at startup, the way it loads each `--profile`. If `ASH_CONFIG` names a path that is not a file, or a file the server can't read, parse or validate, `ash mcp` refuses to start (exit 3) with an error naming the variable and the path. `python -m automated_security_helper.cli.mcp_server` starts the same way as `ash mcp` and makes the same checks.
 
 ### Configuration Options
 

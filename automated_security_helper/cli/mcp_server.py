@@ -2025,4 +2025,12 @@ def _run_stdio_until_closed() -> None:
 
 
 if __name__ == "__main__":
-    run_mcp_server()
+    # `python -m automated_security_helper.cli.mcp_server` starts the way `ash mcp`
+    # does, with the same arguments, so it makes the same startup checks
+    # (ASH_CONFIG, ASH_MCP_TRANSPORT, the options) and the same process setup
+    # before it serves.
+    import sys
+
+    from automated_security_helper.cli.main import app
+
+    app(["mcp", *sys.argv[1:]])

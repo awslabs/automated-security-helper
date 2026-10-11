@@ -18,6 +18,7 @@ supports multiple transports:
 from __future__ import annotations
 
 import os
+import stat
 from pathlib import Path
 from typing import Annotated, List, Optional
 import typer
@@ -569,6 +570,43 @@ def _run_uvicorn(
     server.run(sockets=None if listen_socket is None else [listen_socket])
 
 
+def _ash_config_refusal() -> Optional[str]:
+    """Why ``ASH_CONFIG`` can't be the server's policy, or None when it can.
+
+    ``ASH_CONFIG`` is the operator's explicit policy for every scan that names no
+    config of its own, so the server loads it at startup with
+    :meth:`AshConfig.from_file`, as it loads each ``--profile``. A path that
+    names nothing or a directory, a file the server can't read, and a file that
+    fails to parse or validate are each refused here, before anything is served.
+
+    The path is checked with ``stat`` rather than ``Path.is_file``. For a path
+    under a directory the server can't search, ``is_file`` raises on some Python
+    versions and returns False on others; ``stat`` raises ``PermissionError`` on
+    all of them.
+    """
+    from automated_security_helper.config.ash_config import AshConfig
+
+    value = os.environ.get("ASH_CONFIG")
+    if not value:
+        return None
+    path = Path(value)
+    try:
+        mode = path.stat().st_mode
+    except FileNotFoundError:
+        return f"ASH_CONFIG={value} names no config file."
+    except OSError as exc:
+        return f"ASH_CONFIG={value} could not be read: {exc}"
+    if not stat.S_ISREG(mode):
+        return f"ASH_CONFIG={value} names no config file."
+    try:
+        AshConfig.from_file(path)
+    except Exception as exc:
+        # The same breadth as register_profiles: OSError, YAML and JSON errors,
+        # pydantic's ValidationError, and the ValueError an extends chain raises.
+        return f"ASH_CONFIG={value} could not be loaded: {exc}"
+    return None
+
+
 def mcp_command(
     ctx: typer.Context,
     log_level: Annotated[
@@ -779,14 +817,12 @@ def mcp_command(
         )
         raise typer.Exit(3)
 
-    # ASH_CONFIG is the operator's explicit policy for every scan that names no
-    # config of its own. A value that names no file would leave those scans on
-    # the built-in default, so the server refuses to start instead.
-    ash_config = os.environ.get("ASH_CONFIG")
-    if ash_config and not Path(ash_config).is_file():
+    # A value the server can't load would leave every scan that names no config
+    # on the built-in default, so the server refuses to start instead.
+    refusal = _ash_config_refusal()
+    if refusal is not None:
         _stderr.print(
-            f"[red]Validation Error: ASH_CONFIG={escape(ash_config)} names no config "
-            f"file. "
+            f"[red]Validation Error: {escape(refusal)} "
             f"Point ASH_CONFIG at the operator's config file, or unset it to scan "
             f"with the built-in default.[/red]",
             highlight=False,
