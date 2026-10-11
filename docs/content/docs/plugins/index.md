@@ -89,6 +89,11 @@ Or specify it on the command line:
 ash --ash-plugin-modules my_ash_plugins
 ```
 
+The module must be inside ASH's plugin namespace: under `automated_security_helper.`,
+`ash_plugins`, or a top-level package whose name ends in `ash_plugins`, as
+`my_ash_plugins` does. Any other name refuses the scan with exit code 3 before anything
+is imported.
+
 A scan uses ASH's built-in plugins plus the plugins and event handlers of the modules
 it names this way. When one process runs several scans (the MCP server, or a program
 calling `run_ash_scan` more than once), a module only another scan named takes no part.

@@ -455,17 +455,25 @@ def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) 
         How many scanner classes the registry resolved to, for logging. Zero
         means plugin discovery found nothing, which is worth seeing in a log
         rather than discovering later as an empty scan.
+
+    Raises:
+        ASHConfigValidationError: A project or ``--ash-plugin-modules`` names a
+            module outside the plugin namespace; nothing has been imported.
     """
     from automated_security_helper.plugins import ash_plugin_manager
     from automated_security_helper.plugins.discovery import discover_plugins
     from automated_security_helper.plugins.loader import (
         load_additional_plugin_modules,
         load_internal_plugins,
+        refuse_plugin_modules_outside_namespace,
     )
 
-    load_internal_plugins()
-
     modules = workspace_plugin_modules(plan, settings)
+    # Before anything is imported or any project starts: a name outside the plugin
+    # namespace refuses the workspace with exit 3, as it refuses a single scan.
+    refuse_plugin_modules_outside_namespace(modules)
+
+    load_internal_plugins()
 
     if modules:
         ASH_LOGGER.info(f"Loading workspace plugin modules: {modules}")

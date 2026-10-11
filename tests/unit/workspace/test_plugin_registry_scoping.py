@@ -257,10 +257,13 @@ class TestPrewarm:
         """--ash-plugin-modules is additive to whatever the projects declare."""
         plan = self._plan(tmp_path, ("api", []))
         settings = ProjectScanSettings(
-            output_dir=tmp_path / "out", ash_plugin_modules=("acme.from_cli",)
+            output_dir=tmp_path / "out",
+            ash_plugin_modules=("acme_ash_plugins.from_cli",),
         )
         # Resolves without raising even though the CLI module does not import;
-        # load_additional_plugin_modules logs and continues.
+        # load_additional_plugin_modules logs and continues. The name is inside the
+        # plugin namespace, so this holds the additive merge only: a name outside
+        # the namespace refuses the scan (tests/unit/plugins/test_refused_plugin_modules.py).
         assert prewarm_plugin_registry(plan, settings) > 0
 
 

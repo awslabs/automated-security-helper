@@ -243,7 +243,7 @@ def _attempt(
         # The fixture plugin, as an operator installs one. Its module sits in this
         # git checkout, which an in-tree config may not import from.
         "--config-overrides",
-        "ash_plugin_modules=[escape_plugins]",
+        "ash_plugin_modules=[escape_ash_plugins]",
     ]
     result = subprocess.run(  # nosec B603 - fixed argv
         command, env=env, capture_output=True, text=True, timeout=600, check=False

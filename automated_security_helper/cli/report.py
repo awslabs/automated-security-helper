@@ -21,7 +21,10 @@ from automated_security_helper.core.enums import AshLogLevel, ExportFormat
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
-from automated_security_helper.plugins.loader import load_plugins
+from automated_security_helper.plugins.loader import (
+    PluginModuleNamespaceError,
+    load_plugins,
+)
 from automated_security_helper.utils.log import escape_markup, get_logger
 from automated_security_helper.utils.output_dir_links import (
     OutputDirLinkRefused,
@@ -192,7 +195,12 @@ def report_command(
 
     # Set the plugin context for the plugin manager
     ash_plugin_manager.set_context(plugin_context)
-    load_plugins(plugin_context=plugin_context)
+    try:
+        load_plugins(plugin_context=plugin_context)
+    except PluginModuleNamespaceError as e:
+        # A plugin module outside the plugin namespace, refused before import
+        print(f"[red]Invalid configuration: {e}[/red]")
+        raise typer.Exit(3)
 
     # Load the results file
     #

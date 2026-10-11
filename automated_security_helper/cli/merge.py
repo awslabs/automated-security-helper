@@ -157,6 +157,7 @@ from automated_security_helper.base.plugin_context import PluginContext
 # rebuild by side effect of importing resolve_config; relying on an import made
 # for another purpose is what makes this fragile, so the dependency is named here.
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.plugin_module_trust import split_plugin_modules
 from automated_security_helper.core.enums import (
     AshLogLevel,
     ExportFormat,
@@ -179,7 +180,11 @@ from automated_security_helper.models.asharp_model import (
     RefusedInputInfo,
 )
 from automated_security_helper.plugins import ash_plugin_manager
-from automated_security_helper.plugins.loader import load_plugins
+from automated_security_helper.plugins.loader import (
+    PluginModuleNamespaceError,
+    load_plugins,
+    refuse_plugin_modules_outside_namespace,
+)
 from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.log import ASH_LOGGER, escape_markup, get_logger
 from automated_security_helper.utils.output_dir_links import (
@@ -1331,6 +1336,20 @@ def merge_command(
         # unknown, which is not the same as "no findings".
         print(f"[red]Refusing to merge: {exc}[/red]")
         raise typer.Exit(1)
+
+    # Before anything is written. The shards' config names the plugin modules the
+    # reports are rendered with, and a module outside the plugin namespace is
+    # refused here as the scan itself refuses it (load_plugins below would too,
+    # but only after the merged results file exists).
+    try:
+        refuse_plugin_modules_outside_namespace(
+            split_plugin_modules(
+                getattr(merged.ash_config, "ash_plugin_modules", None) or []
+            )
+        )
+    except PluginModuleNamespaceError as exc:
+        print(f"[red]Invalid configuration: {exc}[/red]")
+        raise typer.Exit(3)
 
     output_dir_path = _relocate_colliding_output_dir(Path(output_dir))
     # The merged results and reports are written into the output directory, so a

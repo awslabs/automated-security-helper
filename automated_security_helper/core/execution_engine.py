@@ -202,8 +202,12 @@ class ScanExecutionEngine:
             # Import additional plugin modules
             from automated_security_helper.plugins.loader import (
                 load_additional_plugin_modules,
+                refuse_plugin_modules_outside_namespace,
             )
 
+            # Before importing any of them: a name outside the plugin namespace
+            # refuses the scan (exit 3) rather than being skipped with a warning.
+            refuse_plugin_modules_outside_namespace(combined_plugin_modules)
             load_additional_plugin_modules(combined_plugin_modules)
 
             # Discover plugins from specified modules

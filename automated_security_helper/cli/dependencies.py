@@ -33,7 +33,10 @@ from automated_security_helper.core.constants import (
     ASH_WORK_DIR_NAME,
 )
 from automated_security_helper.plugins import ash_plugin_manager
-from automated_security_helper.plugins.loader import load_plugins
+from automated_security_helper.plugins.loader import (
+    PluginModuleNamespaceError,
+    load_plugins,
+)
 from automated_security_helper.utils.download_utils import (
     pinned_install_already_satisfied,
 )
@@ -323,14 +326,20 @@ def install_dependencies(
     # load_plugins is what the scan path already uses for this. Calling it here means
     # a config that adds scanners also adds their dependencies, and `--tool
     # trivy-repo` resolves instead of being rejected as an unknown name.
-    load_plugins(
-        PluginContext(
-            source_dir=source_dir,
-            output_dir=output_dir,
-            work_dir=work_dir,
-            config=resolved_config,
+    try:
+        load_plugins(
+            PluginContext(
+                source_dir=source_dir,
+                output_dir=output_dir,
+                work_dir=work_dir,
+                config=resolved_config,
+            )
         )
-    )
+    except PluginModuleNamespaceError as e:
+        # A plugin module outside the plugin namespace: refused before anything
+        # is imported or installed, with a scan's invalid-configuration code.
+        print(f"[red]Invalid configuration: {escape(str(e))}[/red]")
+        raise typer.Exit(3)
 
     outcomes: List[PluginInstallOutcome] = []
     construction_failures: List[PluginInstallOutcome] = []

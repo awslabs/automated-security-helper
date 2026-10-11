@@ -4,6 +4,7 @@ import importlib
 import sys
 from typing import Any, Callable, Dict, Iterable, List
 
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -123,13 +124,15 @@ _ALLOWED_MODULE_PREFIXES = (
 #: skipped it with a warning and every plugin in it went unregistered.
 #:
 #: That divergence was survivable in one path and not in the others.
-#: ``execution_engine`` also calls ``discover_plugins``, which matches a top-level
+#: ``execution_engine`` also calls ``discover_plugins``, which matched a top-level
 #: package by name (then by walking ``pkgutil.iter_modules()``, now by
-#: ``importlib.util.find_spec``) and does import the package -- so the
-#: single-project scan path loaded it anyway. The consumers with
+#: ``importlib.util.find_spec``) and imported the package without this check -- so
+#: the single-project scan path loaded it anyway. The consumers with
 #: no such fallback (``workspace.execution``, ``core.scanner_inventory``,
 #: ``load_plugins`` itself) did not, so the documented arrangement worked in a
 #: single-project scan and silently dropped every custom plugin in a workspace run.
+#: ``discover_plugins`` now applies this check as well, and a scan refuses a name
+#: outside the namespace (``refuse_plugin_modules_outside_namespace``).
 #:
 #: A suffix rather than removing the check. The check's purpose is to keep a config
 #: file from naming an arbitrary importable module, and that purpose survives:
@@ -158,6 +161,49 @@ def _is_allowed_module_path(module_path: str) -> bool:
 
     top_level = module_path.split(".", 1)[0]
     return top_level.endswith(_ALLOWED_TOP_LEVEL_SUFFIX)
+
+
+def _namespace_rule() -> str:
+    return (
+        f"Module paths must start with one of: {', '.join(_ALLOWED_MODULE_PREFIXES)}, "
+        f"or name a top-level package ending in '{_ALLOWED_TOP_LEVEL_SUFFIX}'."
+    )
+
+
+class PluginModuleNamespaceError(ASHConfigValidationError):
+    """``ash_plugin_modules`` names a module outside the plugin namespace.
+
+    An invalid configuration, so a scan maps it to exit code 3 with every other
+    ``ASHConfigValidationError``. Its own type lets a command that maps other
+    configuration errors differently still give this one exit code 3.
+    """
+
+
+def refuse_plugin_modules_outside_namespace(plugin_modules: Iterable[str]) -> None:
+    """Refuse a scan whose ``ash_plugin_modules`` names a module outside the namespace.
+
+    Checked before any of them is imported, so a refused name runs no code and an
+    accepted name beside it is not imported either. Empty entries (a trailing
+    comma) name nothing and are ignored.
+
+    Raises:
+        PluginModuleNamespaceError: Naming every refused entry. A scan maps it to
+            exit code 3, invalid configuration.
+    """
+    refused = [
+        name
+        for name in dict.fromkeys(plugin_modules)
+        if name and not _is_allowed_module_path(name)
+    ]
+    if refused:
+        raise PluginModuleNamespaceError(
+            "ash_plugin_modules names "
+            + ", ".join(repr(name) for name in refused)
+            + f", outside ASH's plugin namespace. {_namespace_rule()} Nothing was "
+            "imported and nothing was scanned. Rename the package, or remove the "
+            "entry from the config file, --config-overrides, --ash-plugin-modules "
+            "or ASH_PLUGIN_MODULES."
+        )
 
 
 #: ASH's built-in plugin package. Every scan selects its plugins without naming it.
@@ -251,9 +297,7 @@ def load_additional_plugin_modules(plugin_modules: List[str] | None = None) -> d
         if not _is_allowed_module_path(module_path):
             ASH_LOGGER.warning(
                 f"Skipping module with unexpected namespace: {module_path}. "
-                f"Module paths must start with one of: "
-                f"{', '.join(_ALLOWED_MODULE_PREFIXES)}, or name a top-level "
-                f"package ending in '{_ALLOWED_TOP_LEVEL_SUFFIX}'."
+                f"{_namespace_rule()}"
             )
             continue
 
@@ -297,13 +341,24 @@ def load_plugins(plugin_context=None) -> Dict[str, List[Any]]:
 
     Returns:
         Dict[str, List[Any]]: Dictionary containing lists of loaded plugins by type
+
+    Raises:
+        PluginModuleNamespaceError: The config names a plugin module outside the
+            plugin namespace (see refuse_plugin_modules_outside_namespace).
     """
-    # Extract additional plugin modules from context if available
+    # Extract additional plugin modules from context if available, split on
+    # commas the way a scan reads them
     additional_plugin_modules = []
     if plugin_context and plugin_context.config:
-        additional_plugin_modules = getattr(
-            plugin_context.config, "ash_plugin_modules", []
+        from automated_security_helper.config.plugin_module_trust import (
+            split_plugin_modules,
         )
+
+        additional_plugin_modules = split_plugin_modules(
+            getattr(plugin_context.config, "ash_plugin_modules", [])
+        )
+    # The same refusal as a scan's, before anything is imported
+    refuse_plugin_modules_outside_namespace(additional_plugin_modules)
 
     # Set the context on the plugin manager if provided
     if plugin_context:

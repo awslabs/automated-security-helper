@@ -315,7 +315,7 @@ def _scan(
         # The fixture plugin, as an operator installs one. Its module sits in this
         # git checkout, which an in-tree config may not import from.
         "--config-overrides",
-        "ash_plugin_modules=[escape_plugins]",
+        "ash_plugin_modules=[escape_ash_plugins]",
     ]
     if online:
         # The fixture scanner declares no network need, so it is granted one the

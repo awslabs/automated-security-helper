@@ -440,9 +440,12 @@ ash_plugin_modules:
 ```
 
 The top-level package must be inside ASH's plugin namespace: either under
-`automated_security_helper.`, or a top-level package whose name ends in `ash_plugins`.
-A module outside that namespace is skipped with a warning rather than imported, so a
-name like `another_plugin_module` silently registers nothing. When the list comes from
+`automated_security_helper.`, `ash_plugins`, or a top-level package whose name ends in
+`ash_plugins`. A name outside that namespace, such as `another_plugin_module`, refuses
+the scan with exit code 3 (invalid configuration) before any module is imported,
+whether it comes from a config file, `--config-overrides`, `--ash-plugin-modules` or
+`ASH_PLUGIN_MODULES`. The same name refuses `ash plugin list`, `ash dependencies
+install`, `ash report` and `ash merge` with exit code 3. When the list comes from
 a config file inside the scanned tree, only installed modules are imported; see
 [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose).
 

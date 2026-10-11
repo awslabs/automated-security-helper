@@ -99,7 +99,10 @@ class TestEngineConstruction:
     def test_plugin_modules_from_cli_and_config_are_loaded(self, tmp_path):
         """CLI and config module lists are merged, comma-split, and discovered."""
         config = AshConfig(project_name="test")
-        config.ash_plugin_modules = ["cfg_mod_a, cfg_mod_b"]
+        # Names inside the plugin namespace, so the merge and the comma split are
+        # what is tested; a name outside it refuses the scan instead
+        # (tests/unit/plugins/test_refused_plugin_modules.py).
+        config.ash_plugin_modules = ["cfg_a_ash_plugins, cfg_b_ash_plugins"]
         ctx = _make_context(tmp_path, config)
 
         with (
@@ -112,12 +115,12 @@ class TestEngineConstruction:
             ScanExecutionEngine(
                 context=ctx,
                 show_progress=False,
-                ash_plugin_modules=["cli_mod"],
+                ash_plugin_modules=["cli_ash_plugins"],
             )
 
         mock_load.assert_called_once()
         loaded = set(mock_load.call_args.args[0])
-        assert loaded == {"cli_mod", "cfg_mod_a", "cfg_mod_b"}
+        assert loaded == {"cli_ash_plugins", "cfg_a_ash_plugins", "cfg_b_ash_plugins"}
         assert set(mock_discover.call_args.kwargs["plugin_modules"]) == loaded
 
     def test_no_plugin_modules_skips_discovery(self, tmp_path):
