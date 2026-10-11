@@ -75,6 +75,13 @@ def zizmor_model(tmp_path, monkeypatch):
     monkeypatch.setattr(
         ZizmorScanner, "_get_uv_tool_version", lambda self, *_: "1.30.1"
     )
+    # The invocation's workingDirectory is the target relative to the process cwd
+    # when the cwd contains it (utils/get_shortest_name.py). Run from a directory
+    # beside the target, so it is recorded absolute and masked as <TMP>/repo
+    # wherever pytest was started, "/" included, and whatever --basetemp is.
+    elsewhere = tmp_path / "cwd"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
     source = tmp_path / "repo"
     shutil.copytree(ZIZMOR_FIXTURE / "repo", source)
     report, context = _zizmor_report(source, tmp_path / "ash_output")
