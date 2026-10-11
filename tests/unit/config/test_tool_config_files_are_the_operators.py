@@ -274,3 +274,51 @@ def test_syft_gets_an_empty_config_not_the_trees(
     (passed,) = _values_after(argv, "--config")
     assert Path(passed).parent == Path(scanner.results_dir)
     assert yaml.safe_load(Path(passed).read_text(encoding="utf-8")) == {}
+
+
+@pytest.mark.parametrize("tool", ["semgrep", "opengrep"])
+def test_a_semgrepignore_is_not_honored_and_the_defaults_are_kept(
+    tmp_path: Path, tool: str
+) -> None:
+    from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
+        SEMGREP_DEFAULT_IGNORES,
+    )
+
+    if tool == "semgrep":
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
+            SemgrepScanner as cls,
+            SemgrepScannerConfig as cfg,
+        )
+    else:
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+            OpengrepScanner as cls,  # type: ignore[assignment]
+            OpengrepScannerConfig as cfg,  # type: ignore[assignment]
+        )
+    context = _context(tmp_path)
+    scanner = cls(context=context, config=cfg())
+    argv = [
+        str(a)
+        for a in scanner._resolve_arguments(
+            target=Path(context.source_dir), results_file=tmp_path / "r.sarif"
+        )
+    ]
+    assert "--x-ignore-semgrepignore-files" in argv
+    excluded = _values_after(argv, "--exclude")
+    assert set(SEMGREP_DEFAULT_IGNORES) <= set(excluded)
+
+
+def test_an_unhonored_semgrepignore_is_noted_in_the_results(tmp_path: Path) -> None:
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
+        SemgrepScanner,
+        SemgrepScannerConfig,
+    )
+
+    context = _context(tmp_path)
+    (Path(context.source_dir) / ".semgrepignore").write_text("hidden/\n", "utf-8")
+    scanner = SemgrepScanner(context=context, config=SemgrepScannerConfig())
+    scanner._resolve_arguments(
+        target=Path(context.source_dir), results_file=tmp_path / "r.sarif"
+    )
+    (note,) = [w for w in context.config._resolution_warnings if ".semgrepignore" in w]
+    assert "was not honored" in note
+    assert "global_settings.ignore_paths" in note

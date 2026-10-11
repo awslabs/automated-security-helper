@@ -6,11 +6,13 @@
 Each test runs the tool as it would run without ASH's handling (the control),
 showing the in-tree file hides a finding, then runs ASH's scanner over the same
 tree and checks the finding is reported. Measured with bandit 1.9.4, grype
-0.118.0 and syft 1.51.1:
+0.118.0, syft 1.51.1, semgrep 1.180.0 and opengrep 1.15.1 and 1.30.0:
 
 * bandit finds a ``.bandit`` anywhere under the target unless ``--ini`` names one;
 * grype and syft read ``.grype.yaml`` and ``.syft.yaml`` from their working
-  directory, the source directory, unless ``--config`` names one.
+  directory, the source directory, unless ``--config`` names one;
+* semgrep and opengrep honor a ``.semgrepignore`` in the tree unless
+  ``--x-ignore-semgrepignore-files`` is passed.
 
 Each test is skipped when its tool is not installed; grype's also needs a
 vulnerability database already in its cache.
@@ -31,6 +33,8 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 
 PluginContext.model_rebuild()
+
+MARKER = "ASH_TOOL_CONFIG_MARKER_7f3a"
 
 pytestmark = [
     pytest.mark.integration,
@@ -183,3 +187,83 @@ def test_a_syft_yaml_in_the_tree_does_not_drop_components(tmp_path: Path) -> Non
     )
     report = scanner.scan(target=source, target_type="source")
     assert "requests" in {component.name for component in report.components or []}
+
+
+# ---------------------------------------------------------------------------
+# semgrep and opengrep
+# ---------------------------------------------------------------------------
+
+
+def _grep_tree(tmp_path: Path) -> Path:
+    source = tmp_path / "repo"
+    for relative in ("app.txt", "hidden/h.txt", "tests/t.txt"):
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{MARKER}\n", encoding="utf-8")
+    (source / ".semgrepignore").write_text("hidden/\n", encoding="utf-8")
+    return source
+
+
+def _rule_file(tmp_path: Path) -> Path:
+    rules = tmp_path / "rules.yaml"
+    rules.write_text(
+        "rules:\n"
+        "  - id: marker\n"
+        "    message: marker\n"
+        "    severity: WARNING\n"
+        "    languages: [generic]\n"
+        f"    pattern-regex: {MARKER}\n",
+        encoding="utf-8",
+    )
+    return rules
+
+
+@pytest.mark.parametrize("tool", ["semgrep", "opengrep"])
+def test_a_semgrepignore_in_the_tree_does_not_hide_files(
+    tmp_path: Path, tool: str
+) -> None:
+    binary = _tool(tool)
+    source = _grep_tree(tmp_path)
+    rules = _rule_file(tmp_path)
+    control_out = tmp_path / "control.sarif"
+    subprocess.run(  # nosec B603 - fixed argv, the tool from PATH
+        [
+            binary,
+            "scan",
+            "--config",
+            str(rules),
+            *(["--metrics", "off"] if tool == "semgrep" else []),
+            "--sarif-output",
+            str(control_out),
+            str(source),
+        ],
+        cwd=source,
+        capture_output=True,
+        check=False,
+    )
+    control = json.loads(control_out.read_text(encoding="utf-8"))
+    control_uris = {
+        r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        for run in control["runs"]
+        for r in run["results"]
+    }
+    assert not any("hidden/" in uri for uri in control_uris), control_uris
+
+    if tool == "semgrep":
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
+            SemgrepScanner as cls,
+            SemgrepScannerConfig as cfg,
+        )
+    else:
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+            OpengrepScanner as cls,  # type: ignore[assignment]
+            OpengrepScannerConfig as cfg,  # type: ignore[assignment]
+        )
+    scanner = cls(
+        context=_context(tmp_path, source),
+        config=cfg.model_validate({"options": {"config": str(rules)}}),
+    )
+    uris = _uris(scanner.scan(target=source, target_type="source"))
+    assert any("hidden/h.txt" in uri for uri in uris), uris
+    # The tools' own default exclusions still apply.
+    assert not any("tests/t.txt" in uri for uri in uris), uris

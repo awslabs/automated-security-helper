@@ -229,6 +229,13 @@
     way: from such a file they are left at the default, `p/ci` and `auto`, with a
     warning naming the key, and under the MCP server `metrics` joins the default
     `denied_paths` (`config` already is one).
+  - semgrep and opengrep no longer honor a `.semgrepignore` in the scanned tree.
+    ASH passes `--x-ignore-semgrepignore-files` together with the tools' default
+    exclusions, so the paths scanned are those scanned with no `.semgrepignore`.
+    A `.semgrepignore` that either tool would have read is named in the results as
+    a `config_warning` validation checkpoint. To leave files out, list them in
+    `global_settings.ignore_paths`; under the MCP server a client's entries there
+    are marked `client_supplied`, as usual.
   - A reporter's `extension` has to be a filename suffix, from any source: a value
     with `/`, `\`, `..` or NUL is replaced by the reporter's default, with a
     warning naming the key. Reports, the files the unused-suppressions, S3 and
