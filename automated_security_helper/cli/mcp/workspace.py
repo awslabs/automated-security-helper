@@ -183,8 +183,8 @@ MCP_WORKSPACE_OUTPUT_REMEDY = (
     "replace the link with a directory."
 )
 from automated_security_helper.utils.process_env import (
-    apply_environ_overrides,
-    restore_environ,
+    hold_environ,
+    release_environ,
 )
 from automated_security_helper.workspace.execution import (
     PROJECTS_DIR_NAME,
@@ -1026,16 +1026,18 @@ async def _execute(
     with full network access while reporting that it had not. The CLI already sets the
     variable around its own invocations; this path bypassed that.
 
-    The value is snapshotted and restored rather than set-and-popped: a long-lived MCP
-    server started with ``ASH_OFFLINE=YES`` in its own environment would otherwise have
-    that deployment-level setting silently cleared by the first offline workspace scan.
+    The variable is held (``utils/process_env.hold_environ``) rather than set and
+    restored: with two sessions' offline scans overlapping, the first to end would put
+    back "unset" while the other still runs, and the last would put back the first
+    one's "YES". The last release restores what the server started with, so a
+    deployment-level ``ASH_OFFLINE=YES`` survives.
 
     Known limitation, stated because it is reachable here and not in the CLI: the variable
-    is process-global while this server can run sessions concurrently. Two overlapping
-    workspace scans with different ``offline`` values share one variable, so the restore
-    of the first can land inside the second. Closing that properly means having scanners
-    consume the resolved setting instead of the environment, which is a change across
-    every scanner rather than a fix to this call site.
+    is process-global while this server can run sessions concurrently. An online scan
+    that overlaps an offline one reads offline mode while the offline one holds it.
+    Closing that properly means having scanners consume the resolved setting instead of
+    the environment, which is a change across every scanner rather than a fix to this
+    call site.
     """
     monitor: Optional["asyncio.Task[None]"] = None
     if progress_reporter is not None and project_outputs:
@@ -1044,16 +1046,16 @@ async def _execute(
         )
     # Under the process-wide environment lock, because other sessions' scans may
     # be copying the environment for a spawn on another thread right now.
-    offline_previous = (
-        apply_environ_overrides({"ASH_OFFLINE": "YES"}) if settings.offline else None
-    )
+    offline_held = bool(settings.offline)
+    if offline_held:
+        hold_environ("ASH_OFFLINE", "YES")
     try:
         # Resolved from this module's globals at call time, so a test that
         # replaces cli.mcp.workspace.execute_workspace is what runs.
         return await asyncio.to_thread(execute_workspace, plan, settings)
     finally:
-        if offline_previous is not None:
-            restore_environ(offline_previous)
+        if offline_held:
+            release_environ("ASH_OFFLINE")
         if monitor is not None:
             monitor.cancel()
             with suppress(asyncio.CancelledError):
