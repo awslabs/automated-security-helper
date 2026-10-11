@@ -1046,7 +1046,7 @@ def main(argv: list[str] | None = None) -> int:
         ("Python blocks in docs parse and import", check_doc_python_blocks),
         ("Links and anchors in docs resolve", check_doc_links),
         ("Docs navigation and redirects resolve", check_doc_nav),
-        ("Docs site build is strict and offline", check_doc_site_build),
+        ("Docs site build is strict, offline and versioned", check_doc_site_build),
         ("Docs links in the ASH source resolve", check_doc_code_links),
         (
             "Option tables and config paths in docs match the models",

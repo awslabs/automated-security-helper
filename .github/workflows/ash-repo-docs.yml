@@ -83,6 +83,14 @@ jobs:
       - name: Build documentation
         run: uv run mkdocs build --clean --strict
 
+      # Publishes two releases and main to a throwaway branch of this checkout with
+      # every proxy pointed at a refusing port, and checks what a reader of each would
+      # get: the version selector, the notice each kind of version shows, latest/,
+      # and the redirects at the site root. It deletes the branch and never pushes,
+      # and this job's token could not push anyway.
+      - name: Check the versioned site
+        run: uv run python scripts/docs_versions.py check
+
   deploy-docs:
     name: Deploy documentation
     runs-on: ubuntu-latest
@@ -90,13 +98,20 @@ jobs:
     permissions:
       #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
       contents: write
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    # A push to main publishes the version main; a release tag vX.Y.Z publishes X.Y.Z
+    # (scripts/docs_versions.py decides, and publishes nothing for any other tag, such
+    # as the floating v3). The tag workflow creates release tags with GITHUB_TOKEN,
+    # whose pushes start no workflow, so it starts this one with workflow_dispatch on
+    # the tag; a maintainer can do the same to publish a tag again.
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # No cache restore in this job. It publishes the site with `contents: write`,
-      # on main and on tag pushes, so nothing a cache entry carries may reach it.
+      # on main and on release tags, so nothing a cache entry carries may reach it.
       # It still saves uv's cache on a push to main, for build-docs to restore:
       # what it saves is what its own `uv sync` just resolved from uv.lock.
       - name: Install uv
@@ -123,8 +138,19 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      # Not `mkdocs gh-deploy`: it replaces the whole branch with one unversioned
+      # build, which would delete every published version. The script fetches
+      # gh-pages itself (this checkout has only the ref being published), commits one
+      # version with mike, points the site root at the latest release and pushes, and
+      # redoes its version if a concurrent deploy (main and a release tag, when a
+      # release merges) pushed first. It never force-pushes.
       - name: Deploy documentation
-        run: uv run mkdocs gh-deploy --clean --force
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: uv run python scripts/docs_versions.py deploy --ref "$GITHUB_REF" --push
 
       - name: Save the uv cache (main only)
         if: >-

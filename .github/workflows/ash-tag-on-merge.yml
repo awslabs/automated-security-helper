@@ -17,6 +17,8 @@ jobs:
       startsWith(github.event.pull_request.title, 'chore(release):')
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -155,3 +157,26 @@ jobs:
               --field sha="$MAIN_SHA"
             echo "Created ${FLOATING} tag at $MAIN_SHA (v${VERSION})"
           fi
+
+  # The docs workflow publishes a docs version for each release tag, but the tag above
+  # is created with GITHUB_TOKEN, and a push made with that token starts no workflow:
+  # v3.6.0 and v3.7.0 have no docs run at all. workflow_dispatch is the exception
+  # GitHub makes, so this starts the docs workflow on the tag. Its own job, so the
+  # `actions: write` that dispatching needs is the only permission it holds.
+  # It runs when the release already existed too: publishing a version again only
+  # rebuilds it from the same tag.
+  publish-docs:
+    name: Publish the release's docs
+    needs: tag-and-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Start the docs deploy for the release tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.tag-and-release.outputs.version }}
+        run: |
+          gh workflow run ash-repo-docs.yml --repo "$GITHUB_REPOSITORY" --ref "v${VERSION}"
+          echo "Started the docs deploy for v${VERSION}"

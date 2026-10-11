@@ -74,6 +74,13 @@ REDIRECT_HOOK = "docs/hooks/redirects.py"
 #: The workflow whose build job must run ``mkdocs build --strict``.
 DOCS_WORKFLOW = ".github/workflows/ash-repo-docs.yml"
 
+#: The script that publishes the site as versions with mike, and checks that it can.
+DOCS_VERSIONS_SCRIPT = "scripts/docs_versions.py"
+
+#: The workflow that creates release tags, and so has to start the docs deploy for
+#: them: a tag pushed with GITHUB_TOKEN starts no workflow of its own.
+RELEASE_TAG_WORKFLOW = ".github/workflows/ash-tag-on-merge.yml"
+
 #: Fixture projects the docs-example runner can start a page in. ``fixture=<name>``
 #: on a marker names a directory here.
 DOC_FIXTURES_DIR = "tests/test_data/docs_fixtures"
@@ -5082,7 +5089,7 @@ def check_nav(root: Path = REPO_ROOT) -> list[Finding]:
 
 
 # ---------------------------------------------------------------------------
-# Check: the site build is strict and offline
+# Check: the site build is strict, offline and versioned
 # ---------------------------------------------------------------------------
 
 #: mkdocs ``validation`` settings that strict mode turns into build failures. A value
@@ -5097,17 +5104,42 @@ REQUIRED_VALIDATION = {
     ("validation", "links", "anchors"): "warn",
 }
 
+#: mkdocs.yml settings the versioned site depends on. ``strict`` makes the builds mike
+#: runs strict too, since mike passes no --strict; the mike plugin's two settings and
+#: Material's ``extra.version`` are what scripts/docs_versions.py check verifies in a
+#: real build, and are checked here as well so the lint job names a removed one.
+REQUIRED_VERSIONING = {
+    ("strict",): True,
+    ("extra", "version", "provider"): "mike",
+    ("extra", "version", "default"): "latest",
+}
+REQUIRED_MIKE_PLUGIN = {"alias_type": "copy", "canonical_version": "latest"}
 
-def check_site_build(root: Path = REPO_ROOT) -> list[Finding]:
-    """mkdocs.yml and the docs workflow keep the build strict, offline, and redirecting."""
+
+def _workflow_runs(path: Path) -> list[str] | None:
+    """Every ``run:`` script in a workflow, or None when the file does not exist."""
     import yaml
 
+    if not path.is_file():
+        return None
+    document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return list(_strings_under_keys(document, {"run"}))
+
+
+def check_site_build(root: Path = REPO_ROOT) -> list[Finding]:
+    """mkdocs.yml and the docs workflows keep the build strict, offline, redirecting
+    and versioned."""
     site = load_site(str(root))
     findings: list[Finding] = []
-    for path, wanted in REQUIRED_VALIDATION.items():
+
+    def setting(path: tuple[str, ...]) -> Any:
         value: Any = site.config
         for part in path:
             value = value.get(part) if isinstance(value, dict) else None
+        return value
+
+    for path, wanted in REQUIRED_VALIDATION.items():
+        value = setting(path)
         if value != wanted:
             findings.append(
                 Finding(
@@ -5115,6 +5147,17 @@ def check_site_build(root: Path = REPO_ROOT) -> list[Finding]:
                     MKDOCS_YML,
                     1,
                     f"{'.'.join(path)} is {value!r}; it must be {wanted!r} so --strict fails on it",
+                )
+            )
+    for path, wanted in REQUIRED_VERSIONING.items():
+        value = setting(path)
+        if value != wanted:
+            findings.append(
+                Finding(
+                    "site",
+                    MKDOCS_YML,
+                    1,
+                    f"{'.'.join(path)} is {value!r}; the versioned site needs {wanted!r}",
                 )
             )
     hooks = [str(h) for h in site.config.get("hooks") or []]
@@ -5141,10 +5184,43 @@ def check_site_build(root: Path = REPO_ROOT) -> list[Finding]:
         findings.append(
             Finding("site", MKDOCS_YML, 1, "the privacy plugin is not configured")
         )
-    workflow = root / DOCS_WORKFLOW
-    if workflow.is_file():
-        document = yaml.safe_load(workflow.read_text(encoding="utf-8")) or {}
-        runs = list(_strings_under_keys(document, {"run"}))
+    mike = next(
+        (p["mike"] for p in plugins if isinstance(p, dict) and "mike" in p),
+        {} if "mike" in names else None,
+    )
+    if mike is None:
+        findings.append(
+            Finding(
+                "site",
+                MKDOCS_YML,
+                1,
+                "the mike plugin is not listed, so mike adds it with its defaults "
+                "and extra.docs_version never reaches the pages",
+            )
+        )
+    else:
+        for key, wanted in REQUIRED_MIKE_PLUGIN.items():
+            value = (mike or {}).get(key)
+            if value != wanted:
+                findings.append(
+                    Finding(
+                        "site",
+                        MKDOCS_YML,
+                        1,
+                        f"plugins.mike.{key} is {value!r}; the versioned site needs {wanted!r}",
+                    )
+                )
+    if not (root / DOCS_VERSIONS_SCRIPT).is_file():
+        findings.append(
+            Finding(
+                "site",
+                DOCS_VERSIONS_SCRIPT,
+                1,
+                "the docs versions script does not exist",
+            )
+        )
+    runs = _workflow_runs(root / DOCS_WORKFLOW)
+    if runs is not None:
         builds = [r for r in runs if re.search(r"\bmkdocs\s+build\b", r)]
         if not builds:
             findings.append(
@@ -5160,9 +5236,53 @@ def check_site_build(root: Path = REPO_ROOT) -> list[Finding]:
                         f"'{run.strip()}' does not pass --strict",
                     )
                 )
+        for run in runs:
+            if re.search(r"\bgh-deploy\b", run):
+                findings.append(
+                    Finding(
+                        "site",
+                        DOCS_WORKFLOW,
+                        1,
+                        f"'{run.strip()}' replaces the whole gh-pages branch with one "
+                        "unversioned build, deleting every published version; deploy "
+                        f"with {DOCS_VERSIONS_SCRIPT} deploy",
+                    )
+                )
+        for command, why in (
+            ("deploy", "no step publishes the site with it"),
+            ("check", "no step checks the versioned site with it"),
+        ):
+            if not any(
+                re.search(rf"{re.escape(DOCS_VERSIONS_SCRIPT)}\s+{command}\b", r)
+                for r in runs
+            ):
+                findings.append(
+                    Finding(
+                        "site",
+                        DOCS_WORKFLOW,
+                        1,
+                        f"{DOCS_VERSIONS_SCRIPT} {command} is not run: {why}",
+                    )
+                )
     else:
         findings.append(
             Finding("site", DOCS_WORKFLOW, 1, "the docs workflow does not exist")
+        )
+    tag_runs = _workflow_runs(root / RELEASE_TAG_WORKFLOW)
+    workflow_name = Path(DOCS_WORKFLOW).name
+    if tag_runs is not None and not any(
+        re.search(rf"\bgh\s+workflow\s+run\s+{re.escape(workflow_name)}\b", r)
+        for r in tag_runs
+    ):
+        findings.append(
+            Finding(
+                "site",
+                RELEASE_TAG_WORKFLOW,
+                1,
+                f"the tag workflow does not start {workflow_name} on the release tag, "
+                "so no release gets a docs version: a tag created with GITHUB_TOKEN "
+                "starts no workflow by itself",
+            )
         )
     return findings
 

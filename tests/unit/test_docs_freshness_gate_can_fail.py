@@ -88,7 +88,7 @@ NON_VACUITY_COVERAGE = {
     "Python blocks in docs parse and import": "test_docs_checks_can_fail.py::test_python_check_can_fail",
     "Links and anchors in docs resolve": "test_docs_checks_can_fail.py::test_links_check_can_fail",
     "Docs navigation and redirects resolve": "test_docs_checks_can_fail.py::test_nav_check_can_fail",
-    "Docs site build is strict and offline": "test_docs_checks_can_fail.py::test_site_build_check_can_fail",
+    "Docs site build is strict, offline and versioned": "test_docs_checks_can_fail.py::test_site_build_check_can_fail",
     "Docs links in the ASH source resolve": "test_docs_checks_can_fail.py::test_code_links_check_can_fail",
     "Option tables and config paths in docs match the models": "test_docs_checks_can_fail.py::test_option_tables_check_can_fail",
 }

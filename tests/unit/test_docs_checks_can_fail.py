@@ -1303,6 +1303,7 @@ def test_save_as_maps_paths_to_modules():
 MKDOCS = """site_name: test
 site_url: https://example.github.io/project
 docs_dir: docs/content
+strict: true
 hooks:
   - docs/hooks/redirects.py
 not_in_nav: |
@@ -1318,8 +1319,16 @@ validation:
     unrecognized_links: warn
     anchors: warn
 plugins:
+  - mike:
+      alias_type: copy
+      canonical_version: latest
   - privacy
   - awesome-nav
+extra:
+  version:
+    provider: mike
+    default: latest
+  docs_version: !ENV [MIKE_DOCS_VERSION, ""]
 markdown_extensions:
   - admonition
   - pymdownx.superfences
@@ -1329,6 +1338,16 @@ WORKFLOW = """jobs:
   build:
     steps:
       - run: uv run mkdocs build --clean --strict
+      - run: uv run python scripts/docs_versions.py check
+  deploy:
+    steps:
+      - run: uv run python scripts/docs_versions.py deploy --ref "$GITHUB_REF" --push
+"""
+
+TAG_WORKFLOW = """jobs:
+  publish-docs:
+    steps:
+      - run: gh workflow run ash-repo-docs.yml --repo "$GITHUB_REPOSITORY" --ref "v${VERSION}"
 """
 
 
@@ -1340,12 +1359,17 @@ def _site(
     redirects: str = "redirects: {}\n",
     mkdocs: str = MKDOCS,
     workflow: str = WORKFLOW,
+    tag_workflow: str = TAG_WORKFLOW,
+    versions_script: bool = True,
 ) -> Path:
     root = tmp_path / "repo"
     _write(root, "mkdocs.yml", mkdocs)
     _write(root, dc.REDIRECT_HOOK, "# hook\n")
     _write(root, dc.REDIRECTS_FILE, redirects)
     _write(root, dc.DOCS_WORKFLOW, workflow)
+    _write(root, dc.RELEASE_TAG_WORKFLOW, tag_workflow)
+    if versions_script:
+        _write(root, dc.DOCS_VERSIONS_SCRIPT, "# script\n")
     _write(root, "README.md", "# Project\n\n## Getting started\n")
     for rel, text in pages.items():
         _write(root, rel, text)
@@ -1637,8 +1661,95 @@ def test_site_build_check_can_fail(tmp_path, case, mkdocs, workflow, expected):
     )
 
 
+VERSIONING_DEFECTS = [
+    (
+        "strict only on the command line",
+        {"mkdocs": MKDOCS.replace("strict: true\n", "")},
+        "strict is None; the versioned site needs True",
+    ),
+    (
+        "no version selector",
+        {"mkdocs": MKDOCS.replace("    provider: mike\n", "")},
+        "extra.version.provider is None",
+    ),
+    (
+        "outdated default is not latest",
+        {"mkdocs": MKDOCS.replace("    default: latest\n", "    default: stable\n")},
+        "extra.version.default is 'stable'",
+    ),
+    (
+        "mike plugin not listed",
+        {
+            "mkdocs": MKDOCS.replace(
+                "  - mike:\n      alias_type: copy\n      canonical_version: latest\n",
+                "",
+            )
+        },
+        "the mike plugin is not listed",
+    ),
+    (
+        "aliases are symbolic links",
+        {"mkdocs": MKDOCS.replace("alias_type: copy", "alias_type: symlink")},
+        "plugins.mike.alias_type is 'symlink'",
+    ),
+    (
+        "no canonical version",
+        {"mkdocs": MKDOCS.replace("      canonical_version: latest\n", "")},
+        "plugins.mike.canonical_version is None",
+    ),
+    (
+        "gh-deploy is back",
+        {
+            "workflow": WORKFLOW.replace(
+                'uv run python scripts/docs_versions.py deploy --ref "$GITHUB_REF" --push',
+                "uv run mkdocs gh-deploy --clean --force",
+            )
+        },
+        "replaces the whole gh-pages branch",
+    ),
+    (
+        "nothing deploys",
+        {
+            "workflow": WORKFLOW.replace(
+                'uv run python scripts/docs_versions.py deploy --ref "$GITHUB_REF" --push',
+                "echo nothing",
+            )
+        },
+        "scripts/docs_versions.py deploy is not run",
+    ),
+    (
+        "the versioned site is not checked",
+        {
+            "workflow": WORKFLOW.replace(
+                "      - run: uv run python scripts/docs_versions.py check\n", ""
+            )
+        },
+        "scripts/docs_versions.py check is not run",
+    ),
+    (
+        "releases never start the docs deploy",
+        {
+            "tag_workflow": "jobs:\n  release:\n    steps:\n      - run: gh release create\n"
+        },
+        "does not start ash-repo-docs.yml on the release tag",
+    ),
+    (
+        "the versions script is gone",
+        {"versions_script": False},
+        "the docs versions script does not exist",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "case,site,expected", VERSIONING_DEFECTS, ids=[c[0] for c in VERSIONING_DEFECTS]
+)
+def test_site_build_check_reports_versioning_defects(tmp_path, case, site, expected):
+    _assert_reports(dc.check_site_build(_site(tmp_path, CLEAN_PAGES, **site)), expected)
+
+
 def test_the_real_mkdocs_config_is_strict_and_offline():
-    """The committed mkdocs.yml and docs workflow pass the build-settings check."""
+    """The committed mkdocs.yml and docs workflows pass the build-settings check."""
     assert dc.check_site_build(REPO_ROOT) == []
 
 
