@@ -63,6 +63,16 @@ def tree_exclusion_files(target: Path) -> List[Path]:
     file inside the tree (snyk reads a link's target), cannot be read, or cannot
     be parsed counts too. ``.git`` is walked as well, as snyk's native filter
     walks it.
+
+    A link to a directory is not followed, and nothing behind it counts, because
+    snyk does not follow one either. Its native filter lists files with Go's
+    ``filepath.WalkDir`` (go-application-framework ``pkg/utils/file_filter.go``,
+    ``GetAllFiles``), which reports a link to a directory as an entry and does not
+    walk into it. Its legacy one globs with ``followSymbolicLinks`` set from
+    ``symlinksEnabled`` (``@snyk/code-client`` ``collectFilePolicies``), which the
+    CLI's ``snyk code test`` does not set (snyk/cli
+    ``src/lib/plugins/sast/analysis.ts``). Measured on those sources as of
+    2026-10-11.
     """
     found: List[Path] = []
     for directory, _subdirectories, names in os.walk(target):

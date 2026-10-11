@@ -183,6 +183,26 @@ def test_a_link_at_a_policy_name_refuses_the_scan(
     assert runs == []
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges")
+def test_a_linked_directory_is_neither_followed_nor_counted(
+    context: PluginContext, runs: List[List[str]], tmp_path: Path
+) -> None:
+    """snyk does not walk into a link to a directory, so its files exclude nothing.
+
+    See ``tree_exclusion_files`` for where snyk's file filters were read.
+    """
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / ".snyk").write_text("exclude:\n  global: [app.js]\n", encoding="utf-8")
+    # The same file counts where it is not behind a link.
+    assert snyk_code_scanner.tree_exclusion_files(outside) == [outside / ".snyk"]
+    os.symlink(outside, Path(context.source_dir) / "linked", target_is_directory=True)
+
+    assert snyk_code_scanner.tree_exclusion_files(Path(context.source_dir)) == []
+    _scan(context)
+    assert len(runs) == 1
+
+
 def test_the_operator_can_accept_the_trees_exclusions(
     context: PluginContext, runs: List[List[str]]
 ) -> None:
