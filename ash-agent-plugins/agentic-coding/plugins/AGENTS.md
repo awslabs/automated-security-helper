@@ -45,6 +45,7 @@ A finding that a scanner reports with no severity of its own, as detect-secrets 
 ## Limits
 
 - `run_ash_scan` takes no scanner list. To skip a scanner, the project's ASH config sets `scanners.<name>.enabled` to `false`. Its `severity_threshold` argument does not change what the scan reports; the config's thresholds decide which findings are actionable.
+- A scan runs inside the server process and stops if the server exits. Over stdio, the server exits when the agent disconnects from it.
 - `cancel_scan` marks a scan cancelled, but the scan keeps running and can still write to the output directory.
 - The server keeps its list of scans in memory. After it restarts, `get_scan_progress` fails with `scan_not_found` for older scan ids; read their results from the output directory.
 - `check_installation` reports that ASH runs. It does not check the scanner tools. A scanner whose tool is missing ends as MISSING, listed in `incomplete_scanners`.
