@@ -439,6 +439,8 @@ ash merge --results <file-or-dir> [--results ...] --output-dir <dir> [options]
 | `--results`            | A shard's `ash_aggregated_results.json`, or a directory containing one. Repeat once per shard. Required | | |
 | `--output-dir`         | Directory to write the merged results and reports to. Required                |                                                   | `ASH_OUTPUT_DIR`     |
 | `--output-formats`     | Comma-separated report formats to generate                                    | The formats the scan's own configuration asks for |                      |
+| `--config`, `-c`       | The operator's config file, the source of the settings a shard's recorded configuration cannot choose (see below) | ASH's defaults                                    | `ASH_CONFIG`         |
+| `--config-overrides`   | Configuration overrides as `key.path=value`, applied over the shards' recorded configuration | |                      |
 | `--min-severity`       | Minimum severity that counts as actionable for the exit code                  | `low`                                             |                      |
 | `--fail-on-findings`   | Exit non-zero when the merged report has actionable findings                   | The scan configuration's value, then `True`       |                      |
 | `--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | Refuse the merge when a shard completed none of the scanners it owned, and exit 1 when any scanner in the union is `ERROR` or `MISSING` | The scan configuration's value, then `True` | |
@@ -452,6 +454,24 @@ ash merge --results <file-or-dir> [--results ...] --output-dir <dir> [options]
 The merged report does not depend on the order the shards are listed in. They are sorted by shard index before anything is merged, and the report's identity — its configuration, converter results, name, and description — comes from the lowest-indexed shard, because those are properties of the scan rather than of a shard.
 
 The reporters and severity thresholds come from the scan's own configuration, carried through the shard results, rather than from a config file resolved on the collector host. The collector job need not have the source tree checked out at all, and a config file found there could disagree with the one the shards actually scanned under, which would move the verdict without moving the findings.
+
+#### Settings a shard's recorded configuration cannot choose
+
+A shard's recorded configuration may have been read from a config file inside the scanned tree, so `ash merge` treats it the way a scan treats such a file: the `ash_plugin_modules` row and the reporter rows of [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose) apply to it, and so does the rule for the options a plugin reporter declares in `destination_options`. Whether ASH's plugin packages that send findings off the host (`ash_aws_plugins`, `ash_snyk_plugins`) are loaded, where the reporters send findings, and the credentials they use therefore come from the operator at merge time: ASH's defaults, `--config` (or `ASH_CONFIG`), and `--config-overrides`. A value the recorded configuration sets that the operator's does not is replaced by the operator's, and a warning names the setting and the shard's results file.
+
+- `--config-overrides` apply over each shard's recorded configuration before anything reads it, so they reach the reporters, the completion gate and the verdict, and they count as the operator's values for the settings above.
+- `--config` supplies the operator's values for those settings. It does not replace the recorded configuration, so a reporter or plugin module the shards did not configure is added with `--config-overrides`. A `--config` file inside the working directory's checkout is not the operator's, as for `ash report`.
+- The sandbox settings and the scanners' own config files are left as recorded: no scanner runs during a merge, and the merged results still say how the shards scanned.
+
+To keep a shard's reporter settings, pass the same values at merge time. For example, to upload the merged report to S3:
+
+```bash
+ash merge --results ./shard-0 --results ./shard-1 --output-dir ./ash-merged \
+  --config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_aws_plugins"]' \
+  --config-overrides reporters.s3.enabled=true \
+  --config-overrides reporters.s3.options.bucket_name=my-bucket \
+  --config-overrides reporters.s3.options.aws_region=us-east-1
+```
 
 ### What Merge Refuses
 

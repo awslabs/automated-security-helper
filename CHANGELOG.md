@@ -1105,6 +1105,32 @@
   the scanner. Reverting to the previous behavior means accepting a report that
   states coverage it does not have.
 
+- **`ash merge` treats the configuration each shard recorded as a repository's
+  config.** A shard's `ash_aggregated_results.json` carries the configuration its
+  scan resolved, and `ash merge` builds its reporters from the lowest-indexed
+  shard's copy. Whether ASH's plugin packages that send findings off the host
+  (`ash_aws_plugins`, `ash_snyk_plugins`) are loaded, where the reporters send
+  findings, and the credentials they use now come from the operator at merge
+  time, as they do for a config file inside the scanned tree during a scan: ASH's
+  defaults, the new `--config` option (or `ASH_CONFIG`), and the new
+  `--config-overrides` option. A recorded value that the operator's configuration
+  does not set is replaced, and a warning names the setting and the shard's
+  results file. The merged `ash_aggregated_results.json` records the configuration
+  as the merge applied it. The recorded sandbox settings and scanner config files
+  are unchanged, since no scanner runs during a merge.
+
+  A merge that relied on a shard's recorded reporter settings (an S3 bucket, a
+  Security Hub region, an `ash_plugin_modules` entry that loads the AWS reporters)
+  no longer sends findings there. To keep it, pass the same values to `ash merge`,
+  with `--config-overrides` or in a config file outside the working directory's
+  checkout named with `--config`. `--config` supplies the operator's values for the
+  settings the recorded configuration names; a reporter or plugin module the
+  shards did not configure is added with `--config-overrides`, for example
+  `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_aws_plugins"]'`.
+  `--config-overrides` apply over every shard's recorded configuration, so they
+  also reach `fail_on_findings`, `fail_on_incomplete_scanners` and the other
+  settings `ash merge` reads from it.
+
 - **An MCP profile's `runtime_overrides` and a workspace policy are read more
   strictly.**
   - A profile's own `denied_paths` adds to the default list. Before, it replaced

@@ -500,6 +500,11 @@ system paths the sandbox already reads also has to be listed in
 `sandbox.extra_read_paths`, or the tool cannot open it and the scanner reports an
 error.
 
+`ash merge` holds the configuration each shard recorded in its results to the
+`ash_plugin_modules` and reporter rows of the table above, against the operator's
+defaults, `--config` and `--config-overrides` at merge time; see
+[Settings a shard's recorded configuration cannot choose](cli-reference.md#settings-a-shards-recorded-configuration-cannot-choose).
+
 ### Configs an MCP client delivered
 
 ASH's configuration can come from three places, and how far it is trusted depends
