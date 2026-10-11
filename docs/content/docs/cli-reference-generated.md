@@ -157,6 +157,7 @@ Start the ASH MCP server (Model Context Protocol).
 | `--auth-header-value` | str |  |  | Expected value of --auth-header-name. |
 | `--stateless-http/--no-stateless-http` | bool | False |  | Handle each streamable-HTTP request independently instead of binding it to a server-held session. Required behind a load balancer that may route consecutive requests to different replicas, and by managed runtimes that inject their own Mcp-Session-Id. Only valid with --transport streamable-http. |
 | `--allowed-host` | List[str] |  |  | Host header value to accept, repeatable. Keeps DNS-rebinding protection enabled while allowing a known proxy or load balancer hostname. Without this, protection is enabled only when --host is loopback, matching the MCP SDK's own default. |
+| `--profile` | List[str] |  |  | Register a named config profile as NAME=path/to/ash.yaml, repeatable. Clients list them with the list_profiles tool and bind one to their session with select_profile; a bound profile supplies the config for every later call in that session that names none. Each file is loaded and schema-validated now, so a typo fails startup rather than a scan. |
 
 ### `ash get-genai-guide`
 

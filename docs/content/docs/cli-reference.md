@@ -1025,6 +1025,7 @@ The MCP server provides a standardized interface for AI assistants to:
 | `--auth-header-value`                       | Expected value of `--auth-header-name`                                              | None                   |
 | `--stateless-http` / `--no-stateless-http`  | Handle each streamable-HTTP request independently instead of binding it to a server-held session | `--no-stateless-http` |
 | `--allowed-host`                            | Host header value to accept. Repeatable                                             | None                   |
+| `--profile`                                 | Register a config profile as `NAME=path/to/ash.yaml`. Repeatable. Each file is loaded and validated at startup, and one that fails stops the server with exit 3. See [Config profiles](mcp/streamable-http.md#config-profiles) | None |
 | `--log-level`                               | Set the log level                                                                   | `INFO`                 |
 | `--verbose`, `-v`                           | Enable verbose logging                                                              | `False`                |
 | `--debug`, `-d`                             | Enable debug logging                                                                | `False`                |

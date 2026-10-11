@@ -39,5 +39,14 @@
 │                                                      protection is enabled only when --host is  │
 │                                                      loopback, matching the MCP SDK's own       │
 │                                                      default.                                   │
+│ --profile                                     <str>  Register a named config profile as         │
+│                                                      NAME=path/to/ash.yaml, repeatable. Clients │
+│                                                      list them with the list_profiles tool and  │
+│                                                      bind one to their session with             │
+│                                                      select_profile; a bound profile supplies   │
+│                                                      the config for every later call in that    │
+│                                                      session that names none. Each file is      │
+│                                                      loaded and schema-validated now, so a typo │
+│                                                      fails startup rather than a scan.          │
 │ --help                                               Show this message and exit.                │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -935,6 +935,10 @@
 
 ### Fixes
 
+- `ash mcp --profile NAME=path/to/ash.yaml` works. The server registered profiles
+  given with `--profile`, but `ash mcp` did not accept the option and exited 2 with
+  `No such option: --profile`, so `list_profiles` always returned an empty list.
+
 - Under the MCP server, a config file an MCP client delivered (a file in a delivered
   tree, an upload named as `config_path`, or `validate_config`'s `config_content`), or
   one it names outside the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, no

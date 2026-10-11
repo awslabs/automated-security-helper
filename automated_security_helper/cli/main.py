@@ -109,6 +109,16 @@ def _mcp_wrapper(
         "hostname. Without this, protection is enabled only when --host is "
         "loopback, matching the MCP SDK's own default.",
     ),
+    profile: list[str] | None = typer.Option(
+        None,
+        "--profile",
+        help="Register a named config profile as NAME=path/to/ash.yaml, "
+        "repeatable. Clients list them with the list_profiles tool and bind "
+        "one to their session with select_profile; a bound profile supplies "
+        "the config for every later call in that session that names none. "
+        "Each file is loaded and schema-validated now, so a typo fails "
+        "startup rather than a scan.",
+    ),
 ):
     """Lazy wrapper that imports and delegates to the real MCP command."""
     from automated_security_helper.cli.mcp import mcp_command
@@ -128,6 +138,7 @@ def _mcp_wrapper(
         auth_header_value=auth_header_value,
         stateless_http=stateless_http,
         allowed_host=allowed_host,
+        profile=profile,
     )
 
 
