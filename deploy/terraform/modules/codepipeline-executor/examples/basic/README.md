@@ -57,5 +57,5 @@ Shards run with `--no-fail-on-findings` and fail only on a real crash.
 The verdict is `ash merge`'s own exit code, propagated unchanged: 0 clean, 2
 findings at or above `min_severity`, 1 when the result is incomplete (for example
 a gap in shard coverage, or a scanner that did not finish). Nothing in the module
-recomputes it — ASH shares that calculation with `ash scan`, so the pipeline cannot reach a different conclusion than a plain scan
-about the same findings.
+recomputes it — ASH shares that calculation with `ash scan`, so the pipeline cannot
+reach a different conclusion than a plain scan about the same findings.

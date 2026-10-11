@@ -38,8 +38,8 @@ Each of the four target templates embeds its own image build so it is genuinely
 one-click. The cost is duplication: deploying all four gives four ECR
 repositories and four CodeBuild projects building the same ASH revision. If that
 is not worth it, deploy `AshImagePipeline` and edit each target template's image
-reference to point at its repository; no parameter does this. Consuming it by `Fn::ImportValue` was considered and rejected, because
-a console launch of the AgentCore template would then fail with an unresolved
+reference to point at its repository; no parameter does this. Consuming it by
+`Fn::ImportValue` was considered and rejected, because a console launch of the AgentCore template would then fail with an unresolved
 export and no hint about which stack to deploy first.
 
 ## Launching a committed template
@@ -287,11 +287,14 @@ protocol.** Three MCP tools do that:
   laptop or a CI runner with no shared network.
 - `clear_source` — deletes what you delivered.
 
+These tools need an `AshVersion` whose ASH has them. v3.7.0, the default, has none
+of them, so a runtime built from it cannot receive your code, and its `run_ash_scan`
+with no `source_dir` scans the server's own working directory. Everything below
+about delivered trees assumes an ASH built from a later commit.
+
 Then call `run_ash_scan` with `source_dir` set to the path the delivery tool
-returned. Some of what follows depends on the ASH version the image is built from,
-and v3.7.0, the default `AshVersion`, differs from ASH built from a later commit;
-each difference is called out. Scanning writes an output tree inside the target directory, so the target has to be
-writable — a delivered tree is, because the runtime created it.
+returned. Scanning writes an output tree inside the target directory, so the target
+has to be writable — a delivered tree is, because the runtime created it.
 
 Sizing follows from the upload limits rather than from AgentCore: 100 MiB zipped,
 500 MiB extracted, 50000 files. A repository past those has to arrive by
@@ -299,18 +302,15 @@ Sizing follows from the upload limits rather than from AgentCore: 100 MiB zipped
 
 Two consequences worth knowing before you deploy:
 
-- **Deliver first.** On ASH built from a commit later than v3.7.0, `run_ash_scan`
-  with no `source_dir` and no delivered tree is **refused** with
-  `error_type: no_source_delivered`, naming the delivery tools to call, rather
-  than scanning the container's working directory, which holds none of your code.
-  On v3.7.0 there is no such refusal: the no-argument form always scans the
-  server's working directory, delivered tree or not, which is a scan of the wrong
-  tree. Pass `source_dir` on v3.7.0.
+- **Deliver first.** `run_ash_scan` with no `source_dir` and no delivered tree is
+  **refused** with `error_type: no_source_delivered`, naming the delivery tools to
+  call, rather than scanning the container's working directory, which holds none
+  of your code.
 - **On this target, pass `source_dir` explicitly.** `set_source_zip_finalize` and
   `set_source_git` both return the path they wrote to. Capture it and hand it back
   to `run_ash_scan(source_dir=...)` rather than relying on the no-argument form.
 
-  On a later ASH, the no-argument form finds the delivered tree by session id, and the session id
+  The no-argument form finds the delivered tree by session id, and the session id
   comes from the `Mcp-Session-Id` request header. That is dependable on stdio and
   on Fargate. On AgentCore it is not established, and the reason is worth stating
   rather than glossing:
@@ -331,8 +331,7 @@ Two consequences worth knowing before you deploy:
   rotates it per request, the upload lands under one session directory and the scan
   looks under another.
 
-  On a later ASH that case is **refused, not guessed at** (v3.7.0 has no such
-  check): the scan sees that some other session
+  That case is **refused, not guessed at**: the scan sees that some other session
   holds a delivered tree while yours does not, and returns
   `error_type: session_source_mismatch` saying the id is probably not stable and
   to pass `source_dir` instead. It reports the *count* of other delivering
@@ -341,9 +340,8 @@ Two consequences worth knowing before you deploy:
   question entirely, which is why it remains the recommendation — but if you
   forget, you get a specific error rather than a scan of the wrong tree.
 
-  **You can settle it in two calls.** On a later ASH, every tool that resolves a
-  session echoes the id it resolved back in its response, so no log dive or image
-  change is needed. The tools in v3.7.0 do not return it.
+  **You can settle it in two calls.** Every tool that resolves a session echoes the
+  id it resolved back in its response, so no log dive or image change is needed:
 
   ```text
   # same runtime-session-id on both invocations
@@ -366,9 +364,9 @@ The workspace therefore lands under `$HOME/.cache/ash-mcp/<session-id>/`, which 
 writable in the runtime. On v3.7.0, with the variable unset, scan targets are
 checked only against a short list of refused system directories, not against an
 allowlist. ASH built from a later commit confines a caller that presents a session
-id to its own session workspace when the variable is unset. If you set `ASH_MCP_ALLOWED_ROOTS` to bound the scan
-surface, note that it *replaces* that default list — but a session's own workspace
-stays permitted, so delivered trees keep working without being named in it.
+id to its own session workspace when the variable is unset. If you set
+`ASH_MCP_ALLOWED_ROOTS` to bound the scan surface, note that it *replaces* that
+default list — but a session's own workspace stays permitted, so delivered trees keep working without being named in it.
 
 If you need shared, pre-populated storage rather than per-caller delivery,
 AgentCore does support it: `AWS::BedrockAgentCore::Runtime` takes up to five
@@ -611,7 +609,7 @@ here rather than to a variant.
   findings about it, but it does mean the stack is not usable the moment it
   finishes. Set `McpIngressCidr` to the range your clients come from:
 
-  ```sh
+  ```text
   # At deploy time, or on an update of an existing stack.
   ParameterKey=McpIngressCidr,ParameterValue=10.1.0.0/16
   ```
@@ -656,9 +654,9 @@ here rather than to a variant.
   and empty `KmsKeyId` and `EncryptionConfiguration.KmsKey` values on the resources
   that take the optional KMS key. The validator resolves each parameter to its
   default and then evaluates the true branch of the `Fn::If` guarding it. Verified
-  against the synthesized template: each is `{"Fn::If": [<condition>, <parameter>, <fallback>]}` where the
-  condition is false exactly when the parameter is empty, so CloudFormation receives
-  the fallback. `Annotations.acknowledgeWarning` does not clear them, because the
+  against the synthesized template: each is
+  `{"Fn::If": [<condition>, <parameter>, <fallback>]}` where the condition is false
+  exactly when the parameter is empty, so CloudFormation receives the fallback. `Annotations.acknowledgeWarning` does not clear them, because the
   spec validator emits outside that mechanism.
 
 ## cdk-nag

@@ -83,7 +83,7 @@ gate only when it clears both. With the default threshold:
 
 | `min_severity` | Fails the gate on | |
 |---|---|---|
-| `low` | medium, high | strictest |
+| `low` | medium, high | strictest; the same as `medium` under the default threshold |
 | `medium` | medium, high | |
 | `high` | high only | laxest |
 
