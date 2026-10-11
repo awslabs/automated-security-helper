@@ -343,12 +343,13 @@
   `automated-security-helper:non-root` tag, and its own layer-cache scope on GitHub
   Actions). A job that runs as root (AWS CodeBuild, container-based GitLab or Jenkins
   jobs) cannot build `non-root`, whose user would get UID 0, and is refused before the
-  build with that explanation: pass `--build-target ci` there. `./ash` refuses it the
-  same way, as does `Invoke-ASH -ContainerUID 0` (without `-ContainerUID` it builds with
-  the Dockerfile's own UID), and so does any spelling of zero such as `00`. A GID of 0,
-  root's group, is refused for a `non-root` build in the same three places. A
+  build with that explanation (exit 1): pass `--build-target ci` there. `./ash` refuses
+  it the same way, and so does `Invoke-ASH`, run as root or given `-ContainerUID 0`
+  (exit 3, naming `-BuildTarget ci`); any spelling of zero such as `00` counts. A GID
+  of 0, root's group, is refused for a `non-root` build in the same three places. A
   `--container-uid` or `--container-gid` holding anything but the digits 0-9 (`²`, `1x`)
-  is refused as not numeric, by `./ash` as well. This repository's
+  is refused as not numeric, by `./ash` and `Invoke-ASH` as well. See the breaking
+  change above. This repository's
   validate-container action now passes `--build-target ci` to every build and scan.
 - **Container mode reads the config file you named.** `--config` (or `ASH_CONFIG`) was
   handed to the scan inside the container as the host path, which names nothing there,
@@ -406,7 +407,9 @@
 - **`./ash` mounts the directory you named, or stops.** A `--source-dir` it could not
   enter (one that does not exist) left the working directory in its place, and that
   was mounted and scanned; it now exits 1, as `ash --source-dir` does, and so does an
-  `--output-dir` it cannot create. A config, source or output path starting with `-` is
+  `--output-dir` it cannot create. It also exits 1, before building, for a `non-root`
+  build whose UID or GID would be 0 and for a `--container-uid` or `--container-gid`
+  that is not a number. A config, source or output path starting with `-` is
   no longer read as options by `dirname`, `basename`, `readlink`, `cd` or `mkdir`, which
   resolved it to the wrong file or to none.
 - **`--ignore-suppressions` works in container mode.** It was not passed to the scan
@@ -1065,6 +1068,16 @@
 
 ### Breaking changes
 
+- **A container scan that runs as root builds the root image only when asked.**
+  `ash --mode container`, `ash build-image`, `./ash` and `Invoke-ASH` build the
+  `non-root` stage by default, CI or not, and refuse that build before it starts when
+  its user would get UID 0 or GID 0, which is what a job running as root gives it
+  (AWS CodeBuild, container-based GitLab and Jenkins jobs). The refusal exits 1 (3 for
+  `Invoke-ASH`) and names the opt-in: `--build-target ci` (`-BuildTarget ci` for
+  `Invoke-ASH`), the stage that runs as root, or `--container-uid` and
+  `--container-gid` for the non-root user. In AWS CodeBuild:
+  `ash --mode container --build-target ci`. An unprivileged user, such as a
+  GitHub-hosted runner's, builds `non-root` as before.
 - **MCP scans can now end in a new terminal status, `incomplete`.** Clients
   should treat it as terminal with partial coverage: the run finished and its
   results are readable, but at least one selected scanner did not complete
