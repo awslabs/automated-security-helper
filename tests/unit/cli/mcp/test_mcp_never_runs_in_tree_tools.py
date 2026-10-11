@@ -83,9 +83,11 @@ def test_the_decision_point_both_ways(honored, in_tree_tool, monkeypatch):
 
 
 def test_every_transport_applies_it_before_starting():
-    """``mcp_command`` sets it ahead of the transport branches, not only for stdio."""
+    """``mcp_command`` sets it ahead of every transport's start, not only for stdio."""
     from automated_security_helper.cli import mcp as mcp_package
 
     source = inspect.getsource(mcp_package.mcp_command)
     applied = source.index("honor_in_tree_opt_in(MCP_HONORS_IN_TREE_OPT_IN)")
-    assert applied < source.index('if transport == "stdio":')
+    starts = ["run_mcp_server()", "build_streamable_http_app(", "build_sse_app("]
+    for start in starts:
+        assert applied < source.index(start), start
