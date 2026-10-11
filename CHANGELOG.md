@@ -120,7 +120,11 @@
   suppressions and ignore paths apply, marked `client_supplied` in the results,
   unless the profile's own `denied_paths` lists them. Files under a
   client-supplied ignore path are still converted and scanned, and each finding
-  there is kept as a marked, suppressed result. The policy comes from the
+  there is kept as a marked, suppressed result. ASH sets the mark: a
+  `client_supplied` value written in any config file or override is ignored.
+  A workspace policy file a client delivered gets the same treatment, under the
+  MCP server or `ash --workspace`: its suppressions and ignore paths are marked
+  and checked against the runtime-override policy. The policy comes from the
   registered profile, never from the session's patched copy, and
   `/global_settings/mcp` joins the default `denied_paths`. Delivering source
   while a scan of the session runs is refused. See

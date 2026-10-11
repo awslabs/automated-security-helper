@@ -380,3 +380,111 @@ def test_dry_run_without_policy_does_not_mention_it(tmp_path):
     rendered = resolve_workspace(workspace).render()
     assert "workspace policy" not in rendered
     assert "policy:" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# A policy file an MCP client delivered
+# ---------------------------------------------------------------------------
+
+_POLICY_WITH_ENTRIES = (
+    "workspace:\n"
+    "  suppressions:\n"
+    "    - path: 'api/tests/**'\n"
+    "      reason: tests\n"
+    "      client_supplied: {mark}\n"
+    "  ignore_paths:\n"
+    "    - path: '**/vendor'\n"
+    "      reason: third party\n"
+    "      client_supplied: {mark}\n"
+)
+
+
+def _policy_entries(plan):
+    project = _by_key(plan)["api"]
+    return list(project.policy_suppressions) + list(project.policy_ignore_paths)
+
+
+@pytest.fixture
+def _mcp_root(tmp_path, monkeypatch):
+    root = tmp_path / "mcp-workspaces"
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    return root
+
+
+def test_a_delivered_policys_entries_are_marked_client_supplied(tmp_path, _mcp_root):
+    """Kept and marked in the results, as a delivered config's own entries are."""
+    root = _mcp_root / "session-1" / "source"
+    _project(root, "api")
+    workspace = _workspace(root, ["api"])
+    _policy_file(root, _POLICY_WITH_ENTRIES.format(mark="false"))
+
+    entries = _policy_entries(resolve_workspace(workspace))
+
+    assert len(entries) == 2
+    assert all(entry.client_supplied is True for entry in entries)
+
+
+def test_a_policy_elsewhere_cannot_mark_its_own_entries(tmp_path, _mcp_root):
+    """Only ASH marks an entry, so a file's own ``client_supplied`` is not kept."""
+    _project(tmp_path, "api")
+    workspace = _workspace(tmp_path, ["api"])
+    _policy_file(tmp_path, _POLICY_WITH_ENTRIES.format(mark="true"))
+
+    entries = _policy_entries(resolve_workspace(workspace))
+
+    assert len(entries) == 2
+    assert all(entry.client_supplied is False for entry in entries)
+
+
+def test_a_delivered_policy_is_refused_under_a_profile_denying_suppressions(
+    tmp_path, _mcp_root
+):
+    """An operator who lists suppressions in ``denied_paths`` refuses a client's."""
+    from automated_security_helper.config.ash_config import (
+        AshConfig,
+        RuntimeOverridesConfig,
+    )
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    root = _mcp_root / "session-1" / "source"
+    _project(root, "api")
+    workspace = _workspace(root, ["api"])
+    _policy_file(root, _POLICY_WITH_ENTRIES.format(mark="false"))
+    rules = ClientConfigRules(
+        policy=RuntimeOverridesConfig(denied_paths=["/global_settings/suppressions"]),
+        base=AshConfig(),
+    )
+
+    with pytest.raises(ASHConfigFieldDeniedError) as excinfo:
+        resolve_workspace(workspace, client_config_rules=rules)
+
+    assert "global_settings.suppressions" in str(excinfo.value)
+
+
+def test_an_operators_value_pattern_applies_to_a_delivered_policy(tmp_path, _mcp_root):
+    from automated_security_helper.config.ash_config import (
+        AshConfig,
+        RuntimeOverridesConfig,
+    )
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    root = _mcp_root / "session-1" / "source"
+    _project(root, "api")
+    workspace = _workspace(root, ["api"])
+    _policy_file(root, _POLICY_WITH_ENTRIES.format(mark="false"))
+    rules = ClientConfigRules(
+        policy=RuntimeOverridesConfig(
+            denied_value_patterns={"/global_settings/ignore_paths": "vendor"}
+        ),
+        base=AshConfig(),
+    )
+
+    with pytest.raises(ASHConfigFieldDeniedError):
+        resolve_workspace(workspace, client_config_rules=rules)

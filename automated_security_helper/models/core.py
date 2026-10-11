@@ -38,9 +38,10 @@ class IgnorePathWithReason(BaseModel):
         bool,
         Field(
             description=(
-                "Set by the server: True when the config of a tree an MCP client "
-                "delivered supplied this entry, so results show which "
-                "suppressions and ignored paths came from the client's own config."
+                "Set by ASH: True when a config or workspace policy file an MCP "
+                "client delivered supplied this entry, so results show which "
+                "suppressions and ignored paths came from the client. A value "
+                "written in a config file is ignored."
             ),
         ),
     ] = False

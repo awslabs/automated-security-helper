@@ -8,6 +8,7 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.client_config_policy import (
     ClientConfigRules,
     apply_client_config_rules,
+    clear_client_supplied_marks,
 )
 from automated_security_helper.config.config_sources import (
     _resolve_dict_key,
@@ -263,6 +264,7 @@ def resolve_config(
     )
     if config is None:
         return config
+    config = clear_client_supplied_marks(config)
     config = apply_client_config_rules(
         config,
         documents,

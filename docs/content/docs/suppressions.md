@@ -318,7 +318,13 @@ ASH applies them, and marks what came from the client so the results show what
 the client's config hid:
 
 - In the results' config, each suppression and ignore path the operator did not
-  supply has `client_supplied: true`.
+  supply has `client_supplied: true`. ASH sets the mark; a `client_supplied`
+  value written in a config file, of any kind, or set with `--config-overrides`
+  is ignored.
+- A workspace policy file a client delivered (under the MCP workspace root) is
+  handled the same way, including when `ash --workspace` reads one: its
+  suppressions and ignore paths are marked, and checked against the operator's
+  runtime-override policy as a delivered config's are.
 - A file under a client-supplied ignore path is still converted and scanned, and a
   finding there is kept as a suppressed result rather than dropped. An exclusion
   the client's config added to a scanner's own options is handled the same way.

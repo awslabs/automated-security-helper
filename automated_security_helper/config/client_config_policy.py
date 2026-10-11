@@ -660,6 +660,43 @@ def apply_client_config_rules(
     )
 
 
+def clear_client_supplied_marks(config: AshConfig) -> AshConfig:
+    """``config`` with every ``client_supplied`` a config file or override set cleared.
+
+    Only ASH marks an entry: ``_mark_client_supplied`` sets it, after this, on
+    the suppressions and ignore paths a client's config supplied. A value
+    written in a config file, of any tier, or set by an override is not
+    evidence of where the entry came from, so it is cleared on every
+    suppression and ignore path, including entries in a scanner's own options
+    (bandit's ``excluded_paths``, checkov's ``skip_path``) and in a plugin
+    section kept as plain data.
+    """
+    from pydantic import BaseModel as _Model
+
+    from automated_security_helper.models.core import IgnorePathWithReason
+
+    def clear(node: Any) -> None:
+        if isinstance(node, IgnorePathWithReason):
+            node.client_supplied = False
+            return
+        if isinstance(node, _Model):
+            for name in type(node).model_fields:
+                clear(getattr(node, name, None))
+            for value in (node.model_extra or {}).values():
+                clear(value)
+        elif isinstance(node, dict):
+            if "client_supplied" in node and "path" in node:
+                node.pop("client_supplied")
+            for value in node.values():
+                clear(value)
+        elif isinstance(node, (list, tuple)):
+            for value in node:
+                clear(value)
+
+    clear(config)
+    return config
+
+
 def _mark_client_supplied(
     config: AshConfig,
     documents: Mapping[Path, Any],
