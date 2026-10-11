@@ -143,6 +143,26 @@ Run the tool only by returning its command from `_execute_scan`. A process you s
 | `ruff check --isolated` | ruff, like many tools, reads its configuration from files in the repository it checks, which would let the repository turn off the rules you selected, so pass the tool's option for ignoring those files. If your plugin takes an option that names a file the tool reads as configuration, use `operator_path` from `automated_security_helper.utils.config_trust`, the check ASH's own scanners use, which accepts the value only when the operator set it and the file is outside the scanned tree. |
 | The module-level list | The decorator registers the class for scans, and `ash plugin list` shows the classes in this list. |
 
+## Declare what the scanner needs under the sandbox
+
+Under `--sandbox`, a scanner gets the strictest policy unless it declares more: no network, no extra read paths, and no environment beyond the sandbox's allowlist ([Scanner sandbox](../concepts/sandbox.md)). `ruff-security` needs nothing more, so it declares nothing. A scanner whose tool downloads a rule pack into a cache would add a `sandbox_requirements` class attribute, or a property when the need depends on the scanner's options:
+
+```python
+from typing import ClassVar
+
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+
+sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+    network=True,
+    cache_paths=("~/.cache/acme-rules",),
+    env_prefixes=("ACME_",),
+)
+```
+
+`network` asks for a network on online scans, `read_paths` for read-only host paths, `cache_paths` for cache directories the tool writes (writable through a throwaway overlay under bwrap, read-only elsewhere), and `env_prefixes` and `env_names` for environment variables. A variable whose name marks it as a credential passes only when `env_names` names it exactly.
+
+If the read paths or environment variables come from the scanner's own options, which the scanned repository can write, also set `read_paths_require_grant=True` or `env_requires_grant=True`. The sandbox then mounts those paths only for a scanner named in `sandbox.read_path_scanners`, and only when a path resolves inside the source tree or an `extra_read_paths` entry and is a regular file or a directory. It passes those variables only to a scanner named in `sandbox.env_scanners`, and with `read_paths_require_grant` it never mounts the scanner's `cache_paths`. Only the operator can set those lists ([Give a scanner more access](../docs/scanner-sandbox.md#grants)).
+
 ## Set the severity
 
 ASH takes a finding's severity from, in order: the result's `properties.issue_severity` (CRITICAL, HIGH, MEDIUM, LOW, or INFO); the `security-severity` score in its rule's properties; or its SARIF level, where `error` counts as critical, `warning` as medium, and `note` as low. ruff marks every result `error`, so both findings above count as critical. To report them as HIGH, add this method to `RuffSecurityScanner` and import `PropertyBag` at the top of the module:

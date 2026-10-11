@@ -110,7 +110,9 @@ configuration, which includes your suppressions and ignore paths. It holds no in
 findings.
 
 Before the upload it calls `HeadBucket`. Locally it writes the uploaded content to
-`reports/s3-report.json` and a receipt with the object URL to `reports/ash.s3.json`.
+`reports/s3-report.json` and a receipt with the object URL to `reports/ash.s3.json`. When
+ASH cannot write the local copy, the receipt's `local_copy` is `null`, ASH logs a warning,
+and the upload still counts.
 
 IAM: `s3:PutObject` on `arn:aws:s3:::<bucket>/<key_prefix>*`, and `s3:ListBucket` on the
 bucket, which `HeadBucket` requires.

@@ -77,7 +77,7 @@ All options, with types and defaults, are in the [scanner reference](../../../re
 trivy runs in the source directory and, without flags that say otherwise, reads a `trivy.yaml`, a `.trivyignore`, and a `trivy-secret.yaml` from there; a `trivy.yaml` can also point trivy at a directory of modules to load. A scanned repository could use those files to remove its own findings or make trivy load code. So ASH always passes trivy's config, module directory, ignore file, and secret config flags:
 
 - `config_file`, `module_dir`, `ignore_file`, and `secret_config_file` are used only when the operator set them, with `--config-overrides` or in a config file outside every git checkout and the scanned directory, and only for a path outside every git checkout and the scanned directory. Otherwise ASH logs a warning and ignores the value. A path that does not exist fails the scan.
-- With `ignore_file` or `secret_config_file` unset or ignored, ASH uses the file that `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG` names, under the same path rule.
+- With `ignore_file` or `secret_config_file` unset or ignored, ASH uses the file that `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG` names, unless that file is inside the scanned directory or the git checkout that holds it.
 - Otherwise ASH passes an empty file, or an empty module directory, that it creates in the scanner's results directory.
 
 A `.trivyignore`, `trivy.yaml`, or `trivy-secret.yaml` in the scanned repository is therefore never read. When neither the option nor the environment variable supplies an ignore file or a secret config, and the repository has a `.trivyignore` or `trivy-secret.yaml`, ASH logs a warning that it is not used. To ignore findings, use ASH suppressions ([Suppress findings](../../../how-to/suppress-findings.md)):
@@ -109,7 +109,7 @@ trivy-repo and the built-in `trivy` scanner use one trivy cache: the directory `
 
 - Online, before the scan, ASH updates the vulnerability database in that cache with `trivy image --download-db-only`, outside the scanner sandbox. When the `misconfig` scanner is on, it also fetches trivy's checks bundle. trivy then scans without updating anything itself.
 - Offline (`--offline`, `ASH_OFFLINE=YES`, or the scanner's `offline: true`), ASH updates nothing and passes trivy the offline flags, so trivy uses whatever database is in the cache. `TRIVY_OFFLINE_SCAN` on its own does not stop ASH's update before an online scan.
-- Either way, ASH holds the database to its age bound, 24 hours from the time it was built (trivy's own bound), and by default fails the scan when it is older. A container image built with `--offline` contains a database, so its trivy scans fail one day after the database was built unless you rebuild the image or allow stale databases. [Content databases](../../../concepts/content-databases.md) explains the bound and how to relax it.
+- Either way, ASH holds the database to its age bound, 24 hours from the time it was built (trivy's own bound), and by default fails the scan when it is older. A container image built with `--offline` contains a database and holds it to `warn` instead, so its trivy scans keep passing after that day and the reports record the stale database; rebuild the image to keep its findings current. [Content databases](../../../concepts/content-databases.md) explains the bound and how to relax it.
 
 ## Sandbox
 

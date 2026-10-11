@@ -7,7 +7,7 @@ This page is for maintainers of the ASH repository. It describes how ASH's own C
 The workflow `.github/workflows/ash-unified-ci.yml` has four "Community Plugins" scan legs, all with `method: python-local` and `config-file: community`, on `ubuntu-latest`, `ubuntu-24.04-arm`, `macos-latest`, and `windows-latest`. Each calls the composite action [`.github/actions/run-scan-test`](https://github.com/awslabs/automated-security-helper/blob/main/.github/actions/run-scan-test/action.yml) with `snyk-token: ${{ secrets.SNYK_TOKEN }}`. For these legs the action:
 
 1. installs the community tools: the Snyk CLI with `npm install -g snyk` (up to three attempts), ferret-scan with `pip install` against the version range its plugin declares, and trivy and hadolint (and GuardDog, except on Windows) with `ash dependencies install --config .ash/.ash_community_plugins.yaml`;
-2. scans with `--config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins`, with `SNYK_TOKEN` set from the input.
+2. scans with `--config .ash/.ash_community_plugins.yaml --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins`, with `SNYK_TOKEN` set from the input. Like every scan leg, it also passes `--config-overrides` options that name the repository's `.ash/bandit.yaml` and `.ash/.grype.yaml`, because a config file inside the scanned tree cannot choose bandit's or grype's own config file.
 
 `.ash/.ash_community_plugins.yaml` is inside the scanned tree, so it cannot load `ash_snyk_plugins` itself; that is why the legs name it on the command line. The file lists the other four community modules, and it disables `snyk-code` (`scanners.snyk-code.enabled: false`).
 

@@ -37,7 +37,7 @@ There is no config key for offline mode. `build.build_mode` exists in the config
 | Scanner | Offline behavior |
 |---|---|
 | grype | Reads its cached database with updates and grype's own age check off. ASH fails the scan when the database is past its age bound ([Refresh cadence](#refresh)). |
-| trivy, trivy-repo | Read the cached trivy database with its updates off. ASH fails the scan when the database is past its age bound. With no database, `trivy` is MISSING. trivy still checks for a newer trivy release unless the network is gone. |
+| trivy, trivy-repo | Read the cached trivy database with its updates off. ASH fails the scan when the database is past its age bound, except in the offline image, where it warns ([Refresh cadence](#refresh)). With no database, `trivy` is MISSING. trivy still checks for a newer trivy release unless the network is gone. |
 | semgrep, opengrep | Run the rulesets in `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` plus ASH's bundled rules, instead of the configured registry rulesets. MISSING when the directory is unset or empty. ASH fails the scan when the rulesets are past their age bound. |
 | detect-secrets | Runs as usual. If its settings turn on detect-secrets' verification filter, it still sends each candidate secret to the service that issued it, to check whether it is live; under the sandbox, leave detect-secrets out of `sandbox.network_scanners` to stop that. |
 | checkov | Uses the policies in the installed package and skips platform downloads. |
@@ -105,12 +105,12 @@ is before you download them, and the rulesets from the time they were downloaded
 | semgrep rulesets | `semgrep-offline-rules` | 30 days | Download again, or rebuild the offline image |
 | opengrep rulesets | `opengrep-offline-rules` | 30 days | Download again, or rebuild the offline image |
 
-The trivy bound sets the pace. An offline image fails every scan that includes trivy
-less than a day after its build, so rebuild offline images that scan with trivy more than
-once a day, refresh the trivy cache more than once a day on offline hosts, or exclude
-trivy with `--exclude-scanners trivy`. The bounds are fixed in
-the code; no setting changes them. When ASH cannot read a database's age at all, it counts
-the database as stale.
+The trivy bound is the shortest. On an offline host, refresh the trivy cache more than once
+a day, or exclude trivy with `--exclude-scanners trivy`. An offline image holds `trivy-db`
+to `warn` by default, so its trivy scans keep passing after the first day and the reports
+record the stale database; rebuild the image as often as you want trivy's findings current,
+and at least every 5 days for grype. The bounds are fixed in the code; no setting changes
+them. When ASH cannot read a database's age at all, it counts the database as stale.
 
 A stale database fails the scan with exit code 1 and a message that names the database,
 its build time, its age, and the bound. The findings are kept in the reports.
@@ -118,7 +118,9 @@ its build time, its age, and the bound. The findings are kept in the reports.
 ## Allow a stale database {#allow-stale}
 
 `content_db_staleness: warn` lets a scan pass against a stale database and records the
-warning in the reports. To relax one database for a limited time, add an entry with an
+warning in the reports. In the offline image, `trivy-db` is already held to `warn`; set
+`content_db_staleness_offline_image_default: false` to make a stale trivy database fail the
+scan there too ([Content databases](../concepts/content-databases.md#what-happens-when-a-database-is-stale)). To relax one database for a limited time, add an entry with an
 expiration date and a reason:
 
 <!-- doctest: config kind=ash -->
@@ -136,7 +138,7 @@ warning. Quote the date: an unquoted date makes the whole config invalid.
 
 For one scan, `--allow-stale-content-db` sets `warn` and `--no-allow-stale-content-db`
 sets `fail`. Either form also clears every `content_db_staleness_overrides` entry for that
-scan.
+scan and turns the offline image's `trivy-db` default off.
 
 Who can relax the policy depends on where the setting comes from:
 

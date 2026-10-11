@@ -31,6 +31,8 @@ There are three ways to change the default:
 - a `content_db_staleness_overrides` entry for one database, which needs an expiration date and a reason and stops applying at 00:00 UTC on that date;
 - `--allow-stale-content-db` or `--no-allow-stale-content-db` on the command line. Either one wins over the config file and clears every per-database override: the first sets `warn`, the second `fail`.
 
+An image built with `ash build-image --offline` holds `trivy-db` to `warn` instead of `fail` by default, because trivy's 24-hour bound would otherwise fail every trivy scan in the image from a day after the build. The scan passes, and the reports say the database was stale and that the offline image's default let the scan pass. `grype-db` and the offline rulesets still fail the scan. To hold `trivy-db` to `content_db_staleness` in the image too, set `content_db_staleness_offline_image_default: false` or pass `--no-allow-stale-content-db`; a `content_db_staleness_overrides` entry for `trivy-db` also takes precedence over this default. Only the image's own environment turns the default on, so it never applies outside such an image.
+
 Every reading, fresh or stale, is recorded in the results. On the CLI, a repository's own config can set `content_db_staleness: warn`; pass your own config with `--config`, or `--no-allow-stale-content-db`, to keep `fail`. A config an MCP client delivers may not change either setting under the default policy. See [Configuration trust model](trust-model.md).
 
 ## Where the databases are cached
@@ -41,6 +43,8 @@ ASH resolves one cache directory per tool and passes the same directory to the s
 |---|---|---|---|
 | grype | `$GRYPE_DB_CACHE_DIR`, else `$XDG_CACHE_HOME/grype/db`, else `~/.cache/grype/db` | `$GRYPE_DB_CACHE_DIR`, else `$XDG_CACHE_HOME/grype/db`, else `~/Library/Caches/grype/db` | `%GRYPE_DB_CACHE_DIR%`, else `%XDG_CACHE_HOME%\grype\db`, else `%LOCALAPPDATA%\cache\grype\db` |
 | trivy | `$TRIVY_CACHE_DIR`, else `$XDG_CACHE_HOME/trivy`, else `~/.cache/trivy` | `$TRIVY_CACHE_DIR`, else `~/Library/Caches/trivy` | `%TRIVY_CACHE_DIR%`, else `%LOCALAPPDATA%\trivy` |
+
+trivy and trivy-repo run with `trivy --cache-backend=memory`, so a scan only reads trivy's cache directory. An offline scan can therefore use a cache it may only read, such as one shared between CI jobs or built into an image. An online scan needs the cache writable, because ASH refreshes trivy's database there before every online scan, sandboxed or not.
 
 `XDG_CACHE_HOME` counts only when it is an absolute path. For trivy on Linux, a relative value sends the cache to `$TMPDIR/trivy`. The ASH container image sets `GRYPE_DB_CACHE_DIR=/deps/.grype` and `TRIVY_CACHE_DIR=/deps/.trivy`. The offline semgrep and opengrep rules are read from the directories `SEMGREP_RULES_CACHE_DIR` and `OPENGREP_RULES_CACHE_DIR` name; the image sets them to `/deps/.semgrep` and `/deps/.opengrep`.
 
@@ -55,4 +59,4 @@ When ASH runs a refresh itself (trivy's before every online scan, grype's under 
 
 The age checks are protected the same way: each probe runs with ASH's empty tool configuration from outside the scanned tree, so a configuration file in the repository cannot point the probe at a different database from the one the scan read.
 
-Offline, nothing is refreshed. The databases must already be in the cache: `ash build-image --offline` builds an image with current grype and trivy databases and the semgrep and opengrep rulesets (`p/ci` by default), in which every scan runs offline. On a host you can run `grype db update` and `trivy image --download-db-only` while online. Because each bound counts from when the database itself was built, an offline image starts failing trivy scans within a day of the image build, and grype scans within five days, unless you rebuild it or relax the policy. [Run ASH offline](../how-to/run-offline.md) covers seeding the caches and choosing a rebuild cadence.
+Offline, nothing is refreshed. The databases must already be in the cache: `ash build-image --offline` builds an image with current grype and trivy databases and the semgrep and opengrep rulesets (`p/ci` by default), in which every scan runs offline. On a host you can run `grype db update` and `trivy image --download-db-only` while online. Because each bound counts from when the database itself was built, an offline image reports trivy's database stale within a day of the image build, as a warning by default, and starts failing grype scans within five days, unless you rebuild it or relax the policy. [Run ASH offline](../how-to/run-offline.md) covers seeding the caches and choosing a rebuild cadence.

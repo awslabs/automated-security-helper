@@ -10,7 +10,7 @@ The `snyk-code` scanner runs `snyk code test`, the static analysis of [Snyk Code
 
 ## Load the plugin
 
-The scanner sends source off the host with your Snyk credentials, so a config file that the scanned repository could have written cannot load it. ASH ignores, with a warning, an `ash_plugin_modules` entry for `ash_snyk_plugins` in a config file inside a git checkout or the scanned directory, or in one an MCP client delivered ([Who may load a module](../../../plugins/index.md#who-may-load-a-module)). Load it from an operator source instead. With `SNYK_TOKEN` set, or after `snyk auth`:
+The scanner sends source off the host with your Snyk credentials, so a config file that the scanned repository could have written cannot load it. ASH ignores, with a warning, an `ash_plugin_modules` entry for `ash_snyk_plugins`, or for a module inside it, in a config file inside a git checkout or the scanned directory, and the MCP server refuses a config an MCP client delivered that names one ([Who may load a module](../../../plugins/index.md#who-may-load-a-module)). Load it from an operator source instead. With `SNYK_TOKEN` set, or after `snyk auth`:
 
 <!-- doctest: illustrative reason="needs the Snyk CLI and a Snyk account" -->
 ```bash
@@ -29,6 +29,8 @@ scanners:
     options:
       severity_threshold: HIGH
 ```
+
+Once you load the module, the repository's own `.ash/.ash.yaml` can still set the `snyk-code` options.
 
 Snyk's SARIF is in `.ash/ash_output/scanners/snyk-code/source/results_sarif.sarif`, and its findings are in the finding reports under `.ash/ash_output/reports/`, such as `ash.sarif`, `ash.html`, and `ash.csv`.
 

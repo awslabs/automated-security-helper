@@ -100,9 +100,11 @@ The results record the mode you asked for (`ash_config.sandbox.mode` in
 
     If `landlock` is not in the list, add it to the `lsm=` kernel boot parameter. ASH
     reports `Landlock is not supported or not enabled (add 'landlock' to the lsm=
-    kernel parameter)` until you do. On a kernel whose Landlock ABI is below 6, ASH logs
-    a warning: there, a scanner can still send signals to processes outside its
-    sandbox.
+    kernel parameter)` until you do. ASH needs Landlock ABI 3 (Linux 6.2) or later, the
+    first that can stop a scanner from truncating files it may only read. On an older
+    kernel ASH reports `Landlock ABI <n> is below 3 (Linux 6.2), ...`, and `auto` skips
+    Landlock. On a kernel whose Landlock ABI is below 6, ASH logs a warning: there, a
+    scanner can still send signals to processes outside its sandbox.
 
     Landlock isolates less than bubblewrap: it uses no namespaces, and it shares the
     host's `/dev/shm`. Use it only where bubblewrap cannot run, for example where user
@@ -178,13 +180,22 @@ set them; see [Who may grant](#who-may-grant).
 |---|---|---|
 | `network_scanners` | `null` | A network to the scanners named. `null` means each scanner's own need: semgrep, opengrep, grype, trivy, and npm-audit have one, and so do snyk-code and trivy-repo when their plugins are loaded. A list replaces those defaults: a scanner it names gets a network on every online scan, and a scanner it leaves out gets none. |
 | `extra_read_paths` | `[]` | Read-only access to more host paths, for every sandboxed scanner. `~` and `$VARS` are expanded. |
-| `read_path_scanners` | `[]` | To the scanners named, the extra paths their own options point to. Of the scanners ASH ships, only detect-secrets uses it, for a baseline file outside the source tree. |
+| `read_path_scanners` | `[]` | To the scanners named, the extra paths their own options point to, when such a path resolves inside the source tree or an `extra_read_paths` entry and is a regular file or a directory. Of the scanners ASH ships, only detect-secrets uses it, for a baseline file outside the source tree. |
 | `env_scanners` | `[]` | To the scanners named, the environment variables their own options ask for. No scanner ASH ships asks for any yet; it is for plugin scanners that declare such a need. |
 
 `--offline` removes the network from every scanner whatever `network_scanners` says.
 grype and trivy do not need a grant for their databases: before an online sandboxed
 scan, ASH refreshes them outside the sandbox; see
-[Content databases](../concepts/content-databases.md).
+[Content databases](../concepts/content-databases.md). cfn-guard needs none for its
+installed rules either: it may read `$ASH_CFN_GUARD_RULES_DIR`, or `share/cfn-guard-rules`
+beside ASH's bin directory.
+
+A file that a scanner option names outside the source directory, such as a `config_file`
+of actionlint, gitleaks, trivy, or zizmor, gitleaks' `baseline_path`, trivy's `ignore_file`
+or `secret_config_file`, or a path for actionlint's `shellcheck` or `pyflakes`, is not mounted
+for the scanner. Unless it is under a system directory the sandbox already reads, such as
+`/etc` or `/opt`, add it to `extra_read_paths`. cfn-guard's `rules_paths` need no entry: ASH
+copies those rules into the scanner's results directory.
 
 Grant on the command line for one scan:
 
@@ -236,13 +247,15 @@ baseline, and reports the findings the baseline would have marked.
 A grant counts only when it comes from one of these:
 
 - `--config-overrides`;
-- a config file named with `--config` or `ASH_CONFIG`, when that file and every file it
-  `extends` are outside every git checkout and outside the scanned directory;
+- a config file named with `--config` or `ASH_CONFIG`, when that file is outside every git
+  checkout and outside the scanned directory;
 - in workspace mode, the `--config` file the workspace scan was given, under the same
   rule: outside every git checkout and outside the workspace;
-- under `ash mcp`, the server's own configuration.
+- under `ash mcp`, the server's own configuration, under the same rule.
 
-`--sandbox` sets only the mode.
+`--sandbox` sets only the mode. When one of these files extends a base that cannot grant,
+the file keeps the grants its own `sandbox` section writes, and loses what it inherits
+from any base and what it changes with `patch`, so write each grant in the file itself.
 
 A config file inside any git checkout, meaning a directory at or above it holds a
 `.git` directory or file, by the file's own path or its resolved path, cannot grant. Nor
@@ -250,14 +263,15 @@ can a config file inside the scanned directory, or, under `ash mcp`, one an MCP 
 delivered. ASH drops its grants and logs, as `ash.log` records it:
 
 ```text
-WARNING  Ignoring sandbox.network_scanners, sandbox.extra_read_paths from
-/home/me/src/app/.ash/.ash.yaml: the file is inside a git checkout or the scanned
+WARNING  Ignoring sandbox.network_scanners, sandbox.extra_read_paths from the config built
+on /home/me/src/app/.ash/.ash.yaml: the file is inside a git checkout or the scanned
 directory, so someone other than the operator may have written it, and it cannot grant
-sandbox access. A network_scanners list there still removes network from
-scanners it does not name, and a sandbox mode there still applies when nothing else turns
-the sandbox on. To grant access, pass the setting with --config-overrides (for example
-'sandbox.network_scanners=[grype]') or put it in a config file outside every git checkout
-and the scanned directory.
+sandbox access. Of the files the config was built from, only the sandbox settings a file
+outside every git checkout and the scanned directory writes itself are kept. A
+network_scanners list there still removes network from scanners it does not name, and a
+sandbox mode there still applies when nothing else turns the sandbox on. To grant access,
+pass the setting with --config-overrides (for example 'sandbox.network_scanners=[grype]')
+or put it in a config file outside every git checkout and the scanned directory.
 ```
 
 The console shows the same warning with `[grype]` missing from the example. For a file
@@ -266,9 +280,9 @@ operator`.
 
 So a repository can take a network away from its own scan, but cannot add one. The rule
 also covers your own files: a config kept in a checkout of its own, such as an ops or
-dotfiles repository, cannot grant either, and neither can a file outside every checkout
-that `extends` one inside. Move the grants to `--config-overrides` or to a file outside
-every checkout. [Configuration trust model](../concepts/trust-model.md) explains how ASH
+dotfiles repository, cannot grant either, and a file outside every checkout that `extends`
+one inside keeps only the grants it writes itself. Move the grants to `--config-overrides`
+or to a file outside every checkout. [Configuration trust model](../concepts/trust-model.md) explains how ASH
 decides where a config file belongs.
 
 When a scanner's own settings ask for something the default policy does not allow, ASH
@@ -292,6 +306,7 @@ ERROR    bandit not run: scanner sandbox unavailable: firejail is not installed
 | `bwrap cannot create a sandbox here (...)` | Allow unprivileged user namespaces (see the bubblewrap tab), or use `landlock`. |
 | `bwrap cannot apply the Unix-socket filter in its sandbox (...)` | Use the bwrap from your distribution, on x86_64 or aarch64, on a kernel that allows seccomp filters. |
 | `Landlock is not available (...)` | Add `landlock` to the `lsm=` kernel parameter. |
+| `Landlock ABI <n> is below 3 (Linux 6.2), ...` | Use bwrap, a kernel with Landlock ABI 3 or later, or container mode. |
 | `firejail is not installed` | Install firejail, or use another backend. |
 | `firejail ran a test command without a sandbox (...)` | Use `bwrap` or `landlock`; firejail does not sandbox inside this container. |
 | `sandbox-exec is not present (it has been removed from this macOS)` | No macOS backend remains; scan in a container. |

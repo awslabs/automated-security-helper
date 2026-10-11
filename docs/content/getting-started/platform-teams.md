@@ -126,12 +126,16 @@ The repository can still affect results in other ways:
   `scanners.bandit.options.ignore_nosec: true` in your file.
 - Its `.gitignore` and `.ignore` files, which decide which files ASH scans, committed files
   included.
-- The tool config files some scanners read from the repository, such as bandit's `.bandit`.
+- The tool config files some scanners read from the repository, such as detect-secrets'
+  `.secrets.baseline`, whose plugin and filter settings apply unless your file sets
+  `scanners.detect-secrets.options.scan_settings.plugins_used`, and semgrep's and opengrep's
+  `.semgrepignore`. [What the trust model does not protect](../concepts/trust-model.md#not-protected)
+  lists the scanners whose own config files ASH keeps from being read.
 
 When you let ASH read a repository's config file instead, that file can change the
 verdict, but it cannot load ASH's plugin packages that send data off the machine, choose
 reporter destinations or credentials, grant sandbox access, or set the scanner options
-that name a program to run or a tool config that can load code.
+in [Options only the operator can set](../how-to/choose-scanners.md#operator-only).
 [Configuration trust model](../concepts/trust-model.md) has the complete rules.
 
 ## 4. Run the scan in CI
@@ -172,8 +176,9 @@ database is past its age bound. An image that scans online refreshes the trivy d
 during each scan, and grype updates its own database, so the hosts need outbound access to
 the databases' download sites. An offline image carries the databases it downloaded at
 build time. trivy's bound is the shortest, a day, and it counts from when the database
-was built upstream, which is before your image build, so an offline image fails trivy
-scans less than a day after its build.
+was built upstream, which is before your image build. An offline image holds trivy's
+database to `warn`, so its trivy scans keep passing after that day and the reports
+record the stale database. grype's bound is five days, and past it the scan fails.
 
 Rebuild the image on a schedule, with `--force` so the build does not reuse cached layers
 that hold the old databases and tools:
@@ -187,10 +192,11 @@ docker push "$ASH_IMAGE_NAME"
 
 If the rebuild runs in a CI job, run it as
 `env -u CI -u IsCI -u ISCI -u CODEBUILD_BUILD_ID ash build-image ...`, or ASH builds the
-root image. Rebuild offline images that scan with trivy more than once a day, and online
-images at least weekly, so the scanner tools get their fixes. Keep
-`content_db_staleness: fail` in the operator config; a repository cannot relax it while
-you pass `--config`. [Run ASH offline](../how-to/run-offline.md) covers air-gapped hosts,
+root image. Rebuild offline images within grype's five days, and more often to keep
+trivy's findings current, and online images at least weekly, so the scanner tools get
+their fixes. Keep `content_db_staleness: fail` in the operator config; a repository
+cannot relax it while you pass `--config`. To hold trivy's database to its bound in an
+offline image too, also set `content_db_staleness_offline_image_default: false`. [Run ASH offline](../how-to/run-offline.md) covers air-gapped hosts,
 and [Content databases](../concepts/content-databases.md) lists every bound.
 
 ## 6. Send findings where your team reads them

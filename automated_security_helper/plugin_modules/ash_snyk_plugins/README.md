@@ -12,7 +12,7 @@ The plugin runs Snyk Code only. Snyk's dependency, container and infrastructure-
 
 ## Load the plugin
 
-A config file that the scanned repository could have written cannot load this module. ASH ignores, with a warning, an `ash_plugin_modules` entry for `ash_snyk_plugins` in a config file inside a git checkout or the scanned directory, such as the repository's own `.ash/.ash.yaml`. Load it from the command line instead:
+A config file that the scanned repository could have written cannot load this module. ASH ignores, with a warning, an `ash_plugin_modules` entry for `ash_snyk_plugins`, or for a module inside it, in a config file inside a git checkout or the scanned directory, such as the repository's own `.ash/.ash.yaml`. Load it from the command line instead:
 
 <!-- doctest: illustrative reason="needs the Snyk CLI and a Snyk account" -->
 ```bash
@@ -31,6 +31,8 @@ scanners:
     options:
       severity_threshold: HIGH
 ```
+
+Once you load the module, the repository's own `.ash/.ash.yaml` can still set the `snyk-code` options.
 
 Snyk's SARIF is written to `.ash/ash_output/scanners/snyk-code/source/results_sarif.sarif`, and its findings are in every ASH report.
 
