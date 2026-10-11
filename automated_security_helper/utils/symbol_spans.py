@@ -40,6 +40,7 @@ declaration, so a finding reported on a decorator line is inside the symbol.
 
 from __future__ import annotations
 
+import functools
 import importlib
 import re
 import threading
@@ -55,6 +56,7 @@ from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 SYMBOLS_EXTRA = "symbols"
 
 
+@functools.cache
 def symbols_extra_install_command() -> str:
     """The command that installs the symbols extra's packages into ASH's environment.
 
@@ -62,6 +64,11 @@ def symbols_extra_install_command() -> str:
     a scan never name different installs. The packages are read from the
     running distribution's metadata, so the command matches this ASH whatever
     its version or source.
+
+    Built once per process. Reading the metadata walks every installed
+    distribution (about 0.46 s with 205 of them), and the scan warning is built
+    once per file a symbol suppression is checked against, under the index lock.
+    The answer cannot change while the process runs.
     """
     # Names the extra's packages rather than ASH's distribution with the extra
     # (the earlier "install automated-security-helper[symbols]"): on PyPI that

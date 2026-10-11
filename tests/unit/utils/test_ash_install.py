@@ -107,6 +107,19 @@ def records(checkout, wheel) -> dict:
     }
 
 
+@pytest.fixture(autouse=True)
+def _fresh_symbols_command():
+    """The symbols command is built once per process; these tests vary its inputs."""
+    from automated_security_helper.utils import symbol_spans
+
+    clear = getattr(symbol_spans.symbols_extra_install_command, "cache_clear", None)
+    if clear is not None:
+        clear()
+    yield
+    if clear is not None:
+        clear()
+
+
 def _origin(monkeypatch, direct_url, version=None):
     monkeypatch.setattr(ash_install, "_direct_url", lambda: direct_url)
     if version is not None:

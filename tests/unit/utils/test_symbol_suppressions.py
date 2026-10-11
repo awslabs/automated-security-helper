@@ -716,6 +716,57 @@ class TestLint:
         lint_install = _symbols_install(lint_issues[0].message)
         assert scan_install is not None, scan_hints[0]
         assert scan_install == lint_install, (scan_hints[0], lint_issues[0].message)
+        # The whole command, version ranges included: the same package names
+        # without the extra's bounds would install versions outside them.
+        scan_commands = re.findall(r"`([^`]*)`", scan_hints[0])
+        lint_commands = re.findall(r"`([^`]*)`", lint_issues[0].message)
+        assert (
+            scan_commands
+            == lint_commands
+            == [symbol_spans.symbols_extra_install_command()]
+        ), (scan_hints[0], lint_issues[0].message)
+
+    def test_the_hint_is_built_once_however_many_files_need_it(
+        self, tmp_path, caplog, monkeypatch
+    ):
+        """Building the hint reads every installed distribution's metadata.
+
+        Measured at about 0.46 s a call with 205 distributions, and the scan
+        builds the reason once per file a symbol suppression is checked against,
+        under the index lock. It is built once per process.
+        """
+        from automated_security_helper.utils import ash_install
+
+        calls = []
+        real = ash_install.extra_requirements_from_metadata
+
+        def counting(extra):
+            calls.append(extra)
+            return real(extra)
+
+        monkeypatch.setattr(ash_install, "extra_requirements_from_metadata", counting)
+        # Start and end with nothing cached, so the count is this test's own.
+        clear = getattr(
+            symbol_spans.symbols_extra_install_command, "cache_clear", lambda: None
+        )
+        clear()
+        monkeypatch.setitem(sys.modules, "tree_sitter", None)
+        monkeypatch.setattr(symbol_spans, "_language_cache", {})
+        for index in range(5):
+            _write(tmp_path, f"src/mod{index}.py", PYTHON_SOURCE)
+        resolver = SymbolResolver(tmp_path)
+        inside = _line(PYTHON_SOURCE, "MARK module_function body")
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            for index in range(5):
+                assert not _suppression(
+                    path=f"src/mod{index}.py", symbol="module_function"
+                ).matches(_finding(f"src/mod{index}.py", inside), resolver)
+        _lint([{"path": "src/app.py", "reason": "r", "symbol": "module_function"}])
+        clear()
+
+        hints = [r for r in caplog.records if "'symbols' extra" in r.getMessage()]
+        assert len(hints) == 5, [r.getMessage() for r in hints]
+        assert calls == ["symbols"], calls
 
     def test_both_hints_point_at_the_docs_for_other_installers(
         self, tmp_path, caplog, monkeypatch
