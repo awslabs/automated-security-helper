@@ -237,6 +237,47 @@ def untrusted_reason(path: Path, scan_root: Path) -> Optional[str]:
     return None
 
 
+def scanned_checkouts(scan_root: Path) -> List[Path]:
+    """The outermost git checkout holding ``scan_root``, by its own and resolved path.
+
+    The tree the scanned repository wrote: for a submodule or a vendored checkout,
+    the superproject around it too. Empty for a scan root outside every checkout.
+    """
+    found: List[Path] = []
+    for start in (as_named(scan_root), Path(os.path.realpath(scan_root))):
+        outermost = None
+        for candidate in (start, *start.parents):
+            if os.path.lexists(candidate / ".git"):
+                outermost = candidate
+        if outermost is not None and outermost not in found:
+            found.append(outermost)
+    return found
+
+
+def in_tree_reason(path: Path, scan_root: Path) -> Optional[str]:
+    """Why ``path`` is inside the scanned tree itself, or None.
+
+    Narrower than ``untrusted_reason``: inside the scan root, or the outermost
+    checkout holding it, by any of their names, or reached through a link inside
+    them. Another checkout, such as an operator's ops repository, is not the
+    scanned tree. Used for a path the operator named
+    (``config/path_trust.py``), which the operator may keep in a checkout of their
+    own; a path a repository's config names follows ``untrusted_reason``.
+    """
+    names = scan_root_names(scan_root)
+    roots = [*scanned_checkouts(scan_root), *names]
+    label = Path(scan_root).as_posix()
+    if any(is_within(path, root) for root in roots) or _named_within(path, roots):
+        return f"it is inside the scanned tree at {label}"
+    for link in links_followed(path):
+        if any(is_within(link.parent, root) for root in roots):
+            return (
+                f"it is reached through {link.as_posix()}, a link inside the "
+                f"scanned tree at {label}"
+            )
+    return None
+
+
 def untrusted_path(path: Path, scan_root: Path) -> bool:
     """Whether the scanned repository could have written ``path``.
 

@@ -339,6 +339,9 @@ class ProjectScanSettings:
     excluded_scanners: Tuple[str, ...] = ()
     output_formats: Tuple[str, ...] = ()
     config_overrides: Tuple[str, ...] = ()
+    #: ``config_overrides`` came from an MCP client, not the operator; see
+    #: ``resolve_config(client_overrides=)``.
+    client_overrides: bool = False
     ash_plugin_modules: Tuple[str, ...] = ()
     strategy: str = "parallel"
     offline: bool = False
@@ -895,6 +898,7 @@ def _project_config_with_policy(
         # operator's file still decides the sandbox when the project's is in the
         # tree, the same as it would for a project that has none.
         trusted_config_path=settings.default_config_path,
+        client_overrides=settings.client_overrides,
     )
 
     # The scanners' own checks on tool config file paths (config/path_trust.py)

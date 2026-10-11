@@ -21,6 +21,11 @@ from automated_security_helper.config.default_config import (
     default_config_names,
     get_default_config,
 )
+from automated_security_helper.config.path_trust import (
+    OperatorPaths,
+    operator_reason,
+    parse_overrides,
+)
 from automated_security_helper.config.plugin_module_trust import (
     confine_plugin_modules,
 )
@@ -207,6 +212,7 @@ def resolve_config(
     scanned_root: Path | str | None = None,
     trusted_config_path: Path | str | None = None,
     untrusted_config: bool = False,
+    client_overrides: bool = False,
 ) -> AshConfig:
     """
     Load configuration from file or return default configuration.
@@ -238,6 +244,9 @@ def resolve_config(
             and its ``sandbox.mode`` cannot turn off or replace a mode the
             trusted base sets. Its ``ash_plugin_modules`` are limited the same way
             as an in-tree file's (``config/plugin_module_trust.py``).
+        client_overrides: ``config_overrides`` came from an MCP client (a
+            workspace tool's), not the operator, so a tool path they name is not
+            the operator's (``path_trust.OperatorPaths``).
 
     Returns:
         The resolved AshConfig object
@@ -245,6 +254,7 @@ def resolve_config(
     chain: List[Path] = []
     named: List[Path] = []
     spelled: List[Path] = []
+    merged: List[Any] = []
     config = _resolve_config(
         config_path,
         source_dir,
@@ -254,6 +264,7 @@ def resolve_config(
         chain,
         named,
         spelled,
+        merged,
     )
     if config is None:
         return config
@@ -265,6 +276,15 @@ def resolve_config(
     # Every file of a chain is judged by its resolved path and by the names that
     # reached it, the bases' extends entries included (ResolvedConfigDocument.named).
     default_spelled = [*ash_config_named, *default_config_names()]
+    config._operator_paths = _operator_paths(
+        chain or default_config_chain(),
+        [*named, *spelled] if chain else default_spelled,
+        named if chain else ash_config_named,
+        root,
+        merged[0] if merged else None,
+        untrusted=untrusted_config,
+        overrides=[] if client_overrides else config_overrides,
+    )
     if chain:
         in_tree = repository_written(
             chain, root, [*named, *spelled], all_untrusted=untrusted_config
@@ -339,6 +359,43 @@ def resolve_config(
         config, trusted, config_overrides, Path(scanned_root), in_tree
     )
     return config
+
+
+def _operator_paths(
+    chain: List[Path],
+    names: List[Path],
+    root_names: List[Path],
+    scan_root: Path,
+    document: Any,
+    *,
+    untrusted: bool,
+    overrides: Optional[List[str]],
+) -> OperatorPaths:
+    """Which tool paths in the config the operator named; see path_trust.
+
+    The chain's merged ``document`` (or, with no config file, the default
+    config's) when no file of the chain is inside the scanned tree or an MCP
+    client's (``path_trust.operator_reason``, under every name); only the selected
+    file's own document when that file is the operator's and a base it extends is
+    not; and what ``overrides`` set.
+    """
+    record = OperatorPaths(overrides=parse_overrides(overrides))
+    if untrusted:
+        return record
+    if all(operator_reason(path, scan_root) is None for path in [*chain, *names]):
+        if document is None:
+            document = get_default_config().model_dump()
+        record.documents = [document]
+    elif chain and all(
+        operator_reason(path, scan_root) is None for path in [chain[-1], *root_names]
+    ):
+        try:
+            own = read_config_file(chain[-1])
+        except Exception:  # noqa: BLE001 - the chain was read already; nothing to add
+            own = None
+        if isinstance(own, dict):
+            record.documents = [own]
+    return record
 
 
 def _own_sandbox_settings(path: Path) -> Dict[str, Any]:
@@ -426,12 +483,14 @@ def _resolve_config(
     chain: List[Path],
     named: List[Path],
     spelled: List[Path],
+    merged: List[Any],
 ) -> AshConfig:
     """resolve_config without the sandbox confinement.
 
     Appends every file read to ``chain``, resolved, the root config file's path as
-    it was named (passed or discovered) to ``named``, and every file read by the
-    path that named it (``ResolvedConfigDocument.named``) to ``spelled``.
+    it was named (passed or discovered) to ``named``, every file read by the
+    path that named it (``ResolvedConfigDocument.named``) to ``spelled``, and the
+    merged document, before any override, to ``merged``.
     """
     try:
         # Start with default config
@@ -524,6 +583,7 @@ def _resolve_config(
             chain.extend(document.chain)
             named.append(Path(config_path))
             spelled.extend(document.named)
+            merged.append(document.data)
             ASH_LOGGER.debug(f"Loaded config from file: {config_path}")
 
             # Apply config overrides if provided

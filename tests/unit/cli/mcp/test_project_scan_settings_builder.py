@@ -173,6 +173,7 @@ def _opts(tmp_path: Path) -> ScanOptions:
         # and project_timeout and breaks two unrelated entries in the table.
         config=str(root / ".ash.yaml"),
         config_overrides=["global_settings.severity_threshold=HIGH"],
+        client_overrides=True,
         offline=True,
         strategy=ExecutionStrategy.SEQUENTIAL,
         scanners=["bandit", "semgrep"],
@@ -213,6 +214,7 @@ def _expected(tmp_path: Path) -> Dict[str, Any]:
         "excluded_scanners": ("cdk-nag",),
         "output_formats": ("csv", "html"),
         "config_overrides": ("global_settings.severity_threshold=HIGH",),
+        "client_overrides": True,
         "ash_plugin_modules": ("my_plugins",),
         "strategy": "sequential",
         "offline": True,
@@ -662,3 +664,33 @@ class TestBothCallersUseTheSharedBuilder:
             "the MCP workspace tool built its own ProjectScanSettings instead "
             "of calling build_project_scan_settings"
         )
+
+
+def test_an_mcp_workspace_scans_overrides_are_marked_as_the_clients(tmp_path):
+    # A tool path a client's config_overrides name is not the operator's
+    # (config/path_trust.py), so the MCP path marks them.
+    from automated_security_helper.workspace.plan import WorkspacePlan
+
+    module = importlib.import_module(MODULE_UNDER_TEST)
+    # Only workspace_root is read; the rest of a plan is beside the point here.
+    plan = WorkspacePlan.model_construct(workspace_root=str(tmp_path))
+    opts = module._scan_options(
+        plan,
+        output_dir=None,
+        config_overrides=["scanners.checkov.options.config_file=/x.yaml"],
+        scanners=None,
+        excluded_scanners=None,
+        offline=False,
+        allow_missing_projects=False,
+    )
+    assert opts.client_overrides is True
+    none = module._scan_options(
+        plan,
+        output_dir=None,
+        config_overrides=None,
+        scanners=None,
+        excluded_scanners=None,
+        offline=False,
+        allow_missing_projects=False,
+    )
+    assert none.client_overrides is False

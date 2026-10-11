@@ -131,6 +131,9 @@ class ScanOptions(BaseModel):
     # grants come from instead. Both go to resolve_config, in local mode only.
     untrusted_config: bool = False
     trusted_config_path: Optional[str] = None
+    # config_overrides came from an MCP client (a workspace tool's), so a tool
+    # config path they name is not the operator's (config/path_trust.py).
+    client_overrides: bool = False
     offline: bool = False
     strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL
     scanners: Optional[List[str]] = Field(default_factory=list)
@@ -2176,6 +2179,7 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
             getattr(fmt, "value", str(fmt)) for fmt in (opts.output_formats or [])
         ),
         config_overrides=tuple(opts.config_overrides or []),
+        client_overrides=opts.client_overrides,
         ash_plugin_modules=tuple(opts.ash_plugin_modules or []),
         strategy=getattr(opts.strategy, "value", str(opts.strategy)),
         offline=opts.offline,

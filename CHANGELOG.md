@@ -153,10 +153,15 @@
   ignore file a setting names (checkov's and ferret-scan's `config_file`,
   detect-secrets `file://` plugins and filters, trivy-repo's `ignore_file` and
   `secret_config_file`, `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`) is judged by
-  where it is, whoever names it, `--config-overrides` included. One kept in a
-  checkout of your own, such as an ops repository, is therefore not passed to the
-  tool: a `.trivyignore` kept there, for example, no longer removes findings. Keep
-  such files outside every checkout. A virtualenv inside a git checkout counts as
+  who named it. One the operator named, with `--config-overrides`, in a config file
+  outside the scanned tree, or through `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG`,
+  is passed unless it is inside the scanned tree itself (the source directory, or
+  the outermost checkout holding it) or an MCP client delivered it, so one kept in
+  an ops repository works. One a config inside the scanned tree names has to be
+  outside every git checkout as well. When the operator's config file extends one
+  inside the tree, only the paths the operator's file writes itself count as the
+  operator's. An MCP client's `config_overrides` are the client's, not the
+  operator's. A virtualenv inside a git checkout counts as
   inside it for `ash_plugin_modules`, and the warning names the module's location
   and the checkout. A file a setting names is judged by the path as written, by the
   file it resolves to, and by every symlink resolving it follows, so a symlink the

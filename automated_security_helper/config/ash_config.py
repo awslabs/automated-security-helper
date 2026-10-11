@@ -1105,6 +1105,11 @@ class AshConfig(BaseModel):
     # refuses tool config files inside it. None means the source directory's tree.
     _scanned_root: Optional[Path] = PrivateAttr(default=None)
 
+    # Which tool paths in this config the operator named
+    # (config/path_trust.OperatorPaths), recorded by resolve_config. None means
+    # no option value counts as the operator's.
+    _operator_paths: Optional[Any] = PrivateAttr(default=None)
+
     # Project information
     project_name: Annotated[
         str,

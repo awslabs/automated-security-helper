@@ -264,3 +264,240 @@ def test_one_config_is_confined_by_both_rules(tmp_path, monkeypatch, supplied_by
     assert config.sandbox.network_scanners is None
     assert config.sandbox.extra_read_paths == []
     assert module not in config.ash_plugin_modules
+
+
+# --- Who named the path ------------------------------------------------------
+#
+# Maintainer's ruling: a tool config path the operator named (--config-overrides,
+# a config file outside the scanned tree, an environment variable) is honored
+# from another checkout, such as an ops repository. It is refused only inside the
+# scanned tree itself or when an MCP client delivered it. A path a config inside
+# the scanned tree names keeps the stricter rule.
+
+CHECKOV_KEY = "scanners.checkov.options.config_file"
+
+
+def _ops_rules(tmp_path: Path) -> Path:
+    ops = _checkout(tmp_path / "ops")
+    rules = ops / "checkov.yaml"
+    rules.write_text("framework: [terraform]\n")
+    return rules
+
+
+def _scanned_checkout(tmp_path: Path, config: str = "project_name: scanned\n") -> Path:
+    target = _checkout(tmp_path / "target")
+    (target / ".ash").mkdir()
+    (target / ".ash" / ".ash.yaml").write_text(config)
+    return target
+
+
+def _honored(value, target, config, key=CHECKOV_KEY):
+    return honored_path(str(value), source_dir=target, key=key, config=config)
+
+
+def test_an_operator_config_file_names_a_tool_config_in_its_own_checkout(tmp_path):
+    rules = _ops_rules(tmp_path)
+    operator = rules.parent / "ash.yaml"
+    operator.write_text(
+        f"project_name: ops\nscanners:\n  checkov:\n    options:\n"
+        f"      config_file: {rules.as_posix()}\n"
+    )
+    target = _scanned_checkout(tmp_path)
+    config = resolve_config(config_path=operator, source_dir=target)
+    assert _honored(rules, target, config) == rules.resolve()
+
+
+def test_an_override_names_a_tool_config_in_another_checkout(tmp_path):
+    rules = _ops_rules(tmp_path)
+    target = _scanned_checkout(tmp_path)
+    config = resolve_config(
+        source_dir=target,
+        config_overrides=[f"{CHECKOV_KEY}={rules.as_posix()}"],
+    )
+    assert _honored(rules, target, config) == rules.resolve()
+
+
+def test_an_environment_variable_names_a_file_in_another_checkout(tmp_path):
+    rules = _ops_rules(tmp_path)
+    target = _scanned_checkout(tmp_path)
+    config = resolve_config(source_dir=target)
+    assert _honored(rules, target, config, key="TRIVY_IGNOREFILE") == rules.resolve()
+
+
+def test_a_repository_config_still_cannot_name_a_file_in_another_checkout(
+    tmp_path, caplog
+):
+    rules = _ops_rules(tmp_path)
+    target = _scanned_checkout(
+        tmp_path,
+        f"project_name: scanned\nscanners:\n  checkov:\n    options:\n"
+        f"      config_file: {rules.as_posix()}\n",
+    )
+    config = resolve_config(source_dir=target)
+    caplog.set_level("WARNING")
+    assert _honored(rules, target, config) is None
+    (message,) = [
+        r.getMessage() for r in caplog.records if "Ignoring" in r.getMessage()
+    ]
+    assert "--config-overrides or in a config file outside the scanned tree" in message
+
+
+def test_an_operator_named_file_inside_the_scanned_tree_is_still_refused(
+    tmp_path, caplog
+):
+    target = _scanned_checkout(tmp_path)
+    rules = target / "vendor" / "checkov.yaml"
+    rules.parent.mkdir()
+    rules.write_text("framework: [terraform]\n")
+    config = resolve_config(
+        source_dir=target, config_overrides=[f"{CHECKOV_KEY}={rules.as_posix()}"]
+    )
+    caplog.set_level("WARNING")
+    assert _honored(rules, target, config) is None
+    (message,) = [
+        r.getMessage() for r in caplog.records if "Ignoring" in r.getMessage()
+    ]
+    assert "inside the scanned tree" in message
+    assert "whoever names it" not in message
+
+
+def test_the_outer_checkout_of_a_submodule_scan_root_is_the_scanned_tree(tmp_path):
+    # Scanning mono/vendor/lib, a submodule: the superproject is scanned too.
+    mono = _checkout(tmp_path / "mono")
+    lib = mono / "vendor" / "lib"
+    lib.mkdir(parents=True)
+    (lib / ".git").write_text("gitdir: ../../.git/modules/lib\n")
+    rules = mono / "ops" / "checkov.yaml"
+    rules.parent.mkdir()
+    rules.write_text("framework: [terraform]\n")
+    config = resolve_config(
+        source_dir=lib, config_overrides=[f"{CHECKOV_KEY}={rules.as_posix()}"]
+    )
+    assert _honored(rules, lib, config) is None
+
+
+def test_with_a_repository_base_only_the_operator_files_own_value_counts(tmp_path):
+    rules = _ops_rules(tmp_path)
+    target = _scanned_checkout(tmp_path)
+    (target / ".ash" / "base.yaml").write_text(
+        f"project_name: scanned\nscanners:\n  checkov:\n    options:\n"
+        f"      config_file: {rules.as_posix()}\n"
+    )
+    inherited = tmp_path / "inherits.yaml"
+    inherited.write_text("project_name: op\nextends: target/.ash/base.yaml\n")
+    config = resolve_config(config_path=inherited, source_dir=target)
+    assert _honored(rules, target, config) is None
+    own = tmp_path / "own.yaml"
+    own.write_text(
+        f"project_name: op\nextends: target/.ash/base.yaml\nscanners:\n  checkov:\n"
+        f"    options:\n      config_file: {rules.as_posix()}\n"
+    )
+    config = resolve_config(config_path=own, source_dir=target)
+    assert _honored(rules, target, config) == rules.resolve()
+
+
+def test_an_mcp_clients_overrides_are_not_the_operators(tmp_path):
+    rules = _ops_rules(tmp_path)
+    target = _scanned_checkout(tmp_path)
+    config = resolve_config(
+        source_dir=target,
+        config_overrides=[f"{CHECKOV_KEY}={rules.as_posix()}"],
+        client_overrides=True,
+    )
+    assert _honored(rules, target, config) is None
+
+
+def test_a_file_url_entry_the_operator_named_counts_by_its_file(tmp_path):
+    ops = _checkout(tmp_path / "ops")
+    plugin = ops / "plugin.py"
+    plugin.write_text("")
+    target = _scanned_checkout(tmp_path)
+    key = "scanners.detect-secrets.options.scan_settings.plugins_used[].path"
+    config = resolve_config(
+        source_dir=target,
+        config_overrides=[
+            (
+                "scanners.detect-secrets.options.scan_settings.plugins_used="
+                f'[{{"name": "Mine", "path": "file://{plugin.as_posix()}"}}]'
+            )
+        ],
+    )
+    assert _honored(plugin, target, config, key=key) == plugin.resolve()
+
+
+def test_a_value_the_operators_config_does_not_set_is_not_the_operators(tmp_path):
+    # Every config file here is the operator's, but detect-secrets also checks
+    # entries it read from a .secrets.baseline in the scanned tree under the same
+    # key. Such an entry is not in the operator's config, so it follows the
+    # stricter rule and cannot point at a file in someone's checkout.
+    ops = _checkout(tmp_path / "ops")
+    plugin = ops / "plugin.py"
+    plugin.write_text("")
+    operator = tmp_path / "ash.yaml"
+    operator.write_text("project_name: op\n")
+    target = _scanned_checkout(tmp_path)
+    config = resolve_config(config_path=operator, source_dir=target)
+    key = "scanners.detect-secrets.options.scan_settings.plugins_used[].path"
+    assert _honored(plugin, target, config, key=key) is None
+    assert _honored(plugin, target, config, key=CHECKOV_KEY) is None
+
+
+# --- A Homebrew prefix that is itself a checkout ------------------------------
+#
+# On Apple Silicon, Homebrew's prefix (/opt/homebrew) is a clone of Homebrew/brew,
+# so its etc/ and lib/pythonX/site-packages/ are inside a git checkout. The layout
+# is simulated here, so this runs on every platform.
+
+
+def _homebrew_prefix(tmp_path: Path) -> Path:
+    prefix = _checkout(tmp_path / "opt" / "homebrew")
+    (prefix / "Library" / "Homebrew").mkdir(parents=True)
+    (prefix / "etc").mkdir()
+    return prefix
+
+
+def test_a_tool_config_the_operator_keeps_in_the_homebrew_prefix_is_passed(
+    tmp_path,
+):
+    prefix = _homebrew_prefix(tmp_path)
+    rules = prefix / "etc" / "checkov.yaml"
+    rules.write_text("framework: [terraform]\n")
+    target = _scanned_checkout(tmp_path)
+    config = resolve_config(
+        source_dir=target, config_overrides=[f"{CHECKOV_KEY}={rules.as_posix()}"]
+    )
+    assert _honored(rules, target, config) == rules.resolve()
+
+
+def test_a_repository_config_cannot_name_a_file_in_the_homebrew_prefix(tmp_path):
+    prefix = _homebrew_prefix(tmp_path)
+    rules = prefix / "etc" / "checkov.yaml"
+    rules.write_text("framework: [terraform]\n")
+    target = _scanned_checkout(
+        tmp_path,
+        f"project_name: scanned\nscanners:\n  checkov:\n    options:\n"
+        f"      config_file: {rules.as_posix()}\n",
+    )
+    config = resolve_config(source_dir=target)
+    assert _honored(rules, target, config) is None
+
+
+def test_a_module_in_the_homebrew_prefix_counts_as_inside_a_checkout(
+    tmp_path, monkeypatch
+):
+    # Today's rule, pending a decision: a repository's config cannot import a
+    # module installed under the Homebrew prefix, as for any virtualenv inside a
+    # checkout. --ash-plugin-modules and an operator config are unaffected.
+    prefix = _homebrew_prefix(tmp_path)
+    site = prefix / "lib" / "python3.12" / "site-packages"
+    package = site / "acme_ash_plugin_brew"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    monkeypatch.syspath_prepend(str(site))
+    target = _scanned_checkout(tmp_path)
+    try:
+        reason = refusal_reason("acme_ash_plugin_brew", target)
+    finally:
+        sys.modules.pop("acme_ash_plugin_brew", None)
+    assert reason is not None
+    assert f"the git checkout at {prefix.absolute().as_posix()}" in reason

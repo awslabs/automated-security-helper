@@ -282,8 +282,9 @@ turns into a symlink to some other file still counts as inside the checkout. Eve
 symlink met on the way counts too: a path that leads through a link inside a
 checkout, even from a link of your own, counts as inside that checkout, and the
 reason names the link.
-Tool config files that scanner options name, and plugin modules, are judged by the
-same rule; see
+Plugin modules are judged by the same rule. A tool config file a scanner option
+names is judged by it too when a config inside the scanned tree names it; one the
+operator names may sit in a checkout of the operator's own. See
 [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose).
 
 Sandbox grants follow a scanner's own name, the one its code gives it. If a config

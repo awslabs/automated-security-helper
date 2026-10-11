@@ -655,6 +655,8 @@ def _scan_options(
         workspace_plan=plan,
         allow_missing_projects=allow_missing_projects,
         config_overrides=list(config_overrides or []),
+        # A client's overrides: a tool path they name is not the operator's.
+        client_overrides=bool(config_overrides),
         scanners=list(scanners or []),
         excluded_scanners=list(excluded_scanners or []),
         offline=offline,
