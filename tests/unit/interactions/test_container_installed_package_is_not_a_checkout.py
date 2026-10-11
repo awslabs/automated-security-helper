@@ -47,7 +47,7 @@ def record(cmd_list, check=True, debug=False, shell=False):
     seen.append([str(c) for c in cmd_list if c is not None])
     return subprocess_utils.create_completed_process(args=seen[-1], returncode=0)
 rac.run_cmd_direct = record
-rac._find_runner = lambda name: "/usr/bin/docker"
+rac._find_runner = lambda name: "/nonexistent/ash-test/docker"
 rac._runner_supports_buildx = lambda runner: False
 subprocess_utils.get_host_uid = lambda: 1000
 subprocess_utils.get_host_gid = lambda: 1000

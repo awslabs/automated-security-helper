@@ -99,7 +99,9 @@ def commands(monkeypatch) -> List[List[str]]:
 
     monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 1000)
     monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: 1000)
-    monkeypatch.setattr(rac, "_find_runner", lambda _name: "/usr/bin/docker")
+    monkeypatch.setattr(
+        rac, "_find_runner", lambda _name: "/nonexistent/ash-test/docker"
+    )
     monkeypatch.setattr(rac, "_runner_supports_buildx", lambda _runner: False)
     monkeypatch.setattr(rac, "run_cmd_direct", record)
     for name in _SCRUBBED_ENV:
@@ -316,7 +318,7 @@ class TestTheImageIsBuiltFromAshsOwnDockerfile:
             "    seen.append(cmd)\n"
             "    return subprocess_utils.create_completed_process(args=cmd, returncode=0)\n"
             "rac.run_cmd_direct = record\n"
-            "rac._find_runner = lambda name: '/usr/bin/docker'\n"
+            "rac._find_runner = lambda name: '/nonexistent/ash-test/docker'\n"
             "rac._runner_supports_buildx = lambda runner: False\n"
             "subprocess_utils.get_host_uid = lambda: 1000\n"
             "subprocess_utils.get_host_gid = lambda: 1000\n"

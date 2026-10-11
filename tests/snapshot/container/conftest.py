@@ -45,7 +45,7 @@ FIXTURE_REPO = REPO_ROOT / "tests" / "test_data" / "snapshot_fixture" / "repo"
 
 #: What the fake runner reports as its path. A fixed string, so the "Resolved
 #: OCI_RUNNER to:" line is the same on every machine.
-FAKE_DOCKER = "/usr/bin/docker"
+FAKE_DOCKER = "/nonexistent/ash-test/docker"
 
 
 @pytest.fixture

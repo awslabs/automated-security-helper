@@ -52,7 +52,9 @@ def runtime(monkeypatch, tmp_path) -> Dict[str, Any]:
 
     monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 1000)
     monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: 1000)
-    monkeypatch.setattr(rac, "_find_runner", lambda _name: "/usr/bin/docker")
+    monkeypatch.setattr(
+        rac, "_find_runner", lambda _name: "/nonexistent/ash-test/docker"
+    )
     monkeypatch.setattr(rac, "get_ash_revision", lambda: "LOCAL")
     monkeypatch.setattr(rac, "_find_dockerfile", lambda _rev: dockerfile)
 

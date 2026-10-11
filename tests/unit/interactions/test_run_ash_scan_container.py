@@ -80,7 +80,7 @@ def test_run_ash_container_basic(
     mock_get_host_gid.return_value = 1000
 
     # Mock subprocess_utils.find_executable
-    mock_find_executable.return_value = "/usr/bin/docker"
+    mock_find_executable.return_value = "/nonexistent/ash-test/docker"
 
     # Mock validate_path to return the path as-is
     mock_validate_path.return_value = "/test/source"
@@ -142,7 +142,7 @@ def test_run_ash_container_build_only(
     mock_get_host_gid.return_value = 1000
 
     # Mock subprocess_utils.find_executable
-    mock_find_executable.return_value = "/usr/bin/docker"
+    mock_find_executable.return_value = "/nonexistent/ash-test/docker"
 
     # Use context manager to patch run_cmd_direct
     with patch(
@@ -194,7 +194,7 @@ def test_run_ash_container_run_only(
     mock_get_host_gid.return_value = 1000
 
     # Mock subprocess_utils.find_executable
-    mock_find_executable.return_value = "/usr/bin/docker"
+    mock_find_executable.return_value = "/nonexistent/ash-test/docker"
 
     # Mock validate_path to return the path as-is
     mock_validate_path.return_value = "/test/source"

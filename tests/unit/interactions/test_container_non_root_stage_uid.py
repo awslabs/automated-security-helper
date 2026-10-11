@@ -41,7 +41,9 @@ def commands(monkeypatch, tmp_path) -> List[List[str]]:
     monkeypatch.setattr(rac, "ASH_ASSETS_DIR", assets)
     monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 0)
     monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: 0)
-    monkeypatch.setattr(rac, "_find_runner", lambda _name: "/usr/bin/docker")
+    monkeypatch.setattr(
+        rac, "_find_runner", lambda _name: "/nonexistent/ash-test/docker"
+    )
     monkeypatch.setattr(rac, "_runner_supports_buildx", lambda _runner: False)
     monkeypatch.setattr(rac, "run_cmd_direct", record)
     for name in (
