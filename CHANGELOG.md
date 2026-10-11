@@ -164,6 +164,9 @@
   `config_base_gate` passed to `run_ash_scan` with container or nix mode is refused,
   because the ASH those modes run would read the config without it. See
   [Running a scan in a container](docs/content/docs/cli-reference.md#running-a-scan-in-a-container).
+- **`--ignore-suppressions` works in container mode.** It was not passed to the scan
+  inside the container, which applies the suppressions, so suppressed findings stayed
+  out of the reports and out of the exit code the host computes from them.
 - **A repository-written config file can no longer choose what ASH installs,
   imports or hands a scanner as its own configuration.** It applies to a discovered
   `.ash/.ash.yaml`, a `--config` path, an `extends` base, or `ASH_CONFIG`, when the

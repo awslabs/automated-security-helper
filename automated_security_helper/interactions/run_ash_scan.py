@@ -1695,6 +1695,7 @@ def _run_container_mode(
         inspect=opts.inspect,
         existing_results=opts.existing_results,
         python_based_plugins_only=opts.python_based_plugins_only,
+        ignore_suppressions=opts.ignore_suppressions,
         fail_on_findings=effective_fail_on_findings,
         fail_on_incomplete_scanners=effective_fail_on_incomplete_scanners,
         ash_revision_to_install=opts.ash_revision_to_install,
@@ -1778,8 +1779,9 @@ def _run_container_mode(
     # NOT "any non-zero status", and the difference matters: the container entrypoint is
     # this same CLI, so 0, 1 and 2 are verdicts that _compute_exit_code reached from a
     # results file, and the host deliberately recomputes them, because it applies
-    # --min-severity and --ignore-suppressions, neither of which is forwarded inward.
-    # Exiting on 2 here would report findings the operator asked to filter out.
+    # --min-severity, which is not forwarded inward. Exiting on 2 here would report
+    # findings the operator asked to filter out. (--ignore-suppressions is forwarded:
+    # suppressions are applied by the scan inside, and reach the host in its ash.sarif.)
     #
     # NOT ASH_EXIT_CODES either, which is the wider table of every status the CLI can
     # return and includes two that assert the opposite of a verdict. 3 is an invalid

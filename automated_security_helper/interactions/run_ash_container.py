@@ -972,10 +972,14 @@ def _assemble_run_command(
     shard_count: int | None = None,
     fail_on_incomplete_scanners: bool | None = None,
     workspace_config: str | None = None,
+    ignore_suppressions: bool = False,
 ) -> List[str]:
     """Assemble the full `docker run` command list.
 
     Args:
+        ignore_suppressions: Forwarded, because the suppressions are applied by
+            the scan inside: the host recomputes the verdict from the ash.sarif
+            that scan writes, which already carries them.
         config: The host path of ``--config``. It is made readable in the
             container and the inner scan is given the path it has there; see
             :func:`_host_file_in_container`. Handing the host path over verbatim
@@ -1126,6 +1130,8 @@ def _assemble_run_command(
         ash_args.append("--fail-on-incomplete-scanners")
     elif fail_on_incomplete_scanners is not None:
         ash_args.append("--no-fail-on-incomplete-scanners")
+    if ignore_suppressions:
+        ash_args.append("--ignore-suppressions")
 
     for phase in phases:
         ash_args.extend(
@@ -1280,6 +1286,7 @@ def run_ash_container(
     shard_index: int | None = None,
     shard_count: int | None = None,
     workspace_config: str | None = None,
+    ignore_suppressions: bool = False,
 ):
     """Build and run the ASH container image.
 
@@ -1570,6 +1577,7 @@ def run_ash_container(
             shard_index=shard_index,
             shard_count=shard_count,
             workspace_config=workspace_config,
+            ignore_suppressions=ignore_suppressions,
         )
 
         return _execute_container(run_cmd, debug=debug)

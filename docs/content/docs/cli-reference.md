@@ -212,6 +212,11 @@ root) is handed to the container the same way. The `./ash` wrapper and `Invoke-A
 mount a config from outside the source directory on its own, so an `extends` base next
 to it is not reachable there; use `ash --mode container` for such a chain.
 
+`--ignore-suppressions` is passed to the scan inside the container, which is where
+suppressions are applied: the host reads that scan's `ash.sarif` back to compute the
+exit code. `--min-severity` stays on the host, which applies it to the results it
+reads back.
+
 The image stage is the one `--build-target` names, `non-root` when it is not given. The
 `CI`, `IsCI`, `ISCI` and `CODEBUILD_BUILD_ID` variables do not change it;
 `--custom-containerfile` builds on `ci`. A `non-root` build is refused when the
