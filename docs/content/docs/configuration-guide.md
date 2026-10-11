@@ -532,13 +532,13 @@ on which:
   - Choices that are the operator's are in the default `denied_paths` too, so a
     file that sets one is refused rather than scanned without it: each scanner's
     own config file (`config_file` for bandit, checkov, ferret-scan, grype and
-    syft, and trivy-repo's `secret_config_file`), every scanner's and the jupyter
-    converter's `tool_version`, opengrep's `version` and `sha256`, opengrep's and
-    semgrep's `metrics` (their `config` is in the table below), and the AWS
     syft, and trivy-repo's `secret_config_file`), snyk-code's
-    `honor_tree_exclusions`, every scanner's and the jupyter
-    converter's `tool_version`, opengrep's `version` and `sha256`, and the AWS
-    reporters' destinations and credentials listed in the table above.
+    `honor_tree_exclusions`, every scanner's and the jupyter converter's
+    `tool_version`, opengrep's `version` and `sha256`, opengrep's and semgrep's
+    `metrics` (their `config` is in the table below), the AWS reporters'
+    destinations and credentials listed in the table above, and the GitLab SAST
+    reporter's `exclude_suppressed`, which would leave the findings a client's
+    suppressions are marked on out of that report.
   - Its own `global_settings.suppressions` and `global_settings.ignore_paths`
     apply. Each entry the operator did not supply is marked `client_supplied: true`,
     the files under a client-supplied ignore path are still scanned, and a finding

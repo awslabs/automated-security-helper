@@ -801,6 +801,10 @@ class RuntimeOverridesConfig(BaseModel):
         "/reporters/s3/options/aws_profile",
         "/reporters/s3/options/bucket_name",
         "/reporters/s3/options/key_prefix",
+        # The GitLab SAST report leaves suppressed findings out with this set, so
+        # the findings a client's own suppressions are marked on would be gone
+        # from it (off by default; GHAS's is on by default and off reports more).
+        "/reporters/gitlab-sast/options/exclude_suppressed",
     ]
 
     denied_value_patterns: Annotated[

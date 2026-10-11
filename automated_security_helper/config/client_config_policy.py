@@ -260,6 +260,7 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/reporters/s3/options/aws_profile",
             "/reporters/s3/options/bucket_name",
             "/reporters/s3/options/key_prefix",
+            "/reporters/gitlab-sast/options/exclude_suppressed",
         ),
     )
 )

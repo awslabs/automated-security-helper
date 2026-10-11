@@ -188,8 +188,9 @@
   offline reports no advisories). So do the choices that are the operator's:
   each scanner's own config file (`config_file` of bandit, checkov, ferret-scan,
   grype and syft, and trivy-repo's `secret_config_file`), every `tool_version`,
-  opengrep's `version` and `sha256`, and the AWS reporters' destinations and
-  credentials. Left at its default, each still scans.
+  opengrep's `version` and `sha256`, the AWS reporters' destinations and
+  credentials, and the GitLab SAST reporter's `exclude_suppressed`. Left at its
+  default, each still scans.
 
 - **A config file inside the scanned tree can no longer choose what ASH installs,
   imports or hands a scanner as its own configuration.** It applies to a discovered

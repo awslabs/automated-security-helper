@@ -469,6 +469,10 @@ _OPERATOR_CHOICES = [
         "scanners.semgrep.options.metrics",
     ),
     (
+        "reporters:\n  gitlab-sast:\n    options:\n      exclude_suppressed: true\n",
+        "reporters.gitlab-sast.options.exclude_suppressed",
+    ),
+    (
         "converters:\n  jupyter:\n    options:\n      tool_version: '==1.0.0'\n",
         "converters.jupyter.options.tool_version",
     ),

@@ -488,6 +488,10 @@ _POINTED_DENIALS: Dict[str, Tuple[str, Any]] = {
         "/scanners/opengrep/options/sha256",
         {"linux/amd64": "0" * 64},
     ),
+    "/reporters/gitlab-sast/options/exclude_suppressed": (
+        "/reporters/gitlab-sast/options/exclude_suppressed",
+        True,
+    ),
     "/scanners/opengrep/options/metrics": (
         "/scanners/opengrep/options/metrics",
         "on",

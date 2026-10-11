@@ -204,7 +204,8 @@
                   "/reporters/s3/options/aws_region",
                   "/reporters/s3/options/aws_profile",
                   "/reporters/s3/options/bucket_name",
-                  "/reporters/s3/options/key_prefix"
+                  "/reporters/s3/options/key_prefix",
+                  "/reporters/gitlab-sast/options/exclude_suppressed"
                 ],
                 "denied_value_patterns": {},
                 "enabled": false,
@@ -646,7 +647,8 @@
                 "/reporters/s3/options/aws_region",
                 "/reporters/s3/options/aws_profile",
                 "/reporters/s3/options/bucket_name",
-                "/reporters/s3/options/key_prefix"
+                "/reporters/s3/options/key_prefix",
+                "/reporters/gitlab-sast/options/exclude_suppressed"
               ],
               "denied_value_patterns": {},
               "enabled": false,
@@ -754,7 +756,8 @@
               "/reporters/s3/options/aws_region",
               "/reporters/s3/options/aws_profile",
               "/reporters/s3/options/bucket_name",
-              "/reporters/s3/options/key_prefix"
+              "/reporters/s3/options/key_prefix",
+              "/reporters/gitlab-sast/options/exclude_suppressed"
             ],
             "denied_value_patterns": {},
             "enabled": false,
@@ -3363,7 +3366,8 @@
             "/reporters/s3/options/aws_region",
             "/reporters/s3/options/aws_profile",
             "/reporters/s3/options/bucket_name",
-            "/reporters/s3/options/key_prefix"
+            "/reporters/s3/options/key_prefix",
+            "/reporters/gitlab-sast/options/exclude_suppressed"
           ],
           "description": "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). Defaults block the most dangerous fields on the real AshConfig schema. Each entry starts with '/'. A list that is not one of ASH's defaults is added to the current defaults, unless replace_default_denied_paths is true.",
           "items": {
