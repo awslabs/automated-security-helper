@@ -21,7 +21,7 @@ from automated_security_helper.cli.mcp import workspace as workspace_module
 
 
 @pytest.fixture(autouse=True)
-def _clear_policy_env(monkeypatch):
+def _clear_policy_env(monkeypatch, tmp_path):
     from automated_security_helper.cli.mcp.profile_registry import (
         clear_profile_registry,
         clear_session_state,
@@ -29,7 +29,9 @@ def _clear_policy_env(monkeypatch):
 
     monkeypatch.delenv("ASH_MCP_ALLOWED_ROOTS", raising=False)
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
-    monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
+    # The session configs select_profile writes go under this test's own
+    # directory, not the user's MCP cache, which concurrent runs share.
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
     clear_profile_registry()
     clear_session_state()
     yield
