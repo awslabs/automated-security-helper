@@ -557,6 +557,21 @@ class ScannerExecutor:
                             and raw_results["status"] == "failed"
                         ):
                             container.status = ScannerStatus.ERROR
+                        elif not (
+                            "status" in raw_results
+                            or "severity_counts" in raw_results
+                            or isinstance(raw_results.get("findings"), list)
+                        ):
+                            # Nothing here to grade: a tool's own JSON that a scanner
+                            # returned because it did not parse. Graded on its zero
+                            # findings it read as a clean scan.
+                            container.status = ScannerStatus.ERROR
+                            container.add_error(
+                                f"{scanner_config_name} returned a result on "
+                                f"{target_type} that could not be graded: it is not "
+                                "SARIF and carries no status, severity_counts or "
+                                "findings"
+                            )
                         else:
                             if "severity_counts" in raw_results:
                                 raw_counts = raw_results["severity_counts"]

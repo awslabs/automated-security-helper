@@ -184,6 +184,9 @@ notifications when it cannot read its rules, grype a zero-byte report when it ca
 load its database), and "found nothing" and "never scanned" look the same in it, so
 that file is not read. The accepted codes per scanner are in
 [Scanner exit codes](troubleshooting.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
+A results file ASH cannot read as SARIF is `ERROR` too, whatever the exit code, as is
+a scanner result that carries nothing to grade; neither can show that the target is
+clean.
 
 With the key off, an `ERROR` scanner no longer fails the scan: the exit code comes from
 the findings alone, so a scan whose only problem is a failed scanner exits 0, the same

@@ -439,24 +439,25 @@ def test_the_empty_results_warning_quotes_captured_stderr_when_present(
     assert "Stderr: tool said no" in logger.warning.call_args.args[0]
 
 
-def test_a_results_file_that_is_not_sarif_is_returned_raw_with_a_warning(
-    plugin_context, tmp_path
-):
-    """Unparsable output degrades to the raw dict rather than failing the scan."""
+def test_a_results_file_that_is_not_sarif_fails_the_scan(plugin_context, tmp_path):
+    """Unparsable output is a failed scan, not a dict that reads as a clean one.
+
+    It used to be returned as the raw dict, which the executor graded PASSED with
+    no findings because the dict carried no verdict.
+    """
     scanner = _scanner(
         plugin_context, execute_scan=_execute_writing(json.dumps({"not": "sarif"}))
     )
     target = _populated_target(tmp_path)
 
-    logger = create_autospec(ASH_LOGGER)
     with (
         patch.object(type(scanner), "_run_subprocess", return_value={"returncode": 0}),
-        patch("automated_security_helper.base.scanner_plugin.ASH_LOGGER", logger),
+        pytest.raises(ScannerError) as excinfo,
     ):
-        result = scanner.scan(target=target, target_type="source")
+        scanner.scan(target=target, target_type="source")
 
-    assert result == {"not": "sarif"}
-    assert "Failed to parse" in logger.warning.call_args.args[0]
+    assert "is not SARIF ASH can read" in str(excinfo.value)
+    assert "could not be graded" in str(excinfo.value)
 
 
 def test_a_valid_sarif_results_file_is_returned_as_a_report(plugin_context, tmp_path):

@@ -880,10 +880,12 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     sarif_report, final_args, target
                 )
             except Exception as e:
-                ASH_LOGGER.warning(
-                    f"Failed to parse {self.__class__.__name__} results as SARIF: {e}"
+                # Not returned as it is: a dict without a verdict was graded PASSED
+                # with no findings, which is how a clean scan reads.
+                raise ScannerError(
+                    f"its results file is not SARIF ASH can read, so its findings "
+                    f"could not be graded: {e}"
                 )
-                sarif_report = raw  # type: ignore[assignment]
 
             return sarif_report
 

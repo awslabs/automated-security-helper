@@ -617,6 +617,14 @@
   unset. snyk-code, which raised on every non-zero code, now accepts 1 ("issues
   found"), so a snyk run with findings reports them instead of failing.
 
+  Two more shapes that read as a clean scan are `ERROR` now. A results file the
+  template reads as JSON but not as SARIF, even with an accepted exit code, was
+  returned as it was and graded `PASSED` with no findings; a scanner that overrides
+  `scan()` could return its tool's JSON the same way (ferret-scan and syft do when it
+  does not parse). A result with no `status`, `severity_counts` or `findings` is no
+  longer graded. A results file whose SARIF ASH's schema rejects is affected too: its
+  findings were dropped silently, and the scanner is now `ERROR` and says so.
+
   **A scan that exited 0 can now exit 1.** That is a scanner whose tool was failing
   all along. With `fail_on_incomplete_scanners: false` the `ERROR` row does not fail
   the scan and the exit code comes from the findings alone, so such a scan still
