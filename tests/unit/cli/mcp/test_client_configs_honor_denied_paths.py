@@ -990,6 +990,38 @@ def test_a_key_is_not_checked_against_patterns_bound_below_it(_server) -> None:
     assert not isinstance(config, Exception), config
 
 
+@pytest.mark.parametrize(
+    "pattern,text,key",
+    [
+        (
+            "^enabled$",
+            "scanners:\n  bandit:\n    enabled: false\n",
+            "scanners.bandit.enabled",
+        ),
+        (
+            "^excluded_paths$",
+            "scanners:\n  bandit:\n    options:\n      excluded_paths: []\n",
+            "scanners.bandit.options.excluded_paths",
+        ),
+    ],
+)
+def test_a_key_pattern_refuses_a_schema_key_in_an_upload(
+    _server, pattern: str, text: str, key: str
+) -> None:
+    """Every key of ASH's schema is in the server's config, so that is no exemption.
+
+    Only the session's patched profile repeats the server's keys as such.
+    """
+    _bind_profile(
+        _server["tmp"],
+        _policy_profile(
+            f"      denied_value_patterns:\n        /scanners/**: '{pattern}'\n"
+        ),
+    )
+    source = _upload({".ash/.ash.yaml": text})
+    _assert_refused(_scan_resolution(source, None), key=key)
+
+
 def test_a_patch_appended_suppression_is_marked(_server) -> None:
     source = _upload(
         {

@@ -498,6 +498,9 @@ def client_file_denials(
     ``untrusted_config``). Under a default policy the restrict-only settings are
     checked for anything they ask beyond the trusted base (``_widenings``).
     """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        session_config_was_patched,
+    )
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
     from automated_security_helper.config.runtime_patch import (
         config_document_denials,
@@ -517,6 +520,7 @@ def client_file_denials(
                 config=rules.base,
                 exempt=exempt,
                 inert=INERT_PATHS,
+                repeats_trusted=session_config_was_patched(path),
             )
             if not _writes_plugin_default(document, denial, rules.base)
             and not _writes_a_tightening(document, denial)

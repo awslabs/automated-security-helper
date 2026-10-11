@@ -682,6 +682,7 @@ def config_document_denials(
     config: AshConfig | None = None,
     exempt: Sequence[str] = (),
     inert: Sequence[str] = (),
+    repeats_trusted: bool = False,
 ) -> List[DocumentDenial]:
     """The fields ``document`` sets that ``allowlist``'s denials refuse.
 
@@ -694,10 +695,13 @@ def config_document_denials(
     ``config`` is the trusted config. Its plugin sections add to the keys a glob
     denial is matched over, and a leaf whose value equals what ``config`` has at
     the same place (``_trusted_value``) changes nothing, so it is not refused: an
-    ``ash config init`` file writes the defaults. Nor is a mapping key ``config``
-    already has there, which a value pattern would otherwise refuse in every file
-    that repeats the trusted config, a session's client-patched profile among
-    them. A ``patch`` op is refused whatever it writes.
+    ``ash config init`` file writes the defaults. With ``repeats_trusted`` (a
+    session's client-patched profile, which is the trusted profile with the
+    client's checked patch applied), neither is a mapping key ``config`` already
+    has there, which a value pattern would otherwise refuse for every key the
+    copy repeats. Any other document gets no such exemption: ``config`` is a full
+    dump, so it has every key of ASH's schema. A ``patch`` op is refused whatever
+    it writes.
 
     A write at or under a pattern in ``exempt`` is not checked against
     ``denied_paths``, though value patterns still apply to it. A write at or
@@ -739,7 +743,10 @@ def config_document_denials(
             continue
         if kind != "patch" and config is not None and dump is not None:
             present, value = _trusted_value(config, dump, path, plugin_keys)
-            if present and (kind == "key" or value == _as_json(op["value"])):
+            if present and (
+                (kind == "key" and repeats_trusted)
+                or (kind != "key" and value == _as_json(op["value"]))
+            ):
                 continue
         denials.append(DocumentDenial(key, path, reason, kind == "patch"))
     return denials
