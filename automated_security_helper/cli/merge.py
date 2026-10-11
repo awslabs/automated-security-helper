@@ -1263,8 +1263,25 @@ def _shown(value: Any) -> str:
     return text if len(text) <= 60 else text[:57] + "..."
 
 
+#: The verdict settings ``ash merge`` has a flag for, with the flag's spelling for
+#: true and for false. A flag that is given decides the setting for the merge.
+VERDICT_FLAGS: Dict[str, Tuple[str, str]] = {
+    "fail_on_findings": ("--fail-on-findings", "--no-fail-on-findings"),
+    "fail_on_incomplete_scanners": (
+        "--fail-on-incomplete-scanners",
+        "--no-fail-on-incomplete-scanners",
+    ),
+}
+
+
+def _decided_by_flags(cli_values: Optional[Dict[str, Optional[bool]]]) -> set:
+    """The verdict settings a flag given on the command line decides."""
+    return {key for key, value in (cli_values or {}).items() if value is not None}
+
+
 def verify_verdict_settings_agree(
     loaded: Sequence[Tuple[Path, AshAggregatedResults]],
+    cli_values: Optional[Dict[str, Optional[bool]]] = None,
 ) -> None:
     """Refuse shards whose recorded configs disagree on a setting the verdict reads.
 
@@ -1272,12 +1289,15 @@ def verify_verdict_settings_agree(
     the lowest-indexed shard's value for every shard would let one shard's
     ``fail_on_findings: false`` or suppressions decide for findings another shard
     produced under different settings. Compared after ``--config-overrides`` are
-    applied, so an override that sets the value for every shard settles it.
+    applied, so an override that sets the value for every shard settles it, and a
+    setting the command line's flag decides (``cli_values``, keyed as
+    ``VERDICT_FLAGS``) is not compared at all.
 
     Raises:
         ASHConfigValidationError: Naming each setting that differs and every
             shard's value for it.
     """
+    decided = _decided_by_flags(cli_values)
     shards = []
     for path, results in _in_index_order(loaded):
         assignment = read_shard_assignment(results)
@@ -1287,7 +1307,9 @@ def verify_verdict_settings_agree(
             else "a shard without provenance"
         )
         shards.append((label, path, _recorded_verdict_settings(results)))
-    keys = sorted({key for _, _, settings in shards for key in settings})
+    keys = sorted(
+        {key for _, _, settings in shards for key in settings if key not in decided}
+    )
     differing = [
         key
         for key in keys
@@ -1306,12 +1328,19 @@ def verify_verdict_settings_agree(
         )
         for key in differing
     ]
+    flags = [
+        f"{VERDICT_FLAGS[key][0]} or {VERDICT_FLAGS[key][1]} for {key}"
+        for key in differing
+        if key in VERDICT_FLAGS
+    ]
     raise ASHConfigValidationError(
         "the shards' recorded configurations disagree on settings that decide the "
         "merged verdict:\n  " + "\n  ".join(lines) + "\nOne verdict covers the "
         "merged scan, so ash merge does not take one shard's value for the others. "
         "Run every shard with the same configuration, or set the value for all of "
-        "them with --config-overrides."
+        "them with --config-overrides"
+        + (f", or with {', '.join(flags)}" if flags else "")
+        + "."
     )
 
 
@@ -1324,14 +1353,19 @@ def _override_value(value: Any) -> str:
 
 
 def warn_on_ignored_operator_verdict_settings(
-    trusted_config: AshConfig, recorded: AshConfig
+    trusted_config: AshConfig,
+    recorded: AshConfig,
+    cli_values: Optional[Dict[str, Optional[bool]]] = None,
 ) -> None:
     """Name each verdict setting ``--config`` sets that the recorded config decides.
 
     The verdict follows the scan's own configuration, so a setting the operator's
     file sets for it does not apply at merge time. Only the settings the file
-    writes are compared, so a file that sets only reporters warns about nothing.
+    writes are compared, so a file that sets only reporters warns about nothing,
+    and a setting a flag given on the command line decides (``cli_values``) is
+    not reported, since the flag applies.
     """
+    decided = _decided_by_flags(cli_values)
     operator = _verdict_settings(
         trusted_config.model_dump(mode="json", by_alias=True, exclude_unset=True)
     )
@@ -1339,15 +1373,18 @@ def warn_on_ignored_operator_verdict_settings(
         return
     shards = _verdict_settings(recorded.model_dump(mode="json", by_alias=True))
     for key, value in operator.items():
-        if json.dumps(value, sort_keys=True) == json.dumps(
+        if key in decided or json.dumps(value, sort_keys=True) == json.dumps(
             shards.get(key), sort_keys=True
         ):
             continue
+        flag = ""
+        if key in VERDICT_FLAGS and isinstance(value, bool):
+            flag = f" or {VERDICT_FLAGS[key][0 if value else 1]}"
         ASH_LOGGER.warning(
             f"ash merge's --config sets {key} to {_shown(value)}, and the shards "
             f"recorded {_shown(shards.get(key))}. The verdict follows the shards' "
             "own configuration, so their value applies. To apply yours, pass "
-            f"--config-overrides {key}={_override_value(value)}."
+            f"--config-overrides {key}={_override_value(value)}{flag}."
         )
 
 
@@ -1520,6 +1557,11 @@ def merge_command(
 
     parsed_formats = _parse_output_formats(output_formats)
     overrides = list(config_overrides or [])
+    # The verdict settings the command line's flags decide; see VERDICT_FLAGS.
+    cli_verdict = {
+        "fail_on_findings": fail_on_findings,
+        "fail_on_incomplete_scanners": fail_on_incomplete_scanners,
+    }
 
     try:
         # The operator's trusted base, resolved the way ``ash report`` resolves
@@ -1542,10 +1584,12 @@ def merge_command(
         merged = merge_shard_results(
             loaded, require_scanner_completion=require_completion
         )
-        verify_verdict_settings_agree(loaded)
+        verify_verdict_settings_agree(loaded, cli_verdict)
         if merged.ash_config is None:
             merged.ash_config = apply_config_overrides(AshConfig(), overrides)
-        warn_on_ignored_operator_verdict_settings(trusted_config, merged.ash_config)
+        warn_on_ignored_operator_verdict_settings(
+            trusted_config, merged.ash_config, cli_verdict
+        )
         # What a config inside the scanned tree may not choose comes from the
         # operator's base instead; see the module docstring.
         confine_recorded_config(

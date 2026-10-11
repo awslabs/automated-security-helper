@@ -1166,7 +1166,8 @@
   operator's configuration turns it off, so turn off the ones you do not want; the
   [`ash merge` reference](docs/content/docs/cli-reference.md#settings-a-shards-recorded-configuration-cannot-choose)
   has an S3-only example. Shards that disagree on a verdict setting merge once
-  `--config-overrides` sets it for all of them.
+  `--config-overrides` sets it for all of them, or, for `fail_on_findings` and
+  `fail_on_incomplete_scanners`, once the matching `ash merge` flag is given.
 
 - **An MCP profile's `runtime_overrides` and a workspace policy are read more
   strictly.**

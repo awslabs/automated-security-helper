@@ -1071,6 +1071,52 @@ class TestVerdictSettings:
 
         _assert_merged(result, harness)
 
+    @pytest.mark.parametrize(
+        "flag, exit_code", [("--fail-on-findings", 2), ("--no-fail-on-findings", 0)]
+    )
+    def test_the_fail_on_findings_flag_settles_a_disagreement(
+        self, harness, flag, exit_code
+    ):
+        """The flag decides fail_on_findings for the merge, so the shards' values don't."""
+        paths = _write_each(
+            harness,
+            build_shards(2),
+            [{"fail_on_findings": False}, {"fail_on_findings": True}],
+        )
+
+        result = harness.merge(paths, flag)
+
+        assert result.exit_code == exit_code, (result.output, result.exception)
+        assert (harness.output_dir / RESULTS_FILE_NAME).is_file()
+
+    def test_the_incomplete_scanners_flag_settles_a_disagreement(self, harness):
+        paths = _write_each(
+            harness,
+            build_shards(2),
+            [
+                {"fail_on_incomplete_scanners": False},
+                {"fail_on_incomplete_scanners": True},
+            ],
+        )
+
+        result = harness.merge(paths, "--no-fail-on-incomplete-scanners")
+
+        _assert_merged(result, harness)
+
+    def test_the_refusal_names_the_flag_that_would_settle_it(self, harness):
+        paths = _write_each(
+            harness,
+            build_shards(2),
+            [{"fail_on_findings": False}, {"fail_on_findings": True}],
+        )
+
+        result = harness.merge(paths)
+
+        assert result.exit_code == 3, (result.output, result.exception)
+        console = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", result.output).split())
+        assert "--fail-on-findings" in console, console
+        assert "--no-fail-on-findings" in console, console
+
     def test_a_verdict_setting_in_the_operators_config_is_named(self, harness):
         """The shards' value applies, and the warning gives the override that would not."""
         shard_paths = harness.write_shards({"fail_on_findings": False})
@@ -1084,6 +1130,25 @@ class TestVerdictSettings:
         named = [m for m in harness.warnings if "fail_on_findings" in m]
         assert named, harness.warnings
         assert "--config-overrides fail_on_findings=true" in named[0]
+        assert "--fail-on-findings" in named[0]
+
+    def test_a_flag_that_decides_the_setting_leaves_no_config_warning(self, harness):
+        """--fail-on-findings applies, so the --config value is not reported as ignored."""
+        shard_paths = harness.write_shards({"fail_on_findings": False})
+        operator = _write_yaml(
+            harness.tmp_path / "operator" / "ash.yaml", {"fail_on_findings": True}
+        )
+
+        result = harness.merge(
+            shard_paths, "--config", str(operator), "--fail-on-findings"
+        )
+
+        assert result.exit_code == 2, (result.output, result.exception)
+        assert not [
+            m
+            for m in harness.warnings
+            if "ash merge's --config sets fail_on_findings" in m
+        ], harness.warnings
 
     def test_an_operator_config_that_sets_no_verdict_setting_names_none(self, harness):
         """Control: a --config that sets only reporters warns about no verdict setting."""
