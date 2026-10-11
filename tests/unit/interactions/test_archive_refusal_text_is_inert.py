@@ -39,6 +39,24 @@ REVERSED = "invoice\u202egpj.zip"
 MENTION = "@someone/pkg.zip"
 LINK = "https://example.invalid/pkg.zip"
 TICKS = "a``b.zip"
+#: Rich markup: a closing tag with no opening one raises MarkupError when printed
+#: as markup, and an opening one restyles the rest of the line.
+CLOSING_TAG = "[/b]x.zip"
+STYLE_TAG = "[bold]styled[/bold].zip"
+#: A C1 control (CSI, which some terminals act on as ESC [) and DEL.
+C1_CONTROL = "a\x9bb.zip"
+DELETE = "a\x7fb.zip"
+NAMES = (
+    ESCAPE,
+    REVERSED,
+    MENTION,
+    LINK,
+    TICKS,
+    CLOSING_TAG,
+    STYLE_TAG,
+    C1_CONTROL,
+    DELETE,
+)
 
 
 def model() -> AshAggregatedResults:
@@ -47,7 +65,7 @@ def model() -> AshAggregatedResults:
         converted_paths=[],
         refused_inputs=[
             RefusedInputInfo(path="outer.zip", member=name, reason="nested")
-            for name in (ESCAPE, REVERSED, MENTION, LINK, TICKS)
+            for name in NAMES
         ],
     )
     return results
@@ -66,7 +84,7 @@ def refusal_lines(report: str):
 def test_the_markdown_summary_puts_each_refusal_in_a_code_span():
     lines = refusal_lines(MarkdownReporter(context=context()).report(model()))
 
-    assert len(lines) == 5, lines
+    assert len(lines) == len(NAMES), lines
     for line in lines:
         match = re.fullmatch(r"- (?:\*\*scan incomplete\*\*: )?(`+) (.*) \1", line)
         assert match, line
@@ -81,8 +99,11 @@ def test_the_text_summary_escapes_control_and_bidirectional_characters():
 
     lines = refusal_lines(report)
     assert "\x1b" not in report and "\u202e" not in report
+    assert "\x9b" not in report and "\x7f" not in report
     assert any("\\x1b[31mred\\x1b[0m.zip" in line for line in lines), lines
     assert any("invoice\\u202egpj.zip" in line for line in lines), lines
+    assert any("a\\x9bb.zip" in line for line in lines), lines
+    assert any("a\\x7fb.zip" in line for line in lines), lines
 
 
 def test_the_console_escapes_control_and_bidirectional_characters():
@@ -92,5 +113,20 @@ def test_the_console_escapes_control_and_bidirectional_characters():
 
     text = console.export_text()
     assert "\x1b" not in text and "\u202e" not in text
+    assert "\x9b" not in text and "\x7f" not in text
     assert "\\x1b[31mred\\x1b[0m.zip" in text
     assert "invoice\\u202egpj.zip" in text
+    assert "a\\x9bb.zip" in text and "a\\x7fb.zip" in text
+
+
+def test_the_console_prints_markup_in_a_name_as_it_is():
+    console = Console(record=True, width=400, color_system=None)
+
+    print_converter_refusals(model(), console)
+
+    text = console.export_text()
+    assert CLOSING_TAG in text
+    assert STYLE_TAG in text
+    assert len([line for line in text.splitlines() if "Not scanned" in line]) == len(
+        NAMES
+    )
