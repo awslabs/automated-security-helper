@@ -20,14 +20,14 @@ The provided `buildspec.yml` configures AWS CodeBuild to:
 
 ## Configuration
 
-The buildspec includes the following environment variables:
+The buildspec's `env.variables` block sets four variables:
 
-| Variable             | Description                          | Default                                                    |
-|----------------------|--------------------------------------|------------------------------------------------------------|
-| `ASH_REPO_BRANCH`    | The branch or tag of ASH to install  | `v3.0.0-beta`                                              |
-| `ASH_MODE`           | The execution mode for ASH           | `container`                                                |
-| `ASH_REPO_CLONE_URL` | The URL to clone the ASH repository  | `https://github.com/awslabs/automated-security-helper.git` |
-| `COLUMNS`            | Terminal width for better formatting | `140`                                                      |
+- the branch or tag of ASH to install, `v3.0.0-beta` as committed. That tag is a
+  pre-release of v3; set it to the release you want to run.
+- `ASH_MODE`, the execution mode for ASH, `container`.
+- `ASH_REPO_CLONE_URL`, the repository to install ASH from,
+  `https://github.com/awslabs/automated-security-helper.git`.
+- the terminal width for the build log, 140 columns.
 
 ## Phases
 
@@ -52,15 +52,18 @@ JUnit XML reports are collected and made available in the CodeBuild test reports
 
 - AWS CodeBuild environment with Docker support
 - **Privileged mode enabled** in the CodeBuild project settings (required for container operations)
-- Python 3.8 or later
+- Python 3.10 to 3.14
 - Internet access to download ASH and its dependencies
 
 ## Customization
 
 You can customize the ASH execution by modifying the `ash` command in the build phase. For example:
 
+<!-- doctest: config kind=buildspec -->
 ```yaml
-build:
-  commands:
-    - ash --mode container --no-progress --scanners bandit,semgrep
+version: 0.2
+phases:
+  build:
+    commands:
+      - ash --mode container --no-progress --scanners bandit,semgrep
 ```

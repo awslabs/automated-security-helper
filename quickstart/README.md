@@ -1,5 +1,10 @@
 # ASH Quickstart
 
+> [!NOTE]
+> The CloudFormation template this page describes, `c9template.yaml`, was removed from
+> the repository in the ASH v3 release, so these steps can no longer be followed. To
+> install ASH, see [Install ASH](https://awslabs.github.io/automated-security-helper/how-to/install/).
+
 The purpose of this template is to deploy an AWS Cloud9 Environment with ASH and all the dependencies pre-installed.
 
 This quickstart is designed for **learning purposes only**. The user will be responsible for any patching strategy, network protection and access controls to the instance.
@@ -12,7 +17,7 @@ By default, the owner of the AWS Cloud9 Environment will be the user that launch
 
 ## Installation
 
-1. Download the [template](./c9template.yaml) to your local machine, or clone this repository.
+1. Download the template (`c9template.yaml`) to your local machine, or clone this repository.
 1. Log into your AWS Console
 1. Navigate to the AWS CloudFormation console in your region of choice. You can use [this](https://console.aws.amazon.com/cloudformation/home) link.
 1. Select `Create stack`
@@ -31,7 +36,7 @@ By default, the owner of the AWS Cloud9 Environment will be the user that launch
 
 If the stack fails to deploy, check the error message in CloudFormation under the `Event` tabs.  In general errors are very descriptive about the reasons for the failure. For example:
 
-```
+```text
 ash-admin already exists in stack arn:aws:cloudformation:us-east-1:123456789012:stack/ASHC9/c0426010-c99c-11ed-85fd-0e5951eaa6e5
 ```
 

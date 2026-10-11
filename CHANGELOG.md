@@ -137,7 +137,7 @@
   plugin's section under every spelling ASH reads as that plugin's config.
 
   Each value that is not honored is logged once as a warning naming the key. See
-  [Settings a repository's config cannot choose](docs/content/docs/configuration-guide.md#settings-a-repositorys-config-cannot-choose).
+  [Settings a repository's config cannot choose](https://awslabs.github.io/automated-security-helper/concepts/trust-model/#denied-settings).
 
 - **ASH no longer follows symlinks out of the scanned tree when it reads tree files
   into its own output.** This covers converter inputs (archives and notebooks), the
@@ -236,7 +236,7 @@
   under `ASH_OFFLINE`. A local `--offline` scan with no semgrep or opengrep rule cache
   now reports that scanner MISSING with the cache guidance and exits 1 as an incomplete
   scan, where it used to pass by going online. See
-  [Which scanners run offline](docs/content/docs/advanced-usage.md#which-scanners-run-offline).
+  [Which scanners run offline](https://awslabs.github.io/automated-security-helper/how-to/run-offline/#scanners).
   To seed the cache, build the image with `ash build-image --offline`, or for a local
   scan download the rulesets from `https://semgrep.dev/c/<ruleset>` into the
   directories named by `SEMGREP_RULES_CACHE_DIR` and `OPENGREP_RULES_CACHE_DIR` and
@@ -652,7 +652,7 @@
   so ASH's reported severity can differ from a scanner's own report. To keep a
   finding's severity where it is, suppress it or set the finding's own
   `issue_severity`. See "How ASH determines a finding's severity" in the
-  [scanner statistics guide](user-guide/scanner-statistics.md).
+  [scanner statistics guide](https://awslabs.github.io/automated-security-helper/how-to/read-results/#counting).
 
 - **A scanner that lost every target on any one tree now reports `ERROR`, on every
   scan, with nothing to opt into.** This is wider than the flag change above and
@@ -977,7 +977,7 @@
   reporter was a stub that wrote the whole results model as YAML into
   `ash.spdx.json`, and `ash report` exited 1 trying to print that as JSON. It now
   emits an SPDX 2.3 JSON document built from the scan's CycloneDX SBOM, validated
-  against the SPDX 2.3 schema; see [Output formats](docs/content/docs/output-formats.md#spdx).
+  against the SPDX 2.3 schema; see [Output formats](https://awslabs.github.io/automated-security-helper/reference/reporters/#spdx).
   The reporter is still disabled by default.
 
 - **`ash report` passes a reporter its configured options.** The command assigned the
@@ -1370,12 +1370,14 @@
 
 _via `ash` CLI_
 
+<!-- doctest: illustrative reason="historical: the ASH v2 command line" -->
 ```sh
 ash --no-run --build-target ci
 ```
 
 _via `docker` or other OCI CLI_
 
+<!-- doctest: illustrative reason="needs Docker" -->
 ```sh
 docker build --tag automated-security-helper:ci --target ci .
 ```

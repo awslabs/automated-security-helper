@@ -26,7 +26,7 @@ and a fix written to it would have passed the exact case this fixture exists to
 close. `README.md` gained the same correction. The advisory-only demotion of
 `validation_summary.*.has_issues` is untouched and still load-bearing.
 
-**`--selftest` gained a fifth case:** a scanner in `ERROR` while
+**`assert_case.py --selftest` gained a fifth case:** a scanner in `ERROR` while
 `summary_stats.missing` is 0, requiring rejection, and additionally requiring that
 the rejection reason mention `ERROR` so it must come from the per-scanner branch
 rather than the counter check. The four pre-existing cases are unchanged. Without
@@ -38,7 +38,7 @@ produced the wrong guidance in the first place.
 the repository's `.pre-commit-config.yaml`). The alternative — leaving it
 unformatted — was rejected because the repository's `ruff-format` pre-commit hook
 would rewrite it on whoever's commit next touched this tree, attributing the churn
-to them. Behaviour was verified unchanged after formatting: `--replay` produced
+to them. Behaviour was verified unchanged after formatting: `assert_case.py --replay` produced
 byte-identical output to the pre-format run.
 
 ## Why `summary_stats` is not sufficient — measured here
@@ -47,7 +47,7 @@ byte-identical output to the pre-format run.
 locally with `UV_CACHE_DIR=/dev/null/<name>`, which fails uv tool installs with
 "Not a directory (os error 20)":
 
-```
+```text
 scanner_results: bandit=ERROR  checkov=ERROR  detect-secrets=PASSED
                  cdk-nag/cfn-nag/grype/syft=MISSING  npm-audit/opengrep/semgrep=SKIPPED
 summary_stats:   passed=1 failed=0 missing=4 skipped=3   -> 8 of 10 scanners
@@ -56,7 +56,7 @@ summary_stats:   passed=1 failed=0 missing=4 skipped=3   -> 8 of 10 scanners
 The two `ERROR` scanners are in no counter. Then the discriminating case, with the
 four tool-less scanners excluded so `missing` is genuinely 0:
 
-```
+```text
 scanner_results: bandit=ERROR  checkov=ERROR  (8 SKIPPED)
 summary_stats:   passed=0 failed=0 missing=0 skipped=8
 ash scan default                        -> exit 0   <- false green, with ERROR
@@ -163,9 +163,9 @@ Still unmeasured, and deliberately still labelled that way in `expected.json`:
   `/tmp` ceilings. The green run above does not imply any of it works.
 
 Not wired into CI. The live pair needs a container runtime and an image reference,
-and `--replay` deliberately exits non-zero on XPASS to prompt a flag flip — both
+and `assert_case.py --replay` deliberately exits non-zero on XPASS to prompt a flag flip — both
 are decisions about CI topology that belong to whoever owns that, not to an
-adopting change. `--selftest` and `--replay` are cheap and need nothing installed,
+adopting change. `assert_case.py --selftest` and `assert_case.py --replay` are cheap and need nothing installed,
 so they are the obvious first candidates if someone does wire it up.
 
 ## Left for the author
