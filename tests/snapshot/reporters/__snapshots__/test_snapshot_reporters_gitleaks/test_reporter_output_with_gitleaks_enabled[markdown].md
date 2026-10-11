@@ -42,9 +42,9 @@ The table below shows findings by scanner, with status based on severity thresho
 
 | Scanner | Suppressed | Critical | High | Medium | Low | Info | Actionable | Result | Threshold |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| gitleaks | 0 | 4 | 0 | 0 | 0 | 0 | 4 | FAILED | MEDIUM (global) |
+| gitleaks | 0 | 5 | 0 | 0 | 0 | 0 | 5 | FAILED | MEDIUM (global) |
 
-### Top 2 Hotspots
+### Top 3 Hotspots
 
 Files with the highest number of security findings:
 
@@ -52,11 +52,12 @@ Files with the highest number of security findings:
 | ---: | --- |
 | 3 | app/settings.py |
 | 1 | docs/example.md |
+| 1 | app/inline_allowed.py |
 
 <h2>Detailed Findings</h2>
 
 <details>
-<summary>Show 4 actionable findings</summary>
+<summary>Show 5 actionable findings</summary>
 
 ### Finding 1: github-pat
 
@@ -118,6 +119,23 @@ REDACTED
 
 **Description**:
 aws-access-token has detected secret for file app/settings.py.
+
+**Code Snippet**:
+```
+REDACTED
+```
+
+---
+
+### Finding 5: github-pat
+
+- **Severity**: CRITICAL
+- **Scanner**: gitleaks
+- **Rule ID**: github-pat
+- **Location**: app/inline_allowed.py:2
+
+**Description**:
+github-pat has detected secret for file app/inline_allowed.py.
 
 **Code Snippet**:
 ```

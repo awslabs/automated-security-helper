@@ -1480,6 +1480,40 @@
      "properties": {
       "tags": []
      }
+    },
+    {
+     "message": {
+      "text": "github-pat has detected secret for file app/inline_allowed.py."
+     },
+     "ruleId": "github-pat",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "app/inline_allowed.py"
+        },
+        "region": {
+         "startLine": 2,
+         "startColumn": 18,
+         "endLine": 2,
+         "endColumn": 57,
+         "snippet": {
+          "text": "REDACTED"
+         }
+        }
+       }
+      }
+     ],
+     "partialFingerprints": {
+      "commitSha": "",
+      "email": "",
+      "author": "",
+      "date": "",
+      "commitMessage": ""
+     },
+     "properties": {
+      "tags": []
+     }
     }
    ]
   }

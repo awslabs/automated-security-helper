@@ -64,7 +64,11 @@ which are both, so the scanned tree does not configure gitleaks:
   scan rather than reporting the first run alone, and the copies are removed when
   it ends. It copies at most ``MAX_RESCAN_FILES`` files, and its runs share one
   ``scan_timeout``; names past the limit are reported as not evaluated, which
-  makes the scan incomplete. Inline ``gitleaks:allow`` comments still apply.
+  makes the scan incomplete.
+* Inline ``gitleaks:allow`` comments drop a finding the same way, so ASH passes
+  ``--ignore-gitleaks-allow``. ``options.honor_inline_ignores: true`` turns them
+  back on; it is honored only when the operator set it, and from a config in the
+  scanned tree it is ignored with a warning.
 * A ``.gitleaksignore`` that is a symlink, not a regular file, or hard-linked
   stops the scanner before gitleaks runs (``_read_tree_ignore_file``): gitleaks
   opens the name, follows the link, and logs each line it cannot parse. ASH reads
@@ -154,7 +158,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
-from automated_security_helper.utils.config_trust import operator_path
+from automated_security_helper.utils.config_trust import operator_path, set_by_operator
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
@@ -252,7 +256,7 @@ def gitleaksignore_files(data: bytes) -> List[str]:
     file with a ``bufio.Scanner`` (``ScanLines``: lines end at ``\n`` alone, one
     trailing ``\r`` dropped, reading stops at a line of 64 KiB or more), trims each
     line with ``strings.TrimSpace``, skips empty lines and lines starting with
-    ``#``, splits on ``:`` and replaces ``\`` with ``/`` in the file part: the
+    ``#``, splits on ``:`` and replaces ``\\`` with ``/`` in the file part: the
     first of three parts, or the second of four (``commit:file:rule:line``). The
     rejoined line is matched exactly against each finding's
     ``<file>:<rule>:<line>`` (``AddFinding``), so the file it can hide is
@@ -333,6 +337,19 @@ class GitleaksScannerConfigOptions(ScannerOptionsBase):
             ),
         ),
     ] = None
+    honor_inline_ignores: Annotated[
+        bool,
+        Field(
+            description=(
+                "Honor gitleaks' inline `gitleaks:allow` comments. Off by default: "
+                "gitleaks runs with `--ignore-gitleaks-allow`, so every finding "
+                "reaches ASH, where suppressions are reported and counted. Honored "
+                "only when set by --config-overrides or a config file outside the "
+                "scanned tree; from a config in the scanned tree it is ignored "
+                "with a warning."
+            ),
+        ),
+    ] = False
     max_target_megabytes: Annotated[
         int | None,
         Field(
@@ -371,6 +388,8 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     # Names the last re-scan did not reach (MAX_RESCAN_FILES), for the report
     # _post_process_sarif finishes next.
     _rescan_skipped: int = PrivateAttr(default=0)
+    # Whether the tree-set honor_inline_ignores refusal was already logged.
+    _ignores_refusal_logged: bool = PrivateAttr(default=False)
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -438,6 +457,33 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 f"or unset the option; gitleaks is not run without it."
             )
         return chosen.path
+
+    def _honor_inline_ignores(self) -> bool:
+        """Whether gitleaks may apply ``gitleaks:allow`` comments in the tree.
+
+        Off unless the operator turned it on: a comment in the scanned tree drops
+        a finding before ASH sees it, so it would be neither reported nor counted
+        as suppressed.
+        """
+        if not self._options().honor_inline_ignores:
+            return False
+        config = self.context.config if self.context is not None else None
+        if set_by_operator(
+            config, "scanners.gitleaks.options.honor_inline_ignores", True
+        ):
+            return True
+        if not self._ignores_refusal_logged:
+            self._ignores_refusal_logged = True
+            self._plugin_log(
+                "scanners.gitleaks.options.honor_inline_ignores is true in a config "
+                "in the scanned tree or from an MCP client, so it is ignored: "
+                "gitleaks runs with --ignore-gitleaks-allow and gitleaks:allow "
+                "comments do not apply. Set it with --config-overrides or a config "
+                "file outside the scanned tree, or suppress findings with ASH "
+                "suppressions.",
+                level=logging.WARNING,
+            )
+        return False
 
     def _resolve_config_file(self, results_dir: Path) -> Optional[Path]:
         """The config to pass as ``--config``; None leaves it to the environment.
@@ -521,6 +567,8 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             "--no-color",
             f"--gitleaks-ignore-path={self._empty_ignore_dir(results_dir).as_posix()}",
         ]
+        if not self._honor_inline_ignores():
+            args.append("--ignore-gitleaks-allow")
         config_file = self._resolve_config_file(results_dir)
         if config_file is not None:
             args.append(f"--config={config_file.as_posix()}")

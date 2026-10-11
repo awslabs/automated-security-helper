@@ -1821,6 +1821,7 @@
               "options": {
                 "baseline_path": null,
                 "config_file": null,
+                "honor_inline_ignores": false,
                 "max_target_megabytes": null,
                 "scan_timeout": 1800,
                 "severity_threshold": null
@@ -8437,6 +8438,7 @@
           "default": {
             "baseline_path": null,
             "config_file": null,
+            "honor_inline_ignores": false,
             "max_target_megabytes": null,
             "scan_timeout": 1800,
             "severity_threshold": null
@@ -8483,6 +8485,12 @@
           "default": null,
           "description": "Path to a gitleaks TOML config, relative to the source directory. Its rules and [[allowlists]] apply on top of ASH suppressions. Honored only when set by --config-overrides or a config file outside the scanned tree. Unset, gitleaks uses GITLEAKS_CONFIG or GITLEAKS_CONFIG_TOML from the environment if one is set, else its default rules; a .gitleaks.toml in the scanned repository is not read. A path that does not exist fails the scan.",
           "title": "Config File"
+        },
+        "honor_inline_ignores": {
+          "default": false,
+          "description": "Honor gitleaks' inline `gitleaks:allow` comments. Off by default: gitleaks runs with `--ignore-gitleaks-allow`, so every finding reaches ASH, where suppressions are reported and counted. Honored only when set by --config-overrides or a config file outside the scanned tree; from a config in the scanned tree it is ignored with a warning.",
+          "title": "Honor Inline Ignores",
+          "type": "boolean"
         },
         "max_target_megabytes": {
           "anyOf": [
@@ -16953,6 +16961,7 @@
             "options": {
               "baseline_path": null,
               "config_file": null,
+              "honor_inline_ignores": false,
               "max_target_megabytes": null,
               "scan_timeout": 1800,
               "severity_threshold": null

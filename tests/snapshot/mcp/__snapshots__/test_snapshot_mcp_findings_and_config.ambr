@@ -832,6 +832,7 @@
           'options': dict({
             'baseline_path': None,
             'config_file': None,
+            'honor_inline_ignores': False,
             'max_target_megabytes': None,
             'scan_timeout': 1800,
             'severity_threshold': None,
@@ -1308,6 +1309,7 @@
           'options': dict({
             'baseline_path': None,
             'config_file': None,
+            'honor_inline_ignores': False,
             'max_target_megabytes': None,
             'scan_timeout': 1800,
             'severity_threshold': None,
@@ -1784,6 +1786,7 @@
           'options': dict({
             'baseline_path': None,
             'config_file': None,
+            'honor_inline_ignores': False,
             'max_target_megabytes': None,
             'scan_timeout': 1800,
             'severity_threshold': None,

@@ -3,13 +3,13 @@ additional_reports:
     source:
       duration: 0.5
       end_time: '2026-01-15T12:00:00.500000Z'
-      finding_count: 4
+      finding_count: 5
       metadata:
         scanner_version: 8.30.1
       report_type: sarif
       scanner_name: gitleaks
       severity_counts:
-        critical: 4
+        critical: 5
       start_time: '2026-01-15T12:00:00Z'
       status: PASSED
       target: <TMP>/src
@@ -279,6 +279,7 @@ ash_config:
       options:
         baseline_path: null
         config_file: null
+        honor_inline_ignores: false
         max_target_megabytes: null
         scan_timeout: 1800
         severity_threshold: null
@@ -402,7 +403,7 @@ metadata:
   report_id: ASH-20260115
   shard: null
   summary_stats:
-    actionable: 4
+    actionable: 5
     duration: 0.0
     end: null
     error: 0
@@ -410,7 +411,7 @@ metadata:
     missing: 0
     passed: 0
     severity_counts:
-      critical: 4
+      critical: 5
       high: 0
       info: 0
       low: 0
@@ -418,7 +419,7 @@ metadata:
       suppressed: 0
     skipped: 0
     start: null
-    total: 4
+    total: 5
   tool_version: <ASH_VERSION>
   validation_summary: {}
 name: ASH Scan 2026-01-15T12:00:00
@@ -777,6 +778,89 @@ sarif:
       relatedLocations: []
       rule: null
       ruleId: aws-access-token
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: app/inline_allowed.py
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: 57
+            endLine: 2
+            message: null
+            properties: null
+            snippet:
+              binary: null
+              properties: null
+              rendered: null
+              text: REDACTED
+            sourceLanguage: null
+            startColumn: 18
+            startLine: 2
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: github-pat has detected secret for file app/inline_allowed.py.
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        issue_severity: CRITICAL
+        scanner_details:
+          tool_invocation:
+            duration: 0.5
+            end_time: '2026-01-15T12:00:00.500000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:00+00:00'
+          tool_name: gitleaks
+          tool_version: 8.30.1
+        scanner_name: gitleaks
+        scanner_version: 8.30.1
+        tags:
+        - secret
+        - security
+        - gitleaks
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: github-pat
       ruleIndex: -1
       stacks: []
       suppressions: null
@@ -4855,14 +4939,14 @@ sarif:
   version: 2.1.0
 scanner_results:
   gitleaks:
-    actionable_finding_count: 4
+    actionable_finding_count: 5
     dependencies_satisfied: true
     duration: 0.5
     excluded: false
     exit_code: 0
-    finding_count: 4
+    finding_count: 5
     severity_counts:
-      critical: 4
+      critical: 5
       high: 0
       info: 0
       low: 0

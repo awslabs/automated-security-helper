@@ -57,9 +57,11 @@ CAPTURED_SARIF = DATA / "gitleaks-8.30.1.sarif"
 #: .gitleaks.toml, whose allowlist covers it. app/fingerprint_ignored.py is not:
 #: gitleaks itself applies the tree's root .gitleaksignore, and ASH's re-scan adds
 #: that finding back (tested here with a fake run, and against the binary in the
-#: integration test). clean.py and inline_allowed.py are absent by construction.
+#: integration test). app/inline_allowed.py is in it because ASH passes
+#: --ignore-gitleaks-allow; clean.py is absent by construction.
 EXPECTED = {
     ("aws-access-token", "app/settings.py", 5),
+    ("github-pat", "app/inline_allowed.py", 2),
     ("github-pat", "app/settings.py", 4),
     ("github-pat", "docs/example.md", 5),
     ("slack-bot-token", "app/settings.py", 6),
@@ -173,6 +175,34 @@ def test_argv_for_the_source_target(tmp_path):
     assert args[-2:] == ["--", "."]
     # gitleaks then reads no file a symlink in the tree names.
     assert "--follow-symlinks" not in args
+
+
+def test_inline_allow_comments_are_off_by_default(tmp_path):
+    """A gitleaks:allow comment in the scanned tree drops a finding before ASH sees
+    it, so it would be neither reported nor counted as suppressed."""
+    scanner = _scanner(tmp_path)
+    args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+    assert "--ignore-gitleaks-allow" in args[: args.index("--")]
+
+
+def test_the_operator_can_honor_inline_allow_comments(tmp_path):
+    scanner = _scanner(tmp_path, operator=True, honor_inline_ignores=True)
+    args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+    assert "--ignore-gitleaks-allow" not in args
+
+
+@pytest.mark.parametrize("operator", [False, None])
+def test_honor_inline_ignores_from_the_scanned_tree_is_ignored(
+    tmp_path, caplog, operator
+):
+    scanner = _scanner(tmp_path, operator=operator, honor_inline_ignores=True)
+    with caplog.at_level("WARNING"):
+        args = scanner._build_arguments(
+            scanner.context.source_dir, tmp_path / "o.sarif"
+        )
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o2.sarif")
+    assert "--ignore-gitleaks-allow" in args
+    assert caplog.text.count("scanners.gitleaks.options.honor_inline_ignores") == 1
 
 
 def test_argv_for_the_converted_target_is_absolute(tmp_path):
@@ -515,6 +545,7 @@ def test_a_line_pinned_rule_suppression_suppresses_only_that_finding(tmp_path):
     )
     assert state == {
         ("github-pat", "app/settings.py"): True,
+        ("github-pat", "app/inline_allowed.py"): False,
         ("github-pat", "docs/example.md"): False,
         ("aws-access-token", "app/settings.py"): False,
         ("slack-bot-token", "app/settings.py"): False,

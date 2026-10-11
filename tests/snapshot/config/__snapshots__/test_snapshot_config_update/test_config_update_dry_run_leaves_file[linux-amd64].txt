@@ -157,6 +157,7 @@ scanners:
       scan_timeout: 1800
       config_file: null
       baseline_path: null
+      honor_inline_ignores: false
       max_target_megabytes: null
   grype:
     name: grype

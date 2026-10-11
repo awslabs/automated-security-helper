@@ -62,22 +62,26 @@ PINNED = TOOL_VERSIONS["gitleaks"].lstrip("v")
 #: What gitleaks writes for the fixture with ASH's argv, which is the committed
 #: capture. The tree's .gitleaks.toml is not passed, so docs/example.md is in it;
 #: gitleaks applies the tree's root .gitleaksignore itself, so
-#: app/fingerprint_ignored.py is not.
+#: app/fingerprint_ignored.py is not. ASH passes --ignore-gitleaks-allow, so
+#: app/inline_allowed.py is.
 EXPECTED = {
     ("aws-access-token", "app/settings.py", 5),
+    ("github-pat", "app/inline_allowed.py", 2),
     ("github-pat", "app/settings.py", 4),
     ("github-pat", "docs/example.md", 5),
     ("slack-bot-token", "app/settings.py", 6),
 }
 
 #: What ASH reports: the above plus the finding ASH's re-scan adds back past the
-#: tree's .gitleaksignore. Only inline_allowed.py's gitleaks:allow still hides one.
+#: tree's .gitleaksignore.
 REPORTED = EXPECTED | {("github-pat", "app/fingerprint_ignored.py", 2)}
 
-#: The two findings the fixture repo's own gitleaks config hides from gitleaks.
+#: The findings the fixture repo's own gitleaks config and comments hide from
+#: gitleaks left to its defaults.
 HIDDEN_BY_THE_TREE = {
     ("github-pat", "docs/example.md", 5),
     ("github-pat", "app/fingerprint_ignored.py", 2),
+    ("github-pat", "app/inline_allowed.py", 2),
 }
 
 
@@ -528,16 +532,24 @@ def test_an_operator_config_file_still_applies(tmp_path, path_with_gitleaks):
     assert ("github-pat", "app/settings.py", 4) in _findings(report)
 
 
-def test_the_inline_allow_comment_is_what_hides_its_finding(
-    tmp_path, path_with_gitleaks
-):
+def test_an_inline_allow_comment_hides_nothing_by_default(tmp_path, path_with_gitleaks):
+    """ASH passes --ignore-gitleaks-allow: the comment is the tree's to write."""
     source = _copy_fixture(tmp_path)
+    _, report = _scan_direct(source, tmp_path / "out")
+    assert ("github-pat", "app/inline_allowed.py", 2) in _findings(report)
+
+
+def test_the_operator_can_honor_inline_allow_comments(tmp_path, path_with_gitleaks):
+    source = _copy_fixture(tmp_path)
+    _, report = _scan_direct(source, tmp_path / "out", honor_inline_ignores=True)
+    assert ("github-pat", "app/inline_allowed.py", 2) not in _findings(report)
+    # The control: the same file without the comment is reported.
     target = source / "app" / "inline_allowed.py"
     target.write_text(
         target.read_text(encoding="utf-8").replace("  # gitleaks:allow", ""),
         encoding="utf-8",
     )
-    _, report = _scan_direct(source, tmp_path / "out")
+    _, report = _scan_direct(source, tmp_path / "out2", honor_inline_ignores=True)
     assert ("github-pat", "app/inline_allowed.py", 2) in _findings(report)
 
 
@@ -810,6 +822,7 @@ def test_ash_suppressions_apply_to_gitleaks_findings(tmp_path, gitleaks_bin_dir)
         ("github-pat", "app/settings.py"): True,
         ("github-pat", "docs/example.md"): False,
         ("github-pat", "app/fingerprint_ignored.py"): False,
+        ("github-pat", "app/inline_allowed.py"): False,
         ("aws-access-token", "app/settings.py"): False,
         ("slack-bot-token", "app/settings.py"): False,
     }, log

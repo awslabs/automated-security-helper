@@ -28,6 +28,8 @@ scanners:
       config_file: null
       # A gitleaks JSON report whose findings gitleaks ignores (--baseline-path).
       baseline_path: null
+      # Honor gitleaks:allow comments in the scanned tree. Off by default.
+      honor_inline_ignores: false
       # Skip files larger than this many megabytes.
       max_target_megabytes: null
       # Seconds before the gitleaks process is killed. Inherited by every scanner.
@@ -67,7 +69,7 @@ gitleaks' log repeats each line of a `.gitleaksignore` it cannot parse. ASH cuts
 
 Use ASH suppressions: they are recorded in the reports and counted. gitleaks' own mechanisms drop findings before ASH sees the report, so only these still apply:
 
-- A `gitleaks:allow` comment on the line with the secret.
+- A `gitleaks:allow` comment on the line with the secret, only when the operator sets `options.honor_inline_ignores: true` with `--config-overrides` or an ASH config file outside the scanned tree. By default ASH runs `gitleaks --ignore-gitleaks-allow`, so the comment hides nothing; set from a config inside the scanned tree, the option is ignored with a warning.
 - `[[allowlists]]` in an operator's `config_file` (paths, regexes, stopwords, per-rule).
 - An operator's `baseline_path`: a previous gitleaks JSON report whose findings are ignored.
 

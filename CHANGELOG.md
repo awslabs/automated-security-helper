@@ -124,8 +124,10 @@
     two selected rule sets is reported once.
   - gitleaks 8.30.1 (`gitleaks dir`, working tree only),
     CRITICAL findings with values redacted (`--redact=100`), beside detect-secrets,
-    which stays on and unchanged. Inline `gitleaks:allow` comments apply, and so
-    do an operator's `options.config_file` and `options.baseline_path`.
+    which stays on and unchanged. An operator's `options.config_file` and
+    `options.baseline_path` apply. gitleaks runs with `--ignore-gitleaks-allow`,
+    so a `gitleaks:allow` comment in the scanned tree hides nothing unless the
+    operator sets `options.honor_inline_ignores`.
   - zizmor (`>=1.29.0,<2.0.0`) on workflows and composite
     actions, run with `--offline`; GitHub tokens are withheld unless the operator
     sets `options.online_audits` (a config in the scanned tree cannot). A workflow
@@ -258,9 +260,10 @@
   of the tree through a symbolic link makes cfn-guard MISSING. With `rules_paths` ignored and `rule_sets` empty,
   cfn-guard falls back to `wa-Security-Pillar`. In an operator's rules directory, a
   rules file that resolves outside it through a symlink is refused, and cfn-guard
-  is given copies of the files ASH read. Inline `gitleaks:allow` comments still
-  apply. zizmor runs with `--no-ignores`, so `# zizmor: ignore[...]` comments do
-  not, unless the operator sets `scanners.zizmor.options.honor_inline_ignores`. Tool output quoted in a scanner's error
+  is given copies of the files ASH read. gitleaks runs with
+  `--ignore-gitleaks-allow` and zizmor with `--no-ignores`, so `gitleaks:allow`
+  and `# zizmor: ignore[...]` comments apply only when the operator sets that
+  scanner's `honor_inline_ignores`. Tool output quoted in a scanner's error
   has terminal escape sequences removed and other control characters escaped.
 - **trivy-repo names its own config file and modules directory.** It always passes
   `--config` and `--module-dir`: by default an empty config file and an empty

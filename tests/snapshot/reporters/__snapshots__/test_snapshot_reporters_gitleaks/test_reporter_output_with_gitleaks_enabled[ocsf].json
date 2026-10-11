@@ -190,5 +190,53 @@
         "title": "aws-access-token"
       }
     ]
+  },
+  {
+    "activity_id": 1,
+    "activity_name": "Scan",
+    "category_name": "Findings",
+    "category_uid": 2,
+    "class_uid": 2002,
+    "finding_info": {
+      "desc": "github-pat has detected secret for file app/inline_allowed.py.",
+      "title": "github-pat in inline_allowed.py - github-pat has detected secret for file app/inline_allowed.py.",
+      "uid": "<UUID>"
+    },
+    "metadata": {
+      "logged_time": 1768478442000,
+      "product": {
+        "name": "Automated Security Helper",
+        "vendor_name": "Amazon Web Services",
+        "version": "<ASH_VERSION>"
+      },
+      "version": "1.1.0"
+    },
+    "severity_id": 4,
+    "status": "New",
+    "status_id": 1,
+    "time": 1768478442000,
+    "type_uid": 200201,
+    "vulnerabilities": [
+      {
+        "affected_code": [
+          {
+            "end_line": 2,
+            "file": {
+              "name": "inline_allowed.py",
+              "path": "app/inline_allowed.py",
+              "type_id": 1
+            },
+            "start_line": 2
+          }
+        ],
+        "cve": {
+          "desc": "github-pat has detected secret for file app/inline_allowed.py.",
+          "uid": "github-pat"
+        },
+        "desc": "github-pat has detected secret for file app/inline_allowed.py.",
+        "severity": "ERROR",
+        "title": "github-pat"
+      }
+    ]
   }
 ]

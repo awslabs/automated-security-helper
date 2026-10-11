@@ -95,7 +95,7 @@ def gitleaks_scan(pinned_clock, tmp_path: Path):
     return _build_model(manifest, context), context
 
 
-def test_the_model_carries_the_four_findings_as_critical(gitleaks_scan):
+def test_the_model_carries_the_five_findings_as_critical(gitleaks_scan):
     model, _ = gitleaks_scan
     row = model.scanner_results["gitleaks"]
     assert (
@@ -103,8 +103,10 @@ def test_the_model_carries_the_four_findings_as_critical(gitleaks_scan):
         == "FAILED"
     )
     results = model.sarif.runs[0].results
+    # app/inline_allowed.py's among them: ASH passes --ignore-gitleaks-allow.
     assert sorted(r.ruleId for r in results) == [
         "aws-access-token",
+        "github-pat",
         "github-pat",
         "github-pat",
         "slack-bot-token",

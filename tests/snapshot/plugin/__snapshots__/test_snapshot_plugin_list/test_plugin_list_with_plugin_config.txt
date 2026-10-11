@@ -193,6 +193,8 @@ ASH Scanners
 │                │         │                      │                        │ null,                 │
 │                │         │                      │                        │     "baseline_path":  │
 │                │         │                      │                        │ null,                 │
+│                │         │                      │                        │     "honor_inline_ig… │
+│                │         │                      │                        │ false,                │
 │                │         │                      │                        │     "max_target_mega… │
 │                │         │                      │                        │ null                  │
 │                │         │                      │                        │   }                   │

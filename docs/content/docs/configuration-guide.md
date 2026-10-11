@@ -794,6 +794,7 @@ scanners:
     options:
       config_file: null           # a gitleaks TOML config; operator-only, may be inside the tree
       baseline_path: null         # a gitleaks report whose findings are ignored; same rule
+      honor_inline_ignores: false # honor gitleaks:allow comments; operator-only
       max_target_megabytes: null  # skip files larger than this
 ```
 
