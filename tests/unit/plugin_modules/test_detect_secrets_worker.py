@@ -12,6 +12,8 @@ import json
 import subprocess
 import sys
 
+import pytest
+
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
@@ -19,6 +21,11 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScanner,
     DetectSecretsScannerConfig,
     DetectSecretsScanSettingsFiltersUsed,
+)
+from tests.utils.refusing_proxy import (
+    RecordingProxy,
+    route_through,
+    scrub_cloud_credentials,
 )
 
 AWS_KEY = "AKIAIOSFODNN7EXAMPLE"  # pragma: allowlist secret
@@ -98,3 +105,86 @@ def test_no_network_unless_secrets_are_verified_online(tmp_path, monkeypatch):
         )
     ]
     assert scanner.sandbox_requirements.network is True
+
+
+#: AWS's documentation placeholder secret key, in parts so that this file holds no
+#: key-shaped literal for ASH's own detect-secrets self-scan to report.
+_SECRET_KEY_PARTS = ("wJalrXUtnFEMI/K7MDENG/", "bPxRfiCY", "EXAMPLEKEY")
+
+
+def _verifying_worker_run(tmp_path, verify):
+    """Run the worker on a key pair with the verification filter in its settings."""
+    secret = "".join(_SECRET_KEY_PARTS)
+    src = tmp_path / "src"
+    src.mkdir()
+    target = src / "creds.py"
+    target.write_text(
+        f'aws_access_key_id = "{AWS_KEY}"\naws_secret_access_key = "{secret}"\n',
+        encoding="utf-8",
+    )
+    request = {
+        "root": str(src),
+        "baseline": None,
+        "settings": {
+            "plugins_used": [{"name": "AWSKeyDetector"}],
+            "filters_used": [
+                {
+                    "path": "detect_secrets.filters.common.is_ignored_due_to_verification_policies",
+                    "min_level": 2,
+                }
+            ],
+        },
+        "paths": [str(target)],
+    }
+    if verify is not None:
+        request["verify"] = verify
+    request_file = tmp_path / "request.json"
+    output = tmp_path / "output.json"
+    request_file.write_text(json.dumps(request), encoding="utf-8")
+    subprocess.run(  # nosec B603 - fixed argv
+        [
+            sys.executable,
+            "-m",
+            "automated_security_helper.utils.detect_secrets_worker",
+            str(request_file),
+            str(output),
+        ],
+        check=True,
+        cwd=tmp_path,
+    )
+    return json.loads(output.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("verify", [False, None], ids=["verify-false", "no-verify-key"])
+def test_the_worker_sends_no_request_unless_the_scan_may_verify(
+    tmp_path, monkeypatch, verify
+):
+    """The scanner removes the filter when verification may not run; the worker
+    also refuses the requests, so a filter that reaches it anyway sends nothing.
+    The secret is still reported, as unverified."""
+    scrub_cloud_credentials(monkeypatch)
+    proxy = RecordingProxy()
+    route_through(monkeypatch, proxy)
+    try:
+        scanned = _verifying_worker_run(tmp_path, verify)
+    finally:
+        proxy.close()
+
+    assert proxy.external_requests() == [], proxy.requests
+    assert scanned and scanned[0][1], "the key was not reported"
+
+
+def test_control_the_worker_verifies_when_the_scan_may(tmp_path, monkeypatch):
+    """Control: with verify true the same run asks the issuer (the refusing local
+    proxy answers), which shows the run above would have sent a request."""
+    scrub_cloud_credentials(monkeypatch)
+    proxy = RecordingProxy()
+    route_through(monkeypatch, proxy)
+    try:
+        _verifying_worker_run(tmp_path, True)
+    finally:
+        proxy.close()
+
+    assert any("sts.amazonaws.com" in line for line in proxy.external_requests()), (
+        proxy.requests
+    )

@@ -626,14 +626,23 @@ def test_detect_secrets_verification_from_the_repository_gets_no_network(tmp_pat
             plugin_type="scanner", plugin_name="detect-secrets"
         ),
     )
+    # The repository's config cannot turn verification on at all
+    # (config/secret_verification_trust.py), so the scanner does not ask for a
+    # network, and the sandbox would not grant one if it did.
+    assert not any(
+        "verification" in str(item.path)
+        for item in scanner.config.options.scan_settings.filters_used
+    )
     requirements = scanner.sandbox_requirements
-    assert requirements.network is True
+    assert requirements.network is False
     assert requirements.network_requires_grant is True
     results = tmp_path / "results"
     results.mkdir()
+    # What the scanner asked for before the repository's filter was refused.
+    asked = SandboxRequirements(network=True, network_requires_grant=True)
     policy = build_scanner_policy(
         "detect-secrets",
-        requirements,
+        asked,
         argv0="/bin/true",
         source_dir=source,
         output_dir=tmp_path,

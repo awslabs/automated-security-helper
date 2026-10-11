@@ -14,7 +14,13 @@ from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Unio
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.config.path_trust import honored_path
+from automated_security_helper.config.path_trust import (
+    honored_path,
+    scanned_tree_reason,
+)
+from automated_security_helper.config.secret_verification_trust import (
+    is_verification_filter,
+)
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
@@ -97,13 +103,6 @@ def _detect_secrets_api():
     from detect_secrets.settings import transient_settings
 
     return SecretsCollection, transient_settings, get_mapping_from_secret_type_to_class
-
-
-#: The detect-secrets filter that verifies candidate secrets against their issuer's
-#: API over the network. See DetectSecretsScanner.sandbox_requirements.
-_VERIFICATION_FILTER_PATH = (
-    "detect_secrets.filters.common.is_ignored_due_to_verification_policies"
-)
 
 
 class DetectSecretsScanSettingsPluginsUsed(BaseModel):
@@ -238,14 +237,15 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         time the executor asks. Under --offline no scanner gets a network, so
         there the extra, unverified findings are reported.
 
-        The need is declared with ``network_requires_grant``: the settings come
-        from a baseline or ASH config that the scanned repository can write,
-        and the same baseline can load a plugin from the repository, so a
-        repository could otherwise give its own code a network. The sandbox
-        grants it only when ``sandbox.network_scanners`` names detect-secrets.
+        The need is declared with ``network_requires_grant``: a baseline the
+        operator names can load a plugin from a file outside the tree, so the
+        filter alone does not decide it. The sandbox grants it only when
+        ``sandbox.network_scanners`` names detect-secrets. The filter itself is
+        kept only when the operator turned verification on, and never offline
+        (``_drop_refused_verification``).
         """
         verifying = any(
-            item.path == _VERIFICATION_FILTER_PATH
+            is_verification_filter(item.path)
             for item in self.config.options.scan_settings.filters_used
         )
         return SandboxRequirements(network=verifying, network_requires_grant=True)
@@ -399,6 +399,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # into scan_settings so they are applied during scanning.
         # SecretsCollection.load_from_baseline() only loads results, not settings,
         # so we must propagate the baseline's configuration explicitly.
+        filters_from_baseline = False
         if real_baseline is not None:
             try:
                 baseline_data = self._read_baseline(real_baseline)
@@ -422,6 +423,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                             DetectSecretsScanSettingsFiltersUsed(**f)
                             for f in baseline_data["filters_used"]
                         ]
+                        filters_from_baseline = True
                     ASH_LOGGER.debug(
                         f"Loaded settings from baseline: "
                         f"{len(self.config.options.scan_settings.plugins_used)} plugins, "
@@ -434,6 +436,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 )
 
         self._drop_in_tree_settings_paths()
+        self._drop_refused_verification(filters_from_baseline=filters_from_baseline)
 
         # Skipped when the library is absent: the plugin list has to be read out of
         # detect-secrets itself, and there is no scan to configure for a scanner that
@@ -561,6 +564,66 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 filters.append(item)
         settings.filters_used = filters
 
+    def _verification_refusal(self, *, filters_from_baseline: bool) -> Optional[str]:
+        """Why this scan may not verify secrets with their issuers, or None.
+
+        Verification sends each candidate secret, and for an AWS key the key pair
+        itself, to the service that issued it, so the scanning host contacts that
+        service with credentials found in the scanned tree. It runs only when the
+        operator asked for it and the scan is online:
+
+        * offline mode turns it off, whatever any config or baseline says;
+        * a config built from a file the scanned repository or an MCP client wrote
+          cannot turn it on (``config/secret_verification_trust.py`` records why),
+          including through a baseline outside the tree that the config names;
+        * a baseline inside the scanned tree cannot turn it on, whichever config
+          named it. ``detect-secrets scan`` writes the filter into every baseline it
+          generates, so a repository's ``.secrets.baseline`` normally carries it.
+        """
+        if self._scanner_offline():
+            return "ASH is running in offline mode"
+        config = getattr(self.context, "config", None)
+        refusal = getattr(config, "_secret_verification_refusal", None)
+        if refusal:
+            return refusal
+        if filters_from_baseline and self.config.options.baseline_file is not None:
+            root = getattr(config, "_scanned_root", None) or self.context.source_dir
+            why = scanned_tree_reason(Path(self.config.options.baseline_file), root)
+            if why is not None:
+                return (
+                    f"the baseline {Path(self.config.options.baseline_file).as_posix()} "
+                    f"turns it on, and {why}"
+                )
+        return None
+
+    def _drop_refused_verification(self, *, filters_from_baseline: bool) -> None:
+        """Remove the verification filter from the settings when it may not run.
+
+        See ``_verification_refusal``. The rest of the settings, the baseline's
+        exclusions included, still apply, and candidates the filter would have
+        dropped as rejected by their issuer are reported.
+        """
+        settings = self.config.options.scan_settings
+        if not any(is_verification_filter(item.path) for item in settings.filters_used):
+            return
+        refusal = self._verification_refusal(
+            filters_from_baseline=filters_from_baseline
+        )
+        if refusal is None:
+            return
+        settings.filters_used = [
+            item
+            for item in settings.filters_used
+            if not is_verification_filter(item.path)
+        ]
+        self._plugin_log(
+            f"Not verifying candidate secrets with their issuers: {refusal}. "
+            "Verification runs only online, when the operator's own ASH config names "
+            "the filter in scanners.detect-secrets.options.scan_settings.filters_used "
+            "or names a baseline outside the scanned tree that does.",
+            level=logging.INFO if self._scanner_offline() else logging.WARNING,
+        )
+
     @staticmethod
     def _get_baseline_exclude_patterns(
         scan_settings_dict: Dict[str, Any],
@@ -659,6 +722,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         scan_settings_dict: Dict[str, Any],
         work_dir: Path,
         scan_timeout: float | None,
+        verify: bool = False,
     ) -> Any:
         """Scan ``scan_paths`` in a subprocess; return the resulting collection.
 
@@ -669,6 +733,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         ``transient_settings`` -- and this method rebuilds the same
         ``SecretsCollection`` from its output, so everything downstream reads
         ``self._secrets_collection`` exactly as before.
+
+        ``verify`` is whether this scan may send candidate secrets to their issuers.
+        When it is False the worker refuses every HTTP request detect-secrets
+        tries, so a filter or plugin that verifies under another name cannot
+        either (see ``utils/detect_secrets_worker.py``).
 
         Returns None when the worker was killed at ``scan_timeout``. The caller then
         keeps the collection it already holds (the parsed baseline, or empty). This
@@ -682,6 +751,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         """
         from detect_secrets.core.potential_secret import PotentialSecret
 
+        from automated_security_helper.utils.detect_secrets_worker import (
+            REFUSE_HTTP_ENV,
+        )
+        from automated_security_helper.utils.process_env import snapshot_environ
         from automated_security_helper.utils.subprocess_utils import (
             run_command_with_output_handling,
         )
@@ -702,6 +775,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     "baseline": baseline,
                     "settings": scan_settings_dict,
                     "paths": scan_paths,
+                    "verify": verify,
                 },
                 fp,
             )
@@ -715,6 +789,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 stdout_preference="return",
                 stderr_preference="return",
                 cwd=worker_cwd,
+                env=None if verify else {**snapshot_environ(), REFUSE_HTTP_ENV: "1"},
                 encoding="utf-8",
                 errors="replace",
                 timeout=scan_timeout,
@@ -957,6 +1032,23 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     for f in self.config.options.scan_settings.filters_used
                 ]
 
+            # Verification is decided again on the settings the worker gets, because
+            # offline mode is read when it is used and the settings can change
+            # after the scanner was configured. See _verification_refusal.
+            verify = any(
+                is_verification_filter(item.get("path"))
+                for item in scan_settings_dict.get("filters_used", [])
+            )
+            if verify and (
+                self._verification_refusal(filters_from_baseline=False) is not None
+            ):
+                scan_settings_dict["filters_used"] = [
+                    item
+                    for item in scan_settings_dict["filters_used"]
+                    if not is_verification_filter(item.get("path"))
+                ]
+                verify = False
+
             # Apply exclude file patterns from baseline filters to the scan set
             # BEFORE passing files to detect-secrets. This prevents unnecessary
             # file I/O and entropy calculations on excluded files, which is
@@ -1063,6 +1155,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 scan_settings_dict=scan_settings_dict,
                 work_dir=target_results_dir,
                 scan_timeout=scan_timeout,
+                verify=verify,
             )
             if scanned is not None:
                 self._secrets_collection = scanned

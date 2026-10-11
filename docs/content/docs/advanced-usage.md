@@ -166,6 +166,15 @@ not put a scanner back online during an `--offline` scan; `ash config init` writ
 `offline: false` for every scanner that has the option, so a generated config would
 otherwise undo the flag.
 
+#### What offline mode turns off
+
+Besides the database and rule downloads, offline mode turns off what the scanners do
+over the network on their own:
+
+- detect-secrets does not verify candidate secrets with their issuers, whatever the
+  scanned repository's `.secrets.baseline` or any config says. See
+  [Secret verification](configuration-guide.md#secret-verification).
+
 #### Seeding the semgrep and opengrep rule cache
 
 Offline, semgrep and opengrep read their rules only from a local cache: the directory

@@ -37,6 +37,9 @@ from automated_security_helper.config.sandbox_grants import (
     confine_sandbox_grants,
     repository_written,
 )
+from automated_security_helper.config.secret_verification_trust import (
+    confine_secret_verification,
+)
 
 #: Why a config an MCP client supplied may not grant, for the confinement warning.
 CLIENT_SUPPLIED = "an MCP client supplied the file, not the operator"
@@ -425,7 +428,9 @@ def resolve_config(
             base instead, its ``network_scanners`` list only removes network,
             and its ``sandbox.mode`` cannot turn off or replace a mode the
             trusted base sets. Its ``ash_plugin_modules`` are limited the same way
-            as an in-tree file's (``config/plugin_module_trust.py``).
+            as an in-tree file's (``config/plugin_module_trust.py``), and so is
+            detect-secrets' secret verification
+            (``config/secret_verification_trust.py``).
         client_overrides: ``config_overrides`` came from an MCP client (a
             workspace tool's), not the operator, so a tool path they name is not
             the operator's (``path_trust.OperatorPaths``).
@@ -536,15 +541,12 @@ def resolve_config(
     ]
     if sandbox_overrides:
         trusted = apply_config_overrides(trusted, sandbox_overrides)
-    confine_sandbox_grants(
-        config.sandbox,
-        trusted.sandbox,
-        in_tree,
-        reason=CLIENT_SUPPLIED if untrusted_config else REPOSITORY_WRITTEN,
-    )
+    reason = CLIENT_SUPPLIED if untrusted_config else REPOSITORY_WRITTEN
+    confine_sandbox_grants(config.sandbox, trusted.sandbox, in_tree, reason=reason)
     confine_plugin_modules(
         config, trusted, config_overrides, Path(scanned_root), in_tree
     )
+    confine_secret_verification(config, trusted, config_overrides, in_tree, reason)
     return config
 
 

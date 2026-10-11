@@ -168,6 +168,11 @@ findings to use. It takes `baseline_file` when set, else `.ash/.secrets.baseline
 same result whichever directory ASH runs from. See
 [Detect-Secrets](../../configuration-guide.md#detect-secrets) in the configuration guide.
 
+**Secret verification**: detect-secrets can send a candidate secret to the service that
+issued it. ASH does that only when the operator's own configuration turns it on, never
+from a baseline or config file the scanned repository holds, and never offline. See
+[Secret verification](../../configuration-guide.md#secret-verification).
+
 **Dependencies**: `detect-secrets` Python package
 
 ---

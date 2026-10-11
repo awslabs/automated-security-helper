@@ -781,6 +781,37 @@ the source directory too. A baseline in the directory ASH runs from does not app
 a scan of another directory. For more details on baseline files, refer to the
 detect-secrets [documentation](https://github.com/Yelp/detect-secrets/tree/master).
 
+#### Secret verification
+
+detect-secrets can verify a candidate secret by sending it to the service that issued
+it, and drop the candidates the service rejects. The filter that does this is
+`detect_secrets.filters.common.is_ignored_due_to_verification_policies`, and
+`detect-secrets scan` writes it into every baseline it generates. For an AWS access
+key the request goes to `sts.amazonaws.com`, signed with the key pair found in the
+scanned file, so verification makes the host running ASH contact the issuer with
+credentials taken from the scanned tree. ASH therefore verifies only when the operator
+asks for it, and never in offline mode:
+
+- The filter counts when the operator's own configuration names it: a config file
+  outside the scanned directory and every git checkout (`--config` or `ASH_CONFIG`),
+  `--config-overrides`, or for the MCP server the profile the session is bound to. It
+  can be in `scan_settings.filters_used`, or in a `baseline_file` outside the scanned
+  tree that such a config names. `scan_settings` replaces the baseline's own settings,
+  so list the plugins and other filters you want there as well.
+- A `.secrets.baseline` inside the scanned tree, a config file the scanned repository
+  holds (`.ash/.ash.yaml` and the other discovered names, including a workspace
+  project's own config), and a config an MCP client supplied cannot turn verification
+  on, whatever baseline they name. ASH removes the filter, keeps the rest of the
+  settings, and logs a warning that names the source.
+- Under `--offline` (or `ASH_OFFLINE`) nothing turns it on.
+
+When verification is off, candidates the filter would have dropped are reported, so a
+repository whose own baseline used to verify can show more findings. The
+detect-secrets worker also refuses every HTTP request in that case, so a filter or
+plugin that verifies under another name sends nothing either. Under `--sandbox`,
+verification also needs `sandbox.network_scanners` to name detect-secrets; see
+[Scanner sandbox](scanner-sandbox.md).
+
 ### Checkov
 
 ```yaml

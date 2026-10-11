@@ -150,6 +150,24 @@
 
 ### Behavior changes
 
+- **detect-secrets verifies secrets only when the operator turns it on, and never
+  offline.** Verification sends each candidate secret to the service that issued it;
+  for an AWS key that is a request to `sts.amazonaws.com` signed with the key pair
+  found in the scanned file. Its filter came from whatever settings the scan used, so
+  a repository's `.secrets.baseline` (which `detect-secrets scan` fills with the
+  filter), its `.ash/.ash.yaml`, a workspace project's config, an MCP client's config,
+  or a `baseline_file` outside the tree named by any of them made the scanning host
+  contact the issuer, and `--offline` did not stop it without `--sandbox`. Now the
+  filter is kept only from the operator's own configuration (a config file outside the
+  scanned tree and every git checkout, `--config-overrides`, the MCP session's
+  profile, or a baseline outside the tree that such a config names), and only online;
+  from any other source ASH removes it and logs a warning naming the source, and when
+  verification is off the detect-secrets worker refuses every HTTP request. Candidates
+  the issuer would have rejected are now reported, so a repository whose own baseline
+  verified can show more detect-secrets findings. To keep verifying, name the filter in
+  `scanners.detect-secrets.options.scan_settings.filters_used` of your own config. See
+  [Secret verification](docs/content/docs/configuration-guide.md#secret-verification).
+
 - **Container mode builds ASH's own Dockerfile, never one in the working directory.**
   `ash --mode container` and `ash build-image` used to build a `Dockerfile` in the
   directory they were started from (with a `pyproject.toml` beside it, for an ASH

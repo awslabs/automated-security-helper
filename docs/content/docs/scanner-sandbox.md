@@ -235,14 +235,17 @@ variables and `SNYK_TOKEN`, and read access to its token file; trivy-repo asks f
 network and its database cache; ferret-scan asks only for its `FERRET_` variables.
 
 detect-secrets needs a network only to verify candidate secrets with their issuers,
-which it does when its settings list the verification filter. Those settings come
-from a `.secrets.baseline` or an ASH config file, and the scanned repository can
-commit either one. The same baseline can also load a detect-secrets plugin from the
-repository. So the sandbox doesn't take detect-secrets' own word for it: detect-secrets
-gets a network only when `sandbox.network_scanners` names it, and a repository can't
-set that (see below). Without a network every candidate counts as unverified, so a
-sandboxed scan whose settings verify reports the candidates that verification would
-have dropped, and ASH logs a warning naming the setting.
+which it does when its settings list the verification filter. Only the operator's own
+configuration can list it: ASH removes it from a `.secrets.baseline` inside the
+scanned tree and from a config file the scanned repository or an MCP client wrote,
+and offline from every source (see
+[Secret verification](configuration-guide.md#secret-verification)). A baseline the
+operator names can still load a detect-secrets plugin from a file outside the tree, so
+the sandbox doesn't take detect-secrets' own word for it either: detect-secrets gets a
+network only when `sandbox.network_scanners` names it, and a repository can't set that
+(see below). Without a network every candidate counts as unverified, so a sandboxed
+scan whose settings verify reports the candidates that verification would have
+dropped, and ASH logs a warning naming the setting.
 
 detect-secrets and cdk-nag are Python libraries. They run in worker subprocesses,
 not in the ASH process, where no OS sandbox could reach them. The workers use the
