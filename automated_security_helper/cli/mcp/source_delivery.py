@@ -578,7 +578,17 @@ def _git_executable() -> str:
     return git
 
 
-@_while_no_scan_runs
+def _validated_clone_depth(depth: object) -> int:
+    """``depth`` if it is a positive whole number of commits, else raise ValueError."""
+
+    if isinstance(depth, bool) or not isinstance(depth, int) or depth < 1:
+        raise ValueError(
+            f"refusing clone depth {depth!r}: the depth is a positive whole number "
+            f"of commits"
+        )
+    return depth
+
+
 def set_source_git(
     url: str,
     ref: Optional[str] = None,
@@ -612,18 +622,35 @@ def set_source_git(
     Raises:
         ValueError: if ``session_id`` is invalid, if ``url``/``ref`` is
             option-like or uses a command-executing git transport, if ``url`` is
-            local or not https/ssh, or if ``ssh_key_id`` is set.
+            local or not https/ssh, if ``ssh_key_id`` is set, or if ``depth`` is
+            not a positive whole number. Raised before anything is created.
         RuntimeError: if git is not on PATH, or ``git clone`` (or the optional
             ``git checkout`` for an explicit ref) fails.
     """
 
-    # Validate before touching the filesystem so a rejected request leaves no
-    # session directory behind.
+    # Validated here, before the session is taken: taking it creates the session
+    # workspace, and a refused request leaves nothing behind.
     url = _validate_clone_url(url)
     remote_clone_host(url)
     _refuse_ssh_key_id(ssh_key_id)
     if ref:
         ref = _reject_option_like(ref, "ref")
+    depth = _validated_clone_depth(depth)
+    return _clone_into_session(
+        url, ref, depth=depth, workspace_root=workspace_root, session_id=session_id
+    )
+
+
+@_while_no_scan_runs
+def _clone_into_session(
+    url: str,
+    ref: Optional[str],
+    *,
+    depth: int,
+    workspace_root: Optional[Path],
+    session_id: str,
+) -> Path:
+    """Clone a validated ``url`` into the session workspace; see ``set_source_git``."""
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
     session_dir = mark_session_workspace(_session_workspace(root, session_id))
@@ -646,7 +673,7 @@ def set_source_git(
         *_GIT_CONFIG,
         "clone",
         "--depth",
-        str(int(depth)),
+        str(depth),
         # End-of-options marker, so even a future change that loosens
         # _validate_clone_url cannot turn the url into a git flag.
         "--",
@@ -676,7 +703,7 @@ def set_source_git(
             str(target),
             "fetch",
             "--depth",
-            str(int(depth)),
+            str(depth),
             "origin",
             ref,
         ]
