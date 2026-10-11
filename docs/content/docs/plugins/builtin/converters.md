@@ -294,7 +294,9 @@ nested archive's contents scanned, extract it into the tree before the scan.
 
 An archive that zipfile and tarfile cannot read is not extracted at all: a bad CRC, a
 truncated or damaged stream (a damaged single-file gzip included), an empty file, a
-`.tar.gz` that holds no tar, or headers over the read limits above. A tar's members
+`.tar.gz` that holds no tar, headers over the read limits above, or members that
+cannot all be written, such as a file member named like a directory another member
+made. A tar's members
 must end at an end-of-archive block (512 zero bytes, which every common tar writer
 puts after the last member): tarfile stops reading members without an error at a
 damaged header or where the archive is cut off, so a tar that stops anywhere else is

@@ -119,6 +119,38 @@ def tar_with_noise_for_a_header() -> bytes:
     return bytes(raw)
 
 
+#: A file member named like the directory an earlier member made, and the reverse:
+#: the second member of each cannot be written where the first put something else.
+FILE_OVER_DIRECTORY = [
+    ("d.py/a.py", b"a = 1\n"),
+    ("d.py", b"d = 2\n"),
+    ("z.py", b"z = 3\n"),
+]
+DIRECTORY_OVER_FILE = [
+    ("d.py", b"d = 2\n"),
+    ("d.py/a.py", b"a = 1\n"),
+    ("z.py", b"z = 3\n"),
+]
+
+
+def zip_of(members) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, data in members:
+            archive.writestr(name, data)
+    return buffer.getvalue()
+
+
+def tar_of(members) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        for name, data in members:
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
 def empty_valid_zip() -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w"):
@@ -155,6 +187,18 @@ UNREADABLE = [
     pytest.param("inside.tar", tar_cut_inside_a_header(), id="tar-cut-inside-header"),
     pytest.param(
         "noise.tar", tar_with_noise_for_a_header(), id="tar-noise-for-a-header"
+    ),
+    pytest.param(
+        "clash.zip", zip_of(FILE_OVER_DIRECTORY), id="zip-file-over-a-directory"
+    ),
+    pytest.param(
+        "clash.tar", tar_of(FILE_OVER_DIRECTORY), id="tar-file-over-a-directory"
+    ),
+    pytest.param(
+        "clash.zip", zip_of(DIRECTORY_OVER_FILE), id="zip-directory-over-a-file"
+    ),
+    pytest.param(
+        "clash.tar", tar_of(DIRECTORY_OVER_FILE), id="tar-directory-over-a-file"
     ),
 ]
 

@@ -210,7 +210,9 @@
   between members or inside a header, or with a damaged header after the first, was
   read as a shorter archive: its first members were extracted and nothing was
   recorded. A tar's members must now end at an end-of-archive block, which GNU tar,
-  bsdtar, `git archive` and Python's tarfile all write. Each of these is now
+  bsdtar, `git archive` and Python's tarfile all write. An archive with a file member
+  named like a directory an earlier member made was dropped as "skipping directory",
+  leaving the members before it on disk. Each of these is now
   recorded in `converter_results.archive.failed_inputs` (the record a converter's
   input that could not be converted gets); anything written from it is removed; and
   with `fail_on_incomplete_scanners` on the scan exits 1 naming it. The summaries,

@@ -1024,8 +1024,6 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 # Add the extracted directory to results
                 results.append(target_path)
                 scan_budget.commit(budget)
-            except IsADirectoryError:
-                ASH_LOGGER.debug(f"Skipping directory: {archive_file}")
             except _ExtractionLimitExceeded as exceeded:
                 # The whole archive, not a member: none of it reaches the scanners,
                 # so the record carries the limit, which the completeness gate
@@ -1040,7 +1038,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             except Exception as e:
                 # Named for the converter, a .zip, .tar or .gz it could not read: a
                 # bad CRC, a truncated or damaged stream, a gzip-compressed file
-                # that is not a tarball, an empty file. None of it is scanned, and
+                # that is not a tarball, an empty file, or members that cannot all
+                # be written (a file named like a directory an earlier member
+                # made raises IsADirectoryError). None of it is scanned, and
                 # whatever was written before the failure is removed, so the
                 # scanners do not read a partial extraction as the archive.
                 # Recorded, not only logged: the completeness gate reads
