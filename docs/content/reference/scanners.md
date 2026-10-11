@@ -12,7 +12,7 @@
 
 This page is generated from the scanner plugins in the ASH source code by `scripts/generate_scanner_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 21 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that is loaded only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module.
+ASH ships 21 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
 
 | Scanner | Tool type | Enabled by default | Provided by | Command | Runs with `--python-only` |
 |---------|-----------|--------------------|-------------|---------|---------------------------|
@@ -466,7 +466,7 @@ Ferret Scan is a sensitive data detection tool that scans files for potential se
 
 - Scanner page: [`ferret-scan` scanner page](../docs/plugins/community/ferret-scan-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.FerretScanScanner`
-- Provided by: community module `ash_ferret_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_ferret_plugins`
+- Provided by: community module `ash_ferret_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_ferret_plugins`
 - Enabled by default: yes
 - Tool type: SECRETS
 - Command: `ferret-scan`
@@ -509,7 +509,7 @@ Options, under `scanners.ferret-scan.options`. A key not listed here is accepted
 GuardDog detects malicious-package heuristics in PyPI, npm, Go, GitHub Action, RubyGems and crates packages.
 
 - Class: `automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner.GuardDogScanner`
-- Provided by: community module `ash_guarddog_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_guarddog_plugins`
+- Provided by: community module `ash_guarddog_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_guarddog_plugins`
 - Enabled by default: yes
 - Tool type: SCA
 - Command: `guarddog`
@@ -541,7 +541,7 @@ Options, under `scanners.guarddog.options`. A key not listed here is accepted an
 ## `hadolint`
 
 - Class: `automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner.HadolintScanner`
-- Provided by: community module `ash_hadolint_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_hadolint_plugins`
+- Provided by: community module `ash_hadolint_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_hadolint_plugins`
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `hadolint`
@@ -564,7 +564,7 @@ Options, under `scanners.hadolint.options`. A key not listed here is accepted an
 
 - Scanner page: [`snyk-code` scanner page](../docs/plugins/community/snyk-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner.SnykCodeScanner`
-- Provided by: community module `ash_snyk_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_snyk_plugins`
+- Provided by: community module `ash_snyk_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_snyk_plugins`
 - Enabled by default: yes
 - Tool type: SAST
 - Command: `snyk`
@@ -586,7 +586,7 @@ Options, under `scanners.snyk-code.options`. A key not listed here is accepted a
 
 - Scanner page: [`trivy-repo` scanner page](../docs/plugins/community/trivy-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.TrivyRepoScanner`
-- Provided by: community module `ash_trivy_plugins`, loaded when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_trivy_plugins`
+- Provided by: community module `ash_trivy_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_trivy_plugins`
 - Enabled by default: yes
 - Tool type: SAST
 - Command: `trivy`

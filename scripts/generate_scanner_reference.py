@@ -187,9 +187,10 @@ def generate(docs_root: Path) -> tuple[str, dict]:
         "",
         (
             f"ASH ships {len(plugins)} scanners. The built-in ones are loaded on every "
-            "scan. The others are community scanners, each in a plugin module that is "
-            "loaded only when the configuration's `ash_plugin_modules` (or "
-            "`--ash-plugin-modules`) names the module."
+            "scan. The others are community scanners, each in a plugin module that "
+            "`ash scan` loads only when the configuration's `ash_plugin_modules` (or "
+            "`--ash-plugin-modules`) names the module; for the MCP server, see "
+            "[What a plugin can do](../plugins/index.md#what-a-plugin-can-do)."
         ),
         "",
         "| Scanner | Tool type | Enabled by default | Provided by | Command | Runs with `--python-only` |",

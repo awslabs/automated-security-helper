@@ -227,6 +227,14 @@ def package_note(plugin: Plugin) -> str:
     """Where a plugin comes from and how to load it."""
     if plugin.builtin:
         return "built in, loaded on every scan"
+    if plugin.kind == "scanner":
+        # Said of `ash scan` only: in the long-running `ash mcp` process a community
+        # scanner one call registered stays registered for the scans after it, as
+        # the plugins page explains. The AWS reporters are not affected.
+        return (
+            f"{_origin(plugin)} {code(module_name(plugin))}, which `ash scan` loads "
+            f"when `ash_plugin_modules` names {code(plugin.package)}"
+        )
     return (
         f"{_origin(plugin)} {code(module_name(plugin))}, loaded when "
         f"`ash_plugin_modules` names {code(plugin.package)}"

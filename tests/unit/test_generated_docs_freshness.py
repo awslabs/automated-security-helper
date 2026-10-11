@@ -1091,3 +1091,22 @@ def test_mcp_notes_match_the_server() -> None:
     )
     assert "does not change which findings" in threshold
     assert "does not stop the scan" in _section(text, "## cancel_scan")
+
+
+def test_community_loading_is_scoped_to_ash_scan() -> None:
+    """ "Loaded only when named" is said of ``ash scan``; the MCP server is pointed elsewhere.
+
+    Under ``ash mcp`` a community scanner registered by an earlier call stays
+    registered for later scans, so the unscoped statement is not true there. The
+    plugins page says what holds for the MCP server, and this page links to it.
+    """
+    text = _page("scanners.md")
+    intro = text.split("\n| Scanner |", 1)[0]
+    assert "that `ash scan` loads only when" in intro
+    assert "(../plugins/index.md#what-a-plugin-can-do)" in intro
+    provided = [
+        ln for ln in text.splitlines() if ln.startswith("- Provided by: community")
+    ]
+    assert provided, "no community scanners on the page"
+    for line in provided:
+        assert "which `ash scan` loads when" in line, line
