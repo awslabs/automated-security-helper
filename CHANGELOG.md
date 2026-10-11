@@ -159,6 +159,9 @@
   settings or thresholds applied. The file is now mounted read-only (with its `extends`
   chain, for one outside the source directory) and the inner scan is given the path it
   has in the container; one that is not an existing file refuses the scan with exit 3.
+  A config inside the scanned checkout but outside `--source-dir` keeps the limits a
+  local scan gives a repository's config: the host decides, and passes the scan inside
+  `--config-from-scanned-repository`, since it sees that file only at `/ash-config`.
   The same holds for `./ash --config` and `Invoke-ASH -Config`, which also honor
   `ASH_CONFIG` now, and for `run_ash_scan(mode=container)` called with no `config`,
   which hands `ASH_CONFIG`'s file to the container when the source directory has no

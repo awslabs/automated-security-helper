@@ -182,6 +182,26 @@ if [[ "${NO_RUN}" = "NO" && ( "${CONFIG_GIVEN}" = "YES" || -n "${CONFIG_PATH}" )
     *)
       CONFIG_RUN_ARGS=(--mount "type=bind,source=${CONFIG_REAL},destination=/ash-config/$(basename "${CONFIG_REAL}"),readonly")
       CONFIG_ASH_ARGS=(--config "/ash-config/$(basename "${CONFIG_REAL}")")
+      # A config elsewhere in the scanned checkout -- the outermost directory at or
+      # above the source dir holding a .git entry, as a local scan defines it -- was
+      # written by the repository being scanned. The scan inside sees it only at
+      # /ash-config, outside its own tree, so it is told.
+      for start in "${SOURCE_DIR}" "${SOURCE_REAL}"; do
+        dir="${start}"
+        checkout="${start}"
+        while :; do
+          if [ -e "${dir}/.git" ]; then checkout="${dir}"; fi
+          if [ "${dir}" = "/" ] || [ -z "${dir}" ]; then break; fi
+          dir="$(dirname "${dir}")"
+        done
+        checkout_real="$(cd "${checkout}" && pwd -P)"
+        case "${CONFIG_REAL}" in
+          "${checkout_real%/}"/*)
+            CONFIG_ASH_ARGS+=(--config-from-scanned-repository)
+            break
+            ;;
+        esac
+      done
       ;;
   esac
 fi

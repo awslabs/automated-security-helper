@@ -943,10 +943,32 @@ def _unreadable_config(config: str | None) -> str | None:
     )
 
 
+#: Tells the scan inside the container that its --config was written by the
+#: repository being scanned; see _written_by_the_scanned_repository.
+CONFIG_FROM_SCANNED_REPOSITORY_FLAG = "--config-from-scanned-repository"
+
+
+def _written_by_the_scanned_repository(files: List[Path], source_dir: Path) -> bool:
+    """Whether any of *files* is inside the tree a local scan of *source_dir* trusts less.
+
+    The same rule ``resolve_config`` applies to a local scan: the outermost git
+    checkout at or above the source directory, under every name it has
+    (``config/sandbox_grants.scanned_trees``). A config mounted at /ash-config is
+    outside the scan's own tree inside the container, so the host has to decide.
+    """
+    from automated_security_helper.config.sandbox_grants import (
+        files_inside,
+        scanned_trees,
+    )
+
+    return bool(files_inside(files, scanned_trees(Path(source_dir))))
+
+
 def _host_file_in_container(
     host_path: str, source_dir: Path, mount_root: str, *, follow_extends: bool
-) -> Tuple[List[str], str]:
-    """The mounts that make a host config file readable in the container, and its path there.
+) -> Tuple[List[str], str, List[Path]]:
+    """The mounts that make a host config file readable in the container, its path
+    there, and the host files those mounts are of.
 
     A file inside the source directory is already under the read-only ``/src``
     mount, and so is every ``extends`` base it can name: a config inside the
@@ -964,7 +986,7 @@ def _host_file_in_container(
     resolved = Path(host_path).resolve()
     source = Path(source_dir).resolve()
     if resolved.is_relative_to(source):
-        return [], f"/src/{resolved.relative_to(source).as_posix()}"
+        return [], f"/src/{resolved.relative_to(source).as_posix()}", []
 
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
@@ -991,7 +1013,7 @@ def _host_file_in_container(
         mounts.extend(
             ["--mount", f"type=bind,source={file},destination={destination},readonly"]
         )
-    return mounts, f"{mount_root}/{resolved.relative_to(root).as_posix()}"
+    return mounts, f"{mount_root}/{resolved.relative_to(root).as_posix()}", files
 
 
 def _assemble_run_command(
@@ -1103,14 +1125,21 @@ def _assemble_run_command(
 
     # The config files the operator named on the host, read-only.
     inner_config = None
+    config_from_scanned_repository = False
     if config:
-        config_mounts, inner_config = _host_file_in_container(
+        config_mounts, inner_config, config_files = _host_file_in_container(
             config, source_dir, CONTAINER_CONFIG_ROOT, follow_extends=True
         )
         cmd.extend(config_mounts)
+        # A config inside the source directory is read through /src, which is the
+        # inner scan's own tree; one mounted from elsewhere needs the host's verdict.
+        config_from_scanned_repository = (
+            workspace_relative_file is None
+            and _written_by_the_scanned_repository(config_files, source_dir)
+        )
     inner_workspace_config = None
     if workspace_config and workspace_relative_file is not None:
-        policy_mounts, inner_workspace_config = _host_file_in_container(
+        policy_mounts, inner_workspace_config, _ = _host_file_in_container(
             workspace_config,
             source_dir,
             CONTAINER_WORKSPACE_CONFIG_ROOT,
@@ -1220,6 +1249,8 @@ def _assemble_run_command(
 
     if inner_config is not None:
         ash_args.extend(["--config", inner_config])
+    if config_from_scanned_repository:
+        ash_args.append(CONFIG_FROM_SCANNED_REPOSITORY_FLAG)
 
     for override in config_overrides:
         ash_args.extend(["--config-overrides", override])

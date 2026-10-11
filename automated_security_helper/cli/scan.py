@@ -482,6 +482,14 @@ def run_ash_scan_cli_command(
             envvar="ASH_SHARD_COUNT",
         ),
     ] = None,
+    config_from_scanned_repository: Annotated[
+        bool,
+        typer.Option(
+            "--config-from-scanned-repository",
+            hidden=True,
+            help="Apply the limits ASH puts on a config file inside the scanned tree to the --config file and every file it extends, wherever they are. Container mode passes this to the scan inside the container when the config, or a file it extends, is inside the scanned repository but outside --source-dir, where that scan cannot see it.",
+        ),
+    ] = False,
     ### WORKSPACE-RELATED OPTIONS
     workspace: Annotated[
         str | None,
@@ -847,4 +855,5 @@ def run_ash_scan_cli_command(
         custom_build_arg=custom_build_arg,
         workspace_plan=workspace_plan,
         allow_missing_projects=allow_missing_projects,
+        untrusted_config=config_from_scanned_repository,
     )

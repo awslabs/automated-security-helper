@@ -206,7 +206,13 @@ mounted read-only under `/ash-config`, together with the files its `extends` cha
 names, each at the same place relative to the config's directory (the parent of `.ash/`
 for a file in `.ash/`), so relative bases resolve as they do on the host; only those
 files are mounted, not the directory. A `--config` that is not an existing file, or is
-empty, refuses the scan with exit 3 before anything is built. In workspace mode the
+empty, refuses the scan with exit 3 before anything is built. A config the scanned
+repository wrote keeps the limits a local scan gives it (see
+[Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)):
+when the config or a file it extends is inside the outermost git checkout at or above
+`--source-dir` but outside `--source-dir` itself, where the scan inside the container
+cannot see that, the host passes it `--config-from-scanned-repository` (`./ash` and
+`Invoke-ASH` do the same). In workspace mode the
 policy file the host resolved (`--workspace-config`, or the one found in the workspace
 root) is handed to the container the same way. The `./ash` wrapper and `Invoke-ASH`
 mount a config from outside the source directory on its own, so an `extends` base next

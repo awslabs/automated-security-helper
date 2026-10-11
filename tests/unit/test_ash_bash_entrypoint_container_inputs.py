@@ -357,3 +357,50 @@ class TestAPathTheMountCannotCarryIsRefused:
 
         assert rc == 0, output
         assert [call[0] for call in calls] == ["run"]
+
+
+class TestAConfigTheScannedRepositoryWroteKeepsItsLimits:
+    """A config inside the scanned checkout but outside the source directory.
+
+    The scan inside the container sees it at /ash-config, outside its own tree, so
+    the wrapper tells it the file belongs to the scanned repository, as a local scan
+    of that checkout would treat it.
+    """
+
+    @pytest.fixture
+    def checkout(self, tmp_path):
+        root = tmp_path / "repo"
+        (root / ".git").mkdir(parents=True)
+        (root / "services" / "api").mkdir(parents=True)
+        (root / "ci").mkdir()
+        return root
+
+    def test_a_config_elsewhere_in_the_checkout_is_marked(self, fake_runner, checkout):
+        (checkout / "ci" / "ash.yaml").write_text("project_name: p\n")
+
+        rc, output, calls = _run_ash_status(
+            fake_runner,
+            checkout / "services" / "api",
+            ["--no-build", "--config", str(checkout / "ci" / "ash.yaml")],
+        )
+
+        assert rc == 0, output
+        assert "--config-from-scanned-repository" in _inner_args(_only(calls, "run"))
+
+    def test_a_config_outside_the_checkout_is_not_marked(
+        self, fake_runner, checkout, tmp_path
+    ):
+        """Control."""
+        (tmp_path / "operator").mkdir()
+        (tmp_path / "operator" / "ash.yaml").write_text("project_name: p\n")
+
+        rc, output, calls = _run_ash_status(
+            fake_runner,
+            checkout / "services" / "api",
+            ["--no-build", "--config", str(tmp_path / "operator" / "ash.yaml")],
+        )
+
+        assert rc == 0, output
+        inner = _inner_args(_only(calls, "run"))
+        assert "--config-from-scanned-repository" not in inner
+        assert _flag(inner, "--config") == "/ash-config/ash.yaml"

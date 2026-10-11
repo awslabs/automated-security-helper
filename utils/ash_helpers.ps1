@@ -256,6 +256,7 @@ function Invoke-ASH {
         # config is, when it is not an existing file. -NoRun scans nothing, so it
         # does not need one.
         $configMountArg = $null
+        $configFromRepository = $false
         if (-not $NoRun -and ($PSBoundParameters.ContainsKey('Config') -or -not [string]::IsNullOrEmpty($Config))) {
             if ([string]::IsNullOrEmpty($Config) -or -not (Test-Path -LiteralPath $Config -PathType Leaf)) {
                 Write-Error "Config file not found: '$Config'. -Config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container."
@@ -272,9 +273,26 @@ function Invoke-ASH {
             else {
                 $configInner = "/ash-config/" + (Split-Path -Leaf $configFull)
                 $configMountArg = "--mount `"type=bind,source=$configFull,destination=$configInner,readonly`""
+                # A config elsewhere in the scanned checkout -- the outermost directory
+                # at or above SourceDir holding a .git entry, as a local scan defines
+                # it -- was written by the repository being scanned. The scan inside
+                # sees it only at /ash-config, outside its own tree, so it is told.
+                $checkout = $sourceDirFull
+                $dir = Get-Item -LiteralPath $sourceDirFull
+                while ($null -ne $dir) {
+                    if (Test-Path -LiteralPath (Join-Path $dir.FullName '.git')) {
+                        $checkout = $dir.FullName
+                    }
+                    $dir = $dir.Parent
+                }
+                $checkoutPrefix = $checkout.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
+                $configFromRepository = $configFull.StartsWith($checkoutPrefix, $pathComparison)
             }
             $ashCmdArgs.Add("--config")
             $ashCmdArgs.Add("`"$configInner`"")
+            if ($configFromRepository) {
+                $ashCmdArgs.Add('--config-from-scanned-repository')
+            }
         }
 
         # Set image name with target stage
