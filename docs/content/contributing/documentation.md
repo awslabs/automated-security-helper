@@ -168,9 +168,9 @@ import in a saved package resolves within that package.
 
 ### Option tables
 
-A table that documents options or config keys (its first header cell is Option, Key,
-Field, Setting or Argument, or it has a Default column) carries a marker naming the
-section it documents, on the line directly above its header row:
+A table that documents options, keys or parameters (its first header cell is Option,
+Key, Field, Setting, Argument, Param or Parameter, or it has a Default column) carries
+a marker naming the section it documents, on the line directly above its header row:
 
 ````markdown
 <!-- doctest: options of=scanners.bandit -->
@@ -180,9 +180,15 @@ section it documents, on the line directly above its header row:
 ````
 
 Every row's first code span must be a key of that section, and its Default cell must
-state the default the code has. A table that looks like an options table and has no
-marker is an error, so a new table cannot skip the check. Tables headed Variable or
+state the default the code has. A column headed Defaults to, If not passed, If not set
+or If unset is a Default column too. A table that looks like an options table and has
+no marker is an error, so a new table cannot skip the check. Tables headed Variable or
 Environment variable are checked as environment variables instead.
+
+A row can name several keys when its first cell is only a list of code spans
+(`` `quiet`, `simple` and `debug` ``). Its Default cell then holds one value for all of
+them, or one code span per key in the same order (`` `False`, `"origin/main"` ``). A
+key written with a value (`` `--build-target ci` ``) is checked as the key alone.
 
 | `of=` | The rows are |
 |-------|--------------|
@@ -192,6 +198,15 @@ Environment variable are checked as environment variables instead.
 | `global_settings`, `sandbox`, `global_settings.suppressions`, ... | the keys under that config path; a path through a list means one item of it |
 | `workspace-policy`, `workspace-policy.workspace`, ... | keys of the workspace policy file |
 | `cli`, `cli.scan`, `cli.config.get`, ... | the options and arguments of that `ash` command |
+| `mcp.run_ash_scan`, ... | the parameters of that MCP tool, from the input schema the server lists |
+| `python.automated_security_helper.interactions.run_ash_scan.run_ash_scan` | the parameters of a Python function, a class's `__init__` (`python.<module>.<Class>`) or a method (`python.<module>.<Class>.<method>`), read from the source without importing it |
+| `dockerfile` | the build arguments of the shipped `Dockerfile`, with the defaults its `ARG` lines give |
+| `cloudformation:deploy/cdk/templates` | the Parameters of one CloudFormation template, or of every template in a directory |
+| `github-inputs:.github/workflows/run-ash-security-scan.yml` | the inputs of a GitHub Action (its `action.yml` or the directory holding one) or of a workflow (`workflow_call` and `workflow_dispatch`) |
+
+Python, Dockerfile, CloudFormation and GitHub sections are read from the code tree, the
+checkout of the installed ASH (see [Checking docs against another checkout's
+code](#checking-docs-against-another-checkouts-code)).
 
 A Default cell is one of:
 
@@ -205,9 +220,16 @@ A Default cell is one of:
   platform;
 - one of the phrases `required`, `see the section` (the key is a nested section),
   `computed at run time` or `depends on the platform`, and for `ash` options `off`,
-  `on` or `not set`.
+  `on` or `not set`. `empty` means an empty string or list. A phrase may be set in
+  emphasis (`*required*`).
 
 A bare word such as `true` or `None` is read the same way; anything else is reported.
+
+Defaults of a `python.` section are read as Python, not YAML: write `` `None` ``,
+`` `False` ``, `` `"low"` `` or `` `ExecutionStrategy.PARALLEL` ``. A literal is compared
+by value and anything else by its source text, and a string may also be written without
+quotes (`` `t3.medium` ``). Dockerfile, CloudFormation and GitHub defaults are strings
+and are compared as written, so `` `NO` `` is the string NO, not false.
 
 ### Commands, options and variables in prose
 
@@ -406,7 +428,8 @@ to resolve in: save the block inside one with `save-as=<package>/<module>.py`.
 | is not a key of | the row names an option the section does not have; the message suggests the nearest |
 | default says ..., but the default is | the code's default changed; state the one in the message |
 | says required, but the default is / but the key is required | the key does (or does not) have a default |
-| is not a value or a recognized phrase | write the default in one code span |
+| is not a value or a recognized phrase | write the default in one code span, and move any explanation to another column |
+| the MCP server has no tool, defines no function or class, no module, is not in the code tree, declares no inputs | the `of=` names nothing in the code; the message says which part |
 | has no key, ships no scanner named | a dotted config path in a code span does not exist |
 | needs of= / an options marker goes on the line directly above a table | fix the marker |
 
