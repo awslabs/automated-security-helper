@@ -378,7 +378,8 @@ def test_ferret_always_gets_an_explicit_config_outside_the_tree(tmp_path):
         config=FerretScannerConfig(options={"use_default_config": False}),
         context=_context(source, tmp_path, config),
     )
-    values = [a.value for a in scanner.args.extra_args if a.key == "--config"]
+    argv = scanner._resolve_arguments(source, tmp_path / "results.sarif")
+    values = [argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg == "--config"]
     assert len(values) == 1
     passed = Path(values[0])
     assert not passed.resolve().is_relative_to(source.resolve())

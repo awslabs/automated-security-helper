@@ -38,8 +38,8 @@ from automated_security_helper.utils.download_utils import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.config.path_trust import honored_path
+from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.content_db_refresh import (
@@ -297,8 +297,8 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
         (measured with trivy 0.75.0). The operator's file, from the option or the
         environment variable, is used when it is outside the scanned tree
         (config/path_trust.py); a refused option falls through to the variable.
-        Otherwise trivy gets a file ASH writes into the results directory, which
-        sets nothing.
+        Otherwise trivy gets a file that sets nothing, which ASH writes outside the
+        scanned tree (``empty_tool_config``).
         """
         context_config = getattr(self.context, "config", None)
         source_dir = Path(self.context.source_dir)
@@ -332,13 +332,7 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 "to use one.",
                 level=logging.WARNING,
             )
-        if self.results_dir is None:
-            raise ScannerError("TrivyRepoScanner has no results directory")
-        written = Path(os.path.abspath(self.results_dir)) / ash_name
-        written.parent.mkdir(parents=True, exist_ok=True)
-        with open_for_write(written) as handle:
-            handle.write(ash_content)
-        return written.as_posix()
+        return empty_tool_config(ash_name, ash_content, context=self.context).as_posix()
 
     @staticmethod
     def _package_from_message(message: str | None) -> tuple[str | None, str | None]:

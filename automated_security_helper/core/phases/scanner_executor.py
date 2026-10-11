@@ -28,6 +28,7 @@ from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
     sanitize_sarif_paths,
 )
+from automated_security_helper.utils.tool_config_dir import tool_config_scope
 
 _ResultsFn = Callable[
     [ScanResultsContainer, AshAggregatedResults], AshAggregatedResults
@@ -395,7 +396,14 @@ class ScannerExecutor:
                                     f"{target_type} runs under {sandbox.backend.name}"
                                 )
                             heartbeat.start()
-                            with sandbox_scope(sandbox):
+                            # The config files ASH writes for this run's tool live
+                            # in a directory of the run's own, outside the scanned
+                            # tree, which the sandbox lets the scanner read and
+                            # which is removed when the run ends.
+                            with (
+                                sandbox_scope(sandbox),
+                                tool_config_scope(self.plugin_context),
+                            ):
                                 try:
                                     raw_results = scanner_plugin.scan(
                                         target=scan_target,

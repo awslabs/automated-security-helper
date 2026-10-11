@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.config.resolve_config import resolve_config
 
 SCANNERS = ["bandit", "grype", "syft"]
@@ -215,7 +216,9 @@ def test_grype_gets_an_empty_config_not_the_trees(tmp_path: Path, name: str) -> 
     scanner = GrypeScanner(context=context, config=GrypeScannerConfig())
     argv, _, _ = scanner._execute_scan(Path(context.source_dir), "source", [])
     (passed,) = _values_after([str(a) for a in argv], "--config")
-    assert Path(passed).parent == Path(scanner.results_dir)
+    # Written outside the scanned tree, not in the results directory under it.
+    assert not in_scanned_tree(passed, context.source_dir)
+    assert Path(passed).parent != Path(scanner.results_dir)
     assert yaml.safe_load(Path(passed).read_text(encoding="utf-8")) == {}
     assert all(arg.key != "--config" for arg in scanner.args.extra_args), (
         "the empty config is added for the scan only"
@@ -261,9 +264,13 @@ def test_syft_gets_an_empty_config_not_the_trees(
     )
     scanner.dependencies_satisfied = True
     calls: List[List[str]] = []
+    contents: List[Any] = []
 
     def fake_run(*args: Any, **kwargs: Any) -> Dict[str, Any]:
-        calls.append([str(a) for a in kwargs.get("command") or args[0]])
+        argv = [str(a) for a in kwargs.get("command") or args[0]]
+        calls.append(argv)
+        (passed,) = _values_after(argv, "--config")
+        contents.append(yaml.safe_load(Path(passed).read_text(encoding="utf-8")))
         raise RuntimeError("stop after the command is built")
 
     monkeypatch.setattr(scanner, "_pre_scan", lambda *a, **k: True)
@@ -272,8 +279,10 @@ def test_syft_gets_an_empty_config_not_the_trees(
         scanner.scan(target=Path(context.source_dir), target_type="source")
     (argv,) = calls
     (passed,) = _values_after(argv, "--config")
-    assert Path(passed).parent == Path(scanner.results_dir)
-    assert yaml.safe_load(Path(passed).read_text(encoding="utf-8")) == {}
+    # Written outside the scanned tree, not in the results directory under it.
+    assert not in_scanned_tree(passed, context.source_dir)
+    assert Path(passed).parent != Path(scanner.results_dir)
+    assert contents == [{}]
 
 
 @pytest.mark.parametrize("tool", ["semgrep", "opengrep"])

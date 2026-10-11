@@ -24,6 +24,7 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -425,7 +426,7 @@ def test_a_config_file_in_the_source_directory_is_not_used(
     """The repository being scanned does not choose bandit's config.
 
     ASH used to pass the first of these it found. Now none is passed, and bandit
-    gets an empty --ini written in the results directory, so it does not read a
+    gets an empty --ini written outside the scanned tree, so it does not read a
     .bandit under the target on its own either.
     """
     in_tree = plugin_context.source_dir / relative_path
@@ -438,7 +439,8 @@ def test_a_config_file_in_the_source_directory_is_not_used(
     assert in_tree.as_posix() not in " ".join(argv)
     assert "--configfile" not in argv
     (ini,) = _value_after(argv, "--ini")
-    assert Path(ini).parent == Path(scanner.results_dir)
+    assert not in_scanned_tree(ini, plugin_context.source_dir)
+    assert Path(ini).parent != Path(scanner.results_dir)
     assert Path(ini).read_text(encoding="utf-8") == "[bandit]\n"
 
 

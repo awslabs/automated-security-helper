@@ -22,12 +22,12 @@ from automated_security_helper.config.path_trust import (
     honored_path,
     resolved_path,
 )
+from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
 )
 from automated_security_helper.base.plugin_base import pep440_requirement
-from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.uv_tool_runner import checked_requirement
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs, ToolExtraArg
@@ -814,13 +814,14 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         # Config file. Always passed: without --config, ferret-scan loads a
         # ferret.yaml from its working directory, the source directory (measured
         # with ferret-scan 2.5.3), so a run with no config of its own gets an
-        # empty one ASH writes, which ferret-scan treats as its defaults.
-        config_file_path = (
-            self._find_config_file(options.config_file) or self._empty_config_file()
-        )
-        self.args.extra_args.append(
-            ToolExtraArg(key="--config", value=str(config_file_path))
-        )
+        # empty one ASH writes, which ferret-scan treats as its defaults. That one
+        # is added when the arguments are resolved for a scan (_resolve_arguments),
+        # not here, where constructing the scanner would write it.
+        config_file_path = self._find_config_file(options.config_file)
+        if config_file_path is not None:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--config", value=str(config_file_path))
+            )
 
         # Profile
         if options.profile:
@@ -997,12 +998,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         )
 
     def _empty_config_file(self) -> Path:
-        """An empty ferret-scan config in this scanner's results directory."""
-        path = Path(self.results_dir) / "ferret-empty-config.yaml"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open_for_write(path) as handle:
-            handle.write("{}\n")
-        return path.resolve()
+        """An empty ferret-scan config, written outside the scanned tree."""
+        return empty_tool_config(
+            "ferret-empty-config.yaml", "{}\n", context=self.context
+        ).resolve()
 
     def _bundled_config(self) -> Path | None:
         """The config bundled with this plugin, when use_default_config allows it."""
@@ -1029,6 +1028,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         """
         # Process configuration options
         self._process_config_options()
+        if not any(arg.key == "--config" for arg in self.args.extra_args):
+            self.args.extra_args.append(
+                ToolExtraArg(key="--config", value=str(self._empty_config_file()))
+            )
 
         # Build command
         args = [self.command]

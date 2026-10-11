@@ -49,8 +49,9 @@ What happens now
   there are the client's, so none is replayed.
 * The scanners no longer look for a config file by name.
 * Each of them hands its tool an explicit config, the operator's or an empty one
-  ASH writes in the results directory, so the tool does not pick a file up from
-  the tree on its own either (see each scanner's ``_process_config_options``).
+  ASH writes outside the scanned tree (``empty_tool_config``), so the tool does
+  not pick a file up from the tree on its own either (see each scanner's
+  ``_process_config_options``).
 
 The same rule as reporter destinations (``config/reporter_trust.py``), which this
 follows.
@@ -321,22 +322,22 @@ def _confine_settings_files(
     return ignored
 
 
-def empty_tool_config(results_dir: Any, name: str, content: str) -> Path:
-    """A config file that sets nothing, written in the scanner's results directory.
+def empty_tool_config(name: str, content: str, *, context: Any) -> Path:
+    """A config file that sets nothing, for a tool that would otherwise find its own.
 
     Handed to a tool that would otherwise look for its config file in its
-    working directory or under the scan target on its own. Written without
-    following a link at that name (``utils/sandbox/fs_guard.open_for_write``),
-    since a sandboxed scanner can write its results directory.
+    working directory or under the scan target on its own. Written in the
+    scanner run's own directory outside the scanned tree, created fresh and
+    removed when the run ends (``utils/tool_config_dir``), never in the results
+    directory, which is inside the tree in the default layout.
+
+    Args:
+        name: The file's name (``grype-empty.yaml``); the tool may read its
+            format from the extension.
+        content: What the file holds, which sets nothing for that tool.
+        context: The scanner's PluginContext, whose scanned tree the file is
+            kept out of.
     """
-    import os
+    from automated_security_helper.utils.tool_config_dir import write_tool_config
 
-    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
-
-    if results_dir is None:
-        raise ValueError(f"no results directory to write {name} in")
-    written = Path(os.path.abspath(results_dir)) / name
-    written.parent.mkdir(parents=True, exist_ok=True)
-    with open_for_write(written) as handle:
-        handle.write(content)
-    return written
+    return write_tool_config(name, content, context=context)

@@ -198,9 +198,10 @@ class SandboxPolicy:
     scan's own data, so the system and tool paths. Programs run from there, and from
     the spawn's private uv cache, which the backend adds because ``uv tool run``
     keeps the environments of tools it was not asked to install there. ``scan_data`` is the scan's data
-    (the source tree, the output directory, the scan target and the working
-    directory), which stays non-executable even where a tool path contains it, so a
-    repository checked out under ``/opt`` cannot have its own binaries run.
+    (the source tree, the output directory, the scan target, the working directory
+    and the directory of config files ASH wrote for the tool), which stays
+    non-executable even where a tool path contains it, so a repository checked out
+    under ``/opt`` cannot have its own binaries run.
     """
 
     scanner_name: str
@@ -645,6 +646,7 @@ def build_scanner_policy(
     network_scanners: Optional[Sequence[str]],
     extra_read_paths: Sequence[str] = (),
     network_limit: Optional[Sequence[str]] = None,
+    tool_config_dir: Optional[Path] = None,
 ) -> SandboxPolicy:
     """The policy one scanner gets for one spawn.
 
@@ -654,6 +656,9 @@ def build_scanner_policy(
         network_limit: When not None, a scanner not named here gets no network
             whatever the rest says. Set from a config file in the scanned tree,
             which may take network away but not grant it.
+        tool_config_dir: The directory of config files ASH wrote for this scanner
+            run's tool (``utils/tool_config_dir``). Read-only, and data: no program
+            is run from it.
     """
     real_home = Path.home()
     if network_scanners is None:
@@ -673,7 +678,7 @@ def build_scanner_policy(
         + _executable_prefix(argv0)
         + [_expand(p) for p in requirements.read_paths]
         + [_expand(p) for p in extra_read_paths]
-        + [source_dir, output_dir, scan_target, _readable_cwd(cwd)]
+        + [source_dir, output_dir, scan_target, _readable_cwd(cwd), tool_config_dir]
     )
 
     cache = _existing(
@@ -698,7 +703,7 @@ def build_scanner_policy(
     read_only = [p for p in read_only if not _inside_writable(p)]
     cache = [p for p in cache if not _inside_writable(p)]
 
-    scan_data = _existing([source_dir, output_dir, scan_target, cwd])
+    scan_data = _existing([source_dir, output_dir, scan_target, cwd, tool_config_dir])
     not_programs = {os.path.realpath(p) for p in [*scan_data, *_DATA_SYSTEM_PATHS]}
     executable = [p for p in read_only if os.path.realpath(p) not in not_programs]
 

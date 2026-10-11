@@ -282,7 +282,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 )
         # bandit reads a .bandit file it finds under the scan target on its own
         # unless --ini names one, so a scan always passes one: the operator's, or
-        # an empty one written in the results directory when the scan runs
+        # an empty one written outside the scanned tree when the scan runs
         # (_execute_scan), not here, where constructing the scanner would write it.
         self._ini_file = ini_file
 
@@ -343,7 +343,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         )
         original_extra_args = list(self.args.extra_args)
         ini_file = self._ini_file or empty_tool_config(
-            self.results_dir, "bandit-empty.ini", "[bandit]\n"
+            "bandit-empty.ini", "[bandit]\n", context=self.context
         )
         self.args.extra_args.append(
             ToolExtraArg(key="--ini", value=ini_file.as_posix())

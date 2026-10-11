@@ -42,6 +42,7 @@ from automated_security_helper.utils.sandbox.policy import (
     refuse_symlinked_output_dir,
     build_scanner_policy,
 )
+from automated_security_helper.utils.tool_config_dir import active_tool_config_dir
 
 
 @dataclass
@@ -328,6 +329,8 @@ def prepare_spawn(
         network_scanners=scope.network_scanners,
         extra_read_paths=scope.extra_read_paths,
         network_limit=scope.network_limit,
+        # This thread's scanner run's own config files, and no other run's.
+        tool_config_dir=active_tool_config_dir(),
     )
     plan = scope.backend.plan(list(argv), base_env, policy)
     # First in line once the process has exited: nothing ASH writes into the

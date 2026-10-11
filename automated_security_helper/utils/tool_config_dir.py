@@ -1,0 +1,219 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The directory that holds the config files ASH writes for a scanner's tool.
+
+Why this exists
+---------------
+bandit, grype, syft, trivy and ferret-scan each read a config file of their own
+from the scanned tree unless they are given one, so ASH always gives one: the
+operator's, or a file ASH writes that sets nothing
+(``config/tool_config_trust.empty_tool_config``). Those files used to be written in
+the scanner's results directory. That is under the output directory, which
+defaults to ``<source>/.ash/ash_output``, so the file sat inside the tree being
+scanned, at a path the scanned repository could already occupy with a committed
+file or link, and the tool read it from there.
+
+What happens now
+----------------
+Each scanner run has a directory of its own for these files
+(:func:`tool_config_scope`, entered by the scanner executor around each
+``scan()``). It is
+
+* made by ``tempfile.mkdtemp``, so it is new, its name is not known in advance,
+  and its mode is 0700. It is in the system temporary directory, or under the
+  output directory when the temporary directory is inside the scanned tree and the
+  output directory is not;
+* made only when the run writes its first file, and each file in it is created
+  with ``O_EXCL`` and ``O_NOFOLLOW``, so it is a new file ASH wrote;
+* readable, and not writable, by that scanner under ``--sandbox``:
+  ``utils/sandbox/scope.prepare_spawn`` adds :func:`active_tool_config_dir` to each
+  spawn's read grants, as data a program may not be run from;
+* removed when the run ends, whether the tool succeeded, failed or never started.
+
+Failure modes and known limitations
+-----------------------------------
+* When the temporary directory and the output directory are both inside the
+  scanned tree (a scan of a whole filesystem), the directory is made in the
+  temporary directory anyway, and a warning says so. It is still new and private,
+  so nothing in the repository can be at its path, but a tool that walks the tree
+  may come across it.
+* A scanner run outside the scanner executor (a test, a scanner module run as a
+  script) has no scope. Each file it writes gets a directory of its own, removed
+  when the process exits.
+"""
+
+from __future__ import annotations
+
+import atexit
+import contextvars
+import os
+import shutil
+import tempfile
+import threading
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Iterator, List, Optional
+
+from automated_security_helper.utils.log import ASH_LOGGER
+
+#: The name every such directory starts with.
+TOOL_CONFIG_DIR_PREFIX = "ash-tool-config-"
+
+_CREATE_FLAGS = (
+    os.O_WRONLY
+    | os.O_CREAT
+    | os.O_EXCL
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_BINARY", 0)
+)
+
+
+class _ToolConfigDir:
+    """One scanner run's directory, made when the run writes its first file."""
+
+    def __init__(self, context: Any) -> None:
+        config = getattr(context, "config", None)
+        source_dir = getattr(context, "source_dir", None)
+        output_dir = getattr(context, "output_dir", None)
+        root = getattr(config, "_scanned_root", None) or source_dir
+        self.scan_root: Optional[Path] = Path(root) if root is not None else None
+        self.output_dir: Optional[Path] = (
+            Path(os.path.abspath(output_dir)) if output_dir is not None else None
+        )
+        self.path: Optional[Path] = None
+        self._lock = threading.Lock()
+
+    def directory(self) -> Path:
+        with self._lock:
+            if self.path is None:
+                self.path = _new_directory(self.scan_root, self.output_dir)
+            return self.path
+
+    def remove(self) -> None:
+        with self._lock:
+            path, self.path = self.path, None
+        if path is None:
+            return
+        try:
+            shutil.rmtree(path)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            ASH_LOGGER.warning(
+                f"Could not remove {path.as_posix()}, which holds the config files "
+                f"ASH wrote for a scanner: {e}"
+            )
+
+
+_ACTIVE: contextvars.ContextVar[Optional[_ToolConfigDir]] = contextvars.ContextVar(
+    "ash_tool_config_dir", default=None
+)
+
+_unscoped_lock = threading.Lock()
+_unscoped: List[_ToolConfigDir] = []
+_unscoped_cleanup_registered = False
+
+
+def _remove_unscoped() -> None:
+    with _unscoped_lock:
+        pending = list(_unscoped)
+        _unscoped.clear()
+    for holder in pending:
+        holder.remove()
+
+
+def _inside_tree(path: Path, scan_root: Optional[Path]) -> bool:
+    # Imported here: path_trust reaches the config models, which import the
+    # scanners that use this module.
+    from automated_security_helper.config.path_trust import in_scanned_tree
+
+    return scan_root is not None and in_scanned_tree(path, scan_root)
+
+
+def _new_directory(scan_root: Optional[Path], output_dir: Optional[Path]) -> Path:
+    """A new 0700 directory, outside the scanned tree wherever one can be made."""
+    parents = [Path(tempfile.gettempdir())]
+    if (
+        output_dir is not None
+        and output_dir.is_dir()
+        and not _inside_tree(output_dir, scan_root)
+    ):
+        parents.append(output_dir)
+    for parent in parents:
+        try:
+            made = Path(tempfile.mkdtemp(prefix=TOOL_CONFIG_DIR_PREFIX, dir=parent))
+        except OSError:
+            continue
+        if not _inside_tree(made, scan_root):
+            return made
+        os.rmdir(made)
+    made = Path(tempfile.mkdtemp(prefix=TOOL_CONFIG_DIR_PREFIX))
+    ASH_LOGGER.warning(
+        f"The temporary directory and the output directory are inside the scanned "
+        f"tree, so the config files ASH writes for the scanner's tool are in "
+        f"{made.as_posix()}, inside it too."
+    )
+    return made
+
+
+@contextmanager
+def tool_config_scope(context: Any) -> Iterator[None]:
+    """One scanner run: files written during it share a directory, removed at the end.
+
+    Args:
+        context: The run's PluginContext. Its source directory (or the wider root
+            ``AshConfig._scanned_root`` records) is the tree the directory must be
+            outside, and its output directory the second place one is made.
+    """
+    holder = _ToolConfigDir(context)
+    reset = _ACTIVE.set(holder)
+    try:
+        yield
+    finally:
+        _ACTIVE.reset(reset)
+        holder.remove()
+
+
+def active_tool_config_dir() -> Optional[Path]:
+    """The directory of the scanner run in progress, if it has written a file."""
+    holder = _ACTIVE.get()
+    return holder.path if holder is not None else None
+
+
+def write_tool_config(name: str, content: str, *, context: Any = None) -> Path:
+    """Write ``content`` as ``name`` in the run's directory and return its path.
+
+    The file is created, never opened as an existing one, and a link at its name is
+    not followed. A second file of the same name in one run gets a new
+    subdirectory, so each caller gets the content it wrote.
+
+    Args:
+        name: The file's name, which the tool may read its format from
+            (``grype-empty.yaml``).
+        content: What the file holds.
+        context: The scanner's PluginContext, for a run outside a scope: the file
+            then gets a directory of its own, outside that context's scanned tree,
+            removed when the process exits.
+    """
+    if Path(name).name != name or name in ("", ".", ".."):
+        raise ValueError(f"not a file name: {name!r}")
+    global _unscoped_cleanup_registered
+    holder = _ACTIVE.get()
+    if holder is None:
+        holder = _ToolConfigDir(context)
+        with _unscoped_lock:
+            if not _unscoped_cleanup_registered:
+                atexit.register(_remove_unscoped)
+                _unscoped_cleanup_registered = True
+            _unscoped.append(holder)
+    directory = holder.directory()
+    path = directory / name
+    try:
+        fd = os.open(path, _CREATE_FLAGS, 0o600)
+    except FileExistsError:
+        path = Path(tempfile.mkdtemp(dir=directory)) / name
+        fd = os.open(path, _CREATE_FLAGS, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+        handle.write(content)
+    return path

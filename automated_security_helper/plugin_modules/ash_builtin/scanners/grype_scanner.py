@@ -390,7 +390,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         results_file.parent.mkdir(exist_ok=True, parents=True)
         original_extra_args = list(self.args.extra_args)
         if not any(arg.key == "--config" for arg in self.args.extra_args):
-            empty = empty_tool_config(self.results_dir, "grype-empty.yaml", "{}\n")
+            empty = empty_tool_config("grype-empty.yaml", "{}\n", context=self.context)
             self.args.extra_args.append(
                 ToolExtraArg(key="--config", value=empty.as_posix())
             )

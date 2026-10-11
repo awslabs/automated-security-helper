@@ -256,7 +256,9 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             # set during model_post_init but lost by the ToolArgs rebuild above.
             self._process_config_options()
             if not any(arg.key == "--config" for arg in self.args.extra_args):
-                empty = empty_tool_config(self.results_dir, "syft-empty.yaml", "{}\n")
+                empty = empty_tool_config(
+                    "syft-empty.yaml", "{}\n", context=self.context
+                )
                 self.args.extra_args.append(
                     ToolExtraArg(key="--config", value=empty.as_posix())
                 )
