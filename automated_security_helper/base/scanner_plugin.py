@@ -503,22 +503,30 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if isinstance(code, int) and not isinstance(code, bool):
             self.exit_code = abs(code)
 
-    def _refuse_rejected_exit_code(self) -> None:
+    def _refuse_rejected_exit_code(self, results_file: Optional["Path"] = None) -> None:
         """Raise ScannerError when the tool's exit code is outside its success set.
 
-        For a scanner that overrides ``scan()`` and runs one tool per target, as the
-        template does: call it after the run and before reading the results file. A
+        For the template and for a scanner that overrides ``scan()`` and runs one tool
+        per target: call it after the run and before reading the results file. A
         tool that failed can still leave a results file -- semgrep writes SARIF that
         holds only error notifications when it cannot read its rules, and grype a
         zero-byte report when it cannot load its database -- and "found nothing"
-        and "never scanned" read the same in it. The message names the code and the
-        accepted set; ``_describe_scan_failure`` adds the tool's stderr.
+        and "never scanned" read the same in it.
+
+        The message names the code. With ``results_file``, for an override whose own
+        handler does not describe the failure, it also carries the accepted set and
+        the tool's stderr (``_describe_scan_failure``); the template's handler adds
+        those itself.
         """
-        if not self._exit_code_accepted():
-            raise ScannerError(
-                f"its tool exited with code {self.exit_code}, which this scanner "
-                "does not accept as a completed run, so its results file is not read"
-            )
+        if self._exit_code_accepted():
+            return
+        rejected = ScannerError(
+            f"its tool exited with code {self.exit_code}, which this scanner "
+            "does not accept as a completed run, so its results file is not read"
+        )
+        if results_file is None:
+            raise rejected
+        raise ScannerError(self._describe_scan_failure(rejected, results_file))
 
     # Log level used for the empty-target preamble message. Defaults to INFO;
     # bandit overrides to VERBOSE since python-only repos commonly trip it.

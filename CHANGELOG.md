@@ -586,6 +586,15 @@
   run's exit code. The accepted codes per scanner, with their sources, are in
   [A Scanner Is ERROR With an Exit Code It Does Not Accept](docs/content/docs/troubleshooting.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
 
+  The same rule now holds for the scanners that run their tool outside the template:
+  trivy-repo, syft, ferret-scan and snyk-code. trivy-repo and syft accept only 0, where
+  they accepted 0 and 1: neither tool has a "findings found" code, and 1 is how both
+  report an error. As a result, an `exit-code` setting in a `trivy.yaml` in the
+  scanned directory or in `TRIVY_EXIT_CODE` turns a trivy-repo run with findings into
+  `ERROR`, since that exit cannot be told apart from trivy's own error exit; leave it
+  unset. snyk-code, which raised on every non-zero code, now accepts 1 ("issues
+  found"), so a snyk run with findings reports them instead of failing.
+
   **A scan that exited 0 can now exit 1.** That is a scanner whose tool was failing
   all along. With `fail_on_incomplete_scanners: false` the `ERROR` row does not fail
   the scan and the exit code comes from the findings alone, so such a scan still

@@ -3,7 +3,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Annotated, ClassVar, List, Literal
+from typing import Annotated, ClassVar, List, Literal, Set
 
 from pydantic import Field, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -87,6 +87,11 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
+
+    # syft exits 0 for a completed run; cmd/syft/main.go runs clio, whose Run exits 1
+    # on any error, and syft installs no other exit-code mapping. An SBOM has no
+    # "findings found" code.
+    success_exit_codes: ClassVar[Set[int]] = {0}
 
     # Env vars to layer onto the subprocess. Populated in model_post_init when
     # offline mode is active. Kept local to the scanner instance so concurrent
@@ -275,7 +280,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             subprocess_env = (
                 {**snapshot_environ(), **self.extra_env} if self.extra_env else None
             )
-            self._run_subprocess(
+            response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
                 env=subprocess_env,
@@ -286,6 +291,8 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 target=target,
                 target_type=target_type,
             )
+            self._record_target_exit_code(response)
+            self._refuse_rejected_exit_code(results_file)
 
             syft_results = {}
             with open(results_file, mode="r", encoding="utf-8") as f:

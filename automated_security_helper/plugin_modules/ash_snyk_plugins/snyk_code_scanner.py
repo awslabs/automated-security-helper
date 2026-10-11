@@ -6,7 +6,7 @@ import shlex
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, List, Literal
+from typing import Annotated, Any, ClassVar, List, Literal, Set
 from pydantic import Field
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -60,6 +60,10 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
+
+    # src/cli/exit-codes.ts: 0 no issues, 1 issues found, 2 an error, 3 no supported
+    # project detected.
+    success_exit_codes: ClassVar[Set[int]] = {0, 1}
 
     def model_post_init(self, context):
         if self.config is None:
@@ -243,15 +247,16 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             )
 
             # No environment modifications are currently needed for Snyk Code.
-            self._run_subprocess(
+            response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
                 timeout=self._effective_scan_timeout(),
             )
 
-            # Handle errors executing the scanner. For Snyk, non-zero response indicate the scanner was not
-            # executed successfully.
-            if self.exit_code != 0:
+            # snyk exits 1 when it found issues, which is a completed scan, and 2 or 3
+            # when it failed or found no supported project; see success_exit_codes.
+            self._record_target_exit_code(response)
+            if not self._exit_code_accepted():
                 raise ScannerError(
                     f"Snyk scan failed with exit code {self.exit_code}: {self.errors}"
                 )

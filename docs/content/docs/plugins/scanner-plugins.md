@@ -54,6 +54,19 @@ Hooks such as `_process_config_options()`, `_resolve_arguments()`, `_pre_scan()`
 `_post_scan()` and `_post_process_sarif()` let you adjust individual steps
 without replacing the template.
 
+### Exit codes
+
+`success_exit_codes` names the exit codes your tool uses for a run that completed:
+0, plus the code it uses for "completed, findings found" if it has one. The default
+is `{0, 1}`; grype, for example, declares `{0, 2}`, and a tool with no findings code
+declares `{0}`. When the tool exits with any other code, the template does not read
+the results file and raises `ScannerError`, so the scanner is recorded `ERROR` with
+the code and the tool's stderr. A failed tool can leave a file that holds no
+findings, and reading it would grade the run `PASSED`. Cite the tool's own
+documentation or source for each code you add: a set that is too wide records a
+failed tool as a clean scan, and one that is too narrow turns ordinary scans into
+errors.
+
 ### Overriding scan() directly
 
 A scanner whose workflow does not fit the template — one that calls a Python API
@@ -75,6 +88,20 @@ class ApiScanner(ScannerPluginBase[ApiScannerConfig]):
 Omitting the stub makes the class abstract, and it fails at instantiation rather
 than at scan time. `examples/ash_plugins_example/my_ash_plugins/scanner.py`
 follows this pattern.
+
+An override that runs one tool per target applies the same exit-code rule itself,
+after the run and before it reads the results file:
+
+```python
+        response = self._run_subprocess(command=argv, results_dir=results_dir)
+        self._record_target_exit_code(response)
+        self._refuse_rejected_exit_code(results_file)
+```
+
+`_record_target_exit_code` makes `exit_code` this run's code (the plugin otherwise
+keeps the largest code any of its runs returned), and `_refuse_rejected_exit_code`
+raises `ScannerError` naming the code, the accepted set and the tool's stderr when
+the code is not in `success_exit_codes`.
 
 ## Scanner Plugin Configuration
 

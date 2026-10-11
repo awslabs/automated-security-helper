@@ -1152,7 +1152,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             )
 
             # Run ferret-scan with output to file
-            self._run_subprocess(
+            response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
                 stdout_preference="write",
@@ -1163,6 +1163,9 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             )
 
             self._post_scan(target=target, target_type=target_type)
+            # Exit 1 is ferret-scan's error code; see success_exit_codes.
+            self._record_target_exit_code(response)
+            self._refuse_rejected_exit_code(results_file)
 
             # --fail-on-incomplete makes ferret-scan exit 3 when coverage was cut short.
             # The SARIF is still valid (partial); surface it as a warning so missing

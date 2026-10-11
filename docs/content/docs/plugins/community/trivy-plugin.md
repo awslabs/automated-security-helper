@@ -192,6 +192,15 @@ scanners:
 
 The Trivy plugin integrates with ASH's unified reporting system, producing results in SARIF format that can be converted to various output formats.
 
+trivy-repo accepts only exit code 0 as a completed run. trivy exits 0 whether or not
+it found anything and 1 on an error, so a run that exits 1 is recorded `ERROR` and its
+results file is not read. An `exit-code` setting in a `trivy.yaml` in the scanned
+directory, which trivy reads from its working directory, or in `TRIVY_EXIT_CODE`,
+makes a run with findings exit with that code; the scanner is then `ERROR` instead of
+reporting them. ASH decides the scan's exit code from the findings, so leave
+`exit-code` unset. See
+[A Scanner Is ERROR With an Exit Code It Does Not Accept](../../troubleshooting.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
+
 ### Available Output Formats
 
 - **SARIF**: Machine-readable results for CI/CD integration

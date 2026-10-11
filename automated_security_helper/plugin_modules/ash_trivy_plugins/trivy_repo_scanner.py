@@ -150,6 +150,15 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 
+    # trivy exits 0 for a completed run, findings or not, unless --exit-code names
+    # another code for findings (default 0, pkg/flag/report_flags.go), and 1 from
+    # log.Fatal on any error (cmd/trivy/main.go). ASH passes no --exit-code, so 1 is
+    # an error. An exit-code set in a trivy.yaml in the scanned directory (trivy
+    # reads it from its working directory) or in TRIVY_EXIT_CODE makes a run with
+    # findings exit with that code, and it is then recorded as a failed run: 1 is
+    # indistinguishable from trivy's own error exit.
+    success_exit_codes: ClassVar[Set[int]] = {0}
+
     # Env vars layered onto the subprocess. Populated by _process_config_options
     # when offline mode is active. Kept on the instance so concurrent scanners
     # do not race on os.environ.
@@ -569,12 +578,14 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 level=logging.VERBOSE,
             )
 
-            self._run_subprocess(
+            response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
                 env=subprocess_env,
                 timeout=self._effective_scan_timeout(),
             )
+            self._record_target_exit_code(response)
+            self._refuse_rejected_exit_code(results_file)
 
             # SARIF mode - parse SARIF results
             if Path(results_file).exists():
@@ -612,9 +623,7 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                                 arguments=final_args[1:],
                                 startTimeUtc=self.start_time,
                                 endTimeUtc=self.end_time,
-                                executionSuccessful=(
-                                    self.exit_code == 0 or self.exit_code == 1
-                                ),
+                                executionSuccessful=self._exit_code_accepted(),
                                 exitCode=self.exit_code,
                                 exitCodeDescription="\n".join(self.errors),
                                 workingDirectory=ArtifactLocation(

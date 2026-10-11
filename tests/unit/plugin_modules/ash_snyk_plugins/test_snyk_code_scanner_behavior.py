@@ -548,27 +548,13 @@ def test_nonzero_exit_code_raises_scanner_error(
     assert "exit code 2" in str(excinfo.value)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ScannerError,
-    reason=(
-        "scan() raises on any non-zero exit code, but snyk exits 1 when it finds "
-        "actionable items. _run_subprocess stores that 1 in self.exit_code via "
-        "_process_command_response, so the `if self.exit_code != 0` check fires "
-        "before the _post_scan override that exists to reset 1 back to 0 -- and "
-        "before the base class's own success_exit_codes = {0, 1}. A snyk run that "
-        "actually finds something therefore reports a scanner failure instead of "
-        "returning its findings. Remove this xfail once the check excludes 1."
-    ),
-)
 def test_exit_code_one_means_findings_not_failure(
     scanner, snyk_on_path, populated_source, subprocess_double
 ):
-    """Snyk exits 1 when it finds issues; that is a successful scan.
+    """Snyk exits 1 when it finds issues; that is a completed scan, not a failure.
 
-    The _post_scan override in this module documents exactly this ("Snyk
-    returns 1 on a successful scan when actionable items are detected") but
-    never gets the chance to act on it during a real scan.
+    It used to raise: the scan checked ``exit_code != 0`` instead of the scanner's
+    accepted set, so a snyk run that found something reported a scanner failure.
     """
     subprocess_double.side_effect = writes_sarif(snyk_sarif(), exit_code=1)
 
