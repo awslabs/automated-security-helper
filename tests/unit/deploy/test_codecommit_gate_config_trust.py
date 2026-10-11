@@ -11,9 +11,9 @@ The gate clones a pull request and runs ``ash scan`` over it. ASH reads its conf
 file it discovers inside the scanned tree (``_discovered_config_path``,
 interactions/run_ash_scan.py). The Terraform image's entrypoint sets ``ASH_CONFIG`` only
 when a base config was supplied, so a gate deployed without one let the pull request's
-own ``.ash/.ash.yaml`` decide what was scanned and what counted: measured during the
-deploy audit, a pull request adding ``global_settings.ignore_paths`` turned a failing
-scan into exit 0, "pass", and an APPROVE. The verdict has to come from a config file the
+own ``.ash/.ash.yaml`` decide what was scanned and what counted: measured, a pull
+request adding ``global_settings.ignore_paths`` turned a failing scan into exit 0,
+"pass", and an APPROVE. The verdict has to come from a config file the
 operator controls, outside the cloned tree, whether or not a base config was supplied.
 
 The scan also inherited the function's environment, which on Lambda carries the

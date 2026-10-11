@@ -335,9 +335,10 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  *
  * HOST CHECKING IS AN EXPLICIT DECISION, AND SO IS SESSION TRUST
  * --------------------------------------------------------------
- * ASH's MCP hardening refuses to bind a non-loopback host without `--allowed-host`
- * unless the operator passes `--trust-upstream-host-check`, the statement that a
- * proxy or platform in front of ASH checks Host and Origin. In stateless mode it no
+ * An ASH whose `ash mcp` has these options refuses to bind a non-loopback host
+ * without `--allowed-host` unless the operator passes `--trust-upstream-host-check`,
+ * the statement that a proxy or platform in front of ASH checks Host and Origin. In
+ * stateless mode it no
  * longer treats a client-supplied `Mcp-Session-Id` as a session identity unless the
  * operator passes `--trust-upstream-session-id`, the statement that the platform in
  * front issues and authenticates that header. The entrypoint maps two environment

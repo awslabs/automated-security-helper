@@ -196,9 +196,8 @@
  *   AshFargate              68,502    over   17,302  76,674     over  25,474
  *   AshImagePipeline        61,183    over    9,983  68,435     over  17,235
  *
- * AND WHAT THEY MEASURE NOW, after the gate and MCP hardening (the gate's config and
- * completeness checks, the MCP entrypoint's Host and session decisions, the bootstrap's
- * response-URL parameter):
+ * AND WHAT THEY MEASURE NOW, with the gate's config and completeness checks, the MCP
+ * entrypoint's Host and session decisions and the bootstrap's response-URL parameter:
  *
  *                            bytes    margin
  *   AshAgentCore            50,400    under    800  (288 under the budget below)

@@ -96,3 +96,33 @@ def test_the_gate_egress_row_says_when_ssm_is_called():
     ]
     assert len(rows) == 1
     assert "SSM" not in rows[0] or "base_config_ssm_parameter_name" in rows[0]
+
+
+#: Labels of the review process that produced these changes. They name notes and
+#: paths that are not in the repository, so a reader of the shipped file cannot
+#: follow them; the text has to describe the behavior instead.
+_PROCESS_LABELS = re.compile(
+    r"deploy audit|gateprobe|research/audit|interface notes|mcp cluster"
+    r"|config hardening|MCP hardening|D6 fallback",
+    re.IGNORECASE,
+)
+
+
+def test_shipped_comments_and_test_names_name_no_review_process():
+    roots = [DEPLOY, REPO_ROOT / "tests" / "unit" / "deploy"]
+    offending = []
+    for root in roots:
+        for path in sorted(root.rglob("*")):
+            if (
+                not path.is_file()
+                or path.suffix not in {".ts", ".py", ".md", ".tf", ".hcl", ".sh"}
+                or {"node_modules", ".terraform", "templates"} & set(path.parts)
+                or path.name == pathlib.Path(__file__).name
+            ):
+                continue
+            for number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                if _PROCESS_LABELS.search(line):
+                    offending.append(f"{path.relative_to(REPO_ROOT)}:{number}")
+    assert offending == []

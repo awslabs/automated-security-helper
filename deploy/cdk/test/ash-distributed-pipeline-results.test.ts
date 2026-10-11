@@ -20,9 +20,9 @@
  * ---------------------------
  * The shard projects set `ASH_CONFIG` as a project environment variable and write the
  * file only when a base config was supplied. With none, ASH used to treat a missing
- * `ASH_CONFIG` file as "use defaults". The config hardening makes an explicit config
- * path that does not exist refuse the scan with exit 3, so a pipeline deployed
- * without `AshBaseConfigYaml` would fail every shard. Whatever reaches `ash` has to be
+ * `ASH_CONFIG` file as "use defaults". An ASH that refuses an explicit config path
+ * that does not exist, with exit 3 as a config error, would fail every shard of a
+ * pipeline deployed without `AshBaseConfigYaml`. Whatever reaches `ash` has to be
  * a config file that exists, or no `ASH_CONFIG` at all. The phases are run in
  * separate shells, as the stack's own comment warns an `export` does not reliably
  * cross phases.

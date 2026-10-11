@@ -5,9 +5,9 @@
  * WHY THIS FILE EXISTS
  * --------------------
  * Both MCP targets run the same baked entrypoint (`MCP_ENTRYPOINT_SCRIPT`) on
- * `--host 0.0.0.0`. ASH's MCP hardening (the mcp cluster's interface notes, 1b and
- * 1c) makes two things explicit operator decisions instead of side effects of the
- * bind address:
+ * `--host 0.0.0.0`. An ASH whose `ash mcp` has `--trust-upstream-host-check` and
+ * `--trust-upstream-session-id` makes two things explicit operator decisions
+ * instead of side effects of the bind address:
  *
  * - Host checking. A non-loopback bind without `--allowed-host` refuses to start
  *   unless the operator passes `--trust-upstream-host-check`, which states that a
@@ -188,7 +188,7 @@ describe('AgentCore: the platform checks Host and issues the session header', ()
     expect(run.argv).not.toContain('--trust-upstream-host-check');
   });
 
-  test('control: the shipped defaults still start on a release ASH (the D6 fallback)', () => {
+  test('control: the shipped defaults still start on a release ASH (the stateful fallback)', () => {
     // A release ASH has neither trust flag and no Host check to opt out of, so the
     // opt-out has nothing to pass. This is the one-click default today.
     const run = runEntrypoint(agentCoreEnvironment(), 'release');

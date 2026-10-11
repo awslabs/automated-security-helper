@@ -9,7 +9,7 @@
  * under judgment chose the rules it was judged by: a committed
  * `fail_on_findings: false` turned a failing scan (exit 2) into exit 0, which the
  * handler reads as "passed" and, with `ApprovalGate=true`, APPROVEs. Measured
- * against main during the deploy audit (research/audit-advanced, gateprobe).
+ * against main.
  * `AshBaseConfigYaml`, the parameter that looks like the operator's control, was
  * stored in SSM and handed to the function by name, and nothing read it.
  *
