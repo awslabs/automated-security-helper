@@ -23,8 +23,10 @@ all run for real.
 
 from __future__ import annotations
 
+import glob
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 from unittest.mock import patch
@@ -129,26 +131,47 @@ def _scanner(
     return scanner
 
 
+def _unescaped(argument: str) -> str:
+    """A ``glob.escape``-d path as cfn-lint's ``glob.glob`` matches it."""
+    return re.sub(r"\[(.)\]", r"\1", argument)
+
+
 class FakeCfnLint:
-    """Stands in for _run_subprocess: records argv and writes captured SARIF."""
+    """Stands in for _run_subprocess: records argv and writes captured SARIF.
+
+    ``captured_by_template`` is keyed by repository-relative template path. Each
+    captured result is located at the path cfn-lint was given for that template,
+    as cfn-lint locates it (measured with 1.57.2: an absolute argument gives an
+    absolute URI).
+    """
 
     def __init__(self, captured_by_template: dict, returncode=6, extra=None):
         self.captured_by_template = captured_by_template
         self.returncode = returncode
         self.extra = extra or {}
         self.calls: list = []
+        self.cwds: list = []
 
     def __call__(self, command, **kwargs):
         self.calls.append(list(command))
+        self.cwds.append(kwargs.get("cwd"))
         output = next(
             a.split("=", 1)[1] for a in command if a.startswith("--output-file=")
         )
         files = command[command.index("--") + 1 :]
         runs = []
-        for name in files:
-            source = self.captured_by_template.get(name)
-            if source is not None:
-                runs.extend(json.loads(Path(source).read_text())["runs"])
+        for argument in files:
+            given = _unescaped(argument)
+            for name, source in self.captured_by_template.items():
+                if given == name or given.endswith("/" + name):
+                    for run in json.loads(Path(source).read_text())["runs"]:
+                        for result in run.get("results", []):
+                            for location in result.get("locations", []):
+                                artifact = location["physicalLocation"][
+                                    "artifactLocation"
+                                ]
+                                artifact["uri"] = given
+                        runs.append(run)
         # cfn-lint writes the file whenever it completes, findings or not (measured:
         # exit 0 on compliant.yaml still writes a 732-byte SARIF with no results).
         if self.returncode in (0, 2, 4, 6, 8, 10, 12, 14):
@@ -342,10 +365,13 @@ class TestScan:
         report = self._run(scanner, fake)
         assert len(fake.calls) == 1
         argv = fake.calls[0]
-        files = argv[argv.index("--") + 1 :]
+        files = [_unescaped(a) for a in argv[argv.index("--") + 1 :]]
         # settings.yaml has no Resources and unparseable.yaml is not YAML; both are
         # skipped exactly as cfn-nag skips them.
-        assert files == ["templates/compliant.yaml", "templates/insecure.yaml"]
+        assert files == [
+            (repo / "templates" / name).absolute().as_posix()
+            for name in ("compliant.yaml", "insecure.yaml")
+        ]
         assert argv[:3] == ["cfn-lint", "--format", "sarif"]
         assert scanner.targets_attempted == 2 and scanner.targets_failed == 0
         _assert_parses_to(report, EXPECTED_INSECURE)
@@ -368,6 +394,28 @@ class TestScan:
         assert "uriBaseId" not in dumped
         _assert_parses_to(report, EXPECTED_INSECURE)
 
+    def test_cfn_lint_runs_outside_the_scanned_tree_on_absolute_paths(self, repo):
+        """cfn-lint resolves the relative paths in a config file (``append_rules``,
+        ``custom_rules``, ``override_spec``) against its working directory, not
+        against the file. Run in the source directory, an operator's
+        ``append_rules: [rules]`` imported the scanned tree's ``rules/*.py``
+        (measured with 1.57.2). So cfn-lint runs outside the tree, every path it
+        is given is absolute, and its absolute URIs are reported
+        repository-relative."""
+        fake = FakeCfnLint({"templates/insecure.yaml": CAPTURED_INSECURE})
+        report = self._run(_scanner(repo), fake)
+
+        (cwd,) = fake.cwds
+        assert cwd is not None, "cfn-lint ran in the source directory"
+        assert not Path(cwd).absolute().is_relative_to(repo.absolute()), cwd
+        argv = fake.calls[0]
+        files = argv[argv.index("--") + 1 :]
+        assert files and all(Path(_unescaped(f)).is_absolute() for f in files)
+        for option in ("--output-file=", "--config-file="):
+            (value,) = [a.split("=", 1)[1] for a in argv if a.startswith(option)]
+            assert Path(value).is_absolute(), (option, value)
+        _assert_parses_to(report, EXPECTED_INSECURE)
+
     def test_the_recorded_invocation_carries_no_host_path(self, repo):
         fake = FakeCfnLint({}, returncode=0)
         report = self._run(_scanner(repo), fake)
@@ -385,9 +433,10 @@ class TestScan:
         self._run(_scanner(repo), fake)
         argv = fake.calls[0]
         files = argv[argv.index("--") + 1 :]
-        assert "templates/g[[]1].yaml" in files
-        assert "templates/-dash.yaml" in files
-        assert argv.index("--") < argv.index("templates/-dash.yaml")
+        templates_dir = glob.escape((repo / "templates").absolute().as_posix())
+        assert f"{templates_dir}/g[[]1].yaml" in files
+        assert f"{templates_dir}/-dash.yaml" in files
+        assert argv.index("--") < argv.index(f"{templates_dir}/-dash.yaml")
 
     def test_config_options_reach_argv_as_single_tokens(self, repo, tmp_path):
         operator_rc = tmp_path / "operator" / ".cfnlintrc"

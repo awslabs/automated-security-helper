@@ -20,9 +20,12 @@ with its reason, as cfn-nag counts it.
 
 How it is invoked, and why each argument is there
 -------------------------------------------------
-``cfn-lint --format sarif --output-file <f> [options] -- <template>...``, run in the
-source directory with templates given relative to it, so cfn-lint's SARIF URIs are
-already the repository-relative paths ASH reports.
+``cfn-lint --format sarif --output-file <f> [options] -- <template>...``, run from
+outside the scanned tree (normally the filesystem root) with every path absolute,
+because cfn-lint resolves a config file's relative paths against its working
+directory (``CfnLintScanner._subprocess_cwd``). cfn-lint writes each URI as the
+absolute path it was given, and ``normalize_report`` maps it back to the
+repository-relative path ASH reports.
 
 * Template paths are passed through ``glob.escape``. cfn-lint expands every filename
   argument with ``glob.glob(filename, recursive=True)`` (cfnlint/config.py at 1.57.1),
@@ -74,6 +77,7 @@ from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
 )
+from automated_security_helper.config.path_trust import cwd_outside_scanned_tree
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -374,7 +378,9 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 handle.write("{}\n")
             args.append(f"--config-file={empty.resolve().as_posix()}")
         else:
-            args.append(f"--config-file={config_file.as_posix()}")
+            args.append(
+                f"--config-file={Path(os.path.abspath(config_file)).as_posix()}"
+            )
         if options.regions:
             args.extend(["--regions", *options.regions])
         if options.ignore_checks:
@@ -482,18 +488,24 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             out.append(current)
         return out
 
-    def normalize_report(self, report: SarifReport) -> SarifReport:
-        """Apply the severity mapping, drop location bases, sort rules, in place.
+    def normalize_report(
+        self, report: SarifReport, shown_by_argument: Optional[Dict[str, str]] = None
+    ) -> SarifReport:
+        """Locate results as ASH reports them, map severities, sort rules, in place.
 
-        cfn-lint tags every location with ``uriBaseId: EXECUTIONROOT``, a base
-        its own run declares with a description and no uri. ASH builds its own
-        run and the merged SARIF never defines that base, so the reference is
-        dropped, as cfn-guard's ``normalize_results`` drops its own: an ASH
+        cfn-lint writes each URI as the template path it was given, which is
+        absolute (see ``_subprocess_cwd``); ``shown_by_argument`` maps each such
+        path to the repository-relative one ASH reports, as cfn-guard's
+        ``normalize_results`` replaces its URIs. cfn-lint also tags every
+        location with ``uriBaseId: EXECUTIONROOT``, a base its own run declares
+        with a description and no uri. ASH builds its own run and the merged
+        SARIF never defines that base, so the reference is dropped: an ASH
         location without a base is relative to the source directory.
 
         cfn-lint lists driver rules in a different order from run to run (a set
         iteration), so they are sorted by id to keep reports reproducible.
         """
+        shown_by_argument = shown_by_argument or {}
         for run in report.runs or []:
             for result in run.results or []:
                 for location in [
@@ -501,11 +513,14 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                     *(result.relatedLocations or []),
                 ]:
                     physical = location.physicalLocation
-                    if (
-                        physical is not None
-                        and physical.root.artifactLocation is not None
-                    ):
-                        physical.root.artifactLocation.uriBaseId = None
+                    artifact = physical.root.artifactLocation if physical else None
+                    if artifact is None:
+                        continue
+                    artifact.uriBaseId = None
+                    if artifact.uri:
+                        artifact.uri = shown_by_argument.get(
+                            artifact.uri.replace("\\", "/"), artifact.uri
+                        )
                 severity, level = severity_for_rule(result.ruleId)
                 result.level = Level(level)
                 if result.properties is None:
@@ -520,6 +535,27 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         if self.context is None:
             raise ScannerError("cfn-lint has no plugin context")
         return Path(self.context.source_dir)
+
+    def _subprocess_cwd(self, results_dir: Path) -> Path | None:
+        """Run cfn-lint from outside the scanned tree, normally the filesystem root.
+
+        cfn-lint resolves every relative path in a config file (``append_rules``,
+        ``custom_rules``, ``override_spec`` and the rest) against its working
+        directory, not against the file (cfnlint/helpers.py ``load_plugins``
+        walks the directory as written). Run in the source directory, an
+        operator's ``.cfnlintrc`` outside the tree with ``append_rules: [rules]``
+        imported the scanned tree's ``rules/*.py`` (measured with 1.57.2). From
+        outside the tree a relative path cannot name a file in it, so templates,
+        the output file and the config file are all passed as absolute paths.
+        The ``.cfnlintrc`` lookup in the working directory is already off: ASH
+        always names a config file.
+        """
+        return cwd_outside_scanned_tree(
+            self._source_dir(),
+            results_dir=results_dir,
+            source_dir=self._source_dir(),
+            config=getattr(self.context, "config", None),
+        )
 
     def _execute_scan(
         self,
@@ -624,16 +660,23 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             source_dir = self._source_dir()
             if self.results_dir is None:
                 raise ScannerError("cfn-lint has no results directory")
-            results_dir = self.results_dir.joinpath(target_type)
+            results_dir = Path(os.path.abspath(self.results_dir.joinpath(target_type)))
             results_dir.mkdir(parents=True, exist_ok=True)
             option_args = self._option_args(results_dir)
-            displayed = [display_path(p, source_dir) for p in discovery.templates]
+            # Absolute, because cfn-lint does not run in the source directory (see
+            # _subprocess_cwd). Each maps back to the path ASH reports.
+            shown_by_argument = {
+                Path(template).absolute().as_posix(): display_path(template, source_dir)
+                for template in discovery.templates
+            }
             merged: List[Result] = []
             rules: Dict[str, ReportingDescriptor] = {}
             driver = report.runs[0].tool.driver
             child_env = self._child_env()
+            cwd = self._subprocess_cwd(results_dir)
 
-            for index, batch in enumerate(self.batches(displayed)):
+            for index, arguments in enumerate(self.batches(list(shown_by_argument))):
+                batch = [shown_by_argument[argument] for argument in arguments]
                 self.targets_attempted += len(batch)
                 batch_file = results_dir.joinpath(f"cfn-lint.{index}.sarif")
                 command = [
@@ -643,13 +686,14 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                     f"--output-file={batch_file.as_posix()}",
                     *option_args,
                     "--",
-                    *[glob.escape(p) for p in batch],
+                    *[glob.escape(argument) for argument in arguments],
                 ]
                 response = self._run_subprocess(
                     command=command,
                     results_dir=results_dir,
                     stdout_preference="write",
                     stderr_preference="both",
+                    cwd=cwd,
                     env=child_env,
                     timeout=self._effective_scan_timeout(),
                 )
@@ -695,7 +739,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
 
             report.runs[0].results = merged
             driver.rules = list(rules.values()) or None
-            self.normalize_report(report)
+            self.normalize_report(report, shown_by_argument)
             self._post_scan(target=target, target_type=target_type)
             report.runs[0].invocations = [
                 Invocation(

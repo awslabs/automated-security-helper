@@ -449,6 +449,34 @@ def test_a_cfnlintrc_named_by_the_scanned_tree_never_loads_its_rules(tmp_path):
     assert _scanner_results(output)["cfn-lint"]["status"] != "MISSING"
 
 
+def test_a_relative_path_in_the_operators_cfnlintrc_never_reaches_the_tree(tmp_path):
+    """cfn-lint resolves a config file's relative paths against its working
+    directory, not against the file. Run in the source directory, the operator's
+    ``append_rules: [rules]`` imported the scanned tree's rules/*.py."""
+    _require_cfn_lint()
+    source = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, source)
+    marker = tmp_path / "tree-rule-imported"
+    _rules_that_mark(source / "rules", marker)
+    rc = tmp_path / "operator" / ".cfnlintrc"
+    rc.parent.mkdir()
+    rc.write_text("append_rules:\n  - rules\n", encoding="utf-8")
+
+    proc, output = _scan_with_tree_config(
+        tmp_path,
+        {},
+        "--config-overrides",
+        f"scanners.cfn-lint.options.config_file={rc.as_posix()}",
+    )
+
+    assert not marker.exists(), "cfn-lint imported a rule from the scanned tree"
+    # The relative path names nothing where cfn-lint runs, so the run fails
+    # loudly rather than linting without the operator's rules.
+    assert _scanner_results(output)["cfn-lint"]["status"] == "ERROR", (
+        proc.stdout[-3000:] + proc.stderr[-3000:]
+    )
+
+
 def test_the_operator_can_name_a_cfnlintrc_outside_the_tree(tmp_path):
     """The control: the same kind of rules file is imported when the operator names it."""
     _require_cfn_lint()
