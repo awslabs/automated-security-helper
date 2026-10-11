@@ -22,6 +22,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from automated_security_helper.base import scanner_plugin
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.config.path_trust import in_scanned_tree
@@ -93,7 +94,17 @@ class _Recorder:
 def recorder(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(refresh, "spawn_run", rec)
+    # The recorder stands in for the tool, so the tool need not be installed: the
+    # CI unit-test runner has neither grype nor trivy, and a scanner's refresh
+    # looks its tool up before it spawns anything.
+    monkeypatch.setattr(refresh, "find_executable", lambda tool: tool)
     return rec
+
+
+def test_a_tool_that_is_not_installed_is_an_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(refresh, "find_executable", lambda tool: None)
+    with pytest.raises(ScannerError, match="grype is not installed"):
+        refresh.prepare_content_db("grype", tmp_path, offline=False, **_where(tmp_path))
 
 
 def test_offline_nothing_runs(recorder, tmp_path):
@@ -695,6 +706,9 @@ class TestOneCacheForTheScanTheRefreshAndTheCheck:
         monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
         monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+        # The probe is given the scanner's binary; the probe recorder stands in for
+        # it, so it need not be installed (the CI unit-test runner has neither).
+        monkeypatch.setattr(scanner_plugin, "find_executable", lambda tool: tool)
         return tmp_path
 
     @staticmethod
