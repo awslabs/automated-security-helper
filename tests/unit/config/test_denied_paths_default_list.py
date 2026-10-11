@@ -6,6 +6,12 @@
 The ``replace_default_denied_paths`` Field description says this holds whether
 the flag is set or not; ``test_denied_paths_edits.py`` covers the flag with an
 operator's own list.
+
+Every shipped list is a subset of the current one, so in add mode the merged
+list equals the current one whether or not the list is read as a default. The
+test therefore also asserts that it is read as one: an operator's own list
+keeps the default handling of sandbox, plugin modules and suppressions only
+for what it does not name (``exempt_paths``), and gets a "leaves out" warning.
 """
 
 from __future__ import annotations
@@ -16,6 +22,7 @@ from automated_security_helper.config.ash_config import RuntimeOverridesConfig
 from automated_security_helper.config.client_config_policy import (
     SHIPPED_DEFAULT_DENIED_PATHS,
     effective_policy,
+    policy_is_default,
 )
 
 CURRENT = sorted(RuntimeOverridesConfig().denied_paths)
@@ -35,6 +42,7 @@ def test_a_default_list_reads_as_the_current_one(listed, replace: bool) -> None:
     effective = effective_policy(RuntimeOverridesConfig(**kwargs))
 
     assert sorted(effective.denied_paths) == CURRENT
+    assert policy_is_default(effective)
 
 
 def test_an_older_shipped_list_lacks_current_entries() -> None:
