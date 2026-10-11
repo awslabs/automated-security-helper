@@ -248,17 +248,36 @@ fi
 HOST_UID=$(id -u)
 HOST_GID=$(id -g)
 
-# The non-root stage creates its user with `adduser --uid <UID>`, and UID 0 is root,
-# which already exists: that build fails at that step, after the whole core stage has
-# been built. Refused before building, as `ash build-image` does. Any spelling of zero
-# counts, since the build reads UID=00 as 0 too.
+# --container-uid and --container-gid become build arguments, read as numbers.
+for id_flag in UID GID; do
+  id_given="CONTAINER_${id_flag}_SPECIFIED"
+  id_value="CONTAINER_${id_flag}"
+  if [[ "${!id_given}" = "YES" && ! "${!id_value}" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: Container ${id_flag} must be a numeric value: '${!id_value}'." >&2
+    exit 1
+  fi
+done
+
+# The non-root stage creates its user with `adduser --uid <UID> --gid <GID>`. UID 0 is
+# root, which already exists: that build fails at that step, after the whole core stage
+# has been built. GID 0 is root's group, which would give the unprivileged user root's
+# group rights over the image. Either is refused before building, as `ash build-image`
+# does. Any spelling of zero counts, since the build reads UID=00 as 0 too.
 if [[ "${NO_BUILD}" = "NO" && "${TARGET_STAGE}" = "non-root" ]]; then
   BUILD_UID="${HOST_UID}"
+  BUILD_GID="${HOST_GID}"
   if [[ "${CONTAINER_UID_SPECIFIED}" = "YES" ]]; then
     BUILD_UID="${CONTAINER_UID}"
   fi
+  if [[ "${CONTAINER_GID_SPECIFIED}" = "YES" ]]; then
+    BUILD_GID="${CONTAINER_GID}"
+  fi
   if [[ "${BUILD_UID}" =~ ^0+$ ]]; then
     echo "ERROR: The non-root image stage creates a user with UID 0, which is root: ASH is running as root, or --container-uid 0 was given. Pass --build-target ci to build the image that runs as root, or --container-uid and --container-gid with the IDs the non-root user should have." >&2
+    exit 1
+  fi
+  if [[ "${BUILD_GID}" =~ ^0+$ ]]; then
+    echo "ERROR: The non-root image stage gives its user GID 0, which is root's group: ASH is running with GID 0, or --container-gid 0 was given. Pass --build-target ci to build the image that runs as root, or --container-gid with the GID the non-root user should have." >&2
     exit 1
   fi
 fi

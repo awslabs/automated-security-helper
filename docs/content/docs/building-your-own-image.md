@@ -54,7 +54,8 @@ part, and an explicit `--build-target` always wins. `--custom-containerfile` bui
 
 The `non-root` stage creates its user with the UID and GID of the account running ASH,
 or with `--container-uid` and `--container-gid`. A UID of 0 is root and cannot be that
-user, so a `non-root` build with UID 0 is refused before anything is built. That is the
+user, and a GID of 0 is root's group, so a `non-root` build with UID 0 or GID 0 is refused
+before anything is built, and so is a UID or GID that is not a number. That is the
 case when ASH itself runs as root, as many CI jobs do (AWS CodeBuild, container-based
 GitLab and Jenkins jobs): pass `--build-target ci` there, or give the non-root user its
 IDs explicitly. `./ash` refuses it the same way. `Invoke-ASH` builds with the

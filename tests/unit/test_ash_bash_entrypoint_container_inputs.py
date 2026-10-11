@@ -606,3 +606,48 @@ class TestANonRootBuildAsUid0IsRefused:
         calls = run_ash(fake_runner, project, ["--no-build", "--container-uid", "0"])
 
         assert [call[0] for call in calls] == ["run"]
+
+    @pytest.mark.parametrize("gid", ["0", "00"])
+    def test_a_container_gid_of_0(self, gid, fake_runner, project):
+        """GID 0 is root's group: the non-root user would get root's group rights."""
+        rc, output, calls = _run_ash_status(
+            fake_runner,
+            project,
+            ["--no-run", "--container-uid", "1000", "--container-gid", gid],
+        )
+
+        assert rc == 1, output
+        assert calls == []
+        assert "GID 0" in output
+        assert "--build-target ci" in output
+
+    @pytest.mark.parametrize("flag", ["--container-uid", "--container-gid"])
+    def test_an_id_that_is_not_a_number(self, flag, fake_runner, project):
+        rc, output, calls = _run_ash_status(
+            fake_runner, project, ["--no-run", flag, "1x"]
+        )
+
+        assert rc == 1, output
+        assert calls == []
+        assert "must be a numeric value" in output
+
+    def test_an_unprivileged_host_user_builds_non_root_as_itself(
+        self, fake_runner, project, tmp_path
+    ):
+        """Control: the refusal is about root; any other host user is unaffected."""
+        fake_bin = tmp_path / "fake-id-bin"
+        fake_bin.mkdir()
+        fake_id = fake_bin / "id"
+        fake_id.write_text("#!/bin/sh\necho 1000\n")
+        fake_id.chmod(0o755)
+
+        calls = run_ash(
+            fake_runner,
+            project,
+            ["--no-run"],
+            {"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+        )
+
+        [build] = calls
+        assert _flag(build, "--target") == "non-root"
+        assert "UID=1000" in build and "GID=1000" in build

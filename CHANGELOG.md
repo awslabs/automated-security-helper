@@ -345,9 +345,10 @@
   jobs) cannot build `non-root`, whose user would get UID 0, and is refused before the
   build with that explanation: pass `--build-target ci` there. `./ash` refuses it the
   same way, as does `Invoke-ASH -ContainerUID 0` (without `-ContainerUID` it builds with
-  the Dockerfile's own UID), and so does any spelling of zero such as `00`. A
-  `--container-uid` or `--container-gid` holding digits other than 0-9 (`²`) is refused
-  as not numeric. This repository's
+  the Dockerfile's own UID), and so does any spelling of zero such as `00`. A GID of 0,
+  root's group, is refused for a `non-root` build in the same three places. A
+  `--container-uid` or `--container-gid` holding anything but the digits 0-9 (`²`, `1x`)
+  is refused as not numeric, by `./ash` as well. This repository's
   validate-container action now passes `--build-target ci` to every build and scan.
 - **Container mode reads the config file you named.** `--config` (or `ASH_CONFIG`) was
   handed to the scan inside the container as the host path, which names nothing there,

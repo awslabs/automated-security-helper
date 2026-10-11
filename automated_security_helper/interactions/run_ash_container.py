@@ -486,25 +486,37 @@ def _resolve_build_target(
     return build_target.value if hasattr(build_target, "value") else str(build_target)
 
 
-def _non_root_stage_uid_refusal(build_target: str, container_uid: str) -> str | None:
-    """Why a ``non-root`` build with this UID cannot work, or None when it can.
+def _non_root_stage_uid_refusal(
+    build_target: str, container_uid: str, container_gid: str = "100"
+) -> str | None:
+    """Why a ``non-root`` build with these IDs cannot work, or None when it can.
 
-    The ``non-root`` stage creates its user with ``adduser --uid <UID>``, and UID 0
-    is root, which already exists: the build would fail at that step, after the
-    whole ``core`` stage had been built. A host running as root gets UID 0 by
-    default (CI jobs often do), so it is refused here, before any build, with the
-    two ways forward. Compared as a number: the build reads ``UID=00`` as 0 too.
-    ``container_uid`` is a string of digits by now (``run_ash_container`` refuses
-    any other).
+    The ``non-root`` stage creates its user with ``adduser --uid <UID> --gid <GID>``.
+    UID 0 is root, which already exists, so that build fails at that step after the
+    whole ``core`` stage has been built; GID 0 is root's group, which would give the
+    unprivileged user root's group rights over the image. A host running as root
+    gets both by default (CI jobs often do), so either is refused here, before any
+    build, with the two ways forward. Compared as numbers: the build reads
+    ``UID=00`` as 0 too. Both are strings of digits by now (``run_ash_container``
+    refuses any other).
     """
-    if build_target != BuildTarget.NON_ROOT.value or int(container_uid) != 0:
+    if build_target != BuildTarget.NON_ROOT.value:
         return None
-    return (
-        "The non-root image stage creates a user with UID 0, which is root: ASH is "
-        "running as root, or --container-uid 0 was given. Pass --build-target ci to "
-        "build the image that runs as root, or --container-uid and --container-gid "
-        "with the IDs the non-root user should have."
-    )
+    if int(container_uid) == 0:
+        return (
+            "The non-root image stage creates a user with UID 0, which is root: ASH "
+            "is running as root, or --container-uid 0 was given. Pass --build-target "
+            "ci to build the image that runs as root, or --container-uid and "
+            "--container-gid with the IDs the non-root user should have."
+        )
+    if int(container_gid) == 0:
+        return (
+            "The non-root image stage gives its user GID 0, which is root's group: "
+            "ASH is running with GID 0, or --container-gid 0 was given. Pass "
+            "--build-target ci to build the image that runs as root, or "
+            "--container-gid with the GID the non-root user should have."
+        )
+    return None
 
 
 def _runner_supports_buildx(resolved_oci_runner: str) -> bool:
@@ -1800,7 +1812,7 @@ def run_ash_container(
     # Build phase
     if build:
         root_uid_refusal = _non_root_stage_uid_refusal(
-            resolved_build_target, container_uid
+            resolved_build_target, container_uid, container_gid
         )
         if root_uid_refusal is not None:
             typer.secho(root_uid_refusal, fg=typer.colors.RED)
