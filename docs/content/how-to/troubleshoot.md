@@ -208,10 +208,16 @@ Cause: some settings decide what ASH may run, read, or send: sandbox grants, plu
 modules, reporter destinations and credentials, and options that name a scanner's own
 configuration or ignore file. A config file inside the scanned directory, or inside
 any git checkout, could have been written by someone other than you, so ASH ignores
-those settings from it. The warning names each setting and says why.
+those settings from it. The warning names each setting and says why. For sandbox
+settings in a config file that an MCP client delivered to `ash mcp`, the reason reads
+`an MCP client supplied the file, not the operator`. For a plugin module, the warning
+also gives where Python found the module and the git checkout or scanned directory that
+location is in.
 
 Fix: pass the setting with `--config-overrides`, or put it in a config file outside the
 scanned directory and outside every git checkout and name that file with `--config`.
+Name a plugin module with `--ash-plugin-modules`, or install it outside every git
+checkout and the scanned directory.
 A scanner configuration or ignore file that such an option names must also be outside
 the scanned directory. See [Configuration trust model](../concepts/trust-model.md).
 

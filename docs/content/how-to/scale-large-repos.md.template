@@ -317,8 +317,12 @@ unfiltered.
 
 The scan tool refuses the whole workspace, with exit code 4, when any project folder
 resolves outside the roots the server allows (`ASH_MCP_ALLOWED_ROOTS`); see
-[Run the MCP server](mcp-server.md). Over MCP there are no changed-files, sharding, or
-fail-gate parameters. Leave `config_overrides` and `profile` unset: `ash mcp` has no option
+[Run the MCP server](mcp-server.md). In a workspace inside source an MCP client
+delivered, each project's config file is a delivered config: if one sets a field the
+server's policy denies, both tools fail with exit code 3 and name the project (see
+[What a delivered config cannot set](mcp-server.md#what-a-delivered-config-cannot-set)).
+Over MCP there are no changed-files, sharding, or fail-gate parameters. Leave
+`config_overrides` and `profile` unset: `ash mcp` has no option
 that registers profiles, so a call that sets either is refused with exit code 3.
 
 What workspace scans do not do:
