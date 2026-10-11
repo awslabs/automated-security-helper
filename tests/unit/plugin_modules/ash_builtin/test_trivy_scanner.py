@@ -462,7 +462,21 @@ def test_options_become_flags(tmp_path):
     assert "--license-full" in argv
     assert "--ignore-unfixed" in argv
     assert "--disable-telemetry" not in argv
-    assert argv[argv.index("--severity") + 1] == "HIGH,CRITICAL"
+    # The threshold gates the verdict after the scan; trivy reports everything.
+    assert not [a for a in argv if a.startswith("--severity")]
+
+
+@pytest.mark.parametrize("threshold", ["LOW", "MEDIUM", "HIGH", "CRITICAL"])
+@pytest.mark.parametrize("kind", ["trivy", "trivy-repo"])
+def test_a_severity_threshold_is_never_a_trivy_filter(tmp_path, kind, threshold):
+    """trivy --severity drops lower findings before ASH sees them, so they would be
+    neither reported nor counted. ASH applies the threshold, as for every scanner."""
+    if kind == "trivy":
+        scanner = _scanner(tmp_path, operator=True, severity_threshold=threshold)
+    else:
+        scanner = _repo_scanner(tmp_path, severity_threshold=threshold)
+    args = scanner._resolve_arguments(target="/t", results_file="/r.sarif")
+    assert not [a for a in args if a.startswith("--severity")]
 
 
 def test_ignore_unfixed_is_warned_about(tmp_path, caplog):
@@ -935,8 +949,6 @@ def test_the_community_plugin_offline_command_line_is_unchanged(tmp_path):
         "--license-full",
         "--ignore-unfixed",
         "--disable-telemetry",
-        "--severity",
-        "MEDIUM,HIGH,CRITICAL",
         "--offline-scan",
         "--skip-version-check",
         "--skip-db-update",

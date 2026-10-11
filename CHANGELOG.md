@@ -133,8 +133,9 @@
     skipped with a warning.
   - trivy: `trivy fs` (0.75.0), `vuln` only by default, held to
     the trivy database's 24h bound; offline with no database it is MISSING with the
-    reason. A scanner-level `severity_threshold` is passed as `--severity`, so lower
-    findings are dropped by trivy and never reported. trivy and trivy-repo share trivy's cache and run at the same time, so
+    reason. A scanner-level `severity_threshold` gates the verdict as for every
+    scanner, and lower findings are still reported; it is not passed to trivy as
+    `--severity`, and neither is trivy-repo's any longer. trivy and trivy-repo share trivy's cache and run at the same time, so
     online ASH updates the database once per scan, under a lock in that cache, and
     both scanners then run with `--skip-db-update` and `--skip-java-db-update` (and
     `--skip-check-update` when `misconfig` is on), pointed at that cache with

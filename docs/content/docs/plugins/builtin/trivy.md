@@ -45,7 +45,8 @@ scanners:
       secret_config_file: null
       # false follows ASH (--offline / ASH_OFFLINE); true forces trivy offline.
       offline: false
-      # Passed to trivy as --severity (this level and above).
+      # Gates the verdict, as for every scanner. Findings below it are still
+      # reported. Not passed to trivy as --severity.
       severity_threshold: null
       # Seconds before the trivy process is killed; also passed as trivy --timeout.
       # null leaves both unbounded: trivy gets --timeout=2562047h (about 292
@@ -75,7 +76,9 @@ To accept a finding, prefer an ASH suppression, which is recorded in the reports
 
 ## Severity
 
-Each finding is reported at trivy's own severity for it (CRITICAL, HIGH, MEDIUM, LOW). That is the severity the `trivy --severity` filter uses, which is how `severity_threshold` reaches trivy, so a finding cannot pass the filter as HIGH and be reported as MEDIUM. A finding below the threshold is dropped by trivy itself: it is not reported, suppressed or counted, unlike a scanner whose threshold ASH applies after the scan. A finding trivy rates UNKNOWN falls back to ASH's usual SARIF mapping: the rule's CVSS score (`security-severity`), then the SARIF level.
+Each finding is reported at trivy's own severity for it (CRITICAL, HIGH, MEDIUM, LOW), not at a band of its CVSS score, so a finding trivy rates HIGH is reported HIGH whatever its score. A finding trivy rates UNKNOWN falls back to ASH's usual SARIF mapping: the rule's CVSS score (`security-severity`), then the SARIF level.
+
+`severity_threshold` works as for every other scanner: ASH applies it after the scan, to that severity, so a finding below it is still reported and does not fail the scan. It is not passed to trivy as `--severity`, which would drop those findings before ASH saw them.
 
 The severity is read per finding, from the `Severity:` line trivy writes in each result's message, not from the result's SARIF rule. trivy writes one rule per advisory, and one advisory can be rated differently for two packages in the same scan (Debian, for example, rates some binutils advisories CRITICAL for `binutils` and LOW for `gdb`); the rule carries only one of those ratings.
 

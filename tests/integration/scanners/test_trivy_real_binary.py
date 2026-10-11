@@ -544,6 +544,33 @@ def test_ash_scan_runs_trivy_and_records_its_database(tmp_path, trivy_env):
     assert all("--offline-scan" in c for c in lines), lines
 
 
+def test_a_severity_threshold_gates_the_verdict_and_drops_no_finding(
+    tmp_path, trivy_env
+):
+    """Every fixture finding is HIGH or MEDIUM. At CRITICAL none is actionable, so the
+    scan passes, and every one is still in the report, as for any other scanner."""
+    source = _copy_fixture(tmp_path)
+    output = tmp_path / "out"
+    config = {
+        **CONFIG,
+        "scanners": {
+            "trivy": {"enabled": True, "options": {"severity_threshold": "CRITICAL"}}
+        },
+    }
+    proc, log = _run_ash(source, output, config, trivy_env, "--scanners", "trivy")
+    assert proc.returncode == 0, log
+    data = _aggregated(output)
+    assert STABLE <= {
+        (
+            r["ruleId"],
+            r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+        )
+        for run in data["sarif"]["runs"]
+        for r in run.get("results") or []
+    }, log
+    assert not any("--severity" in c for c in _command_lines(data)), log
+
+
 def test_ash_scan_offline_uses_the_cached_database(tmp_path, trivy_env):
     source = _copy_fixture(tmp_path)
     output = tmp_path / "out"

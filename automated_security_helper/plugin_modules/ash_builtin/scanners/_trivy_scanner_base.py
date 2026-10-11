@@ -20,8 +20,8 @@ findings, names and outputs are byte-identical to what its users get today, and
 ``trivy`` uses the template-method ``scan()`` the builtin scanners use.
 
 The options are read by attribute (``scanners``, ``license_full``,
-``ignore_unfixed``, ``disable_telemetry``, ``offline``, ``severity_threshold``),
-so both config classes satisfy it without sharing a base.
+``ignore_unfixed``, ``disable_telemetry``, ``offline``), so both config classes
+satisfy it without sharing a base.
 """
 
 from __future__ import annotations
@@ -76,15 +76,6 @@ from automated_security_helper.utils.package_identity import (
 )
 
 C = TypeVar("C", bound=ScannerPluginConfigBase)
-
-#: trivy's ``--severity`` value for each ASH severity threshold: the threshold and
-#: every severity above it.
-SEVERITY_INCLUSION = {
-    "LOW": "LOW,MEDIUM,HIGH,CRITICAL",
-    "MEDIUM": "MEDIUM,HIGH,CRITICAL",
-    "HIGH": "HIGH,CRITICAL",
-    "CRITICAL": "CRITICAL",
-}
 
 #: Flags every trivy scan gets, online or offline. ``--offline-scan``: trivy scans
 #: never contact package registries; the database refresh is a separate step
@@ -456,14 +447,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 )
             )
 
-        threshold = options.severity_threshold
-        if threshold is not None and threshold != "ALL":
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--severity",
-                    value=SEVERITY_INCLUSION[threshold],
-                )
-            )
+        # severity_threshold is not passed as --severity: trivy would drop the lower
+        # findings before ASH saw them, so they would be neither reported nor
+        # counted. ASH applies it after the scan, as for every scanner, to the
+        # severity trivy gave each finding.
 
         for flag in SCAN_FLAGS:
             self.args.extra_args.append(ToolExtraArg(key=flag, value=None))

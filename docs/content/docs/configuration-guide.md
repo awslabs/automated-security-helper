@@ -813,10 +813,10 @@ scanners:
       ignore_file: null          # a .trivyignore; same rule
       secret_config_file: null   # a trivy-secret.yaml; same rule
       offline: false
-      severity_threshold: null   # passed to trivy as --severity
+      severity_threshold: null   # gates the verdict, as for every scanner
 ```
 
-A scanner-level `severity_threshold` is passed to trivy as `--severity`, so findings below it are dropped by trivy itself and never reported or counted. See [Trivy filesystem scanner](plugins/builtin/trivy.md).
+A scanner-level `severity_threshold` gates the verdict as it does for every other scanner: findings below it are reported and do not fail the scan. It is not passed to trivy as `--severity`. See [Trivy filesystem scanner](plugins/builtin/trivy.md).
 
 ### zizmor
 

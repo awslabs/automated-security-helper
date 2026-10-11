@@ -71,14 +71,16 @@ measured and the offline database check is skipped.
 Severity
 --------
 Each result's ASH severity is trivy's own severity for it (CRITICAL, HIGH, MEDIUM,
-LOW), read from the ``Severity:`` line trivy writes in the result's message. It is
-the value trivy's ``--severity`` filter uses, which is how ASH's
-``severity_threshold`` is passed to trivy, so the threshold and the reported
-severity cannot disagree. Without this, ASH would bucket the rule's
-``security-severity`` (a CVSS base score), and a finding trivy rates HIGH with a
-6.5 CVSS score would pass trivy's HIGH filter and be reported MEDIUM. A result
-whose severity is UNKNOWN keeps ASH's generic SARIF mapping (the CVSS score, then
-the SARIF level).
+LOW), read from the ``Severity:`` line trivy writes in the result's message.
+Without this, ASH would bucket the rule's ``security-severity`` (a CVSS base
+score), and a finding trivy rates HIGH with a 6.5 CVSS score would be reported
+MEDIUM. A result whose severity is UNKNOWN keeps ASH's generic SARIF mapping (the
+CVSS score, then the SARIF level).
+
+``severity_threshold`` is not passed to trivy as ``--severity``, which would drop
+every lower finding before ASH saw it, so that it was neither reported nor
+counted. ASH applies the threshold after the scan, as for every scanner, to the
+severity above: a finding below it is reported and does not fail the scan.
 
 Per result, not per rule: trivy writes one SARIF rule per CVE and rewrites its
 severity tag (and ``security-severity``) for each result, so the rule ends up with

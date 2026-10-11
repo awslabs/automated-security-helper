@@ -106,7 +106,7 @@ scanners:
 | Option               | Type      | Default                                      | Description                                                             |
 | -------------------- | --------- | -------------------------------------------- | ----------------------------------------------------------------------- |
 | `scanners`           | List[str] | `["vuln", "misconfig", "secret", "license"]` | Types of scans to perform                                               |
-| `severity_threshold` | str       | `null`                                       | Minimum severity to report (`ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`); `null` uses the global threshold, `ALL` passes no `--severity` |
+| `severity_threshold` | str       | `null`                                       | Minimum severity that fails the scan (`ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`); `null` uses the global threshold. Findings below it are still reported; it is not passed to trivy as `--severity` |
 | `ignore_unfixed`     | bool      | `true`                                       | Ignore vulnerabilities without available fixes                          |
 | `license_full`       | bool      | `true`                                       | Enable full license scanning (more comprehensive but slower)            |
 | `disable_telemetry`  | bool      | `true`                                       | Disable Trivy telemetry data collection                                 |
