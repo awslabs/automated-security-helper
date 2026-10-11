@@ -280,6 +280,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         "output_file",
         "output_executive_file",
         "output_technical_file",
+        # What is sent to the model besides the findings.
+        "include_code_snippets",
+        "custom_prompt",
     )
 
     def __init__(self, *args, **kwargs):

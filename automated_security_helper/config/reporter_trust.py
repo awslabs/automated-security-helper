@@ -82,7 +82,10 @@ if TYPE_CHECKING:
 
 #: The options of each built-in reporter that pick where findings go or which
 #: credentials send them: each reporter's ``destination_options``. Where each is
-#: used is listed in the PR that added this. Security Hub's ``findings_scope``
+#: used is listed in the PR that added this. The Bedrock reporter's
+#: ``include_code_snippets`` and ``custom_prompt`` choose what is sent to the
+#: model besides the findings: source from the scanned tree, and instructions.
+#: Security Hub's ``findings_scope``
 #: (which findings it imports and may archive) and ``archive_resolved_findings``
 #: are listed before its options model defines them, so that no repository's or
 #: client's config can set them once it does; the reporter declares each when its
@@ -102,6 +105,8 @@ REPORTER_DESTINATION_OPTIONS: Dict[str, Tuple[str, ...]] = {
         "output_file",
         "output_executive_file",
         "output_technical_file",
+        "include_code_snippets",
+        "custom_prompt",
     ),
     "cloudwatch-logs": ("aws_region", "log_group_name", "log_stream_name"),
     "s3": ("aws_region", "aws_profile", "bucket_name", "key_prefix"),

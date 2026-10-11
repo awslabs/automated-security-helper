@@ -1049,11 +1049,15 @@
     `/reporters/s3/enabled` and `/reporters/bedrock-summary-reporter/**` join the
     default `denied_paths` (`/reporters/cloudwatch-logs/**` already covers that
     reporter). A delivered config that turns one of these reporters on, or sets
-    another Bedrock option such as `include_code_snippets` or `custom_prompt`,
-    which choose what is sent to the model, is refused with
+    another Bedrock option, is refused with
     `error_type: config_field_denied`. `enabled: false`, and a value equal to the
     server's, are accepted. A profile that relied on a client turning one of these
     reporters on sets it in the profile instead.
+  - The Bedrock reporter's `include_code_snippets` and `custom_prompt`, which choose
+    what is sent to the model with the findings, are the operator's too: a config
+    file inside the scanned tree that sets one is ignored with a warning, and a
+    repository that set them in its own config sets them with `--config-overrides`
+    or in a config file outside the tree instead.
   - `enabled: false` for one of these reporters is accepted the same way through
     `select_profile`'s `patch_ops` and `override_yaml` and the MCP workspace tools'
     `config_overrides`, under the entries that cover it; `enabled: true`, and

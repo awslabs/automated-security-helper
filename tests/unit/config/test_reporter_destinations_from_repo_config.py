@@ -120,6 +120,46 @@ def test_security_hubs_import_scope_and_archiving_are_the_operators(
     assert f"reporters.aws-security-hub.options.{name}" in warnings, warnings
 
 
+#: What the Bedrock reporter sends to the model besides the findings, each with a
+#: value other than its default.
+_BEDROCK_CONTENT = {"include_code_snippets": True, "custom_prompt": "Repo prompt."}
+
+
+@pytest.mark.parametrize("name", sorted(_BEDROCK_CONTENT))
+def test_a_repository_config_does_not_choose_what_bedrock_is_sent(
+    tmp_path, ash_log, name
+):
+    source = tmp_path / "repo"
+    _write_config(
+        source / ".ash" / ".ash.yaml",
+        {"bedrock-summary-reporter": {"options": {name: _BEDROCK_CONTENT[name]}}},
+    )
+
+    config = resolve_config(source_dir=source)
+
+    assert name not in _options(config, "bedrock-summary-reporter")
+    warnings = "\n".join(_warnings(ash_log))
+    assert f"reporters.bedrock-summary-reporter.options.{name}" in warnings, warnings
+
+
+@pytest.mark.parametrize("name", sorted(_BEDROCK_CONTENT))
+def test_a_repository_config_repeating_the_operators_bedrock_content_applies(
+    tmp_path, ash_log, name
+):
+    """The same value is no change: it applies, with no warning."""
+    section = {"bedrock-summary-reporter": {"options": {name: _BEDROCK_CONTENT[name]}}}
+    source = tmp_path / "repo"
+    project = _write_config(source / ".ash" / ".ash.yaml", section)
+    operator = _write_config(tmp_path / "operator" / "ash.yaml", section)
+
+    config = resolve_config(
+        config_path=project, source_dir=source, trusted_config_path=operator
+    )
+
+    assert _options(config, "bedrock-summary-reporter")[name] == _BEDROCK_CONTENT[name]
+    assert not any(name in message for message in _warnings(ash_log))
+
+
 @pytest.mark.parametrize(
     "spelling", ["BedrockSummary", "bedrocksummaryreporter", "Bedrock_Summary_Reporter"]
 )

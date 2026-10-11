@@ -49,12 +49,13 @@ profile with `select_profile` load it. A config an MCP client delivered cannot a
 ## Settings only the operator can set
 
 These reporter options choose where findings are sent or written, which
-credentials send them, and which findings Security Hub imports and archives:
+credentials send them, which findings Security Hub imports and archives, and what
+the Bedrock reporter sends to the model with them:
 
 | Reporter section           | Options                                                                                                 |
 |----------------------------|---------------------------------------------------------------------------------------------------------|
 | `aws-security-hub`         | `aws_region`, `aws_profile`, `account_id`, `findings_scope`, `archive_resolved_findings`                |
-| `bedrock-summary-reporter` | `aws_region`, `aws_profile`, `model_id`, `output_file`, `output_executive_file`, `output_technical_file` |
+| `bedrock-summary-reporter` | `aws_region`, `aws_profile`, `model_id`, `output_file`, `output_executive_file`, `output_technical_file`, `include_code_snippets`, `custom_prompt` |
 | `cloudwatch-logs`          | `aws_region`, `log_group_name`, `log_stream_name`                                                       |
 | `s3`                       | `aws_region`, `aws_profile`, `bucket_name`, `key_prefix`                                                |
 
@@ -74,8 +75,7 @@ run a reporter for one scan, set it with `--config-overrides`, such as
 The reporters' other options still apply from the tree.
 
 Under the MCP server they are also default `denied_paths` entries, and so are
-`enabled` of each reporter and every `bedrock-summary-reporter` option, which
-chooses what is sent to the model. For `cloudwatch-logs` and
+`enabled` of each reporter and every other `bedrock-summary-reporter` option. For `cloudwatch-logs` and
 `bedrock-summary-reporter` every setting of the section is
 (`/reporters/cloudwatch-logs/**`, `/reporters/bedrock-summary-reporter/**`). A config
 an MCP client delivered that changes one is refused with
