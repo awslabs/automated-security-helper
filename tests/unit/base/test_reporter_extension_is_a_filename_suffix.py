@@ -283,3 +283,119 @@ def test_the_confined_path_helper_refuses_a_symlink_that_leads_outside(tmp_path)
     (reports_dir / "ash.link.json").symlink_to(outside)
 
     assert confined_report_path(reports_dir, "ash.link.json") is None
+
+
+# --------------------------------------------------------------------------- #
+# The whole local scan: exit status and what is on disk afterwards
+# --------------------------------------------------------------------------- #
+
+
+def _escaping_reporter(extension: str):
+    """A third-party reporter whose unvalidated default extension is ``extension``."""
+
+    class _Config(ReporterPluginConfigBase):
+        model_config = ConfigDict(validate_default=False)
+
+        name: Literal["third-party-escaper"] = "third-party-escaper"
+        enabled: bool = True
+
+    _Config.model_fields["extension"].default = extension
+    _Config.model_rebuild(force=True)
+
+    class _Reporter(ReporterPluginBase[_Config]):
+        def model_post_init(self, context):
+            if self.config is None:
+                self.config = _Config()
+            return super().model_post_init(context)
+
+        def report(self, model: AshAggregatedResults) -> Optional[str]:
+            return '{"escaped": true}'
+
+    return _Reporter
+
+
+class _ReportingOrchestrator:
+    """Stands in for the orchestrator: the scan's results file, then the real report phase."""
+
+    config = None
+
+    def __init__(self, output_dir, reporter):
+        self.output_dir = output_dir
+        self.reporter = reporter
+
+    def execute_scan(self, phases=None):
+        model = AshAggregatedResults()
+        model.save_model(self.output_dir)
+        return ReportPhase(
+            plugins=[self.reporter],
+            plugin_context=PluginContext(
+                source_dir=self.output_dir.parent / "src",
+                output_dir=self.output_dir,
+                config=AshConfig(),
+            ),
+            progress_display=LiveProgressDisplay(show_progress=False),
+            asharp_model=model,
+        ).execute(
+            report_dir=self.output_dir / "reports",
+            aggregated_results=model,
+            cli_output_formats=None,
+            python_based_plugins_only=False,
+        )
+
+
+def _files(root):
+    return sorted(path.relative_to(root).as_posix() for path in root.rglob("*"))
+
+
+@pytest.mark.parametrize("extension", ["x/../../escaped.json", "../x"])
+@pytest.mark.parametrize("ash_x", ["with reports/ash.x/", "without reports/ash.x/"])
+def test_a_third_party_extension_outside_reports_refuses_the_scan(
+    tmp_path, monkeypatch, extension, ash_x
+):
+    """Exit 1 from the local scan, and nothing written outside reports/ or in it.
+
+    ``x/../../escaped.json`` joined as ``reports/ash.x/../../escaped.json`` would
+    land in the output directory when ``reports/ash.x/`` exists.
+    """
+    from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+    from automated_security_helper.interactions.run_ash_scan import (
+        ScanOptions,
+        _run_local_mode,
+    )
+
+    (tmp_path / "src").mkdir()
+    output_dir = tmp_path / "out"
+    reports = output_dir / "reports"
+    reports.mkdir(parents=True)
+    if ash_x == "with reports/ash.x/":
+        (reports / "ash.x").mkdir()
+    orchestrator = _ReportingOrchestrator(output_dir, _escaping_reporter(extension))
+    monkeypatch.setattr(
+        ASHScanOrchestrator, "create", staticmethod(lambda **kwargs: orchestrator)
+    )
+    before = _files(tmp_path)
+
+    with pytest.raises(SystemExit) as refused:
+        _run_local_mode(
+            ScanOptions(source_dir=tmp_path / "src", output_dir=output_dir),
+            ASH_LOGGER,
+        )
+
+    assert refused.value.code == 1
+    reason = getattr(refused.value, "reason", "")
+    assert f"The report file name {'ash.' + extension!r} is not a file in" in reason
+    # Only the results file the stand-in scan phase wrote is new.
+    assert _files(tmp_path) == sorted([*before, "out/ash_aggregated_results.json"])
+
+
+def test_an_override_of_dot_dot_x_gives_a_built_in_reporter_its_default(
+    tmp_path, ash_log
+):
+    source = tmp_path / "repo"
+    source.mkdir()
+
+    config = resolve_config(
+        source_dir=source, config_overrides=["reporters.csv.extension=../x"]
+    )
+
+    assert config.reporters.csv.extension == "csv"
