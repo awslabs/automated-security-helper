@@ -1,6 +1,6 @@
 """A scanner that ran without its content database is ERROR, never PASSED.
 
-grype matches packages against a vulnerability database. Measured with an empty cache
+grype matches packages against its database. Measured with an empty cache
 and the update endpoint refused: grype exited 1 and wrote a zero-byte report, and the
 scanner was graded PASSED with 0 findings, the scan exiting 0 under
 ``--allow-stale-content-db``. The rejected exit code alone now makes that ERROR
@@ -184,10 +184,10 @@ def test_a_current_database_is_graded_on_findings(layout, monkeypatch):
     ],
     ids=["default", "with-vuln", "without-vuln", "empty-list"],
 )
-def test_trivy_repo_uses_its_database_only_when_it_looks_for_vulnerabilities(
+def test_trivy_repo_holds_its_database_unless_its_scanners_leave_out_vuln(
     layout, scanners, expected
 ):
-    """A trivy-repo scan that does not look for vulnerabilities reads no trivy-db.
+    """A trivy-repo scan whose scanners leave out `vuln` reads no trivy-db.
 
     Without this, the absent database of a secrets-only scan would make it ERROR,
     and a stale one would fail it, for a database the scan never opened.

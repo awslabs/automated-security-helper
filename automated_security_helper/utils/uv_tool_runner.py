@@ -309,7 +309,7 @@ class UVToolRunner:
                     version_line = result.stdout.strip().split("\n")[0]
                     version = version_line.strip()
 
-            except Exception as error:  # nosec B110 — version check failure is non-critical
+            except Exception as error:  # nosec B110 — a failed version check is not fatal
                 if _refused_by_sandbox(error):
                     # The probe never ran, so there is no answer to remember.
                     return None
