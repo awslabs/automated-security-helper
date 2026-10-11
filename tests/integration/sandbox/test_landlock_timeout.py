@@ -94,16 +94,36 @@ def _plan(backend, tmp_path, argv):
     return backend.plan(argv, {"PATH": "/usr/bin:/bin"}, policy)
 
 
+def _no_core_dump() -> None:
+    """Run in each child before it execs: a SIGSEGV here must not write a core file.
+
+    With an unlimited core size and a bare ``core`` core_pattern, both the Landlock
+    wrapper, which re-raises its scanner's signal on itself, and the unwrapped
+    shell dump core into their working directory, which was the checkout pytest
+    ran from. The limit is inherited across the wrapper's exec of the scanner.
+    """
+    import resource
+
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+
 def test_a_scanner_killed_by_a_signal_reports_it_as_unwrapped(tmp_path):
     import subprocess  # nosec B404 - runs the sandboxed command under test
 
     backend = _landlock()
     argv = ["/bin/sh", "-c", "kill -SEGV $$"]
     plan = _plan(backend, tmp_path, argv)
-    wrapped = subprocess.run(plan.argv, env=plan.env, check=False)  # nosec B603 - backend-built argv
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    wrapped = subprocess.run(  # nosec B603 - backend-built argv
+        plan.argv, env=plan.env, cwd=cwd, preexec_fn=_no_core_dump, check=False
+    )
     plan.run_cleanup()
-    unwrapped = subprocess.run(argv, check=False)  # nosec B603 - fixed argv
+    unwrapped = subprocess.run(  # nosec B603 - fixed argv
+        argv, cwd=cwd, preexec_fn=_no_core_dump, check=False
+    )
     assert wrapped.returncode == unwrapped.returncode < 0
+    assert not [path.name for path in cwd.iterdir() if path.name.startswith("core")]
 
 
 def test_a_process_left_after_a_normal_exit_is_reaped(tmp_path):
