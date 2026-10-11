@@ -1092,11 +1092,11 @@ def _mcp_workspace_root_outside_home(monkeypatch, tmp_path_factory):
     sweeps workspaces nobody used for a day, under ``ASH_MCP_WORKSPACE_ROOT``,
     which otherwise resolves to ``$XDG_CACHE_HOME/ash-mcp`` or
     ``~/.cache/ash-mcp``. A test that builds an app without naming a root would
-    act on that real directory. Set only when the environment names none, so a
-    run or a test that sets its own keeps it.
+    act on that real directory. Set whatever the environment says, so a developer
+    who exports their own root never runs the tests against it; a test that needs
+    a particular root sets its own.
     """
-    if not os.environ.get("ASH_MCP_WORKSPACE_ROOT"):
-        monkeypatch.setenv(
-            "ASH_MCP_WORKSPACE_ROOT",
-            str(tmp_path_factory.getbasetemp() / "mcp-workspace-root"),
-        )
+    monkeypatch.setenv(
+        "ASH_MCP_WORKSPACE_ROOT",
+        str(tmp_path_factory.getbasetemp() / "mcp-workspace-root"),
+    )

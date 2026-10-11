@@ -319,7 +319,13 @@ def _deliver_then_shut_down(proc: subprocess.Popen, workspace_root: Path) -> int
 
 
 def _sandbox_with_age(root: Path, session_id: str, age_seconds: float) -> Path:
-    sandbox = root / session_id
+    from automated_security_helper.cli.mcp.session_paths import (
+        mark_session_workspace,
+    )
+
+    # Created the way ASH creates a session workspace, marker included: the
+    # sweep removes only directories ASH created.
+    sandbox = mark_session_workspace(root / session_id)
     (sandbox / "source").mkdir(parents=True)
     (sandbox / "source" / "app.py").write_text("print('hello')\n", encoding="utf-8")
     stamp = time.time() - age_seconds

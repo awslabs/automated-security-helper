@@ -67,6 +67,7 @@ from automated_security_helper.cli.mcp.session_identity import (
     UNIDENTIFIED_SESSION_ID,
 )
 from automated_security_helper.cli.mcp.session_paths import (
+    mark_session_workspace,
     session_directory,
     validated_path_component,
 )
@@ -604,7 +605,7 @@ def set_source_git(
         ref = _reject_option_like(ref, "ref")
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
-    session_dir = _ensure_dir(_session_workspace(root, session_id))
+    session_dir = mark_session_workspace(_session_workspace(root, session_id))
 
     # Wipe any previous source for this session before cloning a fresh one;
     # callers are expected to call clear_source explicitly, but cloning over
@@ -800,7 +801,7 @@ def set_source_zip_chunk(
     """
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
-    session_dir = _ensure_dir(_session_workspace(root, session_id))
+    session_dir = mark_session_workspace(_session_workspace(root, session_id))
     part = _part_path(session_dir, upload_id)
     _ensure_dir(part.parent)
 
@@ -919,7 +920,7 @@ def set_source_zip_finalize(
     """
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
-    session_dir = _ensure_dir(_session_workspace(root, session_id))
+    session_dir = mark_session_workspace(_session_workspace(root, session_id))
     final = _final_zip_path(session_dir, upload_id)
     if not final.exists():
         raise FileNotFoundError(

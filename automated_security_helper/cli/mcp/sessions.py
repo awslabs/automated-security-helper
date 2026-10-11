@@ -56,6 +56,8 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from typing_extensions import Self
 
 from automated_security_helper.cli.mcp.session_paths import (
+    SESSION_MARKER,
+    mark_session_workspace,
     session_directory,
     validated_path_component,
 )
@@ -202,8 +204,9 @@ class MCPSessionRegistry:
             existing = self._sessions.get(session_id)
             if existing is not None:
                 return existing
-            workspace = session_directory(self._workspace_parent, session_id)
-            workspace.mkdir(parents=True, exist_ok=True)
+            workspace = mark_session_workspace(
+                session_directory(self._workspace_parent, session_id)
+            )
             session = MCPSession(id=session_id, workspace_root=workspace)
             self._sessions[session_id] = session
             return session
@@ -503,6 +506,10 @@ def sweep_stale_workspaces(
 ) -> List[str]:
     """Remove session workspaces nobody used for longer than ``ttl_seconds``.
 
+    Only directories ASH created as session workspaces are considered: each
+    carries ``session_paths.SESSION_MARKER``, and anything else under the root
+    (an operator's notes, a ``.git`` directory) is never removed.
+
     "Used" is the newest modification time of the sandbox directory and its
     direct children; every HTTP request that names a session refreshes it
     (:func:`touch_session_workspace`), and every delivery writes there. A
@@ -537,6 +544,9 @@ def sweep_stale_workspaces(
         try:
             validated_path_component(session_id)
             if entry.is_symlink() or not entry.is_dir():
+                continue
+            marker = entry / SESSION_MARKER
+            if marker.is_symlink() or not marker.is_file():
                 continue
             if _last_used(entry) >= cutoff:
                 continue

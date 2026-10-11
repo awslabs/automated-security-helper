@@ -333,6 +333,11 @@ def materialize_session_config(session_id: Optional[str], config: AshConfig) -> 
             "cannot materialize a session config: no MCP workspace root could "
             "be resolved. Set ASH_MCP_WORKSPACE_ROOT."
         )
+    from automated_security_helper.cli.mcp.session_paths import (
+        mark_session_workspace,
+    )
+
+    mark_session_workspace(sandbox.root)
     config_dir = sandbox.config_dir
     config_dir.mkdir(parents=True, exist_ok=True)
     target = config_dir / SESSION_CONFIG_FILENAME

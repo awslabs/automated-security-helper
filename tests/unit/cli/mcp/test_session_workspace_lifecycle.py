@@ -39,10 +39,14 @@ def root(tmp_path, monkeypatch) -> Path:
 
 
 def _sandbox(root: Path, session_id: str, age: float) -> Path:
-    sandbox = root / session_id
+    from automated_security_helper.cli.mcp.session_paths import (
+        mark_session_workspace,
+    )
+
+    sandbox = mark_session_workspace(root / session_id)
     (sandbox / "source").mkdir(parents=True)
     stamp = time.time() - age
-    for path in (sandbox / "source", sandbox):
+    for path in [*sandbox.rglob("*"), sandbox]:
         os.utime(path, (stamp, stamp))
     return sandbox
 
