@@ -1280,7 +1280,9 @@ ERROR    Scan incomplete: cfn-nag (MISSING), grype (MISSING), syft (MISSING)
 
 Two statuses count as incomplete:
 
-- `ERROR` — the scanner ran and failed.
+- `ERROR` — the scanner ran and failed: its tool exited with a code the scanner
+  does not accept, its results could not be read, or its content database does
+  not exist. Whatever results file the tool left is not graded.
 - `MISSING` — the scanner's dependencies were unavailable, so it never ran.
 
 `SKIPPED` does not. A skipped scanner is one you did not select, which is also
