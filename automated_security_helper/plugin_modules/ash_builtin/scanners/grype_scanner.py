@@ -23,10 +23,7 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
-    Run,
     SarifReport,
-    Tool,
-    ToolComponent,
 )
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
@@ -448,17 +445,6 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             )
             scan_env.update(GRYPE_PREPARED_ENV)
         return final_args, results_file, scan_env
-
-    def _ensure_runs(self, sarif_report: SarifReport) -> None:
-        """Synthesize a fallback Run when Grype emits a runless SARIF."""
-        if not sarif_report.runs:
-            ASH_LOGGER.warning("Grype SARIF report has no runs, creating empty run")
-            sarif_report.runs = [
-                Run(
-                    tool=Tool(driver=ToolComponent(name="grype", version="unknown")),
-                    results=[],
-                )
-            ]
 
     def _invocation_extras(
         self,

@@ -656,15 +656,6 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         raise ScannerError("its results file is empty, so there is nothing to grade")
 
-    def _ensure_runs(self, sarif_report: SarifReport) -> None:
-        """Ensure ``sarif_report.runs`` is non-empty before invocation injection.
-
-        Default no-op. Override (e.g. Grype) to synthesize a fallback Run
-        when the scanner produces a SARIF report with zero runs but the
-        template still needs to attach an invocation.
-        """
-        return None
-
     def _post_process_sarif(
         self,
         sarif_report: SarifReport,
@@ -881,10 +872,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     f"its results file is not SARIF ASH can read, so its findings "
                     f"could not be graded: {e}"
                 )
-            self._ensure_runs(sarif_report)
             if not sarif_report.runs:
                 # Every field of a SARIF log is optional, so `{}` validates. No run
-                # is no scan; see _handle_empty_results.
+                # is no scan; see _handle_empty_results. Checked on the report as
+                # the tool wrote it, before any scanner adjusts it.
                 raise ScannerError(
                     "its results file holds no SARIF run, so there is nothing to grade"
                 )

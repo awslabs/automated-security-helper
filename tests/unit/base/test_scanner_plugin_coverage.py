@@ -267,11 +267,10 @@ def test_handle_empty_results_raises_by_default(plugin_context):
         scanner._handle_empty_results()
 
 
-def test_the_default_ensure_runs_and_post_process_hooks_are_inert(plugin_context):
+def test_the_default_post_process_hooks_are_inert(plugin_context):
     scanner = _scanner(plugin_context)
     report = SarifReport.model_validate(MINIMAL_SARIF)
 
-    assert scanner._ensure_runs(report) is None
     assert scanner._post_process_sarif(report, ["stub-tool"], Path(".")) is report
     assert scanner._invocation_extras(report, ["stub-tool"], Path(".")) == {}
 

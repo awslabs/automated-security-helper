@@ -15,6 +15,7 @@ The controls are the dict shapes the executor does grade: ``severity_counts``, a
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import ClassVar, Literal
 from unittest.mock import MagicMock, patch
@@ -276,5 +277,112 @@ class TestAResultOfAnotherTypeIsAnError:
 
     def test_true_is_graded_as_before(self, plugin_context):
         row = _override_row(plugin_context, True)
+
+        assert row.status == ScannerStatus.PASSED, row.errors
+
+
+#: Answers ``grype db status -o json`` for a database built an hour ago, so the
+#: content-database check passes and only the results file decides the row.
+GRYPE_STATUS_TOOL = """\
+import json, sys
+from datetime import datetime, timedelta, timezone
+built = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+print(json.dumps({{"schemaVersion": "v6.0.2", "built": built, "path": {path!r}, "valid": True}}))
+sys.exit(0)
+"""
+
+
+class TestGrypeWithNoRunIsAnError:
+    """The run check reads what grype wrote, before the scanner adjusts the report.
+
+    grype's SARIF writer always adds a run, so a file with none is not grype's own
+    output for a clean scan. The real GrypeScanner runs with its tool replaced: the
+    replacement writes the given results file and exits 0, and ``grype`` on PATH
+    reports a current database. The control is the same setup with one run.
+    """
+
+    @pytest.fixture
+    def grype_context(self, tmp_path, monkeypatch):
+        from automated_security_helper.utils import subprocess_utils
+
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        cache = tmp_path / "grype-cache"
+        cache.mkdir()
+        script = bin_dir / "grype"
+        script.write_text(
+            f"#!{sys.executable}\n"
+            + GRYPE_STATUS_TOOL.format(path=str(cache / "6" / "vulnerability.db")),
+            encoding="utf-8",
+        )
+        script.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{bin_dir}:/usr/bin:/bin")
+        monkeypatch.setenv("ASH_BIN_PATH", str(bin_dir))
+        monkeypatch.setenv("GRYPE_DB_CACHE_DIR", str(cache))
+        monkeypatch.setenv("ASH_OFFLINE", "YES")
+        subprocess_utils.clear_find_executable_cache()
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "package.json").write_text("{}\n")
+        output = tmp_path / "output"
+        (output / ASH_WORK_DIR_NAME).mkdir(parents=True)
+        yield PluginContext(
+            source_dir=source,
+            output_dir=output,
+            work_dir=output / ASH_WORK_DIR_NAME,
+            config=AshConfig(project_name="grype-runs"),
+        )
+        subprocess_utils.clear_find_executable_cache()
+
+    @staticmethod
+    def _grype_row(context, monkeypatch, results_text: str):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
+            GrypeScanner,
+        )
+
+        scanner = GrypeScanner(context=context)
+        written = {}
+        original = scanner._execute_scan
+
+        def capture(*args, **kwargs):
+            outcome = original(*args, **kwargs)
+            written["results_file"] = Path(outcome[1])
+            return outcome
+
+        def tool(*args, **kwargs):
+            written["results_file"].parent.mkdir(parents=True, exist_ok=True)
+            written["results_file"].write_text(results_text, encoding="utf-8")
+            response = {"returncode": 0, "stdout": "", "stderr": ""}
+            scanner._process_command_response(response)
+            return response
+
+        monkeypatch.setattr(scanner, "_execute_scan", capture)
+        monkeypatch.setattr(scanner, "_run_subprocess", tool)
+        monkeypatch.setattr(scanner, "validate_plugin_dependencies", lambda: True)
+        return _row(context, scanner)
+
+    @pytest.mark.parametrize(
+        "content",
+        ["{}", json.dumps({"version": "2.1.0", "runs": []})],
+        ids=["empty-object", "sarif-no-runs"],
+    )
+    def test_the_row_is_error(self, grype_context, monkeypatch, content):
+        row = self._grype_row(grype_context, monkeypatch, content)
+
+        assert row.status == ScannerStatus.ERROR, (
+            f"grype exited 0 and wrote {content!r}; the row was graded "
+            f"{row.status.value} with {row.finding_count} findings"
+        )
+        assert any("no SARIF run" in str(e) for e in row.errors), row.errors
+
+    def test_one_run_with_no_results_is_passed(self, grype_context, monkeypatch):
+        sarif = {
+            "version": "2.1.0",
+            "runs": [
+                {"tool": {"driver": {"name": "grype", "rules": []}}, "results": []}
+            ],
+        }
+
+        row = self._grype_row(grype_context, monkeypatch, json.dumps(sarif))
 
         assert row.status == ScannerStatus.PASSED, row.errors

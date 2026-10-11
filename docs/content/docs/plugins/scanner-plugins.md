@@ -64,8 +64,9 @@ the results file and raises `ScannerError`, so the scanner is recorded `ERROR` w
 the code and the tool's stderr. A failed tool can leave a file that holds no
 findings, and reading it would grade the run `PASSED`. With an accepted code, an
 empty results file and SARIF with no run are `ERROR` too, because they record no
-scan; a tool that writes an empty file for a clean scan overrides
-`_handle_empty_results()` to return a report. Cite the tool's own
+scan. The run check reads the report as the tool wrote it, before
+`_post_process_sarif()` or any other hook changes it. A tool that writes an empty
+file for a clean scan overrides `_handle_empty_results()` to return a report. Cite the tool's own
 documentation or source for each code you add: a set that is too wide records a
 failed tool as a clean scan, and one that is too narrow turns ordinary scans into
 errors.
