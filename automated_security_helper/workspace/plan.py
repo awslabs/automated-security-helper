@@ -165,6 +165,17 @@ class ProjectPlan(BaseModel):
             ),
         ),
     ] = None
+    operator_config_digest: Annotated[
+        Optional[str],
+        Field(
+            None,
+            description=(
+                "Digest of the bytes of every file operator_config is built from, "
+                "when the plan was resolved. The scan refuses the project when "
+                "the file it would layer no longer matches."
+            ),
+        ),
+    ] = None
     scanners: Annotated[
         List[str],
         Field(

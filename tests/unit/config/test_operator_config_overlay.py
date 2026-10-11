@@ -427,3 +427,20 @@ def test_without_an_overlay_the_selected_config_is_unchanged(tmp_path):
     assert config.project_name != "repo"
     assert config.fail_on_findings is not False
     assert config.fail_on_incomplete_scanners is False
+
+
+def test_a_single_directory_scan_reads_only_the_config_it_was_given(tmp_path):
+    """The same through the orchestrator a single-directory scan builds."""
+    from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+
+    _project(tmp_path, {"project_name": "repo", "fail_on_findings": False})
+    operator = _operator(tmp_path, {"fail_on_incomplete_scanners": False})
+
+    orchestrator = ASHScanOrchestrator(
+        source_dir=tmp_path / "repo", output_dir=tmp_path / "out", config_path=operator
+    )
+    orchestrator.initialize()
+
+    assert orchestrator.config.fail_on_incomplete_scanners is False
+    assert orchestrator.config.project_name != "repo"
+    assert orchestrator.config.fail_on_findings is True

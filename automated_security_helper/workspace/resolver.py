@@ -133,6 +133,7 @@ from automated_security_helper.config.client_config_policy import ClientConfigRu
 from automated_security_helper.config.resolve_config import (
     check_operator_config,
     find_config_file,
+    operator_config_digest,
     resolve_config,
 )
 from automated_security_helper.core.exceptions import (
@@ -1015,10 +1016,12 @@ def resolve_workspace(
         Path(default_config) if default_config else None,
         Path(trusted_config) if trusted_config else None,
     )
+    operator_digest: Optional[str] = None
     if operator is not None:
         # Once for the whole workspace, so a project with no config of its own,
         # which uses the operator's file alone, is refused with the rest.
         check_operator_config(operator, definition.root, remote_client=remote_client)
+        operator_digest = operator_config_digest(operator)
 
     projects: List[ProjectPlan] = []
     for candidate in candidates:
@@ -1063,6 +1066,7 @@ def resolve_workspace(
                 # every path it was reached by (config_sources, "Base paths").
                 config_source=_as_named(config_path),
                 operator_config=_as_named(operator_config),
+                operator_config_digest=operator_digest if operator_config else None,
                 scanners=scanners,
                 severity_threshold=config.global_settings.severity_threshold,
                 scanner_pins=pins,

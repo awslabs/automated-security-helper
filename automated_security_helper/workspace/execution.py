@@ -922,6 +922,63 @@ def _workspace_root(project: ProjectPlan) -> Path:
     return root
 
 
+def _same_file(first: Optional[str | Path], second: Optional[str | Path]) -> bool:
+    """Whether two optional paths name the same file, or are both None."""
+    if first is None or second is None:
+        return first is None and second is None
+    return Path(first).resolve() == Path(second).resolve()
+
+
+def _check_the_plans_operator_config(
+    project: ProjectPlan, settings: ProjectScanSettings
+) -> None:
+    """Refuse a project whose plan does not layer the operator config the scan names.
+
+    The scan layers the file the plan recorded (``project.operator_config``), so
+    the plan's ``--dry-run`` is what runs. That holds only for a plan resolved
+    with the same operator config as these settings: a plan resolved without one,
+    or with another, would be scanned without the operator's final fields. And
+    the file must not have changed since the plan was resolved
+    (``operator_config_digest``), or the scan would run settings the plan did not
+    report. Either is refused for this project, as a config error.
+
+    Raises:
+        ASHConfigValidationError: The plan and these settings disagree, or the
+            operator config changed since the plan.
+    """
+    from automated_security_helper.config.resolve_config import operator_config_digest
+    from automated_security_helper.workspace.resolver import _operator_config
+
+    operator = _operator_config(
+        Path(settings.default_config_path) if settings.default_config_path else None,
+        Path(settings.trusted_config_path) if settings.trusted_config_path else None,
+    )
+    # A project with no config of its own uses the default config alone, so
+    # nothing is layered over it.
+    own_config = project.config_source is not None and not _same_file(
+        project.config_source, settings.default_config_path
+    )
+    expected = operator if own_config else None
+    if not _same_file(project.operator_config, expected):
+        raise ASHConfigValidationError(
+            f"Project '{project.key}' was planned with operator config "
+            f"{project.operator_config or 'none'}, but this scan is run with "
+            f"{expected.as_posix() if expected else 'none'}. Resolve the workspace "
+            "again with the same --config as the scan."
+        )
+    if (
+        project.operator_config is not None
+        and project.operator_config_digest is not None
+        and operator_config_digest(project.operator_config)
+        != project.operator_config_digest
+    ):
+        raise ASHConfigValidationError(
+            f"The operator config {project.operator_config} changed after "
+            f"project '{project.key}' was planned, so the scan would not run the "
+            "plan. Resolve the workspace again."
+        )
+
+
 def _project_config_with_policy(
     project: ProjectPlan, settings: ProjectScanSettings
 ) -> Any:
@@ -966,6 +1023,8 @@ def _project_config_with_policy(
         check_discovered_source,
     )
     from automated_security_helper.config.resolve_config import resolve_config
+
+    _check_the_plans_operator_config(project, settings)
 
     # ``config_source`` is None for a project that declared no config. The plan was
     # resolved with the same fallback, so the resolver already recorded the

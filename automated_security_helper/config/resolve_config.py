@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 from types import UnionType
@@ -819,6 +820,24 @@ def check_operator_config(
         operator_config_path, None, permit_base, env_refused_for(remote_client)
     )
     _refuse_unless_the_operators(overlay, scanned_root)
+
+
+def operator_config_digest(operator_config_path: Path | str) -> str:
+    """A digest of the bytes of every file ``operator_config_path`` is built from.
+
+    Workspace resolution records it with the plan, and each project's scan
+    compares it before layering the file again, so a file that changed between
+    the plan and the scan (another call rewriting a session's profile, an edit)
+    is refused rather than scanned with settings ``--dry-run`` did not report.
+    """
+    path = Path(operator_config_path)
+    document = resolve_config_document(path, confine_to=default_confinement_root(path))
+    digest = hashlib.sha256()
+    for member in document.chain:
+        data = Path(member).read_bytes()
+        digest.update(f"{Path(member).as_posix()}\0{len(data)}\0".encode("utf-8"))
+        digest.update(data)
+    return digest.hexdigest()
 
 
 def _overlaid(

@@ -298,3 +298,58 @@ def test_the_dry_run_names_the_operators_file(tmp_path):
     plan = resolve_workspace(_workspace(root, ["api"]), default_config=operator)
 
     assert operator.resolve().as_posix() in plan.render()
+
+
+def test_the_operators_grant_is_kept_at_scan_over_the_projects(tmp_path):
+    root = tmp_path / "work"
+    _project(root, "api", {"sandbox": {"extra_read_paths": ["/project/x"]}})
+    operator = _operator(tmp_path, {"sandbox": {"extra_read_paths": ["/operator/x"]}})
+    plan = resolve_workspace(_workspace(root, ["api"]), default_config=operator)
+
+    _scan(tmp_path, plan, operator)
+
+    assert _resolved("api").sandbox.extra_read_paths == ["/operator/x"]
+
+
+def test_a_scan_refuses_a_plan_resolved_without_its_operator_config(tmp_path):
+    """The scan layers only what the plan recorded, so a plan resolved without
+    the operator's file must not be scanned under settings that name one."""
+    root = tmp_path / "work"
+    _project(root, "api", {"fail_on_findings": False})
+    operator = _operator(tmp_path, {"fail_on_findings": True})
+    plan = resolve_workspace(_workspace(root, ["api"]))
+    _Orchestrator.behaviour["api"] = {"sarif": _sarif_with_one_error()}
+
+    outcome = _scan(tmp_path, plan, operator)
+
+    assert _Orchestrator.built == []
+    assert outcome.payload.projects[0].invalid_config is True
+    assert outcome.exit_code == WorkspaceExitCode.INVALID_PROJECT_CONFIG
+
+
+def test_a_scan_refuses_an_operator_config_that_changed_after_the_plan(tmp_path):
+    """Plan and scan read the same file at two times; between them it must not
+    change, or the scan runs settings --dry-run did not report."""
+    root = tmp_path / "work"
+    _project(root, "api", {"fail_on_findings": False})
+    operator = _operator(tmp_path, {"fail_on_findings": True})
+    plan = resolve_workspace(_workspace(root, ["api"]), default_config=operator)
+    operator.write_text(yaml.safe_dump({"project_name": "changed"}), encoding="utf-8")
+
+    outcome = _scan(tmp_path, plan, operator)
+
+    assert _Orchestrator.built == []
+    assert outcome.exit_code == WorkspaceExitCode.INVALID_PROJECT_CONFIG
+
+
+def test_an_unchanged_operator_config_scans(tmp_path):
+    """Control for the two refusals above."""
+    root = tmp_path / "work"
+    _project(root, "api", {"fail_on_findings": False})
+    operator = _operator(tmp_path, {"fail_on_findings": True})
+    plan = resolve_workspace(_workspace(root, ["api"]), default_config=operator)
+
+    outcome = _scan(tmp_path, plan, operator)
+
+    assert [o.key for o in _Orchestrator.built] == ["api"]
+    assert outcome.exit_code == WorkspaceExitCode.SUCCESS
