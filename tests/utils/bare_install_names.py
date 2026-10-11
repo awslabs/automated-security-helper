@@ -33,8 +33,12 @@ What is reported
    documents as taking a value (``uv tool run --help``) has its value skipped
    when looking for that word. ``pipx inject <venv> <packages>`` installs its
    packages, not its venv name. A command is found inside code spans, HTML
-   ``<code>``/``<pre>`` (entities decoded), ``$(...)``, and a JSON array of
+   ``<code>``/``<pre>`` (entities decoded), ``$(...)``, quotes (an alias or
+   variable holding a command, ``alias ash="uvx ..."``), and a JSON array of
    strings such as a Dockerfile's exec form ``RUN ["pip", "install", ...]``.
+   The value of a uv option ending in ``-package`` (``--reinstall-package``)
+   names a package to treat specially, not one to install, and is not read as
+   a target.
 2. A requirement spelling of ASH's distribution name anywhere in the text:
    ``automated-security-helper[extra]`` or ``automated-security-helper==1.2``.
    Those only ever mean "resolve this name from an index", with or without an
@@ -56,8 +60,9 @@ What is reported
 
 In Python files every string expression is read whole: adjacent literals, an
 f-string, ``+`` concatenation, ``%`` and ``str.format`` with constant arguments,
-and module-level names assigned once to a string are folded into one text, with
-anything not constant read as ``{}``. Every list and tuple with a string in it
+module-level names assigned once to a string, and ``ASH_DISTRIBUTION_NAME``
+imported from ``utils/ash_install.py`` (by name or as an attribute) are folded
+into one text, with anything not constant read as ``{}``. Every list and tuple with a string in it
 is rebuilt into one command line, so an argv list such as
 ``[sys.executable, "-m", "pip", "install", "automated-security-helper[cdk]"]``
 is read as the command it runs. A requirement followed by ``@ {}`` there is a
@@ -187,6 +192,7 @@ _RUN_VALUE_OPTIONS = frozenset(
         "--no-binary-package",
         "--cache-dir",
         "--refresh-package",
+        "--prerelease-package",
         "-p",
         "--python",
         "--color",
@@ -480,6 +486,17 @@ def _quoted_line(words: list[str]) -> str:
     return " ".join(f'"{w}"' if re.search(r"\s", w) else w for w in words)
 
 
+def _quoted_commands(line: str) -> Iterator[str]:
+    """The text inside each quoted span of ``line``, read as commands too.
+
+    A shell alias or a variable holds its command in quotes, as in
+    ``alias ash="uvx ..."`` or ``export ASH='uvx ...'``, and the quote sticks to
+    the word before it, so ``ash="uvx`` is not read as ``uvx`` otherwise.
+    """
+    for match in re.finditer(r'"([^"]+)"|\'([^\']+)\'', line):
+        yield from _segments(match.group(1) or match.group(2))
+
+
 def _string_arrays(line: str) -> Iterator[str]:
     """Each JSON array of strings in ``line``, rebuilt as one command line."""
     for match in _STRING_ARRAY.finditer(line):
@@ -600,7 +617,11 @@ def find_in_text(text: str, *, python_literal: bool = False) -> list[tuple[int, 
     found: list[tuple[int, str]] = []
     for number, raw_line in _logical_lines(text):
         line = html.unescape(raw_line)
-        for command_line in [*_segments(line), *_string_arrays(line)]:
+        for command_line in [
+            *_segments(line),
+            *_quoted_commands(line),
+            *_string_arrays(line),
+        ]:
             if command_is_bare_install(command_line):
                 found.append((number, command_line))
         found.extend(
@@ -622,6 +643,13 @@ def find_bare_installs(text: str) -> list[str]:
 
 _FOLD_UNKNOWN = "{}"
 
+#: Constants ASH exports for building install text, by the name other modules
+#: import them under, so a hint built from one in another module is still read.
+#: ``tests/unit/test_no_bare_name_install_hints.py`` checks these against the
+#: real values.
+EXPORTED_CONSTANTS = {"ASH_DISTRIBUTION_NAME": "automated-security-helper"}
+_EXPORTED_CONSTANTS = EXPORTED_CONSTANTS
+
 
 def _fold(node: ast.AST, constants: dict[str, str]) -> Optional[str]:
     """The text of a string expression, or None if ``node`` is not one.
@@ -632,6 +660,9 @@ def _fold(node: ast.AST, constants: dict[str, str]) -> Optional[str]:
         return node.value if isinstance(node.value, str) else None
     if isinstance(node, ast.Name):
         return constants.get(node.id)
+    if isinstance(node, ast.Attribute):
+        # ``ash_install.ASH_DISTRIBUTION_NAME`` from another module.
+        return _EXPORTED_CONSTANTS.get(node.attr)
     if isinstance(node, ast.JoinedStr):
         parts = []
         for value in node.values:
@@ -683,8 +714,13 @@ def _fold(node: ast.AST, constants: dict[str, str]) -> Optional[str]:
 
 
 def _module_constants(tree: ast.Module) -> dict[str, str]:
-    """Module-level names assigned exactly once to a string expression."""
-    constants: dict[str, str] = {}
+    """Module-level names assigned exactly once to a string expression.
+
+    Starts from the constants ASH exports for building install text, so a module
+    that imports one is read with its value; a module that assigns the same name
+    itself more than once loses it.
+    """
+    constants: dict[str, str] = dict(_EXPORTED_CONSTANTS)
     assigned: dict[str, int] = {}
     for statement in tree.body:
         if isinstance(statement, ast.Assign):
@@ -700,7 +736,9 @@ def _module_constants(tree: ast.Module) -> dict[str, str]:
             text = _fold(value, constants)
             if text is not None:
                 constants[target.id] = text
-    return {name: text for name, text in constants.items() if assigned[name] == 1}
+    return {
+        name: text for name, text in constants.items() if assigned.get(name, 1) == 1
+    }
 
 
 def _python_strings(source: str, path: Path) -> Iterator[tuple[int, str]]:

@@ -21,12 +21,15 @@ place a user reads install advice in one pass.
 
 What it checks
 --------------
-Every file under ``automated_security_helper/`` and ``docs/`` (the MCP testing
-guide is ``docs/content/docs/MCP-SERVER-TESTING-GUIDE.md``), plus the root
-``README.md`` and its template. In Python files it reads every string literal,
-docstrings included, and no comments: comments are where the history of a
-changed hint belongs, and no user reads them. What counts as a bare-name install
-is defined, with its limits, in ``tests/utils/bare_install_names.py``.
+Every file git tracks under ``automated_security_helper/``, ``docs/`` (the MCP
+testing guide is ``docs/content/docs/MCP-SERVER-TESTING-GUIDE.md``),
+``ash-agent-plugins/``, ``skills/``, ``.github/``, ``examples/`` and ``deploy/``
+(``node_modules`` never), plus ``README.md``, its template, ``CONTRIBUTING.md``
+and ``DEVELOPMENT.md``. Without a checkout it walks the same roots on disk. In
+Python files it reads every string expression, docstrings included, and no
+comments: comments are where the history of a changed hint belongs, and no user
+reads them. What counts as a bare-name install is defined, with its limits, in
+``tests/utils/bare_install_names.py``.
 
 The gate is shown able to fail three ways: the matcher is run on the commands
 it must report and on the git-URL forms it must accept, a planted copy of the
@@ -35,12 +38,13 @@ files that carried the hints this gate was written for.
 
 What it does not cover
 ----------------------
-Other directories (``ash-agent-plugins/``, ``skills/``, ``.github/``, and
-``examples/`` apart from the plugin example's ``pyproject.toml``, which the last
-two tests here check) and MCP client configs written as YAML or TOML. Python
-comments. Hints assembled at runtime from pieces that never share a string
-literal; the runtime-hint tests pin those messages as users see them
-(``tests/unit/utils/test_symbol_suppressions.py`` and the detect-secrets
+The rest of the tree (``scripts/``, ``tests/``, ``Dockerfile`` and other root
+files); a sweep of it at the time this gate widened found no install text
+there. MCP client configs written as YAML or TOML. Python comments. Hints
+assembled at runtime from values that are not module-level constants; the
+runtime-hint tests pin those messages as users see them
+(``tests/unit/utils/test_ash_install.py``,
+``tests/unit/utils/test_symbol_suppressions.py`` and the detect-secrets
 behavior tests).
 """
 
@@ -56,6 +60,7 @@ import pytest
 
 from tests.utils.bare_install_names import (
     BINARY_SUFFIXES,
+    EXPORTED_CONSTANTS,
     find_bare_installs,
     find_in_file,
 )
@@ -252,6 +257,17 @@ BARE_NAME_INSTALLS = {
     "conda-install": "conda install -c conda-forge ash",
     "mamba-install": "mamba install automated-security-helper",
     "micromamba-install": "micromamba install ash",
+    "alias-uvx-distribution-name": 'alias ash="uvx automated-security-helper"',
+    "alias-uvx-ash": 'alias ash="uvx ash"',
+    "alias-uvx-from-bare-name": 'alias ash="uvx --from automated-security-helper ash"',
+    "alias-single-quoted": "alias ash='uvx automated-security-helper'",
+    "export-command-variable": 'export ASH="uvx automated-security-helper"',
+    "uvx-prerelease-package": "uvx --prerelease-package pkg=allow ash mcp",
+    # Each of these three is reported by one rule alone: HTML entities decoded,
+    # a JSON string array rebuilt, a `\\` continuation joined.
+    "html-entities-only": "<code>uvx &quot;ash&quot; mcp</code>",
+    "dockerfile-exec-form-uvx": 'RUN ["uvx", "ash", "mcp"]',
+    "line-continuation-ash": "pip install \\\n    ash",
     "pip-download": "pip download ash",
     "pip-wheel": "pip wheel automated-security-helper",
     "uv-pip-reinstall-package-and-bare-target": (
@@ -397,6 +413,11 @@ RESOLVING_OR_UNRELATED = {
     "rye-run-script": "rye run ash scan",
     "conda-install-other": "conda install -c conda-forge python=3.12 nodejs",
     "pip-download-git": f"pip download git+{GIT_URL}@v3.7.0",
+    "alias-uvx-git": f'alias ash="uvx git+{GIT_URL}@v3.7.0"',
+    "alias-uvx-from-direct-reference": (
+        f"alias ash=\"uvx --from 'automated-security-helper[symbols] @ "
+        f"git+{GIT_URL}@v3.7.0' ash\""
+    ),
     "uv-pip-reinstall-hint": (
         "/opt/ash/bin/python -m uv pip install --python /opt/ash/bin/python "
         f"--reinstall-package automated-security-helper git+{GIT_URL}@0123abcd"
@@ -484,6 +505,24 @@ PYTHON_BARE_NAME_INSTALLS = {
     "requirement-literal-alone": """
         REQUIREMENT = "automated-security-helper[cdk]"
         """,
+    # ash_install exports the distribution name for building install text; it is
+    # only meaningful with a direct reference after it.
+    "imported-name-constant": """
+        from automated_security_helper.utils.ash_install import ASH_DISTRIBUTION_NAME
+
+        HINT = f"pip install {ASH_DISTRIBUTION_NAME}[symbols]"
+        """,
+    "imported-name-attribute": """
+        from automated_security_helper.utils import ash_install
+
+        HINT = "pip install " + ash_install.ASH_DISTRIBUTION_NAME
+        """,
+    "imported-name-in-argv": """
+        from automated_security_helper.utils.ash_install import ASH_DISTRIBUTION_NAME
+
+        def command(extra):
+            return ["pip", "install", f"{ASH_DISTRIBUTION_NAME}[{extra}]"]
+        """,
 }
 
 PYTHON_RESOLVING_OR_UNRELATED = {
@@ -511,7 +550,22 @@ PYTHON_RESOLVING_OR_UNRELATED = {
     "image-name": """
         IMAGE = "automated-security-helper:custom"
         """,
+    "imported-name-in-direct-reference": """
+        from automated_security_helper.utils.ash_install import ASH_DISTRIBUTION_NAME
+
+        def requirement(extra, source):
+            return f"{ASH_DISTRIBUTION_NAME}[{extra}] @ {source}"
+        """,
 }
+
+
+def test_the_exported_constants_the_matcher_folds_are_the_real_ones():
+    """The matcher reads ``ASH_DISTRIBUTION_NAME`` from other modules by value."""
+    from automated_security_helper.utils import ash_install
+
+    assert EXPORTED_CONSTANTS == {
+        name: getattr(ash_install, name) for name in EXPORTED_CONSTANTS
+    }
 
 
 @pytest.mark.parametrize(
@@ -621,6 +675,8 @@ def test_planted_lines_for_other_installers_are_reported(tmp_path):
             uv add --dev ash
             uv add "automated-security-helper @ git+{GIT_URL}@v3.7.0"
             conda install -c conda-forge ash
+            alias ash="uvx automated-security-helper"
+            alias ash="uvx git+{GIT_URL}@v3.7.0"
             ```
             """
         ),
@@ -634,6 +690,7 @@ def test_planted_lines_for_other_installers_are_reported(tmp_path):
         "docs/content/docs/installers.md:5",
         "docs/content/docs/installers.md:7",
         "docs/content/docs/installers.md:9",
+        "docs/content/docs/installers.md:10",
     }
 
 
