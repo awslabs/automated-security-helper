@@ -1248,3 +1248,126 @@ def test_a_line_gitleaks_can_buffer_is_read(tmp_path, monkeypatch):
     assert _copied_for(tmp_path, monkeypatch, entries, b"app/after.py") == [
         b"app/after.py"
     ]
+
+
+# --------------------------------------------------------------------------- #
+# The re-scan is bounded, and what it skips is reported as not evaluated
+# --------------------------------------------------------------------------- #
+
+
+def _capped(tmp_path, monkeypatch, names: list, limit: int):
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        gitleaks_scanner as module,
+    )
+
+    monkeypatch.setattr(module, "MAX_RESCAN_FILES", limit)
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, {})
+    source = Path(scanner.context.source_dir)
+    for name in names:
+        _write(source, name)
+    (source / ".gitleaksignore").write_text(
+        "".join(f"{name}:github-pat:1\n" for name in names)
+    )
+    return scanner, calls, source
+
+
+def test_the_re_scan_copies_at_most_the_limit_and_says_how_many_it_skipped(
+    tmp_path, monkeypatch, caplog
+):
+    names = [f"app/f{index}.py" for index in range(5)]
+    scanner, calls, source = _capped(tmp_path, monkeypatch, names, limit=2)
+    with caplog.at_level("WARNING"):
+        _add_back(scanner, source, _report(), tmp_path)
+    assert [call["files"] for call in calls] == [["app/f0.py", "app/f1.py"]]
+    assert "3 file(s) the scanned tree's .gitleaksignore names were not" in caplog.text
+    for name in names:  # the names are the tree's; the warning gives a count
+        assert name not in caplog.text
+
+
+def test_files_past_the_limit_are_reported_as_not_evaluated(tmp_path, monkeypatch):
+    """An error-level run notification: the scan gate reads it as incomplete."""
+    from types import SimpleNamespace
+
+    from automated_security_helper.interactions.run_ash_scan import unevaluated_rules
+
+    names = [f"app/f{index}.py" for index in range(3)]
+    scanner, _, source = _capped(tmp_path, monkeypatch, names, limit=1)
+    results_file = tmp_path / "res" / "gitleaks.sarif"
+    results_file.parent.mkdir()
+    raw = _report()
+    scanner._add_back_gitleaksignore_drops(
+        raw, source, scanner._build_arguments(source, results_file), results_file
+    )
+    report = SarifReport.model_validate(raw)
+    scanner._inject_invocation(report, ["gitleaks", "dir"], source)
+    report = scanner._post_process_sarif(report, [], source)
+
+    [notification] = report.runs[0].invocations[0].toolExecutionNotifications
+    assert getattr(notification.level, "value", notification.level) == "error"
+    gap = unevaluated_rules(SimpleNamespace(sarif=report))
+    assert len(gap) == 1 and "2 file(s)" in gap[0] and "gitleaks" in gap[0]
+    # Reported once: the next target's report does not inherit it.
+    again = scanner._post_process_sarif(
+        SarifReport.model_validate(_report()), [], source
+    )
+    assert unevaluated_rules(SimpleNamespace(sarif=again)) == []
+
+
+def test_within_the_limit_nothing_is_reported_as_not_evaluated(tmp_path, monkeypatch):
+    names = [f"app/f{index}.py" for index in range(2)]
+    scanner, calls, source = _capped(tmp_path, monkeypatch, names, limit=2)
+    raw = _report()
+    results_file = tmp_path / "res" / "gitleaks.sarif"
+    results_file.parent.mkdir()
+    scanner._add_back_gitleaksignore_drops(
+        raw, source, scanner._build_arguments(source, results_file), results_file
+    )
+    report = SarifReport.model_validate(raw)
+    scanner._inject_invocation(report, ["gitleaks", "dir"], source)
+    report = scanner._post_process_sarif(report, [], source)
+    assert not report.runs[0].invocations[0].toolExecutionNotifications
+    assert [call["files"] for call in calls] == [names]
+
+
+def test_the_re_scan_runs_share_one_deadline(tmp_path, monkeypatch):
+    """Each run is given what is left of one scan_timeout, not a fresh one."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        gitleaks_scanner as module,
+    )
+
+    clock = iter([100.0, 100.0, 130.0, 130.0])
+    monkeypatch.setattr(module.time, "monotonic", lambda: next(clock))
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, {}, scan_timeout=50)
+    timeouts = []
+    fake = scanner._run_subprocess
+
+    def timed(command, **kwargs):
+        timeouts.append(kwargs.get("timeout"))
+        return fake(command, **kwargs)
+
+    monkeypatch.setattr(scanner, "_run_subprocess", timed)
+    source = Path(scanner.context.source_dir)
+    _write(source, "app/x.py")
+    (source / ".gitleaksignore").write_text(
+        ".gitleaksignore:github-pat:1\napp/x.py:github-pat:1\n"
+    )
+    _add_back(scanner, source, _report(), tmp_path)
+    assert timeouts == [50.0, 20.0]
+
+
+def test_a_re_scan_with_no_time_left_fails_the_scan(tmp_path, monkeypatch):
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        gitleaks_scanner as module,
+    )
+
+    clock = iter([100.0, 100.0, 160.0, 160.0])
+    monkeypatch.setattr(module.time, "monotonic", lambda: next(clock))
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, {}, scan_timeout=50)
+    source = Path(scanner.context.source_dir)
+    _write(source, "app/x.py")
+    (source / ".gitleaksignore").write_text(
+        ".gitleaksignore:github-pat:1\napp/x.py:github-pat:1\n"
+    )
+    with pytest.raises(ScannerError, match="timed out"):
+        _add_back(scanner, source, _report(), tmp_path)
+    assert len(calls) == 1

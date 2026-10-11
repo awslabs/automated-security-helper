@@ -62,7 +62,9 @@ which are both, so the scanned tree does not configure gitleaks:
   reached through a symlink, nothing that is not a regular file, nothing under
   ASH's output directory, not the operator's baseline. A failed re-run fails the
   scan rather than reporting the first run alone, and the copies are removed when
-  it ends. Inline ``gitleaks:allow`` comments still apply.
+  it ends. It copies at most ``MAX_RESCAN_FILES`` files, and its runs share one
+  ``scan_timeout``; names past the limit are reported as not evaluated, which
+  makes the scan incomplete. Inline ``gitleaks:allow`` comments still apply.
 * A ``.gitleaksignore`` that is a symlink, not a regular file, or hard-linked
   stops the scanner before gitleaks runs (``_read_tree_ignore_file``): gitleaks
   opens the name, follows the link, and logs each line it cannot parse. ASH reads
@@ -113,6 +115,7 @@ import os
 import posixpath
 import shutil
 import stat
+import time
 from pathlib import Path, PurePosixPath
 from typing import (
     Annotated,
@@ -139,8 +142,12 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
+    Invocation,
     Kind,
     Level,
+    Message,
+    Message1,
+    Notification,
     PropertyBag,
     SarifReport,
 )
@@ -183,6 +190,11 @@ RESCAN_SELF_DIR = "self"
 
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _BINARY = getattr(os, "O_BINARY", 0)
+
+#: Most files the ``.gitleaksignore`` re-scan copies. Names past it are not
+#: re-scanned, and the run reports them as not evaluated, which fails the scan
+#: as incomplete (``run_ash_scan.unevaluated_rules``).
+MAX_RESCAN_FILES = 10_000
 
 #: Most bytes of the tree's ``.gitleaksignore`` ASH reads. A larger file stops
 #: the scan: its entries could not all be re-scanned.
@@ -356,6 +368,9 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     # The target, argv and .gitleaksignore content of the run whose report
     # _read_results_file reads next, for the re-scan. Set by _execute_scan.
     _pending_run: Optional[Tuple[Path, List[str], bytes]] = PrivateAttr(default=None)
+    # Names the last re-scan did not reach (MAX_RESCAN_FILES), for the report
+    # _post_process_sarif finishes next.
+    _rescan_skipped: int = PrivateAttr(default=0)
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -753,12 +768,34 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             shutil.rmtree(rescan_dir)
         rescan_dir.mkdir(parents=True)
         added = 0
+        # One deadline for every re-scan run, scan_timeout long.
+        timeout = self._effective_scan_timeout()
+        deadline = None if timeout is None else time.monotonic() + timeout
         try:
-            batches, copied = self._copy_for_rescan(
+            batches, copied, skipped = self._copy_for_rescan(
                 target, relatives, rescan_dir, final_args
             )
+            self._rescan_skipped = skipped
+            if skipped:
+                self._plugin_log(
+                    f"{skipped} file(s) the scanned tree's {IGNORE_FILE_NAME} names "
+                    f"were not re-scanned: ASH re-scans at most {MAX_RESCAN_FILES}. "
+                    "The scan is reported as incomplete.",
+                    level=logging.WARNING,
+                )
             for cwd, scan_arg, report in batches:
-                data = self._run_rescan(final_args, cwd, scan_arg, report, rescan_dir)
+                remaining = None
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise ScannerError(
+                            "gitleaks timed out re-scanning the files the scanned "
+                            f"tree's {IGNORE_FILE_NAME} names: scan_timeout "
+                            f"({timeout}s) covers every re-scan run"
+                        )
+                data = self._run_rescan(
+                    final_args, cwd, scan_arg, report, rescan_dir, remaining
+                )
                 for run in data.get("runs") or []:
                     for result in run.get("results") or []:
                         self._respell_rescan_result(result, scan_path)
@@ -784,8 +821,11 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         relatives: List[str],
         rescan_dir: Path,
         final_args: List[str],
-    ) -> Tuple[List[Tuple[Path, str, Path]], int]:
+    ) -> Tuple[List[Tuple[Path, str, Path]], int, int]:
         """Copy the named files the directory scan reads; return the runs to make.
+
+        Returns the runs, the number of files copied, and the number of names
+        not checked because ``MAX_RESCAN_FILES`` files were copied first.
 
         Each run is ``(working directory, scan path, report path)``. The files go
         under ``RESCAN_TREE_DIR`` at their tree paths, scanned as ``.``. The root
@@ -822,7 +862,11 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         self_dir = rescan_dir / RESCAN_SELF_DIR
         in_tree = 0
         itself = False
-        for relative in relatives:
+        not_checked = 0
+        for index, relative in enumerate(relatives):
+            if in_tree + int(itself) >= MAX_RESCAN_FILES:
+                not_checked = len(relatives) - index
+                break
             if relative in skipped_names:
                 continue
             if output_inside is not None and PurePosixPath(relative).is_relative_to(
@@ -855,7 +899,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             batches.append((tree_dir, ".", rescan_dir / "tree.sarif"))
         if itself:
             batches.append((self_dir, IGNORE_FILE_NAME, rescan_dir / "self.sarif"))
-        return batches, in_tree + int(itself)
+        return batches, in_tree + int(itself), not_checked
 
     def _run_rescan(
         self,
@@ -864,6 +908,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         scan_arg: str,
         report: Path,
         rescan_dir: Path,
+        timeout: Optional[float],
     ) -> Dict[str, Any]:
         """Run gitleaks with the first run's flags over ``scan_arg`` from ``cwd``."""
         args = [
@@ -878,7 +923,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             results_dir=rescan_dir,
             cwd=cwd,
             env=self._rescan_env(final_args),
-            timeout=self._effective_scan_timeout(),
+            timeout=timeout,
         )
         self.exit_code = exit_code
         code = response.get("returncode", 1) if isinstance(response, dict) else 1
@@ -975,15 +1020,50 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 level=logging.DEBUG,
             )
 
+    def _report_rescan_skipped(self, sarif_report: SarifReport) -> None:
+        """Record the names the re-scan did not reach as a run that is incomplete.
+
+        An error-level ``toolExecutionNotifications`` entry on the invocation,
+        which ``run_ash_scan.unevaluated_rules`` reads: the scan exits 1 as
+        incomplete rather than reading as clean, since a finding the tree's
+        ``.gitleaksignore`` hides in those files is not reported. A count, not the
+        names, which are the tree's text.
+        """
+        skipped, self._rescan_skipped = self._rescan_skipped, 0
+        if not skipped or not sarif_report.runs:
+            return
+        notification = Notification(
+            level=Level.error,
+            message=Message(
+                root=Message1(
+                    text=(
+                        f"gitleaks: {skipped} file(s) the scanned tree's "
+                        f"{IGNORE_FILE_NAME} names were not re-scanned, past "
+                        f"ASH's limit of {MAX_RESCAN_FILES}, so a finding that file "
+                        "hides in them is not reported."
+                    )
+                )
+            ),
+        )
+        run = sarif_report.runs[0]
+        if not run.invocations:
+            run.invocations = [Invocation(executionSuccessful=True)]
+        invocation = run.invocations[0]
+        invocation.toolExecutionNotifications = [
+            *(invocation.toolExecutionNotifications or []),
+            notification,
+        ]
+
     def _post_process_sarif(
         self,
         sarif_report: SarifReport,
         final_args: List[str],
         target: Path,
     ) -> SarifReport:
-        """Drop ASH's own files, rate every result, drop empty fingerprints, and
-        keep snippets redacted."""
+        """Drop ASH's own files, rate every result, drop empty fingerprints, keep
+        snippets redacted, and report the files the re-scan did not reach."""
         self._drop_results_under_output_dir(sarif_report, target)
+        self._report_rescan_skipped(sarif_report)
         for result in sarif_report.get_all_results():
             # See "Severity" in the module docstring.
             result.level = Level.error
