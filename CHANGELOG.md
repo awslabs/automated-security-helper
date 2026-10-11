@@ -224,7 +224,13 @@
 - **A single-file `.gz` is decompressed and scanned.** A `.gz` that is one compressed
   file rather than a tarball, such as `data.json.gz`, used to be passed over. It is
   decompressed to `data.json` within the extraction limits and the scan's budget,
-  and scanned. A `.tar.gz` that holds no tar is a failed input.
+  and scanned. A `.tar.gz` that holds no tar is a failed input. This changes the
+  verdict for a large single-file gzip with a scannable inner name, such as
+  `dump.sql.gz` or `data.csv.gz`: one that decompresses to more than a limit
+  (256 MiB for `max_member_bytes` by default) was passed over before, and is now
+  refused for that limit, which fails a default scan. Raise the limit with
+  `--config-overrides converters.archive.options.max_member_bytes=<bytes>`, or leave
+  the file out with `global_settings.ignore_paths`.
 
 - **A Git LFS pointer named like an archive is reported, not failed.** A checkout
   without its LFS objects holds a pointer file where each LFS-tracked `.zip` or
