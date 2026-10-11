@@ -1438,3 +1438,50 @@ def test_a_re_scan_with_no_time_left_fails_the_scan(tmp_path, monkeypatch):
     with pytest.raises(ScannerError, match="timed out"):
         _add_back(scanner, source, _report(), tmp_path)
     assert len(calls) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Each target is judged by its own exit code
+# --------------------------------------------------------------------------- #
+
+
+def _run_targets(tmp_path, monkeypatch, codes: list) -> list:
+    """Scan the source and then the converted target with one scanner instance,
+    gitleaks exiting with ``codes`` in turn. Only the process launch is replaced,
+    so the base class's exit-code accumulation runs as it does in a scan."""
+    from automated_security_helper.utils import subprocess_utils
+
+    scanner = _scanner(tmp_path)
+    monkeypatch.setattr(scanner, "validate_plugin_dependencies", lambda: True)
+    source = Path(scanner.context.source_dir)
+    _write(source, "app/x.py")
+    work = Path(scanner.context.work_dir)
+    _write(work, "archive/x.py")
+    remaining = iter(codes)
+
+    def launch(command, **kwargs):
+        # A report whatever the code, so only the exit code decides the outcome.
+        report = next(
+            a.split("=", 1)[1] for a in command if a.startswith("--report-path=")
+        )
+        Path(report).write_text(json.dumps(_report()))
+        return {"returncode": next(remaining)}
+
+    monkeypatch.setattr(subprocess_utils, "run_command_with_output_handling", launch)
+    outcomes = []
+    for target, kind in ((source, "source"), (work, "converted")):
+        try:
+            scanner.scan(target=target, target_type=kind)
+            outcomes.append("ok")
+        except ScannerError:
+            outcomes.append("error")
+    return outcomes
+
+
+def test_a_failed_source_run_does_not_fail_a_clean_converted_one(tmp_path, monkeypatch):
+    assert _run_targets(tmp_path, monkeypatch, [1, 0]) == ["error", "ok"]
+
+
+def test_leaks_in_the_source_do_not_hide_a_failed_converted_run(tmp_path, monkeypatch):
+    """The worst code across runs was 2, which is accepted, so exit 1 read as leaks."""
+    assert _run_targets(tmp_path, monkeypatch, [LEAKS_EXIT_CODE, 1]) == ["ok", "error"]

@@ -26,7 +26,8 @@ Every invocation carries these flags, and none of them is configurable:
 * ``--exit-code=2``: gitleaks exits 1 both when it finds leaks (its default
   ``--exit-code``) and when it fails (every fatal log line exits 1, including an
   unreadable config). Moving the leaks code to 2 is the only way to tell those
-  apart, so 0 and 2 are success and 1 is a failure.
+  apart, so 0 and 2 are success and 1 is a failure. Each target (the source, then
+  the converted files) is judged by its own run's exit code.
 * ``--no-banner``, ``--no-color``: the log goes to a file nobody reads in a
   terminal.
 * ``--gitleaks-ignore-path=<empty directory ASH writes>``: by default gitleaks
@@ -626,6 +627,11 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         """
         if self.results_dir is None:
             raise ScannerError("GitleaksScanner has no results directory")
+        # ScannerExecutor runs this instance over the source and then the converted
+        # target, and the base class keeps the worst exit code across runs. Without
+        # this, a source run that failed (1) failed a clean converted run, and one
+        # that found leaks (2) made a converted run's failure (1) read as leaks.
+        self.exit_code = 0
         results_file = self.results_dir.joinpath(target_type, "gitleaks.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
         # A report left by an earlier run must not be read as this run's: a
