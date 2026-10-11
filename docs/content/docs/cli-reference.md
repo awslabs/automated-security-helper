@@ -210,7 +210,10 @@ empty, refuses the scan with exit 3 before anything is built. In workspace mode 
 policy file the host resolved (`--workspace-config`, or the one found in the workspace
 root) is handed to the container the same way. The `./ash` wrapper and `Invoke-ASH`
 mount a config from outside the source directory on its own, so an `extends` base next
-to it is not reachable there; use `ash --mode container` for such a chain.
+to it is not reachable there; use `ash --mode container` for such a chain. A program that
+calls `run_ash_scan(mode=RunMode.container)` with no `config` gets `ASH_CONFIG`'s file
+handed to the container when no config is found in the source directory, which is when
+a local scan uses it.
 
 A path that would be mounted (the source and output directories, the config file and
 the files it extends, the workspace policy) may not contain a comma, a double quote, a

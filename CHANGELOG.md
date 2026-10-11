@@ -160,7 +160,9 @@
   chain, for one outside the source directory) and the inner scan is given the path it
   has in the container; one that is not an existing file refuses the scan with exit 3.
   The same holds for `./ash --config` and `Invoke-ASH -Config`, which also honor
-  `ASH_CONFIG` now. In workspace mode, a `--workspace-config` policy outside the
+  `ASH_CONFIG` now, and for `run_ash_scan(mode=container)` called with no `config`,
+  which hands `ASH_CONFIG`'s file to the container when the source directory has no
+  config of its own, as a local scan uses it. In workspace mode, a `--workspace-config` policy outside the
   workspace root was not passed to the container at all, so its ceiling and policy
   scanners did not apply there; it is mounted and forwarded the same way. A
   `config_base_gate` passed to `run_ash_scan` with container or nix mode is refused,

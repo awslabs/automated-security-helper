@@ -1243,6 +1243,26 @@ def _discovered_config_path(
     return discovery.selected.path.as_posix()
 
 
+def _ash_config_fallback(source_dir: Path) -> Optional[str]:
+    """``ASH_CONFIG``, when a local scan of *source_dir* with no config named uses it.
+
+    A local scan falls back to ``ASH_CONFIG``'s file when it finds no config in the
+    source directory (config/default_config.py). The scan inside a container sees
+    neither the host's environment nor that file, so container mode names it
+    explicitly, in that same case and no other. A discovery error is left to the
+    scan, which reports it.
+    """
+    env_config = os.environ.get("ASH_CONFIG")
+    if not env_config:
+        return None
+    try:
+        if _discovered_config_path(source_dir) is not None:
+            return None
+    except Exception:
+        return None
+    return env_config
+
+
 def _load_with_confinement(
     ash_config_cls,
     config_path_str: str,
@@ -3121,6 +3141,15 @@ def run_ash_scan(
             f"mode, not to mode={opts.mode.value!r}"
             + (" with a workspace plan" if opts.workspace_plan is not None else "")
         )
+
+    if (
+        opts.mode == RunMode.container
+        and opts.config is None
+        and opts.workspace_plan is None
+    ):
+        # Before anything reads the config, so the host's own reads (the exit-code
+        # fields below) use the file the container is handed.
+        opts.config = _ash_config_fallback(opts.source_dir)
 
     _apply_log_level_env(opts)
     _refuse_symlinked_output_dir(opts)
