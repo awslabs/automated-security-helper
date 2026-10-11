@@ -1150,7 +1150,9 @@ def _chain_placements(
     is the entry as written, so the two can disagree: an entry that leaves the
     config's directory and comes back by name, or a ``..`` after a link to a
     directory at another depth. Such a chain is refused with ContainerInputError
-    naming the entry, before anything is mounted.
+    naming the entry, before anything is mounted. So is a chain where two files
+    would be mounted at one container path, or one file at a path another needs as
+    a directory.
     """
     from automated_security_helper.config.config_sources import EXTENDS_KEY
 
@@ -1190,6 +1192,19 @@ def _chain_placements(
                     (host_file, ref),
                 )
             )
+    # A file mounted at a path another file of the chain needs as a directory: the
+    # runner cannot create both mounts.
+    root = mount_root.rstrip("/")
+    for inner, host_file in placed.items():
+        parent = posixpath.dirname(inner)
+        while parent != root and parent.startswith(root + "/"):
+            if parent in placed:
+                raise ContainerInputError(
+                    f"{placed[parent]} would be mounted at {parent}, where "
+                    f"{host_file} needs a directory to be mounted at {inner}. Name "
+                    "each base by its own path."
+                )
+            parent = posixpath.dirname(parent)
     return placements
 
 

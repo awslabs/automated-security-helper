@@ -226,7 +226,8 @@ written, from where the extending file is mounted, so an entry whose written pat
 leaves the config's directory (`../cfg/base.yaml` from `cfg/ash.yaml`), or that climbs
 out with `..` after a link to a directory at another depth, would place its base outside
 `/ash-config`: the run is refused with exit 3 before anything is built, naming the
-entry. A config the scanned
+entry. So is a chain where two files would be mounted at one container path, or one
+file at a path another file of the chain needs as a directory. A config the scanned
 repository wrote keeps the limits a local scan gives it (see
 [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)):
 when the config or a file it extends is inside a git checkout, the one holding

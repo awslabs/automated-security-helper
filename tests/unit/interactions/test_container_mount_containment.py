@@ -537,6 +537,67 @@ class TestChainFilesCannotCollide:
             "/ash-config/c.yaml",
         ]
 
+    def test_a_file_where_another_needs_a_directory_is_refused(self, tree):
+        """``f2link.yaml`` is a link to ``sub/f2.yaml``, whose ``extends: d`` is the
+        file ``sub/d`` on the host but ``/ash-config/d`` inside, where the config's
+        own ``d/x.yaml`` needs a directory. The runner cannot create both."""
+        ops = tree["operator"]
+        (ops / "sub").mkdir()
+        (ops / "d").mkdir()
+        (ops / "sub" / "f2.yaml").write_text("extends: d\n", encoding="utf-8")
+        (ops / "sub" / "d").write_text("project_name: q\n", encoding="utf-8")
+        (ops / "d" / "x.yaml").write_text("project_name: r\n", encoding="utf-8")
+        (ops / "f2link.yaml").symlink_to(ops / "sub" / "f2.yaml")
+        config = ops / "ash.yaml"
+        config.write_text("extends: [f2link.yaml, d/x.yaml]\n", encoding="utf-8")
+
+        refusal = rac.container_input_refusal(
+            tree["source"], tree["output"], str(config)
+        )
+
+        assert refusal is not None
+        assert "/ash-config/d" in refusal and "/ash-config/d/x.yaml" in refusal
+        with pytest.raises(rac.ContainerInputError):
+            _assemble(tree["source"], tree["output"], config=str(config))
+
+    @pytest.mark.parametrize("collision", ["same-path", "file-where-a-directory-goes"])
+    def test_the_run_exits_3_and_starts_nothing(self, collision, tree, commands):
+        ops = tree["operator"]
+        if collision == "same-path":
+            # x -> other/deep/dir, whose b.yaml extends ../c.yaml: other/deep/c.yaml
+            # on the host, /ash-config/c.yaml inside, where the config's c.yaml goes.
+            (ops / "other" / "deep" / "dir").mkdir(parents=True)
+            (ops / "other" / "deep" / "dir" / "b.yaml").write_text(
+                "extends: ../c.yaml\n", encoding="utf-8"
+            )
+            (ops / "other" / "deep" / "c.yaml").write_text(
+                "project_name: deep\n", encoding="utf-8"
+            )
+            (ops / "c.yaml").write_text("project_name: top\n", encoding="utf-8")
+            (ops / "x").symlink_to(
+                ops / "other" / "deep" / "dir", target_is_directory=True
+            )
+            body = "extends: [x/b.yaml, c.yaml]\n"
+        else:
+            (ops / "sub").mkdir()
+            (ops / "d").mkdir()
+            (ops / "sub" / "f2.yaml").write_text("extends: d\n", encoding="utf-8")
+            (ops / "sub" / "d").write_text("project_name: q\n", encoding="utf-8")
+            (ops / "d" / "x.yaml").write_text("project_name: r\n", encoding="utf-8")
+            (ops / "f2link.yaml").symlink_to(ops / "sub" / "f2.yaml")
+            body = "extends: [f2link.yaml, d/x.yaml]\n"
+        config = ops / "ash.yaml"
+        config.write_text(body, encoding="utf-8")
+
+        result = rac.run_ash_container(
+            source_dir=str(tree["source"]),
+            output_dir=str(tree["output"]),
+            config=str(config),
+        )
+
+        assert result.returncode == 3, result.stderr
+        assert commands == []
+
 
 # ---------------------------------------------------------------------------
 # A base the host-side validation refused is not mounted
