@@ -12,7 +12,10 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
-from automated_security_helper.core.unified_metrics import coverage_shortfalls
+from automated_security_helper.core.unified_metrics import (
+    coverage_shortfalls,
+    inputs_not_scanned,
+)
 from automated_security_helper.utils.content_db_staleness import (
     stale_content_databases,
 )
@@ -266,6 +269,21 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                         f"- **{scanner_name}**: evaluated {attempted - failed} of {attempted} "
                         f"target(s); {failed} could not be evaluated"
                     )
+                md_parts.append("")
+
+            # Same placement and reasoning: a SKIPPED or PASSED row cannot say which input
+            # went unexamined (npm-audit's lockfiles offline, for one).
+            not_scanned = inputs_not_scanned(model)
+            if not_scanned:
+                md_parts.append("### Inputs not scanned")
+                md_parts.append("")
+                md_parts.append(
+                    "These scanners found these inputs and did not scan them, so no "
+                    "finding about them means nothing:"
+                )
+                md_parts.append("")
+                for scanner_name, path, reason in not_scanned:
+                    md_parts.append(f"- **{scanner_name}**: `{path}`: {reason}")
                 md_parts.append("")
 
             # Same placement and the same reasoning as the coverage section above: no status

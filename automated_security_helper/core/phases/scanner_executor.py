@@ -17,7 +17,10 @@ from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerSeverityCount,
 )
-from automated_security_helper.models.scan_results_container import ScanResultsContainer
+from automated_security_helper.models.scan_results_container import (
+    InputNotScanned,
+    ScanResultsContainer,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import sweep_writable
 from automated_security_helper.utils.sandbox.scope import (
@@ -191,6 +194,25 @@ def _target_count_attr(obj: Any, name: str) -> int | None:
             "scanner plugin's own accounting."
         )
     return None
+
+
+def _inputs_not_scanned(obj: Any) -> List[InputNotScanned]:
+    """The inputs a scanner plugin reported it did not scan, as ``{path, reason}``.
+
+    Coerced at the boundary like ``_target_count_attr``: the plugin is an arbitrary
+    object, so only a list of mappings with string ``path`` and ``reason`` counts.
+    """
+    value = getattr(obj, "inputs_not_scanned", None)
+    if not isinstance(value, list):
+        return []
+    entries = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        path, reason = item.get("path"), item.get("reason")
+        if isinstance(path, str) and path and isinstance(reason, str) and reason:
+            entries.append(InputNotScanned(path=path, reason=reason))
+    return entries
 
 
 def _non_negative_int_attr(obj: Any, name: str) -> int:
@@ -674,6 +696,12 @@ class ScannerExecutor:
                     container.targets_failed = _non_negative_int_attr(
                         scanner_plugin, "targets_failed"
                     )
+                    # Assigned only when there is something to record, so every other
+                    # scanner's serialized report keeps its exact shape (the dump
+                    # excludes unset fields).
+                    not_scanned = _inputs_not_scanned(scanner_plugin)
+                    if not_scanned:
+                        container.inputs_not_scanned = not_scanned
 
                     # A scan with no database had nothing to match against, so its
                     # zero findings are not a result. ERROR whatever the staleness

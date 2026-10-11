@@ -323,33 +323,38 @@ def test_a_version_yarn_cannot_report_is_a_failure(plugin_context):
 
 
 class TestOffline:
-    """Offline keeps npm's behavior: an audit that cannot reach its advisory
-    source is a warning naming the lockfile, not an error."""
+    """Offline no yarn runs: yarn 1's `yarn audit --offline` refuses to ask the
+    registry ("Can't make a request in offline mode") and `yarn npm audit` has no
+    offline mode, so the lockfile is recorded as not audited, with a warning."""
 
-    def test_yarn_1_offline_failure_is_a_warning(self, plugin_context, caplog):
-        capture = _capture("classic-offline")
-        with caplog.at_level(logging.WARNING):
-            report, commands = _scan(plugin_context, capture, offline=True)
-
-        assert [c for c in commands if "--version" not in c] == [capture["command"]]
-        assert report.runs[0].results == []
-        warnings = [r.message for r in caplog.records]
-        assert any(
-            "npm-audit (offline) could not audit 1 lockfile(s)" in m
-            and "Can't make a request in offline mode" in m
-            for m in warnings
-        ), warnings
-
-    def test_yarn_4_offline_is_not_run_and_is_a_warning(self, plugin_context, caplog):
-        """`yarn npm audit` rejects --offline and always asks the registry."""
-        with caplog.at_level(logging.WARNING):
-            report, commands = _scan(
-                plugin_context, _capture("berry-clean"), offline=True
+    @pytest.mark.parametrize("capture_name", ["classic-offline", "berry-clean"])
+    def test_offline_yarn_is_not_run_and_the_lockfile_is_recorded(
+        self, plugin_context, caplog, capture_name
+    ):
+        scanner = _scanner(plugin_context, offline=True)
+        _project(plugin_context.work_dir)
+        side_effect, commands = _respond(
+            _capture(capture_name)["yarn_version"], _response(_capture(capture_name))
+        )
+        with (
+            patch.object(
+                NpmAuditScanner,
+                "_run_subprocess",
+                autospec=True,
+                side_effect=side_effect,
+            ),
+            caplog.at_level(logging.WARNING),
+        ):
+            report = scanner.scan(
+                target=plugin_context.work_dir, target_type="converted"
             )
 
-        assert [c for c in commands if "--version" not in c] == []
+        assert [c for c in commands if "--version" not in c] == [], commands
         assert report.runs[0].results == []
-        assert any("no offline mode" in r.message for r in caplog.records)
+        assert [entry["path"] for entry in scanner.inputs_not_scanned] == ["yarn.lock"]
+        assert any(
+            "Offline, npm-audit audits nothing" in r.message for r in caplog.records
+        )
 
 
 class TestExecutorStatus:

@@ -201,9 +201,14 @@ over the network on their own:
   cannot be read from `trivy repository --help`, trivy's misconfiguration checks are
   skipped offline. checkov still checks Terraform. Any `git` a tool runs offline gets
   `GIT_ALLOW_PROTOCOL=file`, so it reaches no remote.
-- npm-audit passes `--no-update-notifier` to npm. A pnpm project is not audited:
-  `pnpm audit --offline` sends the dependency list to the registry anyway, so ASH
-  skips it and logs a warning naming the lockfile, as it does for yarn 2 and later.
+- npm-audit runs no audit, because npm, pnpm and yarn audit only against the package
+  registry's advisory service: offline `npm audit --offline` reported no advisories for
+  a lockfile with known ones, `pnpm audit --offline` sent the dependency list to the
+  registry anyway, and `yarn npm audit` has no offline mode. npm-audit is SKIPPED, and
+  every lockfile it would have audited is listed as not scanned, with the reason, in
+  `ash_aggregated_results.json` (the scanner's `inputs_not_scanned`), the console
+  summary, and the "Inputs not scanned" section of `ash.summary.md` and
+  `ash.summary.txt`.
 - detect-secrets does not verify candidate secrets with their issuers, whatever the
   scanned repository's `.secrets.baseline` or any config says. See
   [Secret verification](configuration-guide.md#secret-verification).

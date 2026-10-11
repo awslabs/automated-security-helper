@@ -150,8 +150,8 @@
 
 ### Behavior changes
 
-- **trivy-repo and syft read no config file from the scanned tree, online or offline,
-  and offline pnpm projects are not audited.** A `trivy.yaml` in the scanned repository
+- **trivy-repo and syft read no config file from the scanned tree, online or
+  offline.** A `trivy.yaml` in the scanned repository
   could turn on a VEX repository download or client/server mode, and a `.syft.yaml`
   remote license and package lookups; both reached the network with every offline flag
   ASH passed, and online both decided what was reported. trivy now always gets
@@ -161,9 +161,20 @@
   defaults; put the settings in a file outside the tree (`TRIVY_CONFIG`,
   `scanners.syft.options.config_file`). Offline, trivy's version check and telemetry
   are turned off by `TRIVY_SKIP_VERSION_CHECK` and `TRIVY_DISABLE_TELEMETRY`, which an
-  older trivy ignores, rather than by flags it would refuse. `pnpm audit --offline`
-  sends the dependency list to the registry, so offline a pnpm project is skipped with
-  a warning naming the lockfile, as yarn 2 and later already were.
+  older trivy ignores, rather than by flags it would refuse.
+
+- **Offline, npm-audit audits nothing, says so, and is SKIPPED instead of PASSED.**
+  npm, pnpm and yarn audit only against the registry's advisory service: offline,
+  `npm audit --json --offline` on a lockfile pinning a version with known advisories
+  exited 0 with none, `pnpm audit --offline` sent the dependency list to the registry
+  anyway, and `yarn npm audit` has no offline mode. npm-audit was graded PASSED with
+  zero findings, and only a log line said a pnpm or yarn 2+ lockfile went unaudited.
+  Offline, npm-audit now starts no package manager; every lockfile it would have
+  audited is recorded as not scanned, with the reason, in the scanner's
+  `inputs_not_scanned` in `ash_aggregated_results.json`, on the console after the
+  summary table, and in a new "Inputs not scanned" section of `ash.summary.md` and
+  `ash.summary.txt`; and the scanner is SKIPPED, which the completeness gate
+  tolerates, as for other checks that cannot run offline.
 
 - **Offline, trivy-repo does not run trivy's Terraform checks.** trivy downloads the
   source of every `module` block in the scanned Terraform, from the registry, with the
@@ -1147,7 +1158,8 @@
   `--offline`). Offline, every process ASH starts now gets the variables that turn
   those checks off, and the syft and grype settings that look things up over the
   network, trivy's version check and telemetry included whatever `disable_telemetry`
-  says; npm also gets `--no-update-notifier`. On a Go module,
+  says (offline npm-audit now starts no npm at all; see Behavior changes). On a Go
+  module,
   offline syft no longer runs the Go toolchain on PATH (`golang.use-packages-lib`
   was on by default), and the toolchain grype runs gets `GOPROXY=off` and
   `GOTOOLCHAIN=local`, so neither can download modules or a toolchain. See

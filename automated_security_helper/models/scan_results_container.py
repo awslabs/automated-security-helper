@@ -12,6 +12,20 @@ from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 
 
+class InputNotScanned(BaseModel):
+    """One input a scanner did not scan, and why."""
+
+    path: Annotated[
+        str,
+        Field(
+            description=(
+                "The input's path relative to the scanned tree, with '/' separators."
+            )
+        ),
+    ]
+    reason: Annotated[str, Field(description="Why the scanner did not scan it.")]
+
+
 class ScanResultsContainer(BaseModel):
     """Container for scanner results with metadata."""
 
@@ -89,6 +103,13 @@ class ScanResultsContainer(BaseModel):
     # caller bug rather than a third state.
     targets_attempted: int | None = None
     targets_failed: int = 0
+
+    # Inputs the scanner found and did not scan, each with the reason: npm-audit's
+    # lockfiles in offline mode, which it cannot audit without the registry's advisory
+    # service. Rendered beside the summary table and markdown summary
+    # (unified_metrics.inputs_not_scanned), because no status value says which input
+    # went unexamined. Empty for a scanner that scanned everything it found.
+    inputs_not_scanned: List[InputNotScanned] = Field(default_factory=list)
 
     def add_metadata(self, key: str, value: Any) -> None:
         """Add metadata to the container.

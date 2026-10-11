@@ -3,7 +3,6 @@
 import copy
 import json
 import logging
-import os
 import re
 from pathlib import Path
 from typing import Annotated, ClassVar, Dict, List, Literal, Any
@@ -966,6 +965,54 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             f"{self.__class__.__name__} overrides scan() directly."
         )
 
+    #: Why npm-audit audits nothing offline. Recorded with every lockfile it skips.
+    _OFFLINE_REASON = (
+        "npm, pnpm and yarn audit dependencies only against the package registry's "
+        "advisory service, which offline mode does not reach, so this lockfile was "
+        "not audited"
+    )
+
+    def _skip_offline(
+        self, package_files: List[str], target: Path, target_type: str
+    ) -> None:
+        """Record every lockfile as not audited, and that nothing was evaluated.
+
+        ``npm audit`` asks the registry which dependencies are vulnerable, and
+        nothing is cached for it: offline, ``npm audit --json --offline`` on a
+        lockfile pinning a version with known advisories exited 0 with none
+        (npm 10.9.4), ``pnpm audit --offline`` sent the dependency list to the
+        registry anyway (pnpm 12.6.0), and ``yarn npm audit`` has no offline mode.
+        So no audit runs. ``targets_attempted = 0`` makes the scanner SKIPPED rather
+        than PASSED, and ``inputs_not_scanned`` names each lockfile in the results
+        and the summaries.
+        """
+        base = Path(
+            self.context.work_dir
+            if target_type == "converted"
+            else self.context.source_dir
+        ).absolute()
+        skipped = []
+        for item in package_files:
+            package_dir = Path(item).parent
+            for name in ("yarn.lock", "pnpm-lock.yaml", "package-lock.json"):
+                lock_file = package_dir / name
+                if lock_file.exists():
+                    try:
+                        shown = lock_file.absolute().relative_to(base).as_posix()
+                    except ValueError:
+                        shown = lock_file.as_posix()
+                    skipped.append({"path": shown, "reason": self._OFFLINE_REASON})
+                    break
+        self.targets_attempted = 0
+        self.inputs_not_scanned = skipped
+        if skipped:
+            self._plugin_log(
+                f"Offline, npm-audit audits nothing: {self._OFFLINE_REASON}. Not "
+                f"audited: {', '.join(entry['path'] for entry in skipped)}",
+                target_type=target_type,
+                level=logging.WARNING,
+            )
+
     def scan(
         self,
         target: Path,
@@ -989,6 +1036,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
+        # Above every early return, so the executor never reads the previous target's
+        # values (the same reason cfn_nag_scanner initializes its counters first).
+        # targets_attempted stays None, no claim, except offline (_skip_offline).
+        self.targets_attempted = None
+        self.inputs_not_scanned = []
         tool_component = ToolComponent(
             name="npm-audit",
             version=self.tool_version,
@@ -1089,6 +1141,14 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 )
                 return sarif_report
 
+            if self._scanner_offline():
+                self._skip_offline(scannable, target, target_type)
+                self._post_scan(
+                    target=target,
+                    target_type=target_type,
+                )
+                return sarif_report
+
             # Run npm audit for each package.json file. all_results is the
             # merged raw output written to results.json; per_lock_results keeps
             # each lockfile's output whole for the SARIF conversion.
@@ -1123,19 +1183,6 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         else:
                             binary = "npm"
 
-                        if binary == "pnpm" and self._scanner_offline():
-                            # `pnpm audit --offline` still sends the dependency
-                            # list to the registry's advisory endpoint (measured
-                            # with pnpm 12.6.0): pnpm has no offline audit.
-                            # Offline, that is an audit that cannot run, as for
-                            # `yarn npm audit` below.
-                            audit_failures.append(
-                                f"{lock_file}: pnpm audit sends the dependency "
-                                "list to the registry even with --offline, so it "
-                                "was not run"
-                            )
-                            continue
-
                         # Check that the binary is installed before
                         # attempting to run it (#180).  npm is already
                         # validated in validate_plugin_dependencies, but
@@ -1148,25 +1195,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             )
                             continue
 
-                        # Corepack resolves the package manager version from the
-                        # repository's `packageManager` field, and fetches it if the
-                        # image has a different one cached. The Dockerfile sets
-                        # COREPACK_ENABLE_DOWNLOAD_PROMPT=0 so that fetch cannot
-                        # block on a stdin prompt that no one can answer -- but
-                        # disabling the prompt only stops the *asking*, not the
-                        # download.
-                        #
-                        # In offline mode a download is the wrong outcome twice
-                        # over: there is no network, so it fails, and it fails
-                        # instead of using the package manager already cached in the
-                        # image. COREPACK_ENABLE_NETWORK=0 makes corepack fall back
-                        # to the cached version rather than reach out.
+                        # Online only: offline no audit runs (_skip_offline), so
+                        # corepack never fetches a package manager here.
                         subprocess_env = None
-                        if self._scanner_offline():
-                            subprocess_env = {
-                                **os.environ,
-                                "COREPACK_ENABLE_NETWORK": "0",
-                            }
 
                         # yarn 2 and later dropped `yarn audit` for `yarn npm
                         # audit`, and print a different report. Which yarn runs
@@ -1197,45 +1228,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 )
                                 continue
                             if yarn_major >= 2:
-                                if self._scanner_offline():
-                                    # `yarn npm audit` has no offline mode: it
-                                    # rejects --offline and always asks the
-                                    # registry. Offline, that is an audit that
-                                    # cannot run, as it is for npm.
-                                    audit_failures.append(
-                                        f"{lock_file}: yarn {yarn_major} audits "
-                                        "with `yarn npm audit`, which has no "
-                                        "offline mode, so it was not run"
-                                    )
-                                    continue
                                 # --recursive: the whole tree, as npm audits
                                 # it. Without it yarn checks direct deps only.
                                 cmd = [binary, "npm", "audit", "--json", "--recursive"]
-
-                        # Add offline mode if enabled. npm's update notifier
-                        # asks registry.npmjs.org for a newer npm even with
-                        # --offline (measured with npm 10.9.4), so it is turned
-                        # off as well.
-                        if self._scanner_offline():
-                            cmd.append("--offline")
-                            if binary == "npm":
-                                cmd.append("--no-update-notifier")
-                            ASH_LOGGER.info(
-                                f"🔄 Running {binary} audit in offline mode"
-                            )
-
-                            # Validate offline mode requirements
-                            from automated_security_helper.utils.offline_mode_validator import (
-                                validate_npm_audit_offline_mode,
-                            )
-
-                            offline_valid, offline_messages = (
-                                validate_npm_audit_offline_mode()
-                            )
-                            if not offline_valid:
-                                ASH_LOGGER.warning(
-                                    "npm audit offline mode validation failed, but continuing with scan"
-                                )
 
                         # Run from the lock file's parent directory so
                         # that pnpm (and yarn) can locate their lock
@@ -1332,13 +1327,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     f"could not audit {len(audit_failures)} lockfile(s), so "
                     "their dependencies were not checked: " + " | ".join(audit_failures)
                 )
-                if self._scanner_offline():
-                    # Offline, an audit that cannot reach its advisory source is
-                    # the expected outcome, and offline scans have always gone on
-                    # without it. Kept as it was; the warning names what was lost.
-                    ASH_LOGGER.warning(f"npm-audit (offline) {summary}")
-                else:
-                    raise ScannerError(summary)
+                raise ScannerError(summary)
 
             # Convert npm audit results to SARIF
             if all_results:

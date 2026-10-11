@@ -208,6 +208,33 @@ def coverage_shortfalls(
     return shortfalls
 
 
+def inputs_not_scanned(
+    asharp_model: AshAggregatedResults,
+) -> list[tuple[str, str, str]]:
+    """``(scanner, path, reason)`` for every input a scanner found and did not scan.
+
+    Read off the serialized per-target reports (``ScanResultsContainer.
+    inputs_not_scanned``), in scanner order. A scanner that did not scan an input says
+    nothing about it in its findings, and its status cannot say which input it was, so
+    the summaries list them beside the table, as they do coverage shortfalls.
+    """
+    entries = []
+    for scanner_name in sorted(asharp_model.additional_reports or {}):
+        reports = asharp_model.additional_reports.get(scanner_name)
+        if not isinstance(reports, dict):
+            continue
+        for target_report in reports.values():
+            if not isinstance(target_report, dict):
+                continue
+            for item in target_report.get("inputs_not_scanned") or []:
+                if not isinstance(item, dict):
+                    continue
+                path, reason = item.get("path"), item.get("reason")
+                if isinstance(path, str) and isinstance(reason, str):
+                    entries.append((scanner_name, path, reason))
+    return entries
+
+
 def format_duration(duration_seconds: Optional[float]) -> str:
     """Format duration in seconds to a human-readable string.
 

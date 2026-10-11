@@ -1,53 +1,35 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Offline mode must actually reach the subprocess with corepack's network off.
+"""Offline, npm-audit starts no package manager, so corepack cannot fetch one.
 
 Why this file exists
 --------------------
-#451 taught npm-audit to set ``COREPACK_ENABLE_NETWORK=0`` when
-``options.offline`` is set. ``COREPACK_ENABLE_DOWNLOAD_PROMPT=0`` (set in the
-Dockerfile) stops corepack *asking* before it downloads a package manager; it
-does not stop the download. In offline mode a download is wrong twice over --
-there is no network, so it fails, and it fails instead of using the package
-manager already cached in the image.
+#451 taught npm-audit to set ``COREPACK_ENABLE_NETWORK=0`` when offline:
+``COREPACK_ENABLE_DOWNLOAD_PROMPT=0`` (set in the Dockerfile) stops corepack
+*asking* before it downloads a package manager; it does not stop the download.
+Two defects then went unnoticed because nothing tested it: the module used
+``os.environ`` without importing ``os``, and a merge dropped the ``env=`` argument
+while still computing the environment.
 
-Nothing tested it. Grepping the tree for ``COREPACK_ENABLE_NETWORK`` before this
-file found two hits, both in the scanner source and neither in a test, and that
-absence let two separate defects through:
-
-1. ``os.environ`` was used to build the environment while the module never
-   imported ``os``. ruff reports it as F821 and offline scans raised
-   ``NameError: name 'os' is not defined``. It shipped to main, because the only
-   code path that evaluates the expression is guarded by ``options.offline`` and
-   no test set that flag.
-
-2. A later merge resolved a conflict on the ``_run_subprocess`` call by keeping
-   the ``timeout=`` argument the other side added and dropping ``env=``. The
-   ``subprocess_env`` local was still computed just above the call, so the code
-   read as though it worked while the environment reached nothing -- a silent
-   revert of #451 that no test noticed.
-
-Both failure modes are invisible in a diff that looks reasonable, which is why
-the assertion here is on what ``_run_subprocess`` actually receives rather than
-on the shape of the source.
+Offline, npm-audit now runs no audit at all: npm, pnpm and yarn audit only against
+the registry's advisory service, and offline ``npm audit --offline`` reported no
+advisories for a lockfile with known ones. Every lockfile is recorded as not audited
+instead (npm_audit_scanner._skip_offline), so no package manager starts and corepack
+has nothing to fetch. The tests below pin that no process starts offline, that the
+lockfile is recorded, and, online, that npm-audit passes no environment override.
 
 Why assert on the call rather than run corepack
 -----------------------------------------------
-The contract worth pinning is "the offline environment reaches the child
-process". Actually invoking pnpm would need a package manager, a lock file and a
-network policy in the test environment, and would still not distinguish "env was
-never passed" from "corepack ignored it". The double records its kwargs, so a
-dropped argument fails loudly and immediately.
+The contract worth pinning is what reaches ``_run_subprocess``. The double
+records its kwargs, so a process started offline, or an override online, fails
+loudly and immediately.
 """
 
 from unittest.mock import patch
 
 import pytest
 
-from automated_security_helper.plugin_modules.ash_builtin.scanners import (
-    npm_audit_scanner as npm_audit_module,
-)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
     NpmAuditScanner,
     NpmAuditScannerConfig,
@@ -71,11 +53,8 @@ def _scanner(context, *, offline: bool):
 def _run_scan(scanner, tmp_path):
     """Drive scan() over one npm project and return the recorded kwargs.
 
-    An npm project, because offline npm-audit still runs npm, and the environment
-    it builds is the same for every package manager. A pnpm project is not audited
-    offline at all (``pnpm audit --offline`` sends the dependency list to the
-    registry anyway; see test_offline_scanner_network_checks.py), so it starts no
-    process to inspect.
+    An npm project. Online npm-audit runs npm from the lockfile's directory;
+    offline it runs nothing (see npm_audit_scanner._skip_offline).
 
     ``fake_run`` takes ``**kwargs`` deliberately. Pinning the real signature here
     would make this test fail whenever _run_subprocess gains an argument, which
@@ -113,58 +92,37 @@ def _run_scan(scanner, tmp_path):
     return captured
 
 
-def test_the_module_binds_os():
-    """Names the NameError directly, so the diagnosis is not 'offline scan broke'.
-
-    Kept separate from the behavioural tests because it fails for exactly one
-    reason and says so, where the scan-level test below fails for either defect.
-    """
-    assert hasattr(npm_audit_module, "os"), (
-        "npm_audit_scanner builds its offline environment from os.environ but "
-        "does not import os; offline scans raise NameError"
-    )
-
-
-def test_offline_mode_disables_corepack_network(test_plugin_context, tmp_path):
-    """The whole point of #451: the child process must see the flag."""
+def test_offline_mode_starts_no_package_manager(test_plugin_context, tmp_path):
+    """Offline no audit runs at all: npm, pnpm and yarn audit only against the
+    registry's advisory service. So corepack is never asked for a package manager,
+    with or without COREPACK_ENABLE_NETWORK, and no environment has to be built."""
     scanner = _scanner(test_plugin_context, offline=True)
 
     captured = _run_scan(scanner, tmp_path)
 
-    assert captured, "scan() never reached _run_subprocess"
-    envs = [kw.get("env") for kw in captured]
-    assert any(
-        env is not None and env.get("COREPACK_ENABLE_NETWORK") == "0" for env in envs
-    ), (
-        "offline mode did not pass COREPACK_ENABLE_NETWORK=0 to the subprocess; "
-        f"envs seen: {[None if e is None else sorted(set(e) & {'COREPACK_ENABLE_NETWORK'}) for e in envs]}"
-    )
+    assert captured == [], f"offline npm-audit started a process: {captured}"
 
 
-def test_the_offline_environment_still_carries_the_parent_environment(
+def test_offline_mode_records_the_lockfile_as_not_audited(
     test_plugin_context, tmp_path
 ):
-    """Replacing rather than extending os.environ would strip PATH, and the
-    package manager is found on PATH."""
     scanner = _scanner(test_plugin_context, offline=True)
 
-    captured = _run_scan(scanner, tmp_path)
+    _run_scan(scanner, tmp_path)
 
-    env = next(
-        kw["env"]
-        for kw in captured
-        if kw.get("env") and kw["env"].get("COREPACK_ENABLE_NETWORK") == "0"
-    )
-    for key in os_keys_expected_present():
-        assert key in env, f"offline env dropped {key} from the parent environment"
+    assert [entry["path"] for entry in scanner.inputs_not_scanned] == [
+        "packages/sub/package-lock.json"
+    ]
+    assert all(entry["reason"] for entry in scanner.inputs_not_scanned)
 
 
-def os_keys_expected_present():
-    """Parent-environment keys that are present on every platform CI runs on.
+def test_offline_mode_claims_it_evaluated_nothing(test_plugin_context, tmp_path):
+    """targets_attempted 0 is what grades the scanner SKIPPED rather than PASSED."""
+    scanner = _scanner(test_plugin_context, offline=True)
 
-    PATH is the load-bearing one; it is how the package manager is located.
-    """
-    return ["PATH"]
+    _run_scan(scanner, tmp_path)
+
+    assert scanner.targets_attempted == 0
 
 
 @pytest.mark.parametrize("offline", [False])

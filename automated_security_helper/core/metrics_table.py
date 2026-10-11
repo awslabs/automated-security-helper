@@ -12,6 +12,7 @@ from automated_security_helper.core.unified_metrics import (
     coverage_shortfalls,
     get_unified_scanner_metrics,
     format_duration,
+    inputs_not_scanned,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 import platform
@@ -202,6 +203,21 @@ def print_coverage_shortfalls(
         )
 
 
+def print_inputs_not_scanned(
+    asharp_model: AshAggregatedResults, console: Console
+) -> None:
+    """One line per input a scanner found and did not scan, with the reason.
+
+    Printed beside the table, like the coverage shortfalls: a SKIPPED or PASSED row
+    cannot say which input went unexamined. Nothing is printed when there is none.
+    """
+    for scanner_name, path, reason in inputs_not_scanned(asharp_model):
+        console.print(
+            f"[bold yellow]Not scanned:[/bold yellow] {escape(scanner_name)} did not "
+            f"scan {escape(path)}: {escape(reason)}"
+        )
+
+
 def print_stale_content_databases(
     asharp_model: AshAggregatedResults, console: Console
 ) -> None:
@@ -320,6 +336,7 @@ def display_metrics_table(
             # guarded block because it writes to the same console: a closed stdout has to be
             # handled identically for both, and a shortfall notice is not worth failing a scan.
             print_coverage_shortfalls(asharp_model, console)
+            print_inputs_not_scanned(asharp_model, console)
             print_stale_content_databases(asharp_model, console)
         except (ValueError, OSError, BrokenPipeError) as io_error:
             # stdout/stderr may be closed (e.g., in MCP server context)

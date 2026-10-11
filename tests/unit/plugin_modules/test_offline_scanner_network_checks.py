@@ -551,21 +551,35 @@ def _npm_audit_spawns(context, lock_name: str, binary: str, monkeypatch) -> List
 
 
 class TestNpmAuditOffline:
-    def test_npm_update_notifier_is_off(self, offline, context):
-        """``npm audit --offline`` still asks registry.npmjs.org whether a newer
-        npm exists (measured with npm 10.9.4 and an empty npm cache)."""
+    def test_offline_npm_audit_starts_no_npm(self, offline, context):
+        """``npm audit --offline`` still asked registry.npmjs.org whether a newer
+        npm exists (measured with npm 10.9.4 and an empty npm cache), and audited
+        nothing: the advisories come from the registry. Offline no npm runs."""
         audits = _npm_audit_spawns(context, "package-lock.json", "npm", offline)
 
-        assert audits, "the harness did not reach npm audit"
-        assert all(_npm_update_notifier_off(s) for s in audits), (
-            f"offline npm audit runs npm's update notifier: {[s.command for s in audits]}"
+        assert audits == [], (
+            f"offline npm-audit started npm: {[s.command for s in audits]}"
         )
 
-    def test_control_npm_audit_runs_offline(self, offline, context):
-        audits = _npm_audit_spawns(context, "package-lock.json", "npm", offline)
+    def test_offline_npm_audit_records_the_lockfile_as_not_audited(
+        self, offline, context, monkeypatch
+    ):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
+            NpmAuditScanner,
+        )
 
-        assert audits and all(s.has_flag("--offline") for s in audits), [
-            s.command for s in audits
+        recorded = {}
+        original = NpmAuditScanner._skip_offline
+
+        def spy(self, *args, **kwargs):
+            original(self, *args, **kwargs)
+            recorded["inputs"] = list(self.inputs_not_scanned)
+
+        monkeypatch.setattr(NpmAuditScanner, "_skip_offline", spy)
+        _npm_audit_spawns(context, "package-lock.json", "npm", offline)
+
+        assert [entry["path"] for entry in recorded.get("inputs", [])] == [
+            "web/package-lock.json"
         ]
 
     def test_pnpm_audit_is_not_started(self, offline, context):

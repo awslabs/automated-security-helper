@@ -31,7 +31,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScannerConfig,
     NpmAuditScannerConfigOptions,
 )
-from automated_security_helper.utils import offline_mode_validator
 
 # npm severity -> SARIF level. critical/high both map to error and low/info both
 # map to note, so six inputs produce three outcomes. That collapse is npm's own
@@ -456,18 +455,12 @@ def test_a_missing_npm_does_not_take_the_skip_path(
 # ---------------------------------------------------------------------------
 
 
-def test_offline_mode_adds_the_offline_flag_and_disables_corepack_network(
+def test_offline_mode_runs_no_audit_and_records_the_lockfile(
     plugin_context, npm_on_path, node_project, subprocess_double, monkeypatch
 ):
-    """Offline runs must not let corepack reach out for a package manager.
-
-    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 only stops corepack asking; it still
-    downloads. COREPACK_ENABLE_NETWORK=0 is what makes it use the cached
-    version instead.
-    """
-    monkeypatch.setattr(
-        offline_mode_validator, "validate_npm_audit_offline_mode", lambda: (True, [])
-    )
+    """Offline npm audit cannot reach the advisory service and reports nothing, so
+    it is not run (so corepack cannot reach out for a package manager either), and
+    the lockfile is recorded as not audited."""
     scanner = NpmAuditScanner(
         context=plugin_context,
         config=NpmAuditScannerConfig(
@@ -479,33 +472,24 @@ def test_offline_mode_adds_the_offline_flag_and_disables_corepack_network(
 
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
-    kwargs = audit_calls(subprocess_double)[-1].kwargs
-    # --no-update-notifier: npm asks the registry for a newer npm even with
-    # --offline.
-    assert kwargs["command"] == [
-        "npm",
-        "audit",
-        "--json",
-        "--offline",
-        "--no-update-notifier",
+    assert audit_calls(subprocess_double) == []
+    assert [entry["path"] for entry in scanner.inputs_not_scanned] == [
+        "package-lock.json"
     ]
-    assert kwargs["env"]["COREPACK_ENABLE_NETWORK"] == "0"
+    assert scanner.targets_attempted == 0
 
 
-def test_offline_flag_set_after_config_built_reaches_npm(
+def test_offline_mode_set_after_config_built_still_skips_the_audit(
     plugin_context, npm_on_path, node_project, subprocess_double, monkeypatch
 ):
     """``ash scan --offline`` in local mode sets ASH_OFFLINE after configs exist.
 
     The option used to default to ``is_offline_mode()`` at construction, and
     ``ScannerConfigSegment`` constructs its defaults at import, so this order ran
-    ``npm audit`` without ``--offline``. See
+    ``npm audit`` online. Offline is read when the scan runs. See
     tests/unit/plugin_modules/test_offline_resolved_at_scan_time.py.
     """
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
-    monkeypatch.setattr(
-        offline_mode_validator, "validate_npm_audit_offline_mode", lambda: (True, [])
-    )
     config = NpmAuditScannerConfig()
     monkeypatch.setenv("ASH_OFFLINE", "YES")
     scanner = NpmAuditScanner(context=plugin_context, config=config)
@@ -514,17 +498,8 @@ def test_offline_flag_set_after_config_built_reaches_npm(
 
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
-    kwargs = audit_calls(subprocess_double)[-1].kwargs
-    # --no-update-notifier: npm asks the registry for a newer npm even with
-    # --offline.
-    assert kwargs["command"] == [
-        "npm",
-        "audit",
-        "--json",
-        "--offline",
-        "--no-update-notifier",
-    ]
-    assert kwargs["env"]["COREPACK_ENABLE_NETWORK"] == "0"
+    assert audit_calls(subprocess_double) == []
+    assert scanner.targets_attempted == 0
 
 
 def test_online_mode_passes_no_env_override(
@@ -543,15 +518,11 @@ def test_online_mode_passes_no_env_override(
     assert kwargs["env"] is None
 
 
-def test_failed_offline_validation_warns_but_the_scan_continues(
+def test_offline_mode_warns_which_lockfile_was_not_audited(
     plugin_context, npm_on_path, node_project, subprocess_double, monkeypatch, caplog
 ):
-    """A failing offline precondition is a warning, not an abort."""
-    monkeypatch.setattr(
-        offline_mode_validator,
-        "validate_npm_audit_offline_mode",
-        lambda: (False, ["no npm cache found"]),
-    )
+    """Offline the scan goes on without the audit, and the warning names what was
+    not audited."""
     scanner = NpmAuditScanner(
         context=plugin_context,
         config=NpmAuditScannerConfig(
@@ -565,12 +536,12 @@ def test_failed_offline_validation_warns_but_the_scan_continues(
         report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert any(
-        "offline mode validation failed, but continuing" in record.message
+        "Offline, npm-audit audits nothing" in record.message
+        and "package-lock.json" in record.message
         for record in caplog.records
-    )
-    # The scan still ran and still produced its finding.
-    assert len(audit_calls(subprocess_double)) == 1
-    assert len(report.runs[0].results) == 1
+    ), [record.message for record in caplog.records]
+    assert audit_calls(subprocess_double) == []
+    assert report.runs[0].results == []
 
 
 # ---------------------------------------------------------------------------

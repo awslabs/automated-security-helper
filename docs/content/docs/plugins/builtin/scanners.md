@@ -222,9 +222,9 @@ scanners:
 - Severity-based filtering
 - Fix recommendations
 
-In offline mode npm runs with `--offline --no-update-notifier`, and a project with a
-`pnpm-lock.yaml` is not audited: `pnpm audit --offline` still sends the dependency
-list to the registry. See
+In offline mode npm-audit runs no audit, since npm, pnpm and yarn audit only against
+the registry's advisory service. It is SKIPPED, and each lockfile is listed as not
+scanned in the results and the summaries. See
 [What offline mode turns off](../../advanced-usage.md#what-offline-mode-turns-off).
 
 **Dependencies**: Node.js, npm

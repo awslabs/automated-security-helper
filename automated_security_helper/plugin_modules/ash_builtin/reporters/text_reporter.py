@@ -19,7 +19,10 @@ from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
 )
-from automated_security_helper.core.unified_metrics import format_duration
+from automated_security_helper.core.unified_metrics import (
+    format_duration,
+    inputs_not_scanned,
+)
 from automated_security_helper.utils.content_db_staleness import (
     stale_content_databases,
 )
@@ -200,6 +203,16 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 )
 
             text_parts.append("")
+
+            # See the matching section in the markdown reporter: no status value says
+            # which input went unexamined.
+            not_scanned = inputs_not_scanned(model)
+            if not_scanned:
+                text_parts.append("INPUTS NOT SCANNED")
+                text_parts.append("------------------")
+                for scanner_name, path, reason in not_scanned:
+                    text_parts.append(f"- {scanner_name}: {path}: {reason}")
+                text_parts.append("")
 
             # See the matching section in the markdown reporter: no status value carries this.
             stale_dbs = stale_content_databases(model)
