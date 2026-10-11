@@ -394,7 +394,7 @@ class TestPathContainment:
         assert not (tmp_path / "sandbox" / "escaped.txt").exists()
         assert not (tmp_path / "escaped.txt").exists()
 
-    def test_a_key_named_dot_dot_inside_the_prefix_is_still_contained(
+    def test_a_key_that_climbs_and_comes_back_is_refused_too(
         self,
         helper: Helper,
         child_env: dict[str, str],
@@ -402,11 +402,11 @@ class TestPathContainment:
         s3,
         tmp_path: pathlib.Path,
     ):
-        """A key that climbs and comes back stays inside, so it is allowed.
+        """`run/nested/../kept.txt` stays inside the destination and is still refused.
 
-        Distinguishes "refuses anything containing .." from "refuses what
-        actually escapes". The guard resolves the path and compares, so this one
-        resolves back inside the destination and is downloaded.
+        S3 stores the key literally, so it is not the object `run/kept.txt`; written
+        to `kept.txt` it would stand in for that object's file. Every segment of a
+        downloaded key has to be a plain name.
         """
         s3.put_object(Bucket=bucket, Key="run/nested/../kept.txt", Body=b"kept")
 
@@ -415,8 +415,72 @@ class TestPathContainment:
             helper, ["download", bucket, "run", str(destination)], child_env
         )
 
-        assert result.returncode == 0, result.stderr
-        assert (destination / "kept.txt").read_bytes() == b"kept"
+        assert result.returncode == 2, (result.returncode, result.stderr)
+        assert not (destination / "kept.txt").exists()
+
+    @pytest.mark.parametrize(
+        "suffix",
+        ["shard-1/./results.json", "shard-1//results.json", "shard-1/.."],
+        ids=["dot", "empty", "trailing-dot-dot"],
+    )
+    def test_a_key_with_a_dot_or_empty_segment_is_refused(
+        self,
+        helper: Helper,
+        child_env: dict[str, str],
+        bucket: str,
+        s3,
+        tmp_path: pathlib.Path,
+        suffix: str,
+    ):
+        """`.` and empty segments name the same file as a shorter key would."""
+        s3.put_object(Bucket=bucket, Key=f"run/{suffix}", Body=b"x")
+
+        destination = tmp_path / "back"
+        result = run_helper(
+            helper, ["download", bucket, "run", str(destination)], child_env
+        )
+
+        assert result.returncode == 2, (result.returncode, result.stderr)
+        assert f"{helper.log_prefix}:" in result.stderr, result.stderr
+        assert [p for p in destination.rglob("*") if p.is_file()] == []
+
+    def test_one_shards_key_cannot_land_on_another_shards_results(
+        self,
+        helper: Helper,
+        child_env: dict[str, str],
+        bucket: str,
+        s3,
+        tmp_path: pathlib.Path,
+    ):
+        """The case the per-shard grant leaves to the merge.
+
+        Shard 1's role may put any key under `<execution>/shard-1/`, and IAM's `*`
+        matches `shard-1/../shard-0/ash_aggregated_results.json` there. Measured
+        against moto 5.2.3 with botocore 1.43.109: the client sends the `..`
+        segment unnormalized and the server stores and lists the key literally,
+        beside shard 0's own object. Resolved locally, that key is shard 0's
+        file, and it lists after shard 0's own key, so it would replace it.
+        """
+        genuine = json.dumps({"shard": 0}).encode()
+        s3.put_object(
+            Bucket=bucket,
+            Key="run/exec-1/shard-0/ash_aggregated_results.json",
+            Body=genuine,
+        )
+        climbing = "run/exec-1/shard-1/../shard-0/ash_aggregated_results.json"
+        s3.put_object(Bucket=bucket, Key=climbing, Body=b'{"shard": 1}')
+        assert climbing in keys_under(s3, bucket, "run/exec-1/"), (
+            "moto normalized the key"
+        )
+
+        destination = tmp_path / "shard-results"
+        result = run_helper(
+            helper, ["download", bucket, "run/exec-1", str(destination)], child_env
+        )
+
+        assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
+        landed = destination / "shard-0" / "ash_aggregated_results.json"
+        assert not landed.exists() or landed.read_bytes() == genuine
 
 
 class TestEmptyAndMissing:

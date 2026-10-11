@@ -6,12 +6,16 @@
  * The merge action owns the pipeline's verdict, and it forms it from what sits under
  * `executions/<execution id>/` in the results bucket, so each result set has to be
  * written only by the project that produces it. Each shard writes
- * `executions/*\/shard-<its index>/*` and nothing else.
+ * `executions/<execution id>/shard-<its index>/*` and nothing else, with the
+ * execution id matched by one `?` per character.
  *
  * The check is semantic: it asks whether any write grant on a shard's role COVERS a
  * concrete key, using IAM's wildcard rules, rather than comparing strings. A shard
  * must be able to write its own results key (the control) and must not be able to
- * write another shard's, the merged output, or another execution's anything.
+ * write another shard's, the merged output, or a key that nests its own index under
+ * another's. IAM has no variable holding the running execution's id, so a shard can
+ * write under another execution's id; what keeps that id from it is that it can
+ * neither list nor read the results bucket, which is checked here too.
  *
  * WHY THE CONFIG PATH MATTERS
  * ---------------------------
@@ -117,21 +121,52 @@ test('the shard projects and the results bucket were found, so the cases below a
   expect(RESULTS_BUCKET).toBeDefined();
 });
 
+/** An id in CodePipeline's documented execution id pattern. */
+const EXECUTION = '0f1e2d3c-4b5a-4968-8776-655443322110';
+
+/** Every resource pattern a shard's role may apply one of `actions` to. */
+function resourcesFor(shard: Shard, actions: string[]): string[] {
+  return statementsForRole(PIPELINE, shard.role, RESOLVER)
+    .filter((statement) => statement.effect === 'Allow')
+    .filter((statement) =>
+      statement.actions.some((granted) => actions.some((action) => actionMatches(granted, action))),
+    )
+    .flatMap((statement) => statement.resources);
+}
+
 describe.each(SHARDS.map((s) => [s.index, s] as const))('shard %i', (index, shard) => {
   const other = (index + 1) % SHARDS.length;
 
   test('control: it can write its own results for an execution', () => {
-    expect(canWrite(shard, `executions/exec-1/shard-${index}/ash_aggregated_results.json`)).toBe(true);
+    expect(canWrite(shard, `executions/${EXECUTION}/shard-${index}/ash_aggregated_results.json`)).toBe(true);
+    expect(canWrite(shard, `executions/${EXECUTION}/shard-${index}/reports/ash.summary.md`)).toBe(true);
   });
 
   test('it cannot write another shard results, the merged output, or outside an execution', () => {
     const forbidden = [
-      `executions/exec-1/shard-${other}/ash_aggregated_results.json`,
-      'executions/exec-1/merged/ash_aggregated_results.json',
-      `executions/exec-1/shard-${index}0/ash_aggregated_results.json`,
+      `executions/${EXECUTION}/shard-${other}/ash_aggregated_results.json`,
+      `executions/${EXECUTION}/merged/ash_aggregated_results.json`,
+      `executions/${EXECUTION}/shard-${index}0/ash_aggregated_results.json`,
       `elsewhere/shard-${index}/ash_aggregated_results.json`,
+      `executions/${EXECUTION}/merged/shard-${index}/ash_aggregated_results.json`,
+      `executions/${EXECUTION}/shard-${other}/shard-${index}/ash_aggregated_results.json`,
+      `executions/not-an-execution-id/shard-${index}/ash_aggregated_results.json`,
     ].filter((key) => canWrite(shard, key));
     expect(forbidden).toEqual([]);
+  });
+
+  test('it can neither list nor read the results bucket, nor ask the pipeline for an execution id', () => {
+    const listing = resourcesFor(shard, ['s3:ListBucket', 's3:ListBucketVersions']).filter((pattern) =>
+      resourceCovers(pattern, RESULTS_ARN),
+    );
+    const reading = resourcesFor(shard, ['s3:GetObject', 's3:GetObjectVersion']).filter((pattern) =>
+      resourceCovers(pattern, `${RESULTS_ARN}/executions/${EXECUTION}/merged/ash_aggregated_results.json`),
+    );
+    const pipeline = statementsForRole(PIPELINE, shard.role, RESOLVER)
+      .filter((statement) => statement.effect === 'Allow')
+      .flatMap((statement) => statement.actions)
+      .filter((action) => action === '*' || action.startsWith('codepipeline:'));
+    expect({ listing, reading, pipeline }).toEqual({ listing: [], reading: [], pipeline: [] });
   });
 });
 

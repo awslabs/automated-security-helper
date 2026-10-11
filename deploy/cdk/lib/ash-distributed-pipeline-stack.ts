@@ -298,13 +298,18 @@ export class AshDistributedPipelineStack extends Stack {
      * key pattern leaves each shard role the one prefix its post_build uploads to,
      * and no Delete: the upload never deletes.
      *
-     * KNOWN LIMIT: IAM's `*` crosses `/`, so shard N can still write a key such as
-     * `executions/<id>/merged/shard-N/x`. Nothing reads one: the merge asks for
-     * `shard-<i>/ash_aggregated_results.json` of each shard by name and fails when
-     * one is missing.
+     * The execution segment is `EXECUTION_ID_SEGMENT`, one `?` per character of a
+     * CodePipeline execution id, rather than `*`, which crosses `/`: with `*`, shard N
+     * could also write `executions/<id>/merged/shard-N/x` or
+     * `executions/<id>/shard-M/shard-N/x`. Two limits remain. IAM has no variable
+     * that holds the running execution's id, so a shard role can write under
+     * another execution's id; it can neither list nor read the results bucket, so
+     * it has no way to learn one. And IAM compares keys as strings, so `executions/<id>/shard-N/../x`
+     * matches; the merge's download refuses any key with an empty, `.` or `..`
+     * segment.
      */
     shardProjects.forEach((project, index) =>
-      resultsBucket.grantPut(project, `executions/*/shard-${index}/*`),
+      resultsBucket.grantPut(project, `executions/${EXECUTION_ID_SEGMENT}/shard-${index}/*`),
     );
     shardProjects.forEach((project) => config.grantRead(project));
     config.grantRead(mergeProject);
@@ -695,6 +700,15 @@ export class AshDistributedPipelineStack extends Stack {
     });
   }
 }
+
+/**
+ * One `?` per character of a CodePipeline execution id, whose documented pattern is
+ * `[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}` (the
+ * `pipelineExecutionId` field of the CodePipeline API's PipelineExecution type). In
+ * an IAM resource `?` matches exactly one character, so the segment is exactly as
+ * long as an execution id, with its hyphens in place.
+ */
+export const EXECUTION_ID_SEGMENT = '????????-????-????-????-????????????';
 
 /**
  * Write the deployment-wide ASH config into the build, or `{}` when none was supplied.

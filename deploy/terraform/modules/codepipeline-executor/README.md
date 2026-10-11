@@ -199,7 +199,12 @@ against the number of scanners your configuration enables.
 
 **One project and one role per shard.** Each shard can write only
 `<results_prefix>/<execution id>/shard-<index>/`, so no shard can replace another
-shard's results or the merged output the verdict is formed from. IAM cannot tell
+shard's results or the merged output the verdict is formed from. The execution id
+is matched by one `?` per character of CodePipeline's execution id format, because
+IAM has no variable that holds the running execution's id; a shard role could
+write under another execution's id, and it cannot list the bucket to learn one.
+IAM compares keys as strings, so the merge's download refuses any key with an
+empty, `.` or `..` segment. IAM cannot tell
 two actions of one role apart, and a CodeBuild action runs as its project's role,
 so this takes a project per shard. The index is a project environment variable;
 the execution id arrives as a per-action `EnvironmentVariables` override.

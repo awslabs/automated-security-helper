@@ -444,10 +444,16 @@ through pipeline artifacts. A CodeBuild pipeline action accepts
 [1 to 5 input artifacts](https://docs.aws.amazon.com/codepipeline/latest/userguide/reference-action-artifacts.html),
 so an artifact per shard cannot express a six-way split at all.
 
-Each shard's role may put objects only under `executions/*/shard-<its index>/` in
-that bucket, and delete nothing. The merge forms the verdict from what is under an
-execution's prefix, and every shard runs scanners over the repository being scanned,
-so no shard writes another shard's results or the merged output.
+Each shard's role may put objects only under
+`executions/<execution id>/shard-<its index>/` in that bucket, and delete nothing.
+The merge forms the verdict from what is under an execution's prefix, and every
+shard runs scanners over the repository being scanned, so no shard writes another
+shard's results or the merged output. The execution id is matched by one `?` per
+character of CodePipeline's execution id format, because IAM has no variable that
+holds the running execution's id. So a shard role could write under another
+execution's id, and nothing it is granted lists or reads the bucket to learn one.
+IAM also compares keys as strings, so the merge's download refuses any key with an
+empty, `.` or `..` segment rather than writing it where another key's file goes.
 
 Those transfers use `boto3`, not `aws s3 cp`, and that is not a style preference.
 The shard and merge actions run with the ASH image as their CodeBuild environment

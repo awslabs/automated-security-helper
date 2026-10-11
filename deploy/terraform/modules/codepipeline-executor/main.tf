@@ -43,6 +43,9 @@ locals {
   # prefix, so two concurrent executions cannot read each other's shards.
   execution_id_ref = "#{codepipeline.PipelineExecutionId}"
 
+  # One `?` per character of an execution id; see the WriteShardResults statement.
+  execution_id_segment = "????????-????-????-????-????????????"
+
   shard_buildspec = templatefile("${path.module}/buildspec-shard.yml.tftpl", {
     s3_sync_b64 = filebase64("${path.module}/files/ash_s3_sync.py")
   })
@@ -334,11 +337,20 @@ data "aws_iam_policy_document" "shard" {
 
   # Write only, and only under this shard's own key of an execution. A shard has
   # no reason to read another shard's output, and must not be able to write it.
+  #
+  # The execution segment is one `?` per character of a CodePipeline execution id
+  # (documented pattern [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}),
+  # not `*`, which crosses `/` and would let shard N write
+  # <execution id>/merged/shard-N/... or <execution id>/shard-M/shard-N/.... IAM has
+  # no variable holding the running execution's id, so a shard can write under
+  # another execution's id; it cannot list the bucket, so it has no way to learn one.
+  # IAM compares keys as strings, so <execution id>/shard-N/../x matches; the
+  # merge's download refuses any key with an empty, "." or ".." segment.
   statement {
     sid       = "WriteShardResults"
     effect    = "Allow"
     actions   = ["s3:PutObject"]
-    resources = ["${local.results_arn_prefix}/*/shard-${count.index}/*"]
+    resources = ["${local.results_arn_prefix}/${local.execution_id_segment}/shard-${count.index}/*"]
   }
 }
 

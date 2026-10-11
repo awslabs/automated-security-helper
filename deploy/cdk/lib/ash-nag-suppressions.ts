@@ -484,8 +484,9 @@ export function suppressShardProjectRoleWildcards(scope: IConstruct): void {
       'Object access inside two buckets this stack creates: read on the pipeline artifact ' +
       'bucket, and put on this shard\'s own key of the results bucket. RESOURCE: the "/*" ' +
       'object-key suffix on the artifact bucket, because CodePipeline names artifact objects ' +
-      'per execution, and "/executions/*/shard-<index>/*" on the results bucket, because ASH ' +
-      'writes one results prefix per execution and this shard writes only its own key in it. ' +
+      'per execution, and "/*" after "/executions/<execution id>/shard-<index>/" on the results ' +
+      'bucket, because this shard writes its own results files under its own key of each ' +
+      'execution. ' +
       'ACTION: s3:Abort*, ' +
       's3:GetBucket*, s3:GetObject* and s3:List*, API-family suffixes on those same two ' +
       'buckets rather than extra reach.',

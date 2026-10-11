@@ -7,6 +7,12 @@
 # shard's ash_aggregated_results.json or the merged output. That takes a role per
 # shard: IAM cannot tell two actions of one role apart.
 #
+# The execution id segment is one `?` per character of a CodePipeline execution id,
+# so a shard cannot nest its own index under another shard's key or under merged/.
+# IAM has no variable holding the running execution's id, so a shard can write
+# under another execution's id; the last run checks it cannot list the bucket or
+# ask the pipeline, which is how it would learn one.
+#
 # The check is semantic. For every shard index it asks whether any write grant that
 # applies to that shard COVERS a concrete key, using IAM's `*` wildcard, rather than
 # comparing policy strings. The statements are read from the policy documents the
@@ -82,7 +88,7 @@ run "each_shard_can_write_its_own_results" {
           tolist(try(data.aws_iam_policy_document.build_common[i].statement, data.aws_iam_policy_document.build_common[tostring(i)].statement, data.aws_iam_policy_document.build_common.statement)),
           ) : anytrue([
             for resource in(statement.resources == null ? [] : tolist(statement.resources)) :
-            can(regex("^${replace(replace(resource, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::ash-exec-artifacts/${var.results_prefix}/exec-1/shard-${i}/ash_aggregated_results.json"))
+            can(regex("^${replace(replace(replace(resource, ".", "\\."), "*", ".*"), "?", ".")}$", "arn:aws:s3:::ash-exec-artifacts/${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/shard-${i}/ash_aggregated_results.json"))
         ])
         if(statement.effect == null ? "Allow" : statement.effect) == "Allow" && anytrue([
           for action in(statement.actions == null ? [] : tolist(statement.actions)) :
@@ -101,10 +107,13 @@ run "no_shard_can_write_another_shards_results_or_the_merged_output" {
     condition = length(flatten([
       for i in range(var.shard_count) : [
         for key in [
-          "${var.results_prefix}/exec-1/shard-${(i + 1) % var.shard_count}/ash_aggregated_results.json",
-          "${var.results_prefix}/exec-1/merged/ash_aggregated_results.json",
-          "${var.results_prefix}/exec-1/shard-${i}0/ash_aggregated_results.json",
+          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/shard-${(i + 1) % var.shard_count}/ash_aggregated_results.json",
+          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/merged/ash_aggregated_results.json",
+          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/shard-${i}0/ash_aggregated_results.json",
           "elsewhere/shard-${i}/ash_aggregated_results.json",
+          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/merged/shard-${i}/ash_aggregated_results.json",
+          "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/shard-${(i + 1) % var.shard_count}/shard-${i}/ash_aggregated_results.json",
+          "${var.results_prefix}/not-an-execution-id/shard-${i}/ash_aggregated_results.json",
         ] : "shard ${i} can write ${key}"
         if anytrue([
           for statement in concat(
@@ -112,7 +121,7 @@ run "no_shard_can_write_another_shards_results_or_the_merged_output" {
             tolist(try(data.aws_iam_policy_document.build_common[i].statement, data.aws_iam_policy_document.build_common[tostring(i)].statement, data.aws_iam_policy_document.build_common.statement)),
             ) : anytrue([
               for resource in(statement.resources == null ? [] : tolist(statement.resources)) :
-              can(regex("^${replace(replace(resource, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::ash-exec-artifacts/${key}"))
+              can(regex("^${replace(replace(replace(resource, ".", "\\."), "*", ".*"), "?", ".")}$", "arn:aws:s3:::ash-exec-artifacts/${key}"))
           ])
           if(statement.effect == null ? "Allow" : statement.effect) == "Allow" && anytrue([
             for action in(statement.actions == null ? [] : tolist(statement.actions)) :
@@ -121,6 +130,27 @@ run "no_shard_can_write_another_shards_results_or_the_merged_output" {
         ])
       ]
     ])) == 0
-    error_message = "A shard can write results that are not its own: ${jsonencode(flatten([for i in range(var.shard_count) : [for key in ["${var.results_prefix}/exec-1/shard-${(i + 1) % var.shard_count}/ash_aggregated_results.json", "${var.results_prefix}/exec-1/merged/ash_aggregated_results.json"] : "shard ${i} can write ${key}" if anytrue([for statement in concat(tolist(data.aws_iam_policy_document.shard[i].statement), tolist(try(data.aws_iam_policy_document.build_common[i].statement, data.aws_iam_policy_document.build_common[tostring(i)].statement, data.aws_iam_policy_document.build_common.statement))) : anytrue([for resource in(statement.resources == null ? [] : tolist(statement.resources)) : can(regex("^${replace(replace(resource, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::ash-exec-artifacts/${key}"))]) if anytrue([for action in(statement.actions == null ? [] : tolist(statement.actions)) : action == "*" || can(regex("^s3:(\\*|Put|Delete|Abort|Restore|Replicate)", action))])])]]))}"
+    error_message = "A shard can write results that are not its own: ${jsonencode(flatten([for i in range(var.shard_count) : [for key in ["${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/shard-${(i + 1) % var.shard_count}/ash_aggregated_results.json", "${var.results_prefix}/0f1e2d3c-4b5a-4968-8776-655443322110/merged/ash_aggregated_results.json"] : "shard ${i} can write ${key}" if anytrue([for statement in concat(tolist(data.aws_iam_policy_document.shard[i].statement), tolist(try(data.aws_iam_policy_document.build_common[i].statement, data.aws_iam_policy_document.build_common[tostring(i)].statement, data.aws_iam_policy_document.build_common.statement))) : anytrue([for resource in(statement.resources == null ? [] : tolist(statement.resources)) : can(regex("^${replace(replace(replace(resource, ".", "\\."), "*", ".*"), "?", ".")}$", "arn:aws:s3:::ash-exec-artifacts/${key}"))]) if anytrue([for action in(statement.actions == null ? [] : tolist(statement.actions)) : action == "*" || can(regex("^s3:(\\*|Put|Delete|Abort|Restore|Replicate)", action))])])]]))}"
+  }
+}
+
+run "no_shard_can_list_the_bucket_or_read_the_pipeline" {
+  command = plan
+
+  assert {
+    condition = length(flatten([
+      for i in range(var.shard_count) : [
+        for statement in concat(
+          tolist(data.aws_iam_policy_document.shard[i].statement),
+          tolist(try(data.aws_iam_policy_document.build_common[i].statement, data.aws_iam_policy_document.build_common[tostring(i)].statement, data.aws_iam_policy_document.build_common.statement)),
+          ) : [
+          for action in(statement.actions == null ? [] : tolist(statement.actions)) :
+          "shard ${i} holds ${action}"
+          if can(regex("^(\\*|s3:\\*|s3:List|codepipeline:)", action))
+        ]
+        if(statement.effect == null ? "Allow" : statement.effect) == "Allow"
+      ]
+    ])) == 0
+    error_message = "A shard role can list the results bucket or read the pipeline."
   }
 }

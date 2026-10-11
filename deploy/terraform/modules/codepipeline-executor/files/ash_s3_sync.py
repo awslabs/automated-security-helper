@@ -68,11 +68,19 @@ def download(bucket: str, prefix: str, local_dir: str) -> int:
             relative = key[len(prefix) + 1 :] if prefix else key
             if not relative:
                 continue
+
+            # Every segment must be a plain name. S3 stores "." and ".." segments
+            # literally, so such a key is its own object, yet on disk it names
+            # another key's file or a path outside local_dir. S3 keys are written
+            # by whoever can write the bucket.
+            if any(part in ("", ".", "..") for part in relative.split("/")):
+                _fail(
+                    f"key {key!r} has an empty, '.' or '..' segment, so it would "
+                    f"write outside {local_dir} or onto another key's file"
+                )
             destination = root / relative
 
-            # Refuse a key that would escape the destination directory. S3 keys
-            # are written by whoever can write the bucket, and a key containing
-            # ".." would otherwise write outside local_dir.
+            # A link already under local_dir could still lead outside it.
             resolved = destination.resolve()
             if not resolved.is_relative_to(root.resolve()):
                 _fail(f"key {key!r} would write outside {local_dir}")
