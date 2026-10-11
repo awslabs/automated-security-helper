@@ -21,6 +21,11 @@ The test also pins what a relaxation may cover: every repo config keeps the scan
 ``content_db_staleness: fail``, and only a database named in ``RELAXABLE`` may be relaxed.
 ``RELAXABLE`` is empty, so adding an override means adding its database, and the reason, here
 in the same change, where a reviewer sees it.
+
+These configs are inside the tree ASH scans, so a ``policy: warn`` entry in one is ignored with
+a warning (``config/staleness_trust.py``) unless the scan's operator sets the same entry, with
+``--config-overrides`` or a config outside the tree. The check here still keeps such an entry
+from outliving its date.
 """
 
 from __future__ import annotations

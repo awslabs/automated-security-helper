@@ -226,6 +226,14 @@ says `warn`, and either form of the flag also clears
 `content_db_staleness_overrides` for that scan. Like `fail_on_incomplete_scanners`,
 neither key can be changed by an MCP runtime patch.
 
+Relaxing the check is the operator's choice. Set `warn`, or an entry with
+`policy: warn`, with the flag, `--config-overrides` or a config file outside the
+scanned tree. From a config file inside the tree (a repository's
+`.ash/.ash.yaml`, or a workspace project's own config) they are ignored with a
+warning naming the key, unless they equal the operator's value. `fail`, and an
+entry with `policy: fail`, only make the check stricter, so they apply from any
+config. See [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose).
+
 This gate is independent of `fail_on_incomplete_scanners` and does not need it
 turned on. When the scan also has actionable findings, the exit code is 1 rather
 than 2: clearing the reported findings would not make a scan against a stale
@@ -476,6 +484,7 @@ it counts as the client's.
 |---|---|
 | `scanners.<name>.options.tool_version`, `converters.<name>.options.tool_version` | Taken from the defaults, `--config-overrides` or a config file outside the tree, for every scanner and converter, including those a plugin module adds. It chooses which release of the tool ASH installs and which one already on `PATH` it accepts. A value equal to the operator's applies; any other is ignored with a warning, and the operator's value or the tool's default constraint applies. From every source, including `--config-overrides`, it must also be a PEP 440 version specifier set such as `>=1.2,<2` or `==1.4.1`; any other value is replaced by the default constraint. |
 | `scanners.opengrep.options.version` | Must be a release tag such as `v1.15.1`, from every source. Any other value is replaced by the pinned version. |
+| `content_db_staleness`, `content_db_staleness_overrides` | `warn`, and an overrides entry with `policy: warn`, are taken from the defaults, `--allow-stale-content-db`, `--config-overrides` or a config file outside the tree. From the tree's config such a value is ignored with a warning unless it equals the operator's, and the scan fails on a stale database as by default. `fail`, and an entry with `policy: fail`, apply from every config. See [Failing on a stale content database](#failing-on-a-stale-content-database). |
 | `ash_plugin_modules` | An entry is imported only if it names an installed module that Python finds outside the scanned tree. An entry that is not importable, or that would be imported from a file in the tree, is skipped. So are `automated_security_helper.plugin_modules.ash_aws_plugins` and `automated_security_helper.plugin_modules.ash_snyk_plugins`, and any module inside either: the AWS reporters send findings to AWS with the operator's credentials, and the Snyk Code scanner sends the scanned source to Snyk with the operator's Snyk token, so only `--ash-plugin-modules` (or `ASH_PLUGIN_MODULES`), `--config-overrides` or a config file outside the tree can add them. The same holds for their classes when another package the tree's config loads lists or imports them: a scanner or reporter defined in either package is selected only when one of those operator sources loads that package, a module inside it, or the package that lists the class, and each one dropped is named in a warning. |
 | `scanners.checkov.options.config_file`, `scanners.ferret-scan.options.config_file` | Taken from the defaults, `--config-overrides` or a config file outside the tree, and passed to the tool only when the file is outside the scanned tree. The same applies to the `.checkov.yaml` and `ferret.yaml` files these scanners look for by name. ferret-scan then uses its bundled config. checkov and ferret-scan also read such a file from their working directory on their own, so ASH runs both from the filesystem root and always passes ferret-scan a `--config`; finding paths are unchanged. |
 | `scanners.detect-secrets.options.scan_settings` plugins and filters, `scanners.detect-secrets.options.baseline_file` | An entry that names a file (`file://...`) is kept only when the operator's config or `--config-overrides` has it and the file is outside the scanned tree; `baseline_file` likewise comes from the defaults, `--config-overrides` or a config file outside the tree. This includes entries read from a baseline file. detect-secrets' built-in plugins and filters are unaffected. |
@@ -508,11 +517,12 @@ system paths the sandbox already reads also has to be listed in
 error.
 
 `ash merge` holds the configuration each shard recorded in its results to every
-row of the table above, against the operator's defaults, `--config` and
-`--config-overrides` at merge time. It imports only the `ash_plugin_modules`
-entries the operator's configuration names, and takes `enabled` of the reporters
-in the `enabled` row from the operator in both directions, so a shard's
-`enabled: false` is ignored too; see
+row of the table above except `content_db_staleness` and its overrides, which it
+takes from the shards with the other settings its verdict reads, against the
+operator's defaults, `--config` and `--config-overrides` at merge time. It imports
+only the `ash_plugin_modules` entries the operator's configuration names, and takes
+`enabled` of the reporters in the `enabled` row from the operator in both
+directions, so a shard's `enabled: false` is ignored too; see
 [Settings a shard's recorded configuration cannot choose](cli-reference.md#settings-a-shards-recorded-configuration-cannot-choose).
 
 ### Configs an MCP client delivered

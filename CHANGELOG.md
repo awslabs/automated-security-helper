@@ -423,6 +423,17 @@
   resolved. See
   [Settings a repository's config cannot choose](docs/content/docs/configuration-guide.md#settings-a-repositorys-config-cannot-choose).
 
+- **A config file inside the scanned tree can no longer relax the stale content
+  database check.** `content_db_staleness: warn`, and a
+  `content_db_staleness_overrides` entry with `policy: warn`, now come from the
+  defaults, `--allow-stale-content-db`, `--config-overrides` or a config file
+  outside the tree. From a repository's or a workspace project's own config they
+  are ignored with a warning naming the key, unless they equal the operator's
+  value, and a stale database fails the scan as by default. `fail`, and an entry
+  with `policy: fail`, still apply from any config. `ash merge` still takes both
+  keys from the shards. See
+  [Failing on a stale content database](docs/content/docs/configuration-guide.md#failing-on-a-stale-content-database).
+
 - **ASH no longer follows symlinks out of the scanned tree when it reads tree files
   into its own output.** This covers converter inputs (archives and notebooks), the
   JSON and YAML files cfn-nag and cdk-nag read to decide whether they are

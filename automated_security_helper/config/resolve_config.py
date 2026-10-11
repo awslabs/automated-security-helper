@@ -44,6 +44,9 @@ from automated_security_helper.config.sandbox_grants import (
     files_inside,
     scanned_trees,
 )
+from automated_security_helper.config.staleness_trust import (
+    confine_content_db_staleness,
+)
 from automated_security_helper.config.untrusted_source import (
     IN_TREE_OR_DELIVERED,
     UntrustedSource,
@@ -411,6 +414,9 @@ def resolve_config(
     confine_to_trusted_base(
         config, trusted, operator_overrides, Path(scanned_root), in_tree
     )
+    # Not one of confine_to_trusted_base's steps: ash merge takes the verdict
+    # settings, these among them, from the shards (cli/merge.py).
+    confine_content_db_staleness(config, trusted, operator_overrides, in_tree)
     return config
 
 
