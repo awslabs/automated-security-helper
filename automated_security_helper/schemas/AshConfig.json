@@ -206,7 +206,8 @@
                   "/reporters/s3/options/key_prefix"
                 ],
                 "denied_value_patterns": {},
-                "enabled": false
+                "enabled": false,
+                "replace_default_denied_paths": false
               }
             },
             "severity_threshold": "MEDIUM",
@@ -646,7 +647,8 @@
                 "/reporters/s3/options/key_prefix"
               ],
               "denied_value_patterns": {},
-              "enabled": false
+              "enabled": false,
+              "replace_default_denied_paths": false
             }
           },
           "description": "MCP-server-specific configuration (runtime override allowlist, etc.)."
@@ -752,7 +754,8 @@
               "/reporters/s3/options/key_prefix"
             ],
             "denied_value_patterns": {},
-            "enabled": false
+            "enabled": false,
+            "replace_default_denied_paths": false
           },
           "description": "Allowlist for runtime JSON-Patch overrides."
         }
@@ -3358,7 +3361,7 @@
             "/reporters/s3/options/bucket_name",
             "/reporters/s3/options/key_prefix"
           ],
-          "description": "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). Defaults block the most dangerous fields on the real AshConfig schema.",
+          "description": "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). Defaults block the most dangerous fields on the real AshConfig schema. Each entry starts with '/'. A list that is not one of ASH's defaults is added to the current defaults, unless replace_default_denied_paths is true.",
           "items": {
             "type": "string"
           },
@@ -3370,7 +3373,7 @@
             "type": "string"
           },
           "default": {},
-          "description": "Map of JSON-Pointer pattern \u2192 regex. add/replace ops are rejected when any string leaf reachable from the op's value matches the regex; lists and dicts are walked recursively so a forbidden token cannot be hidden inside a nested structure. The `test` op is exempt because it is read-only.",
+          "description": "Map of JSON-Pointer pattern \u2192 regex. add/replace ops are rejected when any string leaf reachable from the op's value matches the regex; lists and dicts are walked recursively so a forbidden token cannot be hidden inside a nested structure. The `test` op is exempt because it is read-only. Each key starts with '/'.",
           "title": "Denied Value Patterns",
           "type": "object"
         },
@@ -3378,6 +3381,12 @@
           "default": false,
           "description": "Master switch \u2014 runtime patches are rejected unless True.",
           "title": "Enabled",
+          "type": "boolean"
+        },
+        "replace_default_denied_paths": {
+          "default": false,
+          "description": "When true, denied_paths replaces ASH's default list instead of adding to it, and each default entry it leaves out is named in a warning. When false (the default), the entries listed are denied as well as the defaults.",
+          "title": "Replace Default Denied Paths",
           "type": "boolean"
         }
       },

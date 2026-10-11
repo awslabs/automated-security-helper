@@ -74,6 +74,7 @@ global_settings:
       - /reporters/s3/options/bucket_name
       - /reporters/s3/options/key_prefix
       denied_value_patterns: {}
+      replace_default_denied_paths: false
 fail_on_findings: true
 fail_on_incomplete_scanners: true
 sandbox:

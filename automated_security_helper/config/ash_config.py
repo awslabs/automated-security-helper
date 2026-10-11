@@ -10,7 +10,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from typing import Annotated, Any, Callable, List, Dict, Literal, Optional
+from typing import Annotated, Any, Callable, List, Dict, Literal, Optional, Tuple
 
 import yaml
 from automated_security_helper.base.converter_plugin import ConverterPluginConfigBase
@@ -695,7 +695,10 @@ class RuntimeOverridesConfig(BaseModel):
         Field(
             description=(
                 "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). "
-                "Defaults block the most dangerous fields on the real AshConfig schema."
+                "Defaults block the most dangerous fields on the real AshConfig schema. "
+                "Each entry starts with '/'. A list that is not one of ASH's defaults "
+                "is added to the current defaults, unless replace_default_denied_paths "
+                "is true."
             )
         ),
     ] = [
@@ -805,10 +808,50 @@ class RuntimeOverridesConfig(BaseModel):
                 "any string leaf reachable from the op's value matches the regex; lists "
                 "and dicts are walked recursively so a forbidden token cannot be hidden "
                 "inside a nested structure. The `test` op is exempt because it is "
-                "read-only."
+                "read-only. Each key starts with '/'."
             )
         ),
     ] = {}
+
+    #: Set by ``client_config_policy.effective_policy`` on the copy it returns:
+    #: the operator's own list (None for a default one), and that this copy's
+    #: ``denied_paths`` is already the list that applies.
+    _listed_denied_paths: Optional[Tuple[str, ...]] = PrivateAttr(default=None)
+    _effective: bool = PrivateAttr(default=False)
+
+    replace_default_denied_paths: Annotated[
+        bool,
+        Field(
+            description=(
+                "When true, denied_paths replaces ASH's default list instead of "
+                "adding to it, and each default entry it leaves out is named in a "
+                "warning. When false (the default), the entries listed are denied "
+                "as well as the defaults."
+            )
+        ),
+    ] = False
+
+    @field_validator("denied_paths")
+    @classmethod
+    def _denied_paths_are_pointers(cls, value: List[str]) -> List[str]:
+        bad = [entry for entry in value if not str(entry).startswith("/")]
+        if bad:
+            raise ValueError(
+                "denied_paths entries are JSON pointers and start with '/'; "
+                f"these do not and would match nothing: {bad}"
+            )
+        return value
+
+    @field_validator("denied_value_patterns")
+    @classmethod
+    def _value_pattern_keys_are_pointers(cls, value: Dict[str, str]) -> Dict[str, str]:
+        bad = [key for key in value if not str(key).startswith("/")]
+        if bad:
+            raise ValueError(
+                "denied_value_patterns keys are JSON pointers and start with '/'; "
+                f"these do not and would match nothing: {bad}"
+            )
+        return value
 
 
 class SandboxConfig(BaseModel):

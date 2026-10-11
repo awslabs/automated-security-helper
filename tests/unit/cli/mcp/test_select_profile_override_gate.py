@@ -771,6 +771,10 @@ def test_a_glob_denial_on_a_plugin_section_is_refused_in_every_spelling(
 ) -> None:
     denial = "/scanners/trivy-*/options/ignore_file"
     document = _profile(allowed_paths=["/**"], denied_paths=[denial])
+    # This entry alone, so the one that refuses is the glob under test.
+    document["global_settings"]["mcp"]["runtime_overrides"][
+        "replace_default_denied_paths"
+    ] = True
     _install(tmp_path, document)
     section = {"options": {"ignore_file": "standin.txt"}}
 
@@ -830,14 +834,17 @@ def test_a_profile_holding_an_earlier_default_list_gets_todays_denials(
     _assert_unbound("override")
 
 
-def test_an_edited_list_is_used_as_written(tmp_path: Path) -> None:
-    """Positive control: a list the operator edited is not replaced."""
+def test_a_replacing_list_is_used_as_written(tmp_path: Path) -> None:
+    """Positive control: with replace_default_denied_paths, a dropped default applies no more."""
     edited = [
         entry
         for entry in RuntimeOverridesConfig().denied_paths
         if entry != "/scanners/opengrep/options/exclude_rule"
     ]
     document = _profile(allowed_paths=["/**"], denied_paths=edited)
+    document["global_settings"]["mcp"]["runtime_overrides"][
+        "replace_default_denied_paths"
+    ] = True
     _install(tmp_path, document)
 
     patched = mcp_select_profile(
@@ -853,3 +860,25 @@ def test_an_edited_list_is_used_as_written(tmp_path: Path) -> None:
     )
 
     assert patched["success"] is True, patched
+
+
+def test_an_edited_list_does_not_lift_the_defaults(tmp_path: Path) -> None:
+    """A profile that denies one more field still denies every default one."""
+    document = _profile(allowed_paths=["/**"], denied_paths=["/project_name"])
+    _install(tmp_path, document)
+
+    patched, overridden = _both_routes(
+        {"op": "replace", "path": "/fail_on_findings", "value": False},
+        _restated(document, fail_on_findings=False),
+    )
+
+    for result in (patched, overridden):
+        assert result["success"] is False, result
+        assert "denied_paths entry '/fail_on_findings'" in result["error"], result
+    project = mcp_select_profile(
+        "op",
+        patch_ops=[{"op": "replace", "path": "/project_name", "value": "renamed"}],
+        session_id="named",
+    )
+    assert project["success"] is False
+    assert "denied_paths entry '/project_name'" in project["error"], project

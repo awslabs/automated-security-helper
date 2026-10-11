@@ -118,7 +118,13 @@
   the policy cannot be established, a config with a delivered file is refused
   with `error_type: config_policy_unreadable`. A delivered tree's own
   suppressions and ignore paths apply, marked `client_supplied` in the results,
-  unless the profile's own `denied_paths` lists them. Files under a
+  unless the profile's own `denied_paths` lists them. A profile's own
+  `denied_paths` now adds to the default list rather than replacing it, so
+  listing one more field lifts no default entry; set
+  `replace_default_denied_paths: true` to use the list as written, and each
+  default entry it leaves out is named in a warning. An entry, or a
+  `denied_value_patterns` key, that does not start with `/` matched nothing and is
+  now refused when the config is read. Files under a
   client-supplied ignore path are still converted and scanned, and each finding
   there is kept as a marked, suppressed result. ASH sets the mark: a
   `client_supplied` value written in any config file or override is ignored.

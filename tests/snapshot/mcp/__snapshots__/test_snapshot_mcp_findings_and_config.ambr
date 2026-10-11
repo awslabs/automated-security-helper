@@ -588,6 +588,7 @@
             'denied_value_patterns': dict({
             }),
             'enabled': False,
+            'replace_default_denied_paths': False,
           }),
         }),
         'severity_threshold': 'MEDIUM',
@@ -1029,6 +1030,7 @@
             'denied_value_patterns': dict({
             }),
             'enabled': False,
+            'replace_default_denied_paths': False,
           }),
         }),
         'severity_threshold': 'HIGH',
@@ -1470,6 +1472,7 @@
             'denied_value_patterns': dict({
             }),
             'enabled': False,
+            'replace_default_denied_paths': False,
           }),
         }),
         'severity_threshold': 'MEDIUM',

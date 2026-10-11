@@ -71,6 +71,7 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
+    Set,
     Tuple,
 )
 
@@ -80,6 +81,7 @@ from automated_security_helper.config.ash_config import (
     AshConfig,
     RuntimeOverridesConfig,
 )
+from automated_security_helper.utils.log import ASH_LOGGER
 
 #: Decision point 1: whether a delivered repository's own suppressions and ignore
 #: paths are honored, as the CLI honors a repository's. True (the decision taken)
@@ -314,21 +316,48 @@ def policy_of(config: AshConfig) -> RuntimeOverridesConfig:
     return effective_policy(mcp.runtime_overrides)
 
 
-def effective_policy(policy: RuntimeOverridesConfig) -> RuntimeOverridesConfig:
-    """``policy`` with a shipped default ``denied_paths`` read as the current default.
+_WARNED_REPLACEMENTS: Set[FrozenSet[str]] = set()
 
-    A profile written by an earlier ``ash config init`` holds the default list of
-    that release. It is the default, not the operator's choice
-    (``policy_is_default``), so it gets every entry the current default has; a
-    stale copy would otherwise let through what the defaults have since denied.
-    An edited list is used as it is.
+
+def effective_policy(policy: RuntimeOverridesConfig) -> RuntimeOverridesConfig:
+    """``policy`` with the ``denied_paths`` list that applies.
+
+    * Unset, or equal to a list ASH has shipped (``policy_is_default``): the
+      current default list. A profile an earlier ``ash config init`` wrote holds
+      that release's list; a stale copy would otherwise let through what the
+      defaults have since denied.
+    * Any other list is added to the current defaults, so an operator who lists
+      one more entry does not lift the rest.
+    * With ``replace_default_denied_paths``, the list is used as written, and
+      each default entry it leaves out is named in a warning, once per list.
+
+    The operator's own list is kept on the copy (``_listed_denied_paths``),
+    since ``exempt_paths`` decides from what the operator wrote rather than from
+    the merged list. Applying this to its own result changes nothing.
     """
-    if "denied_paths" not in policy.model_fields_set or not policy_is_default(policy):
+    if policy._effective:
         return policy
     current = list(RuntimeOverridesConfig().denied_paths)
-    if list(policy.denied_paths) == current:
-        return policy
-    return policy.model_copy(update={"denied_paths": current})
+    listed: Optional[Tuple[str, ...]] = (
+        None if policy_is_default(policy) else tuple(policy.denied_paths)
+    )
+    if listed is None:
+        effective = current
+    elif policy.replace_default_denied_paths:
+        effective = list(listed)
+        removed = [entry for entry in current if entry not in set(effective)]
+        if removed and frozenset(effective) not in _WARNED_REPLACEMENTS:
+            _WARNED_REPLACEMENTS.add(frozenset(effective))
+            ASH_LOGGER.warning(
+                "runtime_overrides.replace_default_denied_paths is true, so these "
+                f"default denied_paths entries do not apply: {', '.join(removed)}"
+            )
+    else:
+        effective = current + [entry for entry in listed if entry not in set(current)]
+    resolved = policy.model_copy(update={"denied_paths": effective})
+    resolved._listed_denied_paths = listed
+    resolved._effective = True
+    return resolved
 
 
 def unreadable_rules(reason: str) -> ClientConfigRules:
@@ -368,23 +397,48 @@ def policy_is_default(policy: RuntimeOverridesConfig) -> bool:
     """Whether ``policy``'s ``denied_paths`` is a default rather than the operator's own.
 
     Unset, or equal (as a set) to a list in ``SHIPPED_DEFAULT_DENIED_PATHS``.
+    For a policy ``effective_policy`` returned, whether the operator's list was.
     """
+    if policy._effective:
+        return policy._listed_denied_paths is None
     if "denied_paths" not in policy.model_fields_set:
         return True
     return frozenset(policy.denied_paths) in SHIPPED_DEFAULT_DENIED_PATHS
 
 
+def _names(entry: str, pointer: str) -> bool:
+    """Whether ``denied_paths`` entry ``entry`` covers ``pointer`` or a key inside it."""
+    from fnmatch import fnmatchcase
+
+    if entry.endswith("/**"):
+        prefix = entry[: -len("/**")]
+        return pointer == prefix or pointer.startswith(prefix + "/") or not prefix
+    return fnmatchcase(pointer, entry) or pointer.startswith(entry.rstrip("/") + "/")
+
+
 def exempt_paths(policy: RuntimeOverridesConfig) -> Tuple[str, ...]:
     """The pointers a delivered file is not checked against ``denied_paths`` for.
 
-    Only under a default ``denied_paths``: an operator who edited the list
-    decides about each of them there. Value patterns apply to them either way.
+    ``sandbox`` and ``ash_plugin_modules``, which are checked against the trusted
+    base instead (``_widenings``), and, with ``HONOR_DELIVERED_SUPPRESSIONS``, the
+    suppressions and ignore paths, which apply marked. Under a default
+    ``denied_paths`` all of them. Under the operator's own list, each that the
+    list itself names (the pointer, or an entry above it) is decided there
+    instead. Value patterns apply to them either way.
     """
-    if not policy_is_default(policy):
-        return ()
-    if HONOR_DELIVERED_SUPPRESSIONS:
-        return RESTRICT_ONLY_PATHS + SUPPRESSION_PATHS
-    return RESTRICT_ONLY_PATHS
+    candidates = RESTRICT_ONLY_PATHS + (
+        SUPPRESSION_PATHS if HONOR_DELIVERED_SUPPRESSIONS else ()
+    )
+    if policy_is_default(policy):
+        return candidates
+    listed = (
+        policy._listed_denied_paths if policy._effective else tuple(policy.denied_paths)
+    ) or ()
+    return tuple(
+        candidate
+        for candidate in candidates
+        if not any(_names(entry, candidate.removesuffix("/**")) for entry in listed)
+    )
 
 
 def denied_fields_message(path: Path, denials: Sequence[Any]) -> str:
@@ -437,8 +491,15 @@ def client_file_denials(
             )
             if not _writes_plugin_default(document, denial, rules.base)
         ]
-        if set(RESTRICT_ONLY_PATHS) <= set(exempt):
-            denials.extend(_widenings(document, rules.base, root))
+        denials.extend(
+            _widenings(
+                document,
+                rules.base,
+                root,
+                sandbox="/sandbox" in exempt,
+                modules="/ash_plugin_modules" in exempt,
+            )
+        )
         if denials:
             found.append((path, denials))
     return found
@@ -503,7 +564,14 @@ def _scanner_gets_network(name: str, trusted: Any) -> bool:
     return False
 
 
-def _widenings(document: Any, base: AshConfig, scanned_root: Path) -> List[Any]:
+def _widenings(
+    document: Any,
+    base: AshConfig,
+    scanned_root: Path,
+    *,
+    sandbox: bool = True,
+    modules: bool = True,
+) -> List[Any]:
     """What a delivered ``document`` asks for under ``sandbox`` and ``ash_plugin_modules``
     beyond the trusted ``base``.
 
@@ -523,9 +591,9 @@ def _widenings(document: Any, base: AshConfig, scanned_root: Path) -> List[Any]:
 
     found: List[Any] = []
     trusted = base.sandbox
-    present, sandbox = _walk(document, ["sandbox"])
-    if present and isinstance(sandbox, dict):
-        listed, network = _walk(sandbox, ["network_scanners"])
+    present, section = _walk(document, ["sandbox"])
+    if sandbox and present and isinstance(section, dict):
+        listed, network = _walk(section, ["network_scanners"])
         if listed and isinstance(network, list):
             extra = [
                 str(name)
@@ -542,7 +610,7 @@ def _widenings(document: Any, base: AshConfig, scanned_root: Path) -> List[Any]:
                         False,
                     )
                 )
-        listed, paths = _walk(sandbox, ["extra_read_paths"])
+        listed, paths = _walk(section, ["extra_read_paths"])
         if listed and isinstance(paths, list):
             extra = [
                 str(path) for path in paths if path not in trusted.extra_read_paths
@@ -557,7 +625,7 @@ def _widenings(document: Any, base: AshConfig, scanned_root: Path) -> List[Any]:
                         False,
                     )
                 )
-        listed, mode = _walk(sandbox, ["mode"])
+        listed, mode = _walk(section, ["mode"])
         if listed and trusted.mode != "off" and mode != trusted.mode:
             found.append(
                 DocumentDenial(
@@ -567,11 +635,11 @@ def _widenings(document: Any, base: AshConfig, scanned_root: Path) -> List[Any]:
                     False,
                 )
             )
-    present, modules = _walk(document, ["ash_plugin_modules"])
-    if present:
+    present, named = _walk(document, ["ash_plugin_modules"])
+    if modules and present:
         trusted_names = set(split_plugin_modules(base.ash_plugin_modules))
         refused: List[str] = []
-        for name in split_plugin_modules(modules):
+        for name in split_plugin_modules(named):
             if name in trusted_names:
                 continue
             package = off_host_package(name)

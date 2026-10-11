@@ -694,7 +694,8 @@ def test_the_policy_is_the_registered_profiles_not_the_patched_copy(_server) -> 
         "    runtime_overrides:\n"
         "      enabled: true\n"
         "      allowed_paths: ['/global_settings/**']\n"
-        "      denied_paths: ['/fail_on_findings']\n",
+        "      denied_paths: ['/fail_on_findings']\n"
+        "      replace_default_denied_paths: true\n",
         encoding="utf-8",
     )
     set_profile_registry(register_profiles([f"op={profile}"]))
@@ -1291,3 +1292,19 @@ def test_a_policy_that_cannot_be_read_refuses_only_scans_with_a_delivered_config
     assert plain.project_name == "operator"
     assert isinstance(delivered, ASHConfigPolicyUnreadableError), delivered
     assert "gone" in str(delivered)
+
+
+def test_a_profile_listing_one_more_field_still_refuses_the_defaults(_server) -> None:
+    """An edited denied_paths adds to the defaults rather than replacing them."""
+    _bind_profile(_server["tmp"], _profile_denying("/project_name"))
+    source = _upload({".ash/.ash.yaml": "fail_on_findings: false\n"})
+    _assert_refused(_scan_resolution(source, None), key="fail_on_findings")
+
+
+def test_a_profile_listing_one_more_field_keeps_delivered_suppressions(_server) -> None:
+    """Fields the operator's list does not name keep their rules: applied, marked."""
+    _bind_profile(_server["tmp"], _profile_denying("/project_name"))
+    source = _upload({".ash/.ash.yaml": _DELIVERED_SUPPRESSION})
+    config = _scan_resolution(source, None)
+    assert not isinstance(config, Exception), config
+    assert [s.client_supplied for s in config.global_settings.suppressions] == [True]
