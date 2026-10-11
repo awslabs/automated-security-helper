@@ -351,6 +351,14 @@
   is refused as not numeric, by `./ash` and `Invoke-ASH` as well. See the breaking
   change above. This repository's
   validate-container action now passes `--build-target ci` to every build and scan.
+- **On Windows, container mode and `ash build-image` default to the `ci` stage.** The
+  output directory is bind-mounted into the container, and on Windows the runtime does
+  not map write permissions onto that mount, so the `non-root` user could not write
+  its reports and logs there. With no `--build-target`, `ash --mode container`, `ash
+  build-image` and `Invoke-ASH` therefore build `ci` on Windows (`ash --mode container`
+  built `non-root` there before). An explicit `--build-target non-root` still builds
+  `non-root` on Windows, and `ash build-image --build-target non-root`, which used to
+  build `ci` there regardless, now builds what it names.
 - **Container mode reads the config file you named.** `--config` (or `ASH_CONFIG`) was
   handed to the scan inside the container as the host path, which names nothing there,
   so that scan ran with the default config: none of the file's suppressions, scanner
