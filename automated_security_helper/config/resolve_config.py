@@ -521,6 +521,24 @@ def _has_a_client_file(document: Any) -> bool:
 _MESSAGES_THAT_QUOTE = frozenset({"value_error", "assertion_error"})
 
 
+def unquoted_validation_problems(error: ValidationError) -> List[str]:
+    """Each problem in ``error`` as its location and pydantic's message, without the value.
+
+    For a validator's own error (``_MESSAGES_THAT_QUOTE``), only its type. Shared
+    with the workspace policy file (``workspace/policy.py``), which a client can
+    supply too.
+    """
+    problems = []
+    for item in error.errors(include_url=False, include_input=False):
+        where = ".".join(str(part) for part in item.get("loc", ())) or "(top level)"
+        kind = item.get("type", "")
+        what = (
+            f"invalid value ({kind})" if kind in _MESSAGES_THAT_QUOTE else item["msg"]
+        )
+        problems.append(f"{where}: {what}")
+    return problems
+
+
 def _client_validation_error(
     config_path: Path | str,
     error: ValidationError,
@@ -534,14 +552,7 @@ def _client_validation_error(
     and pydantic's message for it, without the value, and for a validator's own
     error (``_MESSAGES_THAT_QUOTE``) only its type.
     """
-    problems = []
-    for item in error.errors(include_url=False, include_input=False):
-        where = ".".join(str(part) for part in item.get("loc", ())) or "(top level)"
-        kind = item.get("type", "")
-        what = (
-            f"invalid value ({kind})" if kind in _MESSAGES_THAT_QUOTE else item["msg"]
-        )
-        problems.append(f"{where}: {what}")
+    problems = unquoted_validation_problems(error)
     layered = (
         f" with '{describe_config_path(layered_over)}' layered over it"
         if layered_over is not None

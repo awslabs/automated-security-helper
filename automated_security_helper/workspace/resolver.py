@@ -787,6 +787,8 @@ def _apply_workspace_policy(
     default_config: Optional[PathLike] = None,
     client_config_rules: Optional[ClientConfigRules] = None,
     trusted_config: Optional[PathLike] = None,
+    remote_client: bool = False,
+    permit_base: Optional[Callable[[Path], bool]] = None,
 ) -> Optional[Path]:
     """Resolve the workspace policy and fold it into every active project.
 
@@ -807,10 +809,16 @@ def _apply_workspace_policy(
     ``client_supplied``, so a finding it hides is reported suppressed and
     marked rather than dropped and the files under its ignore paths are still
     scanned. Any other policy's entries are left unmarked, whatever the file
-    says: only ASH marks an entry.
+    says: only ASH marks an entry. Delivered is judged at the path the file was
+    found or named at, so a delivered link is the client's wherever it points.
+
+    The file that path reaches must be one ``permit_base`` permits, checked
+    before it is read. For a delivered file, or any under a remote caller, a
+    refusal of its content says where each problem is, not what the file holds.
 
     Returns:
-        The policy file that was applied, or ``None`` when there is no policy.
+        The path the applied policy file was found or named at, or ``None``
+        when there is no policy.
 
     Raises:
         WorkspaceDefinitionError: Exit code 4, for an unusable policy file or a
@@ -819,8 +827,13 @@ def _apply_workspace_policy(
             legal in itself and only fails in combination with one project.
         ASHConfigFieldDeniedError: Exit code 3, for a delivered policy that sets
             a field the rules deny.
+        ASHConfigInputNotPermittedError: The policy file is outside what
+            ``permit_base`` permits.
     """
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+
+    def client_supplied(path: Path) -> bool:
+        return remote_client or config_is_client_supplied(path)
 
     policy, source = resolve_workspace_policy(
         definition.root,
@@ -828,6 +841,8 @@ def _apply_workspace_policy(
         project_config_paths=[
             Path(project.config_source) for project in projects if project.config_source
         ],
+        permit_base=permit_base,
+        client_supplied=client_supplied,
     )
     delivered = source is not None and config_is_client_supplied(source)
     workspace_policy = policy.workspace if policy else None
@@ -942,10 +957,11 @@ def resolve_workspace(
             (``resolve_config``). Must reach ``ProjectScanSettings.remote_client``
             too.
         permit_base: The MCP session's gate (``cli/mcp/sandbox.config_base_gate``),
-            or None. Each project's own config file, and every base its chain
-            extends, must resolve to a file it permits; one that is a link out
-            is refused before it is read (``config_sources.check_discovered_source``).
-            Must reach ``ProjectScanSettings.config_base_gate`` too.
+            or None. Each project's own config file, every base its chain
+            extends, and the workspace policy file must resolve to a file it
+            permits; one that is a link out is refused before it is read
+            (``config_sources.check_discovered_source``). Must reach
+            ``ProjectScanSettings.config_base_gate`` too.
 
     Returns:
         A :class:`~automated_security_helper.workspace.plan.WorkspacePlan` with
@@ -1035,6 +1051,8 @@ def resolve_workspace(
         default_config=default_config,
         client_config_rules=client_config_rules,
         trusted_config=trusted_config,
+        remote_client=remote_client,
+        permit_base=permit_base,
     )
 
     return WorkspacePlan(

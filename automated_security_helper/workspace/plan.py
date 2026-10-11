@@ -386,7 +386,8 @@ class WorkspacePlan(BaseModel):
                 "Path of the workspace policy file that was applied, or null when "
                 "the workspace declares no policy. Recorded because a ceiling "
                 "changes verdicts, so which file imposed it has to be answerable "
-                "from the output rather than by re-running discovery."
+                "from the output rather than by re-running discovery. The path "
+                "it was found or named at, not the file a symlink there reaches."
             ),
         ),
     ] = None

@@ -446,11 +446,14 @@ def _refuse_a_client_chosen_policy(
     client delivered is always the client's, and so is a policy in a checkout
     the server may scan, named or found beside the definition.
 
-    Checked on the file the resolver applied (``workspace_config_source``,
-    already resolved) rather than on a path worked out beforehand: discovery
-    runs beside the resolved definition, so a symlinked definition, or a file
-    added between a check and the resolution, would make a separate lookup
-    check a different file.
+    Checked on the file the resolver applied (``workspace_config_source``, the
+    path it was found or named at, which ``client_named_config_is_untrusted``
+    judges together with the file it reaches) rather than on a path worked out
+    beforehand: discovery runs beside the resolved definition, so a symlinked
+    definition, or a file added between a check and the resolution, would make
+    a separate lookup check a different file. A policy that reaches a file
+    outside what the session may read is refused earlier, before it is read
+    (``_resolve``'s ``permit_base``).
     """
     from automated_security_helper.cli.mcp.sandbox import (
         ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV,

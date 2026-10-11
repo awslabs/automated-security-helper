@@ -177,12 +177,17 @@
   repository config that links to a file outside the scanned tree is held to the
   limits of a config inside the tree. Workspace mode does the same when it plans
   and when it scans each project, and a project's `config_source` in the plan is
-  the path in the project, not the file a link there reaches. A refusal names the
-  path the client used,
+  the path in the project, not the file a link there reaches. A workspace policy
+  file is judged the same way: a delivered `.ash/ash-workspace.yaml` that links
+  elsewhere is the client's, so its entries are marked and the MCP workspace
+  tools refuse it, one that reaches a file outside the directories the session
+  may read config from is refused before it is read, and `workspace_config_source`
+  is the path it was found or named at. A refusal names the path the client used,
   not the file the link reaches. A validation error for a config file an MCP
   client delivered or named gives the file and each problem's location without
   the values in the file, and a client's file that does not parse is reported by
-  line and column without quoting it.
+  line and column without quoting it. The same holds for a workspace policy file
+  a client delivered, and for any policy file under a remote MCP caller.
 
 - **A value a client patched into its session profile is the client's.**
   `select_profile`'s `patch_ops` and `override_yaml` still change only the keys
