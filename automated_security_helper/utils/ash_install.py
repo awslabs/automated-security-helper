@@ -27,9 +27,19 @@ define and a reinstall downgraded main to the release. The tag is now only the
 fallback for an install that left no record, such as a wheel installed from an
 index, and an unknown version gets the repository URL with no ref.
 
-Limits: the commands are pip commands with POSIX shell quoting. An ASH run by
-``uvx`` or installed with ``uv tool`` or ``pipx`` needs that tool's form, which
-the docs pages give.
+How a hint installs
+-------------------
+Every command runs the uv that ASH depends on through the interpreter that runs
+ASH, and installs into that interpreter's environment:
+``<python> -m uv pip install --python <python> ...``. A bare ``pip`` is not used:
+uv-made environments (``uv sync``, ``uv tool install``, uvx) have none, so it ran
+whatever pip came next on PATH, often another Python's. The interpreter is named
+by path, so the command also reaches a ``uv tool`` or ``pipx`` environment.
+
+Limits: POSIX shell quoting. uvx runs ASH from a cached environment that it
+rebuilds from its own arguments, so an extra installed there does not last; the
+docs pages give the uvx form. The commands need the ``uv`` package to import,
+which an install missing several dependencies may also lack.
 """
 
 from __future__ import annotations
@@ -37,6 +47,7 @@ from __future__ import annotations
 import json
 import re
 import shlex
+import sys
 from importlib.metadata import (
     PackageNotFoundError,
     distribution,
@@ -396,13 +407,31 @@ def ash_install_arguments(extra: Optional[str] = None) -> str:
     return shlex.quote(source)
 
 
+def _uv_pip_install() -> str:
+    """``<python> -m uv pip install --python <python>`` for the running interpreter."""
+    python = shlex.quote(sys.executable)
+    return f"{python} -m uv pip install --python {python}"
+
+
+def install_command(*requirements: str) -> str:
+    """The command that installs ``requirements`` into the environment ASH runs in."""
+    return f"{_uv_pip_install()} {shlex.join(requirements)}"
+
+
 def ash_reinstall_command() -> str:
-    """The pip command that reinstalls the running ASH from where it came from."""
-    return f"pip install --force-reinstall {ash_install_arguments()}"
+    """The command that reinstalls the running ASH from where it came from.
+
+    Only ASH itself is reinstalled (``--reinstall-package``); a dependency that is
+    missing is installed with it, and the others are left as they are.
+    """
+    return (
+        f"{_uv_pip_install()} --reinstall-package {ASH_DISTRIBUTION_NAME} "
+        f"{ash_install_arguments()}"
+    )
 
 
 def extra_install_command(extra: str) -> str:
-    """The pip command that installs ASH's ``extra`` into the running install.
+    """The command that installs ASH's ``extra`` into the running install.
 
     Names the extra's packages, read from the running distribution's metadata,
     so it installs what this ASH declares whatever its version or source. Only
@@ -411,5 +440,5 @@ def extra_install_command(extra: str) -> str:
     """
     declared = extra_requirements_from_metadata(extra)
     if declared:
-        return "pip install " + " ".join(shlex.quote(r) for r in declared)
-    return f"pip install {ash_install_arguments(extra)}"
+        return install_command(*declared)
+    return f"{_uv_pip_install()} {ash_install_arguments(extra)}"

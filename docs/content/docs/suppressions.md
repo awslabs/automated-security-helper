@@ -171,16 +171,24 @@ method of `Deployer`, or at module level, is still reported.
 Symbol suppressions parse source files with
 [tree-sitter](https://tree-sitter.github.io/), which ASH installs as an optional
 extra. When the extra is missing, the scan warning and `ash config lint` print a
-pip command that installs the extra's packages, read from the metadata of the ASH
-you run, so it fits that ASH whatever its version or source. Into the environment
-ASH runs in, that command is:
+command that installs the extra's packages, read from the metadata of the ASH you
+run, so it fits that ASH whatever its version or source. It runs the `uv` that ASH
+depends on through the Python interpreter that runs ASH, and installs into that
+interpreter's environment, so it reaches a virtualenv, a `uv tool install` or
+`pipx install` environment and a checkout's `uv sync` environment alike. The hint
+prints the interpreter's full path where this shows `<python>`:
 
 ```bash
-pip install 'tree-sitter>=0.26,<0.27' 'tree-sitter-java>=0.23.5,<0.24' 'tree-sitter-javascript>=0.25,<0.26' 'tree-sitter-python>=0.25,<0.26' 'tree-sitter-typescript>=0.23.2,<0.24'
+<python> -m uv pip install --python <python> 'tree-sitter>=0.26,<0.27' 'tree-sitter-java>=0.23.5,<0.24' 'tree-sitter-javascript>=0.25,<0.26' 'tree-sitter-python>=0.25,<0.26' 'tree-sitter-typescript>=0.23.2,<0.24'
 ```
 
-An ASH installed as a tool lives in an environment of its own, so reinstall it
-from the source you installed it from with `[symbols]` added. For the release
+A plain `pip install` of those packages does not do the same: environments made by
+uv have no pip, so `pip` runs whichever pip comes next on `PATH`, usually another
+Python's.
+
+You can also reinstall ASH with `[symbols]` added to the source you installed it
+from. For uvx that is the only way that lasts: uvx rebuilds its cached environment
+from its own arguments, so an extra installed into it is dropped. For the release
 these docs describe:
 
 ```bash

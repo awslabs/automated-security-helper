@@ -728,7 +728,14 @@ def mcp_command(
             f"  [cyan]{escape(ash_reinstall_command())}[/cyan]",
             soft_wrap=True,
         )
-        _stderr.print("  [cyan]uv sync --reinstall[/cyan]")
+        # For a checkout, the MCP testing guide's sync. --inexact keeps the extras
+        # installed there; a plain `uv sync` is exact and removes them.
+        _stderr.print(
+            "  uv sync --inexact --reinstall-package automated-security-helper",
+            style="cyan",
+            markup=False,
+            soft_wrap=True,
+        )
         _stderr.print()
         _stderr.print(
             "If the issue persists, check your Python environment and ASH installation."

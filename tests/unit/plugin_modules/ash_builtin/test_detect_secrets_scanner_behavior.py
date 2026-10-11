@@ -23,6 +23,7 @@ import json
 import logging
 import multiprocessing
 import re
+import shlex
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -169,10 +170,22 @@ def test_missing_library_reason_names_installs_that_resolve_to_ash(
 
     assert "detect-secrets is not importable" in reason
     assert find_bare_installs(reason) == []
-    expected = "pip install --force-reinstall " + reinstall.format(
-        version=get_ash_version(), checkout=checkout
-    )
-    assert f"`{expected}`" in reason, reason
+    # Compared as the words a shell reads, so a quoted Windows path or a quoted
+    # interpreter path compares equal to its unquoted value.
+    commands = re.findall(r"`([^`]*)`", reason)
+    assert len(commands) == 2, reason
+    # Both run uv through the interpreter that runs ASH: a bare `pip` in a uv-made
+    # environment is some other Python's pip.
+    uv_pip = [sys.executable, "-m", "uv", "pip", "install", "--python", sys.executable]
+    expected = [
+        *uv_pip,
+        "--reinstall-package",
+        "automated-security-helper",
+        *reinstall.format(version=get_ash_version(), checkout="{}").split(" "),
+    ]
+    expected = [str(checkout) if word == "{}" else word for word in expected]
+    assert shlex.split(commands[0]) == expected, reason
+    assert shlex.split(commands[1]) == [*uv_pip, "detect-secrets"], reason
 
 
 def test_default_config_enables_every_detect_secrets_plugin(scanner):

@@ -254,6 +254,10 @@ BARE_NAME_INSTALLS = {
     "micromamba-install": "micromamba install ash",
     "pip-download": "pip download ash",
     "pip-wheel": "pip wheel automated-security-helper",
+    "uv-pip-reinstall-package-and-bare-target": (
+        "uv pip install --reinstall-package automated-security-helper "
+        "automated-security-helper"
+    ),
     "prose-without-install": "Add automated-security-helper[symbols] to your environment",
     "html-code": "<code>pip install automated-security-helper</code>",
     "html-pre": "<pre>pip install automated-security-helper</pre>",
@@ -393,6 +397,11 @@ RESOLVING_OR_UNRELATED = {
     "rye-run-script": "rye run ash scan",
     "conda-install-other": "conda install -c conda-forge python=3.12 nodejs",
     "pip-download-git": f"pip download git+{GIT_URL}@v3.7.0",
+    "uv-pip-reinstall-hint": (
+        "/opt/ash/bin/python -m uv pip install --python /opt/ash/bin/python "
+        f"--reinstall-package automated-security-helper git+{GIT_URL}@0123abcd"
+    ),
+    "uv-pip-upgrade-package-short": f"uv pip install -P ash git+{GIT_URL}@v3.7.0",
     "mcp-json-uv-run-project": '{"command": "uv", "args": ["run", "--project=/src/ash", "ash", "mcp"]}',
     "mcp-json-from-git": textwrap.dedent(
         """\

@@ -30,8 +30,11 @@ other step, including the quoting and the extra, runs for real.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
+import subprocess
+import sys
 from importlib.metadata import distribution
 from pathlib import Path
 from unittest.mock import patch
@@ -52,6 +55,10 @@ GIT_INSTALL = {
     "vcs_info": {"vcs": "git", "commit_id": COMMIT, "requested_revision": "main"},
 }
 WHEEL_NAME = "automated_security_helper-3.7.0-py3-none-any.whl"
+#: Every printed command installs with the interpreter that runs ASH and the uv
+#: it depends on, into that same interpreter's environment.
+UV_PIP = [sys.executable, "-m", "uv", "pip", "install", "--python", sys.executable]
+REINSTALL = [*UV_PIP, "--reinstall-package", "automated-security-helper"]
 REMOTE_WHEEL_INSTALL = {
     "url": "https://example.invalid/automated_security_helper-3.7.0-py3-none-any.whl",
     "archive_info": {},
@@ -114,12 +121,7 @@ class TestReinstallNamesWhereThisAshCameFrom:
     def test_a_git_install_is_pinned_to_its_commit(self, monkeypatch):
         _origin(monkeypatch, GIT_INSTALL, version="3.7.0")
         command = ash_install.ash_reinstall_command()
-        assert _words(command) == [
-            "pip",
-            "install",
-            "--force-reinstall",
-            f"git+{GIT_INSTALL['url']}@{COMMIT}",
-        ]
+        assert _words(command) == [*REINSTALL, f"git+{GIT_INSTALL['url']}@{COMMIT}"]
         assert "@v3.7.0" not in command
 
     def test_a_git_install_keeps_its_subdirectory(self, monkeypatch):
@@ -128,22 +130,57 @@ class TestReinstallNamesWhereThisAshCameFrom:
             f"@{COMMIT}#subdirectory=pkg"
         )
 
-    def test_credentials_in_a_recorded_url_are_not_repeated(self, monkeypatch):
+    @pytest.mark.parametrize(
+        "recorded, printed",
+        [
+            (
+                "https://user:token@github.example/ash.git",
+                "https://github.example/ash.git",
+            ),
+            (
+                "https://u:t@host.example:8443/r.git",
+                "https://host.example:8443/r.git",
+            ),
+            ("https://u:t@[::1]:8443/r.git", "https://[::1]:8443/r.git"),
+            # The ssh user is how the remote is addressed, not a credential.
+            ("ssh://git@github.com/o/r.git", "ssh://git@github.com/o/r.git"),
+        ],
+        ids=["user-and-token", "port", "ipv6-and-port", "ssh-git-user"],
+    )
+    def test_credentials_in_a_recorded_url_are_not_repeated(
+        self, monkeypatch, recorded, printed
+    ):
         """PEP 610 tells installers to strip them; a hint must not depend on that."""
-        _origin(
-            monkeypatch,
-            {**GIT_INSTALL, "url": "https://user:token@github.example/ash.git"},
-        )
+        _origin(monkeypatch, {**GIT_INSTALL, "url": recorded})
         command = ash_install.ash_reinstall_command()
-        assert "token" not in command and "user" not in command, command
-        assert f"git+https://github.example/ash.git@{COMMIT}" in command
+        assert _words(command)[-1] == f"git+{printed}@{COMMIT}", command
+        assert "u:t@" not in command and "user:token" not in command, command
+
+    @pytest.mark.parametrize(
+        "shape", [_editable, _local_directory], ids=lambda f: f.__name__
+    )
+    def test_a_path_with_a_space_and_brackets_is_quoted_for_a_shell(
+        self, monkeypatch, tmp_path, shape
+    ):
+        """A shell reads the printed command back to the same words.
+
+        zsh treats an unquoted ``[dev]`` as a glob and refuses the command, and a
+        space splits the path in two.
+        """
+        checkout = tmp_path / "a b[dev]"
+        checkout.mkdir()
+        _origin(monkeypatch, shape(checkout))
+        for command in (
+            ash_install.ash_reinstall_command(),
+            f"pip install {ash_install.ash_install_arguments('symbols')}",
+        ):
+            assert shlex.join(_words(command)) == command, command
+            assert any(str(checkout) in word for word in _words(command)), command
 
     def test_an_editable_install_names_its_directory(self, monkeypatch, checkout):
         _origin(monkeypatch, _editable(checkout), version="3.7.0")
         assert _words(ash_install.ash_reinstall_command()) == [
-            "pip",
-            "install",
-            "--force-reinstall",
+            *REINSTALL,
             "-e",
             str(checkout),
         ]
@@ -368,8 +405,11 @@ class TestTheSymbolsHint:
         _origin(monkeypatch, None, version="3.7.0")
         command = symbols_extra_install_command()
         declared = ash_install.extra_requirements_from_metadata(SYMBOLS_EXTRA)
-        assert _words(command)[:2] == ["pip", "install"]
-        assert _words(command)[2:] == declared, command
+        assert _words(command)[: len(UV_PIP)] == UV_PIP, command
+        assert _words(command)[len(UV_PIP) :] == declared, command
+        # The exact text, quoted for a shell: every requirement holds `<` or `>`,
+        # which an unquoted command turns into a redirection.
+        assert command == shlex.join([*UV_PIP, *declared]), command
         assert "automated-security-helper" not in command
         assert "@v" not in command
         assert find_bare_installs(command) == []
@@ -384,13 +424,36 @@ class TestTheSymbolsHint:
             ash_install, "extra_requirements_from_metadata", lambda extra: None
         )
         assert _words(symbols_extra_install_command()) == [
-            "pip",
-            "install",
+            *UV_PIP,
             f"automated-security-helper[symbols] @ git+{GIT_INSTALL['url']}@{COMMIT}",
         ]
 
-    def test_it_points_at_the_docs_for_other_installers(self, monkeypatch):
-        """pip is one installer; uv tool, pipx and uvx users need the docs page."""
+    def test_the_printed_command_reaches_this_environment(self):
+        """The command installs into the environment ASH runs in, wherever that is.
+
+        uv environments have no pip, so a bare ``pip`` runs whatever pip comes next
+        on PATH, often another Python's. Here the extra is installed, so a dry run
+        of the printed command against this environment changes nothing.
+        """
+        from automated_security_helper.utils.symbol_spans import (
+            symbols_extra_install_command,
+        )
+
+        words = _words(symbols_extra_install_command())
+        assert words[: len(UV_PIP)] == UV_PIP, words
+        dry_run = [*words[: len(UV_PIP)], "--dry-run", *words[len(UV_PIP) :]]
+        result = subprocess.run(
+            dry_run,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "UV_OFFLINE": "1"},
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "Would make no changes" in result.stderr, result.stderr
+
+    def test_it_points_at_the_docs_for_uvx(self, monkeypatch):
+        """uvx runs ASH from a cached environment; its users need the docs page."""
         from automated_security_helper.utils.symbol_spans import (
             symbols_extra_install_command,
             symbols_extra_install_hint,
@@ -417,7 +480,7 @@ def _name_and_clauses(requirement: str) -> tuple[str, frozenset[str]]:
 
 
 def test_the_suppressions_page_lists_the_packages_of_the_extra():
-    """The docs page's pip command installs what the metadata declares.
+    """The docs page's install command installs what the metadata declares.
 
     It is a copy of the extra, so it is checked against the running
     distribution's metadata rather than trusted to stay current.
@@ -425,30 +488,48 @@ def test_the_suppressions_page_lists_the_packages_of_the_extra():
     page = REPO_ROOT / "docs" / "content" / "docs" / "suppressions.md"
     text = page.read_text(encoding="utf-8")
     section = text.split("### Installing the extra", 1)[1].split("\n### ", 1)[0]
-    pip_lines = [
-        line for line in section.splitlines() if line.startswith("pip install ")
-    ]
+    # The form the hint prints, with the interpreter as a placeholder.
+    prefix = "<python> -m uv pip install --python <python> "
+    pip_lines = [line for line in section.splitlines() if line.startswith(prefix)]
     assert len(pip_lines) == 1, pip_lines
-    documented = {_name_and_clauses(r) for r in shlex.split(pip_lines[0])[2:]}
+    documented = {
+        _name_and_clauses(r) for r in shlex.split(pip_lines[0][len(prefix) :])
+    }
     declared = ash_install.extra_requirements_from_metadata("symbols")
     assert declared, "the symbols extra could not be read from metadata"
     assert documented == {_name_and_clauses(r) for r in declared}
 
 
-def test_the_mcp_reinstall_hint_names_this_install_on_one_line(capsys, monkeypatch):
+@pytest.mark.parametrize("shape", ["git", "editable-with-space-and-brackets"])
+def test_the_mcp_reinstall_hint_names_this_install_on_one_line(
+    capsys, monkeypatch, tmp_path, shape
+):
     """``ash mcp`` without its dependencies prints a reinstall that resolves to ASH.
 
     stderr is usually not a terminal when an MCP client runs the server, and
-    rich wraps non-terminal output at 80 columns. A wrap between
-    ``--force-reinstall`` and the source leaves a pip command with no
-    requirement on the first line, so the whole command has to stay on one line.
+    rich wraps non-terminal output at 80 columns. A wrap before the source
+    leaves an install command with no requirement on the first line, so the whole
+    command has to stay on one line. A path holding ``[dev]`` must print as is:
+    rich reads an unescaped ``[dev]`` as markup and drops it.
     """
+    from rich.console import Console
+
+    from automated_security_helper.cli import mcp as mcp_module
     from automated_security_helper.cli.mcp import mcp_command
 
-    _origin(monkeypatch, GIT_INSTALL)
-    # The width rich uses when stderr is not a terminal, set explicitly so the
-    # result does not depend on the terminal the tests run in.
-    monkeypatch.setenv("COLUMNS", "80")
+    checkout = tmp_path / "a b[dev]"
+    checkout.mkdir()
+    record, source = {
+        "git": (GIT_INSTALL, [f"git+{GIT_INSTALL['url']}@{COMMIT}"]),
+        "editable-with-space-and-brackets": (
+            _editable(checkout),
+            ["-e", str(checkout)],
+        ),
+    }[shape]
+    _origin(monkeypatch, record)
+    # The width rich uses when stderr is not a terminal. Set on the console
+    # itself: rich reads COLUMNS once, when the module creates the console.
+    monkeypatch.setattr(mcp_module, "_stderr", Console(stderr=True, width=80))
     with patch(
         "automated_security_helper.cli.mcp.validate_mcp_dependencies",
         return_value=False,
@@ -459,15 +540,19 @@ def test_the_mcp_reinstall_hint_names_this_install_on_one_line(capsys, monkeypat
     # FORCE_COLOR in the environment makes rich emit color codes, which sit
     # between the words of the command; the text a user reads is what is checked.
     err = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().err)
-    reinstall = [line for line in err.splitlines() if "force-reinstall" in line]
-    assert len(reinstall) == 1, err
+    reinstall = [line for line in err.splitlines() if "--reinstall-package" in line]
+    assert len(reinstall) == 2, err
     assert find_bare_installs(reinstall[0]) == [], reinstall[0]
-    assert _words(reinstall[0]) == [
-        "pip",
-        "install",
-        "--force-reinstall",
-        f"git+{GIT_INSTALL['url']}@{COMMIT}",
-    ], reinstall[0]
+    assert _words(reinstall[0]) == [*REINSTALL, *source], reinstall[0]
+    # For a checkout: the same sync the MCP testing guide gives, which keeps the
+    # extras installed there; a plain `uv sync` removes them.
+    assert _words(reinstall[1]) == [
+        "uv",
+        "sync",
+        "--inexact",
+        "--reinstall-package",
+        "automated-security-helper",
+    ], reinstall[1]
 
 
 class _Context:

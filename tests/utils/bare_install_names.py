@@ -404,6 +404,17 @@ def _run_command_is_bare(words: list[str], start: int) -> bool:
     return False
 
 
+def _names_a_package_option(word: str) -> bool:
+    """Whether ``word`` is an option whose next word names a package, not a target.
+
+    ``uv pip install --reinstall-package automated-security-helper git+URL``
+    installs the git URL; the option only says which package to reinstall. Every
+    such uv option ends in ``-package`` (``--upgrade-package``, also ``-P``).
+    """
+    option = word.strip("\"'")
+    return "=" not in option and (option == "-P" or option.endswith("-package"))
+
+
 def command_is_bare_install(segment: str) -> bool:
     """Whether one shell command installs or runs a bare name (rule 1)."""
     words = _WORD.findall(segment)
@@ -432,6 +443,7 @@ def command_is_bare_install(segment: str) -> bool:
                 i
                 for i in range(start, len(words))
                 if not words[i].strip("\"'").startswith("-")
+                and not _names_a_package_option(words[i - 1])
             ]
         for i in targets:
             if is_bare_requirement(words[i], _rest(words, i)):

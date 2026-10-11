@@ -56,7 +56,7 @@ SYMBOLS_EXTRA = "symbols"
 
 
 def symbols_extra_install_command() -> str:
-    """The pip command that installs the symbols extra's packages.
+    """The command that installs the symbols extra's packages into ASH's environment.
 
     Used by the scan warning and by the config lint, so ``ash config lint`` and
     a scan never name different installs. The packages are read from the
@@ -71,21 +71,22 @@ def symbols_extra_install_command() -> str:
     return extra_install_command(SYMBOLS_EXTRA)
 
 
-#: The docs section with the uv tool, pipx and uvx forms of the install.
+#: The docs section with the uvx form of the install.
 SYMBOLS_EXTRA_DOCS_URL = f"{ASH_DOCS_URL}/docs/suppressions/#installing-the-extra"
 
 
 def symbols_extra_install_hint() -> str:
     """The install advice the scan warning and the config lint both print.
 
-    The command is pip's, which installs into the environment ASH runs in. An
-    ASH installed as a uv or pipx tool, or run by uvx, has an environment of its
-    own that pip does not reach, so the hint also links the docs section that
-    gives those forms.
+    The command runs uv through the interpreter that runs ASH and installs into
+    that interpreter's environment, which covers a virtualenv, a ``uv tool`` or
+    ``pipx`` install and a checkout's ``uv sync`` environment. uvx rebuilds its
+    cached environment from its own arguments, so for uvx the hint links the docs
+    section that gives the uvx form instead.
     """
     return (
         f"install it with `{symbols_extra_install_command()}`, or for an ASH "
-        f"installed with uv tool, pipx or uvx see {SYMBOLS_EXTRA_DOCS_URL}"
+        f"run by uvx see {SYMBOLS_EXTRA_DOCS_URL}"
     )
 
 

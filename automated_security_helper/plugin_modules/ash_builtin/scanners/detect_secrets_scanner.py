@@ -52,7 +52,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
-from automated_security_helper.utils.ash_install import ash_reinstall_command
+from automated_security_helper.utils.ash_install import (
+    ash_reinstall_command,
+    install_command,
+)
 from automated_security_helper.utils.get_scan_set import (
     honors_ignore_files,
     scan_set,
@@ -77,7 +80,7 @@ def _missing_library_reason() -> str:
     return (
         "detect-secrets is not importable, so the detect-secrets scanner cannot run. "
         f"It ships as a dependency of ASH; reinstall ASH (`{ash_reinstall_command()}`) "
-        "or install the library directly with `pip install detect-secrets`."
+        f"or install the library directly with `{install_command('detect-secrets')}`."
     )
 
 
