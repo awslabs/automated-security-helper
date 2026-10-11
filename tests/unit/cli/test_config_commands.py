@@ -74,11 +74,13 @@ class TestConfigGet:
     """Tests for the config get command."""
 
     def test_get_nonexistent_file_errors(self, tmp_path):
+        """Exit 3, the code for a config that cannot be used, as `ash scan` exits."""
         result = runner.invoke(
             config_app,
             ["get", str(tmp_path / "nonexistent.yaml")],
         )
-        assert result.exit_code == 1
+        assert result.exit_code == 3
+        assert "nonexistent.yaml" in "".join(result.output.split())
 
     def test_get_existing_config(self, tmp_path):
         config_path = tmp_path / ".ash.yaml"

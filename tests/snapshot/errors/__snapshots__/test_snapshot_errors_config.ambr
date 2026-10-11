@@ -11,10 +11,10 @@
 # ---
 # name: test_missing_file[get]
   dict({
-    'exit_code': 1,
+    'exit_code': 3,
     'stderr': '',
     'stdout': '''
-      Config file does not exist at missing.yaml
+      Invalid configuration: Configuration file not found: missing.yaml
   
     ''',
   })

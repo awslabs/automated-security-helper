@@ -753,8 +753,10 @@
   were the file's contents. It now prints `Invalid configuration: could not parse
   <path>: <error>` and exits 3, the code for an invalid configuration and the one it
   already used for a file that parses but does not validate. With no configuration
-  file at all it still prints the defaults. `ash scan` now refuses such a file the
-  same way; see the next entry.
+  file at all it still prints the defaults. A named file that does not exist, and
+  a discovered source discovery cannot read, now exit 3 too (they exited 1, the
+  latter with a traceback, as `ash plugin list` did). `ash scan` now refuses such
+  a file the same way; see the next entry.
 
 - **A config file that cannot be loaded stops the scan with exit 3 instead of
   being replaced by the default configuration.** A file named by `--config`,

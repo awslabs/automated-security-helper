@@ -96,3 +96,40 @@ def test_control_a_config_that_loads_is_used(tmp_path):
     result = CliRunner().invoke(app, _plugin(config))
 
     assert result.exit_code == 0, result.output
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param(["plugin", "list"], id="plugin"),
+        pytest.param(["config", "get"], id="config_get"),
+    ],
+)
+def test_discovery_that_cannot_read_the_only_source_exits_three(tmp_path, command):
+    """Discovery itself refuses: the only source is a pyproject.toml it cannot read.
+
+    It used to reach the user as an uncaught exception and exit 1.
+    """
+    (tmp_path / "pyproject.toml").symlink_to(tmp_path / "absent.toml")
+
+    result = CliRunner().invoke(app, command)
+
+    assert result.exit_code == 3, result.output
+    assert "Invalidconfiguration:" in _flat(result.output)
+    assert "pyproject.toml" in _flat(result.output)
+
+
+def test_config_get_on_a_named_file_that_does_not_exist_exits_three(tmp_path):
+    """Exit 3 like every other command given a config file that cannot be used."""
+    result = CliRunner().invoke(app, ["config", "get", str(tmp_path / "missing.yaml")])
+
+    assert result.exit_code == 3, result.output
+    assert "Configurationfilenotfound" in _flat(result.output)
+    assert "missing.yaml" in _flat(result.output)
+
+
+def test_config_get_on_an_empty_path_says_the_path_is_empty(tmp_path):
+    result = CliRunner().invoke(app, ["config", "get", ""])
+
+    assert result.exit_code == 3, result.output
+    assert "pathisempty" in _flat(result.output)

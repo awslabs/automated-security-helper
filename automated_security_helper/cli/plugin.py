@@ -106,15 +106,16 @@ def list_plugins(
         use_color=color,
     )
 
-    if config is None:
-        found = find_config_file()
-        if found is not None:
-            logger.info(f"Using config file found at: {found.as_posix()}")
-            config = found.as_posix()
-    else:
-        logger.info(f"Using config file specified at: {config}")
-
     try:
+        # Inside the try: discovery refuses a source it cannot read (exit 3).
+        if config is None:
+            found = find_config_file()
+            if found is not None:
+                logger.info(f"Using config file found at: {found.as_posix()}")
+                config = found.as_posix()
+        else:
+            logger.info(f"Using config file specified at: {config}")
+
         console = Console()
         ash_config = resolve_config(
             config_path=config, config_overrides=config_overrides

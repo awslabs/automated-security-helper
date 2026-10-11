@@ -214,18 +214,15 @@ def get(
         show_progress=False,
         use_color=color,
     )
-    if config_path is not None and not Path(config_path).exists():
-        typer.secho(f"Config file does not exist at {config_path}", fg=typer.colors.RED)
-        raise typer.Exit(1)
     # The file this command is about: the one named, or the one resolve_config
-    # would discover. When there is one, it is loaded with fallback_to_default
-    # off. resolve_config's default is to log a file it cannot parse and return
-    # the default configuration -- right for a scan, which records the warning
-    # and carries on, and wrong here: `ash config get` on a file with a YAML
-    # syntax error exited 0 and printed the defaults as though they were that
-    # file's contents.
-    config_file = Path(config_path) if config_path is not None else find_config_file()
+    # would discover. resolve_config refuses either when it cannot be loaded --
+    # missing, empty, unreadable or unparseable -- and so does discovery for a
+    # source it cannot read; each exits 3 below, as `ash scan` does. The named
+    # path is passed as given, so an empty one is reported as empty rather than
+    # as the working directory.
+    config_file = None
     try:
+        config_file = config_path if config_path is not None else find_config_file()
         config = resolve_config(
             config_file,
             config_overrides=config_overrides,
