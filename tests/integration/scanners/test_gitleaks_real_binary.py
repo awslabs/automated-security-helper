@@ -309,6 +309,20 @@ def test_one_gitleaksignore_entry_hiding_two_secrets_reports_both(
     assert _located(report) == both
 
 
+def test_an_entry_spelled_with_a_dot_slash_adds_no_duplicate(
+    tmp_path, path_with_gitleaks
+):
+    """gitleaks matches no ``./`` entry, and reports a file in the spelling it is
+    given, so a re-scan under the entry's spelling duplicated every finding."""
+    source = _copy_fixture(tmp_path)
+    with (source / ".gitleaksignore").open("a", encoding="utf-8") as handle:
+        handle.write("./app/settings.py:github-pat:4\n")
+    _, report = _scan_direct(source, tmp_path / "out")
+    located = _located(report)
+    assert len(located) == len(set(located)) == len(REPORTED), located
+    assert _findings(report) == REPORTED
+
+
 def test_an_operator_config_file_still_applies(tmp_path, path_with_gitleaks):
     source = _copy_fixture(tmp_path)
     operator_config = tmp_path / "operator.toml"

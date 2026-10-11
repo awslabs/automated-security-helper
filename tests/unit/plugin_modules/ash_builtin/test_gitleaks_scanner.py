@@ -831,3 +831,59 @@ def test_a_finding_the_first_run_kept_is_not_added_twice(tmp_path, monkeypatch):
         ("app/two.py", "github-pat", 1, 6),
         ("app/two.py", "github-pat", 1, 54),
     ]
+
+
+def _as_gitleaks_reports(*results: dict) -> dict:
+    """``per_file`` for ``_rescan_harness``: each result under every spelling of its
+    file, reported back in the spelling it was scanned under, as gitleaks does."""
+    per_file: dict = {}
+    for result in results:
+        uri = result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        for spelling in (uri, f"./{uri}"):
+            respelled = copy.deepcopy(result)
+            location = respelled["locations"][0]["physicalLocation"]
+            location["artifactLocation"]["uri"] = spelling
+            per_file.setdefault(spelling, []).append(respelled)
+    return per_file
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "./app/settings.py:github-pat:4",
+        "app//settings.py:github-pat:4",
+        "app/../app/settings.py:github-pat:4",
+    ],
+)
+def test_an_entry_spelled_another_way_adds_no_duplicate(tmp_path, monkeypatch, entry):
+    """gitleaks reports a file in the spelling it was given. The re-scan names each
+    file the way the directory scan reports it, so its findings match the first
+    run's and none is added twice."""
+    found = _result("app/settings.py", "github-pat", 4, column=18)
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, _as_gitleaks_reports(found))
+    source = Path(scanner.context.source_dir)
+    (source / "app").mkdir()
+    (source / "app" / "settings.py").write_text("x")
+    (source / ".gitleaksignore").write_text(entry + "\n")
+
+    assert _add_back(scanner, source, _report(copy.deepcopy(found)), tmp_path) == [
+        ("app/settings.py", "github-pat", 4, 18)
+    ]
+    assert [call[-1] for call in calls] == ["app/settings.py"]
+
+
+def test_an_absolute_entry_inside_the_tree_is_re_scanned_as_reported(
+    tmp_path, monkeypatch
+):
+    found = _result("app/settings.py", "github-pat", 4, column=18)
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, _as_gitleaks_reports(found))
+    source = Path(scanner.context.source_dir)
+    (source / "app").mkdir()
+    (source / "app" / "settings.py").write_text("x")
+    absolute = (source / "app" / "settings.py").absolute().as_posix()
+    (source / ".gitleaksignore").write_text(f"{absolute}:github-pat:4\n")
+
+    assert _add_back(scanner, source, _report(copy.deepcopy(found)), tmp_path) == [
+        ("app/settings.py", "github-pat", 4, 18)
+    ]
+    assert [call[-1] for call in calls] == ["app/settings.py"]

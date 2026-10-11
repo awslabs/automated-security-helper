@@ -431,11 +431,20 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         A dir-scan fingerprint is ``<file>:<rule id>:<line>``. Entries in another
         form (a git-scan fingerprint starts with a commit), and files that are not
         inside the target, are left out: gitleaks could not have matched them.
+
+        Each file is returned in the spelling the directory scan reports it under,
+        whatever spelling the entry used: relative to the target with no ``./``,
+        ``//`` or ``..`` for the source target (scanned as ``.``), and absolute for
+        the converted one. gitleaks reports a file in the spelling it is given, so
+        a re-scan of ``./app/x.py`` reported ``./app/x.py``, which matched none of
+        the first run's ``app/x.py`` results and added each of them a second time.
         """
         ignore_file = Path(target) / IGNORE_FILE_NAME
         if not ignore_file.is_file():
             return []
         root = Path(target).resolve()
+        target_abs = Path(os.path.normpath(Path(target).absolute()))
+        scan_path = self._scan_path(target)
         names = set()
         text = ignore_file.read_text(encoding="utf-8", errors="replace")
         for line in text.splitlines():
@@ -445,14 +454,17 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             parts = entry.rsplit(":", 2)
             if len(parts) != 3 or not parts[0]:
                 continue
-            name = parts[0]
-            candidate = Path(name) if Path(name).is_absolute() else root / name
+            # Joining keeps an absolute entry as it is.
+            lexical = Path(os.path.normpath(target_abs / parts[0]))
+            if lexical == target_abs or not lexical.is_relative_to(target_abs):
+                continue
+            relative = lexical.relative_to(target_abs).as_posix()
             try:
-                resolved = candidate.resolve()
+                resolved = lexical.resolve()
             except OSError:
                 continue
             if resolved.is_file() and resolved.is_relative_to(root):
-                names.add(name)
+                names.add(relative if scan_path == "." else f"{scan_path}/{relative}")
         return sorted(names)
 
     def _add_back_gitleaksignore_drops(
