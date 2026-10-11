@@ -506,3 +506,113 @@ class TestStoredResultsAreMaskedWhenRead:
 
         assert flat
         assert all(VALUE not in finding.model_dump_json() for finding in flat)
+
+
+class TestMergedShards:
+    """``ash merge`` masks the merged results against every shard's secret findings.
+
+    Shards split by scanner, so a secret one shard's scanner reports routinely sits
+    in another shard's snippets: here detect-secrets (shard 0) reports app.py line
+    2, and bandit (shard 1) has a contextRegion over lines 1-2. Each shard was
+    masked only against its own findings.
+    """
+
+    def _shards(self, tmp_path):
+        import json as _json
+
+        from automated_security_helper.cli.merge import stamp_shard_assignment
+        from automated_security_helper.core.enums import ScannerStatus
+        from automated_security_helper.core.sharding import ShardAssignment
+        from automated_security_helper.models.asharp_model import (
+            ScannerTargetStatusInfo,
+        )
+
+        detect_secrets = _result(
+            "SECRET-SECRET-KEYWORD",
+            "app.py",
+            2,
+            "Secret of type 'Secret Keyword' detected",
+            scanner="detect-secrets",
+        )
+        bandit = _result(
+            "B404",
+            "app.py",
+            1,
+            "Consider possible security implications",
+            snippet=OTHER_LINE,
+            context=(1, OTHER_LINE + ASSIGN_LINE),
+            scanner="bandit",
+        )
+        scanners = ["bandit", "detect-secrets"]
+        dirs = []
+        for index, (owned, result) in enumerate(
+            ((["detect-secrets"], detect_secrets), (["bandit"], bandit))
+        ):
+            model = _results(result)
+            for name in scanners:
+                model.scanner_results[name] = ScannerTargetStatusInfo(
+                    status=ScannerStatus.FAILED,
+                    excluded=False,
+                    dependencies_satisfied=True,
+                )
+                model.additional_reports[name] = {
+                    "source": {"scanner_name": name, "status": "FAILED", "duration": 1}
+                }
+            stamp_shard_assignment(
+                model,
+                ShardAssignment(
+                    shard_index=index,
+                    shard_count=2,
+                    assigned_scanners=owned,
+                    candidate_scanners=scanners,
+                ),
+            )
+            shard_dir = tmp_path / f"shard{index}"
+            shard_dir.mkdir()
+            dumped = _json.loads(model.model_dump_json(by_alias=True))
+            # The bandit shard is written as its own scan wrote it: masked against
+            # its own findings only, which leaves the neighbor's line in clear.
+            (shard_dir / "ash_aggregated_results.json").write_text(
+                _json.dumps(dumped), encoding="utf-8"
+            )
+            dirs.append(shard_dir)
+        assert VALUE in (dirs[1] / "ash_aggregated_results.json").read_text()
+        return dirs
+
+    def test_merge_shard_results_masks_across_shards(self, tmp_path):
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        loaded = [
+            (
+                path,
+                AshAggregatedResults.model_validate_json(
+                    (path / "ash_aggregated_results.json").read_text()
+                ),
+            )
+            for path in self._shards(tmp_path)
+        ]
+
+        merged = merge_shard_results(loaded)
+
+        assert VALUE not in merged.model_dump_json()
+
+    def test_the_merged_results_file_holds_no_value_from_another_shard(
+        self, tmp_path, monkeypatch
+    ):
+        from automated_security_helper.cli.merge import merge_command
+
+        monkeypatch.chdir(tmp_path)
+        out = tmp_path / "merged"
+
+        merge_command(
+            results=[str(path) for path in self._shards(tmp_path)],
+            output_dir=str(out),
+            output_formats=["sarif"],
+            fail_on_findings=False,
+            fail_on_incomplete_scanners=False,
+        )
+
+        for relative in ("ash_aggregated_results.json", "reports/ash.sarif"):
+            text = (out / relative).read_text(encoding="utf-8")
+            assert "B404" in text, relative
+            assert VALUE not in text, relative

@@ -1754,7 +1754,8 @@
   `ash_aggregated_results.json`, the findings browser and a workspace's unified
   reports now mask secret values as the file is loaded, so a results file written
   without masking (by an earlier ASH or another producer) no longer passes its
-  values on to the reports and responses rendered from it.
+  values on to the reports and responses rendered from it. `ash merge` masks the
+  merged results against every shard's secret findings before it writes them.
 
 - **ferret-scan's bundled profiles no longer turn on `show_match`.** The
   `comprehensive`, `json-api`, `debug`, `person-name`, `enhanced-metadata` and

@@ -191,6 +191,7 @@ from automated_security_helper.utils.output_dir_links import (
     OutputDirLinkRefused,
     refuse_linked_output_dir,
 )
+from automated_security_helper.utils.secret_masking import mask_secrets_in_results
 
 #: The filename every ASH scan writes its aggregated results to. A ``--results``
 #: directory is searched for this name.
@@ -960,6 +961,12 @@ def merge_shard_results(
     _adopt_owning_shard_results(merged, shards, owner_by_scanner)
     _merge_timing(merged, shards)
     _record_merge_provenance(merged, shards)
+
+    # Each shard was masked against its own secret findings only, and shards split
+    # by scanner, so a secret one shard's scanner reports can sit in another
+    # shard's snippets. The merged set is masked against all of them before
+    # anything is written; see utils/secret_masking.py.
+    mask_secrets_in_results(merged)
 
     # Recomputes summary_stats and per-scanner counts from the merged SARIF, the
     # same call the execution engine makes before the report phase. Without it
