@@ -1095,3 +1095,56 @@ def test_each_target_starts_from_a_clean_exit_code(repo, monkeypatch):
     assert report.runs[0].results == []
     assert scanner.exit_code == 0
     assert report.runs[0].invocations[0].exitCode == 0
+
+
+def test_the_environment_is_copied_under_the_environ_lock(monkeypatch):
+    """Other scanner threads change os.environ while cfn-lint's environment is
+    built (cdk_nag_wrapper sets and removes variables around each template). A
+    copy reads the keys and then each value, so it is taken under ENVIRON_LOCK,
+    which every change also holds (utils/process_env.py). The copy is watched
+    through a stand-in for os.environ that records whether the lock was held at
+    each read."""
+    from collections.abc import Mapping
+
+    from automated_security_helper.utils import process_env
+
+    class Lock:
+        held = False
+
+        def __enter__(self):
+            self.held = True
+
+        def __exit__(self, *exc_info):
+            self.held = False
+
+    lock = Lock()
+    held_at_read: list = []
+
+    class Environ(Mapping):
+        def __init__(self, data):
+            self._data = data
+
+        def __getitem__(self, key):
+            held_at_read.append(lock.held)
+            return self._data[key]
+
+        def __iter__(self):
+            return iter(self._data)
+
+        def __len__(self):
+            return len(self._data)
+
+    # Undone before the test returns: pytest itself writes to os.environ between
+    # phases.
+    with monkeypatch.context() as patched:
+        patched.setattr(process_env, "ENVIRON_LOCK", lock)
+        patched.setattr(os, "environ", Environ({"PATH": "/usr/bin", "LANG": "C"}))
+        env = CfnLintScanner._child_env()
+
+    assert env == {
+        "PATH": "/usr/bin",
+        "LANG": "C",
+        "AWS_REGION": "us-east-1",
+        "AWS_DEFAULT_REGION": "us-east-1",
+    }
+    assert held_at_read == [True, True]

@@ -115,6 +115,7 @@ from automated_security_helper.utils.config_trust import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.output_excerpt import tool_output_excerpt
+from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
@@ -734,9 +735,13 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         a template declaring af-south-1 lost its E3006 under ``--regions``).
         ASH's own environment is not changed. Under ``--sandbox`` the variables
         are not passed at all, which leaves cfn-lint at the same us-east-1.
+
+        The copy is ``snapshot_environ``'s, taken under ``ENVIRON_LOCK``: other
+        scanner threads change the environment while this one runs
+        (utils/process_env.py).
         """
         return {
-            **os.environ,
+            **snapshot_environ(),
             "AWS_REGION": DEFAULT_REGION,
             "AWS_DEFAULT_REGION": DEFAULT_REGION,
         }
