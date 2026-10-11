@@ -68,10 +68,12 @@ class BlockResult:
     output: str
     seconds: float
     timed_out: bool = False
+    #: Why the step failed when it is not about an exit code (a refused save-as).
+    refused: str | None = None
 
     @property
     def ok(self) -> bool:
-        if self.timed_out or self.exit_code is None:
+        if self.refused or self.timed_out or self.exit_code is None:
             return False
         if self.expected == "any":
             return True
@@ -84,7 +86,9 @@ class BlockResult:
         command = "\n".join(
             "    " + line for line in self.command.strip().splitlines()[:12]
         )
-        if self.timed_out:
+        if self.refused:
+            verdict = self.refused
+        elif self.timed_out:
             verdict = f"timed out after {self.seconds:.0f} s"
         else:
             verdict = f"exit code {self.exit_code}, expected {self.expected}"
@@ -110,6 +114,20 @@ def runnable_blocks(page) -> list:
     return selected
 
 
+def session_blocks(page) -> list:
+    """Every block a session handles, in page order: runnable ones and save-as ones.
+
+    A save-as block whose path is refused stays in, so the refusal is reported.
+    """
+    runnable = {id(block) for block in runnable_blocks(page)}
+    return [
+        block
+        for block in page.blocks
+        if block.closed
+        and (id(block) in runnable or (block.save_as and block.mode != "illustrative"))
+    ]
+
+
 def _refusing_port() -> socket.socket:
     """A bound, never-listening socket: connections to its port are refused at once."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -124,6 +142,8 @@ class Session:
     cwd: Path
     env: dict[str, str]
     blocked_port: socket.socket = field(repr=False)
+    #: The fixture copy the page runs in; save-as paths are relative to it.
+    project: Path | None = None
 
 
 _SHELL_PRELUDE = """\
@@ -233,7 +253,12 @@ class PageRunner:
                 ["git", *args], cwd=work, env=env, check=True, capture_output=True
             )
         self.session = Session(
-            root=root, fixture=fixture, cwd=work, env=env, blocked_port=port
+            root=root,
+            fixture=fixture,
+            cwd=work,
+            env=env,
+            blocked_port=port,
+            project=work,
         )
         return self.session
 
@@ -270,12 +295,60 @@ class PageRunner:
             output, _ = process.communicate()
             return None, output.decode("utf-8", errors="replace"), True
 
+    def _save(self, block, session: Session) -> tuple[Path | None, str | None]:
+        """Write a save-as block into the session's project: (path, or why it was refused).
+
+        The path must stay inside the project: no absolute path, no "..", and no
+        existing link on the way, since a link could point anywhere.
+        """
+        relative = block.save_as
+        problem = self.checks.save_as_problem(relative)
+        if problem:
+            return None, f"save-as refused: {problem}"
+        project = session.project or session.cwd
+        target = project
+        for part in [
+            p for p in relative.replace("\\", "/").split("/") if p not in ("", ".")
+        ]:
+            target = target / part
+            if target.is_symlink():
+                return (
+                    None,
+                    f"save-as refused: {relative} goes through a link ({target.name})",
+                )
+        if not target.resolve().is_relative_to(project.resolve()):
+            return None, f"save-as refused: {relative} leaves the page's project"
+        if target.is_dir():
+            return None, f"save-as refused: {relative} is a directory"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(block.body + "\n", encoding="utf-8")
+        return target, None
+
     def run_block(self, block) -> BlockResult:
         fixture = str(self._marker_value(block, "fixture", self.checks.DEFAULT_FIXTURE))
         fresh = bool(self._marker_value(block, "fresh", False))
         session = self.session
         if session is None or fresh or fixture != session.fixture:
             session = self._start(fixture)
+        saved: Path | None = None
+        if block.save_as:
+            saved, refused = self._save(block, session)
+            if (
+                refused
+                or block.mode != "run"
+                or block.family not in ("python", "shell")
+            ):
+                return BlockResult(
+                    page=self.page.rel,
+                    line=block.fence_line,
+                    lang=block.lang,
+                    command=f"save-as={block.save_as}",
+                    expected="0",
+                    exit_code=None if refused else 0,
+                    output="",
+                    seconds=0.0,
+                    refused=refused,
+                )
         timeout = float(self._marker_value(block, "timeout", self.default_timeout))
         expected = str(self._marker_value(block, "expect-exit", "0"))
         block_env = {}
@@ -287,8 +360,15 @@ class PageRunner:
         started = time.monotonic()
 
         if block.family == "python":
-            script = session.root / f"block-{block.fence_line}.py"
-            script.write_text(block.body + "\n", encoding="utf-8")
+            # A saved module runs from where it was saved, so __file__ is that path.
+            script = saved or session.root / f"block-{block.fence_line}.py"
+            if saved is None:
+                script.write_text(block.body + "\n", encoding="utf-8")
+                # A reader runs the snippet as a script in the current directory, so
+                # modules saved there earlier on the page import the way they would.
+                env["PYTHONPATH"] = os.pathsep.join(
+                    p for p in (str(session.cwd), env.get("PYTHONPATH", "")) if p
+                )
             code, output, timed_out = self._run_process(
                 [sys.executable, str(script)], session.cwd, env, timeout
             )
@@ -356,7 +436,7 @@ class PageRunner:
 
     def run(self) -> list[BlockResult]:
         try:
-            return [self.run_block(block) for block in runnable_blocks(self.page)]
+            return [self.run_block(block) for block in session_blocks(self.page)]
         finally:
             self.close()
 

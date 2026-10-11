@@ -282,3 +282,117 @@ def test_fixtures_come_from_the_docs_root(tmp_path):
     page = _page(tmp_path, f"{FENCE}bash\ntest -f only-in-the-docs-tree.txt\n{FENCE}\n")
     results = runner.PageRunner(page, scratch, docs_root=docs_root).run()
     assert all(r.ok for r in results), runner.failure_report(results)
+
+
+SAVED_PAGE = f"""# A plugin tutorial
+
+<!-- doctest: save-as=my_plugins/greeting.py -->
+{FENCE}python
+def hello():
+    return "hi"
+{FENCE}
+
+<!-- doctest: config kind=other reason="a settings file for the example" save-as=.ash/settings.yaml -->
+{FENCE}yaml
+greeting: hi
+{FENCE}
+
+<!-- doctest: run save-as=tools/where.py -->
+{FENCE}python
+from pathlib import Path
+
+assert Path(__file__).as_posix().endswith("tools/where.py"), __file__
+{FENCE}
+
+{FENCE}python
+from my_plugins.greeting import hello
+
+assert hello() == "hi"
+{FENCE}
+
+{FENCE}bash
+PYTHONPATH=. python -c "from my_plugins.greeting import hello; assert hello() == 'hi'"
+test -f .ash/settings.yaml
+{FENCE}
+"""
+
+
+def test_saved_files_are_there_for_later_blocks(tmp_path):
+    results = _run(tmp_path, SAVED_PAGE)
+    assert [r.command.split("\n")[0] for r in results][:2] == [
+        "save-as=my_plugins/greeting.py",
+        "save-as=.ash/settings.yaml",
+    ]
+    assert all(r.ok for r in results), runner.failure_report(results)
+
+
+def test_a_later_block_fails_when_the_save_as_is_dropped(tmp_path):
+    """The proof that save-as is what made the module importable."""
+    page = SAVED_PAGE.replace("<!-- doctest: save-as=my_plugins/greeting.py -->\n", "")
+    results = _run(tmp_path, page)
+    *_, python_import, shell_import = results
+    for result in (python_import, shell_import):
+        assert not result.ok and "No module named 'my_plugins'" in result.output, (
+            runner.failure_report(results)
+        )
+
+
+def test_a_save_as_that_leaves_the_project_is_refused(tmp_path):
+    results = _run(
+        tmp_path,
+        f"""<!-- doctest: save-as=../outside.py -->
+{FENCE}python
+x = 1
+{FENCE}
+
+<!-- doctest: save-as=/tmp/absolute.py -->
+{FENCE}python
+x = 1
+{FENCE}
+
+{FENCE}bash
+mkdir -p elsewhere && ln -s "$PWD/elsewhere" linked
+{FENCE}
+
+<!-- doctest: save-as=linked/through-a-link.py -->
+{FENCE}python
+x = 1
+{FENCE}
+
+<!-- doctest: save-as=elsewhere -->
+{FENCE}text
+a directory is in the way
+{FENCE}
+""",
+    )
+    refused = [r for r in results if r.refused]
+    assert [r.command for r in refused] == [
+        "save-as=../outside.py",
+        "save-as=/tmp/absolute.py",
+        "save-as=linked/through-a-link.py",
+        "save-as=elsewhere",
+    ], runner.failure_report(results)
+    assert "goes through a link" in refused[2].report()
+    assert "is a directory" in refused[3].report()
+    assert not (tmp_path / "sessions" / "outside.py").exists()
+    assert not any((tmp_path / "sessions").rglob("through-a-link.py"))
+
+
+def test_the_save_backstop_refuses_an_escape_the_path_check_misses(
+    tmp_path, monkeypatch
+):
+    """The runner resolves the target and refuses it outside the project even when
+    save_as_problem lets the path through, so one missed case cannot write outside."""
+    monkeypatch.setattr(checks, "save_as_problem", lambda value: None)
+    results = _run(
+        tmp_path,
+        f"""<!-- doctest: save-as=../outside.py -->
+{FENCE}python
+x = 1
+{FENCE}
+""",
+    )
+    assert [r.refused for r in results] == [
+        "save-as refused: ../outside.py leaves the page's project"
+    ], runner.failure_report(results)
+    assert not any(tmp_path.rglob("outside.py"))

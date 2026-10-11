@@ -163,7 +163,11 @@ OTHER_CONFIG_KINDS = {
 }
 REQUIRED_REASON_KINDS = frozenset({"ash-invalid", "other"})
 
-RUN_KEYS = frozenset({"expect-exit", "fixture", "env", "timeout", "fresh"})
+RUN_KEYS = frozenset({"expect-exit", "fixture", "env", "timeout", "fresh", "save-as"})
+#: ``save-as=<path>``: the runner writes the block's content to that path in the page's
+#: project before later blocks run. Valid on any block. With no mode the block is only
+#: saved; with ``run`` it is saved and run; a config block is still validated.
+SAVE_AS = "save-as"
 #: Bare words a marker may carry without ``=value``.
 BARE_KEYS = frozenset({"fresh"})
 DEFAULT_TIMEOUT_S = 60
@@ -242,12 +246,27 @@ class Block:
 
     @property
     def mode(self) -> str:
-        """The effective mode: the marker's, or the unmarked default for the family."""
-        if self.marker is not None:
+        """The effective mode: the marker's, or the unmarked default for the family.
+
+        A marker with save-as and no mode makes a block "save": written to the page's
+        project and not run. A config block keeps "config", so it is still validated.
+        """
+        if self.marker is not None and self.marker.mode:
             return self.marker.mode
+        if self.marker is not None and self.family == "config":
+            return "config"
+        if self.marker is not None:
+            return "save"
         return {"shell": "run", "python": "run", "config": "config"}.get(
             self.family, ""
         )
+
+    @property
+    def save_as(self) -> str | None:
+        if self.marker is None:
+            return None
+        value = self.marker.keys.get(SAVE_AS)
+        return value if isinstance(value, str) else None
 
     @property
     def config_kind(self) -> str:
@@ -355,8 +374,10 @@ def _parse_marker(body: str, line: int) -> tuple[Marker | None, str | None]:
         return None, f"marker cannot be split into words ({exc}); check its quotes"
     if not words:
         return None, "marker names no mode; write <!-- doctest: <mode> ... -->"
-    mode, keys = words[0], {}
-    for word in words[1:]:
+    # A marker may start with a key instead of a mode: <!-- doctest: save-as=x.py -->.
+    mode, rest = ("", words) if "=" in words[0] else (words[0], words[1:])
+    keys: dict[str, Any] = {}
+    for word in rest:
         key, sep, value = word.partition("=")
         if not sep:
             if key in BARE_KEYS:
@@ -613,10 +634,34 @@ def _run_key_problems(marker: Marker, root: Path) -> list[str]:
     return problems
 
 
+def save_as_problem(value: Any) -> str | None:
+    """Why a save-as path cannot be written inside the page's project, or None."""
+    if not isinstance(value, str) or not value.strip():
+        return (
+            "save-as needs a relative path, for example save-as=my_plugins/scanner.py"
+        )
+    pure = value.replace("\\", "/")
+    if pure.startswith(("/", "~")) or re.match(r"^[A-Za-z]:", pure):
+        return f"save-as={value} is not a relative path inside the page's project"
+    parts = [part for part in pure.split("/") if part not in ("", ".")]
+    if not parts or ".." in parts:
+        return f"save-as={value} leaves the page's project; paths may not contain .."
+    return None
+
+
 def marker_problems(block: Block, root: Path) -> list[str]:
     """Everything wrong with how a block is labeled and marked."""
     problems: list[str] = []
     marker, lang, family = block.marker, block.lang, block.family
+    if marker is not None and SAVE_AS in marker.keys:
+        problem = save_as_problem(marker.keys[SAVE_AS])
+        if problem:
+            problems.append(problem)
+        if marker.mode == "illustrative":
+            problems.append(
+                "an illustrative block is not run, so the runner never saves it; drop "
+                "illustrative to save the block, or drop save-as"
+            )
     if not block.info:
         problems.append(
             "fenced block has no language. Name one (text for output samples), so a "
@@ -624,6 +669,14 @@ def marker_problems(block: Block, root: Path) -> list[str]:
         )
     if lang in ("pycon", "python-repl"):
         problems.append("doctest-style >>> blocks are not used; write a python block")
+    if marker is not None and not marker.mode:
+        extra = set(marker.keys) - {SAVE_AS}
+        if SAVE_AS not in marker.keys or extra:
+            problems.append(
+                "a marker without a mode may only carry save-as=<path>; name a mode for "
+                f"{sorted(extra) or 'it'}"
+            )
+        return problems
     if marker is None:
         if lang in WINDOWS_SHELLS or lang in ("zsh", "fish"):
             problems.append(
@@ -641,7 +694,7 @@ def marker_problems(block: Block, root: Path) -> list[str]:
                     f"{lang} blocks may only be illustrative; the docs runner executes bash"
                 )
         elif mode == "illustrative":
-            extra = set(keys) - {"reason"}
+            extra = set(keys) - {"reason", SAVE_AS}
             if extra:
                 problems.append(f"illustrative takes only reason=, not {sorted(extra)}")
             if "reason" not in keys:
@@ -674,7 +727,7 @@ def marker_problems(block: Block, root: Path) -> list[str]:
             known = sorted(set(ASH_CONFIG_KINDS) | set(OTHER_CONFIG_KINDS))
             problems.append(f"unknown config kind '{kind}'; known: {', '.join(known)}")
         else:
-            extra = set(keys) - {"kind"} - allowed
+            extra = set(keys) - {"kind", SAVE_AS} - allowed
             if extra:
                 problems.append(f"config kind={kind} does not take {sorted(extra)}")
             if kind in REQUIRED_REASON_KINDS:
@@ -3385,11 +3438,103 @@ def check_option_tables(files: Iterable[Path], root: Path = REPO_ROOT) -> list[F
 # ---------------------------------------------------------------------------
 
 
-def _import_problems(tree: ast.AST) -> list[tuple[int, str]]:
+def saved_module(path: str | None) -> tuple[str, str] | None:
+    """The module a save-as path creates and the package its relative imports use.
+
+    my_plugins/scanner.py gives ("my_plugins.scanner", "my_plugins"), and
+    my_plugins/__init__.py gives ("my_plugins", "my_plugins"). None when the path is not
+    an importable module (not .py, refused, or a directory such as .ash in the way).
+    """
+    if not path or not path.endswith(".py") or save_as_problem(path):
+        return None
+    parts = [p for p in path.replace("\\", "/").split("/") if p not in ("", ".")]
+    parts[-1] = parts[-1][: -len(".py")]
+    is_package = parts[-1] == "__init__"
+    if is_package:
+        parts = parts[:-1]
+    if not parts or not all(part.isidentifier() for part in parts):
+        return None
+    package = parts if is_package else parts[:-1]
+    return ".".join(parts), ".".join(package)
+
+
+def _module_names(tree: ast.Module) -> frozenset[str] | None:
+    """The names a module defines at top level, or None when it can add names at run
+    time (a star import, a module __getattr__, or globals()/setattr/exec)."""
+    names = {
+        name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Global)
+        for name in node.names
+    }
+    pending: list[ast.AST] = list(tree.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if node.name == "__getattr__":
+                return None
+            names.add(node.name)
+            continue
+        if isinstance(node, ast.Lambda):
+            continue
+        if isinstance(node, ast.alias):
+            if node.name == "*":
+                return None
+            names.add(node.asname or node.name.split(".")[0])
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            names.add(node.id)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names.add(node.name)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in ("globals", "setattr", "exec")
+        ):
+            return None
+        pending.extend(ast.iter_child_nodes(node))
+    return frozenset(names)
+
+
+def page_saved_modules(page: Page) -> dict[str, frozenset[str] | None]:
+    """Modules the page's own save-as blocks create, with the names each defines.
+
+    Later blocks of the page can import them. Saving my_plugins/scanner.py also makes
+    my_plugins a package, which defines no names unless my_plugins/__init__.py is saved
+    too. A value of None means any name is accepted (see _module_names).
+    """
+    modules: dict[str, frozenset[str] | None] = {}
+    for block in page.blocks:
+        saved = saved_module(block.save_as)
+        if saved is None:
+            continue
+        parts = saved[0].split(".")
+        for end in range(1, len(parts)):
+            modules.setdefault(".".join(parts[:end]), frozenset())
+        try:
+            modules[saved[0]] = _module_names(ast.parse(block.body))
+        except SyntaxError:
+            modules[saved[0]] = None  # the python check reports the syntax error
+    return modules
+
+
+def _import_problems(
+    tree: ast.AST,
+    local: dict[str, frozenset[str] | None] | None = None,
+    package: str = "",
+) -> list[tuple[int, str]]:
+    """Imports that do not resolve.
+
+    ``local`` holds the modules the page saves itself (page_saved_modules), and
+    ``package`` is the package of the block's own save-as path, which relative imports
+    resolve against.
+    """
+    local = local or {}
     problems = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
+                if alias.name in local:
+                    continue
                 if not _module_exists(alias.name):
                     problems.append(
                         (
@@ -3398,12 +3543,46 @@ def _import_problems(tree: ast.AST) -> list[tuple[int, str]]:
                         )
                     )
         elif isinstance(node, ast.ImportFrom):
-            if node.level:
-                problems.append(
-                    (node.lineno, "a relative import cannot run outside a package")
-                )
-                continue
             module = node.module or ""
+            if node.level:
+                base = package.split(".") if package else []
+                if not base:
+                    problems.append(
+                        (
+                            node.lineno,
+                            (
+                                "a relative import cannot run outside a package; save "
+                                "the block into one with save-as=<package>/<module>.py"
+                            ),
+                        )
+                    )
+                    continue
+                if node.level - 1 >= len(base):
+                    problems.append(
+                        (
+                            node.lineno,
+                            f"this relative import goes above the top-level package {base[0]}",
+                        )
+                    )
+                    continue
+                base = base[: len(base) - (node.level - 1)]
+                module = ".".join(base + ([node.module] if node.module else []))
+            if module in local:
+                names = local[module]
+                for alias in node.names:
+                    if names is None or alias.name == "*" or alias.name in names:
+                        continue
+                    if f"{module}.{alias.name}" not in local:
+                        problems.append(
+                            (
+                                node.lineno,
+                                (
+                                    f"{module} has no name {alias.name}: the page "
+                                    f"saves {module} without defining it"
+                                ),
+                            )
+                        )
+                continue
             if not _module_exists(module):
                 problems.append(
                     (
@@ -3462,6 +3641,7 @@ def check_python_blocks(
         _module_exists.cache_clear()
     findings: list[Finding] = []
     for page in load_pages(files, root):
+        local = page_saved_modules(page)
         for block in page.blocks:
             if block.family != "python":
                 continue
@@ -3473,7 +3653,9 @@ def check_python_blocks(
                     Finding("python", page.rel, line, f"does not parse: {exc.msg}")
                 )
                 continue
-            for offset, problem in _import_problems(tree):
+            saved = saved_module(block.save_as)
+            package = saved[1] if saved else ""
+            for offset, problem in _import_problems(tree, local, package):
                 findings.append(
                     Finding("python", page.rel, block.body_line + offset - 1, problem)
                 )

@@ -1014,6 +1014,288 @@ def test_python_check_can_fail(tmp_path, case, text, expected, line):
 
 
 # ---------------------------------------------------------------------------
+# save-as: blocks the runner writes into the page's project
+# ---------------------------------------------------------------------------
+
+CLEAN_SAVE_AS = f"""# A plugin tutorial
+
+<!-- doctest: save-as=my_plugins/__init__.py -->
+{FENCE}python
+from .scanner import MyScanner
+
+__all__ = ["MyScanner"]
+{FENCE}
+
+<!-- doctest: save-as=my_plugins/scanner.py -->
+{FENCE}python
+from automated_security_helper.config.ash_config import AshConfig
+
+
+class MyScanner:
+    config = AshConfig
+{FENCE}
+
+<!-- doctest: run save-as=tools/check.py -->
+{FENCE}python
+import my_plugins.scanner
+from my_plugins import MyScanner, scanner
+{FENCE}
+
+<!-- doctest: save-as=.ash/.ash.yaml -->
+{FENCE}yaml
+project_name: saved
+{FENCE}
+
+<!-- doctest: config kind=other reason="a settings file for the example" save-as=settings.yaml -->
+{FENCE}yaml
+greeting: hi
+{FENCE}
+
+<!-- doctest: save-as=Dockerfile -->
+{FENCE}dockerfile
+FROM python:3.12-slim
+{FENCE}
+
+<!-- doctest: save-as=notes/readme.txt -->
+{FENCE}text
+saved, not run
+{FENCE}
+
+<!-- doctest: save-as=scripts/setup.ps1 -->
+{FENCE}powershell
+Get-ChildItem
+{FENCE}
+
+<!-- doctest: run save-as=scripts/hello.sh -->
+{FENCE}bash
+echo hello
+{FENCE}
+
+{FENCE}python
+from my_plugins.scanner import MyScanner
+{FENCE}
+"""
+
+
+def test_save_as_passes_every_valid_form(fixture_root):
+    page = _write(fixture_root, "docs/page.md", CLEAN_SAVE_AS)
+    assert dc.check_markers([page], fixture_root) == []
+    assert dc.check_python_blocks([page], fixture_root) == []
+    assert dc.check_config_blocks([page], fixture_root) == []
+    blocks = dc.parse_page(page, fixture_root).blocks
+    assert [b.mode for b in blocks] == [
+        "save",
+        "save",
+        "run",
+        "config",
+        "config",
+        "save",
+        "save",
+        "save",
+        "run",
+        "run",
+    ]
+    assert blocks[3].config_kind == "ash" and blocks[4].config_kind == "other"
+
+
+SAVE_AS_MARKER_DEFECTS = [
+    (
+        "parent directory",
+        f"<!-- doctest: save-as=../outside.py -->\n{FENCE}python\nx = 1\n{FENCE}\n",
+        "leaves the page's project",
+    ),
+    (
+        "parent directory inside the path",
+        f"<!-- doctest: save-as=a/../../b.py -->\n{FENCE}python\nx = 1\n{FENCE}\n",
+        "leaves the page's project",
+    ),
+    (
+        "absolute path",
+        f"<!-- doctest: save-as=/etc/x.py -->\n{FENCE}python\nx = 1\n{FENCE}\n",
+        "is not a relative path",
+    ),
+    (
+        "home directory",
+        f"<!-- doctest: save-as=~/x.py -->\n{FENCE}python\nx = 1\n{FENCE}\n",
+        "is not a relative path",
+    ),
+    (
+        "windows drive",
+        f"<!-- doctest: save-as=C:/x.py -->\n{FENCE}python\nx = 1\n{FENCE}\n",
+        "is not a relative path",
+    ),
+    (
+        "empty path",
+        f"<!-- doctest: save-as= -->\n{FENCE}python\nx = 1\n{FENCE}\n",
+        "needs a relative path",
+    ),
+    (
+        "run with an escaping path",
+        f"<!-- doctest: run save-as=../x.sh -->\n{FENCE}bash\ntrue\n{FENCE}\n",
+        "leaves the page's project",
+    ),
+    (
+        "config with an escaping path",
+        f'<!-- doctest: config kind=other reason="an example file" save-as=../x.yaml -->\n{FENCE}yaml\na: 1\n{FENCE}\n',
+        "leaves the page's project",
+    ),
+    (
+        "illustrative",
+        f'<!-- doctest: illustrative reason="needs Docker" save-as=x.sh -->\n{FENCE}bash\ndocker ps\n{FENCE}\n',
+        "never saves it",
+    ),
+    (
+        "other keys without a mode",
+        f"<!-- doctest: save-as=x.sh timeout=5 -->\n{FENCE}bash\ntrue\n{FENCE}\n",
+        "may only carry save-as",
+    ),
+    (
+        "saved block without a language",
+        f"<!-- doctest: save-as=x.txt -->\n{FENCE}\nhello\n{FENCE}\n",
+        "has no language",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "case,text,expected",
+    SAVE_AS_MARKER_DEFECTS,
+    ids=[c[0] for c in SAVE_AS_MARKER_DEFECTS],
+)
+def test_save_as_marker_check_can_fail(fixture_root, case, text, expected):
+    page = _write(fixture_root, "docs/page.md", text)
+    _assert_reports(dc.check_markers([page], fixture_root), expected)
+
+
+GREETING = f"""<!-- doctest: save-as=my_plugins/greeting.py -->
+{FENCE}python
+def hello():
+    return "hi"
+{FENCE}
+
+"""
+
+SAVE_AS_PYTHON_DEFECTS = [
+    (
+        "module the page does not save",
+        f"{FENCE}python\nfrom my_plugins.greeting import hello\n{FENCE}\n",
+        "from my_plugins.greeting import ...: no such module",
+        2,
+    ),
+    (
+        "name the saved module lacks",
+        GREETING + f"{FENCE}python\nfrom my_plugins.greeting import goodbye\n{FENCE}\n",
+        "my_plugins.greeting has no name goodbye",
+        8,
+    ),
+    (
+        "name a package without __init__ lacks",
+        GREETING + f"{FENCE}python\nfrom my_plugins import hello\n{FENCE}\n",
+        "my_plugins has no name hello",
+        8,
+    ),
+    (
+        "submodule the page does not save",
+        GREETING + f"{FENCE}python\nimport my_plugins.farewell\n{FENCE}\n",
+        "import my_plugins.farewell: no such module",
+        8,
+    ),
+    (
+        "relative import of a sibling the page does not save",
+        f"<!-- doctest: save-as=my_plugins/__init__.py -->\n{FENCE}python\nfrom .scanner import MyScanner\n{FENCE}\n",
+        "from my_plugins.scanner import ...: no such module",
+        3,
+    ),
+    (
+        "relative import above the package",
+        f"<!-- doctest: save-as=my_plugins/scanner.py -->\n{FENCE}python\nfrom .. import base\n{FENCE}\n",
+        "goes above the top-level package my_plugins",
+        3,
+    ),
+    (
+        "relative import in a top-level module",
+        f"<!-- doctest: save-as=top.py -->\n{FENCE}python\nfrom . import sibling\n{FENCE}\n",
+        "a relative import cannot run outside a package",
+        3,
+    ),
+    (
+        "saved where it cannot be imported",
+        (
+            f"<!-- doctest: save-as=.ash/greeting.py -->\n{FENCE}python\nx = 1\n{FENCE}\n\n"
+            f"{FENCE}python\nimport greeting\n{FENCE}\n"
+        ),
+        "import greeting: no such module",
+        7,
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "case,text,expected,line",
+    SAVE_AS_PYTHON_DEFECTS,
+    ids=[c[0] for c in SAVE_AS_PYTHON_DEFECTS],
+)
+def test_save_as_python_check_can_fail(tmp_path, case, text, expected, line):
+    page = _write(tmp_path, "docs/page.md", text)
+    _assert_reports(dc.check_python_blocks([page], tmp_path), expected, line)
+
+
+def test_a_saved_module_with_run_time_names_accepts_any_import(tmp_path):
+    """A module __getattr__ or a star import can define any name, so none is refused."""
+    page = _write(
+        tmp_path,
+        "docs/page.md",
+        f"""<!-- doctest: save-as=lazy.py -->
+{FENCE}python
+def __getattr__(name):
+    return name
+{FENCE}
+
+<!-- doctest: save-as=star.py -->
+{FENCE}python
+from json import *
+{FENCE}
+
+{FENCE}python
+from lazy import anything
+from star import dumps
+{FENCE}
+""",
+    )
+    assert dc.check_python_blocks([page], tmp_path) == []
+
+
+def test_a_saved_config_block_is_still_validated(tmp_path):
+    page = _write(
+        tmp_path,
+        "docs/page.md",
+        f"<!-- doctest: save-as=.ash/.ash.yaml -->\n{FENCE}yaml\nproject_name: x\n"
+        f"fail_on_findngs: true\n{FENCE}\n",
+    )
+    _assert_reports(
+        dc.check_config_blocks([page], tmp_path),
+        "fail_on_findngs is not a field of AshConfig",
+    )
+
+
+def test_save_as_maps_paths_to_modules():
+    assert dc.saved_module("my_plugins/scanner.py") == (
+        "my_plugins.scanner",
+        "my_plugins",
+    )
+    assert dc.saved_module("my_plugins/__init__.py") == ("my_plugins", "my_plugins")
+    assert dc.saved_module("./top.py") == ("top", "")
+    for not_a_module in (
+        "notes.txt",
+        ".ash/x.py",
+        "../x.py",
+        "/x.py",
+        "my-plugins/x.py",
+    ):
+        assert dc.saved_module(not_a_module) is None, not_a_module
+
+
+# ---------------------------------------------------------------------------
 # A synthetic site: links, navigation, redirects, build settings
 # ---------------------------------------------------------------------------
 
