@@ -155,14 +155,24 @@ def collect_md_files() -> list[Path]:
     is also what caught the omission that this docstring is the record of: the
     first version of this change edited docs/content/faq.md and not
     docs/content/faq.md.template, and the round-trip test is what noticed.
+
+    The exclusions are matched against the path below REPO_ROOT (the docs root with
+    --docs-root), never the absolute path: a checkout that itself sits under a
+    directory named .cache, site or venv used to collect nothing, and every check
+    reading the corpus then passed on zero files. An empty corpus raises instead.
     """
     patterns = ("*.md", "*.md.template")
     files = [
         path
         for pattern in patterns
         for path in REPO_ROOT.rglob(pattern)
-        if not _EXCLUDED_MD_DIRS.intersection(path.parts)
+        if not _EXCLUDED_MD_DIRS.intersection(path.relative_to(REPO_ROOT).parts[:-1])
     ]
+    if not files:
+        raise RuntimeError(
+            f"no markdown files were collected under {REPO_ROOT}, so every check "
+            "that reads the docs would pass on nothing"
+        )
     return sorted(set(files))
 
 

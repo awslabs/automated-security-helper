@@ -595,6 +595,39 @@ def test_the_md_corpus_reaches_past_the_docs_directory(gate):
     assert not any("/__snapshots__/" in f for f in files)
 
 
+@pytest.mark.parametrize("parent", [".cache", "site", "venv", "node_modules"])
+def test_a_checkout_under_an_excluded_directory_name_still_collects_its_docs(
+    gate, tmp_path, monkeypatch, parent
+):
+    """The exclusions name directories inside the checkout. A checkout that itself
+    sits under a directory of that name (~/.cache/ash, /srv/site/ash) used to collect
+    nothing, and every check that reads the corpus then passed."""
+    root = tmp_path / parent / "checkout"
+    _make = {
+        "README.md": "# Readme\n",
+        "docs/page.md": "# Page\n",
+        "docs/site/built.md": "# A build output inside the checkout stays out\n",
+        ".venv/lib/x.md": "# So does a virtual environment\n",
+    }
+    for rel, text in _make.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text, encoding="utf-8")
+    monkeypatch.setattr(gate, "REPO_ROOT", root)
+    files = {path.relative_to(root).as_posix() for path in gate.collect_md_files()}
+    assert files == {"README.md", "docs/page.md"}
+
+
+def test_an_empty_corpus_is_a_failure_not_a_pass(gate, tmp_path, monkeypatch):
+    """Zero files makes every corpus check vacuous; it must fail, loudly."""
+    root = tmp_path / "no-docs"
+    (root / "src").mkdir(parents=True)
+    monkeypatch.setattr(gate, "REPO_ROOT", root)
+    with pytest.raises(RuntimeError, match="no markdown"):
+        gate.collect_md_files()
+    with pytest.raises(RuntimeError, match="no markdown"):
+        gate.check_doc_markers()
+
+
 def test_the_md_corpus_includes_the_templates_docs_are_generated_from(gate):
     """Docs rendered from a sibling .template are edited in the template.
 
