@@ -766,6 +766,70 @@ class TestAshsOwnOutputDirectory:
         )
         assert found == {"app.py"}, found
 
+    def test_files_in_it_are_counted_under_a_pruned_parent(self, tmp_path):
+        """``.ash/`` ignored: the count of ``.ash`` still finds the output directory.
+
+        Its files are reported as ASH's own, with the warning, and not credited to
+        the root ``.gitignore``, the same as when the walk reaches it directly.
+        """
+        root = _build(
+            tmp_path / "src",
+            {
+                ".gitignore": ".ash/\n",
+                "app.py": "x = 1\n",
+                ".ash/other.txt": "o\n",
+                ".ash/ash_output/ash.log": "log\n",
+                ".ash/ash_output/stack.template.json": "{}\n",
+                ".ash/ash_output/nb/analysis.ipynb": "{}\n",
+            },
+        )
+        exclusions: dict = {}
+        with patch.object(gss.ASH_LOGGER, "warning") as warning:
+            found = scan_set(
+                source=str(root),
+                output=str(root / ".ash" / "ash_output"),
+                exclusions=exclusions,
+            )
+        assert _names(root, found) == {".gitignore", "app.py"}
+        assert exclusions["by_ignore_file"] == {".gitignore": 1}, exclusions
+        assert exclusions["excluded_file_count"] == 1, exclusions
+        assert exclusions["output_dir_file_count"] == 2, exclusions
+        messages = [
+            str(call.args[0]) % call.args[1:] for call in warning.call_args_list
+        ]
+        assert any("2 files" in m for m in messages), messages
+
+    def test_a_file_system_without_inode_numbers_falls_back_to_the_path(
+        self, tmp_path, monkeypatch
+    ):
+        """``st_ino`` 0 is no identity: every directory on that device would share it."""
+        root = _build(
+            tmp_path / "src",
+            {
+                "app.py": "x = 1\n",
+                "src/code.py": "c = 1\n",
+                "docs/x.md": "x\n",
+                "out/ash.log": "log\n",
+                "out/old.txt": "o\n",
+            },
+        )
+        real_identity = gss._directory_identity
+
+        def no_inode_numbers(path, follow_symlinks=False):
+            identity = real_identity(path, follow_symlinks=follow_symlinks)
+            return None if identity is None else (identity[0], 0)
+
+        monkeypatch.setattr(gss, "_directory_identity", no_inode_numbers)
+        exclusions: dict = {}
+        found = scan_set(
+            source=str(root),
+            output=str(root / "out"),
+            honor_ignore_files=False,
+            exclusions=exclusions,
+        )
+        assert _names(root, found) == {"app.py", "src/code.py", "docs/x.md"}, found
+        assert exclusions["output_dir_file_count"] == 1, exclusions
+
     def test_control_a_directory_of_that_name_elsewhere_is_scanned(self, tmp_path):
         root = _build(
             tmp_path / "src", {"app.py": "x = 1\n", "docs/ash_output/note.md": "n\n"}

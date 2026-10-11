@@ -365,8 +365,10 @@ set and are not counted. With `honor_ignore_files: false` the record reads
 ASH's own output directory is left out whatever `honor_ignore_files` says. It is
 recognized as the same directory however its path is spelled (through a link in the
 source path, or as `/src/.ash/ash_output` and `/out` in container mode), not by its
-name. Files that are already in it when the scan set is built, this run's `ash.log`
-and `ash.log.jsonl` aside, are counted in `output_dir_file_count`, the summaries say
+name; on a file system that reports no inode numbers, its absolute path decides
+instead. Files that are already in it when the scan set is built, this run's
+`ash.log` and `ash.log.jsonl` aside, are counted in `output_dir_file_count`, also when
+it sits under a directory the root `.gitignore` excludes, and the summaries say
 they were left out, and a warning names the directory. They are an earlier run's
 output, or repository files that sit where ASH writes; to scan repository files
 there, write ASH's output outside the scanned tree with `--output-dir`.

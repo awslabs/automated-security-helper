@@ -7,7 +7,7 @@ import re
 import stat
 import subprocess  # nosec B404
 import sys
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence
 from igittigitt import IgnoreParser
 from pathlib import Path, PurePosixPath
 import argparse
@@ -258,6 +258,45 @@ def _directory_identity(
     return (status.st_dev, status.st_ino)
 
 
+class _OwnOutput(NamedTuple):
+    """ASH's output directory for one scan, as the walks recognize it."""
+
+    #: :func:`_directory_identity` of the directory, followed if it is a link (it
+    #: is where ASH writes, whatever it is called; the orchestrator refuses a
+    #: symlinked one anyway). None when it does not exist.
+    identity: Optional[tuple[int, int]]
+    #: Its absolute, case-normalized path, for when the identity cannot decide.
+    path: str
+
+
+def _own_output_of(output: Optional[str | Path]) -> Optional[_OwnOutput]:
+    if not output:
+        return None
+    return _OwnOutput(
+        identity=_directory_identity(output, follow_symlinks=True),
+        path=os.path.normcase(os.path.abspath(output)),
+    )
+
+
+def _is_own_output(candidate: str, own: Optional[_OwnOutput]) -> bool:
+    """Whether the directory at *candidate* is ASH's output directory *own*.
+
+    By identity, so a spelling through a link or a second mount still matches. A
+    file system that reports ``st_ino`` 0 gives every directory on the device the
+    same identity, which would make all of them the output directory and empty the
+    scan set; there, and when the output directory does not exist, the absolute
+    path decides instead (case-normalized, so a case-only difference on Windows
+    still matches). A link is never the output directory.
+    """
+    if own is None:
+        return False
+    if own.identity is not None and own.identity[1] != 0:
+        return _directory_identity(candidate) == own.identity
+    if _is_link_to_directory(candidate):
+        return False
+    return os.path.normcase(os.path.abspath(candidate)) == own.path
+
+
 def _count_files_in_own_output(directory: str) -> int:
     """How many files were already in ASH's output directory, this run's logs aside."""
     count = 0
@@ -342,16 +381,19 @@ def _count_templates(directory: str) -> int:
 def _count_files_ash_would_scan(
     directory: Path,
     source: str,
-    own_output: Optional[tuple[int, int]] = None,
+    own_output: Optional[_OwnOutput] = None,
+    own_output_counts: Optional[Dict[str, int]] = None,
 ) -> int:
     """How many files under *directory* stay in the scan set when no ignore file applies.
 
     The answer :func:`get_files_not_matching_spec` gives with ``ASH_INCLUSIONS`` as
     the whole spec, decided from names (:func:`_excluded_by_ash_itself`) and not by
     matching each file against a parser. A file ASH leaves out on its own (``.git``,
-    CDK assets, the bundled aws-cdk tree, its own output directory, whose
-    :func:`_directory_identity` is *own_output*) was not removed by the ignore file
-    that pruned *directory*, so it is not counted.
+    CDK assets, the bundled aws-cdk tree, its own output directory *own_output*)
+    was not removed by the ignore file that pruned *directory*, so it is not
+    counted. The output directory's files go into *own_output_counts* instead, as
+    they do when the scan-set walk reaches it directly: a pruned parent does not
+    change what they are.
 
     ASH's own exclusions are applied a directory at a time, so a pruned
     ``node_modules`` costs a walk and a string test per file: a directory on the
@@ -367,7 +409,9 @@ def _count_files_ash_would_scan(
         kept_dirs = []
         for d in dirs:
             candidate = os.path.join(root, d)
-            if own_output is not None and _directory_identity(candidate) == own_output:
+            if _is_own_output(candidate, own_output):
+                if own_output_counts is not None:
+                    own_output_counts[candidate] = _count_files_in_own_output(candidate)
                 continue
             if _is_bundled_cdk_path(candidate):
                 continue
@@ -417,7 +461,8 @@ def _collect_ignorefiles_and_all_files(
             this, only a ``.gitignore`` kept them out (``ash config init``
             writes ``.ash/.gitignore`` for it), so turning the ignore files off
             put ASH's log into the scan set. Recognized by
-            :func:`_directory_identity`, not by its spelling.
+            :func:`_is_own_output`, not by its spelling, and also below a
+            directory the root ``.gitignore`` prunes.
         own_output_counts: Filled, when given, with the output directory (as
             walked) mapped to the number of files already in it when the walk
             reached it, this run's log files aside
@@ -468,16 +513,14 @@ def _collect_ignorefiles_and_all_files(
     pruned_key = os.path.join(path, ".gitignore")
     # The output directory is followed if it is a link: it is where ASH writes,
     # whatever it is called. The orchestrator refuses a symlinked one anyway.
-    own_output_id = (
-        _directory_identity(own_output, follow_symlinks=True) if own_output else None
-    )
+    own = _own_output_of(own_output)
 
     for root, dirs, files in os.walk(path):
-        if own_output_id is not None:
+        if own is not None:
             kept_dirs = []
             for d in dirs:
                 candidate = os.path.join(root, d)
-                if _directory_identity(candidate) != own_output_id:
+                if not _is_own_output(candidate, own):
                     kept_dirs.append(d)
                 elif own_output_counts is not None:
                     own_output_counts[candidate] = _count_files_in_own_output(candidate)
@@ -508,7 +551,9 @@ def _collect_ignorefiles_and_all_files(
             # count walks through _walk_unless_link, as every count does.
             if pruned_counts is None:
                 continue
-            removed = _count_files_ash_would_scan(Path(root) / d, path, own_output_id)
+            removed = _count_files_ash_would_scan(
+                Path(root) / d, path, own, own_output_counts
+            )
             pruned_counts[pruned_key] = pruned_counts.get(pruned_key, 0) + removed
 
         for f in files:
