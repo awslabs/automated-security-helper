@@ -159,7 +159,8 @@ Start the ASH MCP server (Model Context Protocol).
 | `--auth-header-value` | str |  |  | Expected value of --auth-header-name. |
 | `--stateless-http/--no-stateless-http` | bool | False |  | Handle each streamable-HTTP request independently instead of binding it to a server-held session. Required behind a load balancer that may route consecutive requests to different replicas, and by managed runtimes that inject their own Mcp-Session-Id. Only valid with --transport streamable-http. |
 | `--trust-upstream-session-id` | bool | False |  | Stateless streamable-HTTP only. Declare that a platform in front of ASH issues and authenticates the Mcp-Session-Id header, so it can name the caller's session. Without it a stateless server identifies no session, and tools that need one (source delivery, profiles, the scan registry) refuse. |
-| `--allowed-host` | List[str] |  |  | Host header value to accept, repeatable. Keeps DNS-rebinding protection enabled while allowing a known proxy or load balancer hostname. Without this, protection is enabled only when --host is loopback, matching the MCP SDK's own default. |
+| `--allowed-host` | List[str] |  |  | Host header value to accept, repeatable. Keeps DNS-rebinding protection enabled while allowing a known proxy or load balancer hostname. Required with a non-loopback --host unless --trust-upstream-host-check is given. |
+| `--trust-upstream-host-check` | bool | False |  | HTTP transports only. Declare that a proxy or platform in front of ASH checks the Host and Origin headers, so ASH serves any. Without it, a non-loopback --host needs --allowed-host or the server refuses to start. Cannot be combined with --allowed-host. |
 
 ### `ash get-genai-guide`
 

@@ -37,6 +37,7 @@ _VARIABLES = (
     "ASH_MCP_AUTH_HEADER_VALUE",
     "ASH_MCP_ALLOWED_HOSTS",
     "ASH_MCP_TRUST_UPSTREAM_SESSION_ID",
+    "ASH_MCP_TRUST_UPSTREAM_HOST_CHECK",
 )
 
 
@@ -102,3 +103,29 @@ class TestTrustUpstreamSessionId:
         argv = _argv(monkeypatch, {**env, "ASH_MCP_TRUST_UPSTREAM_SESSION_ID": "1"})
 
         assert "--trust-upstream-session-id" not in argv
+
+
+class TestTrustUpstreamHostCheck:
+    def test_the_agentcore_default_declares_the_upstream_check(
+        self, monkeypatch, bound
+    ) -> None:
+        argv = _argv(monkeypatch, {})
+
+        assert "--trust-upstream-host-check" in argv
+        _starts(argv)
+
+    def test_an_allowlist_replaces_the_declaration(self, monkeypatch, bound) -> None:
+        argv = _argv(monkeypatch, {"ASH_MCP_ALLOWED_HOSTS": "ash-mcp.example.com"})
+
+        assert "--trust-upstream-host-check" not in argv
+        _starts(argv)
+
+    def test_turning_it_off_without_an_allowlist_refuses_startup(
+        self, monkeypatch, bound
+    ) -> None:
+        argv = _argv(monkeypatch, {"ASH_MCP_TRUST_UPSTREAM_HOST_CHECK": "false"})
+
+        assert "--trust-upstream-host-check" not in argv
+        result = CliRunner().invoke(ash_app, argv[1:])
+        assert result.exit_code == 3, result.output
+        assert bound["bound"] is False

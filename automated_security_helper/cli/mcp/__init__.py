@@ -61,6 +61,11 @@ _stderr = Console(stderr=True)
 # without forcing an Enum class on the public CLI surface.
 _VALID_TRANSPORTS = ("stdio", "streamable-http", "sse")
 
+#: Bind addresses for which the MCP SDK turns its Host and Origin check on by
+#: itself. Exactly the SDK's literal list: ``127.0.0.2`` is loopback too, but the
+#: SDK leaves the check off for it, so it is treated like any other address.
+_SDK_PROTECTED_HOSTS = ("127.0.0.1", "localhost", "::1")
+
 
 def validate_log_options(
     verbose: bool, debug: bool, log_level: AshLogLevel
@@ -155,6 +160,74 @@ def _validate_trust_upstream_session_id(
         )
 
 
+def _validate_bind(
+    host: str,
+    allowed_hosts: Optional[List[str]],
+    trust_upstream_host_check: bool,
+) -> None:
+    """Refuse an HTTP bind that would serve any Host and any Origin.
+
+    The MCP SDK checks Host and Origin (its DNS-rebinding protection) only when
+    the app is built for one of :data:`_SDK_PROTECTED_HOSTS`. Building for any
+    other address without an explicit allowlist switches the check off, so a
+    page in a browser that resolves its own name to the server reaches every
+    tool. That has to be a decision the operator states, not a default:
+    ``--allowed-host`` keeps the check on with the names clients use, and
+    ``--trust-upstream-host-check`` says a proxy or platform in front of ASH
+    checks Host and Origin instead.
+
+    Raises:
+        ASHValidationError: for a non-loopback host with neither option, or with
+            both, which contradict each other.
+    """
+    if allowed_hosts and trust_upstream_host_check:
+        raise ASHValidationError(
+            "--allowed-host and --trust-upstream-host-check contradict each other: "
+            "the first keeps ASH's Host check on for the names given, the second "
+            "turns it off because something in front of ASH checks Host. Pass one."
+        )
+    if allowed_hosts or trust_upstream_host_check or host in _SDK_PROTECTED_HOSTS:
+        return
+    raise ASHValidationError(
+        f"--host {host} is not a loopback name the MCP SDK protects, and no "
+        f"--allowed-host was given, so the server would answer any Host and any "
+        f"Origin header. Pass --allowed-host with each host name clients use to "
+        f"reach the server (repeatable), or --trust-upstream-host-check if a proxy "
+        f"or platform in front of ASH checks Host and Origin."
+    )
+
+
+def _transport_security(
+    host: str,
+    allowed_hosts: Optional[List[str]],
+    trust_upstream_host_check: bool,
+):
+    """The ``transport_security`` to build an app with, or None for the SDK's own.
+
+    Raises:
+        ASHValidationError: per :func:`_validate_bind`.
+    """
+    _validate_bind(host, allowed_hosts, trust_upstream_host_check)
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    if allowed_hosts:
+        # Supplying transport_security suppresses the SDK's host-based autodetect
+        # entirely, so this is the only branch that can keep protection on while
+        # accepting a non-loopback name. allowed_origins is left empty rather than
+        # mirroring allowed_hosts: Origin is a browser-supplied header, and an MCP
+        # server reached through a proxy has no reason to trust one.
+        return TransportSecuritySettings(
+            allowed_hosts=list(allowed_hosts),
+            allowed_origins=[],
+        )
+    if trust_upstream_host_check:
+        # Stated explicitly rather than left to the SDK's default for a
+        # non-loopback host, so the decision is visible here.
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    # A loopback name: the SDK installs its loopback-only check.
+    return None
+
+
 def _build_auth_middleware(header_name: str, header_value: str):
     """Build a Starlette middleware class that enforces a static header.
 
@@ -212,6 +285,7 @@ def build_streamable_http_app(
     host: str = "127.0.0.1",
     allowed_hosts: Optional[List[str]] = None,
     trust_upstream_session_id: bool = False,
+    trust_upstream_host_check: bool = False,
 ):
     """Build the MCPServer streamable-HTTP ASGI app, optionally guarded by auth.
 
@@ -237,6 +311,9 @@ def build_streamable_http_app(
             of ASH issues and authenticates it. Without it a stateless server
             identifies no session, and the tools that need one refuse; see
             ``cli/mcp/http_sessions.py``.
+        trust_upstream_host_check: A proxy or platform in front of ASH checks
+            Host and Origin, so the app checks neither. Required for a
+            non-loopback ``host`` without ``allowed_hosts``; refused with them.
 
     The host argument is load-bearing, not cosmetic
     ----------------------------------------------
@@ -250,17 +327,25 @@ def build_streamable_http_app(
     every request from another machine. Passing the real bind address is what
     makes the app's security match the socket's reachability.
 
+    It also means a non-loopback ``host`` builds an app with no Host or Origin
+    check at all, so that combination is refused unless ``allowed_hosts`` or
+    ``trust_upstream_host_check`` says how Host is checked; see
+    :func:`_validate_bind`.
+
     Returns:
         A Starlette application ready to hand to uvicorn.
 
     Raises:
         RuntimeError: if MCPServer is not installed.
+        ASHValidationError: for a non-loopback ``host`` with neither
+            ``allowed_hosts`` nor ``trust_upstream_host_check``, or with both.
     """
     if MCPServer is None:
         raise RuntimeError(
             "MCPServer is not installed. The 'mcp' package is required for "
             "the streamable-http transport."
         )
+    security = _transport_security(host, allowed_hosts, trust_upstream_host_check)
     # Import here to keep the stdio path zero-cost when the streamable-HTTP
     # transport is not used.
     from automated_security_helper.cli.mcp_server import mcp as _mcp_instance
@@ -276,18 +361,8 @@ def build_streamable_http_app(
         "stateless_http": stateless_http,
         "host": host,
     }
-    if allowed_hosts:
-        # Supplying transport_security suppresses the SDK's host-based autodetect
-        # entirely, so this is the only branch that can keep protection on while
-        # accepting a non-loopback name. allowed_origins is left empty rather than
-        # mirroring allowed_hosts: Origin is a browser-supplied header, and an MCP
-        # server reached through a proxy has no reason to trust one.
-        from mcp.server.transport_security import TransportSecuritySettings
-
-        app_kwargs["transport_security"] = TransportSecuritySettings(
-            allowed_hosts=list(allowed_hosts),
-            allowed_origins=[],
-        )
+    if security is not None:
+        app_kwargs["transport_security"] = security
     app = _mcp_instance.streamable_http_app(**app_kwargs)
     # Decides which session each request belongs to from what this app issued,
     # never from a header alone. Added before the auth middleware so an
@@ -311,6 +386,7 @@ def build_sse_app(
     auth_header_value: Optional[str] = None,
     host: str = "127.0.0.1",
     allowed_hosts: Optional[List[str]] = None,
+    trust_upstream_host_check: bool = False,
 ):
     """Build the MCPServer SSE ASGI app (legacy).
 
@@ -323,6 +399,8 @@ def build_sse_app(
             reason it is on the streamable-HTTP path -- see below.
         allowed_hosts: Explicit Host-header allowlist. When given, DNS-rebinding
             protection stays on and accepts exactly these hosts.
+        trust_upstream_host_check: A proxy or platform in front of ASH checks
+            Host and Origin; as on the streamable-HTTP path.
 
     Why sse_app gets host and allowed_hosts too
     -------------------------------------------
@@ -350,28 +428,21 @@ def build_sse_app(
 
     Raises:
         RuntimeError: if MCPServer is not installed.
+        ASHValidationError: for the bind :func:`_validate_bind` refuses.
     """
     if MCPServer is None:
         raise RuntimeError(
             "MCPServer is not installed. The 'mcp' package is required for "
             "the sse transport."
         )
+    security = _transport_security(host, allowed_hosts, trust_upstream_host_check)
     from automated_security_helper.cli.mcp_server import mcp as _mcp_instance
 
     # Same v2 change as the streamable-HTTP path above: sse_path is a keyword
     # argument on sse_app() rather than a Settings field.
     app_kwargs = {"sse_path": mount_path, "host": host}
-    if allowed_hosts:
-        # Supplying transport_security suppresses the SDK's host-based autodetect
-        # entirely, exactly as on the streamable-HTTP path. allowed_origins is
-        # left empty for the same reason: Origin is browser-supplied, and a
-        # server reached through a proxy has no reason to trust one.
-        from mcp.server.transport_security import TransportSecuritySettings
-
-        app_kwargs["transport_security"] = TransportSecuritySettings(
-            allowed_hosts=list(allowed_hosts),
-            allowed_origins=[],
-        )
+    if security is not None:
+        app_kwargs["transport_security"] = security
     app = _mcp_instance.sse_app(**app_kwargs)
     # The session of an sse request is the one the server issued for its event
     # stream; a header on a message POST is ignored.
@@ -492,10 +563,20 @@ def mcp_command(
             "--allowed-host",
             help="Host header value to accept, repeatable. Keeps DNS-rebinding "
             "protection enabled while allowing a known proxy or load balancer "
-            "hostname. Without this, protection is enabled only when --host is "
-            "loopback, matching the MCP SDK's own default.",
+            "hostname. Required with a non-loopback --host unless "
+            "--trust-upstream-host-check is given.",
         ),
     ] = None,
+    trust_upstream_host_check: Annotated[
+        bool,
+        typer.Option(
+            "--trust-upstream-host-check",
+            help="HTTP transports only. Declare that a proxy or platform in front "
+            "of ASH checks the Host and Origin headers, so ASH serves any. Without "
+            "it, a non-loopback --host needs --allowed-host or the server refuses "
+            "to start. Cannot be combined with --allowed-host.",
+        ),
+    ] = False,
     profile: Annotated[
         Optional[List[str]],
         typer.Option(
@@ -583,6 +664,16 @@ def mcp_command(
         _validate_trust_upstream_session_id(
             transport, stateless_http, trust_upstream_session_id
         )
+        if transport == "stdio":
+            if trust_upstream_host_check:
+                raise ASHValidationError(
+                    "--trust-upstream-host-check only applies to the HTTP "
+                    "transports; stdio has no Host header to check."
+                )
+        else:
+            # Before anything is built or bound: a refused bind must never
+            # reach the socket.
+            _validate_bind(host, allowed_host, trust_upstream_host_check)
     except ASHValidationError as e:
         _stderr.print(f"[red]Validation Error: {str(e)}[/red]")
         raise typer.Exit(3)
@@ -655,6 +746,7 @@ def mcp_command(
                 host=host,
                 allowed_hosts=allowed_host,
                 trust_upstream_session_id=trust_upstream_session_id,
+                trust_upstream_host_check=trust_upstream_host_check,
             )
             if not quiet:
                 _stderr.print(
@@ -677,6 +769,7 @@ def mcp_command(
                 # uvicorn binds makes the app answer 421 to every proxied request.
                 host=host,
                 allowed_hosts=allowed_host,
+                trust_upstream_host_check=trust_upstream_host_check,
             )
             if not quiet:
                 _stderr.print(

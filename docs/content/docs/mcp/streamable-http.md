@@ -23,6 +23,7 @@ ash mcp \
   --host 0.0.0.0 \
   --port 8000 \
   --mount-path /mcp \
+  --allowed-host ash-mcp.example.com \
   --auth-header-name x-ash-token \
   --auth-header-value SECRET \
   --profile default=/etc/ash/default.yaml \
@@ -32,7 +33,9 @@ ash mcp \
 Flags:
 
 - `--transport streamable-http` — selects the streamable-HTTP transport. Other accepted values: `stdio` (default) and `sse` (legacy, not covered here).
-- `--host` — bind address. Use `127.0.0.1` for loopback-only deployments and `0.0.0.0` when fronted by a reverse proxy.
+- `--host` — bind address. Use `127.0.0.1` for loopback-only deployments and `0.0.0.0` when fronted by a reverse proxy. Any address other than `127.0.0.1`, `localhost` or `::1` needs `--allowed-host` or `--trust-upstream-host-check`, or the server refuses to start (exit 3); see [Host and Origin checking](#host-and-origin-checking).
+- `--allowed-host` — a Host header value the server accepts, repeatable: the name clients use to reach it, such as the proxy's hostname. ASH checks Host against this list and accepts no `Origin` header.
+- `--trust-upstream-host-check` — a proxy or platform in front of ASH checks Host and Origin, so ASH checks neither. For a platform that restricts Host itself and cannot be given an allowlist in advance, such as Bedrock AgentCore Runtime. Refused together with `--allowed-host`.
 - `--port` — TCP port. Defaults are deliberately omitted; pick an explicit port that matches your proxy/firewall config.
 - `--mount-path` — path under which the FastMCP app is mounted. Defaults to `/mcp`. Clients must connect to `http(s)://host:port<mount-path>`.
 - `--auth-header-name` / `--auth-header-value` — single-tenant header gate. Connections missing this header (or carrying a wrong value) are rejected before any tool dispatch. See [Auth](#auth).
@@ -41,6 +44,15 @@ Flags:
 - `--profile NAME=path/to/ash.yaml` — register a config profile under `NAME`. Repeatable. The YAML is loaded and validated through `AshConfig.from_file` at startup; bad profiles fail fast and the server refuses to start. See [Config profiles](#config-profiles).
 
 The server logs the bound address and the registered profile names on startup. It does not log header values or profile contents.
+
+### Host and Origin checking
+
+The MCP SDK protects against DNS rebinding by checking the `Host` and `Origin` headers, and it turns that check on by itself only when the app is built for `127.0.0.1`, `localhost` or `::1`. For any other bind address, including `0.0.0.0`, `::`, a routable address and `127.0.0.2`, the check would be off and the server would answer any Host and any Origin. ASH therefore refuses to start a non-loopback bind unless the operator says how Host is checked:
+
+- `--allowed-host NAME` (repeatable): ASH checks Host against the names given. Use the name clients and your proxy send.
+- `--trust-upstream-host-check`: something in front of ASH checks Host and Origin, and ASH checks neither.
+
+The refusal names both options. The Terraform container entrypoint passes `--trust-upstream-host-check` by default when `ASH_MCP_ALLOWED_HOSTS` is empty, matching AgentCore; set `ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=false` on any other target so a missing allowlist refuses startup.
 
 ## Session identity
 
@@ -347,6 +359,8 @@ docker run \
     --transport streamable-http \
     --host 0.0.0.0 \
     --port 8000 \
+    --allowed-host localhost:8000 \
+    --allowed-host 127.0.0.1:8000 \
     --profile default=/etc/ash/default.yaml \
     --profile strict=/etc/ash/strict.yaml \
     --auth-header-name x-ash-token \
@@ -364,6 +378,7 @@ services:
       - --transport=streamable-http
       - --host=0.0.0.0
       - --port=8000
+      - --allowed-host=ash-mcp.example.com
       - --profile=default=/etc/ash/default.yaml
       - --profile=strict=/etc/ash/strict.yaml
       - --auth-header-name=x-ash-token
@@ -391,7 +406,7 @@ volumes:
   ash-workspace:
 ```
 
-The nginx config is responsible for TLS termination and for injecting `x-ash-token: ${ASH_TOKEN}` on every request that has already authenticated against the tenant's identity provider.
+The nginx config is responsible for TLS termination and for injecting `x-ash-token: ${ASH_TOKEN}` on every request that has already authenticated against the tenant's identity provider. It must forward the client's `Host` (`proxy_set_header Host $host;`), which is the `--allowed-host` value ASH checks.
 
 ## Security note
 

@@ -39,6 +39,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from automated_security_helper.cli.mcp import build_sse_app, mcp_command
+from automated_security_helper.core.exceptions import ASHValidationError
 
 #: Status the SDK returns when the Host header is not on the allowlist.
 HOST_REJECTED = 421
@@ -75,10 +76,22 @@ def _post_message(app, base_url: str) -> int:
 
 
 class TestHostReachesTheApp:
-    def test_binding_all_interfaces_accepts_a_proxied_host_header(self) -> None:
-        """The defect itself: 0.0.0.0 must not be built as though it were loopback."""
-        app = build_sse_app(mount_path="/sse", host="0.0.0.0")
-        assert _post_message(app, PROXY_BASE_URL) == HOST_ACCEPTED_NO_SESSION
+    def test_binding_all_interfaces_without_an_allowlist_serves_no_foreign_host(
+        self,
+    ) -> None:
+        """No allowlist and no opt-out: the build refuses, or the app checks Host.
+
+        Passing the bind host through fixed the 421 on every proxied request, and
+        also switched the SDK's Host and Origin checks off for 0.0.0.0, so any
+        Host was served. A proxied deployment names its hostname with
+        ``allowed_hosts`` (``TestAllowedHostsReachesTheApp``); one whose Host
+        checking happens in front of ASH says so with the explicit opt-out.
+        """
+        try:
+            app = build_sse_app(mount_path="/sse", host="0.0.0.0")
+        except (ASHValidationError, ValueError):
+            return
+        assert _post_message(app, PROXY_BASE_URL) == HOST_REJECTED
 
     def test_loopback_bind_still_refuses_a_foreign_host_header(self) -> None:
         """Protection is worth keeping for the default local case.
@@ -142,7 +155,11 @@ class TestCommandWiring:
 
     def test_host_reaches_build_sse_app(self, captured) -> None:
         mcp_command(
-            ctx=_ResilientFalseCtx(), transport="sse", host="0.0.0.0", quiet=True
+            ctx=_ResilientFalseCtx(),
+            transport="sse",
+            host="0.0.0.0",
+            allowed_host=["ash-mcp.example.com"],
+            quiet=True,
         )
         assert captured.get("host") == "0.0.0.0"
 
@@ -154,7 +171,11 @@ class TestCommandWiring:
         alone.
         """
         mcp_command(
-            ctx=_ResilientFalseCtx(), transport="sse", host="0.0.0.0", quiet=True
+            ctx=_ResilientFalseCtx(),
+            transport="sse",
+            host="0.0.0.0",
+            allowed_host=["ash-mcp.example.com"],
+            quiet=True,
         )
         assert captured.get("host") == captured.get("uvicorn_host")
 

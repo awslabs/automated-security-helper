@@ -115,8 +115,16 @@ def _mcp_wrapper(
         "--allowed-host",
         help="Host header value to accept, repeatable. Keeps DNS-rebinding "
         "protection enabled while allowing a known proxy or load balancer "
-        "hostname. Without this, protection is enabled only when --host is "
-        "loopback, matching the MCP SDK's own default.",
+        "hostname. Required with a non-loopback --host unless "
+        "--trust-upstream-host-check is given.",
+    ),
+    trust_upstream_host_check: bool = typer.Option(
+        False,
+        "--trust-upstream-host-check",
+        help="HTTP transports only. Declare that a proxy or platform in front of "
+        "ASH checks the Host and Origin headers, so ASH serves any. Without it, a "
+        "non-loopback --host needs --allowed-host or the server refuses to start. "
+        "Cannot be combined with --allowed-host.",
     ),
 ):
     """Lazy wrapper that imports and delegates to the real MCP command."""
@@ -138,6 +146,7 @@ def _mcp_wrapper(
         stateless_http=stateless_http,
         trust_upstream_session_id=trust_upstream_session_id,
         allowed_host=allowed_host,
+        trust_upstream_host_check=trust_upstream_host_check,
     )
 
 

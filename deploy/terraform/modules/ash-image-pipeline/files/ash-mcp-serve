@@ -37,6 +37,7 @@ DEFAULT_PORT = "8000"
 DEFAULT_MOUNT_PATH = "/mcp"
 DEFAULT_STATELESS = "true"
 DEFAULT_TRUST_UPSTREAM_SESSION_ID = "false"
+DEFAULT_TRUST_UPSTREAM_HOST_CHECK = "true"
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off"}
@@ -122,8 +123,24 @@ def build_argv() -> list[str]:
     # Repeatable flag. Passing the known proxy or load balancer hostname keeps
     # the MCP SDK's DNS-rebinding protection on: without it, protection is
     # active only when --host is loopback, which it never is behind a proxy.
-    for host in _split_hosts(_env("ASH_MCP_ALLOWED_HOSTS", "")):
+    allowed_hosts = _split_hosts(_env("ASH_MCP_ALLOWED_HOSTS", ""))
+    for host in allowed_hosts:
         argv += ["--allowed-host", host]
+
+    # ash refuses a non-loopback --host with no --allowed-host unless it is told
+    # that something in front of it checks Host and Origin. AgentCore restricts
+    # Host itself and cannot be given a Host allowlist in advance, so the
+    # default here is the AgentCore one. Every other target either names its
+    # hosts in ASH_MCP_ALLOWED_HOSTS or sets this to false, so that a missing
+    # allowlist refuses startup instead of serving any Host.
+    if (
+        transport != "stdio"
+        and not allowed_hosts
+        and _env_bool(
+            "ASH_MCP_TRUST_UPSTREAM_HOST_CHECK", DEFAULT_TRUST_UPSTREAM_HOST_CHECK
+        )
+    ):
+        argv.append("--trust-upstream-host-check")
 
     return argv
 

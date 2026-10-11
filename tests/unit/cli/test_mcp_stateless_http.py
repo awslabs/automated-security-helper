@@ -30,6 +30,7 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app as ash_app
 from automated_security_helper.cli.mcp import build_streamable_http_app, mcp_command
+from automated_security_helper.core.exceptions import ASHValidationError
 
 INITIALIZE = {
     "jsonrpc": "2.0",
@@ -165,13 +166,25 @@ class TestHostBinding:
 
     PROXY_BASE_URL = "http://ash-mcp.example.com"
 
-    def test_binding_all_interfaces_accepts_a_proxied_host_header(self) -> None:
-        app = build_streamable_http_app(
-            mount_path="/mcp", stateless_http=True, host="0.0.0.0"
-        )
+    def test_binding_all_interfaces_without_an_allowlist_serves_no_foreign_host(
+        self,
+    ) -> None:
+        """No allowlist and no opt-out: the build refuses, or the app checks Host.
+
+        Building for 0.0.0.0 used to switch the SDK's Host and Origin checks off
+        entirely, so any Host was served. A deployment behind a proxy names its
+        hostname with ``allowed_hosts`` (tested below); one whose Host checking
+        happens in front of ASH says so with the explicit opt-out.
+        """
+        try:
+            app = build_streamable_http_app(
+                mount_path="/mcp", stateless_http=True, host="0.0.0.0"
+            )
+        except (ASHValidationError, ValueError):
+            return
         resp = _post(app, CLIENT_HEADERS, base_url=self.PROXY_BASE_URL)
-        assert resp.status_code == 200, (
-            f"a server bound to 0.0.0.0 must accept a proxied Host header, got "
+        assert resp.status_code == 421, (
+            f"a server bound to 0.0.0.0 with no allowlist served a foreign Host: "
             f"{resp.status_code}: {resp.text[:200]}"
         )
 
@@ -267,6 +280,7 @@ class TestCommandWiring:
             ctx=_ResilientFalseCtx(),
             transport="streamable-http",
             host="0.0.0.0",
+            allowed_host=["ash-mcp.example.com"],
             quiet=True,
         )
         assert captured.get("host") == captured.get("uvicorn_host") == "0.0.0.0"

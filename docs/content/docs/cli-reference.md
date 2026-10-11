@@ -1119,7 +1119,8 @@ honored by `ash mcp`. See
 | `--auth-header-value`                       | Expected value of `--auth-header-name`                                              | None                   |
 | `--stateless-http` / `--no-stateless-http`  | Handle each streamable-HTTP request independently instead of binding it to a server-held session | `--no-stateless-http` |
 | `--trust-upstream-session-id`               | Stateless streamable-HTTP only: a platform in front of ASH issues and authenticates `Mcp-Session-Id`, so the header names the caller's session | `False` |
-| `--allowed-host`                            | Host header value to accept. Repeatable                                             | None                   |
+| `--allowed-host`                            | Host header value to accept. Repeatable. Required with a non-loopback `--host` unless `--trust-upstream-host-check` is given | None |
+| `--trust-upstream-host-check`               | A proxy or platform in front of ASH checks Host and Origin, so ASH checks neither. HTTP transports only; not with `--allowed-host` | `False` |
 | `--log-level`                               | Set the log level                                                                   | `INFO`                 |
 | `--verbose`, `-v`                           | Enable verbose logging                                                              | `False`                |
 | `--debug`, `-d`                             | Enable debug logging                                                                | `False`                |
@@ -1138,7 +1139,7 @@ A stateless server issues no session, so by default its callers have no session 
 
 The flag is only valid with `--transport streamable-http`, and passing it on another transport is refused rather than ignored. `stdio` has a single implicit session and `sse` holds an open connection per client, so neither has a session to make stateless; silently dropping the flag would leave you running a stateful server and finding out only when a request landed on the wrong replica in production. `--no-stateless-http` is indistinguishable from the default, so it is accepted on every transport.
 
-`--allowed-host` is repeatable and names the Host header values the server will accept. The MCP SDK enables DNS-rebinding protection automatically when the bind address is loopback, and the allowlist it installs then holds only `127.0.0.1`, `localhost`, and `[::1]`; bind anywhere else and that autodetect leaves protection off. `--allowed-host` is how you keep protection on for a non-loopback bind, because supplying it replaces the SDK's autodetect with an explicit allowlist. That is the right posture behind a proxy whose hostname you know:
+`--allowed-host` is repeatable and names the Host header values the server will accept. The MCP SDK enables DNS-rebinding protection automatically when the bind address is `127.0.0.1`, `localhost` or `::1`; bind anywhere else and that autodetect leaves protection off, so the server would answer any Host and any Origin. ASH refuses that: a non-loopback `--host` without `--allowed-host` exits with status 3 and an error naming `--allowed-host` and `--trust-upstream-host-check`. `--allowed-host` keeps protection on for a non-loopback bind, because supplying it replaces the SDK's autodetect with an explicit allowlist. That is the right posture behind a proxy whose hostname you know:
 
 ```bash
 ash mcp --transport streamable-http --host 0.0.0.0 --port 8000 \
@@ -1147,6 +1148,8 @@ ash mcp --transport streamable-http --host 0.0.0.0 --port 8000 \
 ```
 
 The `Origin` allowlist is left empty rather than mirroring the host list. `Origin` is a browser-supplied header, and an MCP server reached through a proxy has no reason to trust one.
+
+`--trust-upstream-host-check` is the explicit alternative when a proxy or platform in front of ASH checks Host and Origin and cannot give ASH a fixed list of names, as on Bedrock AgentCore Runtime. With it ASH checks neither header. It is refused together with `--allowed-host`, which says the opposite, and on stdio.
 
 ### Usage
 
