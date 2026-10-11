@@ -16,7 +16,9 @@ There are three layers:
   shell and Python block, page by page, and fails when a block exits with the wrong
   code.
 - The site build, in the "Build documentation" job. It runs `mkdocs build --strict`
-  with link and anchor validation, and without network access.
+  with link and anchor validation, then publishes the site as versions to a throwaway
+  branch with the network blocked, and checks what readers of each version would see
+  (see [Versioned docs](#versioned-docs)).
 
 ## How blocks are classified
 
@@ -357,6 +359,80 @@ Use the code checkout's `pytest` rather than `python -m pytest` from the docs
 checkout: `python -m` puts the current directory first on the import path, and the
 docs checkout's copy of the package would then be the one imported.
 
+## Versioned docs
+
+The site is published as versions with [mike](https://github.com/jimporter/mike). Each
+version is a directory of the `gh-pages` branch, and `versions.json` at the root of the
+branch lists them for the version selector in the site header.
+
+- Every push to `main` publishes the version `main`, titled "main (unreleased)". Its
+  pages say that they describe unreleased code, and link to the latest release.
+- Every release tag `vX.Y.Z` publishes the version `X.Y.Z` (see
+  [Releases and versions](releases.md#the-documentation-site)). The newest release also
+  gets the `latest` alias. `latest/` is a full copy of it rather than a redirect, and
+  every version names its `latest/` page as the canonical one for search engines. A
+  patch release for an older line is published without moving `latest`.
+- A page of a release that is not the latest shows a notice saying so, with a link to
+  the latest release.
+- Any other tag, such as the floating `v3` or a prerelease, publishes nothing.
+
+The deploy also manages the root of the branch. The root `index.html` redirects to
+`latest/`, or to `main/` until a release has been published, and every page path of
+that version has a redirect at the root that keeps the `#anchor`. So
+`/how-to/install/#install-from-main` still works, and so does an old page path that
+`docs/redirects.yml` maps, through the redirect the build writes for it. Everything
+else at the root is removed on each deploy, except `.nojekyll`, `CNAME` and
+`versions.json`. To keep another file there, add it to `ROOT_KEEP` in
+[`scripts/docs_versions.py`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/docs_versions.py).
+
+That script does all of the publishing. The workflows never run `mkdocs gh-deploy`,
+which replaces the whole branch with one unversioned build and so would delete every
+version; the site check in the lint job fails if one does. `strict: true` in
+`mkdocs.yml` makes every build strict, including the ones mike runs. To preview a page
+that still has warnings, use `mkdocs serve --no-strict`.
+
+### Previewing the versions
+
+`mkdocs serve` shows one version. To see the version selector and the notices,
+publish to a local branch and serve that. Unless it is told to push, the deploy only
+commits to the branch it is given, and a branch other than `gh-pages` keeps the
+preview apart from the real site:
+
+<!-- doctest: illustrative reason="runs in a checkout of this repository and starts a server" -->
+```bash
+uv run python scripts/docs_versions.py deploy --ref refs/tags/v0.0.1 --branch docs-preview
+uv run python scripts/docs_versions.py deploy --ref refs/heads/main --branch docs-preview
+uv run mike serve --branch docs-preview   # http://localhost:8000/, stop with Ctrl+C
+git branch -D docs-preview
+```
+
+The ref only names the version: both commands publish the docs in your working tree.
+
+### What the versions check does
+
+The "Build documentation" job runs `uv run python scripts/docs_versions.py check`. It
+publishes 0.0.1, then 0.0.0, then `main` to a throwaway branch of the checkout, with
+every proxy pointing at a port that refuses connections, so a build that needs the
+network fails. Before publishing it puts stand-ins for an unversioned site at the root
+of the branch: a stylesheet, a sitemap, a page no version has, and an old page from
+`docs/redirects.yml`. The check fails unless:
+
+- `mike list` and `versions.json` show the three versions, with `latest` on 0.0.1 only,
+  because 0.0.0 is older;
+- every page of every version configures the version selector and loads the theme
+  script that reads `versions.json`;
+- every page of a release carries the outdated notice, every page of `main` carries the
+  unreleased one, and no page carries the other;
+- `latest/` is a copy of 0.0.1, and the other versions name `latest/` as canonical;
+- the root redirects every page of `latest/`, the old page redirects to its place under
+  `latest/`, and the stand-ins are gone.
+
+It deletes the branch afterwards and never pushes. It prints how many versions, pages
+and redirects it checked. `tests/unit/test_docs_versions.py` plants each defect the
+check exists for (a missing setting in `mkdocs.yml`, a template without the notices,
+aliases that are not copies, a root left unversioned, an older release that takes
+`latest`) on a small site, and requires the check to report it.
+
 ## What a failure means
 
 Each static finding is one line: the file and line, the check in brackets, and the
@@ -399,7 +475,7 @@ reason instead of an exit code.
 `is read only by the test suite or CI` means the name is real but only contributors
 can use it: move it to a contributor page. Otherwise the name is not one ASH reads,
 nor a build argument. Check the spelling against the
-[environment variable reference](../docs/cli-reference.md), or delete it if the
+[environment variable reference](../reference/environment-variables.md), or delete it if the
 variable was removed. If ASH builds the name at runtime, the finding says how many
 lookups could not be resolved; make the lookup a literal or a module constant.
 
@@ -462,6 +538,9 @@ to resolve in: save the block inside one with `save-as=<package>/<module>.py`.
 | nav entry ... names no page | a titled nav entry points at a page that does not exist |
 | still exists, which is not a page, itself redirected | fix the entry in `docs/redirects.yml` |
 | must be 'warn', does not pass --strict, hooks does not list | `mkdocs.yml` or the docs workflow lost a strict-build setting; restore it |
+| the versioned site needs, the mike plugin is not listed | `mkdocs.yml` lost a setting the [versioned site](#versioned-docs) depends on; restore it |
+| replaces the whole gh-pages branch | a workflow runs `mkdocs gh-deploy`; publish with `scripts/docs_versions.py deploy` instead |
+| scripts/docs_versions.py deploy (or check) is not run, does not start | a workflow lost the step that publishes or checks the versions, or the tag workflow no longer starts the docs deploy for a release |
 
 ## Adding a generated reference page
 

@@ -133,6 +133,8 @@ request whose title starts with `chore(release):`, does the rest:
 - It creates the tag `v<version>` and a GitHub Release at the head of `main`, with the
   version's changelog entry followed by GitHub's generated notes.
 - It moves the floating major tag (see [Tags](#tags)).
+- It starts the docs workflow on the new tag, which publishes the release's docs
+  version (see [The documentation site](#the-documentation-site)).
 
 ### The release App
 
@@ -181,9 +183,31 @@ release is the newest one, `v3` points at it, so `v3` can name a commit that is 
 
 ## The documentation site
 
-The site is published from `main`: each push to `main` rebuilds it with
-`mkdocs gh-deploy`. It therefore describes `main`, which can be ahead of the newest
-release.
+The site is versioned. Each push to `main` publishes the version `main`, and each
+release tag publishes a version named after the release: `v3.8.0` publishes `3.8.0`.
+The newest release also moves the `latest` alias, which is where the site root and
+search engines send readers, so a release changes what most readers see. A patch
+release for an older line, built outside the workflow as described under
+[Tags](#tags), publishes its version when its tag is pushed and leaves `latest` where
+it is. The floating major tag publishes nothing. How the versions are built and
+checked is in [Testing the documentation](documentation.md#versioned-docs).
+
+A tag that the tag workflow creates is created with `GITHUB_TOKEN`, and a push made with
+that token starts no workflow, so the docs workflow would never see it. The tag workflow
+therefore starts the docs workflow on the tag itself, with `workflow_dispatch`. If a
+release's docs version is missing (because that run failed, say), publish it again
+from **Actions > Docs Build & Deploy > Run workflow**, choosing the release tag as the
+ref. Running it on `main` publishes `main` again.
+
+A tag pushed by hand runs the docs workflow as it is at the tagged commit. For a tag on
+a commit from before the site was versioned, that is the old workflow, whose
+`mkdocs gh-deploy --force` force-pushes a single unversioned build as a commit with no
+parent, so every published version disappears from `gh-pages` along with its history.
+That applies to pushing the floating `v3` by hand while it points at such a commit,
+and to a patch release built on a release from before versioning. A ruleset on `gh-pages` that blocks force
+pushes stops it; the versioned deploy only ever fast-forwards the branch. Without one,
+recover by running the docs workflow again on `main` and on each release tag whose
+version should exist, in any order: whichever release is newest takes `latest`.
 
 ## Version-pinned pages
 
