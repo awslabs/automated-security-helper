@@ -102,7 +102,8 @@ class ArchiveConverterConfigOptions(ConverterOptionsBase):
         Field(
             description=(
                 "The most members an archive may have, directories included. An "
-                "archive with more is not extracted."
+                "archive with more is not extracted. All the archives one scan "
+                "extracts may hold four times this many together."
             )
         ),
     ] = 100_000
@@ -119,8 +120,10 @@ class ArchiveConverterConfigOptions(ConverterOptionsBase):
         PositiveInt,
         Field(
             description=(
-                "The most bytes an archive's members may declare added up. An archive "
-                "whose members declare more is not extracted. Default 1 GiB."
+                "The most bytes an archive's members may declare added up, each "
+                "counted as at least 512. An archive whose members declare more is "
+                "not extracted. All the archives one scan extracts may declare four "
+                "times this together. Default 1 GiB."
             )
         ),
     ] = 1024 * 1024 * 1024
@@ -144,6 +147,31 @@ class ArchiveConverterConfigOptions(ConverterOptionsBase):
 #: check for an entry of 100 KiB or less; the ratio here is over a whole archive, a
 #: sum of entries, so the floor is higher.
 RATIO_FLOOR_BYTES = 512 * 1024
+
+
+#: Every member counts as at least this many bytes toward max_total_bytes and the
+#: scan's budget: the size of a tar header, which reading the member costs whatever
+#: it holds. Without it an archive of empty members was free in bytes.
+MEMBER_FLOOR_BYTES = 512
+
+#: The archives one conversion extracts share a budget of this many times
+#: max_members members and max_total_bytes bytes. Four archives at the
+#: per-archive limits fit, which with the defaults is 400,000 members and 4 GiB,
+#: under the 5 GB GitHub strongly recommends a whole repository stays below. It
+#: follows the per-archive limits, so an operator who raises those raises it too.
+SCAN_BUDGET_ARCHIVES = 4
+
+
+class _ScanBudget:
+    """What the archives already extracted in one conversion have used of its budget."""
+
+    def __init__(self) -> None:
+        self.members = 0
+        self.total = 0
+
+    def commit(self, budget: "_ExtractionBudget") -> None:
+        self.members += budget.members
+        self.total += budget.total
 
 
 class _ExtractionLimitExceeded(Exception):
@@ -173,11 +201,20 @@ class _ExtractionBudget:
     without reading the rest.
     """
 
-    def __init__(self, options: ArchiveConverterConfigOptions, archive_size: int):
+    def __init__(
+        self,
+        options: ArchiveConverterConfigOptions,
+        archive_size: int,
+        scan: Optional[_ScanBudget] = None,
+    ):
         self.options = options
         self.archive_size = max(archive_size, 1)
+        self.scan = scan
         self.members = 0
+        # Bytes counted toward the totals, each member at least MEMBER_FLOOR_BYTES.
         self.total = 0
+        # Bytes the members declare, which the compression ratio is taken over.
+        self.declared = 0
 
     def admit(self, name: str, size: int) -> None:
         options = self.options
@@ -194,22 +231,42 @@ class _ExtractionBudget:
                 f"its member '{name}' declares {size} bytes, outside the "
                 f"max_member_bytes extraction limit of {options.max_member_bytes}",
             )
-        self.total += size
+        self.total += max(size, MEMBER_FLOOR_BYTES)
+        self.declared += size
         if self.total > options.max_total_bytes:
             raise _ExtractionLimitExceeded(
                 "max_total_bytes",
                 f"its members declare more than {options.max_total_bytes} bytes, the "
-                "max_total_bytes extraction limit",
+                "max_total_bytes extraction limit (each member counts at least "
+                f"{MEMBER_FLOOR_BYTES} bytes)",
             )
         if (
-            self.total > RATIO_FLOOR_BYTES
-            and self.total > options.max_compression_ratio * self.archive_size
+            self.declared > RATIO_FLOOR_BYTES
+            and self.declared > options.max_compression_ratio * self.archive_size
         ):
             raise _ExtractionLimitExceeded(
                 "max_compression_ratio",
                 f"its members declare more than {options.max_compression_ratio} times "
                 f"its own size of {self.archive_size} bytes, the "
                 "max_compression_ratio extraction limit",
+            )
+        if self.scan is None:
+            return
+        scan_members = SCAN_BUDGET_ARCHIVES * options.max_members
+        if self.scan.members + self.members > scan_members:
+            raise _ExtractionLimitExceeded(
+                "max_members",
+                "together with the archives this scan extracted before it, it would "
+                f"make more than {scan_members} members, {SCAN_BUDGET_ARCHIVES} "
+                "times the max_members extraction limit",
+            )
+        scan_total = SCAN_BUDGET_ARCHIVES * options.max_total_bytes
+        if self.scan.total + self.total > scan_total:
+            raise _ExtractionLimitExceeded(
+                "max_total_bytes",
+                "together with the archives this scan extracted before it, it would "
+                f"declare more than {scan_total} bytes, {SCAN_BUDGET_ARCHIVES} times "
+                "the max_total_bytes extraction limit",
             )
 
 
@@ -535,6 +592,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
+        # Shared by every archive below; only an archive that is extracted uses it.
+        scan_budget = _ScanBudget()
         for archive_file in archive_files:
             # Whether this iteration made the archive's target directory, so a
             # failure part way through removes what it wrote and nothing else.
@@ -585,6 +644,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     budget = _ExtractionBudget(
                         self._extraction_limits(),
                         os.fstat(archive_handle.fileno()).st_size,
+                        scan=scan_budget,
                     )
 
                     # Extract ZIP to target path after inspecting members
@@ -654,6 +714,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
                 # Add the extracted directory to results
                 results.append(target_path)
+                scan_budget.commit(budget)
             except IsADirectoryError:
                 ASH_LOGGER.debug(f"Skipping directory: {archive_file}")
             except _ExtractionLimitExceeded as exceeded:

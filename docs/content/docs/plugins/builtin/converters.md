@@ -56,7 +56,18 @@ limits. Each is an inclusive maximum on what the archive declares:
 | `max_compression_ratio` | 100                 | that total divided by the archive's size on disk, once the total is over 512 KiB |
 
 Every member counts, including members that would not be extracted, because reading
-a compressed tar means decompressing every member to reach the next header. An
+a compressed tar means decompressing every member to reach the next header, and each
+member counts as at least 512 bytes (a tar header) toward `max_total_bytes`, so an
+archive of empty members is not free.
+
+All the archives one scan extracts (one project, in workspace mode) also share a
+budget of four times `max_members` members and four times `max_total_bytes` bytes:
+400,000 members and 4 GiB with the defaults, four archives at the per-archive limits,
+and under the 5 GB GitHub strongly recommends a whole repository stays below. The
+archive that would take the scan over it is refused, naming `max_members` or
+`max_total_bytes` as the limit to raise, and does not use up the budget, so a later
+archive that still fits is extracted. Raising the per-archive limit raises the shared
+budget with it. An
 archive over any limit is refused whole: nothing from it is written or scanned, and
 it is recorded once, with the limit named, under
 `converter_results.archive.refused_inputs` (see below). Such a refusal counts as

@@ -939,14 +939,14 @@
         },
         "max_members": {
           "default": 100000,
-          "description": "The most members an archive may have, directories included. An archive with more is not extracted.",
+          "description": "The most members an archive may have, directories included. An archive with more is not extracted. All the archives one scan extracts may hold four times this many together.",
           "exclusiveMinimum": 0,
           "title": "Max Members",
           "type": "integer"
         },
         "max_total_bytes": {
           "default": 1073741824,
-          "description": "The most bytes an archive's members may declare added up. An archive whose members declare more is not extracted. Default 1 GiB.",
+          "description": "The most bytes an archive's members may declare added up, each counted as at least 512. An archive whose members declare more is not extracted. All the archives one scan extracts may declare four times this together. Default 1 GiB.",
           "exclusiveMinimum": 0,
           "title": "Max Total Bytes",
           "type": "integer"
