@@ -1,3 +1,4 @@
+import errno
 import json
 import os
 from pathlib import Path
@@ -76,15 +77,29 @@ def _empty_config_path() -> ASHConfigSourceError:
 
 
 def _config_file_not_loadable(config_path: Path) -> ASHConfigSourceError:
-    """The refusal for a config path that is missing or is not a regular file."""
+    """The refusal for a config path that is missing or is not a regular file.
+
+    Classified from ``os.stat`` alone; nothing at the path is opened.
+    """
     where = describe_config_path(config_path)
-    if config_path.is_symlink() and not config_path.exists():
-        return ASHConfigSourceError(
-            f"Configuration file not found: {where} is a symbolic link to a file "
-            "that does not exist."
-        )
-    if not config_path.exists():
+    try:
+        os.stat(config_path)
+    except FileNotFoundError:
+        if os.path.islink(config_path):
+            return ASHConfigSourceError(
+                f"Configuration file not found: {where} is a symbolic link to a "
+                "file that does not exist."
+            )
         return ASHConfigSourceError(f"Configuration file not found: {where}")
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            return ASHConfigSourceError(
+                f"Configuration file {where} is a symbolic link that leads back to "
+                "itself, so it cannot be read."
+            )
+        return ASHConfigSourceError(
+            f"Configuration file {where} cannot be read: {exc.strerror}"
+        )
     return ASHConfigSourceError(
         f"Configuration file {where} is not a regular file, so it cannot be read."
     )

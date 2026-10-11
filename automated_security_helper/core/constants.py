@@ -135,6 +135,11 @@ ASH_CONFIG_SOURCES_DESCRIPTION = (
 ASH_CONFIG_EXTENDS_MAX_DEPTH = 10
 ASH_CONFIG_EXTENDS_MAX_FILES = 50
 
+# The most ASH reads from one config file. A config is text a person edits; ASH's
+# own .ash/.ash.yaml is about 160 KiB. The bound stops a file, or a device at a
+# config name, from being read into memory without limit.
+ASH_CONFIG_MAX_FILE_BYTES = 16 * 1024 * 1024
+
 # The environment variable names an ASH config file may interpolate.
 #
 # Why there is a bound at all

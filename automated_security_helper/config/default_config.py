@@ -19,6 +19,11 @@ def _ash_config_file() -> Optional[Path]:
     config_env_var = os.environ.get("ASH_CONFIG", None)
     if not config_env_var:
         return None
+    if not config_env_var.strip():
+        raise ASHConfigSourceError(
+            "ASH_CONFIG is set to only whitespace. Unset it, or set it to the path "
+            "of a config file."
+        )
     path = Path(config_env_var)
     if not path.exists():
         raise ASHConfigSourceError(

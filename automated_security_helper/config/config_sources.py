@@ -88,6 +88,12 @@ not the path it resolved to. Without a predicate the rules above are unchanged.
 
 Bounds
 ------
+Every config file is opened without blocking and read only when the opened file
+is a regular file, and at most ``ASH_CONFIG_MAX_FILE_BYTES`` of it
+(``read_config_bytes``). A FIFO or a device at a config name, including one
+swapped in after a caller checked the name, is refused rather than blocking the
+scan or being read until memory runs out.
+
 A file that appears twice on its own chain is a cycle and fails with the chain
 printed. The same file reached on two branches (a diamond) is not a cycle. A
 chain deeper than ``ASH_CONFIG_EXTENDS_MAX_DEPTH`` fails, and so does reading
@@ -124,9 +130,12 @@ table cannot be told.
 from __future__ import annotations
 
 import copy
+import errno
+import io
 import json
 import os
 import re
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -144,6 +153,7 @@ from automated_security_helper.core.constants import (
     ASH_CONFIG_EXTENDS_MAX_DEPTH,
     ASH_CONFIG_EXTENDS_MAX_FILES,
     ASH_CONFIG_FILE_NAMES,
+    ASH_CONFIG_MAX_FILE_BYTES,
     ASH_PYPROJECT_FILE_NAME,
     ASH_RC_FILE_NAMES,
 )
@@ -234,17 +244,54 @@ def is_pyproject(path: Path) -> bool:
     return Path(path).name == ASH_PYPROJECT_FILE_NAME
 
 
+def read_config_bytes(path: Path) -> bytes:
+    """A config file's bytes; see "Bounds" in the module docstring.
+
+    Opened with ``O_NONBLOCK``, so opening a FIFO does not wait for a writer, and
+    checked with ``fstat`` on the open descriptor, so what is read is the regular
+    file that was opened and not whatever the name pointed at when a caller
+    checked it. Raises ``OSError`` for anything else, and
+    ``ASHConfigSourceError`` for a file longer than ``ASH_CONFIG_MAX_FILE_BYTES``.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(errno.EINVAL, "not a regular file", os.fspath(path))
+        limit = ASH_CONFIG_MAX_FILE_BYTES
+        chunks: List[bytes] = []
+        remaining = limit + 1
+        while remaining > 0:
+            chunk = os.read(fd, min(remaining, 1 << 20))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+    finally:
+        os.close(fd)
+    if remaining <= 0:
+        raise ASHConfigSourceError(
+            f"{Path(path).as_posix()} is larger than {limit} bytes, the most ASH "
+            "reads from one config file."
+        )
+    return b"".join(chunks)
+
+
 def _read_toml_text(path: Path) -> str:
     """A TOML file's text. A leading UTF-8 byte order mark is dropped, since
     tomllib rejects it and editors on some platforms write one."""
-    text = Path(path).read_text(encoding="utf-8")
+    text = read_config_bytes(path).decode("utf-8")
     return text.removeprefix("\ufeff")
 
 
 def _tool_ash_line(path: Path) -> Optional[int]:
+    # Only a regular file is read: this names a file in messages, including the
+    # one that says a path is not a regular file.
+    if not Path(path).is_file():
+        return None
     try:
         text = _read_toml_text(path)
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeDecodeError, ASHConfigSourceError):
         return None
     match = _TOOL_ASH_PATTERN.search(text)
     if match is None:
@@ -292,7 +339,7 @@ def pyproject_has_ash_table(path: Path) -> bool:
         text = _read_toml_text(path)
     except UnicodeDecodeError as exc:
         # Latin-1 decodes any byte string, which is all the pattern needs.
-        if _TOOL_ASH_PATTERN.search(Path(path).read_bytes().decode("latin-1")):
+        if _TOOL_ASH_PATTERN.search(read_config_bytes(path).decode("latin-1")):
             raise ASHConfigSourceError(
                 f"{describe_config_path(path)} declares an ASH configuration but "
                 f"is not valid UTF-8, which TOML requires: {exc}"
@@ -455,8 +502,9 @@ def read_config_file(path: Path) -> Any:
     """
     path = Path(path)
     if path.name.endswith(".json"):
-        with open(path, mode="r", encoding="utf-8") as f:
-            return json.load(f)
+        # utf-8-sig: a leading byte order mark is dropped, as YAML and TOML drop
+        # it; Windows PowerShell 5 writes one.
+        return json.loads(read_config_bytes(path).decode("utf-8-sig"))
     if path.name.endswith(".toml"):
         try:
             text = _read_toml_text(path)
@@ -486,8 +534,10 @@ def read_config_file(path: Path) -> Any:
                 )
             document = table
         return _resolve_toml_env(document)
-    with open(path, mode="r", encoding="utf-8") as f:
-        return load_yaml_config(f)
+    stream = io.StringIO(read_config_bytes(path).decode("utf-8"))
+    # The name a parse error quotes, as it quoted the open file's.
+    stream.name = os.fspath(path)
+    return load_yaml_config(stream)
 
 
 def default_confinement_root(

@@ -768,7 +768,11 @@
   now exits 3 before any scanner runs, with a message naming the file, as a TOML
   syntax error and a schema error already did. A `pyproject.toml` that cannot be
   read is refused when it would be the source used. The defaults apply only when
-  there is no config file at all; an empty `ASH_CONFIG` counts as unset. The same
+  there is no config file at all; an empty `ASH_CONFIG` counts as unset. A config
+  file is now opened without blocking and read only when it is a regular file, up
+  to 16 MiB, so a FIFO or a device at a config name is refused at once instead of
+  stalling the scan or exhausting memory, and a JSON config with a UTF-8 byte order
+  mark is read as YAML and TOML already were. The same
   refusal applies to `ash report`, `ash plugin list` and `ash dependencies install`
   (each exits 3), to workspace mode (planning, `--dry-run` included, and execution;
   `--config` is now passed to planning and must name an existing file even when
