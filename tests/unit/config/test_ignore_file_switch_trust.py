@@ -171,6 +171,30 @@ class TestARepositoryOrClientConfigCannotSetTheSwitch:
         assert any(CONFIG_KEY in w and "uploaded.yaml" in w for w in warnings), warnings
 
 
+class TestTheWarningSaysWhoWroteTheFile:
+    """An MCP client's upload is not in the scanned tree; the warning must not say it is."""
+
+    def test_an_upload_is_named_as_the_clients(self, tmp_path):
+        source = _repo(tmp_path)
+        uploaded = _outside(tmp_path, _yaml(False), name="uploaded.yaml")
+        _config, warnings = _warnings_while(
+            resolve_config,
+            config_path=uploaded,
+            source_dir=source,
+            untrusted_config=True,
+        )
+        (warning,) = [w for w in warnings if CONFIG_KEY in w]
+        assert "MCP client" in warning, warning
+        assert "inside a git checkout" not in warning, warning
+
+    def test_an_in_tree_file_is_named_as_the_repositorys(self, tmp_path):
+        source = _repo(tmp_path, _yaml(False))
+        _config, warnings = _warnings_while(resolve_config, source_dir=source)
+        (warning,) = [w for w in warnings if CONFIG_KEY in w]
+        assert "inside a git checkout or the scanned directory" in warning, warning
+        assert "MCP client" not in warning, warning
+
+
 class TestControls:
     """Pass today: the harness reaches the trust checks and sees their warnings."""
 

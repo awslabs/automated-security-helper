@@ -83,7 +83,7 @@ class TestTheSummaryLine:
         assert lines == [
             (
                 "Ignore files: the scanned repository's .gitignore and .ignore "
-                "files excluded 7 files from the scan set"
+                "files excluded 7 files from ASH's scan set"
             )
         ], lines
 
@@ -92,7 +92,7 @@ class TestTheSummaryLine:
         assert lines == [
             (
                 "- **Ignore files**: the scanned repository's .gitignore and "
-                ".ignore files excluded 7 files from the scan set"
+                ".ignore files excluded 7 files from ASH's scan set"
             )
         ], lines
 
@@ -101,13 +101,16 @@ class TestTheSummaryLine:
         lines = _lines(request.getfixturevalue(fixture).report(_model(NOT_HONORED)))
         assert len(lines) == 1, lines
         assert "not honored" in lines[0] and "honor_ignore_files: false" in lines[0]
+        # semgrep and opengrep still skip files git ignores, so the sentence is
+        # about ASH's scan set, not about every scanner.
+        assert "excluded no files from ASH's scan set" in lines[0], lines[0]
 
     def test_one_file_is_singular(self, text_reporter):
         record = IgnoreFileExclusions(
             honored=True, excluded_file_count=1, by_ignore_file={".gitignore": 1}
         )
         (line,) = _lines(text_reporter.report(_model(record)))
-        assert line.endswith("excluded 1 file from the scan set"), line
+        assert line.endswith("excluded 1 file from ASH's scan set"), line
 
     def test_files_left_out_of_the_output_directory_are_named(self, text_reporter):
         record = IgnoreFileExclusions(

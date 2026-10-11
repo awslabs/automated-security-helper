@@ -308,9 +308,10 @@ ignore files inside it are not read. ASH also leaves out files on its own: `.git
 CDK assets under `cdk.out/asset.*`, its bundled aws-cdk tree, and its own output
 directory when that is inside the source directory. A CloudFormation
 template (`*.template.json`) an ignore file matches is kept, unless it sits in a
-directory the root `.gitignore` excludes. bandit, semgrep, checkov, grype and syft
-walk the source directory themselves, with their own ignore rules, so this setting
-does not change what they read.
+directory the root `.gitignore` excludes. bandit, semgrep, opengrep, checkov, grype
+and syft walk the source directory themselves, with their own ignore rules, so this
+setting does not change what they read: in a git checkout, semgrep and opengrep
+still skip the files git ignores.
 
 `honor_ignore_files` is a top-level key, and it defaults to `true`. To scan the files
 the repository's ignore files match as well, set it to `false` in a config file
@@ -372,7 +373,8 @@ there, write ASH's output outside the scanned tree with `--output-dir`.
 
 `ash.summary.txt` and `ash.summary.md` print the total in their scan metadata, for
 example `Ignore files: the scanned repository's .gitignore and .ignore files
-excluded 7 files from the scan set`, or say that the ignore files were not honored.
+excluded 7 files from ASH's scan set`, or say that the ignore files were not
+honored.
 `ash report --format text` and `--format markdown` print the same line from the
 stored results. The MCP `get_scan_summary` tool returns the record under
 `metadata.ignore_file_exclusions`. In a workspace scan, each project's record is in

@@ -111,12 +111,15 @@ class IgnoreFileExclusions(BaseModel):
         if self.honored:
             text = (
                 "the scanned repository's .gitignore and .ignore files excluded "
-                f"{self.excluded_file_count} {files} from the scan set"
+                f"{self.excluded_file_count} {files} from ASH's scan set"
             )
         else:
+            # "ASH's scan set" and not more: semgrep and opengrep walk the tree
+            # themselves and still skip what git ignores in a checkout.
             text = (
                 "not honored for this scan (honor_ignore_files: false), so the scanned "
-                "repository's .gitignore and .ignore files excluded no files"
+                "repository's .gitignore and .ignore files excluded no files from "
+                "ASH's scan set"
             )
             if self.excluded_file_count:
                 text += (
