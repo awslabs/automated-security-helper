@@ -140,6 +140,7 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+    destination_options = ("aws_region", "log_group_name", "log_stream_name")
 
     def model_post_init(self, context):
         if self.config is None:

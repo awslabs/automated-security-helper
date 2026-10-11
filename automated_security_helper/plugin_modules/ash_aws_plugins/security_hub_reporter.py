@@ -88,6 +88,7 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+    destination_options = ("aws_region", "aws_profile", "account_id")
 
     def model_post_init(self, context):
         if self.config is None:

@@ -326,10 +326,12 @@ for cls in ash_plugin_manager.plugin_modules("reporter"):
             refuses_paths = refuses_paths and built.extension != "x/../../escaped"
         except Exception:
             pass
+    declared = getattr(cls, "destination_options", None)
     out[plugin_config_key(cls)] = {
         "section": sorted(section),
         "options": options,
         "refuses_paths_in_extension": refuses_paths,
+        "destination_options": None if declared is None else list(declared),
     }
 print(json.dumps(out))
 """
@@ -392,6 +394,24 @@ def test_every_destination_like_option_of_a_built_in_reporter_is_listed(
         assert reporter in reporter_fields, reporter
         paths = {f["path"] for f in reporter_fields[reporter]["options"]}
         assert set(names) <= paths, (reporter, names)
+
+
+def test_each_built_in_reporter_declares_the_options_listed_for_it(reporter_fields):
+    """The table covers a reporter before its plugin package is imported, and the
+    declaration after; the two must not drift apart."""
+    from automated_security_helper.config.reporter_trust import (
+        REPORTER_DESTINATION_OPTIONS,
+    )
+
+    declared = {
+        reporter: fields["destination_options"]
+        for reporter, fields in reporter_fields.items()
+    }
+    assert {
+        reporter: list(REPORTER_DESTINATION_OPTIONS.get(reporter, ()))
+        for reporter in declared
+    } == declared
+    assert set(REPORTER_DESTINATION_OPTIONS) <= set(declared)
 
 
 def test_no_listed_option_has_an_alias(reporter_fields):

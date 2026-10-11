@@ -28,6 +28,9 @@ from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.config.ash_config import (
     AshConfig,
 )
+from automated_security_helper.config.reporter_trust import (
+    confine_declared_reporter_destinations,
+)
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.core.unified_metrics import (
@@ -275,6 +278,14 @@ class ScanExecutionEngine:
         }
         for k, v in self.plugins.items():
             ASH_LOGGER.verbose(f"Discovered {len(v)} {k} plugins at runtime")
+
+        # The plugin modules are loaded, so every reporter's declared destination
+        # options are known: those a config file in the scanned tree set are
+        # replaced by the trusted base's before the report phase builds any reporter.
+        if self._context.config is not None:
+            confine_declared_reporter_destinations(
+                self._context.config, self.plugins["reporter"]
+            )
 
         self.ensure_initialized(self._context.config)
 

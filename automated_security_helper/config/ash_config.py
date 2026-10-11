@@ -1232,6 +1232,16 @@ class AshConfig(BaseModel):
     # instead (config/client_scanner_exclusions.py). Set by resolve_config.
     _client_scanner_exclusions: List[Any] = PrivateAttr(default_factory=list)
 
+    # Set by resolve_config when a file of the config's chain is inside the scanned
+    # tree or was delivered by an MCP client: those files, and the trusted base the
+    # built-in reporters' destination options were taken from, with the reporter
+    # overrides replayed. A reporter a plugin module adds is only known once the
+    # scan imports the module, and its declared destination options are taken from
+    # the same base then (config/reporter_trust.py). Empty, and None, when there
+    # is no such file.
+    _in_tree_config_files: Tuple[Path, ...] = PrivateAttr(default=())
+    _trusted_reporter_base: Optional["AshConfig"] = PrivateAttr(default=None)
+
     # Project information
     project_name: Annotated[
         str,

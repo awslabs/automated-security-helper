@@ -18,6 +18,9 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import (
     reporter_companion_file_names,
 )
+from automated_security_helper.config.reporter_trust import (
+    confine_declared_reporter_destinations,
+)
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.constants import ASH_CONFIG_SOURCES_DESCRIPTION
 from automated_security_helper.core.enums import AshLogLevel, ExportFormat
@@ -209,6 +212,9 @@ def report_command(
     reporter_plugins = ash_plugin_manager.plugin_modules(
         plugin_type="reporter",
     )
+    # The config's plugin modules are loaded now, so the destination options each
+    # reporter declares are known; an in-tree config file does not choose them.
+    confine_declared_reporter_destinations(ash_config, reporter_plugins)
     reporter_plugin = None
     reporter_class = None
 

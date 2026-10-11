@@ -227,6 +227,14 @@
     `log_group_name` and `log_stream_name`. This covers the section under any
     spelling ASH reads as that reporter's, such as `BedrockSummary`. The reporters'
     other options still apply from the tree.
+  - A reporter names the options that choose where it sends or writes findings, or
+    which credentials send them, in `destination_options`, and the AWS reporters now
+    declare theirs. A reporter from `ash_plugin_modules`, `--ash-plugin-modules` or
+    `ASH_PLUGIN_MODULES` gets the same treatment once the scan, or `ash report`, has
+    imported its module: those options come only from the defaults,
+    `--config-overrides` or a config file outside the tree. Under the MCP server a
+    delivered file that sets one is scanned with the server's value rather than
+    refused, since the file is checked before the module is imported.
   - Such a file can no longer add `automated_security_helper.plugin_modules.ash_aws_plugins`
     (or a module inside it) to `ash_plugin_modules`. Its reporters are enabled by
     default and send findings to AWS with the operator's credentials, so only

@@ -318,6 +318,17 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         ReporterWorkspaceBehaviour.PER_PROJECT
     )
 
+    #: Options that choose where findings are sent or written, or which
+    #: credentials send them: a region, an account, a bucket, an endpoint, a
+    #: profile, an output path. Named as the options model's fields; an alias of
+    #: one is covered too. When the config was built from a file inside the
+    #: scanned tree, or from one an MCP client delivered, these options come from
+    #: the trusted base instead: the defaults, an operator config outside the
+    #: tree, and ``--config-overrides`` (config/reporter_trust.py). A ``ClassVar``
+    #: for the same reason as ``workspace_behaviour``: it is read from the class,
+    #: after the plugin modules are imported and before any reporter is built.
+    destination_options: ClassVar[Tuple[str, ...]] = ()
+
     @model_validator(mode="after")
     def setup_paths(self) -> Self:
         """Set up default paths and initialize plugin configuration."""

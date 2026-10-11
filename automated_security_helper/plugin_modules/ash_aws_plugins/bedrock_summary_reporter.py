@@ -273,6 +273,14 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+    destination_options = (
+        "aws_region",
+        "aws_profile",
+        "model_id",
+        "output_file",
+        "output_executive_file",
+        "output_technical_file",
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

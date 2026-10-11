@@ -147,6 +147,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+    destination_options = ("aws_region", "aws_profile", "bucket_name", "key_prefix")
 
     def model_post_init(self, context):
         if self.config is None:
