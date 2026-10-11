@@ -67,6 +67,7 @@ import ast
 import datetime as _dt
 import enum
 import inspect
+import operator
 import sys
 import tempfile
 import textwrap
@@ -235,9 +236,10 @@ def platform_defaults(model: type) -> dict[str, list[tuple[str, Any]]]:
     evaluated once, at import, it is ``True`` on the machine that generated the page
     and ``False`` on a Windows one, so the page would differ by where it was built
     and say something false on the other. The class source is parsed, and a default
-    expression that names ``platform``, ``sys`` or ``os`` is evaluated against each
-    platform in :data:`PLATFORMS`. One that cannot be evaluated that way is reported
-    with the value ``None``, rendered as "depends on the platform".
+    expression that names ``platform``, ``sys`` or ``os`` is evaluated by
+    :func:`evaluate_default` against each platform in :data:`PLATFORMS`. One that
+    cannot be evaluated that way is reported with the value ``None``, rendered as
+    "depends on the platform".
     """
     import types as _types
 
@@ -278,11 +280,7 @@ def platform_defaults(model: type) -> dict[str, list[tuple[str, Any]]]:
                     ),
                 }
                 try:
-                    value = eval(  # noqa: S307 - the model's own default expression
-                        compile(ast.Expression(stmt.value), "<default>", "eval"),
-                        {"__builtins__": {}},
-                        namespace,
-                    )
+                    value = evaluate_default(stmt.value, namespace)
                 except Exception:
                     value = None
                 values.append((label, value))
@@ -291,6 +289,109 @@ def platform_defaults(model: type) -> dict[str, list[tuple[str, Any]]]:
             ):
                 found[name] = values
     return found
+
+
+#: The str methods a default expression may call. ``format`` and ``format_map`` are
+#: left out because a format string reads attributes (``"{0.__class__}"``).
+_STR_METHODS = frozenset(
+    {
+        "lower",
+        "upper",
+        "casefold",
+        "strip",
+        "lstrip",
+        "rstrip",
+        "startswith",
+        "endswith",
+    }
+)
+
+_COMPARISONS = {
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+    ast.Is: operator.is_,
+    ast.IsNot: operator.is_not,
+    ast.In: lambda left, right: left in right,
+    ast.NotIn: lambda left, right: left not in right,
+}
+
+
+def evaluate_default(node: ast.AST, namespace: dict[str, Any]) -> Any:
+    """The value of a default expression, with ``namespace`` holding the stub modules.
+
+    Only the forms a platform-dependent default is written in are read: constants;
+    names, looked up in ``namespace`` alone; attributes of the stubs, ``get`` on the
+    ``os.environ`` stub and the :data:`_STR_METHODS` of a string; calls of those;
+    comparisons; ``and``, ``or`` and ``not``; and ``x if c else y``. ``and``, ``or``,
+    chained comparisons and ``if``/``else`` evaluate only the operands Python would.
+    Any other node, a name not in ``namespace``, and an attribute whose name starts
+    with ``_`` raise ``ValueError``, which :func:`platform_defaults` reports as
+    "depends on the platform". The expression is walked, never compiled or run.
+    """
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Name):
+        if node.id not in namespace:
+            raise ValueError(f"{node.id} is not one of {sorted(namespace)}")
+        return namespace[node.id]
+    if isinstance(node, ast.Attribute):
+        if node.attr.startswith("_"):
+            raise ValueError(f"attribute {node.attr} is not read")
+        base = evaluate_default(node.value, namespace)
+        if isinstance(base, types.SimpleNamespace):
+            return getattr(base, node.attr)
+        if isinstance(base, str) and node.attr in _STR_METHODS:
+            return getattr(base, node.attr)
+        if isinstance(base, dict) and node.attr == "get":
+            return base.get
+        raise ValueError(
+            f"attribute {node.attr} of a {type(base).__name__} is not read"
+        )
+    if isinstance(node, ast.Call):
+        if not isinstance(node.func, ast.Attribute):
+            raise ValueError(
+                f"{ast.unparse(node.func)} is not a method or a stub's function"
+            )
+        function = evaluate_default(node.func, namespace)
+        args = [evaluate_default(arg, namespace) for arg in node.args]
+        kwargs = {}
+        for keyword in node.keywords:
+            if keyword.arg is None:
+                raise ValueError("** arguments are not read")
+            kwargs[keyword.arg] = evaluate_default(keyword.value, namespace)
+        return function(*args, **kwargs)
+    if isinstance(node, ast.Compare):
+        left = evaluate_default(node.left, namespace)
+        result: Any = True
+        for op, comparator in zip(node.ops, node.comparators):
+            compare = _COMPARISONS.get(type(op))
+            if compare is None:
+                raise ValueError(f"comparison {type(op).__name__} is not read")
+            right = evaluate_default(comparator, namespace)
+            result = compare(left, right)
+            if not result:
+                return result
+            left = right
+        return result
+    if isinstance(node, ast.BoolOp):
+        value: Any = None
+        for operand in node.values:
+            value = evaluate_default(operand, namespace)
+            if isinstance(node.op, ast.And) and not value:
+                return value
+            if isinstance(node.op, ast.Or) and value:
+                return value
+        return value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return not evaluate_default(node.operand, namespace)
+    if isinstance(node, ast.IfExp):
+        chosen = node.body if evaluate_default(node.test, namespace) else node.orelse
+        return evaluate_default(chosen, namespace)
+    raise ValueError(f"{type(node).__name__} is not read in a default expression")
 
 
 #: Attribute chains that read the platform. ``os.environ`` is not one: a default

@@ -82,11 +82,13 @@ any test.
 
 from __future__ import annotations
 
+import ast
 import os
 import re
 import subprocess
 import sys
 import textwrap
+import types
 from pathlib import Path
 
 import pytest
@@ -527,6 +529,133 @@ def test_env_and_platform_defaults_are_found_in_the_model_source(
         )
     finally:
         del sys.modules["planted_env_model"]
+
+
+_PLATFORM_LABELS = ("Linux", "macOS", "Windows")
+
+
+def _per_platform(*values) -> list:
+    return list(zip(_PLATFORM_LABELS, values))
+
+
+@pytest.mark.parametrize(
+    "module, name",
+    [
+        ("semgrep_scanner", "SemgrepScannerConfig"),
+        ("opengrep_scanner", "OpengrepScannerConfig"),
+    ],
+)
+def test_scanner_enabled_default_is_evaluated_per_platform(
+    module: str, name: str
+) -> None:
+    """``enabled`` is ``platform.system().lower() != "windows"``: on, except on Windows.
+
+    These two are the platform-dependent defaults ASH has, and that expression is
+    the only form they take. ``evaluate_default`` reads it against each stub
+    platform, so the page says "yes on Linux and macOS; no on Windows" wherever it
+    is generated.
+    """
+    import importlib
+
+    config_cls = getattr(
+        importlib.import_module(
+            f"automated_security_helper.plugin_modules.ash_builtin.scanners.{module}"
+        ),
+        name,
+    )
+    generator = _config_generator()
+    assert generator.platform_defaults(config_cls)["enabled"] == _per_platform(
+        True, True, False
+    )
+
+
+def test_platform_defaults_evaluate_only_the_forms_they_know(tmp_path: Path) -> None:
+    """Every planted default reads the platform; the ones outside the known forms are None.
+
+    The first five use the forms ``evaluate_default`` reads (a str method, ``or``,
+    ``not``, ``x if c else y``, ``os.environ.get`` and ``os.getenv`` with a keyword)
+    and get a value per platform. The rest are a lambda, a subscript of a dunder, a
+    call of a name outside the stub namespace and a dunder attribute: each is
+    "depends on the platform" (``None`` on every platform), never a value.
+    """
+    module_path = tmp_path / "planted_platform_model.py"
+    module_path.write_text(
+        textwrap.dedent(
+            """
+            import os
+            import platform
+            import sys
+            from typing import Any
+
+            from pydantic import BaseModel
+
+
+            class Planted(BaseModel):
+                windows_off: bool = platform.system().lower() != "windows"
+                not_linux: bool = platform.system() == "Windows" or not (
+                    platform.system().startswith("Lin")
+                )
+                chosen: str = "nt" if platform.system() == "Windows" else "posix"
+                from_environ: str = os.environ.get("PLANT_UNSET", os.name)
+                from_getenv: str = os.getenv("PLANT_UNSET", default=sys.platform)
+                by_lambda: Any = (lambda: platform.system())()
+                subscript_of_dunder: Any = platform.system.__globals__["__name__"]
+                outside_name: Any = len(platform.system()) > 0
+                dunder: Any = platform.system().__class__
+            """
+        ),
+        encoding="utf-8",
+    )
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("planted_platform_model", module_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["planted_platform_model"] = module
+    try:
+        spec.loader.exec_module(module)
+        generator = _config_generator()
+        unknown = _per_platform(None, None, None)
+        assert generator.platform_defaults(module.Planted) == {
+            "windows_off": _per_platform(True, True, False),
+            "not_linux": _per_platform(False, True, True),
+            "chosen": _per_platform("posix", "posix", "nt"),
+            "from_environ": _per_platform("posix", "posix", "nt"),
+            "from_getenv": _per_platform("linux", "darwin", "win32"),
+            "by_lambda": unknown,
+            "subscript_of_dunder": unknown,
+            "outside_name": unknown,
+            "dunder": unknown,
+        }
+    finally:
+        del sys.modules["planted_platform_model"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "platform.system().__class__",
+        "platform.system.__globals__",
+        "platform.__dict__",
+        "'{0.__class__}'.format(platform)",
+        "__import__('os')",
+        "len(platform.system())",
+    ],
+)
+def test_evaluate_default_refuses_dunders_and_outside_names(source: str) -> None:
+    """A dunder attribute, ``str.format`` and a name outside the namespace raise.
+
+    The same namespace evaluates ``platform.system().lower()``, so what is refused
+    is the form, not the stub.
+    """
+    generator = _config_generator()
+    namespace = {"platform": types.SimpleNamespace(system=lambda: "Linux")}
+
+    def evaluate(text: str):
+        return generator.evaluate_default(ast.parse(text, mode="eval").body, namespace)
+
+    assert evaluate("platform.system().lower()") == "linux"
+    with pytest.raises(ValueError):
+        evaluate(source)
 
 
 # ---------------------------------------------------------------------------

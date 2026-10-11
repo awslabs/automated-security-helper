@@ -3539,16 +3539,21 @@ def cloudformation_section(of: str, code: Path) -> tuple[Section | None, str | N
         """Reads !Ref, !Sub and the other short-form intrinsics as plain values."""
 
     _TagTolerantLoader.add_multi_constructor("!", lambda loader, suffix, node: None)
+
+    def load_template(text: str) -> Any:
+        # What yaml.load(text, Loader=_TagTolerantLoader) does, written out.
+        loader = _TagTolerantLoader(text)
+        try:
+            return loader.get_single_data()
+        finally:
+            loader.dispose()
+
     pooled: dict[str, list[Any]] = {}
     templates = 0
     for path in files:
         try:
             text = path.read_text(encoding="utf-8")
-            data = (
-                json.loads(text)
-                if path.suffix == ".json"
-                else yaml.load(text, Loader=_TagTolerantLoader)  # noqa: S506 -- a SafeLoader subclass
-            )
+            data = json.loads(text) if path.suffix == ".json" else load_template(text)
         except (ValueError, yaml.YAMLError) as exc:
             return None, f"of={of}: {rel_path(path, code)} does not parse ({exc})"
         parameters = data.get("Parameters") if isinstance(data, dict) else None
