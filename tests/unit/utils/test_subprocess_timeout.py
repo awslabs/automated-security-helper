@@ -158,7 +158,7 @@ class TestTheUvToolPathIsAlsoBounded:
         i.e. none of the scanners.
         """
         from automated_security_helper.utils import subprocess_utils
-        from automated_security_helper.utils.uv_tool_runner import get_uv_tool_runner
+        from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
         captured = {}
 
@@ -166,10 +166,20 @@ class TestTheUvToolPathIsAlsoBounded:
             captured.update(kwargs)
             return {"returncode": 0, "stdout": "", "stderr": ""}
 
-        with patch.object(
-            subprocess_utils, "run_command_with_output_handling", side_effect=_fake
+        # A runner of the test's own, told that uv is there. This test is about
+        # where the timeout goes, not about whether uv is installed, and the
+        # process-wide runner from get_uv_tool_runner() remembers the first
+        # is_uv_available() answer on the worker. A test that probed it through a
+        # subprocess stand-in left that answer False, and this test then failed
+        # with "UV is not available" on whichever xdist worker ran both.
+        runner = UVToolRunner()
+        with (
+            patch.object(runner, "is_uv_available", return_value=True),
+            patch.object(
+                subprocess_utils, "run_command_with_output_handling", side_effect=_fake
+            ),
         ):
-            get_uv_tool_runner().run_tool(
+            runner.run_tool(
                 tool_name="bandit",
                 args=["--version"],
                 results_dir=tmp_path,

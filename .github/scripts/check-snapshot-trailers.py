@@ -517,6 +517,52 @@ def run_check(repo: Path, rng: Range) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _snapshot_dirs(root: Path) -> list[Path]:
+    """Every ``__snapshots__`` directory under ``root/tests`` that git counts as the tree.
+
+    Taken from git, not a walk of the filesystem, because git does not enter an
+    ignored directory. tests/pytest-temp is one, and the unit tests run this on the
+    real checkout while other test workers create and remove directories there; a
+    walk of ``tests`` descended into it, raised FileNotFoundError when a directory
+    went away mid-walk, and reported the workers' own empty ``__snapshots__`` as
+    orphans.
+
+    Tracked files give the directories already committed; an untracked file in one
+    is still checked, because ``find_orphans`` lists each directory it is given. An
+    untracked directory, empty or not, is one entry in ``--directory``'s report, and
+    those entries are walked here with every directory git reports as ignored pruned
+    before the walk can enter it. Empty directories, which this check exists to
+    find, hold no file for git to list, so they arrive only that way.
+    """
+
+    def listing(*args: str) -> list[str]:
+        out = git(root, "ls-files", "-z", *args, "--", "tests")
+        return [entry for entry in out.split("\0") if entry]
+
+    found: set[Path] = set()
+    for entry in listing("--cached"):
+        for parent in PurePosixPath(entry).parents:
+            if parent.name == "__snapshots__":
+                found.add(root / parent)
+
+    ignored = {
+        entry.rstrip("/")
+        for entry in listing(
+            "--others", "--ignored", "--exclude-standard", "--directory"
+        )
+    }
+    for entry in listing("--others", "--exclude-standard", "--directory"):
+        if not entry.endswith("/"):
+            continue
+        for dirpath, dirnames, _files in os.walk(root / entry):
+            here = Path(dirpath)
+            prefix = here.relative_to(root).as_posix()
+            dirnames[:] = [d for d in dirnames if f"{prefix}/{d}" not in ignored]
+            if here.name == "__snapshots__":
+                found.add(here)
+    return sorted(found)
+
+
 def find_orphans(root: Path) -> list[str]:
     """Problems with snapshot files under ``root/tests`` that syrupy cannot report.
 
@@ -524,9 +570,12 @@ def find_orphans(root: Path) -> list[str]:
     ``<mod>.py`` next to the ``__snapshots__`` directory, and no ``__snapshots__``
     directory (or per-module directory inside one) may be empty: an empty one is what a
     deleted snapshot leaves behind locally.
+
+    ``root`` must be a git work tree; see ``_snapshot_dirs`` for why and for what that
+    leaves out, which is ignored directories and nothing else.
     """
     problems = []
-    for snapdir in sorted((root / "tests").rglob("__snapshots__")):
+    for snapdir in _snapshot_dirs(root):
         if not snapdir.is_dir():
             continue
         rel = snapdir.relative_to(root).as_posix()
@@ -817,9 +866,16 @@ def _self_test_orphans(tmp: Path) -> list[str]:
     root = tmp / "orphans"
     snaps = root / "tests/snapshot/__snapshots__"
     (snaps / "test_alive").mkdir(parents=True)
+    git(root, "init", "-q")
     (snaps / "test_alive/case.md").write_text("x")
     (snaps / "test_alive.ambr").write_text("x")
     (root / "tests/snapshot/test_alive.py").write_text("")
+    # An ignored directory is outside the check, the way tests/pytest-temp is: an
+    # empty __snapshots__ in it, and a snapshot with no module, are not reported.
+    (root / ".gitignore").write_text("tests/scratch/\n")
+    (root / "tests/scratch/worker/__snapshots__").mkdir(parents=True)
+    (root / "tests/scratch/other/__snapshots__").mkdir(parents=True)
+    (root / "tests/scratch/other/__snapshots__/test_none.ambr").write_text("x")
     clean = find_orphans(root)
     (snaps / "test_gone.ambr").write_text("x")
     (snaps / "test_gone_dir").mkdir()

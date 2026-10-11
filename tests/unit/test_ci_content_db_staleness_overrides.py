@@ -5,17 +5,22 @@
 
 Why this exists
 ---------------
-``.ash/.ash_community_plugins.yaml`` holds trivy-db to ``warn`` while the upstream trivy-db
-publisher is failing, through a ``content_db_staleness_overrides`` entry with an expiration
-date. At runtime ASH ignores an expired entry, so the gate turns back on by itself. That is
-not enough on its own: a dead entry left in the config reads as if the relaxation were still
-in force, and the next person to copy it inherits the pattern. So this test fails from 00:00
-UTC on the entry's expiration date until the entry is removed.
+A ``content_db_staleness_overrides`` entry in a repo config holds one content database to
+``warn`` until its expiration date. At runtime ASH ignores an expired entry, so the gate turns
+back on by itself. That is not enough on its own: a dead entry left in the config reads as if
+the relaxation were still in force, and the next person to copy it inherits the pattern. So
+this test fails from 00:00 UTC on an entry's expiration date until the entry is removed.
+
+The repo configs hold no override today. The last one held trivy-db to ``warn`` from
+2026-10-07, while aquasecurity/trivy-db's scheduled publish was failing, and was removed once
+the upstream publish had recovered. With no entries, the expiry check is shown to work on a
+planted config instead, so it never passes because there was nothing to check.
 
 The date is read from the config entry itself, never restated here, so the two cannot drift.
 The test also pins what a relaxation may cover: every repo config keeps the scan-wide
-``content_db_staleness: fail``, and only trivy-db may be relaxed. Widening either is a change
-to this test, which a reviewer sees.
+``content_db_staleness: fail``, and only a database named in ``RELAXABLE`` may be relaxed.
+``RELAXABLE`` is empty, so adding an override means adding its database, and the reason, here
+in the same change, where a reviewer sees it.
 """
 
 from __future__ import annotations
@@ -32,10 +37,9 @@ from automated_security_helper.config.ash_config import ContentDbStalenessOverri
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REPO_CONFIGS = sorted((REPO_ROOT / ".ash").glob(".ash*.yaml"))
 COMMUNITY_CONFIG = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"
-#: The databases this repository's configs may relax, and why each one may.
-RELAXABLE = {
-    "trivy-db": "aquasecurity/trivy-db stopped publishing on 2026-10-07",
-}
+#: The databases this repository's configs may relax, and why each one may. Empty while no
+#: upstream publisher is down.
+RELAXABLE: dict = {}
 
 
 def _overrides(path: Path) -> List[ContentDbStalenessOverride]:
@@ -67,18 +71,38 @@ def test_no_repo_config_keeps_an_expired_relaxation():
     assert expired_relaxations(REPO_CONFIGS) == []
 
 
-def test_the_expiry_check_can_fail():
-    """At the community config's own expiration instant the check reports every entry."""
-    entries = _overrides(COMMUNITY_CONFIG)
-    if not entries:
-        pytest.skip("the community config holds no content_db_staleness_overrides")
+def _planted_config(directory: Path) -> Path:
+    """A config with one override, so the expiry check is exercised with or without one."""
+    planted = directory / ".ash_planted.yaml"
+    planted.write_text(
+        "content_db_staleness_overrides:\n"
+        "  - database: trivy-db\n"
+        "    policy: warn\n"
+        '    expiration: "2026-10-11"\n'
+        "    reason: planted by test_the_expiry_check_can_fail\n",
+        encoding="utf-8",
+    )
+    return planted
+
+
+@pytest.mark.parametrize("source", ["planted", "community"])
+def test_the_expiry_check_can_fail(source, ash_temp_path):
+    """At each entry's own expiration instant the check reports it, and not a second before.
+
+    The planted config always holds an entry, so this runs whether or not the community
+    config does; the community case checks its own entries too when it has any.
+    """
+    path = _planted_config(ash_temp_path) if source == "planted" else COMMUNITY_CONFIG
+    entries = _overrides(path)
+    if source == "planted":
+        assert len(entries) == 1, entries
     for entry in entries:
-        at_expiry = expired_relaxations([COMMUNITY_CONFIG], now=entry.expires_at)
+        at_expiry = expired_relaxations([path], now=entry.expires_at)
         assert any(entry.database in message for message in at_expiry), at_expiry
         just_before = entry.expires_at - timedelta(seconds=1)
         assert not any(
             entry.database in message
-            for message in expired_relaxations([COMMUNITY_CONFIG], now=just_before)
+            for message in expired_relaxations([path], now=just_before)
         )
 
 

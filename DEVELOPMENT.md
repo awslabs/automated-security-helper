@@ -86,6 +86,12 @@ This provides a consistent development environment across different platforms an
 
 ## Testing
 
+Run the tests from a git checkout with `git` on `PATH`. Some of them list the
+repository's files with `git ls-files` rather than walking the directory tree (see
+[Do Not Walk the Repository Tree](docs/content/docs/testing/parallel_testing.md)), and so
+do `scripts/verify_docs_freshness.py` and `check-snapshot-trailers.py --orphans`; in a
+copy that is not a git work tree they fail instead of checking nothing.
+
 Run the test suite:
 
 ```bash
@@ -230,7 +236,9 @@ its snapshot file, so `check-snapshot-trailers.py --orphans` (in CI, and in
 directory belongs to a `<test_module>.py` next to that directory, and that no
 `__snapshots__` directory is empty. When you rename a module, move its snapshots with it;
 when you delete one, delete its snapshots. Either change needs a `Snapshot-Update:`
-trailer like any other.
+trailer like any other. The check takes its list from git: tracked snapshots and untracked
+ones that are not ignored, so a snapshot not yet added is checked, and anything under an
+ignored directory, such as `tests/pytest-temp`, is not. It needs a git work tree.
 
 ### Output that differs by operating system
 
@@ -279,6 +287,25 @@ Dependencies are managed in `pyproject.toml`. Key groups:
 - Dev dependencies: defined under `[dependency-groups] dev` (includes ruff, pytest, mypy, mkdocs, etc.)
 
 Scanner tools (Bandit, Checkov, Semgrep) are managed via UV tool isolation at runtime — they're not project dependencies.
+
+### Pinned tool versions
+
+`automated_security_helper/utils/tool_downloads.py` pins every tool ASH provisions
+itself. The weekly ASH - Pinned Tool Versions workflow compares those pins with each
+upstream's latest release; to run the same check locally:
+
+```bash
+uv run python scripts/check_pinned_tool_versions.py
+uv run python scripts/check_pinned_tool_versions.py --fail-on-outdated --markdown
+```
+
+It exits 0 when nothing is behind (or without `--fail-on-outdated`), 1 when a pin is
+behind with `--fail-on-outdated` or a Dockerfile apt pin is no longer installable, and
+2 when a lookup failed or the pins could not be read. GitHub allows 60 anonymous API
+requests an hour per address; set `GITHUB_TOKEN` or `GH_TOKEN` to lift that. A lookup
+GitHub refuses with 403 while the token is set is retried once without it, and GitHub's
+error message goes to stderr. The token is never printed, and it is sent across a
+redirect only to the same scheme, host and port.
 
 ## Troubleshooting
 
