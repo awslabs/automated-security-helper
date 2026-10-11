@@ -956,6 +956,10 @@ def check_doc_site_build() -> list[str]:
     return [str(f) for f in _docs_checks().check_site_build(REPO_ROOT)]
 
 
+def check_doc_release_placeholders() -> list[str]:
+    return [str(f) for f in _docs_checks().check_release_placeholders(REPO_ROOT)]
+
+
 def check_doc_code_links() -> list[str]:
     return [str(f) for f in _docs_checks().check_code_links(REPO_ROOT)]
 
@@ -1057,6 +1061,10 @@ def main(argv: list[str] | None = None) -> int:
         ("Links and anchors in docs resolve", check_doc_links),
         ("Docs navigation and redirects resolve", check_doc_nav),
         ("Docs site build is strict, offline and versioned", check_doc_site_build),
+        (
+            "Release numbers in templates stay out of install commands",
+            check_doc_release_placeholders,
+        ),
         ("Docs links in the ASH source resolve", check_doc_code_links),
         (
             "Option tables and config paths in docs match the models",

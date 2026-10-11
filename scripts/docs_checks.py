@@ -75,6 +75,10 @@ REDIRECT_HOOK = "docs/hooks/redirects.py"
 #: so the main version's install commands install main.
 INSTALL_REFS_HOOK = "docs/hooks/install_refs.py"
 
+#: Renders the version-pinned pages from their templates, and names the forms an
+#: install command can take (check_release_placeholders reads both).
+TEMPLATE_MANAGER = "scripts/version_template_manager.py"
+
 #: The workflow whose build job must run ``mkdocs build --strict``.
 DOCS_WORKFLOW = ".github/workflows/ash-repo-docs.yml"
 
@@ -5168,6 +5172,75 @@ def check_nav(root: Path = REPO_ROOT) -> list[Finding]:
                     f"{old} redirects to {new}, but that page has no anchor '#{fragment}'",
                 )
             )
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Check: a release number never becomes an install ref on the main version
+# ---------------------------------------------------------------------------
+
+
+def check_release_placeholders(root: Path = REPO_ROOT) -> list[Finding]:
+    """No template names the ref of an install command with the release placeholder.
+
+    A template has two placeholders. ``{{VERSION}}`` is the ref an install command
+    uses, and the docs site's main version renders it as ``main``. ``{{RELEASE}}`` is
+    the current release number on every build, for what ``ash --version`` prints and
+    for sentences about a release. Written as the ref of an install command, it would
+    make the main version's docs install a release, so every form the template
+    manager lists (``@v``, ``--branch v``, ``rev: v``, ``refs/tags/v``, a flake ref,
+    ``--ash-revision-to-install v``, ``ash-version: v``) followed by it is reported.
+    A table row and a ``text`` block may name the release: neither is a command a
+    reader runs.
+    """
+    path = root / TEMPLATE_MANAGER
+    if not path.is_file():
+        return [
+            Finding(
+                "templates", TEMPLATE_MANAGER, 1, "the template manager does not exist"
+            )
+        ]
+    manager = _load_by_path(
+        "_ash_version_template_manager", path
+    ).VersionTemplateManager(root)
+    pattern = manager.release_in_install_ref()
+    templates = [
+        root / (target + manager.template_suffix)
+        for target in manager.target_files
+        if (root / (target + manager.template_suffix)).is_file()
+    ]
+    if not templates:
+        return [
+            Finding(
+                "templates",
+                TEMPLATE_MANAGER,
+                1,
+                "no target of the template manager has a template, so nothing was checked",
+            )
+        ]
+    message = (
+        f"{manager.release_placeholder} is the ref of an install command, so the main "
+        f"version of the docs would install a release; use {manager.version_placeholder}, "
+        f"or move the release number to a table or a text sample"
+    )
+    findings: list[Finding] = []
+    for template in templates:
+        page = parse_page(template, root)
+        in_tables = {table.header_line for table in page.tables} | {
+            line for table in page.tables for line, _cells in table.rows
+        }
+        lines = [(line, text) for line, text in page.prose if line not in in_tables]
+        for block in page.blocks:
+            if block.lang != "text":
+                lines += [
+                    (block.body_line + offset, text)
+                    for offset, text in enumerate(block.body.splitlines())
+                ]
+        findings += [
+            Finding("templates", page.rel, line, message)
+            for line, text in sorted(lines)
+            if pattern.search(text)
+        ]
     return findings
 
 

@@ -1966,6 +1966,116 @@ def test_the_real_mkdocs_config_is_strict_and_offline():
 
 
 # ---------------------------------------------------------------------------
+# The release placeholder in templates
+# ---------------------------------------------------------------------------
+
+# Assembled, so this file holds no install reference for the tree walk in
+# test_agent_plugin_ash_version.py to read as a pin.
+_REPO_URL = "https://github.com/awslabs/automated-security-" + "helper"
+_TEMPLATE = "docs/content/how-to/install.md.template"
+
+# Every place the release placeholder is allowed: a text sample, a sentence that is
+# not a command, and a table row, next to an install command that uses {{VERSION}}.
+CLEAN_RELEASE_TEMPLATE = (
+    "# Install\n\n"
+    f"{FENCE}bash\n"
+    "uv tool install 'automated-security-helper @ git+"
+    + _REPO_URL
+    + ".git@v{{VERSION}}'\n"
+    "ash --version\n"
+    f"{FENCE}\n\n"
+    f"{FENCE}text\n"
+    "awslabs/automated-security-helper v{{RELEASE}}\n"
+    f"{FENCE}\n\n"
+    "Each file pins ASH v{{RELEASE}}, the release these files were generated for.\n\n"
+    "| Reference | What you get |\n"
+    "|---|---|\n"
+    "| `@v{{RELEASE}}` | That release. |\n"
+)
+
+
+def _release_site(tmp_path: Path, template: str) -> Path:
+    root = tmp_path / "repo"
+    _write(
+        root,
+        dc.TEMPLATE_MANAGER,
+        (REPO_ROOT / dc.TEMPLATE_MANAGER).read_text(encoding="utf-8"),
+    )
+    _write(root, _TEMPLATE, template)
+    return root
+
+
+def test_release_placeholder_check_passes_a_release_outside_commands(tmp_path):
+    assert (
+        dc.check_release_placeholders(_release_site(tmp_path, CLEAN_RELEASE_TEMPLATE))
+        == []
+    )
+
+
+RELEASE_DEFECTS = [
+    (
+        "git URL",
+        f"{FENCE}bash\npip install 'automated-security-helper @ git+"
+        + _REPO_URL
+        + f".git@v{{{{RELEASE}}}}'\n{FENCE}\n",
+    ),
+    ("uses: in prose", "Pin `uses: ...@v{{RELEASE}}` to a commit.\n"),
+    (
+        "--branch",
+        f"{FENCE}bash\ngit clone --branch v{{{{RELEASE}}}} {_REPO_URL}\n{FENCE}\n",
+    ),
+    (
+        "rev:",
+        f"{FENCE}yaml\nrepos:\n  - repo: {_REPO_URL}\n    rev: v{{{{RELEASE}}}}\n{FENCE}\n",
+    ),
+    (
+        "ls-remote refs",
+        f"{FENCE}bash\ngit ls-remote {_REPO_URL} refs/tags/v{{{{RELEASE}}}}\n{FENCE}\n",
+    ),
+    (
+        "flake ref",
+        (
+            f"{FENCE}bash\nexport ASH_NIX_FLAKE_REF=github:awslabs/automated-security-"
+            f"helper/v{{{{RELEASE}}}}\n{FENCE}\n"
+        ),
+    ),
+    (
+        "--ash-revision-to-install",
+        f"{FENCE}bash\nash build-image --ash-revision-to-install v{{{{RELEASE}}}}\n{FENCE}\n",
+    ),
+    (
+        "ash-version:",
+        f"{FENCE}yaml\nwith:\n  ash-version: v{{{{RELEASE}}}}\n{FENCE}\n",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "case,addition", RELEASE_DEFECTS, ids=[c[0] for c in RELEASE_DEFECTS]
+)
+def test_release_placeholder_check_can_fail(tmp_path, case, addition):
+    template = CLEAN_RELEASE_TEMPLATE + "\n" + addition
+    line = next(
+        number
+        for number, text in enumerate(template.splitlines(), start=1)
+        if "{{RELEASE}}" in text and number > CLEAN_RELEASE_TEMPLATE.count("\n")
+    )
+    findings = dc.check_release_placeholders(_release_site(tmp_path, template))
+    _assert_reports(findings, "is the ref of an install command", line=line)
+    assert len(findings) == 1, _messages(findings)
+
+
+def test_release_placeholder_check_reports_checking_nothing(tmp_path):
+    root = _release_site(tmp_path, CLEAN_RELEASE_TEMPLATE)
+    (root / _TEMPLATE).unlink()
+    _assert_reports(dc.check_release_placeholders(root), "nothing was checked")
+
+
+def test_the_real_templates_keep_release_numbers_out_of_install_commands():
+    assert dc.check_release_placeholders(REPO_ROOT) == []
+
+
+# ---------------------------------------------------------------------------
 # Option tables and config paths in prose
 # ---------------------------------------------------------------------------
 
