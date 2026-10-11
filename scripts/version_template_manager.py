@@ -29,13 +29,19 @@ class VersionTemplateManager:
         # Files to process (relative to project root)
         self.target_files = [
             "README.md",
+            "docs/content/docs/advanced-usage.md",
+            "docs/content/getting-started/ci.md",
             "docs/content/getting-started/local.md",
             "docs/content/getting-started/platform-teams.md",
-            "docs/content/how-to/install.md",
             "docs/content/how-to/agent-plugins.md",
+            "docs/content/how-to/ci/github-actions.md",
+            "docs/content/how-to/ci/gitlab-ci.md",
+            "docs/content/how-to/ci/other-ci.md",
+            "docs/content/how-to/install.md",
+            "docs/content/how-to/pre-commit.md",
             "docs/content/how-to/run-in-a-container.md",
+            "docs/content/how-to/scale-large-repos.md",
             "docs/content/how-to/suppress-findings.md",
-            "docs/content/docs/advanced-usage.md",
             "examples/streamlit_ui/README.md",
         ]
 
