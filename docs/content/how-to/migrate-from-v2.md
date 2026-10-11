@@ -7,11 +7,11 @@ lists what changes for a v2 user and what to do about each.
 
 | | v2 | v3 |
 |---|---|---|
-| Install | clone the repository and add it to `PATH` | install from GitHub with uv, pipx or pip ([Install ASH](install.md)) |
+| Install | clone the repository and add it to `PATH` | install from GitHub with uv, pipx, or pip ([Install ASH](install.md)) |
 | Where scanners run | always in a container built on each run | on your machine, or in a container with `ash --mode container` |
-| Configuration | none | `.ash/.ash.yaml`, with ignore paths, suppressions, thresholds and scanner settings |
+| Configuration | none | `.ash/.ash.yaml`, with ignore paths, suppressions, thresholds, and scanner settings |
 | Output | `ash_output/aggregated_results.txt` | `.ash/ash_output/`, with a JSON results file and a `reports/` directory |
-| Exit code | the highest exit code of any scanner | 0, 1, 2, 3 or 4, each with one meaning |
+| Exit code | the highest exit code of any scanner | 0, 1, 2, 3, or 4, each with one meaning |
 | Requirements | a container runtime | Python 3.10 to 3.14, plus scanner tools or a container runtime |
 
 ## Install v3
@@ -35,8 +35,9 @@ same as `ash scan`.
 | --source-dir | `--source-dir`, unchanged |
 | --output-dir | `--output-dir`. The default is now `.ash/ash_output` inside the source directory, instead of `ash_output`. |
 | --ext, -extension | removed. Choose scanners with `--scanners` and `--exclude-scanners`, or turn them on and off in the configuration. |
-| --format text, --format json | removed. `--format` is now an alias of `--output-formats`, which takes reporter names such as `sarif` or `html`. v3 always writes its JSON results file. |
-| --offline, --offline-semgrep-rulesets | `--offline` and `--offline-semgrep-rulesets`, unchanged |
+| --format text, --format json | changed. `--format` is now an alias of `--output-formats`, which takes reporter names such as `sarif` or `html`. `json` is not one of them, so a v2 `--format json` exits 2 with `'json' is not a valid format`. `text` is the text reporter, so a v2 `--format text` keeps only `ash.summary.txt` in `reports/`. v3 always writes its JSON results file. |
+| --offline | `--offline`. In local mode the scanners then need their databases and rules already on the machine; see [Run ASH offline](run-offline.md). |
+| --offline-semgrep-rulesets | `--offline-semgrep-rulesets`, changed. In v2 it also turned on offline mode. In v3 it only chooses the rulesets an offline container image is built with, and does nothing in local mode; pass `--offline` as well. |
 | --build-target, --no-build, --no-run, --force | unchanged, for container mode |
 | --no-cleanup | accepted. v3 keeps its working files by default; `--cleanup` removes them. |
 | -c, --no-color | `--no-color`. `-c` now means `--config`. |
@@ -85,7 +86,7 @@ scanner's text output. v3 writes `.ash/ash_output/` in the scanned directory:
 - `ash_aggregated_results.json`: every scanner's status and findings.
 - `reports/`: the same results in several formats. `ash.summary.txt` and
   `ash.summary.md` are the closest to v2's file; there are also `ash.html`,
-  `ash.sarif`, `ash.junit.xml`, `ash.csv` and others.
+  `ash.sarif`, `ash.junit.xml`, `ash.csv`, and others.
 - `scanners/`: each scanner's raw output.
 - `ash.log`: the scan's log.
 
@@ -117,10 +118,10 @@ See [Set the gate](set-the-gate.md) and [Exit codes](../reference/exit-codes.md)
 
 ## Scanners
 
-v2 ran git-secrets, bandit, semgrep, checkov, cfn_nag, cdk-nag, npm audit, grype and
+v2 ran git-secrets, bandit, semgrep, checkov, cfn_nag, cdk-nag, npm audit, grype, and
 syft, choosing them by the file types it found. v3 runs actionlint, bandit, cdk-nag,
 cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit,
-opengrep, semgrep, syft, trivy and zizmor. A scanner whose tool is installed shows as
+opengrep, semgrep, syft, trivy, and zizmor. A scanner whose tool is installed shows as
 SKIPPED when the project has nothing for it to scan.
 
 - git-secrets is gone. detect-secrets and gitleaks look for secrets.
@@ -128,7 +129,7 @@ SKIPPED when the project has nothing for it to scan.
 - More scanners can report the same problem, because v3 does not merge findings from
   different scanners.
 
-See [Scanners](../reference/scanners.md).
+See [Scanners reference](../reference/scanners.md).
 
 ## Modes
 
@@ -136,15 +137,16 @@ v2 always ran in a container. v3 has four modes, chosen with `--mode`:
 
 - `local`, the default: scanners run on your machine.
 - `container`: ASH builds its image on your machine and scans inside it. It looks for
-  finch, docker, nerdctl and podman in that order, as v2 did.
+  finch, docker, nerdctl, and podman in that order, as v2 did.
 - `precommit`: a faster scan with a smaller set of scanners, for pre-commit hooks.
-- `nix`: scanners come from ASH's Nix flake; see [Install ASH](install.md#nix-mode).
+- `nix`: scanners come from ASH's Nix flake. No release has it yet; see
+  [Install ASH](install.md#nix-mode).
 
 ## pre-commit and CI
 
-The `ash` pre-commit hook id still exists. In v3 it runs a local scan in precommit mode
+The `ash` pre-commit hook ID still exists. In v3 it runs a local scan in precommit mode
 instead of a full container scan. See [Run ASH with pre-commit](pre-commit.md).
 
 v2's CI examples cloned the repository and ran its script. In v3, install ASH from its
 GitHub URL with a pinned version in the job, or call the reusable GitHub Actions
-workflow. See [Add ASH to CI](../getting-started/ci.md).
+workflow. See [Add ASH to a GitHub Actions pipeline](../getting-started/ci.md).

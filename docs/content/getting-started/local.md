@@ -81,8 +81,10 @@ It prints a table with one row per scanner and ends with a box like this:
 
 The "No install path" line is expected: cdk-nag comes from the `cdk` extra,
 detect-secrets is part of ASH, and npm-audit uses the `npm` that comes with Node.js.
-If Ruby or a C compiler is missing, the cfn-nag install fails, the box reads
-"Installation Incomplete", and the command exits 1. You can continue anyway.
+If Ruby or a C compiler is missing, ASH cannot install cfn-nag. The box still reads
+"Installation Complete" and the command exits 0, but a warning near the top says
+`cfn-nag cannot be installed here`, and cfn-nag appears in the "No install path"
+line. The scan then shows cfn-nag as MISSING; step 5 shows how to leave it out.
 
 [Manage scanner tools](../docs/advanced-usage.md) explains where each tool goes and
 how ASH finds it.
@@ -165,8 +167,8 @@ exit code: 2
 
 Each row is one scanner:
 
-- S is the number of suppressed findings, and C, H, M, L and I count the rest by
-  severity: critical, high, medium, low and informational.
+- S is the number of suppressed findings, and C, H, M, L, and I count the rest by
+  severity: critical, high, medium, low, and informational.
 - Thresh is the lowest severity that counts against the scan. `MED (g)` means MEDIUM,
   set globally, which is the default.
 - Action counts the findings at or above that threshold. bandit found two HIGH
@@ -203,13 +205,15 @@ without Node.js:
 ash --exclude-scanners cdk-nag,npm-audit
 ```
 
-An excluded scanner shows as SKIPPED and does not fail the scan. Add the same
+Without Ruby, add cfn-nag to the list:
+`ash --exclude-scanners cdk-nag,npm-audit,cfn-nag`. An excluded scanner shows as SKIPPED and does not fail the scan. Add the same
 `--exclude-scanners` option to the scans in the rest of this tutorial.
 
 ## 6. Look at a finding
 
-`ash report` prints the latest results in the terminal, one block per actionable
-finding:
+`ash report` prints the latest results in the terminal. After the scan details, a
+legend, the scanner table, and the files with the most findings, it prints one block
+per actionable finding:
 
 <!-- doctest: illustrative reason="reads the results of the scan in step 5, which the docs job does not run" -->
 ```bash
@@ -217,6 +221,7 @@ ash report
 ```
 
 ```text
+...
 Finding 1: B324
 
  • Severity: HIGH
@@ -258,7 +263,7 @@ finding counts again, so set it to a date a few months from today, when you want
 to look at the decision again. Keep the date in quotes: unquoted, YAML reads it as a
 date rather than text, and ASH rejects the whole file with exit code 3. A date in the
 past is accepted, and the suppression then does nothing. [Suppress findings](../how-to/suppress-findings.md)
-covers line ranges, symbols, and inline comments.
+covers line ranges, symbols, and inline suppressions.
 
 ## 8. Scan again
 
@@ -310,6 +315,6 @@ They are still listed in the SARIF and HTML reports.
 - [Suppress findings](../how-to/suppress-findings.md) in other ways, and ignore paths.
 - [Set the gate](../how-to/set-the-gate.md): choose which findings fail a scan.
 - [Run ASH with pre-commit](../how-to/pre-commit.md) before each commit.
-- [Add ASH to CI](ci.md).
-- [Read results](../how-to/read-results.md): what each output file is for.
+- [Add ASH to a GitHub Actions pipeline](ci.md).
+- [Read scan results](../how-to/read-results.md): what each output file is for.
 - [Troubleshoot](../how-to/troubleshoot.md) a scan that does not do what you expect.

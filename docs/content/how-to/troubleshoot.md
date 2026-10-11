@@ -17,31 +17,39 @@ evaluate everything they were given
   grype: MISSING
 ```
 
-Cause: ASH could not find the scanner's tool, or could not install it. Earlier in the
-output, and in `ash.log`, a warning names what is missing, for example
-`Grype executable not found in PATH. Please ensure grype is installed.` For bandit,
-checkov, semgrep, cfn-lint and zizmor, the warning
-`UV tool validation failed - UV is not available but required` means the `uv` command
-is not on your `PATH`, so ASH cannot install them during the scan. A scanner whose
-tool is missing shows MISSING even when the project has nothing for it to scan.
+Cause: ASH could not find the scanner's tool, or could not install it. A warning in
+`ash.log` names what is missing, for example
+`Grype executable not found in PATH. Please ensure grype is installed.` The console
+shows the same warning when the progress display is off (`--no-progress`). For the
+scanners ASH installs with uv, one or both of these warnings mean ASH found no `uv`
+command, so it cannot install them during the scan:
+
+```text
+UV tool validation failed - UV is not available but required
+UV tool execution is required but UV is not available for checkov
+```
+
+A scanner whose tool is missing shows MISSING even when the project has nothing for it
+to scan.
 
 Fix: install the tool, usually with `ash dependencies install --tool grype` (using the
 scanner's name). [When a scanner shows MISSING](../docs/advanced-usage.md#when-a-scanner-shows-missing)
-lists the exceptions: cdk-nag, npm-audit, cfn-nag and the uv-installed scanners. If you
+lists the exceptions: cdk-nag, npm-audit, cfn-nag, and the uv-installed scanners. If you
 do not need the scanner, leave it out with `ash --exclude-scanners grype`, which records
 it as SKIPPED.
 
 ### A tool inside the scanned directory is not run {#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree}
 
-Symptom: a scanner shows MISSING although its tool is installed, and the scan prints:
+Symptom: a scanner shows MISSING although its tool is installed, and `ash.log` has a
+warning like this one (the console shows it too when the progress display is off):
 
 ```text
 Not running grype from inside the scanned tree /home/me/repo: /home/me/repo/.venv/bin/grype. To use it, install it outside the scanned tree, or set ASH_ALLOW_IN_TREE_TOOLS=1 or pass --allow-in-tree-tools to allow tools from the tree.
 ```
 
-The scanner's `missing_reason` in `ash_aggregated_results.json` says the same. The
-message at the end of the scan gives only the general advice to install the missing
-tools.
+The scanner's `missing_reason` in `ash_aggregated_results.json` records the reason, as
+"grype was found only inside the scanned tree, at ...". The message at the end of the
+scan gives only the general advice to install the missing tools.
 
 Cause: during a scan, ASH does not run programs found inside the directory it scans.
 The usual case is a scanner installed in the project's virtual environment or
@@ -65,8 +73,9 @@ Fix: to run them, scan from WSL or in a container. See
 ## Exit codes
 
 ASH exits 0 when nothing is actionable, 1 when the scan is incomplete or failed, 2 when
-it has actionable findings, 3 for an invalid configuration, and 4 for a workspace
-error. When a scan is both incomplete and has findings, it exits 1. See
+it has actionable findings or the command line has a usage error, 3 for an invalid
+configuration, and 4 for a workspace error. When a scan is both incomplete and has
+findings, it exits 1 (a workspace scan exits 2). See
 [Exit codes](../reference/exit-codes.md).
 
 ### The scan exits 1 with no findings
@@ -82,12 +91,18 @@ Cause: the scan is incomplete, or it stopped before running. The last lines say 
   [A content database is stale](#a-content-database-is-stale).
 - `Scan ran no scanners`: every scanner was SKIPPED, so the scan shows nothing about
   the code. The scan then also prints `Exiting due to exception during ASH scan`,
-  although no exception occurred. Check `--scanners`, `--exclude-scanners` and the
+  although no exception occurred. Check `--scanners`, `--exclude-scanners`, and the
   `enabled` settings in your configuration.
-- `None of the requested scanners exist`: a name in `--scanners` is misspelled. Names
-  use hyphens, as `ash plugin list` shows them.
+- `Scan incomplete: N rule(s) could not be evaluated`: cdk-nag rules failed with an
+  error on your templates, so the scan says nothing about them. This case also ends
+  with `Exiting due to exception during ASH scan`. Fix the template the rule fails on,
+  or suppress that rule's findings for the template.
+- `None of the requested scanners exist`: no name in `--scanners` matches a scanner.
+  A single misspelled name among valid ones is only a warning
+  (`No registered scanner matches ...`), and that scanner does not run. Names use
+  hyphens, as `ash plugin list` shows them.
 
-Fix: fix the cause named in the message. To accept a partial scan, pass
+Fix: fix the cause named in the message. To accept an incomplete scan, pass
 `--no-fail-on-incomplete-scanners`, or set `fail_on_incomplete_scanners: false` at the
 top level of your configuration. The scan's own advice says to drop
 `--fail-on-incomplete-scanners`, but the check is on by default, so dropping the flag
@@ -102,7 +117,7 @@ Symptom:
 ERROR (1) Exiting because conversion was incomplete: 1 converter(s) did not process the files they were given
 ```
 
-Cause: ASH converts Jupyter notebooks to Python, and extracts `.zip`, `.tar` and `.gz`
+Cause: ASH converts Jupyter notebooks to Python, and extracts `.zip`, `.tar`, and `.gz`
 archives, before it scans them. A notebook that `nbconvert` could not convert, or an
 archive that cannot be read, fails the scan so that its content is not silently left
 unscanned. The lines after the message name each file and the reason.
@@ -124,6 +139,10 @@ report findings without failing, pass `--no-fail-on-findings`, or set
 `global_settings`. To fail only on more severe findings, set
 `global_settings.severity_threshold`. See [Set the gate](set-the-gate.md).
 
+A usage error also exits 2: an invalid `--output-formats`, `--mode`, or `--strategy`
+value, or an option that `ash` with no subcommand does not know. The scan stops before
+it starts and prints an `Error` box instead of the summary table.
+
 ### The scan exits 3
 
 Symptom:
@@ -134,13 +153,16 @@ global_settings.fail_on_findings
   Extra inputs are not permitted
 ```
 
-Cause: the configuration file has a key ASH does not know, or a value of the wrong type,
-below the top level. A common case is an unquoted `expiration` date in a suppression:
-YAML reads it as a date, and ASH expects text. Quote it, as in `"2027-04-30"`.
+Cause: the configuration file has a key ASH does not know below the top level, or a
+value of the wrong type anywhere, top level included. A common case is an unquoted
+`expiration` date in a suppression: YAML reads it as a date, and ASH expects text.
+Quote it, as in `"2027-04-30"`.
 
-Fix: correct the key or value that the message names. `ash config get` loads and checks
-the file the way a scan does. The message suggests `ash config lint`, but `lint` does
-not report these errors. See [Configure ASH](configure.md).
+Fix: correct the key or value that the message names. `ash config get` loads and
+validates the file; unlike a scan, it also exits 3 when the file is not valid YAML.
+The message suggests `ash config lint`, but `lint` does not report these errors, and
+on an unquoted `expiration` date it stops with a Python error. See
+[Configure ASH](configure.md).
 
 ### Your configuration has no effect
 
@@ -161,7 +183,8 @@ Cause: one of these:
 - The setting is one a repository's file may not set; see the next entry.
 
 Fix: run `ash config validate`, which reports YAML errors and unknown top-level keys,
-and `ash config get`, which reports errors below the top level.
+and `ash config get`, which reports errors below the top level. `ash config validate`
+also reports a missing `project_name`, which a scan does not require.
 
 ### A setting in the repository's config file is ignored
 
@@ -173,23 +196,29 @@ Ignoring sandbox.network_scanners from .ash/.ash.yaml: ...
 
 Cause: some settings decide what ASH may run, read, or send: sandbox grants, plugin
 modules, reporter destinations and credentials, and options that name a scanner's own
-configuration or ignore file. A config file inside the scanned directory, or inside any git checkout, could have been
-written by someone other than you, so ASH ignores those settings from it. The warning
-names each setting and says why.
+configuration or ignore file. A config file inside the scanned directory, or inside
+any git checkout, could have been written by someone other than you, so ASH ignores
+those settings from it. The warning names each setting and says why.
 
 Fix: pass the setting with `--config-overrides`, or put it in a config file outside the
 scanned directory and outside every git checkout and name that file with `--config`.
 A scanner configuration or ignore file that such an option names must also be outside
-the scanned directory. See [Trust model](../concepts/trust-model.md).
+the scanned directory. See [Configuration trust model](../concepts/trust-model.md).
 
 ### The scan exits 4
 
-Cause: a workspace scan (`--workspace`) could not start: the workspace file is missing
-or is not valid JSON, a project path contains `..`, or a project directory does not
-exist. The message names the problem.
+Cause: a workspace scan (`--workspace`) could not start, or a workspace option was used
+without one. The message names the problem. The causes are:
 
-Fix: correct the workspace file, or pass `--allow-missing-projects` to skip projects
-that do not exist. See [Scale to large repositories](scale-large-repos.md).
+- the workspace file is missing or is not valid JSON;
+- `--workspace auto` finds more than one workspace file;
+- a project path contains `..`, or a project directory does not exist;
+- `--source-dir` is given with `--workspace`;
+- `--dry-run`, `--allow-missing-projects`, or `--workspace-config` is given without
+  `--workspace`.
+
+Fix: correct the workspace file or the command line, or pass `--allow-missing-projects`
+to skip projects that do not exist. See [Scale to large repositories](scale-large-repos.md).
 
 ## Output directory
 
@@ -223,17 +252,17 @@ ERROR (1) Exiting because 1 content database(s) are past their declared age boun
 ```
 
 Cause: grype, trivy, and offline semgrep and opengrep read databases that go out of
-date. ASH fails a scan whose database is older than its bound, or whose age it cannot
-read: 120 hours for grype's database, 24 hours for trivy's, and 30 days for the offline
-rulesets. Online scans keep grype's and trivy's databases current, so this usually
-happens offline or with an old image.
+date. ASH fails a scan whose database is past its age bound, or whose age it cannot
+read; [Content databases](../concepts/content-databases.md) lists the bounds. Online
+scans keep grype's and trivy's databases current, so this usually happens offline or
+with an old image.
 
 Fix: refresh the database. For an offline image, rebuild it with
 `ash build-image --offline`. For offline rules on your machine, download them again
 ([Seeding the semgrep and opengrep rule cache](../docs/advanced-usage.md#seeding-the-semgrep-and-opengrep-rule-cache)).
 To scan with the old database anyway, pass `--allow-stale-content-db` or set
-`content_db_staleness: warn`: the scan then passes, and every report names the stale
-database. With `warn`, a scan passes even when a database is missing, so its
+`content_db_staleness: warn`: the stale database then no longer fails the scan, and
+every report names it. With `warn`, a scan passes even when a database is missing, so its
 vulnerability results can be incomplete. See
 [Content databases](../concepts/content-databases.md) and
 [Run ASH offline](run-offline.md).
@@ -345,7 +374,7 @@ image, and fetch enough history in CI for the diff.
 Container mode builds ASH's image on your machine before it scans. Common causes:
 
 - No container runtime. The scan exits 1 with `Unable to resolve an OCI runner`. ASH
-  tries finch, docker, nerdctl and podman, in that order. Install one, or name it with
+  tries finch, docker, nerdctl, and podman, in that order. Install one, or name it with
   `--oci-runner`.
 - A non-numeric user or group ID: `Container UID must be a numeric value`. Pass numbers
   to `--container-uid` and `--container-gid`.
@@ -359,9 +388,9 @@ Container mode builds ASH's image on your machine before it scans. Common causes
 Run container mode from a directory other than the project you scan, and name the
 project with `--source-dir`.
 
-If any of `CI`, `IsCI`, `ISCI` or `CODEBUILD_BUILD_ID` is set, to any value, ASH builds
-the `ci` target, which runs as root, even if you pass
-`ash --mode container --build-target non-root`. On
-Windows, `ash build-image` always builds the `ci` target.
+If any of `CI`, `IsCI`, `ISCI`, or `CODEBUILD_BUILD_ID` is set, to any value, or you pass
+`--custom-containerfile`, ASH builds the `ci` target, which runs as root, even if you
+pass `ash --mode container --build-target non-root`. On Windows, `ash build-image`
+always builds the `ci` target.
 
 See [Run ASH in a container](run-in-a-container.md).
