@@ -27,6 +27,7 @@ in length between machines and moves rich's wrap points.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess  # nosec B404 - the fake runner below starts a Python child on purpose
 import sys
@@ -120,6 +121,35 @@ class FakeStep:
     stderr: str = ""
     #: For ``run``: the results JSON to leave in the mounted output directory.
     results_json: str | None = None
+    #: Whether the run marks its results completed, as an inner ASH run does when it
+    #: finishes. False leaves the file as an ASH older than the host's would.
+    marks_completion: bool = True
+
+
+def completed_by(results_json: str, run_id: str | None) -> str:
+    """``results_json`` with the completion marker an inner run writes for ``run_id``.
+
+    See utils/inner_run_outcome.py. Text that does not parse is returned unchanged,
+    as the inner run could not have marked it either.
+    """
+    try:
+        document = json.loads(results_json)
+    except ValueError:
+        return results_json
+    if run_id is None or not isinstance(document, dict):
+        return results_json
+    document.setdefault("validation_checkpoints", []).append(
+        {"type": "run_completed", "metadata": {"run_id": run_id}}
+    )
+    return json.dumps(document)
+
+
+def _outer_run_id(args: list[str]) -> str | None:
+    """The run ID the host passed with ``-e ASH_OUTER_RUN_ID=...``."""
+    for index, arg in enumerate(args[:-1]):
+        if arg == "-e" and args[index + 1].startswith("ASH_OUTER_RUN_ID="):
+            return args[index + 1].split("=", 1)[1]
+    return None
 
 
 @dataclass
@@ -143,9 +173,14 @@ class FakeOciRunner:
         self.calls.append(subcommand)
         step = {"build": self.build, "run": self.run}[subcommand]
         if subcommand == "run" and step.results_json is not None:
+            results_json = (
+                completed_by(step.results_json, _outer_run_id(args))
+                if step.marks_completion
+                else step.results_json
+            )
             _mounted_output_dir(args).joinpath(
                 "ash_aggregated_results.json"
-            ).write_text(step.results_json, encoding="utf-8")
+            ).write_text(results_json, encoding="utf-8")
         script = (
             "import sys\n"
             f"sys.stdout.write({step.stdout!r})\n"

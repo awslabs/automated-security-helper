@@ -129,6 +129,33 @@
     ''',
   })
 # ---
+# name: test_results_the_container_did_not_mark_completed[0]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+                   INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
+      Running ASH scan using built image...
+                   ERROR    The container run did not complete, so its results are not read back: <TMP>/out/ash_aggregated_results.json holds no record that the run completed. The run's own output above says what stopped it. An ASH older than this one does not write that record: rebuild the image from this ASH.
+  
+    ''',
+  })
+# ---
+# name: test_results_the_container_did_not_mark_completed[2]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+                   INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
+      Running ASH scan using built image...
+                   ERROR    Container execution failed with code 2
+                   ERROR    The container run did not complete, so its results are not read back: <TMP>/out/ash_aggregated_results.json holds no record that the run completed. The run's own output above says what stopped it. An ASH older than this one does not write that record: rebuild the image from this ASH.
+  
+    ''',
+  })
+# ---
 # name: test_success_status_without_results
   dict({
     'exit_code': 1,

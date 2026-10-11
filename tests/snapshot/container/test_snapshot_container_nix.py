@@ -20,6 +20,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.snapshot.container.conftest import completed_by
+
 #: Where the fake says ``nix`` is. Fixed, so the recorded command is the same everywhere.
 FAKE_NIX = "/nix/var/nix/profiles/default/bin/nix"
 
@@ -44,6 +46,9 @@ class FakeNixShell:
     def __init__(self) -> None:
         self.returncode = 0
         self.results_json: str | None = None
+        #: Whether the inner run marks its results completed, as it does when it
+        #: finishes; False leaves them as an ASH older than the host's would.
+        self.marks_completion = True
         self.commands: list[list[str]] = []
         self.environments: list[dict[str, str]] = []
 
@@ -53,8 +58,13 @@ class FakeNixShell:
         if self.results_json is not None:
             out = Path("out")
             out.mkdir(exist_ok=True)
+            results_json = (
+                completed_by(self.results_json, (env or {}).get("ASH_OUTER_RUN_ID"))
+                if self.marks_completion
+                else self.results_json
+            )
             out.joinpath("ash_aggregated_results.json").write_text(
-                self.results_json, encoding="utf-8"
+                results_json, encoding="utf-8"
             )
         return subprocess.CompletedProcess(args=cmd, returncode=self.returncode)
 
@@ -127,6 +137,19 @@ def test_shell_exit_with_results(scan, snapshot, nix_shell, fixture_model):
     # status as a warning and reaches its own verdict from the results.
     nix_shell.returncode = 2
     nix_shell.results_json = fixture_model.model_dump_json()
+    assert (
+        _seen(scan([*SCAN, "--no-fail-on-incomplete-scanners"]), nix_shell) == snapshot
+    )
+
+
+def test_results_the_inner_run_did_not_mark_completed(
+    scan, snapshot, nix_shell, fixture_model
+):
+    # As an older ASH first on PATH inside the shell leaves them: not read back,
+    # and the host exits 1 naming the file, although the shell exited 2.
+    nix_shell.returncode = 2
+    nix_shell.results_json = fixture_model.model_dump_json()
+    nix_shell.marks_completion = False
     assert (
         _seen(scan([*SCAN, "--no-fail-on-incomplete-scanners"]), nix_shell) == snapshot
     )

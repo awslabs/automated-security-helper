@@ -58,6 +58,18 @@ def test_verdict_status_with_results(
     assert fake_docker.calls == ["run"]
 
 
+@pytest.mark.parametrize("returncode", [0, 2])
+def test_results_the_container_did_not_mark_completed(
+    returncode, run_cli, snapshot, fake_docker, results_json
+):
+    # As an image built from an older ASH leaves them: the host does not read them
+    # back, whatever the container's status, and exits 1 naming the file.
+    fake_docker.run = FakeStep(
+        returncode=returncode, results_json=results_json, marks_completion=False
+    )
+    assert run_cli(SCAN) == snapshot
+
+
 def test_success_status_without_results(run_cli, snapshot, fake_docker):
     fake_docker.run = FakeStep(returncode=0, stdout="container wrote nothing\n")
     assert run_cli(SCAN) == snapshot
