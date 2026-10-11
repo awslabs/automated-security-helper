@@ -63,6 +63,22 @@ def mark_inner_run_completed(results_file: Path, run_id: str) -> bool:
     return True
 
 
+def sarif_report_written(results, name: str = "ash.sarif"):
+    """Record in ``results`` that the run's SARIF reporter wrote ``reports/<name>``.
+
+    As the report phase records it, for tests that hand ``_run_local_mode`` or
+    ``_compute_exit_code`` results without running the report phase: only a file
+    so recorded is counted or rewritten as the run's SARIF report. Returns
+    ``results``.
+    """
+    from automated_security_helper.utils.inner_run_outcome import (
+        record_reports_written,
+    )
+
+    record_reports_written(results, [(name, "sarif")])
+    return results
+
+
 def is_under_test_scratch(path: Path) -> bool:
     """Whether ``path`` is one of the tests' own throwaway files.
 

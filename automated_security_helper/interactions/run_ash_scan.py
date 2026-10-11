@@ -99,8 +99,10 @@ from automated_security_helper.utils.inner_run_outcome import (
     take_outer_run_id,
     read_back_outcome,
     record_report_refusal,
+    record_reports_written,
+    records_reports_written,
     release_records_completion,
-    report_written_this_run,
+    report_file_written_as,
     refusal_record,
     write_refusal_results,
 )
@@ -2293,23 +2295,26 @@ def _run_local_mode(
                 confined_report_path,
             )
 
+            # The SARIF report this run's SARIF reporter wrote, under the name its
+            # extension gave it: not an earlier run's report, which --use-existing
+            # keeps in reports/, nor another reporter's file at ash.sarif.
             reports_dir = opts.output_dir / "reports"
-            refuse_linked_report_paths(reports_dir, ["ash.sarif"])
-            sarif_path = confined_report_path(reports_dir, "ash.sarif")
+            sarif_name = report_file_written_as(results, "sarif") or "ash.sarif"
+            refuse_linked_report_paths(reports_dir, ["ash.sarif", sarif_name])
+            sarif_path = confined_report_path(reports_dir, sarif_name)
             if sarif_path is None:
                 # Only when reports/ or the file became a link after the check above.
                 # Skipping the rewrite would leave the unfiltered report in place.
                 raise ReportPathRefused(
-                    f"{(reports_dir / 'ash.sarif').as_posix()} is not a file in "
+                    f"{(reports_dir / sarif_name).as_posix()} is not a file in "
                     f"{reports_dir.as_posix()}, so the --changed-files-only rewrite "
                     "cannot replace it",
                     REMEDY,
                 )
-            # Not an earlier run's report, which --use-existing keeps in reports/.
             if (
                 sarif_path.exists()
                 and results.sarif
-                and report_written_this_run(results, "ash.sarif")
+                and report_file_written_as(results, "sarif") is not None
             ):
                 # Replaced atomically for the same reason as the aggregated file
                 # below: ash.sarif already exists, so a reader waiting on it would
@@ -2319,6 +2324,11 @@ def _run_local_mode(
                     results.sarif.model_dump_json(indent=2, by_alias=True),
                 )
 
+        # A run whose report phase did not run (--phases without report) wrote no
+        # report file, and says so: a reports/ash.sarif something else wrote is not
+        # its report.
+        if isinstance(results, BaseModel) and not records_reports_written(results):
+            record_reports_written(results, [])
         # The run completed: as the inner run of a container or nix scan, say so for
         # the outer process, replacing any record an earlier run left in a results
         # file read back with --use-existing. See utils/inner_run_outcome.py.
@@ -2987,12 +2997,21 @@ def _compute_exit_code(
     else:
         final_fail_on_findings = True
 
+    # The SARIF report this run's SARIF reporter wrote, under the name its extension
+    # gave it. Not reports/ash.sarif as such: --use-existing keeps reports/, so with
+    # no SARIF reporter selected the file there is an earlier run's, and another
+    # reporter's extension can name it. Without such a report the model's own
+    # findings are counted. See utils/inner_run_outcome.py.
+    reports_dir = Path(opts.output_dir).joinpath("reports")
+    sarif_name = report_file_written_as(results, "sarif")
+
     # Not read through a link, which would let the file it points to decide the exit
     # code. The report phase refuses one where the SARIF reporter writes; this covers
     # a run in which that reporter did not write it. Ahead of the fail_on_findings
     # return below, so a link left in reports/ refuses the run either way.
-    sarif_link = Path(opts.output_dir).joinpath("reports", "ash.sarif")
-    found = linked_report_path(sarif_link.parent, [sarif_link.name])
+    found = linked_report_path(
+        reports_dir, ["ash.sarif", *([sarif_name] if sarif_name else [])]
+    )
     if found is not None:
         _refuse_report_path_link(ReportPathLinkRefused(found))
 
@@ -3024,11 +3043,13 @@ def _compute_exit_code(
     # input too. No validated config route produces one -- global_settings is a
     # Literal and ScannerOptionsBase.severity_threshold is Literal | None whose None
     # means "defer to global" -- so this is parity rather than a new behaviour.
-    # Only a SARIF report this run wrote. --use-existing keeps reports/, so with no
-    # SARIF reporter selected the file there is an earlier run's, and counting it
-    # would let that run's findings decide this run's exit code.
-    sarif_file = Path(opts.output_dir).joinpath("reports", "ash.sarif")
-    if sarif_file.exists() and report_written_this_run(results, "ash.sarif"):
+    # Only the SARIF report this run's SARIF reporter wrote (sarif_name above), and
+    # only as a file in reports/: the name comes from the results file, which in
+    # container and nix mode another process wrote.
+    from automated_security_helper.base.reporter_plugin import confined_report_path
+
+    sarif_file = confined_report_path(reports_dir, sarif_name) if sarif_name else None
+    if sarif_file is not None and sarif_file.exists():
         try:
             with open(sarif_file, encoding="utf-8") as f:
                 sarif_json = json.load(f)  # nosec

@@ -896,15 +896,20 @@
   refused before any project is scanned, including for a name that collides with
   `reports/workspace-reports.json`.
 
-- **The exit code counts `reports/ash.sarif` only when the run wrote it.**
+- **The exit code counts only the SARIF report this run's SARIF reporter wrote.**
   `--use-existing` keeps `reports/`, so when no SARIF reporter is selected the
   `ash.sarif` there is an earlier run's, and its findings, or its lack of them,
   used to decide the exit code: a clean earlier report made a run with actionable
-  findings exit 0. The report phase now lists the report files it wrote, as a
-  `reports_written` validation checkpoint, and only a listed `ash.sarif` is
-  counted; otherwise the results' own findings are. The `--changed-files-only`
-  rewrite no longer overwrites such a file either. `ash merge` counts its verdict
-  the same way.
+  findings exit 0. A config could also move the SARIF report aside
+  (`reporters.sarif.extension: sarif.orig`) and give another reporter its name, and
+  the exit code was then counted from that reporter's file. The report phase now
+  lists the report files it wrote with the format of the reporter that wrote each,
+  as a `reports_written` validation checkpoint, and only the file the `sarif`
+  reporter wrote is counted, under the name its extension gave it; otherwise the
+  results' own findings are. A run without a report phase (`--phases` without
+  `report`) records that it wrote no report file, and results with no record count
+  none. The `--changed-files-only` rewrite replaces that same file and no other.
+  `ash merge` counts its verdict the same way.
 
 - **Container and nix mode read the inner run's results back only when that run
   completed.** The outer process gives the inner run an ID (`ASH_OUTER_RUN_ID`).

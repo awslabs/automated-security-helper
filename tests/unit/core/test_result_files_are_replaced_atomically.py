@@ -36,6 +36,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from tests.utils.helpers import sarif_report_written
 
 PREVIOUS = "previous contents, complete"
 _REAL_REPLACE = os.replace
@@ -132,7 +133,11 @@ def test_a_failed_changed_files_sarif_rewrite_leaves_the_previous_sarif_intact(
         source_dir=tmp_path, output_dir=output_dir, changed_files_only=True
     )
     orchestrator = MagicMock()
-    orchestrator.execute_scan.return_value = AshAggregatedResults()
+    # As the report phase records it: the SARIF reporter wrote reports/ash.sarif,
+    # so the rewrite replaces it.
+    orchestrator.execute_scan.return_value = sarif_report_written(
+        AshAggregatedResults()
+    )
     orchestrator.config.fail_on_findings = True
 
     intercepted: List[str] = []

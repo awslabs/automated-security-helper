@@ -65,6 +65,7 @@ from automated_security_helper.interactions.run_ash_scan import (
     run_ash_scan,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from tests.utils.helpers import sarif_report_written
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
@@ -670,7 +671,9 @@ class TestRunLocalModeChangedFiles:
         sarif_path = output_dir / "reports" / "ash.sarif"
         sarif_path.write_text("stale placeholder", encoding="utf-8")
         local_orchestrator(
-            results=AshAggregatedResults(sarif=_sarif_with_uris("app.py"))
+            results=sarif_report_written(
+                AshAggregatedResults(sarif=_sarif_with_uris("app.py"))
+            )
         )
         opts = _opts(
             source_dir, output_dir, changed_files_only=True, base_ref="base-ref"
@@ -679,7 +682,9 @@ class TestRunLocalModeChangedFiles:
         returned, _ = _run_local_mode(opts, logger)
 
         assert returned.sarif.runs[0].results == []
-        assert "app.py" not in sarif_path.read_text(encoding="utf-8")
+        rewritten = sarif_path.read_text(encoding="utf-8")
+        assert rewritten != "stale placeholder"
+        assert "app.py" not in rewritten
 
     def test_a_finding_outside_the_source_dir_is_not_revived_by_the_diff(
         self, local_orchestrator, logger, monkeypatch, tmp_path
@@ -778,8 +783,8 @@ class TestRunLocalModeChangedFiles:
         sarif_path = output_dir / "reports" / "ash.sarif"
         sarif_path.write_text("stale placeholder", encoding="utf-8")
 
-        results = AshAggregatedResults(
-            sarif=_sarif_with_uris("changed.py", "untouched.py")
+        results = sarif_report_written(
+            AshAggregatedResults(sarif=_sarif_with_uris("changed.py", "untouched.py"))
         )
         local_orchestrator(results=results)
         opts = _opts(tmp_path, output_dir, changed_files_only=True)
@@ -897,6 +902,70 @@ class TestChangedFilesRewriteLeavesAnEarlierRunsSarif:
         _run_local_mode(opts, logger)
 
         assert sarif.read_text(encoding="utf-8") == "an earlier run's report"
+
+    def test_the_sarif_reporters_own_file_is_rewritten_under_its_name(
+        self, local_orchestrator, logger, monkeypatch, tmp_path
+    ):
+        """An extension can move the SARIF report aside and put another at ash.sarif."""
+        from automated_security_helper.utils import get_scan_set
+
+        monkeypatch.setattr(
+            get_scan_set, "get_changed_files", lambda base_ref, cwd: ["changed.py"]
+        )
+        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: tmp_path)
+        output_dir = tmp_path / "out"
+        reports = output_dir / "reports"
+        reports.mkdir(parents=True)
+        (reports / "ash.sarif").write_text("another reporter's file", encoding="utf-8")
+        renamed = reports / "ash.sarif.orig"
+        renamed.write_text("unfiltered", encoding="utf-8")
+        results = AshAggregatedResults(
+            sarif=_sarif_with_uris("changed.py", "untouched.py")
+        )
+        results.validation_checkpoints.append(
+            {
+                "type": "reports_written",
+                "metadata": {
+                    "files": ["ash.sarif", "ash.sarif.orig"],
+                    "formats": {"ash.sarif": "cyclonedx", "ash.sarif.orig": "sarif"},
+                },
+            }
+        )
+        local_orchestrator(results=results)
+        opts = _opts(tmp_path, output_dir, changed_files_only=True)
+
+        _run_local_mode(opts, logger)
+
+        rewritten = renamed.read_text(encoding="utf-8")
+        assert "changed.py" in rewritten and "untouched.py" not in rewritten
+        assert (reports / "ash.sarif").read_text(
+            encoding="utf-8"
+        ) == "another reporter's file"
+
+
+class TestARunWithoutAReportPhaseRecordsNoReports:
+    def test_the_results_say_no_report_file_was_written(
+        self, local_orchestrator, logger, tmp_path
+    ):
+        """As for ``--phases convert --phases scan``: no report phase, no record.
+
+        A ``reports/ash.sarif`` something other than a reporter wrote is then not
+        read as this run's report.
+        """
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+        local_orchestrator(results=AshAggregatedResults())
+
+        _run_local_mode(_opts(tmp_path, output_dir), logger)
+
+        written = json.loads(
+            (output_dir / "ash_aggregated_results.json").read_text(encoding="utf-8")
+        )
+        assert [
+            checkpoint["metadata"]
+            for checkpoint in written["validation_checkpoints"]
+            if checkpoint.get("type") == "reports_written"
+        ] == [{"files": [], "formats": {}}]
 
 
 class TestChangedFilesSarifRewriteIsNotSkippedSilently:
@@ -1157,7 +1226,9 @@ class TestComputeExitCodeCorruptSarif:
 
         # One finding is suppressed and the other is a note, which is below the
         # default MEDIUM threshold, so nothing is actionable.
-        assert _compute_exit_code(AshAggregatedResults(), opts) == 0
+        assert (
+            _compute_exit_code(sarif_report_written(AshAggregatedResults()), opts) == 0
+        )
 
 
 class TestComputeExitCodeMinSeverity:

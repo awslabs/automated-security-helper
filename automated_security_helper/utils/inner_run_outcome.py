@@ -53,7 +53,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from automated_security_helper.utils.atomic_write import write_text_atomically
 
@@ -69,8 +69,8 @@ RUN_COMPLETED_CHECKPOINT = "run_completed"
 REPORT_PATH_REFUSED_CHECKPOINT = "report_path_refused"
 
 #: ``type`` of the checkpoint in which the report phase lists the report files it
-#: wrote, so the exit code is not counted from a ``reports/ash.sarif`` an earlier
-#: run left (``report_written_this_run``).
+#: wrote, each with its reporter's format, so the exit code is counted only from
+#: the file this run's SARIF reporter wrote (``report_file_written_as``).
 REPORTS_WRITTEN_CHECKPOINT = "reports_written"
 
 #: The records that say how one run ended: replaced when the run ends.
@@ -162,10 +162,18 @@ def _without_outcome_records(checkpoints: Iterable[Any]) -> List[Any]:
     ]
 
 
-def record_reports_written(results: object, files: Iterable[str]) -> None:
-    """List in ``results`` the report files this run's report phase wrote."""
+def record_reports_written(
+    results: object, written: Iterable[Tuple[str, Optional[str]]]
+) -> None:
+    """List in ``results`` the report files this run wrote, each with its reporter's format.
+
+    ``written`` holds ``(file name, format)`` pairs, the format being the name
+    ``--output-formats`` selects the reporter by (``reporter_format_name``). An
+    empty ``written`` records that the run wrote no report file.
+    """
     if results is None:
         return
+    formats = {name: format_name or None for name, format_name in written}
     checkpoints = [
         checkpoint
         for checkpoint in getattr(results, "validation_checkpoints", None) or []
@@ -179,27 +187,51 @@ def record_reports_written(results: object, files: Iterable[str]) -> None:
             "type": REPORTS_WRITTEN_CHECKPOINT,
             "severity": "info",
             "message": "The report files this run wrote.",
-            "metadata": {"files": sorted(set(files))},
+            "metadata": {
+                "files": sorted(formats),
+                "formats": {name: formats[name] for name in sorted(formats)},
+            },
         }
     )
     setattr(results, "validation_checkpoints", checkpoints)
 
 
-def report_written_this_run(results: object, name: str) -> bool:
-    """Whether this run wrote the report file ``name``, as far as ``results`` says.
-
-    True when no report phase recorded what it wrote, as for results that predate
-    the record, so such a file is read as before.
-    """
+def _reports_written(results: object) -> Optional[Dict[str, Any]]:
+    """The metadata of the ``reports_written`` record in ``results``, or None."""
     for checkpoint in getattr(results, "validation_checkpoints", None) or []:
         if (
             isinstance(checkpoint, dict)
             and checkpoint.get("type") == REPORTS_WRITTEN_CHECKPOINT
         ):
             metadata = checkpoint.get("metadata")
-            files = metadata.get("files") if isinstance(metadata, dict) else None
-            return isinstance(files, list) and name in files
-    return True
+            return metadata if isinstance(metadata, dict) else {}
+    return None
+
+
+def records_reports_written(results: object) -> bool:
+    """Whether ``results`` record which report files their run wrote."""
+    return _reports_written(results) is not None
+
+
+def report_file_written_as(results: object, format_name: str) -> Optional[str]:
+    """The report file this run's ``format_name`` reporter wrote, as ``results`` record it.
+
+    None when no reporter of that format wrote one, when more than one did, and when
+    the results record nothing, as for a run whose report phase did not run. A file
+    in ``reports/`` that is not recorded is not this run's report: ``--use-existing``
+    keeps the reports an earlier run wrote, and another reporter's ``extension`` can
+    name the file a reporter of this format would write.
+    """
+    metadata = _reports_written(results)
+    formats = metadata.get("formats") if metadata is not None else None
+    if not isinstance(formats, dict):
+        return None
+    names = [
+        name
+        for name, written_as in formats.items()
+        if isinstance(name, str) and written_as == format_name
+    ]
+    return names[0] if len(names) == 1 else None
 
 
 def completion_marker(run_id: str) -> Dict[str, Any]:
