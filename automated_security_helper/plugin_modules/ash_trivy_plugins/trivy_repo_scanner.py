@@ -253,6 +253,11 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         Returns:
             dict: Scan results
         """
+        # One instance scans the source and then the converted target, and the
+        # base class keeps the worst exit code across runs; each target records
+        # its own run's code.
+        self.exit_code = 0
+
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (

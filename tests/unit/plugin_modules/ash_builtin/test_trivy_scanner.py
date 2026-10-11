@@ -589,6 +589,71 @@ def test_a_failing_exit_code_refuses_even_a_present_report(tmp_path):
     assert scanner._read_results_file(report)["runs"]
 
 
+def _runs_through_the_base_class(monkeypatch, codes: list) -> list:
+    """Replace only the process call: one exit code per run, with a report written
+    for a run that exits 0. ``_run_subprocess`` and the base class's exit-code
+    accumulation (it keeps the worst code across calls) run for real."""
+    remaining = iter(codes)
+    commands = []
+
+    def run(**kwargs):
+        code = next(remaining)
+        command = kwargs["command"]
+        commands.append(command)
+        if code == 0:
+            out = Path(command[command.index("--output") + 1])
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(VULN_SARIF.read_text(encoding="utf-8"), encoding="utf-8")
+        return {"returncode": code, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(
+        "automated_security_helper.utils.subprocess_utils."
+        "run_command_with_output_handling",
+        run,
+    )
+    return commands
+
+
+def _converted(scanner) -> Path:
+    converted = Path(scanner.context.work_dir) / "archive.zip"
+    converted.mkdir(parents=True)
+    (converted / "requirements.txt").write_text("requests==2.19.0\n")
+    return Path(scanner.context.work_dir)
+
+
+def test_each_target_is_judged_by_its_own_exit_code(tmp_path, monkeypatch):
+    """ScannerExecutor runs one instance over the source, then the converted target.
+    A source run that fails (exit 1) must not make a clean converted run fail too."""
+    scanner = _scanner(tmp_path, offline=True)
+    converted = _converted(scanner)
+    _runs_through_the_base_class(monkeypatch, [1, 0])
+
+    with pytest.raises(ScannerError, match="trivy exited 1"):
+        scanner.scan(scanner.context.source_dir, "source", [])
+    report = scanner.scan(converted, "converted", [])
+
+    assert scanner.exit_code == 0
+    assert report.runs[0].invocations[0].exitCode == 0
+    assert report.get_all_results()
+
+
+def test_trivy_repo_records_each_targets_own_exit_code(tmp_path, monkeypatch):
+    from automated_security_helper.base import scanner_plugin
+
+    monkeypatch.setattr(scanner_plugin, "find_executable", lambda name: f"/bin/{name}")
+    scanner = _repo_scanner(tmp_path, offline=True)
+    scanner.dependencies_satisfied = True
+    monkeypatch.setattr(scanner, "_pre_scan", lambda **kw: True)
+    converted = _converted(scanner)
+    _runs_through_the_base_class(monkeypatch, [1, 0])
+
+    scanner.scan(target=scanner.context.source_dir, target_type="source")
+    report = scanner.scan(target=converted, target_type="converted")
+
+    assert scanner.exit_code == 0
+    assert report.runs[0].invocations[0].exitCode == 0
+
+
 def test_the_community_plugin_command_line_is_unchanged(tmp_path):
     """trivy-repo's flags, in order, as before the shared base existed, plus
     --offline-scan and --skip-version-check, which every trivy scan gets."""

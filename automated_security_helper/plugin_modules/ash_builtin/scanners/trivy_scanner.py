@@ -134,7 +134,9 @@ trivy exits 0 whether or not it finds anything and 1 on any fatal error, so 0 is
 the only success code. ASH passes ``--exit-code=0`` to make sure of the first:
 ``TRIVY_EXIT_CODE`` or an ``exit-code`` in the operator's trivy.yaml would
 otherwise make trivy exit 1 on any finding, and the report would be refused
-(``TrivyScannerBase._run_subprocess``).
+(``TrivyScannerBase._run_subprocess``). Each target (the source tree, then the
+converted files) is judged by its own run's exit code; the base class would
+otherwise carry the worst code from one target into the next (``scan``).
 """
 
 from __future__ import annotations
@@ -419,6 +421,27 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         if not self._reads_vulnerability_db():
             return []
         return super().content_databases_in_use()
+
+    def scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
+        config: Any = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        """The template scan, with each target judged by its own exit code.
+
+        ScannerExecutor runs this one instance over the source and then the
+        converted target, and the base class keeps the worst exit code across
+        runs: a source run that failed (exit 1) made a clean converted run read
+        as "trivy exited 1". Reset above every return of the template.
+        """
+        self.exit_code = 0
+        return super().scan(
+            target, target_type, global_ignore_paths, config, *args, **kwargs
+        )
 
     def _execute_scan(
         self,
