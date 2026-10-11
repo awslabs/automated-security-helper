@@ -28,9 +28,10 @@ Tool results are returned as the dict the tool produced.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import uuid
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, Iterable, List, Optional, Tuple
 
 from typing_extensions import Self
 
@@ -377,18 +378,33 @@ class AsgiSseConnection:
 # ---------------------------------------------------------------------------
 
 
-async def stdio_tool_calls(calls: List[Tuple[str, Dict[str, Any]]]) -> List[Any]:
-    """Run tool calls through the SDK's in-memory client, as a stdio client would.
+@contextlib.asynccontextmanager
+async def local_in_memory_client() -> AsyncIterator[Any]:
+    """The MCP SDK's in-memory client on ASH's server, as the local client.
 
     The in-memory transport hands the server messages with no HTTP request
-    attached, which is exactly what the stdio transport does.
+    attached, which is exactly what the stdio transport does. Such a call is
+    stdio's local client only inside ``serving_local_client()``, which is how
+    ``run_mcp_server`` serves stdio, so the client is connected inside it.
+    ``raise_exceptions=True`` makes a server-side crash a test error rather than
+    a JSON-RPC error result an assertion might read as a tool's refusal.
     """
     from mcp import Client
 
+    from automated_security_helper.cli.mcp.session_identity import (
+        serving_local_client,
+    )
     from automated_security_helper.cli.mcp_server import mcp
 
+    with serving_local_client():
+        async with Client(mcp, raise_exceptions=True) as client:
+            yield client
+
+
+async def stdio_tool_calls(calls: List[Tuple[str, Dict[str, Any]]]) -> List[Any]:
+    """Run tool calls through :func:`local_in_memory_client`, as stdio would."""
     results: List[Any] = []
-    async with Client(mcp, raise_exceptions=True) as client:
+    async with local_in_memory_client() as client:
         for name, arguments in calls:
             result = await client.call_tool(name, arguments)
             structured = getattr(result, "structuredContent", None)

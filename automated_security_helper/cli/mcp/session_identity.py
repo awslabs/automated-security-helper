@@ -40,7 +40,9 @@ image change.
 
 stdio carries no headers and serves a single client, so it resolves to
 ``DEFAULT_SESSION_ID``, the sentinel the profile registry already uses for
-callers that name no session.
+callers that name no session. Only a caller known to be that local client gets
+it (:func:`serving_local_client`): a tool call with no HTTP request behind it is
+not enough on its own.
 
 Which session a network call belongs to is decided by the transport, never by
 the header alone: see :func:`resolve_caller_session_id` and
@@ -69,7 +71,12 @@ disagreed. One rule, several labels (the header, ``session_id``, ``upload_id``).
 
 from __future__ import annotations
 
-from typing import Mapping, Optional
+import contextlib
+from contextvars import ContextVar
+from typing import TYPE_CHECKING, Iterator, Mapping, Optional, cast
+
+if TYPE_CHECKING:
+    from mcp.server.mcpserver import Context as SdkContext
 
 # Lowercase because HTTP header names are case-insensitive and this is compared
 # against a lowercased key.
@@ -84,6 +91,28 @@ UNIDENTIFIED_SESSION_ID = "__unidentified__"
 #: ``error_type`` of the refusal a session-dependent tool returns for
 #: :data:`UNIDENTIFIED_SESSION_ID`.
 SESSION_IDENTITY_REQUIRED = "session_identity_required"
+
+#: Set while the caller is the local client; see :func:`serving_local_client`.
+_LOCAL_CLIENT: ContextVar[bool] = ContextVar("ash_mcp_local_client", default=False)
+
+
+@contextlib.contextmanager
+def serving_local_client() -> Iterator[None]:
+    """Serve tool calls made inside this block as the local client's.
+
+    ``run_mcp_server`` serves stdio inside it, and so should a process that
+    drives the server through the MCP SDK's in-memory client. A tool call with
+    no HTTP request behind it is stdio's ``DEFAULT_SESSION_ID``, with local
+    trust, only inside it; anywhere else it is :data:`UNIDENTIFIED_SESSION_ID`.
+    So a transport that ever hands a tool no request gets remote trust rather
+    than stdio's. Tasks the server starts inside the block inherit the mark.
+    """
+
+    token = _LOCAL_CLIENT.set(True)
+    try:
+        yield
+    finally:
+        _LOCAL_CLIENT.reset(token)
 
 
 def validate_path_component(value: str, label: str) -> str:
@@ -192,24 +221,25 @@ def is_reserved_session_id(value: str) -> bool:
     return value.casefold() in {name.casefold() for name in reserved}
 
 
-def _is_sdk_context(ctx: object) -> bool:
-    """True for a Context the MCP SDK built, False for a stand-in.
+def _as_sdk_context(ctx: object) -> Optional["SdkContext"]:
+    """``ctx`` if it is a Context the MCP SDK built, None for a stand-in.
 
     ``type()`` rather than ``isinstance``: a ``MagicMock(spec=Context)`` passes
     ``isinstance``, and a stand-in carries no request a transport produced.
     """
-    try:
-        from mcp.server.mcpserver import Context as SdkContext
-    except ImportError:  # pragma: no cover - only when the mcp package is absent
-        return False
-    return issubclass(type(ctx), SdkContext)
+    from mcp.server.mcpserver import Context as SdkContext
+
+    if issubclass(type(ctx), SdkContext):
+        return cast("SdkContext", ctx)
+    return None
 
 
 def resolve_caller_session_id(ctx: object) -> str:
     """The session a tool call acts for, decided by the transport it arrived on.
 
-    * No request object (stdio, the SDK's in-memory client): the single local
-      client, :data:`DEFAULT_SESSION_ID`.
+    * No request object: inside :func:`serving_local_client` (stdio, an
+      in-memory client its embedder drives), the single local client,
+      :data:`DEFAULT_SESSION_ID`; anywhere else :data:`UNIDENTIFIED_SESSION_ID`.
     * An HTTP request: the session ``http_sessions.SessionBoundary`` stamped on
       it -- one the server issued, or, on a stateless server run with
       ``--trust-upstream-session-id``, the platform's header. A request with no
@@ -229,16 +259,17 @@ def resolve_caller_session_id(ctx: object) -> str:
         DEFAULT_SESSION_ID,
     )
 
-    if not _is_sdk_context(ctx):
+    sdk_context = _as_sdk_context(ctx)
+    if sdk_context is None:
         return resolve_session_id(getattr(ctx, "headers", None))
 
     try:
-        request = ctx.request_context.request  # type: ignore[attr-defined]
+        request = sdk_context.request_context.request
     except ValueError:
         # A Context used outside a request has no transport behind it.
-        return DEFAULT_SESSION_ID
+        request = None
     if request is None:
-        return DEFAULT_SESSION_ID
+        return DEFAULT_SESSION_ID if _LOCAL_CLIENT.get() else UNIDENTIFIED_SESSION_ID
 
     caller = caller_of(getattr(request, "scope", None))
     if caller is None or caller.session_id is None:
@@ -284,6 +315,7 @@ __all__ = [
     "is_reserved_session_id",
     "resolve_caller_session_id",
     "resolve_session_id",
+    "serving_local_client",
     "session_identity_refusal",
     "validate_path_component",
 ]

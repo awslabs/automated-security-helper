@@ -71,7 +71,7 @@ Source delivery, a bound profile and the scan registry all belong to a session, 
 | streamable-HTTP, `--stateless-http` | none: the server issues no session and the header is client-chosen |
 | streamable-HTTP, `--stateless-http --trust-upstream-session-id` | the `Mcp-Session-Id` header, which the operator declares a platform in front of ASH issues and authenticates |
 
-Every caller on a network transport is remote, whatever headers it sends: it is confined to the operator's grants (`ASH_MCP_ALLOWED_ROOTS`, `ASH_MCP_ALLOWED_CONFIG_ROOTS`) plus its own session workspace, and never gets stdio's local trust.
+Every caller on a network transport is remote, whatever headers it sends: it is confined to the operator's grants (`ASH_MCP_ALLOWED_ROOTS`, `ASH_MCP_ALLOWED_CONFIG_ROOTS`) plus its own session workspace, and never gets stdio's local trust. Local trust goes only to a caller ASH knows is the local client: `ash mcp` on stdio, or a program that drives the server through the MCP SDK's in-memory client inside `automated_security_helper.cli.mcp.session_identity.serving_local_client()`. Any other tool call that reaches the server with no HTTP request behind it, including an in-memory client outside that block, has no session identity.
 
 `ASH_MCP_TRANSPORT` is an operator override on top of that: set to `streamable-http` or `sse`, it makes every caller in the process remote, in-process ones included. It is read stripped and in any case. A value that names no transport (`streamable_http`, say) is treated as remote by an in-process caller, and `ash mcp` refuses to start with it (exit 3) rather than serve with the override in an unknown state.
 

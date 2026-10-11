@@ -65,6 +65,7 @@ from automated_security_helper.cli.mcp.scan_target import (
 )
 from automated_security_helper.cli.mcp.session_identity import (
     resolve_caller_session_id,
+    serving_local_client,
     session_identity_refusal,
 )
 from automated_security_helper.cli.mcp.source_delivery import (
@@ -1979,14 +1980,15 @@ def run_mcp_server():
     stdio serves one client for the life of the process, so its session ends
     when the server does. The default workspace is shared by every stdio server
     of the same user, so it is removed only when the last of them exits; see
-    ``sessions.StdioServerPresence``.
+    ``sessions.StdioServerPresence``. Its one client is the local client, the
+    only caller that gets stdio's local trust (``serving_local_client``).
     """
     from automated_security_helper.cli.mcp.sessions import StdioServerPresence
     from automated_security_helper.utils.subprocess_utils import honor_in_tree_opt_in
 
     honor_in_tree_opt_in(MCP_HONORS_IN_TREE_OPT_IN)
     try:
-        with StdioServerPresence():
+        with StdioServerPresence(), serving_local_client():
             _run_stdio_until_closed()
     except Exception as e:
         # Shutdown must not fail on cleanup.

@@ -136,16 +136,14 @@ async def _await_report_files(output_dir: Path) -> None:
 
 async def _drive_one_scan(source: Path) -> Dict[str, Any]:
     """Run one scan over a real client and return everything it produced."""
-    from mcp import Client
-
-    from automated_security_helper.cli.mcp_server import mcp
+    from tests.utils.mcp_transport_harness import local_in_memory_client
 
     progress_events: List[Tuple[float, Optional[float], Optional[str]]] = []
 
     async def record_progress(progress, total, message):
         progress_events.append((progress, total, message))
 
-    async with Client(mcp, raise_exceptions=True) as client:
+    async with local_in_memory_client() as client:
         started = await client.call_tool(
             "run_ash_scan",
             {"source_dir": str(source)},
