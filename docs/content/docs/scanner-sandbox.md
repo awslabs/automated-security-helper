@@ -223,6 +223,10 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
         # An unset or empty variable, or one naming /, $HOME or a directory above
         # it, grants nothing.
         read_path_env=("MYTOOL_RULES_DIR",),
+        # True for a tool handed a staged copy of its input outside the tree
+        # (the jupyter converter's nbconvert): it may not read the source or
+        # output directory. See "Converters" below.
+        staged_input_only=False,
     )
 ```
 
@@ -348,9 +352,17 @@ nbconvert is missing, which fails the scan if the tree has notebooks.
 The jupyter converter runs nbconvert, a third-party tool, over the repository's
 notebooks, so under a sandbox nbconvert runs with the confinement a scanner gets: no
 network unless `sandbox.network_scanners` names `jupyter`, the environment allowlist,
-read access to a staged copy of the notebook and the tool, and the converter's own
-`<output>/converted/jupyter/` directory as the only writable place. Its version probe
-and dependency check run sandboxed as well. Under a sandbox the converter runs
+and the converter's own `<output>/converted/jupyter/` directory as the only writable
+place. Unlike a scanner, it may not read the source tree or the output directory:
+nbconvert is handed a copy of one notebook in a private directory, and reads that
+copy and its tools (`SandboxRequirements.staged_input_only`). bwrap mounts an empty
+directory over the tree where a wider mount would show it (a checkout under `/opt`),
+and sandbox-exec denies reading the tree and the output directory after the reads it
+allows; both give back the results directory and any tool path inside them. Landlock
+can only grant access and firejail shows everything outside `$HOME` and `/tmp`, so
+under those two a tree inside a directory they show (`/opt`, `/usr/local`, or for
+firejail any directory outside `$HOME` and `/tmp`) stays readable to nbconvert. Its
+version probe and dependency check run sandboxed as well, with the same read scope. Under a sandbox the converter runs
 nbconvert's own `jupyter-nbconvert` executable rather than `uv tool run`, which writes
 uv's tools directory and so cannot run there. The convert phase applies the same scope
 to every converter, so a third-party converter's tool is confined the same way.

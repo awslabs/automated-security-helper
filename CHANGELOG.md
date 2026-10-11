@@ -108,9 +108,11 @@
   Converters are covered too. Under a sandbox the jupyter converter installs nothing
   (it used to install nbconvert when it was missing and ASH was online) and runs
   nbconvert, its version probe and its dependency check sandboxed, with a scanner's
-  confinement: a staged copy of the notebook readable, only
-  `<output>/converted/jupyter/` writable, no network unless
-  `sandbox.network_scanners` names `jupyter`. The convert phase applies the same
+  confinement: only `<output>/converted/jupyter/` writable, no network unless
+  `sandbox.network_scanners` names `jupyter`. nbconvert reads a staged copy of the
+  notebook and its tools, not the source tree or the output directory; under
+  Landlock and firejail a tree inside a directory those backends show (such as
+  `/opt`) stays readable. The convert phase applies the same
   scope to every converter. A notebook the sandbox refused (no backend can be used,
   or the backend cannot plan its run) is listed in the converter's `refused_inputs`;
   that notebook and one nbconvert failed on inside the sandbox are listed in its

@@ -1650,3 +1650,165 @@ class TestSandboxExecWorkingDirectory:
             assert self._chdir_arg(plan) == ""
         finally:
             plan.run_cleanup()
+
+
+class TestAToolGivenAStagedCopy:
+    """A tool handed a staged copy of its input reads that copy, not the scan's tree.
+
+    nbconvert converts one notebook ASH copied to a private directory, so the source
+    and output directories are left out of what it may read
+    (``SandboxRequirements.staged_input_only``). The policy names them, and the
+    backends that can hide a directory inside one they show do: bwrap mounts an
+    empty directory over each, and sandbox-exec denies reading them after the reads
+    it allows. Both give back what the policy lists inside them, the results
+    directory first. A scanner, the control, still reads both.
+    """
+
+    STAGED = SandboxRequirements(staged_input_only=True)
+
+    @pytest.fixture
+    def staging(self, tmp_path):
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        (staging / "analysis.ipynb").write_text("{}")
+        return staging
+
+    @pytest.fixture
+    def under_a_tool_path(self, tmp_path, monkeypatch):
+        """A tree checked out inside a directory every tool reads, as under /opt."""
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        opt = tmp_path / "opt"
+        source = opt / "repo"
+        output = source / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        (opt / "tool").mkdir()
+        return SimpleNamespace(
+            home=home,
+            opt=opt,
+            source=source,
+            output=output,
+            results=output / "converted" / "jupyter",
+        )
+
+    def _staged(self, layout, staging, **overrides):
+        kwargs = {"scan_target": staging, "cwd": staging, **overrides}
+        return _policy(layout, self.STAGED, **kwargs)
+
+    @staticmethod
+    def _reaches(paths, target) -> bool:
+        real = Path(os.path.realpath(target))
+        return any(p == real or p in real.parents or real in p.parents for p in paths)
+
+    def test_the_source_and_output_directories_are_not_readable(self, layout, staging):
+        policy = self._staged(layout, staging)
+
+        readable = _resolved([*policy.read_only, *policy.cache])
+        for withheld in (layout.source, layout.output):
+            assert not self._reaches(readable, withheld), (
+                f"a tool given a staged copy may read {withheld}: {sorted(readable)}"
+            )
+
+    def test_the_staged_copy_is_readable_and_the_results_directory_writable(
+        self, layout, staging
+    ):
+        policy = self._staged(layout, staging)
+
+        assert Path(os.path.realpath(staging)) in _resolved(policy.read_only)
+        assert _resolved(policy.writable) == _resolved([layout.results])
+
+    def test_the_policy_names_the_withheld_directories(self, layout, staging):
+        assert _resolved(self._staged(layout, staging).unread) == _resolved(
+            [layout.source, layout.output]
+        )
+
+    def test_a_scanner_still_reads_the_source_and_output_directories(
+        self, layout, staging
+    ):
+        policy = _policy(layout, scan_target=staging, cwd=staging)
+
+        readable = _resolved(policy.read_only)
+        for scanned in (layout.source, layout.output):
+            assert Path(os.path.realpath(scanned)) in readable
+        assert policy.unread == ()
+
+    def test_bwrap_hides_a_withheld_directory_inside_a_mounted_one(
+        self, under_a_tool_path, staging
+    ):
+        layout = under_a_tool_path
+        policy = self._staged(layout, staging, extra_read_paths=[str(layout.opt)])
+        backend = BwrapBackend()
+        backend._executable = "/usr/bin/bwrap"
+
+        argv = backend.plan(["/usr/bin/true"], {}, policy).argv
+
+        def mount(flag, path):
+            spelled = _as_argv(path)
+            found = [
+                i for i, a in enumerate(argv) if a == flag and argv[i + 1] == spelled
+            ]
+            assert found, f"no {flag} {spelled} in {argv}"
+            return found[0]
+
+        opt = mount("--ro-bind", layout.opt)
+        hidden = mount("--tmpfs", layout.source)
+        results = mount("--bind", layout.results)
+        assert opt < hidden < results, (
+            "the empty directory has to cover the tree after the mount that shows "
+            "it, and before the results directory inside it is mounted"
+        )
+
+    def test_bwrap_mounts_no_empty_directory_for_a_scanner(self, under_a_tool_path):
+        layout = under_a_tool_path
+        policy = _policy(layout, extra_read_paths=[str(layout.opt)])
+        backend = BwrapBackend()
+        backend._executable = "/usr/bin/bwrap"
+
+        argv = backend.plan(["/usr/bin/true"], {}, policy).argv
+
+        tmpfs = {argv[i + 1] for i, a in enumerate(argv) if a == "--tmpfs"}
+        assert _as_argv(layout.source) not in tmpfs
+        assert _as_argv(layout.output) not in tmpfs
+
+    def test_sandbox_exec_denies_the_withheld_directories_after_its_reads(
+        self, under_a_tool_path, staging, tmp_path
+    ):
+        layout = under_a_tool_path
+        tool_inside = layout.source / ".venv"
+        tool_inside.mkdir()
+        policy = self._staged(
+            layout, staging, extra_read_paths=[str(layout.opt), str(tool_inside)]
+        )
+
+        lines = SandboxExecBackend().profile(policy, tmp_path / "private-tmp")
+        lines = lines.splitlines()
+
+        def last(prefix, path):
+            spelled = _as_argv(path)
+            found = [
+                i for i, line in _indexed(lines, prefix) if spelled in _subpaths(line)
+            ]
+            assert found, f"no {prefix} rule names {spelled}"
+            return found[-1]
+
+        shown = last("(allow file-read* (subpath", layout.opt)
+        denied = last("(deny file-read*", layout.source)
+        assert last("(deny file-read*", layout.output) == denied
+        given_back = last("(allow file-read* (subpath", tool_inside)
+        written = last("(allow file-read* file-write*", layout.results)
+        assert shown < denied < given_back, (
+            "the tree has to be denied after the read that shows it, and a tool "
+            "path inside it given back after that"
+        )
+        assert denied < written
+
+    def test_sandbox_exec_denies_nothing_more_for_a_scanner(self, layout, tmp_path):
+        lines = _sbpl(layout, tmp_path)
+
+        denied = set()
+        for _, line in _indexed(lines, "(deny file-read*"):
+            denied |= _subpaths(line)
+        assert _as_argv(layout.source) not in denied
+        assert _as_argv(layout.output) not in denied

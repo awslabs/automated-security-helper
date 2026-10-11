@@ -101,6 +101,12 @@ class SandboxRequirements:
             as broad as a filesystem root, ``$HOME`` or a directory holding
             ``$HOME`` grant nothing. A directory directly under ``$HOME`` (``~/rules``)
             is mounted as named: the operator chose it.
+        staged_input_only: The tool is handed a staged copy of its input outside the
+            scanned tree, and reads nothing else of the scan: nbconvert converts one
+            notebook ASH copied to a private directory. The source and output
+            directories are left out of its read paths and named in the policy's
+            ``unread``, so it reads its scan target, its working directory and its
+            tools, and writes its results directory.
     """
 
     network: bool = False
@@ -116,6 +122,7 @@ class SandboxRequirements:
     read_paths_require_grant: bool = False
     env_requires_grant: bool = False
     read_path_env: Tuple[str, ...] = ()
+    staged_input_only: bool = False
 
 
 #: The baseline environment allowlist. Exact names, then prefixes. Anything else in
@@ -242,6 +249,15 @@ class SandboxPolicy:
     #: it looks for an installed tool. The file, not the directory: writing the
     #: lock changes nothing a later run reads.
     uv_tool_locks: Tuple[Path, ...] = ()
+    #: Directories the tool may not read even where a path the policy shows holds
+    #: them: the source and output directories of a tool given a staged copy
+    #: (``SandboxRequirements.staged_input_only``). bwrap mounts an empty directory
+    #: over each that a wider mount would show, and sandbox-exec denies reading
+    #: them after the reads it allows; both give back what the policy lists inside
+    #: them. Landlock only grants, and firejail shows everything outside ``$HOME``
+    #: and ``/tmp``, so under those a tree inside a directory they show stays
+    #: readable.
+    unread: Tuple[Path, ...] = ()
 
     @property
     def results_dir(self) -> Path:
@@ -764,6 +780,12 @@ def build_scanner_policy(
 
     # Data the tool reads, like the scan's own: readable, never executable.
     env_named_reads = _env_named_read_paths(requirements.read_path_env)
+    # A tool given a staged copy reads that copy (the scan target), not the scan's
+    # tree or its output.
+    unread = (
+        _existing([source_dir, output_dir]) if requirements.staged_input_only else []
+    )
+    scan_tree = [] if requirements.staged_input_only else [source_dir, output_dir]
     read_only = _existing(
         [Path(p) for p in SYSTEM_READ_PATHS]
         + _path_directories(real_home)
@@ -773,7 +795,7 @@ def build_scanner_policy(
         + [_expand(p) for p in declared_read]
         + env_named_reads
         + [_expand(p) for p in extra_read_paths]
-        + [source_dir, output_dir, scan_target, _readable_cwd(cwd)]
+        + [*scan_tree, scan_target, _readable_cwd(cwd)]
     )
 
     cache = _existing([uv_cache_directory()] + [_expand(p) for p in declared_cache])
@@ -834,4 +856,5 @@ def build_scanner_policy(
         sandbox_exec_env=dict(requirements.sandbox_exec_env),
         unpack_dir_env=requirements.unpack_dir_env,
         uv_tool_locks=tuple(_uv_tool_locks()),
+        unread=tuple(unread),
     )

@@ -12,7 +12,7 @@ import subprocess  # nosec B404 — CalledProcessError and TimeoutExpired; spawn
 import tempfile
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Annotated, ContextManager, List, Literal, Optional, Tuple
+from typing import Annotated, ClassVar, ContextManager, List, Literal, Optional, Tuple
 
 from pydantic import Field, PrivateAttr
 
@@ -33,6 +33,7 @@ from automated_security_helper.utils.normalizers import get_normalized_filename
 from automated_security_helper.utils.suppression_matcher import (
     file_path_matches as path_matches_pattern,
 )
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.sandbox.scope import (
     SandboxUnavailable,
     active_scope,
@@ -112,6 +113,12 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
     # it is None because an in-tree copy was refused, the reason.
     _direct_nbconvert: Optional[Tuple[Optional[str], Optional[str]]] = PrivateAttr(
         default=None
+    )
+
+    # nbconvert converts a staged copy of one notebook, so under a sandbox it may not
+    # read the scanned tree or the output directory, only that copy and its tools.
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        staged_input_only=True
     )
 
     def model_post_init(self, context):
@@ -606,7 +613,8 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         ``sandbox.network_scanners`` names this converter, the environment allowlist,
         the staged copy and the tool readable, and only this converter's results
         directory writable. ``staging_dir`` is the scan target, so the copy is
-        readable and nothing else outside the policy is.
+        readable; ``sandbox_requirements`` leaves the source and output directories
+        out of the read paths.
 
         Raises:
             SandboxUnavailable: A sandbox was requested and cannot be provided.

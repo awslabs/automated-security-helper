@@ -682,3 +682,79 @@ class TestTheConverterConfinesItselfOutsideThePhase:
         assert tools.installs() == [], (
             f"the converter installed a tool under a sandbox: {tools.installs()}"
         )
+
+
+class TestNbconvertReadsOnlyItsStagedCopy:
+    """nbconvert is handed a staged copy, so it may not read the scanned tree.
+
+    Every nbconvert process the convert phase starts, the version probe and the
+    dependency check included, is planned without the source or the output
+    directory among the paths it may read. A conversion still reads the staged copy
+    and writes the converter's results directory.
+    """
+
+    @staticmethod
+    def _reaches(paths, target) -> bool:
+        real = Path(os.path.realpath(target))
+        resolved = [Path(os.path.realpath(p)) for p in paths]
+        return any(
+            p == real or p in real.parents or real in p.parents for p in resolved
+        )
+
+    @staticmethod
+    def _tools_beside_the_tree(tmp_path) -> _Tools:
+        # A tool's install prefix is readable (the parent of its bin directory), so
+        # the stand-ins live in a directory of their own rather than in the one that
+        # holds the tree.
+        root = tmp_path / "tools"
+        root.mkdir()
+        return _Tools(root, installed=True)
+
+    def test_no_nbconvert_process_may_read_the_source_or_output_directory(
+        self, tmp_path, tree, backend, monkeypatch
+    ):
+        source, output, home = tree
+        tools = self._tools_beside_the_tree(tmp_path)
+        _isolate_tool_lookup(monkeypatch, tools, home, online=True)
+
+        _run_convert_phase(_context(tree, "bwrap"))
+
+        planned = [
+            (argv, policy)
+            for argv, policy, _env in backend.spawns
+            if _mentions_nbconvert(argv)
+        ]
+        assert any("--to" in argv for argv, _policy in planned), (
+            f"no conversion was planned, so nothing was observed: {tools.calls()}"
+        )
+        for argv, policy in planned:
+            readable = [*policy.read_only, *policy.cache]
+            for withheld in (source, output):
+                assert not self._reaches(readable, withheld), (
+                    f"{argv} may read {withheld}: {sorted(map(str, readable))}"
+                )
+
+    def test_the_conversion_reads_the_staged_copy_and_writes_its_results(
+        self, tmp_path, tree, backend, monkeypatch
+    ):
+        source, output, home = tree
+        tools = self._tools_beside_the_tree(tmp_path)
+        _isolate_tool_lookup(monkeypatch, tools, home, online=True)
+        converter = _converter(_context(tree, "bwrap"))
+
+        converted = converter.convert()
+
+        conversions = [
+            (argv, policy)
+            for argv, policy, _env in backend.spawns
+            if _mentions_nbconvert(argv) and "--to" in argv
+        ]
+        assert conversions, f"no conversion was planned: {tools.calls()}"
+        for argv, policy in conversions:
+            staged = Path(argv[argv.index("--to") + 2])
+            assert not _inside(staged, [source]), f"nbconvert was given {staged}"
+            assert _inside(staged, policy.read_only), (
+                f"the staged copy {staged} is not readable: {policy.read_only}"
+            )
+            assert _inside(converter.results_dir, policy.writable)
+        assert len(converted) == 1

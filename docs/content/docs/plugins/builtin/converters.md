@@ -79,7 +79,10 @@ allow it; see [Tools inside the scanned directory](../../advanced-usage.md#tools
 
 **Under `--sandbox`**: nbconvert, its version probe and its dependency check run in
 the scanner sandbox, and nbconvert is never installed (`install_timeout` does not
-apply); install it first with `ash dependencies install`. When no sandbox backend can
+apply); install it first with `ash dependencies install`. nbconvert may read its copy
+of the notebook and its tools, not the source tree or the output directory (under
+Landlock and firejail, a tree inside a directory those backends show stays
+readable). When no sandbox backend can
 be used, no notebook is converted and each is listed in `refused_inputs`; such a
 notebook, and one nbconvert fails on inside the sandbox, is listed in the row's
 `failed_inputs` and fails the scan while `fail_on_incomplete_scanners` is on. See

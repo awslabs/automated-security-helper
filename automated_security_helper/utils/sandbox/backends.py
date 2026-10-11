@@ -307,6 +307,18 @@ class BwrapBackend(SandboxBackend):
             else:
                 args = ["--bind", src, dst]
             ops.append((len(real.parts), mode, args))
+        # A directory the tool may not read, inside one mounted to show something
+        # else (a checkout under /opt), gets an empty directory over it. Ordered like
+        # the home tmpfs: after the mount around it, before what is mounted inside it,
+        # such as the results directory.
+        unread = sorted({_real(p) for p in policy.unread}, key=lambda p: len(p.parts))
+        for index, real in enumerate(unread):
+            covered = any(_is_within(real, outer) for outer in unread[:index])
+            shown = any(
+                real != mounted and _is_within(real, mounted) for mounted in mounts
+            )
+            if real != Path("/") and shown and not covered:
+                ops.append((len(real.parts), 0, ["--tmpfs", real.as_posix()]))
         ops.sort(key=lambda op: (op[0], op[1]))
 
         cmd: List[str] = [
@@ -915,6 +927,22 @@ class SandboxExecBackend(SandboxBackend):
         ]
         if readable:
             lines.append(f"(allow file-read* {readable})")
+        # Then take back what the tool may not read, wherever it is (a checkout under
+        # /opt is otherwise read through "/" or a tool path), and give back what the
+        # policy lists inside it. The results directory comes back with the
+        # writable paths, next.
+        unread = sorted({_real(p) for p in policy.unread})
+        if unread:
+            lines.append(f"(deny file-read* {_sbpl_subpaths(unread)})")
+            listed_inside = sorted(
+                {
+                    _real(p)
+                    for p in list(policy.read_only) + list(policy.cache)
+                    if any(_is_within(_real(p), u) for u in unread)
+                }
+            )
+            if listed_inside:
+                lines.append(f"(allow file-read* {_sbpl_subpaths(listed_inside)})")
         lines.append(f"(allow file-read* file-write* {writable})")
         lines.append(
             '(allow file-read* file-write* (literal "/dev/null") (literal "/dev/zero")'
