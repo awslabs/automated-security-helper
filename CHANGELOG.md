@@ -83,15 +83,10 @@
   and a scanner whose config section is renamed to another scanner's name is not run
   sandboxed.
 
-  A sandboxed scan whose output directory is a symlink, or is reached through one
-  below the source directory, stops with an error before ASH writes anything there.
-  Whether the sandbox is on is decided the way the scan decides it, so a config file
-  the scanned repository or an MCP client wrote cannot set `sandbox.mode: off` to
-  skip this check while the scan itself still runs sandboxed. Under sandbox-exec,
-  no program runs from the source tree, the output directory or the results
-  directory, apart from a tool path inside one (the virtualenv ASH runs from, say)
-  and the spawn's own private uv cache. That holds for checkov and ferret-scan too,
-  which run from the filesystem root.
+  Under sandbox-exec, no program runs from the source tree, the output directory or
+  the results directory, apart from a tool path inside one (the virtualenv ASH runs
+  from, say) and the spawn's own private uv cache. That holds for checkov and
+  ferret-scan too, which run from the filesystem root.
 
   If a sandbox was requested and cannot be provided, the scanner is recorded
   `MISSING` with the reason and the scan exits 1. ASH never falls back to running it
