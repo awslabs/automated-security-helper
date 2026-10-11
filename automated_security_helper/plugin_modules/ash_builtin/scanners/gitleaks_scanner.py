@@ -480,13 +480,19 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         runs[0]["results"] = results
 
         def key(result: Dict[str, Any]) -> Tuple[Any, ...]:
+            # The whole region, not the fingerprint's line: one fingerprint hides
+            # every match of its rule on the line, and each match is a finding.
             location = ((result.get("locations") or [{}])[0]).get(
                 "physicalLocation", {}
             )
+            region = location.get("region") or {}
             return (
                 (location.get("artifactLocation") or {}).get("uri"),
                 result.get("ruleId"),
-                (location.get("region") or {}).get("startLine"),
+                region.get("startLine"),
+                region.get("startColumn"),
+                region.get("endLine"),
+                region.get("endColumn"),
             )
 
         seen = {key(result) for result in results}

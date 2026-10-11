@@ -655,7 +655,11 @@ def test_under_a_sandbox_gitleaks_config_variables_give_the_default_rules(
 # --------------------------------------------------------------------------- #
 
 
-def _result(uri: str, rule: str, line: int) -> dict:
+def _result(uri: str, rule: str, line: int, column: int | None = None) -> dict:
+    region: dict = {"startLine": line, "snippet": {"text": "REDACTED"}}
+    if column is not None:
+        # As gitleaks writes a region: the match's start and end on its line.
+        region.update(startColumn=column, endLine=line, endColumn=column + 39)
     return {
         "ruleId": rule,
         "message": {"text": f"{rule} has detected secret"},
@@ -663,7 +667,7 @@ def _result(uri: str, rule: str, line: int) -> dict:
             {
                 "physicalLocation": {
                     "artifactLocation": {"uri": uri},
-                    "region": {"startLine": line, "snippet": {"text": "REDACTED"}},
+                    "region": region,
                 }
             }
         ],
@@ -771,3 +775,59 @@ def test_a_failed_re_scan_fails_the_scan(tmp_path, monkeypatch, code):
             scanner._build_arguments(source, results_file),
             results_file,
         )
+
+
+def _add_back(scanner, source: Path, raw: dict, tmp_path: Path) -> list:
+    """Run the add-back for ``raw`` and return its (uri, rule, line, column)s."""
+    results_file = tmp_path / "res" / "gitleaks.sarif"
+    results_file.parent.mkdir(exist_ok=True)
+    scanner._add_back_gitleaksignore_drops(
+        raw, source, scanner._build_arguments(source, results_file), results_file
+    )
+    return sorted(
+        (
+            r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+            r["ruleId"],
+            r["locations"][0]["physicalLocation"]["region"]["startLine"],
+            r["locations"][0]["physicalLocation"]["region"].get("startColumn"),
+        )
+        for r in raw["runs"][0]["results"]
+    )
+
+
+def test_two_secrets_of_one_rule_on_one_line_are_both_added_back(tmp_path, monkeypatch):
+    """A dir-scan fingerprint is <file>:<rule>:<line>, so one .gitleaksignore entry
+    hides every match of that rule on the line. The re-scan reports each of them,
+    told apart by column, and each is a finding."""
+    first = _result("app/two.py", "github-pat", 1, column=6)
+    second = _result("app/two.py", "github-pat", 1, column=54)
+    scanner, calls = _rescan_harness(
+        tmp_path, monkeypatch, {"app/two.py": [first, second]}
+    )
+    source = Path(scanner.context.source_dir)
+    (source / "app").mkdir()
+    (source / "app" / "two.py").write_text("x")
+    (source / ".gitleaksignore").write_text("app/two.py:github-pat:1\n")
+
+    assert _add_back(scanner, source, _report(), tmp_path) == [
+        ("app/two.py", "github-pat", 1, 6),
+        ("app/two.py", "github-pat", 1, 54),
+    ]
+    assert len(calls) == 1
+
+
+def test_a_finding_the_first_run_kept_is_not_added_twice(tmp_path, monkeypatch):
+    """The control for the column in the key: the same match, same column, is the
+    same finding."""
+    hidden = _result("app/two.py", "github-pat", 1, column=6)
+    kept = _result("app/two.py", "github-pat", 1, column=54)
+    scanner, _ = _rescan_harness(tmp_path, monkeypatch, {"app/two.py": [hidden, kept]})
+    source = Path(scanner.context.source_dir)
+    (source / "app").mkdir()
+    (source / "app" / "two.py").write_text("x")
+    (source / ".gitleaksignore").write_text("app/two.py:github-pat:1\n")
+
+    assert _add_back(scanner, source, _report(copy.deepcopy(kept)), tmp_path) == [
+        ("app/two.py", "github-pat", 1, 6),
+        ("app/two.py", "github-pat", 1, 54),
+    ]

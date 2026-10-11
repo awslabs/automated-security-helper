@@ -271,6 +271,44 @@ def test_the_trees_own_gitleaks_config_and_ignore_file_hide_nothing(
     assert HIDDEN_BY_THE_TREE <= _findings(report)
 
 
+def _located(report) -> list:
+    """(rule, uri, line, column) of every result, sorted; duplicates kept."""
+    return sorted(
+        (
+            r.ruleId,
+            r.locations[0].physicalLocation.root.artifactLocation.uri,
+            r.locations[0].physicalLocation.root.region.startLine,
+            r.locations[0].physicalLocation.root.region.startColumn,
+        )
+        for r in report.get_all_results()
+    )
+
+
+def _two_tokens_on_one_line(source: Path) -> list:
+    """Write app/two.py with two github-pat matches on line 1; return them located."""
+    token = fabricated_tokens()["settings_github_pat"]
+    other = token[:-4] + ("YYYY" if token.endswith("ZZZZ") else "ZZZZ")
+    (source / "app").mkdir(parents=True)
+    (source / "app" / "two.py").write_text(
+        f'A = "{token}"; B = "{other}"\n', encoding="utf-8"
+    )
+    return [("github-pat", "app/two.py", 1, 6), ("github-pat", "app/two.py", 1, 54)]
+
+
+def test_one_gitleaksignore_entry_hiding_two_secrets_reports_both(
+    tmp_path, path_with_gitleaks
+):
+    """gitleaks' dir fingerprint is <file>:<rule>:<line>, so one entry hides both."""
+    source = tmp_path / "src"
+    both = _two_tokens_on_one_line(source)
+    # The control: with no ignore file, gitleaks reports both, at two columns.
+    _, plain = _scan_direct(source, tmp_path / "out-plain")
+    assert _located(plain) == both
+    (source / ".gitleaksignore").write_text("app/two.py:github-pat:1\n")
+    _, report = _scan_direct(source, tmp_path / "out")
+    assert _located(report) == both
+
+
 def test_an_operator_config_file_still_applies(tmp_path, path_with_gitleaks):
     source = _copy_fixture(tmp_path)
     operator_config = tmp_path / "operator.toml"
