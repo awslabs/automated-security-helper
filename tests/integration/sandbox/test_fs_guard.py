@@ -31,23 +31,31 @@ def test_a_parent_component_replaced_by_a_link_is_refused(tree):
     root, elsewhere = tree
     (root / "source").rmdir()
     (root / "source").symlink_to(elsewhere, target_is_directory=True)
-    with pytest.raises(OSError):
+    with pytest.raises(fs_guard.OutputLinkRefused):
         with fs_guard.open_for_write(root / "source" / "out.log") as f:
             f.write("x")
     assert list(elsewhere.iterdir()) == []
 
 
-def test_a_link_at_the_file_name_is_replaced_not_followed(tree):
+def test_a_link_at_the_file_name_is_refused_not_followed(tree):
     root, elsewhere = tree
     linked = elsewhere / "linked.txt"
     linked.write_text("original\n")
     target = root / "source" / "out.log"
     target.symlink_to(linked)
-    with fs_guard.open_for_write(target) as f:
-        f.write("written\n")
+    with pytest.raises(fs_guard.OutputLinkRefused):
+        fs_guard.open_for_write(target)
     assert linked.read_text() == "original\n"
-    assert not target.is_symlink()
-    assert target.read_text() == "written\n"
+    assert target.is_symlink(), "the refusal leaves the link where it was"
+
+
+def test_a_link_below_a_results_directory_is_refused_before_a_scan(tree):
+    root, elsewhere = tree
+    (root / "source" / "regular.txt").write_text("x")
+    fs_guard.refuse_links_below(root)
+    (root / "source" / "linked").symlink_to(elsewhere, target_is_directory=True)
+    with pytest.raises(fs_guard.OutputLinkRefused):
+        fs_guard.refuse_links_below(root)
 
 
 def test_a_fifo_at_the_file_name_is_refused_without_blocking(tree):

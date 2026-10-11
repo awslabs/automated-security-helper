@@ -22,7 +22,10 @@ from automated_security_helper.models.scan_results_container import (
     ScanResultsContainer,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.sandbox.fs_guard import sweep_writable
+from automated_security_helper.utils.sandbox.fs_guard import (
+    refuse_links_below,
+    sweep_writable,
+)
 from automated_security_helper.utils.sandbox.scope import (
     SandboxUnavailable,
     sandbox_scope,
@@ -432,6 +435,10 @@ class ScannerExecutor:
                                     f"Scanner sandbox: {scanner_config_name} on "
                                     f"{target_type} runs under {sandbox.backend.name}"
                                 )
+                                # A link already there is refused as ASH's writes
+                                # refuse one; the sweep after each spawn would
+                                # remove it without a word.
+                                refuse_links_below(sandbox.results_dir)
                             heartbeat.start()
                             with sandbox_scope(sandbox):
                                 try:

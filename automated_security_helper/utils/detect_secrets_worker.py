@@ -103,7 +103,9 @@ def main(argv: List[str]) -> int:
     with open(request_path, encoding="utf-8") as f:
         request = json.load(f)
     result = run(request)
-    with open(output_path, "w", encoding="utf-8") as f:
+    # Created, never opened: ASH removes the path before it starts the worker, so
+    # anything there now, a symlink included, was put there by something else.
+    with open(output_path, "x", encoding="utf-8") as f:
         json.dump(result, f)
     return 0
 

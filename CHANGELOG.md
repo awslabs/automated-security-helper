@@ -125,6 +125,15 @@
   tool's version, and the check of a pre-installed tool against the scan's
   requirement are probed again by the next check that asks.
 
+  ASH's own writes below the output directory (worker request files, stream logs,
+  results files) no longer follow a symlink, with or without a sandbox. The default
+  output directory is inside the scanned tree, so a link committed at one of those
+  paths used to redirect the write when the sandbox was off. A link at any
+  component of the path now stops the write (`OutputLinkRefused`) and the scanner is
+  `ERROR`; under a sandbox, a link already below a results directory when its
+  scanner starts is refused the same way, where the sweep after the spawn used to
+  remove it.
+
   If a sandbox was requested and cannot be provided, the scanner is recorded
   `MISSING` with the reason and the scan exits 1. ASH never falls back to running it
   unsandboxed. `auto` picks bubblewrap, then firejail, then Landlock on Linux, and

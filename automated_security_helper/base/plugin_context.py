@@ -133,6 +133,20 @@ class PluginContext(BaseModel):
         super().__setattr__(name, value)
 
     @model_validator(mode="after")
+    def _guard_output_dir(self) -> "PluginContext":
+        # ASH's own writes below the output directory never follow a symlink, with
+        # or without a sandbox: the default output directory is inside the
+        # scanned tree. See utils/sandbox/fs_guard.py:open_for_write.
+        output_dir = getattr(self, "output_dir", None)
+        if output_dir is not None:
+            from automated_security_helper.utils.sandbox.fs_guard import (
+                register_writable_root,
+            )
+
+            register_writable_root(output_dir)
+        return self
+
+    @model_validator(mode="after")
     def _derive_work_dir(self) -> "PluginContext":
         # Guard against re-validation of test mocks / spec'd instances that may
         # not expose ``work_dir`` or ``output_dir`` as real attributes.

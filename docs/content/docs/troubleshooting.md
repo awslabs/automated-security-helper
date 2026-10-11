@@ -614,3 +614,25 @@ For an archive that cannot be read, replace it with an intact copy, or exclude i
 For an LFS pointer, fetch the LFS objects before the scan: `git lfs pull`, or
 `lfs: true` on the CI checkout step. See
 [Archive Converter](plugins/builtin/converters.md#archive-converter).
+
+## A Scanner Is ERROR Because a Path Below the Output Directory Is a Symlink
+
+**Symptom**
+
+A scanner row is `ERROR`, and its error ends with:
+
+```
+.ash/ash_output/scanners/detect-secrets/source/results_sarif.sarif was not written: .ash/ash_output/scanners/detect-secrets/source/results_sarif.sarif is a symlink, and ASH does not write through a symlink below its output directory
+```
+
+**Cause**
+
+ASH found a symlink at a path it writes below its output directory, or at a
+directory on the way to it, and did not write through it. This holds with and
+without `--sandbox`. With a sandbox, a symlink anywhere below the scanner's results
+directory before the scanner starts is refused the same way. The default output
+directory is inside the scanned tree, so the link usually came with the repository.
+
+**Fix**
+
+Remove the link, or pass an `--output-dir` outside the scanned tree.

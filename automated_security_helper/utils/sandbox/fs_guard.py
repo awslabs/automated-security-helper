@@ -1,16 +1,20 @@
-"""Keep ASH's own writes inside a sandboxed scanner's results directory.
+"""Keep ASH's own writes inside its output directory and a scanner's results directory.
 
-A sandboxed scanner may write anything under its results directory, including
-symlinks. ASH itself, which is not sandboxed, writes files there afterwards (stream
-logs, ASH.ScanResults.json, the SARIF a scanner override assembles). A plain open()
-follows a symlink the scanner left behind, so those writes would land wherever it
-points. Two measures close that:
+ASH writes files below its output directory itself, unsandboxed: worker request
+files, stream logs, ASH.ScanResults.json, the SARIF a scanner override assembles.
+Something other than ASH can leave a symlink there. The default output directory is
+inside the scanned tree, so the repository can commit one, and a sandboxed scanner
+may write anything under its results directory, links included. A plain open()
+follows such a link, and the write would land wherever it points. Two measures close
+that:
 
+* :func:`open_for_write` is what ASH uses for those writes. Below a registered root
+  (the output directory of every :class:`PluginContext`, and each sandboxed
+  scanner's results directory) it opens every component without following a link,
+  and refuses a link at any of them, the file name included, with
+  :class:`OutputLinkRefused`. The link is left where it is.
 * :func:`sweep_writable` runs after every sandboxed spawn and removes every entry
   under the writable directories that is not a regular file or a directory.
-* :func:`open_for_write` is what ASH uses for its own writes there. It removes a
-  symlink at the target and opens with ``O_NOFOLLOW``, so a link created after the
-  sweep (by a process that outlived the scanner) is still not followed.
 """
 
 from __future__ import annotations
@@ -35,24 +39,44 @@ _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _BINARY = getattr(os, "O_BINARY", 0)
 
 
+class OutputLinkRefused(OSError):
+    """A write below a guarded root met a symlink, and was not made.
+
+    An ``OSError`` (``errno.ELOOP``), so a caller that handles a failed write
+    handles this one. The message names the path ASH was writing and the link.
+    """
+
+    def __init__(self, path: Union[str, Path], link: Union[str, Path]) -> None:
+        super().__init__(
+            errno.ELOOP,
+            f"{Path(path).as_posix()} was not written: {Path(link).as_posix()} is a "
+            "symlink, and ASH does not write through a symlink below its output "
+            "directory",
+        )
+        self.path = Path(path)
+        self.link = Path(link)
+
+
 _roots_lock = threading.Lock()
 _writable_roots: Set[Path] = set()
 
 
 def register_writable_root(path: Union[str, Path]) -> None:
-    """Record that a sandboxed scanner can write beneath ``path``.
+    """Record that ASH writes beneath ``path`` and must not follow a link there.
 
-    open_for_write then opens every component below it without following links.
+    A sandboxed scanner's results directory, and the output directory of every
+    PluginContext. open_for_write then opens every component below it without
+    following a link, and refuses one.
     """
     with _roots_lock:
         _writable_roots.add(Path(os.path.abspath(path)))
 
 
 def _writable_root_for(path: Path) -> Optional[Path]:
-    """The deepest registered root ``path`` is inside, or None."""
+    """The deepest registered root ``path`` is below, or None."""
     with _roots_lock:
         roots = list(_writable_roots)
-    inside = [r for r in roots if path == r or r in path.parents]
+    inside = [r for r in roots if r in path.parents]
     return max(inside, key=lambda r: len(r.parts)) if inside else None
 
 
@@ -96,6 +120,28 @@ def _is_special(mode: int) -> bool:
     return not (stat.S_ISREG(mode) or stat.S_ISDIR(mode))
 
 
+def refuse_links_below(root: Union[str, Path]) -> None:
+    """Raise OutputLinkRefused for the first symlink below ``root``, if any.
+
+    For a sandboxed scanner's results directory before the scanner runs: the sweep
+    after each spawn removes links the scanner made, and would also remove one that
+    was there before it ran (committed with the scanned tree) without saying so.
+    The walk never follows a link. A missing ``root`` has nothing below it.
+    """
+    root = Path(os.path.abspath(root))
+    if not hasattr(os, "fwalk") or not root.is_dir():
+        return
+    for dirpath, dirnames, filenames, dir_fd in os.fwalk(root, follow_symlinks=False):
+        for name in sorted(list(dirnames) + filenames):
+            try:
+                mode = os.lstat(name, dir_fd=dir_fd).st_mode
+            except OSError:
+                continue
+            if stat.S_ISLNK(mode):
+                link = Path(dirpath) / name
+                raise OutputLinkRefused(link, link)
+
+
 def sweep_writable(roots: Iterable[Union[str, Path]]) -> int:
     """Remove symlinks and special files under ``roots``; return how many."""
     removed = 0
@@ -122,21 +168,39 @@ _NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 _FILE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _NOFOLLOW | _NONBLOCK | _BINARY
 
 
-def _open_dir_beneath(root: Path, relative_parts: Tuple[str, ...]) -> int:
+def _is_link(name: str, dir_fd: int) -> bool:
+    try:
+        return stat.S_ISLNK(os.lstat(name, dir_fd=dir_fd).st_mode)
+    except FileNotFoundError:
+        return False
+
+
+def _open_dir_beneath(root: Path, relative_parts: Tuple[str, ...], target: Path) -> int:
     """A descriptor for ``root/relative_parts``, never following a link below root.
 
     Each component is opened relative to the previous one with O_NOFOLLOW, and
-    created when missing, so a component a scanner replaced with a symlink makes
-    the open fail rather than lead elsewhere.
+    created when missing. A component that is a symlink, whoever put it there,
+    raises OutputLinkRefused for ``target``; so does one replaced by a link between
+    the check and the open, which O_NOFOLLOW reports as ELOOP.
     """
     fd = os.open(root, os.O_RDONLY | _DIRECTORY)
+    current = root
     try:
         for part in relative_parts:
+            current = current / part
+            if _is_link(part, fd):
+                raise OutputLinkRefused(target, current)
+            flags = os.O_RDONLY | _DIRECTORY | _NOFOLLOW
             try:
-                child = os.open(part, os.O_RDONLY | _DIRECTORY | _NOFOLLOW, dir_fd=fd)
-            except FileNotFoundError:
-                os.mkdir(part, 0o777, dir_fd=fd)
-                child = os.open(part, os.O_RDONLY | _DIRECTORY | _NOFOLLOW, dir_fd=fd)
+                try:
+                    child = os.open(part, flags, dir_fd=fd)
+                except FileNotFoundError:
+                    os.mkdir(part, 0o777, dir_fd=fd)
+                    child = os.open(part, flags, dir_fd=fd)
+            except OSError as error:
+                if error.errno == errno.ELOOP:
+                    raise OutputLinkRefused(target, current) from error
+                raise
             previous, fd = fd, child
             os.close(previous)
         return fd
@@ -174,11 +238,12 @@ def open_for_write(
 ) -> IO[str]:
     """Open ``path`` for writing text.
 
-    Below a root a sandboxed scanner could write (register_writable_root), no
-    symlink is followed at any component and the target must be a regular file.
-    Anywhere else, which is every write when no sandbox is in use, it is exactly
-    open(path, "w"): the guard changes nothing for a scan that did not ask for a
-    sandbox. Permissions are the same as open(): 0o666 less the umask.
+    Below a registered root (the output directory of a PluginContext, or a
+    sandboxed scanner's results directory; see register_writable_root), no symlink
+    is followed: a link at any component, the file name included, raises
+    OutputLinkRefused and nothing is written. The target must be a regular file,
+    and missing directories are created. Anywhere else it is exactly
+    open(path, "w"). Permissions are the same as open(): 0o666 less the umask.
     """
     path = Path(os.path.abspath(path))
     root = _writable_root_for(path) if hasattr(os, "fwalk") else None
@@ -186,15 +251,17 @@ def open_for_write(
         return open(path, "w", encoding=encoding, errors=errors)
     else:
         relative = path.relative_to(root).parts
-        dir_fd = _open_dir_beneath(root, relative[:-1])
+        dir_fd = _open_dir_beneath(root, relative[:-1], path)
         try:
             name = relative[-1]
+            if _is_link(name, dir_fd):
+                raise OutputLinkRefused(path, path)
             try:
-                if stat.S_ISLNK(os.lstat(name, dir_fd=dir_fd).st_mode):
-                    os.unlink(name, dir_fd=dir_fd)
-            except FileNotFoundError:
-                pass
-            fd = _open_regular(name, dir_fd)
+                fd = _open_regular(name, dir_fd)
+            except OSError as error:
+                if error.errno == errno.ELOOP:
+                    raise OutputLinkRefused(path, path) from error
+                raise
         finally:
             os.close(dir_fd)
     return os.fdopen(fd, "w", encoding=encoding, errors=errors)

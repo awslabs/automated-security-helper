@@ -144,9 +144,17 @@ it needs.
   not examined.
 - ASH writes into the results directory after the scanner exits, and ASH is not
   sandboxed. So after every sandboxed spawn, and again after the scan, ASH removes
-  every symlink and special file the scanner left there, and ASH's own writes there
-  (stream logs, `ASH.ScanResults.json`, the files a scanner override writes) open
-  without following a symlink. A process the scanner leaves running cannot keep
+  every symlink and special file the scanner left there. A symlink already below the
+  results directory when the scanner starts (one committed with the scanned tree) is
+  refused instead, and the scanner is `ERROR`.
+- ASH's own writes below the output directory never follow a symlink, with the
+  sandbox on or off: worker request files, stream logs, `ASH.ScanResults.json` and
+  the files a scanner override writes. A symlink at any component of the path, the
+  file name included, stops the write with "`<path>` was not written: `<link>` is a
+  symlink, and ASH does not write through a symlink below its output directory"
+  (`OutputLinkRefused`, an `OSError`). Nothing is written where the link points, the
+  link is left in place, and the scanner whose write was refused is `ERROR`. Links at
+  or above the output directory itself are not examined, as above. A process the scanner leaves running cannot keep
   planting links afterwards: bwrap and firejail end the whole process tree with the
   scanner, and the Landlock wrapper is a child subreaper that kills any process its
   scanner left behind before it exits. On a timeout ASH sends a sandboxed process
