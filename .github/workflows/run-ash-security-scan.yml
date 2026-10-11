@@ -1084,6 +1084,85 @@ jobs:
           echo "path=${DEST}" >> "$GITHUB_OUTPUT"
           echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
 
+      # THE CONFIG CAN COME FROM ANOTHER COMMIT THAN THE ONE SCANNED
+      #
+      # Without config-ref, ASH reads its config from the checkout: the file `config`
+      # names, or the one it discovers there. On a pull request that is the pull
+      # request's own config, so it could add suppressions or ignore paths to the
+      # scan that gates it. With config-ref, the file `config` names is read from that
+      # commit, written outside the checkout, and handed to the scan and report steps
+      # as --config, which also stops ASH from discovering one in the checkout.
+      # ash-repo-scan.yml passes the pull request's base commit.
+      #
+      # A commit without the file fails the step. The caller named a config, and
+      # ASH's defaults can be a weaker gate than the one asked for (a config that
+      # turns on scanners that are off by default, or lowers the severity
+      # threshold), so a typo or a case variant in `config` must not fall back to
+      # them. config-ref-missing: defaults is the explicit opt-in for the one case
+      # where defaults are right, the pull request that adds a repository's first
+      # config: the scan then uses an empty config, so discovery cannot fall back to
+      # the checkout's either.
+      #
+      # The file lands outside the scanned tree, so ASH treats it like any --config
+      # outside the tree: as the operator's. The caller chose that commit; the
+      # checkout did not.
+      #
+      # Only this one file comes from config-ref. Tool config files it names by a
+      # relative path (scanners.<name>.options.config_file) are still read from the
+      # checkout, and a config that `extends` another file fails to load here.
+      - name: Read the ASH config from config-ref
+        id: config-ref
+        if: inputs.config-ref != ''
+        env:
+          CONFIG_REF: ${{ inputs.config-ref }}
+          CONFIG_PATH: ${{ inputs.config }}
+          CONFIG_REF_MISSING: ${{ inputs.config-ref-missing }}
+        run: |
+          set -euo pipefail
+          case "${CONFIG_REF_MISSING}" in
+            refuse|defaults|"") ;;
+            *)
+              echo "::error::config-ref-missing must be 'refuse' or 'defaults', not '${CONFIG_REF_MISSING}'."
+              exit 1
+              ;;
+          esac
+          if [ -z "${CONFIG_PATH}" ]; then
+            echo "::error::config-ref is set but config is empty. Name the config file to read from ${CONFIG_REF}, for example 'config: .ash/.ash.yaml'."
+            exit 1
+          fi
+          RELATIVE="${CONFIG_PATH#./}"
+          # A path git would read differently from how it is written (absolute, with
+          # an empty, `.` or `..` segment) is refused rather than read as missing.
+          case "/${RELATIVE}/" in
+            *//*|*/./*|*/../*)
+              echo "::error::config must be a plain path inside the repository when config-ref is set, not '${CONFIG_PATH}'."
+              exit 1
+              ;;
+          esac
+          DEST_ROOT="${RUNNER_TEMP}/ash-config-ref"
+          DEST="${DEST_ROOT}/${RELATIVE}"
+          rm -rf "${DEST_ROOT}"
+          mkdir -p "$(dirname "${DEST}")"
+          git fetch --no-tags --no-recurse-submodules --depth=1 origin "${CONFIG_REF}"
+          ENTRY="$(git --literal-pathspecs ls-tree FETCH_HEAD -- "${RELATIVE}")"
+          if [ -z "${ENTRY}" ]; then
+            if [ "${CONFIG_REF_MISSING}" != "defaults" ]; then
+              echo "::error::${CONFIG_REF} has no ${RELATIVE}, so the config this scan was asked to use does not exist there; refusing to scan with ASH's defaults instead. Check the config input, or set config-ref-missing: defaults for the pull request that adds the first config."
+              exit 1
+            fi
+            printf '{}\n' > "${DEST}"
+            echo "::warning::${CONFIG_REF} has no ${RELATIVE}, and config-ref-missing is defaults, so this scan uses ASH's default config, not the checkout's."
+          else
+            read -r MODE TYPE OBJECT ENTRY_PATH <<< "${ENTRY}"
+            if [ "${TYPE}" != "blob" ] || [ "${MODE}" = "120000" ] || [ "${ENTRY_PATH}" != "${RELATIVE}" ]; then
+              echo "::error::${RELATIVE} at ${CONFIG_REF} is not a regular file (${ENTRY}); refusing to scan with it."
+              exit 1
+            fi
+            git cat-file blob "${OBJECT}" > "${DEST}"
+            echo "Scanning with ${RELATIVE} as of ${CONFIG_REF} (blob ${OBJECT}), not the checkout's copy"
+          fi
+          echo "path=${DEST}" >> "$GITHUB_OUTPUT"
+
       - name: Install uv
         id: setup-uv
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
