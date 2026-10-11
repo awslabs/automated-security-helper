@@ -531,6 +531,12 @@ class FirejailBackend(SandboxBackend):
 # ---------------------------------------------------------------------------
 
 
+#: The first Landlock ABI that controls truncation (Linux 6.2). Below it a scanner
+#: can truncate a file it may only read, so the source tree is not read-only, and
+#: the backend counts as unavailable.
+MIN_LANDLOCK_ABI = 3
+
+
 class LandlockBackend(SandboxBackend):
     name = "landlock"
     platforms = ("linux",)
@@ -553,6 +559,12 @@ class LandlockBackend(SandboxBackend):
             check=False,
         )
         self._abi = int(result.stdout.strip() or 0)
+        if self._abi < MIN_LANDLOCK_ABI:
+            return (
+                f"Landlock ABI {self._abi} is below {MIN_LANDLOCK_ABI} (Linux 6.2), so "
+                "it cannot stop a scanner from truncating files it may only read, and "
+                "the source tree would not be read-only"
+            )
         policy = json.dumps({"read_only": ["/"], "writable": [], "network": False})
         failure = _probe_run(
             [
