@@ -164,6 +164,25 @@ def test_header_reads_past_the_per_member_allowance_are_refused(
     assert_refused_for_header_reads(converter, results, "many.tar", OVER_THE_ALLOWANCE)
 
 
+@pytest.mark.parametrize("data_filter", [True, False], ids=["data-filter", "copy"])
+def test_member_data_far_past_the_header_allowance_is_extracted_whole(
+    data_filter, lowered_caps, test_plugin_context, monkeypatch
+):
+    """The allowance bounds the header pass only; extraction reads past it."""
+    monkeypatch.setattr(
+        f"{ARCHIVE_MODULE}._TAR_HAS_DATA_FILTER", data_filter, raising=True
+    )
+    payload = b"x = 1\n" * (64 * 1024 // 6)
+    assert len(payload) > 16 * (HEADER_BASE + HEADER_PER_MEMBER)
+    raw = tar_of([member("big.py")], {"big.py": payload}, tarfile.USTAR_FORMAT)
+
+    converter, results = convert(test_plugin_context, monkeypatch, "big.tar", raw)
+
+    (extracted,) = results
+    assert (extracted / "big.py").read_bytes() == payload
+    assert converter.failed_inputs == []
+
+
 def test_members_with_plain_headers_fit_the_per_member_allowance(
     lowered_caps, test_plugin_context, monkeypatch
 ):
