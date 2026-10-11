@@ -1,4 +1,4 @@
-# Contributing Guidelines
+# Contributing guidelines
 
 Thank you for your interest in contributing to our project. Whether it's a bug report, new feature, correction, or additional
 documentation, we greatly value feedback and contributions from our community.
@@ -6,7 +6,7 @@ documentation, we greatly value feedback and contributions from our community.
 Please read through this document before submitting any issues or pull requests to ensure we have all the necessary
 information to effectively respond to your bug report or contribution.
 
-## Reporting Bugs/Feature Requests
+## Reporting bugs and feature requests
 
 We welcome you to use the GitHub issue tracker to report bugs or suggest features.
 
@@ -18,7 +18,7 @@ reported the issue. Please try to include as much information as you can. Detail
 * Any modifications you've made relevant to the bug
 * Anything unusual about your environment or deployment
 
-## Contributing via Pull Requests
+## Contributing via pull requests
 
 Contributions via pull requests are much appreciated. Before sending us a pull request, please ensure that:
 
@@ -46,7 +46,7 @@ which checks a pull request needs to merge.
 
 ## Set up and run the tests
 
-You need git, [uv](https://docs.astral.sh/uv/getting-started/installation/) and Python 3.10 to 3.14. From a clone of your
+You need git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and Python 3.10 to 3.14. From a clone of your
 fork:
 
 <!-- doctest: illustrative reason="installs packages from the network and runs the full test suite" -->
@@ -56,16 +56,16 @@ uv run pytest
 uv run pytest tests/unit/config --no-cov
 ```
 
-The first command installs ASH, its development tools and both optional extras into `.venv`. The second runs the whole
+The first command installs ASH, its development tools, and both optional extras into `.venv`. The second runs the whole
 suite with its 80% coverage threshold. A run of part of the suite needs `pytest --no-cov`, as in the third command,
 because the threshold applies to every run. For integration and snapshot tests, see [Test your change](docs/content/contributing/testing.md);
-for documentation changes, see [Testing the documentation](docs/content/contributing/documentation.md).
+for documentation changes, see [Test the documentation](docs/content/contributing/documentation.md).
 
 ## Finding contributions to work on
 
 Looking at the existing issues is a great way to find something to contribute on. As our projects, by default, use the default GitHub issue labels (enhancement/bug/duplicate/help wanted/invalid/question/wontfix), looking at any 'help wanted' issues is a great place to start.
 
-## Code of Conduct
+## Code of conduct
 
 This project has adopted the [Amazon Open Source Code of Conduct](https://aws.github.io/code-of-conduct).
 For more information see the [Code of Conduct FAQ](https://aws.github.io/code-of-conduct-faq) or contact
@@ -73,7 +73,7 @@ For more information see the [Code of Conduct FAQ](https://aws.github.io/code-of
 
 ## Security issue notifications
 
-If you discover a potential security issue in this project we ask that you notify AWS/Amazon Security via our [vulnerability reporting page](http://aws.amazon.com/security/vulnerability-reporting/). Please do **not** create a public github issue.
+If you discover a potential security issue in this project we ask that you notify AWS/Amazon Security via our [vulnerability reporting page](http://aws.amazon.com/security/vulnerability-reporting/). Please do not create a public GitHub issue.
 
 [SECURITY.md](SECURITY.md) lists the supported versions, what to include in a report, and what is in scope.
 

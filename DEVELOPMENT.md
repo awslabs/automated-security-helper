@@ -3,12 +3,12 @@
 The development guide is part of the documentation site, under Contributing:
 
 - [Contribute to ASH](docs/content/contributing/index.md): set up a development checkout, the project layout, running
-  ASH from your checkout, pull requests, commit messages, what CI runs, code style and the pre-commit hooks.
-- [Test your change](docs/content/contributing/testing.md): the unit, integration and snapshot tests, the rules the
+  ASH from your checkout, pull requests, commit messages, what CI runs, code style, and the pre-commit hooks.
+- [Test your change](docs/content/contributing/testing.md): the unit, integration, and snapshot tests, the rules the
   suite enforces on new tests, and testing an MCP change locally.
-- [Testing the documentation](docs/content/contributing/documentation.md): how the docs are checked and how to mark
+- [Test the documentation](docs/content/contributing/documentation.md): how the docs are checked and how to mark
   a code block.
-- [Releases and versions](docs/content/contributing/releases.md): versions, the changelog, cutting a release, tags and
+- [Releases and versions](docs/content/contributing/releases.md): versions, the changelog, cutting a release, tags, and
   the version-pinned pages.
 
 The short version, from a git clone:

@@ -2,7 +2,7 @@
 
 ASH versions come from commit messages. [commitizen](https://commitizen-tools.github.io/commitizen/)
 reads the subjects on `main` since the last tag, picks the next version, writes the
-changelog entry and rewrites the files that pin the version. A release is a git tag
+changelog entry, and rewrites the files that pin the version. A release is a git tag
 and a GitHub Release: nothing is published to PyPI or to a container registry, so users
 install ASH from a git URL at a tag (see [Install ASH](../how-to/install.md)). This page
 explains each piece, for contributors who need to know what their commit message does
@@ -88,6 +88,10 @@ uv run cz bump --dry-run --changelog --increment MINOR   # what RELEASE_LINE 3.x
 uv run cz bump --dry-run --changelog                     # what RELEASE_LINE auto does
 ```
 
+The preview shows the curated notes for the next tag, but not the hand-written
+`## Unreleased` notes: the release workflow moves those into the release notes file only
+when it runs, as described below.
+
 ## What the changelog contains
 
 Each release's entry in `CHANGELOG.md` has three parts, in this order:
@@ -100,9 +104,9 @@ Each release's entry in `CHANGELOG.md` has three parts, in this order:
    with the generated entry, so before it bumps, the release workflow moves the
    section's text into `.github/release-notes/<next tag>.md`, after any curated notes,
    and removes the section. That file is read as a Jinja template, so the release fails
-   if the section contains `{{`, `{%` or `{#`.
+   if the section contains `{{`, `{%`, or `{#`.
 3. The generated sections: BREAKING CHANGE, with the text of each `BREAKING CHANGE:`
-   footer, then Feat, Fix, Refactor and Perf, with one line per commit and its scope in
+   footer, then Feat, Fix, Refactor, and Perf, with one line per commit and its scope in
    bold. A commit marked with `!` is listed under its own type, or with no heading when
    its type has none.
 
@@ -116,11 +120,11 @@ A maintainer runs **Actions > ASH - Create Release > Run workflow**. The workflo
 
 1. applies the release line, and folds the `## Unreleased` notes into the release notes;
 2. runs `cz bump --changelog --check-consistency`, which sets the new version, rewrites
-   the `version_files`, rebuilds the agent plugin trees, writes the changelog entry and
+   the `version_files`, rebuilds the agent plugin trees, writes the changelog entry, and
    commits all of it as `bump: version <old> → <new>`;
 3. renders the version-pinned pages from their templates and regenerates the JSON
    schemas;
-4. smoke-tests the result (`ash --help`, `ash config validate` and one unit test file);
+4. smoke-tests the result (`ash --help`, `ash config validate`, and one unit test file);
 5. commits the rest as `chore(release): <old> -> <new>` on the branch `release/v<new>`,
    pushes it, and opens a pull request with that title.
 
@@ -158,7 +162,7 @@ A repository admin sets that up once:
 
 The workflow uses the App only when both secrets are set. With one or neither, it logs a
 warning and falls back to `GITHUB_TOKEN`. With both set, a misconfigured App (not
-installed, wrong permission, bad key) fails the job at the token step, before anything
+installed, wrong permission, or bad key) fails the job at the token step, before anything
 is bumped or pushed, rather than falling back. A working setup shows the
 **Mint a GitHub App token** step running, the App as the pull request's author, and the
 checks starting without an approval banner.
@@ -217,9 +221,9 @@ template. The template has the same name plus `.template` (for example
 committed beside it.
 
 `scripts/version_template_manager.py generate` renders the template of each file listed
-in its `target_files` over that file. The release workflow runs it after the bump. Run it with `uv run`, which reinstalls the project after a version change: the
-script takes the version from the installed package's metadata before it looks at
-`pyproject.toml`.
+in its `target_files` over that file. The release workflow runs it after the bump. Run
+it with `uv run`, which reinstalls the project after a version change: the script takes
+the version from the installed package's metadata before it looks at `pyproject.toml`.
 
 <!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```bash

@@ -1,6 +1,6 @@
-# Testing the documentation
+# Test the documentation
 
-Every command, config file, environment variable, link and page in these docs is
+Every command, config file, environment variable, link, and page in these docs is
 checked against the code. A docs change that names an option ASH does not have, a
 config key ASH ignores, or a page that no longer exists fails CI. This page explains
 how the checks decide what a code block is, how to mark a block that cannot be checked
@@ -8,9 +8,9 @@ the usual way, how to run the checks yourself, and what each failure means.
 
 There are three layers:
 
-- Static checks, in the `lint` job. They read every markdown file in the repository
+- Static checks, in the `lint` job. They read every Markdown file in the repository
   and compare it with the code: the CLI, the config models, the environment variables
-  ASH reads, the navigation and the link targets. They also check the docs URLs and
+  ASH reads, the navigation, and the link targets. They also check the docs URLs and
   paths that ASH's own source names. They run in about ten seconds.
 - The docs-example runner, in the `integration-test` job. It runs every runnable
   shell and Python block, page by page, and fails when a block exits with the wrong
@@ -32,7 +32,7 @@ samples.
 | `zsh`, `fish`, `powershell`, `pwsh`, `ps1`, `cmd`, `bat` | an error | must be marked `illustrative` |
 | `yaml`, `yml`, `json`, `jsonc`, `toml` | `config kind=ash` | parsed, and validated as an ASH config |
 | `python`, `py` | `run` | executed by the runner; must parse; imports must resolve |
-| `dockerfile` | not executed | `ash` in `RUN`, `CMD` and `ENTRYPOINT` lines parsed |
+| `dockerfile` | not executed | `ash` in `RUN`, `CMD`, and `ENTRYPOINT` lines parsed |
 | anything else (`text`, `mermaid`, `diff`, ...) | not executed | nothing |
 
 In a `console` block, only the lines that start with a `$` prompt (and their
@@ -44,9 +44,9 @@ A marker is an HTML comment on the line directly above the opening fence. It doe
 render on the site.
 
 ````markdown
-<!-- doctest: illustrative reason="pulls the container image" -->
+<!-- doctest: illustrative reason="needs Docker" -->
 ```bash
-docker pull public.ecr.aws/aws-samples/automated-security-helper:latest
+ash --mode container --source-dir .
 ```
 ````
 
@@ -70,8 +70,8 @@ Values with spaces go in double quotes. Unknown modes and keys are errors.
 | `<!-- doctest: illustrative reason="needs AWS credentials" -->` | do not run the block |
 
 `illustrative` needs a reason a reader would accept, such as "needs Docker", "installs
-from the network", "needs AWS credentials", "Windows only" or "runs in CI". "TODO",
-"TBD" and "n/a" are rejected. An illustrative block is still checked statically: its
+from the network", "needs AWS credentials", "Windows only", or "runs in CI". "TODO",
+"TBD", and "n/a" are rejected. An illustrative block is still checked statically: its
 `ash` lines must parse, and a Python block must still parse and import.
 
 The runner treats a page as one session, the way a reader follows a tutorial:
@@ -80,14 +80,14 @@ The runner treats a page as one session, the way a reader follows a tutorial:
   `sample-project`, a small git repository with a hardcoded password that
   detect-secrets reports without network access. Fixtures live in
   [`tests/test_data/docs_fixtures`](https://github.com/awslabs/automated-security-helper/tree/main/tests/test_data/docs_fixtures).
-- Files, the working directory and shell variables carry from one shell block to the
+- Files, the working directory, and shell variables carry from one shell block to the
   next. Shell blocks run under `set -e`, so a block stops at its first failing command.
 - A Python block runs in a fresh interpreter in the session's directory and
   environment, with that directory on its import path. It cannot change the session,
   except through `save-as` (below).
-- HOME is private to the session, `ash` is the one in the project's virtual
+- `HOME` is private to the session, `ash` is the one in the project's virtual
   environment, and the network is unreachable: proxies point at a port that refuses
-  connections, and uv, pip and npm run offline. A block that needs the network must be
+  connections, and uv, pip, and npm run offline. A block that needs the network must be
   `illustrative`.
 
 This block runs in CI. The default fixture has one finding, so the scan exits with 2:
@@ -121,9 +121,9 @@ kind.
 Every kind must parse in its language. ASH configs are read with ASH's own reader and
 validated by its models, and any key ASH would accept and never read is an error: most
 plugin models accept unknown keys without complaint, so a misspelled option would
-otherwise do nothing at all. Commands in the `run`, `script` and `commands` keys of CI
+otherwise do nothing at all. Commands in the `run`, `script`, and `commands` keys of CI
 files, and the command of an MCP server entry, get the same checks as a shell block.
-A `pre-commit` block must use hook ids that
+A `pre-commit` block must use hook IDs that
 [`.pre-commit-hooks.yaml`](https://github.com/awslabs/automated-security-helper/blob/main/.pre-commit-hooks.yaml)
 defines.
 
@@ -132,7 +132,7 @@ defines.
 A tutorial often shows a file and then a command that uses it. With `save-as=<path>`,
 the runner writes the block, exactly as shown, to that path in the page's project
 before the blocks after it run. Missing directories are created. `save-as` works on
-any block: Python, shell, config, Dockerfile or text.
+any block: Python, shell, config, Dockerfile, or text.
 
 ````markdown
 <!-- doctest: save-as=my_plugins/greeting.py -->
@@ -170,8 +170,8 @@ import in a saved package resolves within that package.
 
 ### Option tables
 
-A table that documents options, keys or parameters (its first header cell is Option,
-Key, Field, Setting, Argument, Param, Parameter or Prop, or it has a Default column)
+A table that documents options, keys, or parameters (its first header cell is Option,
+Key, Field, Setting, Argument, Param, Parameter, or Prop, or it has a Default column)
 carries a marker naming the section it documents, on the line directly above its header
 row:
 
@@ -183,13 +183,13 @@ row:
 ````
 
 Every row's first code span must be a key of that section, and its Default cell must
-state the default the code has. A column headed Defaults to, If not passed, If not set
+state the default the code has. A column headed Defaults to, If not passed, If not set,
 or If unset is a Default column too. A table that looks like an options table and has
 no marker is an error, so a new table cannot skip the check. Tables headed Variable or
 Environment variable are checked as environment variables instead.
 
 A row can name several keys when its first cell is only a list of code spans
-(`` `quiet`, `simple` and `debug` ``). Its Default cell then holds one value for all of
+(`` `quiet`, `simple`, and `debug` ``). Its Default cell then holds one value for all of
 them, or one code span per key in the same order (`` `False`, `"origin/main"` ``). A
 key written with a value (`` `--build-target ci` ``) is checked as the key alone.
 
@@ -208,9 +208,9 @@ key written with a value (`` `--build-target ci` ``) is checked as the key alone
 | `github-inputs:.github/workflows/run-ash-security-scan.yml` | the inputs of a GitHub Action (its `action.yml` or the directory holding one) or of a workflow (`workflow_call` and `workflow_dispatch`) |
 | `typescript:deploy/cdk-constructs/src/ash-scan-step.ts:ASHScanStepProps` | the properties of a TypeScript interface; one without `?` is required, and the default is its JSDoc `@default` (an `@default - words` default is prose and is not compared) |
 
-Python, Dockerfile, CloudFormation, GitHub and TypeScript sections are read from the code tree, the
-checkout of the installed ASH (see [Checking docs against another checkout's
-code](#checking-docs-against-another-checkouts-code)).
+Python, Dockerfile, CloudFormation, GitHub, and TypeScript sections are read from the code tree, the
+checkout of the installed ASH (see [Check docs against another checkout's
+code](#check-docs-against-another-checkouts-code)).
 
 A Default cell is one of:
 
@@ -223,21 +223,21 @@ A Default cell is one of:
 - `` `VALUE` on Linux and macOS; `VALUE` on Windows `` for a default that depends on the
   platform;
 - one of the phrases `required`, `see the section` (the key is a nested section),
-  `computed at run time` or `depends on the platform`, and for `ash` options `off`,
-  `on` or `not set`. `empty` means an empty string or list. A phrase may be set in
+  `computed at run time`, or `depends on the platform`, and for `ash` options `off`,
+  `on`, or `not set`. `empty` means an empty string or list. A phrase may be set in
   emphasis (`*required*`).
 
 A bare word such as `true` or `None` is read the same way; anything else is reported.
 
 Defaults of a `python.` section are read as Python, not YAML: write `` `None` ``,
-`` `False` ``, `` `"low"` `` or `` `ExecutionStrategy.PARALLEL` ``. A literal is compared
+`` `False` ``, `` `"low"` ``, or `` `ExecutionStrategy.PARALLEL` ``. A literal is compared
 by value and anything else by its source text, and a string may also be written without
-quotes (`` `t3.medium` ``). Dockerfile, CloudFormation, GitHub and TypeScript defaults
+quotes (`` `t3.medium` ``). Dockerfile, CloudFormation, GitHub, and TypeScript defaults
 are compared as written, so `` `NO` `` is the string NO, not false. A default that is a
 member of an enum or class may be written by the member alone: `` `PIP` `` for
 `ASHInstallMode.PIP`, `` `PARALLEL` `` for `ExecutionStrategy.PARALLEL`.
 
-### Commands, options and variables in prose
+### Commands, options, and variables in prose
 
 An inline code span that starts with `ash`, or with a wrapper that runs it (`uvx`,
 `pipx run`, `uv run`, `docker run`), is checked like a command. A span that is only an
@@ -258,16 +258,19 @@ Two more kinds of name are accepted. A build argument, declared with `ARG` in th
 Dockerfile ASH ships or passed by ASH as `--build-arg NAME=...` (as it passes the
 image name to a custom Containerfile), is documented like any variable. A variable
 only the test suite reads or CI sets (in `tests/`, or in an `env:` block under
-`.github/`) is accepted on contributor pages, the pages under
-`docs/content/contributing/` and the repository's `CONTRIBUTING.md` and
-`DEVELOPMENT.md`, and reported anywhere else, because a user cannot use it. Running
+`.github/`) is accepted on contributor pages (the pages under
+`docs/content/contributing/`, the repository's `CONTRIBUTING.md`, and its
+`DEVELOPMENT.md`) and reported anywhere else, because a user cannot use it. Running
 the checks with `scripts/verify_docs_freshness.py --verbose` prints which of these
 sets each accepted name matched.
 
-One kind of read is not in the read set: a config value written as `${NAME}`, which
-ASH's config loader resolves for any name its rule allows (every `ASH_*` name, and a few
-AWS ones). A name that one of the page's ASH config blocks references that way counts as
-read everywhere on the page, so the page can set the variable its own config uses.
+One kind of read is not in the read set: a config value that starts with a reference
+such as `${NAME:default}`, which ASH's config loader replaces with the environment
+variable, or with `default` when it is not set, for any name its rule allows (every
+`ASH_*` name, and a few AWS ones). In this release a reference without a default,
+`${NAME}`, is left as written. A name that one of the page's ASH config blocks
+references either way counts as read everywhere on the page, so the page can set the
+variable its own config uses.
 
 ### Links and pages
 
@@ -310,7 +313,7 @@ excepted) and require that:
 An f-string is read with each placeholder replaced by the constant it names. A URL
 whose path depends on anything else cannot be checked, and is reported as such.
 
-## Running the checks locally
+## Run the checks locally
 
 Run these from a checkout of the repository.
 
@@ -320,29 +323,31 @@ Run these from a checkout of the repository.
 uv run python scripts/verify_docs_freshness.py
 
 # The examples of one page, through the runner
-uv run pytest tests/integration/docs/test_docs_examples.py --run-integration -n 0 -k getting-started
+uv run pytest tests/integration/docs/test_docs_examples.py --run-integration --no-cov -n 0 -k getting-started
 
 # The site, as the docs job builds it
 uv run mkdocs build --clean --strict
 ```
 
-The expression in `pytest -k getting-started` selects pages by path, so it runs every
+`verify_docs_freshness.py` prints PASS or FAIL for each check, with the findings under
+each failing one, and exits 1 when any check fails. The expression in
+`pytest -k getting-started` selects pages by path, so it runs every
 page whose path contains `getting-started`. To check that the runner and the checks
 themselves still catch what they should:
 
 <!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```bash
-uv run pytest tests/unit/test_docs_checks_can_fail.py tests/unit/test_docs_freshness_gate_can_fail.py
-uv run pytest tests/integration/docs/test_docs_runner_can_fail.py --run-integration -n 0
+uv run pytest tests/unit/test_docs_checks_can_fail.py tests/unit/test_docs_freshness_gate_can_fail.py --no-cov
+uv run pytest tests/integration/docs/test_docs_runner_can_fail.py --run-integration --no-cov -n 0
 ```
 
-### Checking docs against another checkout's code
+### Check docs against another checkout's code
 
 Docs written for code that is not on main yet are checked against a checkout that has
 it, while the pages stay in their own checkout. Run the checks with the code
 checkout's interpreter and name the docs checkout. Every ASH import, the CLI, the
-config models and the environment variables come from the interpreter's ASH; every
-page, the nav, `mkdocs.yml`, the redirect map and the fixtures come from the docs
+config models, and the environment variables come from the interpreter's ASH; every
+page, the nav, `mkdocs.yml`, the redirect map, and the fixtures come from the docs
 checkout. Both commands print which package and which docs root they used.
 
 <!-- doctest: illustrative reason="needs two checkouts of this repository" -->
@@ -352,7 +357,7 @@ DOCS=$PWD
 
 "$CODE/.venv/bin/python" "$DOCS/scripts/verify_docs_freshness.py" --docs-root "$DOCS"
 
-"$CODE/.venv/bin/pytest" "$DOCS/tests/integration/docs" --run-integration -n 0 --docs-root "$DOCS"
+"$CODE/.venv/bin/pytest" "$DOCS/tests/integration/docs" --run-integration --no-cov -n 0 --docs-root "$DOCS"
 ```
 
 Use the code checkout's `pytest` rather than `python -m pytest` from the docs
@@ -437,15 +442,15 @@ aliases that are not copies, a root left unversioned, an older release that take
 
 Each static finding is one line: the file and line, the check in brackets, and the
 problem. Runner failures name the page, the line of the block, the command, the exit
-code and the end of the output. A refused `save-as` reports `save-as refused` and the
+code, and the end of the output. A refused `save-as` reports `save-as refused` and the
 reason instead of an exit code.
 
-### markers
+### `markers`
 
 | Message contains | Fix |
 |------------------|-----|
 | has no language | name the language; use `text` for output |
-| cannot run in the docs job | mark the Windows, zsh or fish block `illustrative` with a reason |
+| cannot run in the docs job | mark the Windows, zsh, or fish block `illustrative` with a reason |
 | a blank line separates this marker | delete the blank line under the marker |
 | not directly followed by a fenced code block | move the marker to the line above its fence, or delete it |
 | unknown mode, is not a key of | use a mode and key from the tables above |
@@ -456,7 +461,7 @@ reason instead of an exit code.
 | may only carry save-as | name a mode for the other keys |
 | never closed | close the fence; everything after it was read as code |
 
-### cli
+### `cli`
 
 | Message contains | Fix |
 |------------------|-----|
@@ -470,7 +475,7 @@ reason instead of an exit code.
 | `no __main__` | that module cannot be run with `python -m` |
 | names no action, has no input | a GitHub Actions `uses:` of this repository names a path or input that does not exist |
 
-### env
+### `env`
 
 `is read only by the test suite or CI` means the name is real but only contributors
 can use it: move it to a contributor page. Otherwise the name is not one ASH reads,
@@ -479,7 +484,7 @@ nor a build argument. Check the spelling against the
 variable was removed. If ASH builds the name at runtime, the finding says how many
 lookups could not be resolved; make the lookup a literal or a module constant.
 
-### config
+### `config`
 
 | Message contains | Fix |
 |------------------|-----|
@@ -490,7 +495,7 @@ lookups could not be resolved; make the lookup a literal or a module constant.
 | ASH accepts this one | an `ash-invalid` block validated; make it fail for the reason it states |
 | any other text | the model's own validation error, with the path of the key |
 
-### python
+### `python`
 
 `does not parse` gives the line of the syntax error. `no such module` and `has no
 name` mean an import does not resolve in the project's environment: the module was
@@ -500,20 +505,20 @@ define that name, and `no such module` means no block saves it. `cannot run outs
 package` and `goes above the top-level package` are relative imports with no package
 to resolve in: save the block inside one with `save-as=<package>/<module>.py`.
 
-### options
+### `options`
 
 | Message contains | Fix |
 |------------------|-----|
 | documents options or keys but names no section | add `<!-- doctest: options of=<section> -->` above the table |
 | is not a key of | the row names an option the section does not have; the message suggests the nearest |
-| default says ..., but the default is | the code's default changed; state the one in the message |
+| says ..., but the default is | the code's default changed; state the one in the message |
 | says required, but the default is / but the key is required | the key does (or does not) have a default |
 | is not a value or a recognized phrase | write the default in one code span, and move any explanation to another column |
 | the MCP server has no tool, defines no function or class, no module, is not in the code tree, declares no inputs | the `of=` names nothing in the code; the message says which part |
 | has no key, ships no scanner named | a dotted config path in a code span does not exist |
 | needs of= / an options marker goes on the line directly above a table | fix the marker |
 
-### code-links
+### `code-links`
 
 | Message contains | Fix |
 |------------------|-----|
@@ -524,12 +529,12 @@ to resolve in: save the block inside one with `save-as=<package>/<module>.py`.
 | that page has no such heading | the code quotes a heading that was renamed |
 | is built at runtime | the URL's path is not a constant; write it as a literal so it can be checked |
 
-### links, nav, redirects and site
+### `links`, `nav`, `redirects`, and `site`
 
 | Message contains | Fix |
 |------------------|-----|
 | does not exist | fix the path |
-| has no heading or anchor | fix the anchor; heading ids change when a heading is reworded |
+| has no heading or anchor | fix the anchor; heading IDs change when a heading is reworded |
 | mkdocs cannot serve | link to the GitHub URL the message gives |
 | links to a directory | link to the page in it |
 | no page on the site serves this URL | the page moved; update the link or add a redirect |
@@ -542,24 +547,33 @@ to resolve in: save the block inside one with `save-as=<package>/<module>.py`.
 | replaces the whole gh-pages branch | a workflow runs `mkdocs gh-deploy`; publish with `scripts/docs_versions.py deploy` instead |
 | scripts/docs_versions.py deploy (or check) is not run, does not start | a workflow lost the step that publishes or checks the versions, or the tag workflow no longer starts the docs deploy for a release |
 
-## Adding a generated reference page
+## Add a generated reference page
 
-A reference page that restates the code (a list of options, variables, scanners or
+A reference page that restates the code (a list of options, variables, scanners, or
 tools) is generated, never written by hand. To add one:
 
 1. Write `scripts/generate_<name>.py`. It renders the page from the code (the click
-   tree, a pydantic model, the plugin registry) and writes it. Run as
-   `generate_<name>.py --check`, it writes nothing, compares what it would write with
-   the committed file, prints a diff and exits non-zero if they differ.
+   tree, a pydantic model, or the plugin registry) and writes it under
+   `docs/content/reference/`. Run as `generate_<name>.py --check`, it writes nothing,
+   compares what it would write with the committed file, prints a diff, and exits
+   non-zero if they differ.
    [`scripts/generate_reporter_docs.py`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/generate_reporter_docs.py)
-   is a complete example, including generated regions inside a hand-written page.
-2. Start the page with a banner naming the generator and the command that regenerates
-   it, so a reader who wants to change it knows not to edit it.
-3. Add a freshness test to
-   [`tests/unit/test_generated_docs_freshness.py`](https://github.com/awslabs/automated-security-helper/blob/main/tests/unit/test_generated_docs_freshness.py)
-   that runs `generate_<name>.py --check`, so the unit suite fails when the code
-   changes and the page does not.
-4. Add the page to `.nav.yml`. The static checks then cover it like any other page.
+   is a complete example: it writes the whole page, accepts
+   `generate_reporter_docs.py --check --docs-root <dir>`, and keeps its hand-written
+   columns in a table, `REPORTER_DOCS`, that it requires to cover every registered
+   reporter.
+2. Start the page with a banner that says `Generated by scripts/generate_<name>.py` and
+   gives the command that regenerates it, `uv run python scripts/generate_<name>.py`,
+   so a reader who wants to change it knows not to edit it.
+3. Add the script and its page to `REFERENCE_PAGES` in
+   [`tests/unit/test_generated_docs_freshness.py`](https://github.com/awslabs/automated-security-helper/blob/main/tests/unit/test_generated_docs_freshness.py).
+   That one entry runs `generate_<name>.py --check` in the unit suite, so the suite fails
+   when the code changes and the page does not, and checks the banner in the page's
+   first 600 characters.
+4. Add the page to `GOLDEN` in
+   [`.github/scripts/check-snapshot-trailers.py`](https://github.com/awslabs/automated-security-helper/blob/main/.github/scripts/check-snapshot-trailers.py),
+   so a commit that changes it needs a `Snapshot-Update:` trailer.
+5. Add the page to `.nav.yml`. The static checks then cover it like any other page.
 
 The implementation of all of this is in
 [`scripts/docs_checks.py`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/docs_checks.py)

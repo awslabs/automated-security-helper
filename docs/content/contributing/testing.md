@@ -40,7 +40,7 @@ CI does the same for every step that runs a subset.
 | Directory | What it holds |
 |-----------|---------------|
 | `tests/unit/` | Unit tests, laid out like the package |
-| `tests/integration/` | Tests that run real scanners, real `ash` processes, sandboxes or other host features; skipped unless you pass `pytest --run-integration` |
+| `tests/integration/` | Tests that run real scanners, real `ash` processes, sandboxes, or other host features; skipped unless you pass `pytest --run-integration` |
 | `tests/snapshot/` | Snapshot tests of what ASH prints and writes |
 | `tests/test_data/` | Scanner input and sample results. It is test input, so ruff does not lint it |
 | `tests/utils/` | Test helpers, including `iter_repo_files` and the walk guard described below |
@@ -50,7 +50,7 @@ CI does the same for every step that runs a subset.
 `ash_temp_path` fixture for files a test writes; `ash_temp_path` is a fresh directory
 under `tests/pytest-temp/`, which is gitignored and removed after the test. The
 `test_plugin_context` fixture builds a `PluginContext` with the default configuration
-and source, output and work directories under `ash_temp_path`. Set environment
+and source, output, and work directories under `ash_temp_path`. Set environment
 variables with pytest's `monkeypatch.setenv`, which restores them after the test.
 
 ## Integration tests
@@ -62,8 +62,12 @@ default run does not. To run the suite the way the `integration-test` CI job doe
 
 <!-- doctest: illustrative reason="runs the integration suite in a checkout of this repository" -->
 ```bash
-uv run pytest tests/integration --run-integration --run-slow --no-cov -n 0
+uv run pytest tests/integration tests/unit/cli/mcp/test_source_delivery_scan_e2e.py \
+  --ignore=tests/integration/docs --run-integration --run-slow --no-cov -n 0
 ```
+
+The job runs `tests/integration/docs`, the docs examples, as a separate step; see
+[Test the documentation](documentation.md).
 
 Some integration tests run a scanner binary and skip when it is not installed. CI
 installs them first, and turns a missing one into a failure:
@@ -73,12 +77,18 @@ installs them first, and turns a missing one into a failure:
 uv run ash dependencies install --tool actionlint --tool cfn-lint --tool cfn-guard
 ```
 
-Binary tools go to `~/.ash/bin`, where ASH looks for them. The hadolint tests also need
-`hadolint` on your `PATH`.
+Binary tools go to `~/.ash/bin`, where ASH looks for them. The hadolint tests need
+hadolint, a community scanner, which the community plugin configuration installs into
+`~/.ash/bin` too:
+
+<!-- doctest: illustrative reason="downloads a scanner binary from the network" -->
+```bash
+uv run ash dependencies install --config .ash/.ash_community_plugins.yaml --tool hadolint
+```
 
 Other tests need something on the host, and run in their own CI jobs:
 
-- `tests/integration/sandbox/` needs a sandbox backend: bubblewrap, firejail or Landlock
+- `tests/integration/sandbox/` needs a sandbox backend: bubblewrap, firejail, or Landlock
   on Linux, sandbox-exec on macOS. Each test skips when its backend cannot run (the
   `sandbox escape` job requires them).
 - `tests/integration/converters/` runs on macOS and Windows in the
@@ -100,12 +110,12 @@ module's snapshots are in the `__snapshots__/` directory next to it.
 Snapshots must be identical on every machine. The `snapshot` and `text_snapshot`
 fixtures pass output through one normalizer, `SnapshotNormalizer` in
 `tests/snapshot/support/normalize.py`, which masks values that change from run to run
-(temporary paths, the repository root, the home directory, ids, versions). The fixtures
-also pin the terminal (100 columns, no color, no TTY) and unset the CI variables that
-change ASH's output. Do not normalize inside a test. If a test produces a value that
-varies, register it with the normalizer (`add_root`, `add_literal`) or extend the
-normalizer, with a test in `tests/snapshot/test_snapshot_normalizer.py` that shows what
-it masks.
+(temporary paths, the repository root, the home directory, IDs, and versions). The
+fixtures also pin the terminal (100 columns, no color, and no TTY) and unset the CI
+variables that change ASH's output. Do not normalize inside a test. If a test produces a
+value that varies, register it with the normalizer (`add_root`, `add_literal`) or extend
+the normalizer, with a test in `tests/snapshot/test_snapshot_normalizer.py` that shows
+what it masks.
 
 Time is not masked. When output contains the wall clock, pin it with the `pinned_clock`
 fixture, or `pin_clock` in `tests/snapshot/support/fixture_model.py` for a module that
@@ -157,7 +167,7 @@ its snapshot looks unused to the runs that skip it.
 
 The `snapshot-trailers` job fails when a golden file changed in a commit that has no
 non-empty `Snapshot-Update:` trailer. Golden files are the snapshot files, the MCP
-tool-surface golden, the generated JSON schemas, the generated reference pages and the
+tool-surface golden, the generated JSON schemas, the generated reference pages, and the
 generated MCP tool reference; the full list, with the reason for each entry, is the
 `GOLDEN` table in
 [`.github/scripts/check-snapshot-trailers.py`](https://github.com/awslabs/automated-security-helper/blob/main/.github/scripts/check-snapshot-trailers.py).
@@ -169,7 +179,7 @@ only the commits that touched the file. Then push with `git push --force-with-le
 
 CI never updates snapshots: `tests/snapshot/conftest.py` refuses `pytest --snapshot-update`
 when `CI` or `GITHUB_ACTIONS` is exactly `true`, and `tests/snapshot/test_snapshot_policy.py`
-fails if any workflow, action, script or pytest configuration passes it. A missing
+fails if any workflow, action, script, or pytest configuration passes it. A missing
 snapshot fails, and so does a snapshot that no test asserts any more. syrupy cannot see
 the snapshots of a test module you deleted or renamed, so
 `check-snapshot-trailers.py --orphans` checks that every file under a
@@ -189,7 +199,7 @@ dependencies, and it needs a git checkout.
 
 `tests/unit/test_repo_walkers_skip_scratch.py` reads every module under `tests/`, and
 every function in `scripts/` and `.github/scripts/` that a test reaches, and fails on any
-directory walk (`rglob`, a `glob` with `**`, `os.walk`, `os.fwalk`, `Path.walk`,
+directory walk (`rglob`, a `glob` with `**`, `os.walk`, `os.fwalk`, `Path.walk`, or
 `shutil.copytree`) that can enter a directory other runs create and delete:
 `tests/pytest-temp`, `.ash/ash_output`, `.venv`, or a `node_modules` next to a tracked
 `package.json`. It also fails on a walk whose directory it cannot work out. Other
@@ -199,9 +209,9 @@ there races them.
 To list the repository's files, use `git ls-files`. To walk a tree, use
 `iter_repo_files` from `tests/utils/helpers.py`: it prunes `tests/pytest-temp` before
 `os.walk` descends, and takes `skip_dirs` for other directories to leave out. Walks
-under `tmp_path`, `ash_temp_path` or a `tempfile` directory are private to the test and
+under `tmp_path`, `ash_temp_path`, or a `tempfile` directory are private to the test and
 pass. A walk the guard cannot resolve but that is safe goes in the `_EXEMPT` table in
-that test file, keyed by file, function and the walked expression, with the reason; an
+that test file, keyed by file, function, and the walked expression, with the reason; an
 entry that no longer matches a flagged walk fails the suite too.
 
 ### State that outlives a test
@@ -211,12 +221,12 @@ executable lookups, and the plugin registry. A test that changes them changes th
 every later test on the same worker. Autouse fixtures in `tests/conftest.py` restore them
 after each test:
 
-- `_restore_process_wide_tool_state` restores the uv tool runner, the lookup memos and
+- `_restore_process_wide_tool_state` restores the uv tool runner, the lookup memos, and
   the plugin manager's registrations and event handlers. It keeps a successful tool
   version answer, because those probes are slow.
 - `_no_scanned_tree_scope_outlives_its_test` fails a test that leaves a scanned-tree
   scope active.
-- `_restore_ash_logger_switches` restores the `ash` logger's level, propagation and
+- `_restore_ash_logger_switches` restores the `ash` logger's level, propagation, and
   disabled flag, which any `logging.config.dictConfig` call can change.
 
 The fixtures limit the damage; they do not make every patch safe. Build the object under
@@ -228,7 +238,7 @@ reaches the memo.
 
 ### Tests need a git checkout
 
-The walk guard, the docs checks and the orphan check list files with git, so the unit
+The walk guard, the docs checks, and the orphan check list files with git, so the unit
 suite fails in a directory that is not a git work tree. Run it in a clone.
 
 ## Test an MCP change locally
@@ -292,11 +302,11 @@ asyncio.run(main())
 It prints the name of every tool the server registers, which the
 [MCP tools reference](../reference/mcp-tools.md) describes.
 
-If you changed what a client sees (a tool, its description or schema, a resource or a
+If you changed what a client sees (a tool, its description or schema, a resource, or a
 prompt), regenerate the committed files that record it:
 
 1. `.github/actions/validate-mcp/tool_surface.golden.json` pins the server's tool,
-   resource and prompt lists. `tests/unit/cli/mcp/test_mcp_wire_golden_in_process.py`
+   resource, and prompt lists. `tests/unit/cli/mcp/test_mcp_wire_golden_in_process.py`
    compares it with the server on every unit-test leg, and an install job compares it
    with a live server through the MCP Inspector. Regenerate it with
    `uv run python .github/actions/validate-mcp/compare_tool_surface.py --update`, which
@@ -325,7 +335,7 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress --verbose
 In a checkout whose environment is not activated, put `uv run` in front. The command
 exits with 2 here because the scan has findings. A registered scanner that is missing
 from the results at the end is added to them with no findings and the status SKIPPED,
-MISSING or ERROR, so a dropped scanner shows in the summary rather than disappearing. The
+MISSING, or ERROR, so a dropped scanner shows in the summary rather than disappearing. The
 tracking is `ScannerValidationManager` in
 `automated_security_helper/models/scanner_validation.py`, called from
 `automated_security_helper/core/phases/scan_phase.py`; its tests are

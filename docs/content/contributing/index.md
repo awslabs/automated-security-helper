@@ -1,9 +1,9 @@
 # Contribute to ASH
 
 This page covers a development checkout, the layout of the repository, and what a pull
-request goes through before it merges. The other contributor pages cover
-[running the tests](testing.md), [testing the documentation](documentation.md) and
-[how versions and releases work](releases.md).
+request goes through before it merges. The other contributor pages are
+[Test your change](testing.md), [Test the documentation](documentation.md), and
+[Releases and versions](releases.md).
 
 To report a bug or ask for a feature, open an issue on
 [GitHub](https://github.com/awslabs/automated-security-helper/issues). To report a security
@@ -23,11 +23,13 @@ You need git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and
     cd automated-security-helper
     ```
 
-    Work in a git clone, not in an unpacked source archive. The unit suite, the docs
-    checks and the snapshot checks list files with `git ls-files`, so they fail outside a
-    git work tree, and git must be on your `PATH`.
+    Replace `<your-account>` with your GitHub user name.
 
-2. Install the project, its development tools and both optional extras:
+    Work in a git clone, not in an unpacked source archive. The unit suite, the docs
+    checks, and the snapshot checks list files with `git ls-files`, so they fail outside
+    a git work tree, and git must be on your `PATH`.
+
+2. Install the project, its development tools, and both optional extras:
 
     <!-- doctest: illustrative reason="installs packages from the network" -->
     ```bash
@@ -35,7 +37,7 @@ You need git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and
     ```
 
     This creates `.venv` with ASH installed in editable mode, the `dev` dependency group
-    (pytest, ruff, mypy, pre-commit, mkdocs and the rest), and the two extras that CI
+    (pytest, ruff, mypy, pre-commit, mkdocs, and the rest), and the two extras that CI
     installs: `cdk` (aws-cdk-lib and cdk-nag, which the cdk-nag scanner needs) and
     `symbols` (the tree-sitter grammars that `symbol:` suppressions use). A plain
     `uv sync` leaves both extras out, and then the cdk-nag tests that need the extra
@@ -46,7 +48,7 @@ You need git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and
     `uv sync --python 3.12 --extra cdk --extra symbols`.
 
     The scanners are not project dependencies. A scan runs the Python-based ones, such
-    as bandit, checkov and semgrep, with `uv tool run`, and finds binary ones such as
+    as bandit, checkov, and semgrep, with `uv tool run`, and finds binary ones such as
     grype or trivy on your `PATH` or in `~/.ash/bin`, where `ash dependencies install`
     puts them. See [Manage scanner tools](../docs/advanced-usage.md).
 
@@ -71,10 +73,10 @@ You need git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and
     Git for Windows and MSYS2 ship a shell named `ash`. `uv run ash` finds the project's
     ASH first, because `uv run` puts the project's environment at the front of `PATH`;
     outside `uv run`, the `ashv3` alias runs the same entry point.
-- CI runs the unit suite on Linux (x86_64 and arm64), macOS on Apple silicon and Windows,
-  each with Python 3.10 to 3.14, so any of these works for development.
+- CI runs the unit suite on Linux (x86_64 and arm64), macOS on Apple silicon, and
+  Windows, each with Python 3.10 to 3.14, so any of these works for development.
 - Some tests need programs that are not Python packages, such as a container runtime,
-  a sandbox backend or Nix. [Test your change](testing.md) says which, and how they are
+  a sandbox backend, or Nix. [Test your change](testing.md) says which, and how they are
   selected.
 
 ## Run ASH from your checkout
@@ -100,14 +102,14 @@ option is in the [CLI reference](../reference/cli.md).
 
 | Directory | What it holds |
 |-----------|---------------|
-| `automated_security_helper/` | The package: the CLI and MCP server (`cli/`), configuration models (`config/`), the scan phases (`core/`), plugin base classes (`base/`), built-in and community plugins (`plugin_modules/`), result models (`models/`), JSON schemas (`schemas/`) and shared utilities (`utils/`) |
-| `tests/` | Unit, integration and snapshot tests, test data and test helpers; see [Test your change](testing.md) |
+| `automated_security_helper/` | The package: the CLI and MCP server (`cli/`), configuration models (`config/`), the scan phases (`core/`), plugin base classes (`base/`), built-in and community plugins (`plugin_modules/`), result models (`models/`), JSON schemas (`schemas/`), and shared utilities (`utils/`) |
+| `tests/` | Unit, integration, and snapshot tests, test data, and test helpers; see [Test your change](testing.md) |
 | `docs/` | `docs/content/` is this site, built with mkdocs from `mkdocs.yml` |
 | `scripts/` | Generators for the reference pages, the docs checks, the version template manager, and the verification scripts some CI jobs run |
-| `.github/` | Workflows, composite actions (`actions/`), the gate scripts CI runs (`scripts/`), the changelog template and curated release notes |
+| `.github/` | Workflows, composite actions (`actions/`), the gate scripts CI runs (`scripts/`), the changelog template, and curated release notes |
 | `ash-agent-plugins/` | The agent and IDE plugins: the shared sources in `agentic-coding/transpiler/_base/`, the transpiler that renders them, and the generated per-platform plugin trees |
 | `skills/` | The `ash-mcp` agent skill, generated by the transpiler |
-| `deploy/` | The CDK app, CDK constructs and Terraform for running ASH on AWS |
+| `deploy/` | The CDK app, CDK constructs, and Terraform for running ASH on AWS |
 | `examples/` | Example CI configurations and an example plugin package |
 | `.ash/` | The ASH configuration that CI uses to scan this repository |
 | `Formula/` | The Homebrew formula |
@@ -124,16 +126,18 @@ option is in the [CLI reference](../reference/cli.md).
    [Test your change](testing.md).
 4. Update the docs the change affects. Docs are checked against the code, so a page that
    names an option that no longer exists fails CI; see
-   [Testing the documentation](documentation.md). If users will see different behavior,
+   [Test the documentation](documentation.md). If users will see different behavior,
    describe it under `## Unreleased` in `CHANGELOG.md` (see
    [Releases and versions](releases.md#what-the-changelog-contains)).
 5. Open the pull request against `main` with a title in the commit message format below,
    and fill in the template's checklist.
 
 A pull request merges when it has one approving review, every review conversation is
-resolved, and the required checks pass (see the table below). A push after an approval
-dismisses it. Merging goes through GitHub's merge queue, which squashes the pull request
-into one commit and runs the required checks again on the result.
+resolved, and the required checks pass (see the table below). The "Protect main"
+ruleset also requires the branch to be up to date with `main`, and it includes a code
+quality rule set to every severity. A push after an approval dismisses it. Merging goes
+through GitHub's merge queue, which squashes the pull request into one commit and runs
+the required checks again on the result.
 
 Pull requests from forks run with a read-only token and without repository secrets, so a
 few steps that need them, such as the scan's comment on the pull request, are skipped.
@@ -151,7 +155,7 @@ Commit messages and pull request titles follow
 ```
 
 The type is one of `build`, `bump`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`,
-`refactor`, `revert`, `style` and `test`. A scope cannot contain whitespace, and `!`
+`refactor`, `revert`, `style`, and `test`. A scope cannot contain whitespace, and `!`
 marks a breaking change. For example:
 
 ```text
@@ -174,7 +178,7 @@ The type of the subject that lands on `main` decides what the release does with 
 | Subject on `main` | Changelog | Version bump |
 |-------------------|-----------|--------------|
 | `feat` | listed under Feat | minor |
-| `fix`, `refactor`, `perf` | listed under Fix, Refactor or Perf | patch |
+| `fix`, `refactor`, `perf` | listed under Fix, Refactor, or Perf | patch |
 | any type with `!`, or a `BREAKING CHANGE:` footer | listed | major, capped to minor on the 3.x line |
 | `build`, `bump`, `chore`, `ci`, `docs`, `revert`, `style`, `test` | not listed | none |
 
@@ -184,7 +188,7 @@ the details.
 
 ## What CI runs on a pull request
 
-Three checks are required to merge: "ash / SAST, SCA, and IaC Scan", `Validate PR title`
+Three checks are required to merge: "ash / SAST, SCA, and IaC Scan", `Validate PR title`,
 and `required-checks`. `required-checks` stands for every job in the "ASH - Unified CI"
 workflow, so all of those have to pass too. The repository also requires the code
 scanning results that the ASH scan uploads, so a pull request that introduces an alert
@@ -194,7 +198,7 @@ does not merge.
 |-------|----------------|----------|
 | ash / SAST, SCA, and IaC Scan | ASH scans this repository with the configuration in `.ash/`, fails on actionable findings, and posts a summary on the pull request; the `sarif` job uploads the SARIF report to code scanning | yes |
 | `Validate PR title` | the pull request title passes `cz check` | yes |
-| `lint` | the JSON schemas match a regeneration, the docs checks pass, every CI artifact upload and cache is allowlisted and every cached content database is time-bounded, and `ruff check`, `ruff format --check` and mypy pass; ty runs for information only | through `required-checks` |
+| `lint` | the JSON schemas match a regeneration; the docs checks pass; every CI artifact upload and cache is allowlisted; every cached content database is time-bounded; and `ruff check`, `ruff format --check`, and mypy pass. ty runs for information only | through `required-checks` |
 | `actionlint` | actionlint and shellcheck over every workflow | through `required-checks` |
 | `snapshot-trailers` | every changed golden file has a `Snapshot-Update:` trailer, and every snapshot belongs to a test module | through `required-checks` |
 | `unit-test (<os>, py<version>)` | the unit and snapshot suite with both extras, on five runners and Python 3.10 to 3.14, plus the cdk-nag integration tests | through `required-checks` |
@@ -204,15 +208,15 @@ does not merge.
 | `external-target scan (<os>)`, `multi-project attribution (<os>)` | a scan of a directory outside the repository; a workspace scan that keeps findings with their projects | through `required-checks` |
 | `sandbox escape (<os>)`, `sandbox scanner parity (<sandbox>, <os>)` | the sandbox backends contain a scanner; each scanner gives the same results with and without a sandbox | through `required-checks` |
 | `deploy-tree AWS helpers (moto server)` | the helper scripts in `deploy/`, against a local moto server | through `required-checks` |
-| `<method> (<os>, py<version>)` | each install method (the pip, pipx, uvx, pre-commit and MCP bundle, Homebrew, and the container runtimes) on each runner and Python | through `required-checks` |
-| `required-checks` | fails when any Unified CI job failed or was cancelled; when all of them pass it is skipped, which GitHub counts as passing | yes |
+| `<method> (<os>, py<version>)` | each install method (the pip, pipx, uvx, pre-commit, and MCP bundle, Homebrew, and the container runtimes) on each runner and Python | through `required-checks` |
+| `required-checks` | fails when any Unified CI job failed or was canceled; when all of them pass it is skipped, which GitHub counts as passing | yes |
 | `Build documentation` | `mkdocs build --strict` | no |
 | `Build wheel and sdist, and assert their contents` | the package builds and contains what it should | no |
 | `upgrade (<from>)` | the tree installs into a clean environment, over the latest release, and over the previous commit | no |
 | `dependency-review` | no new dependency with a high-severity advisory | no |
 | `Assert every action is pinned to a commit sha`, `Assert no boolean workflow input is treated as a string` | workflow hygiene | no |
 | `cdk template drift`, `generated buildspec drift`, `terraform hygiene`, `cdk-nag` | the committed IaC in `deploy/` matches a fresh synth, and passes its own checks | no |
-| TypeScript CI, Agent Plugins Drift, CDK Extra Drift, Install Method Validation | the TypeScript packages in `deploy/`, the generated agent plugins, the cdk extra fallback and the Nix install; each runs only when a pull request changes its files | no |
+| TypeScript CI, Agent Plugins Drift, CDK Extra Drift, Install Method Validation | the TypeScript packages in `deploy/`, the generated agent plugins, the cdk extra fallback, and the Nix install; each runs only when a pull request changes its files | no |
 
 A check that is not required does not block the merge when it fails, but the failure
 still shows on the pull request.
@@ -239,7 +243,7 @@ rather than adding the module to the overrides.
 ## Pre-commit hooks
 
 The repository's `.pre-commit-config.yaml` runs ruff, formats JSON files, regenerates the
-JSON schemas and keeps the cdk extra fallback in sync on each commit, and checks the
+JSON schemas, and keeps the cdk extra fallback in sync on each commit. It also checks the
 commit message with commitizen. `pre-commit install` on its own installs only the
 pre-commit stage, not the commit message check. Install both:
 
@@ -254,7 +258,8 @@ the hook environments, and the schema regeneration runs on every commit.
 
 Do not run `pre-commit run --all-files`. The JSON formatting hook sorts keys, so on a
 clean checkout it rewrites many tracked JSON files that their generators own, and CI
-does not run pre-commit at all. If you ran it, review the JSON changes and discard them.
+does not run this repository's pre-commit hooks. If you ran it, review the JSON changes
+and discard them.
 
 The config also has a manual hook that scans the repository with your checkout's ASH:
 
