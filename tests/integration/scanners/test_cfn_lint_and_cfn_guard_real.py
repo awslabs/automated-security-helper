@@ -691,18 +691,18 @@ def test_the_operator_can_name_a_cfnlintrc_outside_the_tree(tmp_path):
 
 # --------------------------------------------------------------------------- #
 # cfn-guard prints a rules file it cannot parse, whole, and follows a symlinked
-# .guard in a rules directory (both measured with 3.2.1). A credentials file outside
-# every rules directory carries a marker that must appear nowhere ASH writes.
+# .guard in a rules directory (both measured with 3.2.1). A file outside every
+# rules directory carries a marker that must appear nowhere ASH writes.
 # --------------------------------------------------------------------------- #
 
 _LEAK_MARKER = "ash-cfn-guard-leak-marker-5c1e"
 
 
-def _secret(tmp_path: Path) -> Path:
-    secret = tmp_path / "elsewhere" / "credentials"
-    secret.parent.mkdir(parents=True)
-    secret.write_text(f"aws_secret_access_key = {_LEAK_MARKER}\n", encoding="utf-8")
-    return secret
+def _outside_file(tmp_path: Path) -> Path:
+    outside_file = tmp_path / "elsewhere" / "notes.txt"
+    outside_file.parent.mkdir(parents=True)
+    outside_file.write_text(f"not a rule {_LEAK_MARKER}\n", encoding="utf-8")
+    return outside_file
 
 
 def _symlink_or_skip(link: Path, target: Path) -> None:
@@ -724,11 +724,11 @@ def test_rules_paths_named_by_the_scanned_tree_are_not_read(tmp_path):
     """The tree empties rule_sets and names its own rules: a link to a file outside
     the tree, and the file itself. Neither is read; the default set runs instead."""
     _require_tools()
-    secret = _secret(tmp_path)
+    outside_file = _outside_file(tmp_path)
     source = tmp_path / "repo"
     shutil.copytree(FIXTURE_REPO, source)
     (source / "policy").mkdir()
-    _symlink_or_skip(source / "policy" / "leak.guard", secret)
+    _symlink_or_skip(source / "policy" / "leak.guard", outside_file)
 
     proc, output = _scan_with_tree_config(
         tmp_path,
@@ -737,7 +737,7 @@ def test_rules_paths_named_by_the_scanned_tree_are_not_read(tmp_path):
                 "cfn-guard": {
                     "options": {
                         "rule_sets": [],
-                        "rules_paths": ["policy", secret.as_posix()],
+                        "rules_paths": ["policy", outside_file.as_posix()],
                     }
                 }
             }
@@ -757,14 +757,14 @@ def test_an_operator_rules_directory_is_read_but_not_a_link_out_of_it(tmp_path):
     """The control: the operator's directory is honored, so its rule reports, and
     the link in it that leaves the directory is refused."""
     _require_tools()
-    secret = _secret(tmp_path)
+    outside_file = _outside_file(tmp_path)
     rules = tmp_path / "operator-rules"
     (rules / "nested").mkdir(parents=True)
     (rules / "nested" / "mine.guard").write_text(
         'rule ash_operator_rule { Resources.*.Type == "AWS::SQS::Queue" }\n',
         encoding="utf-8",
     )
-    _symlink_or_skip(rules / "leak.guard", secret)
+    _symlink_or_skip(rules / "leak.guard", outside_file)
 
     proc, output = _scan_with_tree_config(
         tmp_path,
@@ -790,17 +790,17 @@ def test_an_operator_rules_path_in_the_tree_cannot_be_a_link_out_of_it(tmp_path,
     what is at that path. A link there that leaves the tree is refused, so the
     file it points at never reaches cfn-guard, which would print it whole."""
     _require_tools()
-    secret = _secret(tmp_path)
+    outside_file = _outside_file(tmp_path)
     source = tmp_path / "repo"
     shutil.copytree(FIXTURE_REPO, source)
     if named == "file":
-        _symlink_or_skip(source / "policy.guard", secret)
+        _symlink_or_skip(source / "policy.guard", outside_file)
         value = "policy.guard"
     else:
         outside = tmp_path / "elsewhere" / "rules"
         outside.mkdir()
-        _symlink_or_skip(outside / "creds.guard", secret)
-        (outside / "plain.guard").write_text(secret.read_text(), encoding="utf-8")
+        _symlink_or_skip(outside / "linked.guard", outside_file)
+        (outside / "plain.guard").write_text(outside_file.read_text(), encoding="utf-8")
         _symlink_or_skip(source / "policy", outside)
         value = "policy"
 

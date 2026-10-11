@@ -138,7 +138,7 @@ from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 #: severity reads as everywhere else in ASH.
 #:
 #: Why below security severities: cfn-lint reports template correctness, not
-#: exploitable weaknesses. An E rule means the template is invalid or will fail to
+#: security weaknesses. An E rule means the template is invalid or will fail to
 #: deploy (a misspelled property, a value the service rejects, an end-of-life Lambda
 #: runtime), so it is MEDIUM: at ASH's default threshold an invalid template fails the
 #: scan. A W rule is a best-practice or hygiene finding (an unused parameter, an
@@ -509,7 +509,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         the home directory (cfnlint/config.py, ``_find_config``), and reads neither
         once a config file is named. A repository's ``.cfnlintrc`` is not inert
         configuration: ``append_rules`` loads Python files as rules, which runs them
-        in the scan's environment (measured: a ``rules/evil.py`` beside a
+        in the scan's environment (measured: a ``rules/extra.py`` beside a
         ``.cfnlintrc`` naming it ran on a plain ``cfn-lint -- t.yaml``), and
         ``ignore_checks: [E, W]`` turns every finding off without anything reaching
         ASH's suppression accounting. So the default is an empty configuration ASH

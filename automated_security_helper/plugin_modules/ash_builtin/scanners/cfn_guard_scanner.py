@@ -315,8 +315,8 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         """The operator's ``rules_paths``, read, and whether the list was refused.
 
         cfn-guard echoes a rules file it cannot parse, all of it, in its error
-        (measured with 3.2.1: a credentials file given as ``--rules`` came back
-        whole on stderr), and that error reaches the scan's results. So the list is
+        (measured with 3.2.1: a file that is not rules, given as ``--rules``, came
+        back whole on stderr), and that error reaches the scan's results. So the list is
         used only when the operator set it (``config_trust.operator_paths``; the
         operator may keep rules in the tree). A list from a config in the scanned
         tree, or from an MCP client, is ignored with a warning, and the second
@@ -325,7 +325,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         A named file is read as is. A directory is walked as cfn-guard walks one,
         for ``_RULE_SUFFIXES`` files at any depth, and each is read only when it
         resolves inside that directory: cfn-guard follows a symlinked file there
-        (measured: ``creds.guard -> ../creds`` printed the target), so a link
+        (measured: ``linked.guard -> ../outside.txt`` printed the target), so a link
         leaving the directory the operator named is refused with a warning. Each
         file is read through ``open_in_scanned_tree`` with the named directory as
         its root, and cfn-guard is given a copy of what was read, so a link swapped

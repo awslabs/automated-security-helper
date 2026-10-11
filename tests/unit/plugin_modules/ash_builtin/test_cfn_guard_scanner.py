@@ -379,15 +379,15 @@ class TestRuleSelection:
         of evaluating nothing."""
         directory = _fake_bundle(rules_root)
         if where == "outside":
-            secret = ash_temp_path / "elsewhere" / "credentials"
-            secret.parent.mkdir()
+            not_a_rule = ash_temp_path / "elsewhere" / "notes.txt"
+            not_a_rule.parent.mkdir()
         elif where == "inside":
-            secret = repo / "policy.guard"
+            not_a_rule = repo / "policy.guard"
         else:
-            secret = repo / "policy" / "leak.guard"
-            secret.parent.mkdir()
-        secret.write_text("aws_secret_access_key = not-a-rule\n")
-        named = secret.parent if where == "directory" else secret
+            not_a_rule = repo / "policy" / "leak.guard"
+            not_a_rule.parent.mkdir()
+        not_a_rule.write_text("this line is not a rule\n")
+        named = not_a_rule.parent if where == "directory" else not_a_rule
         scanner = _scanner(repo, operator=False, rule_sets=[], rules_paths=[str(named)])
         with caplog.at_level("WARNING"):
             assert scanner.rule_files() == [directory / "wa-Security-Pillar.guard"]
@@ -458,19 +458,19 @@ class TestRuleSelection:
     ):
         """cfn-guard follows a symlinked .guard in a rules directory and prints a
         target it cannot parse, so the link would put that file in the report."""
-        secret = ash_temp_path / "elsewhere" / "credentials"
-        secret.parent.mkdir()
-        secret.write_text("aws_secret_access_key = not-a-rule\n")
+        not_a_rule = ash_temp_path / "elsewhere" / "notes.txt"
+        not_a_rule.parent.mkdir()
+        not_a_rule.write_text("this line is not a rule\n")
         mine = ash_temp_path / "operator-rules"
         mine.mkdir()
         (mine / "mine.guard").write_text("rule mine { }\n")
         if link_to == "file":
-            _symlink_or_skip(mine / "leak.guard", secret)
+            _symlink_or_skip(mine / "leak.guard", not_a_rule)
         else:
             (mine / "nested").mkdir()
             _symlink_or_skip(
                 mine / "nested" / "leak.guard",
-                Path("..") / ".." / "elsewhere" / "credentials",
+                Path("..") / ".." / "elsewhere" / "notes.txt",
             )
         scanner = _scanner(repo, rule_sets=[], rules_paths=[str(mine)])
         with caplog.at_level("WARNING"):
@@ -498,16 +498,16 @@ class TestRuleSelection:
         content reached ash.sarif and ash.log). Such a path is MISSING."""
         # tmp_path, not ash_temp_path: the repo fixture lives inside this checkout,
         # which counts as the scanned tree.
-        secret = tmp_path / "elsewhere" / "credentials"
-        secret.parent.mkdir()
-        secret.write_text("aws_secret_access_key = not-a-rule\n")
+        not_a_rule = tmp_path / "elsewhere" / "notes.txt"
+        not_a_rule.parent.mkdir()
+        not_a_rule.write_text("this line is not a rule\n")
         if named == "file":
-            _symlink_or_skip(repo / "policy.guard", secret)
+            _symlink_or_skip(repo / "policy.guard", not_a_rule)
             value = "policy.guard"
         else:
             outside = tmp_path / "elsewhere" / "rules"
             outside.mkdir()
-            (outside / "plain.guard").write_text(secret.read_text())
+            (outside / "plain.guard").write_text(not_a_rule.read_text())
             _symlink_or_skip(repo / "policy", outside)
             value = "policy" if named == "directory" else "policy/plain.guard"
         scanner = _scanner(repo, rule_sets=[], rules_paths=[value])
@@ -523,15 +523,15 @@ class TestRuleSelection:
         """The check above runs before the file is read. A rules file inside the
         tree is read under the tree's root, so a link swapped in between is
         refused when the file is opened, rather than followed."""
-        secret = tmp_path / "elsewhere" / "credentials"
-        secret.parent.mkdir()
-        secret.write_text("aws_secret_access_key = not-a-rule\n")
+        not_a_rule = tmp_path / "elsewhere" / "notes.txt"
+        not_a_rule.parent.mkdir()
+        not_a_rule.write_text("this line is not a rule\n")
         named = repo / "policy.guard"
         named.write_text("rule mine { }\n")
 
         def check_then_swap(*_args):
             named.unlink()
-            _symlink_or_skip(named, secret)
+            _symlink_or_skip(named, not_a_rule)
             return False
 
         scanner = _scanner(repo, rule_sets=[], rules_paths=["policy.guard"])
@@ -769,13 +769,13 @@ class TestScan:
         directory, so a link swapped in after the check is never followed, and
         a link that left the directory is not passed at all."""
         _fake_bundle(rules_root)
-        secret = ash_temp_path / "elsewhere" / "credentials"
-        secret.parent.mkdir()
-        secret.write_text("aws_secret_access_key = not-a-rule\n")
+        not_a_rule = ash_temp_path / "elsewhere" / "notes.txt"
+        not_a_rule.parent.mkdir()
+        not_a_rule.write_text("this line is not a rule\n")
         mine = ash_temp_path / "operator-rules"
         mine.mkdir()
         (mine / "mine.guard").write_text("rule mine { }\n")
-        _symlink_or_skip(mine / "leak.guard", secret)
+        _symlink_or_skip(mine / "leak.guard", not_a_rule)
         given = []
 
         def fake(command, **kwargs):

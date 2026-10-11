@@ -312,13 +312,13 @@ class TestOptions:
         reason="symlink creation needs privileges",
     )
     def test_the_empty_config_replaces_a_planted_symlink(self, repo):
-        victim = repo / "victim.txt"
-        victim.write_text("keep me\n")
+        kept = repo / "kept.txt"
+        kept.write_text("keep me\n")
         results = repo / "out"
         results.mkdir()
-        (results / "ash-empty.cfnlintrc").symlink_to(victim)
+        (results / "ash-empty.cfnlintrc").symlink_to(kept)
         _scanner(repo)._option_args(results)
-        assert victim.read_text() == "keep me\n"
+        assert kept.read_text() == "keep me\n"
         assert not (results / "ash-empty.cfnlintrc").is_symlink()
 
 
@@ -647,7 +647,7 @@ class TestTheScannedTreeCannotLoadRules:
     def _plant(repo: Path) -> Path:
         rules = repo / "rules"
         rules.mkdir()
-        (rules / "evil.py").write_text(
+        (rules / "extra.py").write_text(
             "from pathlib import Path\n"
             f"Path({str(repo / 'rules' / 'imported')!r}).touch()\n"
         )
@@ -1049,9 +1049,9 @@ class TestToolVersionIsOnlyAVersionConstraint:
     @pytest.mark.parametrize(
         "value",
         [
-            " @ file:///tmp/evil",
-            "@ git+https://example.invalid/evil.git",
-            "[evil]>=1",
+            " @ file:///tmp/other",
+            "@ git+https://example.invalid/other.git",
+            "[extra]>=1",
             ">=1; sys_platform != 'x'",
             ">=1 --index-url https://example.invalid",
             "1.57.2",
