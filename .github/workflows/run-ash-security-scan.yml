@@ -7,6 +7,14 @@ permissions:
   pull-requests: write # Required for writing comments with scan results to pull requests
 on:
   workflow_call:
+    outputs:
+      artifact-id:
+        description: >-
+          Id of the ash_output artifact the scan uploaded; empty when the scan
+          uploaded none (it failed before ASH wrote its reports). A caller job that
+          downloads ash_output, such as one calling upload-ash-sarif.yml, should
+          start only when this is set.
+        value: ${{ jobs.ash.outputs.artifact-id }}
     inputs:
       ash-version:
         description: "ASH tag, branch or commit to install. Defaults to main."
@@ -228,6 +236,10 @@ jobs:
     name: SAST, SCA, and IaC Scan
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      # Empty when nothing was uploaded; the report job and the caller's SARIF job
+      # start only when it is set.
+      artifact-id: ${{ steps.ash-output.outputs.artifact-id }}
     # Read only. This job runs ASH, the scanners and whatever ASH loads, so it holds
     # no token that can write; the reporting steps are in the `report` job below.
     permissions:
@@ -1308,6 +1320,7 @@ jobs:
           tree "${ASH_OUTPUT_DIR}"
 
       - name: Collect ASH output artifact
+        id: ash-output
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: success() || failure()
         with:
@@ -1329,7 +1342,9 @@ jobs:
   # Here they run in a job that runs nothing from the scan: it downloads the scan's
   # ash_output artifact and hands those files to pinned actions. It runs after a
   # scan that passed or failed (a scan that fails on findings has still written its
-  # reports), and only when the caller asked for something to be reported, so a
+  # reports) and uploaded its ash_output artifact, so a scan that failed before
+  # writing any (a refused config-ref, say) leaves one red check rather than two;
+  # and only when the caller asked for something to be reported, so a
   # caller that reports nothing never starts it. Its result is a check run of its
   # own, `<caller> / Report ASH results`; a reporting failure no longer fails the
   # scan's check.
@@ -1339,6 +1354,7 @@ jobs:
     if: >-
       !cancelled()
       && (needs.ash.result == 'success' || needs.ash.result == 'failure')
+      && needs.ash.outputs.artifact-id != ''
       && (inputs.post-pr-comment || inputs.collect-junit-xml-report || inputs.collect-sarif-report)
     runs-on: ubuntu-latest
     timeout-minutes: 10

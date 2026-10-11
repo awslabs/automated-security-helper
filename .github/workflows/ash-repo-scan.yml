@@ -107,7 +107,9 @@ jobs:
   # has always relied on the same thing for checks and pull-requests: write.
   sarif:
     needs: ash
-    if: needs.ash.result == 'success' || needs.ash.result == 'failure'
+    # Not when the scan uploaded no ash_output (it failed before ASH wrote its
+    # reports): the download would fail too and show a second red check.
+    if: (needs.ash.result == 'success' || needs.ash.result == 'failure') && needs.ash.outputs.artifact-id != ''
     uses: ./.github/workflows/upload-ash-sarif.yml
     permissions:
       contents: read # Required for the checkout in the called workflow
