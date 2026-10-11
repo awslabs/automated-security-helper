@@ -69,7 +69,9 @@ Failure modes
 -------------
 * A build time that cannot be read (the tool printed nothing parseable, the metadata is
   missing) counts as stale, with the reason in the message. An unmeasurable database is not
-  evidence of a fresh one, and treating it as fresh would reopen the silent case.
+  evidence of a fresh one, and treating it as fresh would reopen the silent case. So does a
+  build time further in the future than ``CLOCK_SKEW_ALLOWANCE``: its age would be
+  negative, inside every bound, so it is not a measurement either.
 * The offline rulesets carry no build time of their own. The Dockerfile records the download
   time in ``RULESET_FETCHED_AT_FILE``; without it the oldest rules file's mtime is used, which
   an ordinary ``cp`` resets to the copy time and so can only under-state the age. The record
@@ -110,6 +112,7 @@ from automated_security_helper.utils.content_databases import (
     ContentDatabase,
     built_offline,
     go_duration,
+    is_future_dated,
     is_stale,
     parse_timestamp,
 )
@@ -185,6 +188,20 @@ class ContentDbAgeRecord:
                 f"Content database {self.name} ({self.scanner}): the time it was "
                 f"{self.timestamp_label} could not be read ({self.error or 'no timestamp'}), "
                 f"so it cannot be shown to be inside its {bound} bound ({whose})."
+            )
+        elif is_future_dated(self.built, self.measured_at):
+            ahead = self.built - self.measured_at
+            ahead_text = (
+                format_age(ahead)
+                if ahead >= timedelta(hours=1)
+                else f"{int(ahead.total_seconds() // 60)}m"
+            )
+            head = (
+                f"Content database {self.name} ({self.scanner}): the time it says it was "
+                f"{self.timestamp_label}, {_iso(self.built)}, is {ahead_text} ahead of this "
+                "host's clock "
+                f"(read from {self.measured_by}), so its age cannot be measured and it "
+                f"cannot be shown to be inside its {bound} bound ({whose})."
             )
         else:
             head = (

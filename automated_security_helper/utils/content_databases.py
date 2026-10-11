@@ -450,14 +450,30 @@ def use_allowed(entry: ContentDatabase, built: datetime, now: datetime) -> bool:
     return now - built <= entry.max_age
 
 
+#: How far ahead of this host's clock a database's build time may be and still count
+#: as measured. A build time further ahead is not a usable age: ``now - built`` would
+#: be negative, inside every bound, for as long as the clock stays behind it. The
+#: allowance tolerates a host clock that is somewhat behind the publisher's, and caps
+#: what a future-dated timestamp can add to a database's apparent freshness.
+CLOCK_SKEW_ALLOWANCE = timedelta(minutes=15)
+
+
+def is_future_dated(built: datetime, now: datetime) -> bool:
+    """Whether `built` is further ahead of `now` than ``CLOCK_SKEW_ALLOWANCE``."""
+    return built - now > CLOCK_SKEW_ALLOWANCE
+
+
 def is_stale(entry: ContentDatabase, built: datetime, now: datetime) -> bool:
     """Whether a database built at `built` is past its bound at `now`, for a scan.
+
+    A build time more than ``CLOCK_SKEW_ALLOWANCE`` in the future counts as stale too:
+    its age cannot be measured, and an unmeasured database is not a fresh one.
 
     Separate from ``use_allowed`` on purpose. That answers a CI-cache question and refuses
     anything not cacheable there; this answers "may a scan trust it", which every declared
     database has an answer to.
     """
-    return now - built > entry.max_age
+    return is_future_dated(built, now) or now - built > entry.max_age
 
 
 def parse_timestamp(value: str) -> datetime:

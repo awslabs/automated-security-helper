@@ -177,7 +177,9 @@ how to refresh it. This happens in online and offline mode alike.
 | `opengrep-offline-rules` | opengrep (offline only) | 720h (30 days) | ASH's own choice; opengrep has no staleness notion for local rules | `.ash-rules-fetched-at` in `$OPENGREP_RULES_CACHE_DIR`, else the oldest rules file's mtime |
 
 A database whose build time cannot be read is treated as stale, because an
-unmeasurable database is not evidence of a fresh one.
+unmeasurable database is not evidence of a fresh one. So is a database whose build
+time is more than 15 minutes ahead of the host's clock: its age cannot be measured,
+and the message says so.
 
 To let one scan run against a stale database, pass `--allow-stale-content-db`, or
 set:

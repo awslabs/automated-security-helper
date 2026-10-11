@@ -1344,3 +1344,40 @@ class TestEveryScannerThatReadAStaleDatabaseIsNamed:
         (stale,) = staleness.stale_content_databases(model, enforced_only=True)
         assert stale.scanner == "trivy"
         assert _exit_code(tmp_path, model) == 1
+
+
+# --------------------------------------------------------------------------- future-dated
+
+
+class TestABuildTimeInTheFutureIsNotFresh:
+    """``now - built`` is negative for a build time in the future, which every bound
+    admits, so a database claiming to be built tomorrow read as fresh indefinitely."""
+
+    def test_is_stale_refuses_a_build_time_past_the_clock_skew_allowance(self):
+        entry = cdb.get("trivy-db")
+        now = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
+        allowance = cdb.CLOCK_SKEW_ALLOWANCE
+        assert not cdb.is_stale(entry, now + allowance, now)
+        assert cdb.is_stale(entry, now + allowance + timedelta(seconds=1), now)
+        assert cdb.is_stale(entry, now + timedelta(days=365), now)
+        assert not cdb.is_stale(entry, now - timedelta(hours=1), now)
+
+    @pytest.mark.parametrize("name", sorted(CASES))
+    def test_it_fails_the_scan_and_says_why(self, tmp_path, name):
+        scanner = CASES[name](tmp_path, -timedelta(days=2))
+        sarif = _sarif(scanner.config.name)
+        (record,) = staleness.assess_scanner(
+            scanner, sarif, cdb.DEFAULT_STALENESS_POLICY
+        )
+        assert record.stale and record.enforced
+        message = record.message()
+        assert "ahead of this host's clock" in message, message
+        assert "cannot be shown to be inside" in message, message
+        assert _exit_code(tmp_path, _model(sarif)) == 1
+
+    def test_a_small_skew_is_tolerated(self, tmp_path):
+        scanner = _trivy_case(tmp_path, -timedelta(minutes=1))
+        (record,) = staleness.assess_scanner(
+            scanner, _sarif("trivy-repo"), cdb.DEFAULT_STALENESS_POLICY
+        )
+        assert not record.stale
