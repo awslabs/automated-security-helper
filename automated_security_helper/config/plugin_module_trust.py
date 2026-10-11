@@ -9,7 +9,10 @@ decides that), the entries it adds beyond the trusted list (the defaults, an
 operator config outside the tree, and ``--config-overrides``) are kept only if
 they name an installed module: one that ``importlib.util.find_spec`` locates
 outside the scanned tree. An entry that is not importable, or whose spec points
-into the tree, is dropped with one warning naming ``ash_plugin_modules``.
+into the tree, is dropped with one warning naming ``ash_plugin_modules``. An entry
+outside the plugin namespace is kept, unimported, so the scan refuses it with exit
+code 3 (``plugins.loader.refuse_plugin_modules_outside_namespace``) as it would from
+any other config source.
 
 Packages named this way keep working, which is what ASH's own
 ``.ash/.ash_community_plugins.yaml`` relies on: its entries live in the installed
@@ -136,6 +139,7 @@ def confine_plugin_modules(
     from automated_security_helper.config.resolve_config import (
         apply_config_overrides,
     )
+    from automated_security_helper.plugins.loader import _is_allowed_module_path
 
     module_overrides = [
         override
@@ -149,6 +153,11 @@ def confine_plugin_modules(
     kept: List[str] = []
     refused: List[str] = []
     for name in split_plugin_modules(getattr(config, "ash_plugin_modules", [])):
+        # Left for the scan's refusal (exit 3) rather than dropped here: the
+        # refusal imports nothing, and dropping it would let the scan run.
+        if not _is_allowed_module_path(name):
+            kept.append(name)
+            continue
         if name in trusted_names:
             kept.append(name)
             continue
