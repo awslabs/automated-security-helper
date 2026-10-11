@@ -46,7 +46,9 @@
  * with its own `.ash.yaml` discovers and uses that file, and `ASH_CONFIG` is the
  * default for directories without one. `ash scan` is different, because its
  * `--config` option reads `ASH_CONFIG` as its value, so the shard and merge
- * projects, which run `ash scan` with this variable set, never read the
+ * projects, which run `ash scan` with this variable set, read the base config and
+ * not the repository's when `AshBaseConfigYaml` is set. With it empty they unset
+ * the variable (see ash-distributed-pipeline-stack.ts) and ASH discovers the
  * repository's config. The CodeCommit gate passes `--config` itself, always; see
  * `CODECOMMIT_GATE_HANDLER`.
  */
@@ -603,7 +605,7 @@ exec "$@"
  * -----------------------------------------------
  * Without `--config` or `ASH_CONFIG`, ASH looks for a config INSIDE the scanned
  * tree, which here is the pull request. So the pull request under judgment chose
- * the rules it was judged by: measured, a committed `fail_on_findings: false`
+ * the ASH config it was judged by: measured, a committed `fail_on_findings: false`
  * turned exit 2 into exit 0, "passed" and, with ApprovalGate on, an APPROVE. And
  * `AshBaseConfigYaml` reached this function only as a parameter name nothing read.
  *

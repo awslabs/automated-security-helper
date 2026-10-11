@@ -124,16 +124,22 @@ config can be pasted into Parameter Store after deployment; the next container
 start, or on the gate the next pull request, picks it up. Deploy with a short
 document such as `{}` rather than empty if you mean to do that: a stack deployed with
 `AshBaseConfigYaml` empty does not tell its workload the parameter's name, so an
-edit to the parameter is read by nothing. ASH selects one config source rather than merging them, so what
-`ASH_CONFIG` means depends on how the target runs ASH. An MCP scan of a directory
-that carries its own `.ash.yaml` uses that file; `ASH_CONFIG` is the default for
-directories without one. The pipeline's shard and merge projects run `ash scan`,
-whose `--config` option reads `ASH_CONFIG`, so there the repository's own config is
-not read. The CodeCommit gate always passes `--config`: the base config, read from
-the parameter on every invocation, or `{}` (ASH's defaults) when none was supplied,
-so a pull request never chooses the rules it is judged by. A base config the gate
-cannot read refuses the scan, comments on the pull request and revokes its
-approval.
+edit to the parameter is read by nothing.
+
+ASH selects one config source rather than merging them, so what `ASH_CONFIG` means
+depends on how the target runs ASH. An MCP scan of a directory that carries its own
+`.ash.yaml` uses that file; `ASH_CONFIG` is the default for directories without one.
+The pipeline's shard and merge projects run `ash scan`, whose `--config` option
+reads `ASH_CONFIG`, so with `AshBaseConfigYaml` set the repository's own ASH config
+is not read there; with it empty they leave `ASH_CONFIG` unset and ASH uses the
+repository's config if it has one. The CodeCommit gate always passes `--config`:
+the base config, read from the parameter on every invocation, or `{}` (ASH's
+defaults) when none was supplied, so a pull request's own ASH config is never read.
+That covers ASH's configuration only: ASH still passes some scanners a
+configuration file committed in the scanned tree (bandit's `.bandit` or
+`bandit.yaml`, grype's `.grype.yaml`), so a pull request can still configure those
+scanners. A base config the gate cannot read refuses the scan, comments on the pull
+request and revokes its approval.
 
 The CloudFormation quotas page suggests working around the 4096-byte cap by
 declaring several parameters and rejoining them with `Fn::Join`. That is lossless,

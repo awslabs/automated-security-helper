@@ -55,11 +55,14 @@ schedule exists to prevent.
 ## The scan runs with the operator's configuration
 
 Without `--config` or `ASH_CONFIG`, ASH looks for a config inside the scanned tree,
-which here is the pull request, so a pull request could choose the rules it is
+which here is the pull request, so a pull request could choose the ASH config it is
 judged by. The handler always passes `--config`: the base config
 from `base_config_ssm_parameter_name`, read again for every scan, or, with none set,
 a `{}` document beside the clone, which is ASH's defaults. A pull request's own
-`.ash/.ash.yaml` is never read. The copy `ash-container-init` writes at a cold start
+`.ash/.ash.yaml` is never read. That is ASH's configuration only: ASH still passes
+some scanners a config file committed in the scanned tree (bandit's `.bandit` or
+`bandit.yaml`, grype's `.grype.yaml`), so a pull request can still configure those
+scanners. The copy `ash-container-init` writes at a cold start
 is not used, because the scan's own user can write it and a warm sandbox serves
 later pull requests too; reading the parameter per scan also means an edit reaches
 the next pull request without a cold start. A parameter that cannot be read, or a
@@ -206,7 +209,7 @@ fetch what it needs.
 | `log_retention_days` | — | `number` | `30` | |
 | `vpc_id` | `VpcId` | `string` | `""` | Opt-in VPC placement, with `vpc_subnet_ids`. Empty leaves egress open. Set, the module creates a security group in it whose only egress is TCP 443 to `scan_egress_cidr` (`scan_security_group_id` output, to widen it); your routes must reach what that CIDR names. Not deploy-tested: the ENI grant is pinned with `aws:RequestedRegion`, which AWS does not document for Lambda's service-side calls; if VPC attachment fails on `ec2:CreateNetworkInterface`, please report it. |
 | `vpc_subnet_ids` | `VpcSubnetIds` | `list(string)` | `[]` | Subnets in `vpc_id`. Set together with `vpc_id`, or neither. |
-| `scan_egress_cidr` | `ScanEgressCidr` | `string` | `""` | Required with `vpc_id`. The IPv4 CIDR the function may reach on TCP 443. It calls CodeCommit (API and `git-codecommit`) and SSM; the Lambda service pulls the image and delivers logs. With `ash_offline_mode = false` the scanners also download from public hosts outside AWS. Use your VPC CIDR for an offline image with interface endpoints, or `0.0.0.0/0` for an online image behind a NAT gateway. |
+| `scan_egress_cidr` | `ScanEgressCidr` | `string` | `""` | Required with `vpc_id`. The IPv4 CIDR the function may reach on TCP 443. It calls CodeCommit (API and `git-codecommit`) and, when `base_config_ssm_parameter_name` is set, SSM; the Lambda service pulls the image and delivers logs. With `ash_offline_mode = false` the scanners also download from public hosts outside AWS. Use your VPC CIDR for an offline image with interface endpoints, or `0.0.0.0/0` for an online image behind a NAT gateway. |
 | `tags` | — | `map(string)` | `{}` | |
 
 ## Outputs
@@ -223,8 +226,10 @@ not adjustable.** The clone plus the scan has to fit:
 
 1. The scan cannot be narrowed to the pull request's changes. The handler
    refuses `--changed-files-only` and `--base-ref` in `ash_scan_extra_args`,
-   because a narrowed scan switches off the completeness check without switching
-   off the gate's report of a pass.
+   because with them findings outside the diff stop counting, and so does every
+   finding in a file whose name git prints quoted (a non-ASCII byte, a quote, a
+   backslash or a control character), which can turn a failing pull request
+   into a pass.
 2. More `lambda_memory_mb`, since Lambda allocates CPU in proportion to memory
    and ASH is CPU-bound.
 3. For repositories where that is not enough, use the `codepipeline-executor`

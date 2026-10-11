@@ -498,8 +498,8 @@ def _reject_gate_owned_options(tokens: list[str]) -> None:
         f"ASH_SCAN_EXTRA_ARGS sets options this gate reserves: {' '.join(offending)}. "
         "Refusing to scan rather than letting the environment decide this gate's "
         "verdict: these either repeat an option the gate passes -- which resolves to "
-        "its last occurrence -- or narrow what gets scanned, which switches off the "
-        "completeness check without switching off the gate's report of a pass. "
+        "its last occurrence -- or narrow what gets scanned or what counts, so the "
+        "gate would report a pass about less than the whole tree. "
         f"Reserved: {' '.join(reserved)}."
     )
     LOGGER.error(message)

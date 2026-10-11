@@ -248,10 +248,9 @@ variable "ash_scan_extra_args" {
     Extra arguments appended to the `ash scan` command line, split on whitespace.
 
     Options the gate owns are refused, and so is anything that narrows what gets
-    scanned (refused: `--changed-files-only` and `--base-ref` among them): a
-    narrowed scan switches off the completeness check without switching off the
-    gate's report of a pass. A refused option ends every pull request in outcome
-    "error".
+    scanned or what counts (refused: `--changed-files-only` and `--base-ref`
+    among them): the gate would then report a pass about less than the whole
+    tree. A refused option ends every pull request in outcome "error".
   EOT
   type        = string
   default     = ""

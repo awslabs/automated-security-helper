@@ -185,8 +185,9 @@
  * bytes per 3 and reaches the adopter as an opaque blob. `.ash/.ash.yaml` records the
  * empty population from the other side.
  *
- * WHAT THE FIVE TEMPLATES MEASURE NOW, against a 51,200-byte cap, with `main` beside
- * each for the diff a reviewer reads:
+ * WHAT THE FIVE TEMPLATES MEASURED when the per-policy reasons landed, against a
+ * 51,200-byte cap, with the `main` of that time beside each for the diff a reviewer
+ * read then:
  *
  *                            bytes    margin        on main    margin on main
  *   AshAgentCore            48,809    under 2,391    50,934     under     266
@@ -194,6 +195,17 @@
  *   AshDistributedPipeline 154,630    over  103,430 148,394     over  97,194
  *   AshFargate              68,502    over   17,302  76,674     over  25,474
  *   AshImagePipeline        61,183    over    9,983  68,435     over  17,235
+ *
+ * AND WHAT THEY MEASURE NOW, after the gate and MCP hardening (the gate's config and
+ * completeness checks, the MCP entrypoint's Host and session decisions, the bootstrap's
+ * response-URL parameter):
+ *
+ *                            bytes    margin
+ *   AshAgentCore            50,400    under    800  (288 under the budget below)
+ *   AshCodeCommitGate       61,225    over  10,025
+ *   AshDistributedPipeline 151,117    over  99,917
+ *   AshFargate              71,538    over  20,338
+ *   AshImagePipeline        66,674    over  15,474
  *
  * AshCodeCommitGate HAS SINCE MOVED TO S3-ONLY. The optional VPC placement for its scan
  * function (two parameters, a condition, a Rule, a conditional inline role policy and its
@@ -213,7 +225,8 @@
  * AshImagePipeline -1,778. Sixteen distinct IAM5 reasons now ship where five did, over the
  * same 77 entries on the same 77 policies.
  *
- * READ THE AGENTCORE MARGIN AS STILL WORTH WATCHING: 2,391 bytes, 4.7% of the cap, on a
+ * READ THE AGENTCORE MARGIN AS STILL WORTH WATCHING: 2,391 bytes, 4.7% of the cap, when
+ * that table was taken, and 800 bytes (288 under the budget this file asserts) now, on a
  * stack whose suppression metadata grows with every resource added. An indented entry costs
  * 71 bytes of structure plus its reason -- about 390 at the 321-character mean across the
  * five templates, 357 for AshAgentCore's eight -- and a new suppressed resource brings its
