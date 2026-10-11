@@ -209,15 +209,18 @@ Each `converter_results` row (`archive`, `jupyter`) has:
 |---|---|
 | `dependencies_satisfied` | `false` when the converter's tool was missing. |
 | `excluded` | `true` when the converter was turned off. |
-| `failure` | The error, when the converter itself crashed. |
+| `failure` | The error, as `<Type>: <message>`, when the converter itself crashed or could not be created. |
 | `candidate_inputs` | How many inputs it set out to convert, when it counts them. |
 | `refused_inputs` | Inputs it declined to read, each with `path`, `member` (for an archive member) and `reason`, such as links, special files, and archive members with absolute names or names that would land outside the extraction directory. These never fail the scan. |
-| `failed_inputs` | Inputs it tried and could not convert, each with `path` and `reason`, such as a corrupt archive or a notebook nbconvert could not read. |
+| `failed_inputs` | Inputs it tried and could not convert, each with `path` and `reason`, such as a corrupt archive or a notebook nbconvert could not read. A reason that comes from an unexpected error is the error's type and message, such as `BadZipFile: Bad CRC-32 for file 'app.py'`. |
 | `converted_paths` | The files it wrote under `converted/`. |
 
 A converter with a `failure`, any `failed_inputs`, or a missing tool while it had inputs
 makes the conversion incomplete. Under the default `fail_on_incomplete_scanners` the scan
-then exits 1, because the scanners were given fewer files than the repository has.
+then exits 1, because the scanners were given fewer files than the repository has. The
+console line for each such converter, and its entry in `incomplete_converters` in the MCP
+scan results, give its `failure`, or the number of failed inputs and up to five of their
+paths.
 
 <!-- doctest: config kind=ash-output -->
 ```json

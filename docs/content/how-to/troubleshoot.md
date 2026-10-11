@@ -128,12 +128,14 @@ Cause: ASH converts Jupyter notebooks to Python, and extracts `.zip`, `.tar`, an
 archives, before it scans them. A notebook that `nbconvert` could not convert, or an
 archive that cannot be read, fails the scan so that its content is not silently left
 unscanned. The lines after the message name each converter and up to five of the files
-it could not convert. `ash.log` has a line for each file with the reason,
-`Could not convert '<file>': <reason>` (the console shows it too when the progress
-display is off), and each converter's `failed_inputs` in `ash_aggregated_results.json`
-records the same reason. For a notebook, the reason says that nbconvert exited with a
-non-zero code, did not finish within 60 seconds, or wrote no output, or that uv could not
-run nbconvert and no `jupyter-nbconvert` was found.
+it could not convert, or, for a converter that crashed, its error as `<Type>: <message>`.
+`ash.log` has a line for each file with the reason, `Could not convert '<file>': <reason>`
+(the console shows it too when the progress display is off), and each converter's
+`failed_inputs` in `ash_aggregated_results.json` records the same reason. A reason that
+comes from an unexpected error is the error's type and message, such as
+`BadZipFile: Bad CRC-32 for file 'app.py'`. For a notebook, the reason says that nbconvert
+exited with a non-zero code, did not finish within 60 seconds, or wrote no output, or that
+uv could not run nbconvert and no `jupyter-nbconvert` was found.
 
 Fix: for notebooks, make sure `uv` is on your `PATH` so ASH can run `nbconvert`, or
 install it ahead of time with `ash dependencies install --tool jupyter`. To see

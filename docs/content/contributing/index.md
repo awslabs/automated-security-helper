@@ -221,6 +221,38 @@ does not merge.
 A check that is not required does not block the merge when it fails, but the failure
 still shows on the pull request.
 
+## Scheduled checks
+
+The "ASH - Pinned Tool Versions" workflow runs every Monday and can be started by hand. It
+runs `scripts/check_pinned_tool_versions.py --fail-on-outdated --markdown` and writes the
+report to the job summary. The script compares:
+
+- each version pinned in `automated_security_helper/utils/tool_downloads.py` (the release
+  binaries, the Python scanners the container image installs, the license-only entries,
+  and the cfn-nag gem) with its upstream's latest release on GitHub, PyPI, or RubyGems.
+  Libraries that another pinned wheel bundles are listed as `held` and not looked up;
+- each `package=version` pin on an `apt-get install` line in the `Dockerfile` with the
+  Debian and NodeSource package indexes, for amd64 and arm64.
+
+The script fetches only HTTPS URLs on `api.github.com`, `pypi.org`, `rubygems.org`,
+`deb.debian.org`, and `deb.nodesource.com`, and checks every redirect hop against the same
+rule before it follows it. With `GITHUB_TOKEN` or `GH_TOKEN` set, it sends the token to
+the GitHub API only, carries it across a redirect only to the same scheme, host, and port,
+and retries a GitHub lookup that gets 403 once without the token. It exits 2 when a
+lookup fails, the pins cannot be read, or an `apt-get install` line names a package
+without a version, and 1 when no package index carries an apt pin's version. A pin that
+is behind makes it exit 1 only with `check_pinned_tool_versions.py --fail-on-outdated`, as
+the workflow runs it; otherwise it exits 0. To run it locally, from a checkout:
+
+<!-- doctest: illustrative reason="queries GitHub, PyPI, RubyGems, and the Debian and NodeSource archives" -->
+```bash
+python scripts/check_pinned_tool_versions.py
+```
+
+The workflow opens no issue or pull request. A bump changes every digest, the license
+files, and the source commit in `tool_downloads.py`, so a person makes it; the report
+lists each value a bump has to change.
+
 ## Code style
 
 CI runs these, and so can you:

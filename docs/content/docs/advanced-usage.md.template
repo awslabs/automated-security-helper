@@ -196,8 +196,10 @@ keeps out).
 
 To let ASH use tools from inside the scanned directory for one scan, pass
 `--allow-in-tree-tools` to `ash` or `ash scan`, or set `ASH_ALLOW_IN_TREE_TOOLS=1` in
-the environment. With `--cli-json-input`, `"allow_in_tree_tools": true` has the same
-effect as the flag. ASH then runs the in-tree copies and logs each one:
+the environment. The variable turns the opt-in on for `1`, `true`, `yes`, or `on`, in any
+letter case and with surrounding spaces ignored; any other value leaves it off. With
+`--cli-json-input`, `"allow_in_tree_tools": true` has the same effect as the flag. ASH
+then runs the in-tree copies and logs each one:
 
 ```text
 Running bandit from inside the scanned tree /home/me/repo: /home/me/repo/.venv/bin/bandit. In-tree tools are allowed by ASH_ALLOW_IN_TREE_TOOLS or --allow-in-tree-tools.
