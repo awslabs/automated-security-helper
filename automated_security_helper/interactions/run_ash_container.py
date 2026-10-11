@@ -487,7 +487,7 @@ def _resolve_build_target(
 
 
 def _non_root_stage_uid_refusal(
-    build_target: str, container_uid: str, container_gid: str = "100"
+    build_target: str, container_uid: str, container_gid: str
 ) -> str | None:
     """Why a ``non-root`` build with these IDs cannot work, or None when it can.
 

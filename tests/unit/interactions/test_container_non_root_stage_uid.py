@@ -210,6 +210,12 @@ def test_an_unprivileged_host_user_builds_non_root_as_itself(commands, monkeypat
     assert "UID=1000" in build and "GID=1000" in build
 
 
+def test_the_gid_has_no_default():
+    """A caller that leaves the GID out gets an error, not a GID check skipped."""
+    with pytest.raises(TypeError):
+        rac._non_root_stage_uid_refusal(BuildTarget.NON_ROOT.value, "1000")
+
+
 def test_the_refusal_names_the_opt_in_exactly(commands):
     """The message names the flag that builds the root stage, as it is typed."""
     result = rac.run_ash_container(
