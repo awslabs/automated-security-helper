@@ -491,8 +491,10 @@ def jupyter(request, test_plugin_context, monkeypatch, tmp_path):
 
     Both routes are covered: ``uv tool run``, the default, through
     ``get_uv_tool_runner``, and the direct ``jupyter`` fallback through the converter
-    module's own ``subprocess`` name, with a jupyter-nbconvert on PATH outside the
-    tree for it to resolve. The standard library module is never patched.
+    module's own ``subprocess`` and ``spawn_run`` names (it starts nbconvert through
+    ``spawn_run``, so a scanner sandbox can confine it), with a jupyter-nbconvert on
+    PATH outside the tree for it to resolve. The standard library module is never
+    patched.
     """
     converter = JupyterConverter(
         context=test_plugin_context, config=JupyterConverterConfig()
@@ -539,6 +541,7 @@ def jupyter(request, test_plugin_context, monkeypatch, tmp_path):
                 TimeoutExpired=subprocess.TimeoutExpired,
             ),
         )
+        monkeypatch.setattr(jupyter_converter_module, "spawn_run", run)
     return converter, calls
 
 
