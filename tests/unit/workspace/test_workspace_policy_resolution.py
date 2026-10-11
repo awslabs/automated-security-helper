@@ -563,3 +563,39 @@ def test_a_delivered_policy_adding_a_scanner_scans_under_the_default_rules(
     plan = resolve_workspace(workspace)
 
     assert list(_by_key(plan)["api"].policy_scanners) == ["bandit"]
+
+
+def test_the_plan_takes_its_trusted_base_from_the_registered_profile(
+    tmp_path, _mcp_root
+):
+    """``trusted_config`` reaches the plan's resolution, as it reaches the scan's.
+
+    The patched copy repeats the registered profile's ``ash_aws_plugins``, which
+    only the operator's config may load. With the client's copy as the trusted
+    base, the plan would drop the module the scan then loads.
+    """
+    import yaml
+
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.client_config_policy import rules_from
+
+    module = "automated_security_helper.plugin_modules.ash_aws_plugins"
+    profile = {"project_name": "operator", "ash_plugin_modules": [module]}
+    operator_copy = _mcp_root / "session-1" / "config" / "ash.yaml"
+    client_copy = _mcp_root / "session-1" / "client-config" / "ash.yaml"
+    for path in (operator_copy, client_copy):
+        path.parent.mkdir(parents=True)
+        path.write_text(yaml.safe_dump(profile), encoding="utf-8")
+    # Outside the MCP root's parent, which would put both copies in the tree.
+    checkouts = tmp_path / "checkouts"
+    _project(checkouts, "api")
+    workspace = _workspace(checkouts, ["api"])
+
+    plan = resolve_workspace(
+        workspace,
+        default_config=client_copy,
+        trusted_config=operator_copy,
+        client_config_rules=rules_from(AshConfig.model_validate(profile)),
+    )
+
+    assert module in _by_key(plan)["api"].ash_plugin_modules
