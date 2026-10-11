@@ -64,6 +64,10 @@ from typing import Iterable, List, Mapping, Optional, Sequence
 
 from automated_security_helper.config.ash_config import SandboxConfig
 from automated_security_helper.config.config_sources import describe_config_path
+from automated_security_helper.config.untrusted_source import (
+    IN_TREE_OR_DELIVERED,
+    UntrustedSource,
+)
 from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -153,7 +157,10 @@ def files_inside(
 
 
 def confine_sandbox_grants(
-    sandbox: SandboxConfig, trusted: SandboxConfig, in_tree: List[Path]
+    sandbox: SandboxConfig,
+    trusted: SandboxConfig,
+    in_tree: List[Path],
+    source: UntrustedSource = IN_TREE_OR_DELIVERED,
 ) -> None:
     """Replace the grants in ``sandbox`` with ``trusted``'s, keeping its list as a limit.
 
@@ -162,6 +169,8 @@ def confine_sandbox_grants(
         trusted: The same settings resolved from the trusted base plus the
             overrides.
         in_tree: The config files inside the scanned tree. Named in the warning.
+        source: Why those files are not the operator's, and the fix, for the
+            warning.
     """
     ignored = []
     if sandbox.network_scanners != trusted.network_scanners:
@@ -180,10 +189,8 @@ def confine_sandbox_grants(
     if ignored:
         files = ", ".join(describe_config_path(path) for path in in_tree)
         ASH_LOGGER.warning(
-            f"Ignoring {', '.join(ignored)} from {files}: the file is inside the "
-            "scanned tree, so the repository being scanned wrote it. A "
+            f"Ignoring {', '.join(ignored)} from {files}: {source.reason}. A "
             "network_scanners list there still removes network from scanners it "
             "does not name, and a sandbox mode there still applies when nothing "
-            "else turns the sandbox on. Set these with --config-overrides or a "
-            "config file outside the tree."
+            f"else turns the sandbox on. Set these with {source.remedy}."
         )

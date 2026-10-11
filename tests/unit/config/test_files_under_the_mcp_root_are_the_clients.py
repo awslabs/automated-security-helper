@@ -103,9 +103,9 @@ def test_a_config_under_the_mcp_root_named_on_the_cli_is_not_the_operators(
     seen = {}
     real = rc.confine_sandbox_grants
 
-    def recording(sandbox, trusted, in_tree):
+    def recording(sandbox, trusted, in_tree, **kwargs):
         seen["in_tree"] = list(in_tree)
-        return real(sandbox, trusted, in_tree)
+        return real(sandbox, trusted, in_tree, **kwargs)
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(rc, "confine_sandbox_grants", recording)

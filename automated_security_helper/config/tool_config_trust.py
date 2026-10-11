@@ -80,6 +80,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
+from automated_security_helper.config.untrusted_source import (
+    IN_TREE_OR_DELIVERED,
+    UntrustedSource,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 if TYPE_CHECKING:
@@ -182,6 +186,7 @@ def confine_scanner_config_files(
     trusted_config: "AshConfig",
     config_overrides: Optional[Sequence[str]],
     in_tree: Sequence[Path],
+    source: UntrustedSource = IN_TREE_OR_DELIVERED,
 ) -> None:
     """Replace the tool config choices an in-tree or delivered file made with the trusted base's.
 
@@ -193,6 +198,8 @@ def confine_scanner_config_files(
             replayed onto ``trusted_config``, as the reporter overrides are in
             ``confine_reporter_destinations``, so an override still sets these.
         in_tree: The config files inside the tree, named in the warning.
+        source: Why those files are not the operator's, and the fix, for the
+            warning.
     """
     from automated_security_helper.config.client_scanner_exclusions import (
         _scanner_sections,
@@ -239,9 +246,8 @@ def confine_scanner_config_files(
         files = ", ".join(describe_config_path(path) for path in in_tree)
         ASH_LOGGER.warning(
             f"Ignoring {', '.join(sorted(set(ignored)))} from {files}: these choose "
-            "a scanner's own configuration, which is the operator's choice, and that "
-            "config is inside the scanned tree or was delivered by an MCP client. Set "
-            "them with --config-overrides or in a config file outside the tree."
+            "a scanner's own configuration, which is the operator's choice, and "
+            f"{source.reason}. Set them with {source.remedy}."
         )
 
 

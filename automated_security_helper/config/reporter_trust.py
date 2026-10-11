@@ -75,6 +75,10 @@ from typing import (
 from pydantic import BaseModel
 
 from automated_security_helper.config.config_sources import describe_config_path
+from automated_security_helper.config.untrusted_source import (
+    IN_TREE_OR_DELIVERED,
+    UntrustedSource,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 if TYPE_CHECKING:
@@ -177,6 +181,7 @@ def confine_reporter_destinations(
     trusted_config: "AshConfig",
     config_overrides: Optional[Sequence[str]],
     in_tree: Sequence[Path],
+    source: UntrustedSource = IN_TREE_OR_DELIVERED,
 ) -> None:
     """Replace the destination options an in-tree file set with the trusted base's.
 
@@ -191,6 +196,8 @@ def confine_reporter_destinations(
             replayed onto ``trusted_config``, the same way the sandbox overrides
             are, so an override still sets these options.
         in_tree: The config files inside the tree, named in the warning.
+        source: Why those files are not the operator's, and the fix, for the
+            warning.
     """
     from automated_security_helper.config.resolve_config import (
         apply_config_overrides,
@@ -212,11 +219,14 @@ def confine_reporter_destinations(
         REPORTER_DESTINATION_OPTIONS,
         REPORTER_ENABLED_DEFAULTS,
         in_tree,
+        source,
     )
 
 
 def confine_declared_reporter_destinations(
-    config: "AshConfig", reporter_classes: Iterable[type]
+    config: "AshConfig",
+    reporter_classes: Iterable[type],
+    source: UntrustedSource = IN_TREE_OR_DELIVERED,
 ) -> None:
     """Apply ``confine_reporter_destinations`` to the options loaded reporters declare.
 
@@ -230,6 +240,8 @@ def confine_declared_reporter_destinations(
     Args:
         config: The config ``resolve_config`` returned, changed in place.
         reporter_classes: The reporter classes the plugin manager loaded.
+        source: As for ``confine_reporter_destinations``; ``ash merge`` passes
+            the one it passed there.
     """
     from automated_security_helper.config.ash_config import AshConfig
 
@@ -245,6 +257,7 @@ def confine_declared_reporter_destinations(
         declared_destination_options(reporter_classes),
         declared_enabled_defaults(reporter_classes),
         config._in_tree_config_files,
+        source,
     )
 
 
@@ -358,6 +371,7 @@ def _confine(
     destinations: Mapping[str, Sequence[str]],
     enabled_defaults: Mapping[str, bool],
     in_tree: Sequence[Path],
+    source: UntrustedSource = IN_TREE_OR_DELIVERED,
 ) -> None:
     """Set each reporter's ``destinations`` options, and ``enabled`` where the
     trusted base turns it off, to the trusted base's, with one warning."""
@@ -367,11 +381,9 @@ def _confine(
         return
     files = ", ".join(describe_config_path(path) for path in in_tree)
     ASH_LOGGER.warning(
-        f"Ignoring {', '.join(ignored)} from {files}: that config is inside the "
-        "scanned tree or was delivered by an MCP client, and these options choose "
-        "whether findings are sent, where they are sent or written, and which "
-        "credentials send them. Set them with --config-overrides or a config file "
-        "outside the tree."
+        f"Ignoring {', '.join(ignored)} from {files}: {source.reason}, and these "
+        "options choose whether findings are sent, where they are sent or written, "
+        f"and which credentials send them. Set them with {source.remedy}."
     )
 
 

@@ -31,6 +31,13 @@ Each level of a dotted name is located without importing its parent packages
 ``--ash-plugin-modules`` and ``ASH_PLUGIN_MODULES`` are the operator's and are not
 filtered here.
 
+``ash merge`` holds the config a shard recorded in its results to these rules with
+``UntrustedSource.named_modules_only`` (``config/untrusted_source.py``): an entry
+the trusted list does not name is dropped whether or not it is installed, because
+nothing the merge imports is a shard's choice. Every class the merge then loads
+comes from a module the operator named, so it does not call
+``drop_untrusted_off_host_plugins``.
+
 The name check alone does not cover another installed package that imports one
 of those classes and lists it in its own ``ASH_SCANNERS``, ``ASH_REPORTERS`` or
 ``ASH_CONVERTERS``: the entry names that package, and importing it registers the
@@ -67,6 +74,10 @@ from typing import (
 from automated_security_helper.config.config_sources import describe_config_path
 from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.config.sandbox_grants import is_within
+from automated_security_helper.config.untrusted_source import (
+    IN_TREE_OR_DELIVERED,
+    UntrustedSource,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 if TYPE_CHECKING:
@@ -173,6 +184,7 @@ def confine_plugin_modules(
     config_overrides: Optional[Sequence[str]],
     scanned_root: Path,
     in_tree: Sequence[Path],
+    source: UntrustedSource = IN_TREE_OR_DELIVERED,
 ) -> None:
     """Drop the entries of ``config.ash_plugin_modules`` an in-tree file may not add.
 
@@ -186,6 +198,9 @@ def confine_plugin_modules(
         scanned_root: The scan root; the trees it is checked against are
             ``path_trust.in_scanned_tree``'s.
         in_tree: The config files inside the tree, named in the warning.
+        source: Why those files are not the operator's, and the fix, for the
+            warning. With ``named_modules_only`` (``ash merge``), an entry the
+            trusted list does not name is dropped as well.
     """
     from automated_security_helper.config.resolve_config import (
         apply_config_overrides,
@@ -207,6 +222,9 @@ def confine_plugin_modules(
         if name in trusted_names:
             kept.append(name)
             continue
+        if source.named_modules_only:
+            refused.append(f"{name!r} (the operator's configuration does not name it)")
+            continue
         package = off_host_package(name)
         if package is not None and package not in trusted_names:
             refused.append(f"{name!r} ({OFF_HOST_PLUGIN_SENDS[package]})")
@@ -220,12 +238,16 @@ def confine_plugin_modules(
         return
     config.ash_plugin_modules = kept
     files = ", ".join(describe_config_path(path) for path in in_tree)
+    imported = (
+        "only modules the operator's configuration names are imported from it"
+        if source.named_modules_only
+        else "only installed modules outside the tree are imported from it, and not "
+        "ASH's plugin packages that send findings or source off the host"
+    )
     ASH_LOGGER.warning(
         f"Ignoring ash_plugin_modules entries {', '.join(refused)} from {files}: "
-        "the file is inside the scanned tree, so only installed modules outside the "
-        "tree are imported from it, and not ASH's plugin packages that send "
-        "findings or source off the host. Name other modules with "
-        "--ash-plugin-modules, --config-overrides or a config file outside the tree."
+        f"{source.reason}, so {imported}. Name other modules with "
+        f"{source.modules_remedy}."
     )
 
 

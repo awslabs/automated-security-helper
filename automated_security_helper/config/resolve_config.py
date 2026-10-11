@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from pydantic import ValidationError
 import yaml
@@ -42,6 +42,10 @@ from automated_security_helper.config.sandbox_grants import (
     confine_sandbox_grants,
     files_inside,
     scanned_trees,
+)
+from automated_security_helper.config.untrusted_source import (
+    IN_TREE_OR_DELIVERED,
+    UntrustedSource,
 )
 from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
@@ -403,6 +407,43 @@ def resolve_config(
     operator_overrides = (
         list(config_overrides or []) if client_config_policy is None else []
     )
+    confine_to_trusted_base(
+        config, trusted, operator_overrides, Path(scanned_root), in_tree
+    )
+    return config
+
+
+def confine_to_trusted_base(
+    config: AshConfig,
+    trusted: AshConfig,
+    operator_overrides: Sequence[str],
+    scanned_root: Path,
+    in_tree: Sequence[Path],
+    source: UntrustedSource = IN_TREE_OR_DELIVERED,
+) -> None:
+    """Replace what a config that is not the operator's may not choose, in place.
+
+    The steps ``resolve_config`` runs for a config built from a file inside the
+    scanned tree or one an MCP client delivered, in order: the sandbox grants
+    (``sandbox_grants``), ``ash_plugin_modules`` (``plugin_module_trust``), the
+    reporters' destinations and whether the off-host reporters run
+    (``reporter_trust``), and the scanners' own config files
+    (``tool_config_trust``). Each takes the value from ``trusted`` with the
+    operator's overrides replayed onto it, and names what it ignored in one
+    warning. ``ash merge`` runs the same steps on the config a shard recorded,
+    with its own ``source``, so a step added here applies to both.
+
+    Args:
+        config: The config to confine.
+        trusted: The trusted base: the defaults, or the operator's config, without
+            ``operator_overrides``.
+        operator_overrides: The overrides that are the operator's choice.
+        scanned_root: The tree the plugin module check is made against.
+        in_tree: The files ``config`` was built from that are not the operator's,
+            named in the warnings.
+        source: Why those files are not the operator's, and the fix, for the
+            warnings.
+    """
     # Only an override under `sandbox` can change the sandbox section, and replaying
     # the rest onto the defaults could fail where the config file supplied the
     # section they write into.
@@ -413,13 +454,17 @@ def resolve_config(
     ]
     if sandbox_overrides:
         trusted = apply_config_overrides(trusted, sandbox_overrides)
-    confine_sandbox_grants(config.sandbox, trusted.sandbox, in_tree)
+    files = list(in_tree)
+    confine_sandbox_grants(config.sandbox, trusted.sandbox, files, source=source)
     confine_plugin_modules(
-        config, trusted, operator_overrides, Path(scanned_root), in_tree
+        config, trusted, operator_overrides, Path(scanned_root), files, source=source
     )
-    confine_reporter_destinations(config, trusted, operator_overrides, in_tree)
-    confine_scanner_config_files(config, trusted, operator_overrides, in_tree)
-    return config
+    confine_reporter_destinations(
+        config, trusted, operator_overrides, files, source=source
+    )
+    confine_scanner_config_files(
+        config, trusted, operator_overrides, files, source=source
+    )
 
 
 def _is_a_client_file(path: Path | str) -> bool:
