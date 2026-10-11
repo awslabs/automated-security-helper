@@ -169,8 +169,9 @@ import in a saved package resolves within that package.
 ### Option tables
 
 A table that documents options, keys or parameters (its first header cell is Option,
-Key, Field, Setting, Argument, Param or Parameter, or it has a Default column) carries
-a marker naming the section it documents, on the line directly above its header row:
+Key, Field, Setting, Argument, Param, Parameter or Prop, or it has a Default column)
+carries a marker naming the section it documents, on the line directly above its header
+row:
 
 ````markdown
 <!-- doctest: options of=scanners.bandit -->
@@ -203,8 +204,9 @@ key written with a value (`` `--build-target ci` ``) is checked as the key alone
 | `dockerfile` | the build arguments of the shipped `Dockerfile`, with the defaults its `ARG` lines give |
 | `cloudformation:deploy/cdk/templates` | the Parameters of one CloudFormation template, or of every template in a directory |
 | `github-inputs:.github/workflows/run-ash-security-scan.yml` | the inputs of a GitHub Action (its `action.yml` or the directory holding one) or of a workflow (`workflow_call` and `workflow_dispatch`) |
+| `typescript:deploy/cdk-constructs/src/ash-scan-step.ts:ASHScanStepProps` | the properties of a TypeScript interface; one without `?` is required, and the default is its JSDoc `@default` (an `@default - words` default is prose and is not compared) |
 
-Python, Dockerfile, CloudFormation and GitHub sections are read from the code tree, the
+Python, Dockerfile, CloudFormation, GitHub and TypeScript sections are read from the code tree, the
 checkout of the installed ASH (see [Checking docs against another checkout's
 code](#checking-docs-against-another-checkouts-code)).
 
@@ -228,8 +230,10 @@ A bare word such as `true` or `None` is read the same way; anything else is repo
 Defaults of a `python.` section are read as Python, not YAML: write `` `None` ``,
 `` `False` ``, `` `"low"` `` or `` `ExecutionStrategy.PARALLEL` ``. A literal is compared
 by value and anything else by its source text, and a string may also be written without
-quotes (`` `t3.medium` ``). Dockerfile, CloudFormation and GitHub defaults are strings
-and are compared as written, so `` `NO` `` is the string NO, not false.
+quotes (`` `t3.medium` ``). Dockerfile, CloudFormation, GitHub and TypeScript defaults
+are compared as written, so `` `NO` `` is the string NO, not false. A default that is a
+member of an enum or class may be written by the member alone: `` `PIP` `` for
+`ASHInstallMode.PIP`, `` `PARALLEL` `` for `ExecutionStrategy.PARALLEL`.
 
 ### Commands, options and variables in prose
 
