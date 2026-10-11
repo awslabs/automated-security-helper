@@ -311,6 +311,77 @@ working directory, and not inside the scanned directory unless you allow in-tree
 (see [Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory)).
 A copy found only inside the scanned directory counts as not installed.
 
+## Scan a repository you do not trust {#untrusted}
+
+For a repository you do not trust, on Linux or macOS:
+
+1. Install the scanners first, from a trusted environment, with `ash dependencies install`,
+   which also installs the notebook converter's nbconvert. A sandboxed scan does not
+   install scanners, and you do not want an online scan installing tools while the
+   hostile tree is present.
+2. Keep your own config file outside every git checkout, and pass it with `--config`. In
+   a scan of one directory, ASH then does not read the repository's ASH config, so the
+   enabled scanners, the gate, and the suppressions in config files are yours. Inline
+   suppression comments and scanner config files in the repository still apply (see
+   [what the trust model does not protect](../concepts/trust-model.md#not-protected));
+   for bandit, set `scanners.bandit.options.ignore_nosec: true` in your file. Only your
+   file and `--config-overrides` may grant sandbox access. In workspace mode, `--config`
+   is only the default for projects that have no config of their own, so give your
+   settings with `--config-overrides` there.
+3. Scan in local mode, the default, with the sandbox on: `sandbox.mode: auto` in that
+   file, or `--sandbox auto`. Check `ash.log` for the backend it picked. Prefer `bwrap` on
+   Linux, which hides everything you did not grant; use `landlock` only where bwrap
+   cannot run. `firejail` and `sandbox-exec` leave most files outside your home
+   directory readable (see [Set up a backend](#backends)).
+4. Decide which scanners need the network. Scan with `--offline` and pre-seeded databases
+   if you can, and keep the offline semgrep and opengrep rules cache where the sandbox
+   can read it: under a system directory such as `/opt`, or in `sandbox.extra_read_paths`
+   (see [Offline semgrep and opengrep](#offline-semgrep-and-opengrep)). Otherwise set
+   `sandbox.network_scanners` to the shortest list that works, and leave detect-secrets
+   out of it unless you use its verification filter.
+5. Put the output directory outside the repository with `--output-dir`, and run ASH from
+   a directory outside the repository with `--source-dir`. The default output directory
+   is `.ash/ash_output` inside the scanned directory.
+6. Do not pass `--allow-in-tree-tools`, and run ASH from an installation outside the
+   repository, with none of the repository's directories on `PATH`. The in-tree refusal
+   covers the programs ASH starts, not the Python running ASH.
+7. Name only plugin modules you trust. Every plugin module runs inside ASH's own process,
+   outside the sandbox.
+
+An operator config for this setup can be as small as:
+
+```yaml
+project_name: untrusted-scan
+sandbox:
+  mode: auto
+fail_on_findings: true
+fail_on_incomplete_scanners: true
+content_db_staleness: fail
+scanners:
+  bandit:
+    options:
+      ignore_nosec: true
+```
+
+And the scan, run from outside the repository:
+
+<!-- doctest: illustrative reason="needs a working sandbox backend and an operator config outside the docs fixture" -->
+```bash
+ash scan --config /etc/ash/untrusted.yaml --source-dir /work/src/pr-1234 --output-dir /work/ash-output/pr-1234 --offline
+```
+
+The default `fail_on_incomplete_scanners` matters here. If a backend cannot sandbox a
+scanner, or a scanner's tool exists only inside the repository, that scanner is
+`MISSING` and the scan exits 1, rather than passing on fewer scanners than you asked
+for.
+
+On Windows there is no sandbox backend. Run ASH under WSL2 with `--sandbox bwrap`, or use
+container mode with `--offline`, which gives the container no network. Keep the source
+and the output in separate directory trees, such as `C:\work\src\pr-1234` and
+`C:\work\ash-output\pr-1234`. In container mode the scan inside the container cannot see
+your `--config` file, so give its settings with `--config-overrides`. The sandbox is off
+inside the container, so every scanner in it shares the container's access.
+
 ## Container and Nix mode
 
 `--mode container` turns the sandbox off for the scan inside the container, without a
