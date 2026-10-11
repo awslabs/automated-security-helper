@@ -704,8 +704,22 @@ class TestEveryConsumerPassesTheSwitch:
         """The keyword alone is not enough: ``honor_ignore_files=True`` passes the name.
 
         Each call has to hand on what its config says, through
-        ``honors_ignore_files(<config>)``.
+        ``honors_ignore_files(<context>.config)``, or
+        ``honors_ignore_files(getattr(<context>, "config", None))`` where the
+        context is loosely typed.
         """
+
+        def names_the_config(argument: ast.expr) -> bool:
+            if isinstance(argument, ast.Attribute):
+                return argument.attr == "config"
+            return (
+                isinstance(argument, ast.Call)
+                and isinstance(argument.func, ast.Name)
+                and argument.func.id == "getattr"
+                and len(argument.args) >= 2
+                and isinstance(argument.args[1], ast.Constant)
+                and argument.args[1].value == "config"
+            )
 
         def passes_the_switch(call: ast.Call) -> bool:
             for keyword in call.keywords:
@@ -717,8 +731,7 @@ class TestEveryConsumerPassesTheSwitch:
                     and isinstance(value.func, ast.Name)
                     and value.func.id == "honors_ignore_files"
                     and len(value.args) == 1
-                    and isinstance(value.args[0], ast.Attribute)
-                    and value.args[0].attr == "config"
+                    and names_the_config(value.args[0])
                 )
             return False
 
