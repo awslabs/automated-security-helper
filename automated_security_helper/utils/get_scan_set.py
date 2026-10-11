@@ -6,7 +6,7 @@ import io
 import re
 import subprocess  # nosec B404
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 from igittigitt import IgnoreParser
 from pathlib import Path, PurePosixPath
 import argparse
@@ -207,6 +207,64 @@ def _is_link_to_directory(path: str | Path) -> bool:
         return True
     isjunction = getattr(os.path, "isjunction", None)
     return bool(isjunction is not None and isjunction(path))
+
+
+#: The ``ASH_INCLUSIONS`` entries :func:`_excluded_by_ash_itself` restates. A change
+#: to ``ASH_INCLUSIONS`` has to change that function too; a test compares them.
+_RESTATED_ASH_INCLUSIONS = (".git", "**/cdk.out/asset.*", "!**/*.template.json")
+
+
+def _excluded_by_ash_itself(parts: Sequence[str]) -> bool:
+    """Whether ASH leaves a file out with no ignore file at all, from its path parts.
+
+    *parts* are the file's path components below the scan root. The answer is
+    :func:`get_files_not_matching_spec`'s with ``ASH_INCLUSIONS`` as the whole spec,
+    worked out from names instead of by matching each file against the parser: a
+    pruned ``node_modules`` holds hundreds of thousands of files, and a parser match
+    per file stats each of them.
+
+    - The bundled aws-cdk tree, the same substring test as :func:`_is_bundled_cdk_path`.
+    - Any ``*.template.json`` is kept otherwise, which is what the forced-inclusion
+      pass does whatever else matched.
+    - A ``.git`` component, file or directory, is left out (rule ``.git``).
+    - An ``asset.*`` component directly under a ``cdk.out`` component is left out
+      (rule ``**/cdk.out/asset.*``).
+    """
+    if "/node_modules/aws-cdk" in "/" + "/".join(parts):
+        return True
+    if parts and parts[-1].endswith(".template.json"):
+        return False
+    for index, part in enumerate(parts):
+        if part == ".git":
+            return True
+        if part.startswith("asset.") and index > 0 and parts[index - 1] == "cdk.out":
+            return True
+    return False
+
+
+def _relative_parts(path: str, source: str) -> tuple[str, ...]:
+    """*path*'s components below *source*, compared as the walk spelled them."""
+    relative = os.path.relpath(os.path.abspath(path), os.path.abspath(source))
+    return tuple(_with_posix_separators(relative, _PATH_SEPARATORS).split("/"))
+
+
+def _files_removed_by_ignore_files(
+    source: str, all_files: List[str], scan_set_files: List[str]
+) -> int:
+    """How many walked files are missing from the scan set because of an ignore file.
+
+    The walked files that are not in the scan set, less the ones ASH leaves out on
+    its own (:func:`_excluded_by_ash_itself`). Taken from the scan set rather than
+    summed from the per-file attribution, so a rule the attribution credits to the
+    wrong file, or to none, still counts.
+    """
+    kept = set(scan_set_files)
+    return sum(
+        1
+        for walked in all_files
+        if walked not in kept
+        and not _excluded_by_ash_itself(_relative_parts(walked, source))
+    )
 
 
 def _ash_own_exclusion_spec(source_dir: str | Path) -> IgnoreParser:
@@ -457,7 +515,13 @@ def get_ash_ignorespec_lines(
                 content = f.readlines()
         debug_echo(f"Found .ignore file: {clean}", debug=debug)
         lines.append(f"######### START CONTENTS: {clean} #########")
-        lines.extend(content)
+        # Comment lines are left out. They hold no rule (git reads a line starting
+        # with "#" as a comment, and the compiler below skips every such line), and
+        # a comment shaped like this function's own START CONTENTS marker would be
+        # read back as one: the rules after it would be credited to another file
+        # and compiled against that file's directory. Compared stripped, because
+        # every line is stripped below before the compiler sees it.
+        lines.extend(line for line in content if not line.strip().startswith("#"))
         lines.append(f"######### END CONTENTS: {clean} #########")
         lines.append("")
     lines = [line.strip() for line in lines]
@@ -803,14 +867,14 @@ def report_ignore_file_exclusions(
 
 
 def ignore_file_exclusion_record(
-    counts: Dict[str, int], honored: bool
+    counts: Dict[str, int], honored: bool, excluded_file_count: int
 ) -> Dict[str, Any]:
     """The ``metadata.ignore_file_exclusions`` record of one scan set.
 
-    Built from :func:`report_ignore_file_exclusions`'s counts, without the two
-    entries that are not an ignore file (``ASH_INCLUSIONS`` and the bundled aws-cdk
-    tree): what ASH leaves out on its own is not something an ignore file removed.
-    Each ignore file is named by its path relative to the scan root, the
+    ``by_ignore_file`` is :func:`report_ignore_file_exclusions`'s counts, without
+    the two entries that are not an ignore file (``ASH_INCLUSIONS`` and the bundled
+    aws-cdk tree): what ASH leaves out on its own is not something an ignore file
+    removed. Each ignore file is named by its path relative to the scan root, the
     ``${SOURCE_DIR}/`` token dropped, and keeps its count when that is zero.
 
     Args:
@@ -818,6 +882,10 @@ def ignore_file_exclusion_record(
         honored: Whether the scanned repository's own ignore files were applied.
             False when the operator turned them off; *counts* then holds only the
             ignore files the caller named, which is nothing for ``ash scan``.
+        excluded_file_count: The total, from the scan set itself
+            (:func:`_files_removed_by_ignore_files` plus the pruned files), not
+            from *counts*: the attribution names a file for each removal, and the
+            total must not depend on it naming the right one.
     """
     by_ignore_file: Dict[str, int] = {}
     for marker, count in counts.items():
@@ -827,7 +895,7 @@ def ignore_file_exclusion_record(
         by_ignore_file[key] = by_ignore_file.get(key, 0) + count
     return {
         "honored": honored,
-        "excluded_file_count": sum(by_ignore_file.values()),
+        "excluded_file_count": excluded_file_count,
         "by_ignore_file": by_ignore_file,
     }
 
@@ -1163,8 +1231,13 @@ def scan_set(
             honored=honor_ignore_files,
         )
         if exclusions is not None:
+            removed = _files_removed_by_ignore_files(
+                source, all_files, ashscanset_list
+            ) + sum(pruned_counts.values())
             exclusions.update(
-                ignore_file_exclusion_record(counts, honored=honor_ignore_files)
+                ignore_file_exclusion_record(
+                    counts, honored=honor_ignore_files, excluded_file_count=removed
+                )
             )
     else:
         # The scan set came off disk, so nothing was matched this run and there is

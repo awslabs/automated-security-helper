@@ -198,6 +198,161 @@ class TestAPrunedLinkIsNotFollowed:
         )
 
 
+class TestIgnoreFileTextCannotRewriteTheRecord:
+    """A line in a repository's ignore file is a rule or a comment, never a section marker.
+
+    ASH copies each ignore file's text between ``START/END CONTENTS`` marker lines
+    and reads the markers back to tell which file a rule came from. A comment line
+    in the file shaped like a marker used to be read as one, so the file's rules
+    were credited to ``ASH_INCLUSIONS`` or to an ignore file that does not exist.
+    git reads such a line as a comment.
+    """
+
+    def test_a_marker_shaped_comment_does_not_hide_what_the_file_removed(
+        self, tmp_path
+    ):
+        root = _build(
+            tmp_path / "src",
+            {
+                ".gitignore": "######### START CONTENTS: ASH_INCLUSIONS #########\n"
+                "secret.txt\n",
+                "app.py": "x = 1\n",
+                "secret.txt": "s\n",
+            },
+        )
+        assert _names(root, scan_set(source=str(root))) == {".gitignore", "app.py"}
+        record = _record(root)
+        assert record["by_ignore_file"] == {".gitignore": 1}, record
+        assert record["excluded_file_count"] == 1, record
+
+    def test_an_indented_marker_shaped_comment_is_read_the_same_way(self, tmp_path):
+        root = _build(
+            tmp_path / "src",
+            {
+                ".gitignore": "   ######### START CONTENTS: ASH_INCLUSIONS #########\n"
+                "secret.txt\n",
+                "app.py": "x = 1\n",
+                "secret.txt": "s\n",
+            },
+        )
+        record = _record(root)
+        assert record["by_ignore_file"] == {".gitignore": 1}, record
+        assert record["excluded_file_count"] == 1, record
+
+    def test_a_nested_file_cannot_claim_to_be_the_root_one(self, tmp_path):
+        """Its rules stay in its own directory, and are credited to it."""
+        root = _build(
+            tmp_path / "src",
+            {
+                "sub/.gitignore": "######### START CONTENTS: ${SOURCE_DIR}/.gitignore"
+                " #########\n*.py\n",
+                "sub/x.py": "x = 1\n",
+                "app.py": "x = 1\n",
+                "other/y.py": "y = 2\n",
+            },
+        )
+        found = _names(root, scan_set(source=str(root)))
+        assert {"app.py", "other/y.py"} <= found, found
+        assert "sub/x.py" not in found, found
+        record = _record(root)
+        assert record["by_ignore_file"] == {"sub/.gitignore": 1}, record
+        assert record["excluded_file_count"] == 1, record
+
+    def test_no_ignore_file_is_invented(self, tmp_path):
+        root = _build(
+            tmp_path / "src",
+            {
+                ".gitignore": "*.log\n######### START CONTENTS: ${SOURCE_DIR}/zzz/"
+                ".gitignore #########\n",
+                "a.log": "a\n",
+                "app.py": "x = 1\n",
+            },
+        )
+        record = _record(root)
+        assert record["by_ignore_file"] == {".gitignore": 1}, record
+
+    def test_the_total_does_not_depend_on_attribution(self, tmp_path):
+        """A total summed from the attribution can only be as right as the attribution.
+
+        With the attribution emptied, as a parser the mapping does not match would
+        leave it, the per-file counts are lost and the total is still the number of
+        files the ignore files removed, pruned ones included.
+        """
+        root = _build(
+            tmp_path / "src",
+            {
+                ".gitignore": "build/\n*.log\n",
+                "a.log": "a\n",
+                "build/o.txt": "o\n",
+                "app.py": "x = 1\n",
+            },
+        )
+        real = gss.get_ash_ignorespec_with_attribution
+
+        def without_attribution(*args, **kwargs):
+            parser, _mapping = real(*args, **kwargs)
+            return parser, {}
+
+        with patch.object(
+            gss, "get_ash_ignorespec_with_attribution", without_attribution
+        ):
+            record = _record(root)
+        assert record["excluded_file_count"] == 2, record
+
+
+class TestAshsOwnExclusionsByName:
+    """The name-based test for ASH's own exclusions answers what the parser answers.
+
+    The totals and the pruned-directory counts decide "ASH leaves this out anyway"
+    from path names, without a parser match per file. That is only right while it
+    restates ``ASH_INCLUSIONS``, so the two are compared on paths that sit on each
+    side of every rule.
+    """
+
+    PATHS = [
+        "a.py",
+        ".git/HEAD",
+        "sub/.git",
+        "x/.git/objects/ab",
+        ".git/x.template.json",
+        "dir.git/a",
+        ".gitx/a",
+        "cdk.out/asset.1/h.py",
+        "cdk.out/asset.1/t.template.json",
+        "cdk.out/asset.",
+        "cdk.out/Stack.template.json",
+        "a/cdk.out/asset.x",
+        "asset.1/h.py",
+        "cdk.out/assets/h.py",
+        "cdk.out.bak/asset.1/a",
+        "node_modules/aws-cdk/x.json",
+        "node_modules/aws-cdk-lib/x.json",
+        "node_modules/aws-cdk/t.template.json",
+        "src/node_modules/aws-cdkmine/y.py",
+        "node_modules/aws/cdk.py",
+    ]
+
+    def test_the_restated_rules_are_ash_inclusions(self):
+        assert gss._RESTATED_ASH_INCLUSIONS == tuple(gss.ASH_INCLUSIONS), (
+            "ASH_INCLUSIONS changed: update _excluded_by_ash_itself to match"
+        )
+
+    def test_the_name_test_agrees_with_the_parser(self, tmp_path):
+        root = _build(tmp_path / "src", dict.fromkeys(self.PATHS, "x\n"))
+        own_spec = gss._ash_own_exclusion_spec(root)
+        forced = gss._forced_inclusion_spec(root)
+        disagree = []
+        for path in self.PATHS:
+            full = root / path
+            by_parser = gss._is_bundled_cdk_path(str(full)) or (
+                own_spec.match(full) and not forced.match(full)
+            )
+            by_name = gss._excluded_by_ash_itself(tuple(path.split("/")))
+            if by_parser != by_name:
+                disagree.append((path, by_parser, by_name))
+        assert disagree == [], disagree
+
+
 class TestTheBundledCdkTreeIsAshsOwnExclusion:
     def test_an_ignore_rule_matching_it_is_not_credited_with_removing_it(
         self, tmp_path
