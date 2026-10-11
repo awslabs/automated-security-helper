@@ -539,6 +539,36 @@ _OPERATOR_CHOICES = [
     ),
 ]
 
+
+def _operator_only_reporter_options() -> List[tuple]:
+    from automated_security_helper.config.reporter_trust import (
+        REPORTER_DESTINATION_OPTIONS,
+    )
+
+    return [
+        (reporter, name)
+        for reporter, names in sorted(REPORTER_DESTINATION_OPTIONS.items())
+        for name in names
+    ]
+
+
+@pytest.mark.parametrize(
+    "reporter,name",
+    _operator_only_reporter_options(),
+    ids=[f"{r}.{n}" for r, n in _operator_only_reporter_options()],
+)
+def test_every_operator_only_reporter_option_in_an_upload_is_refused(
+    _server, reporter, name
+) -> None:
+    """Every option config/reporter_trust.py lists, so a new one is covered."""
+    text = f"reporters:\n  {reporter}:\n    options:\n      {name}: other-value\n"
+    source = _upload({"ash.yaml": text})
+    _assert_refused(
+        _scan_resolution(_server["target"], str(source / "ash.yaml")),
+        key=f"reporters.{reporter}.options.{name}",
+    )
+
+
 #: The reporters that send findings off the host, whose ``enabled`` a client's
 #: file may set only to false (config/reporter_trust.py).
 _OFF_HOST_REPORTERS = [

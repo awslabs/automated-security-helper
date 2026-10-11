@@ -35,6 +35,9 @@ from automated_security_helper.cli.mcp.profile_registry import (
     set_profile_registry,
 )
 from automated_security_helper.cli.mcp_tools import mcp_select_profile
+from automated_security_helper.config.reporter_trust import (
+    REPORTER_DESTINATION_OPTIONS,
+)
 from automated_security_helper.config.ash_config import (
     RuntimeOverridesConfig,
     SandboxConfig,
@@ -502,24 +505,24 @@ _POINTED_DENIALS: Dict[str, Tuple[str, Any]] = {
     ),
 }
 
-#: Destination and credential options of the AWS reporters, which the profile
-#: does not configure, so each case adds the reporter's section.
+#: The operator-only options of the AWS reporters that are default entries of
+#: their own (config/reporter_trust.py), which the profile does not configure,
+#: so each case adds the reporter's section. Derived from the table, so an
+#: option added there and to the default list gets a case here.
 _REPORTER_DENIALS: Dict[str, Any] = {
-    "/reporters/aws-security-hub/options/aws_region": "other-region-1",
-    "/reporters/aws-security-hub/options/aws_profile": "other-profile",
-    "/reporters/aws-security-hub/options/account_id": "000000000000",
-    "/reporters/bedrock-summary-reporter/options/model_id": "other.model",
-    "/reporters/bedrock-summary-reporter/options/output_file": "other.md",
-    "/reporters/bedrock-summary-reporter/options/output_executive_file": "other.md",
-    "/reporters/bedrock-summary-reporter/options/output_technical_file": "other.md",
-    "/reporters/s3/options/aws_region": "other-region-1",
-    "/reporters/s3/options/aws_profile": "other-profile",
-    "/reporters/s3/options/bucket_name": "other-bucket",
-    "/reporters/s3/options/key_prefix": "other/",
-    "/reporters/aws-security-hub/enabled": True,
-    "/reporters/s3/enabled": True,
-    "/reporters/bedrock-summary-reporter/**": True,
+    pointer: "other-value"
+    for reporter, names in REPORTER_DESTINATION_OPTIONS.items()
+    for name in names
+    if (pointer := f"/reporters/{reporter}/options/{name}")
+    in RuntimeOverridesConfig().denied_paths
 }
+_REPORTER_DENIALS.update(
+    {
+        "/reporters/aws-security-hub/enabled": True,
+        "/reporters/s3/enabled": True,
+        "/reporters/bedrock-summary-reporter/**": True,
+    }
+)
 
 
 def _nested_at(pointer: str, value: Any) -> Dict[str, Any]:

@@ -22,35 +22,28 @@ from typing import Dict, List
 import pytest
 import yaml
 
+from automated_security_helper.config.reporter_trust import (
+    REPORTER_DESTINATION_OPTIONS,
+    REPORTER_ENABLED_DEFAULTS,
+)
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.utils.log import ASH_LOGGER
 
+#: Values that read like what a repository would write, for some options. Every
+#: other option gets ``repo-<name>``, which no default is.
+_EXAMPLE_VALUES: Dict[str, str] = {
+    "aws_region": "repo-region-1",
+    "account_id": "000000000001",
+    "output_file": "/elsewhere/summary.md",
+    "output_executive_file": "../executive.md",
+    "output_technical_file": "../../technical.md",
+}
+
 # Every option listed in config/reporter_trust.py, with a value no default has.
+# Derived from the table, so an option added there is covered here.
 REPO_VALUES: Dict[str, Dict[str, str]] = {
-    "aws-security-hub": {
-        "aws_region": "repo-region-1",
-        "aws_profile": "repo-profile",
-        "account_id": "000000000001",
-    },
-    "bedrock-summary-reporter": {
-        "aws_region": "repo-region-1",
-        "aws_profile": "repo-profile",
-        "model_id": "repo.standin-model",
-        "output_file": "/elsewhere/summary.md",
-        "output_executive_file": "../executive.md",
-        "output_technical_file": "../../technical.md",
-    },
-    "cloudwatch-logs": {
-        "aws_region": "repo-region-1",
-        "log_group_name": "repo-log-group",
-        "log_stream_name": "repo-log-stream",
-    },
-    "s3": {
-        "aws_region": "repo-region-1",
-        "aws_profile": "repo-profile",
-        "bucket_name": "repo-bucket",
-        "key_prefix": "repo-prefix/",
-    },
+    reporter: {name: _EXAMPLE_VALUES.get(name, f"repo-{name}") for name in names}
+    for reporter, names in REPORTER_DESTINATION_OPTIONS.items()
 }
 
 
@@ -223,10 +216,6 @@ def test_config_overrides_are_honored(tmp_path, ash_log):
 
 def _enabled(config, reporter: str):
     """Whether ``reporter`` runs under ``config``: its section's value, or its default."""
-    from automated_security_helper.config.reporter_trust import (
-        REPORTER_ENABLED_DEFAULTS,
-    )
-
     section = config.get_plugin_config("reporter", reporter) or {}
     return section.get("enabled", REPORTER_ENABLED_DEFAULTS[reporter])
 
@@ -241,7 +230,7 @@ def _operator_off(tmp_path: Path, reporter: str) -> Path:
     return _operator(tmp_path, reporter, False)
 
 
-@pytest.mark.parametrize("reporter", sorted(REPO_VALUES))
+@pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
 def test_an_in_tree_config_does_not_turn_on_a_reporter_the_operator_turned_off(
     tmp_path, ash_log, reporter
 ):
@@ -262,7 +251,7 @@ def test_an_in_tree_config_does_not_turn_on_a_reporter_the_operator_turned_off(
     assert f"reporters.{reporter}.enabled" in warnings, warnings
 
 
-@pytest.mark.parametrize("reporter", sorted(REPO_VALUES))
+@pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
 def test_an_in_tree_config_that_leaves_the_reporter_out_keeps_it_off(
     tmp_path, ash_log, reporter
 ):
@@ -297,7 +286,7 @@ def test_the_operators_ash_config_turning_one_off_holds_too(
     assert any("reporters.s3.enabled" in m for m in _warnings(ash_log))
 
 
-@pytest.mark.parametrize("reporter", sorted(REPO_VALUES))
+@pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
 def test_an_in_tree_config_may_turn_one_off(tmp_path, ash_log, reporter):
     """``enabled: false`` only narrows what is sent, so it applies from any config."""
     source = tmp_path / "repo"
@@ -309,7 +298,7 @@ def test_an_in_tree_config_may_turn_one_off(tmp_path, ash_log, reporter):
     assert not any("enabled" in message for message in _warnings(ash_log))
 
 
-@pytest.mark.parametrize("reporter", sorted(REPO_VALUES))
+@pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
 def test_enabled_true_where_the_operator_has_it_on_changes_nothing(
     tmp_path, ash_log, reporter
 ):
@@ -363,6 +352,161 @@ def test_an_operator_off_written_another_way_still_counts(tmp_path, trusted_valu
     )
 
     assert _enabled(config, "s3") is False
+
+
+@pytest.fixture
+def defaults_off(monkeypatch):
+    """Each off-host reporter off by its own default.
+
+    Stands in for a release whose reporter models default ``enabled`` to false.
+    ``test_each_off_host_reporters_enabled_default_is_listed`` holds the table
+    equal to the models, so such a release changes both.
+    """
+    for reporter in REPORTER_ENABLED_DEFAULTS:
+        monkeypatch.setitem(REPORTER_ENABLED_DEFAULTS, reporter, False)
+
+
+@pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+def test_off_by_default_an_in_tree_config_cannot_enable_it(
+    tmp_path, ash_log, defaults_off, reporter
+):
+    """No operator config: the trusted base is the defaults, which have it off."""
+    source = tmp_path / "repo"
+    _write_config(source / ".ash" / ".ash.yaml", {reporter: {"enabled": True}})
+
+    config = resolve_config(source_dir=source)
+
+    assert _enabled(config, reporter) is False
+    warnings = "\n".join(_warnings(ash_log))
+    assert f"reporters.{reporter}.enabled" in warnings, warnings
+
+
+@pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+def test_off_by_default_a_delivered_config_cannot_enable_it(
+    tmp_path, ash_log, defaults_off, reporter
+):
+    """Refused under the default denied_paths, and kept off under a policy that
+    does not deny the field: the confinement holds on its own."""
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.client_config_policy import rules_from
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    upload = _write_config(
+        tmp_path / "upload" / "ash.yaml", {reporter: {"enabled": True}}
+    )
+    source = tmp_path / "repo"
+    source.mkdir()
+
+    with pytest.raises(ASHConfigFieldDeniedError) as refused:
+        resolve_config(config_path=upload, source_dir=source, untrusted_config=True)
+    assert f"reporters.{reporter}.enabled" in str(refused.value)
+
+    narrow = rules_from(
+        AshConfig.model_validate(
+            {
+                "global_settings": {
+                    "mcp": {
+                        "runtime_overrides": {
+                            "denied_paths": ["/fail_on_findings"],
+                            "replace_default_denied_paths": True,
+                        }
+                    }
+                }
+            }
+        )
+    )
+    config = resolve_config(
+        config_path=upload,
+        source_dir=source,
+        untrusted_config=True,
+        client_config_policy=narrow,
+    )
+    assert _enabled(config, reporter) is False
+
+
+# The scan engine over a config whose tree file turns every off-host reporter on,
+# with the reporters' models patched to default off and the table left as it is,
+# so only the check after the plugin package is loaded can catch it.
+_ENGINE_WITH_DEFAULTS_OFF = """
+import json, sys
+from pathlib import Path
+from automated_security_helper.plugin_modules.ash_aws_plugins import ASH_REPORTERS
+
+for reporter in ASH_REPORTERS:
+    config_model = reporter.model_fields["config"].annotation.__args__[0]
+    config_model.model_fields["enabled"].default = False
+    config_model.model_rebuild(force=True)
+
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.core.execution_engine import ScanExecutionEngine
+
+source = Path(sys.argv[1])
+config = resolve_config(source_dir=source)
+ScanExecutionEngine(
+    context=PluginContext(source_dir=source, output_dir=source.parent / "out",
+                          work_dir=source.parent / "work", config=config),
+    show_progress=False,
+    ash_plugin_modules=["automated_security_helper.plugin_modules.ash_aws_plugins"],
+)
+print(json.dumps({
+    name: (config.get_plugin_config("reporter", name) or {}).get("enabled")
+    for name in json.loads(sys.argv[2])
+}))
+"""
+
+
+def test_off_by_their_models_default_the_loaded_reporters_stay_off(tmp_path):
+    """Once the plugin package is loaded, its models' own defaults decide."""
+    names = sorted(REPORTER_ENABLED_DEFAULTS)
+    source = tmp_path / "repo"
+    _write_config(
+        source / ".ash" / ".ash.yaml", {name: {"enabled": True} for name in names}
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _ENGINE_WITH_DEFAULTS_OFF,
+            str(source),
+            json.dumps(names),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+    assert result.returncode == 0, result.stderr[-4000:]
+    enabled = json.loads(result.stdout.strip().splitlines()[-1])
+    assert enabled == dict.fromkeys(names, False), enabled
+
+
+def test_the_example_values_cover_the_table():
+    """An option added to the table gets a value above without another edit."""
+    assert {r: set(v) for r, v in REPO_VALUES.items()} == {
+        r: set(names) for r, names in REPORTER_DESTINATION_OPTIONS.items()
+    }
+
+
+def test_every_operator_only_reporter_setting_is_a_default_denied_path():
+    """Under the MCP server a delivered file that sets one is refused."""
+    from automated_security_helper.config.ash_config import RuntimeOverridesConfig
+    from automated_security_helper.config.client_config_policy import _names
+
+    shipped = RuntimeOverridesConfig().denied_paths
+    pointers = [
+        f"/reporters/{reporter}/options/{name}"
+        for reporter, names in REPORTER_DESTINATION_OPTIONS.items()
+        for name in names
+    ] + [f"/reporters/{reporter}/enabled" for reporter in REPORTER_ENABLED_DEFAULTS]
+    uncovered = [
+        pointer
+        for pointer in pointers
+        if not any(_names(entry, pointer) for entry in shipped)
+    ]
+    assert not uncovered
 
 
 def test_an_override_turns_one_on(tmp_path, ash_log):
