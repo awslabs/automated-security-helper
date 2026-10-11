@@ -216,7 +216,8 @@ container; so is a config file ASH cannot read itself. A config outside
 `--source-dir` whose `extends` chain includes a file inside it is refused with exit 3
 as well: that base belongs to the repository being scanned, and its own `extends`
 entries would choose which files under the config's directory are mounted into the
-container. A config the scanned
+container. For the same reason, a file of the chain inside the scanned checkout may
+extend only files inside it. A config the scanned
 repository wrote keeps the limits a local scan gives it (see
 [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)):
 when the config or a file it extends is inside the outermost git checkout at or above

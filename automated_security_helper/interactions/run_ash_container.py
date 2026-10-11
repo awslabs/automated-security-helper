@@ -1130,6 +1130,39 @@ def _refuse_bases_inside_the_source(
             )
 
 
+def _refuse_repository_bases_reaching_out(
+    placements: List[Tuple[Path, str]], source: Path
+) -> None:
+    """Refuse a chain in which a file the scanned repository wrote extends one it did not.
+
+    A base elsewhere in the scanned checkout is the repository's file, and so are
+    its ``extends`` entries. Followed out of the checkout, they would choose which
+    files under the outside config's directory are mounted into the container.
+    """
+    from automated_security_helper.config.sandbox_grants import (
+        is_within,
+        scanned_trees,
+    )
+
+    trees = scanned_trees(source)
+
+    def written_by_the_repository(path: Path) -> bool:
+        return any(is_within(path, tree) for tree in trees)
+
+    for file, _ in placements:
+        if not written_by_the_repository(file):
+            continue
+        for ref in _extends_refs_of(file):
+            base = (file.parent / ref).resolve()
+            if not written_by_the_repository(base):
+                raise ContainerInputError(
+                    f"{file} is in the repository being scanned and extends {base}, "
+                    "which is outside it. ASH does not mount files a config of the "
+                    "repository being scanned chooses. Extend that file from a config "
+                    "outside the repository instead."
+                )
+
+
 def _host_file_in_container(
     host_path: str, source_dir: Path, mount_root: str, *, follow_extends: bool
 ) -> Tuple[List[str], str, List[Path]]:
@@ -1146,7 +1179,10 @@ def _host_file_in_container(
     so the bases resolve inside the container to the files the host reads. Only
     those files are mounted, not the directory they are in. A chain that does not
     resolve on the host mounts the file alone: the scan inside reaches the same
-    error and reports it with its own exit code.
+    error and reports it with its own exit code. A chain in which the scanned
+    repository would choose what is mounted is refused with ContainerInputError:
+    one with a base inside the source directory, or one in which a file of the
+    scanned checkout extends a file outside it.
 
     The path is resolved first, so a symlink is judged, and mounted, by its target.
     """
@@ -1169,6 +1205,8 @@ def _host_file_in_container(
             # before anything is placed.
             resolve_config_document(resolved, confine_to=root)
             placements = _chain_placements(resolved, inner_config)
+            _refuse_bases_inside_the_source(resolved, placements[1:], source)
+            _refuse_repository_bases_reaching_out(placements, source)
         except ContainerInputError:
             raise
         except Exception as e:
@@ -1176,7 +1214,6 @@ def _host_file_in_container(
             ASH_LOGGER.debug(
                 f"Mounting {resolved} alone: its chain did not resolve: {e}"
             )
-        _refuse_bases_inside_the_source(resolved, placements[1:], source)
 
     mounts: List[str] = []
     for file, destination in placements:

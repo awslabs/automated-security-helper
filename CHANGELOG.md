@@ -166,7 +166,8 @@
   container is not the same file, a config named inside the scanned tree that links
   out of it (its target would have been mounted), a config file ASH cannot read, and
   a config outside `--source-dir` that extends a file inside it, whose own `extends`
-  entries the scanned repository would then choose.
+  entries the scanned repository would then choose, or whose chain has a file of the
+  scanned checkout extending a file outside it.
   A config inside the scanned checkout but outside `--source-dir` keeps the limits a
   local scan gives a repository's config: the host decides, and passes the scan inside
   `--config-from-scanned-repository`, since it sees that file only at `/ash-config`.
