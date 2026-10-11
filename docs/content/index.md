@@ -16,8 +16,9 @@ a container you build, or from an AI coding agent over MCP.
   JUnit XML, CSV, CycloneDX, OCSF, GitLab formats, and more. See
   [Read scan results](how-to/read-results.md).
 - It returns one exit code. By default a scan fails on findings at MEDIUM severity or
-  above, and also when a selected scanner could not run or a vulnerability database is
-  past its age limit. See [Set when a scan fails](how-to/set-the-gate.md).
+  above. It also fails when a selected scanner could not run or ended in an error, and
+  when a vulnerability database or offline ruleset is past its age bound. See
+  [Set the gate](how-to/set-the-gate.md).
 - For large codebases it can scan only changed files, split a scan into shards and merge
   them, and scan every project in a workspace. See
   [Scale to large repositories](how-to/scale-large-repos.md).

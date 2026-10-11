@@ -31,7 +31,7 @@ describes. Include a description of the issue and its impact, the steps to repro
 and the ASH versions affected.
 
 SECURITY.md also says what is in scope. A false positive from a scanner is not a security
-issue: suppress it in your config, as [Suppress a finding](how-to/suppress-findings.md)
+issue: suppress it in your config, as [Suppress findings](how-to/suppress-findings.md)
 shows. A bug in a scanner that ASH runs, such as semgrep or cfn-lint, belongs with that
 scanner's project.
 

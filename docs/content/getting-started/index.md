@@ -18,7 +18,7 @@ leave them out of the scan.
 
 The first result is a table in your terminal with one row per scanner, the reports in
 `.ash/ash_output/`, and exit code 2, because the project has findings. The tutorial takes
-about 15 minutes, most of it downloads.
+about 15 minutes, most of it spent on downloads.
 
 ## Add ASH to CI
 
@@ -42,8 +42,11 @@ vulnerability databases.
 an IDE that supports MCP, such as Claude Code, Kiro, Cursor, or GitHub Copilot in VS Code.
 The agent starts `ash mcp` on your machine as a local server and runs scans through it.
 
-You need git, ASH, and the scanner tools installed on the same machine as the agent, and an
-agent that can start a local MCP server over stdio.
+You need git and ASH on the same machine as the agent, and an agent that can start a local
+MCP server over stdio. Installing the scanner tools first with `ash dependencies install`
+is optional. Without them, an online scan with the sandbox off installs bandit, cfn-lint,
+checkov, semgrep, and zizmor itself, which needs uv on your `PATH`, and reports every other
+scanner whose tool is missing as MISSING.
 
 The first result is the agent's answer: it starts a scan, follows it until it finishes,
 and tells you what the scanners found. The reports are also written to `.ash/ash_output/`
@@ -59,8 +62,9 @@ You need ASH installed, a container runtime such as Docker, Finch, or Podman, an
 container registry that you can push to.
 
 The first result is an ASH image in your registry, built from a release tag, and an
-operator config that sets the gate for every scan. A test scan then shows that a
-repository's own config cannot change that gate. Building the image takes a few minutes.
+operator config that sets the gate for every scan. A test scan then shows that when you
+pass your config with `--config`, the repository's own ASH config file does not change
+that gate. Building the image takes a few minutes.
 
 ## Other starting points
 

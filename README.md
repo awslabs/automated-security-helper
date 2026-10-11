@@ -37,7 +37,7 @@ which also provides the Python that ASH runs on. Install uv:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Open a new terminal, so that `uv` is on your PATH, and install ASH:
+Open a new terminal, so that `uv` is on your `PATH`, and install ASH:
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
@@ -45,8 +45,8 @@ uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://gith
 ```
 
 Keep `--python 3.12`: on a machine without Python 3.10 to 3.14, uv would otherwise
-download Python 3.15, and v3.7.0 does not install on it. The `cdk` extra adds the
-packages the cdk-nag scanner needs. ASH is not published on PyPI; a package named
+download Python 3.15, and releases up to v3.7.x do not install on it. The `cdk` extra
+adds the packages the cdk-nag scanner needs. ASH is not published on PyPI; a package named
 `automated-security-helper` there belongs to someone else, so always install from GitHub.
 
 Check the install:
@@ -59,8 +59,8 @@ ash --version
 awslabs/automated-security-helper v3.7.0
 ```
 
-This README and the documentation describe the `main` branch, which has changes that are
-not in v3.7.0 yet. To use them now,
+This README and the documentation describe the `main` branch, which can have changes that
+are not in a release yet. To use them,
 [install from `main`](https://awslabs.github.io/automated-security-helper/how-to/install/#install-from-main).
 [Install ASH](https://awslabs.github.io/automated-security-helper/how-to/install/) also
 covers pipx, pip, Windows, and the other install methods.
@@ -94,7 +94,8 @@ files of the kind it checks), MISSING (its tool is not installed), or ERROR.
 
 A MISSING or ERROR scanner makes the scan incomplete, and an incomplete scan exits 1 even
 when it also found something. Without `ash dependencies install`, most scanners are
-MISSING. To scan without a tool you cannot install, leave its scanner out:
+MISSING. To scan without a tool you cannot install, leave its scanner out. For example,
+on a machine without Node.js:
 
 <!-- doctest: illustrative reason="a full scan downloads rules and vulnerability databases; the docs job has no network" -->
 ```bash
@@ -103,8 +104,8 @@ ash --exclude-scanners cdk-nag,npm-audit
 
 ## What you get
 
-The reports are in `.ash/ash_output/reports/`: an HTML report, Markdown and text
-summaries, SARIF, JUnit XML, CSV, and formats for GitHub code scanning, GitLab, CycloneDX,
+The reports are in `.ash/ash_output/reports/`: an HTML report, a Markdown summary, a text
+summary, SARIF, JUnit XML, CSV, and formats for GitHub code scanning, GitLab, CycloneDX,
 and OCSF. `ash report` prints the findings in the terminal with their rule IDs, and
 `ash inspect findings` lets you browse them.
 [Read scan results](https://awslabs.github.io/automated-security-helper/how-to/read-results/)
@@ -117,20 +118,17 @@ configuration, and `4` for a workspace definition or policy error. See
 
 ## Next steps
 
-Pick the guide for what you want to do next:
-
-- [Add ASH to a GitHub Actions pipeline](https://awslabs.github.io/automated-security-helper/getting-started/ci/):
-  scan every pull request and fail the check on findings; the guide links to GitLab CI and
-  other CI systems. For CI owners.
-- [Run your first scan](https://awslabs.github.io/automated-security-helper/getting-started/local/):
-  the local workflow in full, from reading a finding to suppressing a false positive and
-  fixing a real issue. For developers.
-- [Roll out ASH across repositories](https://awslabs.github.io/automated-security-helper/getting-started/platform-teams/):
-  your own image, one operator config that repositories cannot change, and results sent
-  where your team reads them. For security and platform teams.
-- [Connect an AI agent to ASH](https://awslabs.github.io/automated-security-helper/getting-started/agents/):
-  let a coding agent or IDE run scans over MCP and explain the findings. For AI agent and
-  IDE users.
+- To scan every pull request and fail the check on findings, follow
+  [Add ASH to a GitHub Actions pipeline](https://awslabs.github.io/automated-security-helper/getting-started/ci/).
+  It links to the pages for GitLab CI and other CI systems.
+- To learn the local workflow in full, from reading a finding to suppressing a false
+  positive and fixing a real issue, follow
+  [Run your first scan](https://awslabs.github.io/automated-security-helper/getting-started/local/).
+- To run ASH for many repositories from your own image, with the gate in an operator config
+  kept outside the repositories and the results sent where your team reads them, follow
+  [Roll out ASH across repositories](https://awslabs.github.io/automated-security-helper/getting-started/platform-teams/).
+- To let a coding agent or IDE run scans over MCP and explain the findings, follow
+  [Connect an AI agent to ASH](https://awslabs.github.io/automated-security-helper/getting-started/agents/).
 
 The full documentation is at <https://awslabs.github.io/automated-security-helper/>.
 
