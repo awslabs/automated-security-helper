@@ -216,8 +216,8 @@ pass `--no-build`. `ash build-image` builds one to push to your own registry. Se
 
 `ash --mode nix` runs the scan inside a Nix shell whose scanner tools come from
 ASH's `flake.nix`. It needs Nix with flakes enabled, on Linux or macOS (on Windows,
-inside WSL2). It does not install ASH itself: install ASH with one of the methods
-above first.
+inside WSL2). It does not install ASH itself: the scan inside the shell runs the same
+ASH you started, so install ASH with one of the methods above first.
 
 The Nix shell supplies the tools of every built-in scanner except cdk-nag, which runs on
 the Python environment ASH is installed in, so install ASH with the `cdk` extra for it.

@@ -251,10 +251,28 @@ ERROR (1) /home/me/out/reports is a symlink. ...
 Cause: the output directory, a directory on the way to it inside the scanned
 directory, or something ASH writes inside it, such as `reports`, is a symbolic link.
 ASH clears and writes its output directory, so it does not do that through a link. This
-check applies whether or not the sandbox is on.
+check applies whether or not the sandbox is on. In a workspace scan, a link at
+`projects/<project>` fails only that project, and a link at `projects` or
+`.workspace-spool` stops the whole run. [Output files](../reference/output-files.md#links)
+lists every path ASH checks.
 
 Fix: pass `--output-dir` with a real directory, which can be outside the project, or
 replace the link with a directory. Turning the sandbox off does not change this.
+
+### The scan stops because a report file is a link
+
+Symptom: the run exits 1 before any reporter writes, with:
+
+```text
+ERROR (1) /home/me/out/reports/ash.sarif is a symlink. ASH does not write a report through a link. Remove the link and run ASH again.
+```
+
+Cause: a file a reporter is about to write in `reports/` is a symbolic link or a
+directory junction. A scan clears `reports/` first, so this usually comes from
+`ash scan --use-existing` or `ash merge` writing into an output directory that already
+holds the link.
+
+Fix: remove the link and run the command again, or write to a new output directory.
 
 ## Content databases
 

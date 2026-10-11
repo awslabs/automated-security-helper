@@ -287,6 +287,10 @@ The output directory, `.ash/ash_output` next to the workspace file by default, h
   with its status, its finding counts, `incomplete_scanners`, and `incomplete_converters`,
   which names each converter that lost coverage and why.
 
+A link at `projects` or `.workspace-spool` stops the whole run, and a link at
+`projects/<project>` fails that project; see
+[Links are refused](../reference/output-files.md#links).
+
 A workspace policy file applies to every project: a severity threshold that projects can
 tighten but not relax, suppressions and ignore paths for every project, and extra scanners.
 ASH finds `ash-workspace.yaml`, `.yml`, or `.json`, with or without a leading dot, in the

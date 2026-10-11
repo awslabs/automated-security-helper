@@ -88,7 +88,9 @@ these:
   directory (the default `.ash/ash_output` is below it, so a repository can commit such
   a link);
 - `analysis`, `reports`, `scanners`, or `converted` in the output directory;
-- the files ASH writes there by a fixed name;
+- the files ASH writes there by a fixed name: `ash_aggregated_results.json`,
+  `ash-ignore-report.txt`, `ash-scan-set-files-list.txt`, `ash.log`, and
+  `ash.log.jsonl`;
 - in workspace mode, `projects` and `.workspace-spool` in the workspace's output
   directory, and each project's `projects/<project>` directory.
 
@@ -104,11 +106,25 @@ mount its output directory through a link, whatever the sandbox mode. Pass --out
 a directory that is not a link, or replace the link with a directory.
 ```
 
-In workspace mode, a link at `projects` or `.workspace-spool` stops the whole scan this
-way, and a link at `projects/<project>` fails only that project, with the same message.
+In workspace mode, a link at `projects` or `.workspace-spool` stops the whole run this
+way before any project starts. A link at `projects/<project>` fails only that project,
+with the same message; the other projects still run, and the run exits 1.
 
 Directories above an output directory that is outside the source directory are not
 examined, so `--output-dir /tmp/ash` works on a system where `/tmp` is a link.
+
+Reports are checked again before any reporter writes. If `reports/`, or a file that one
+of the reporters about to run writes there, such as `reports/ash.sarif`, is a link, the
+run stops with exit 1:
+
+```text
+ERROR (1) /work/out/reports/ash.sarif is a symlink. ASH does not write a report through a link.
+Remove the link and run ASH again.
+```
+
+This applies to scans in every run mode, including `--use-existing` and workspace scans,
+and to `ash merge`. `ash report` prints its report instead of writing it, and refuses a
+link only at a file the reporter writes beside it.
 
 ## `ash_aggregated_results.json` {#aggregated-results}
 
@@ -308,9 +324,17 @@ the workspace-relative path in `properties.workspace_uri`.
 
 ## Reports {#reports}
 
-`reports/` holds one file per enabled reporter, named `ash.<extension>`. The table lists
-the reporters ASH ships and whether each is enabled by default;
-[Reporters](reporters.md) gives each one's format and options.
+`reports/` holds one file per enabled reporter, named `ash.<extension>`, or `ash.txt`
+for a reporter that declares no extension. The table lists the reporters ASH ships and
+whether each is enabled by default; [Reporters](reporters.md) gives each one's format
+and options.
+
+A reporter's `extension` must be a file name suffix. A configured `extension` that
+contains `/`, `\`, `..`, or a NUL character is ignored with a warning, and the reporter's
+default is used. A report file name that is still not a single file name in `reports/`,
+such as one from a plugin reporter that skips this check, stops the run with exit 1 before
+any reporter writes. A single file name is one that is not empty, `.`, or `..`, and
+contains no `/`, `\`, or NUL.
 
 | File | Reporter | Enabled |
 |---|---|---|

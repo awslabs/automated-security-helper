@@ -48,9 +48,9 @@ Things to know about the output directory:
   `ash config init` writes a `.ash/.gitignore` that ignores `ash_output*`.
 - ASH refuses an output directory that is itself a symbolic link or a Windows junction,
   that is reached through one below the scanned directory (such as a linked `.ash`), or
-  that has one at `reports/`, `scanners/`, `converted/`, or `analysis/`. The scan stops
-  with exit code 1 before it writes anything. See
-  [Output files](../reference/output-files.md#links).
+  that has one at `reports/`, `scanners/`, `converted/`, `analysis/`, or a file ASH writes
+  there, such as `ash.log`. The scan stops with exit code 1 before it writes anything.
+  See [Output files](../reference/output-files.md#links).
 - Reports contain source text. ASH masks secrets in finding messages, but the code
   snippets attached to findings are copied as they are, secrets included. Treat the
   output directory like the code it came from.
