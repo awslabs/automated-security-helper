@@ -21,7 +21,10 @@ the workspace report step before a project is scanned and again before it writes
 and by ``ash report`` for the files a reporter writes itself. run_ash_scan also
 uses it where ASH reads a report back: container and nix mode before reading the
 inner run's results, and ``_compute_exit_code`` before it counts
-``reports/ash.sarif``.
+``reports/ash.sarif``. A ``reports/`` that is itself a link, dangling or not, is
+refused before anything creates or clears it (``ensure_reports_dir``, the
+orchestrator's directory setup, and container and nix mode before they clear the
+output directory).
 
 A report file name (``ash.<extension>``) that is not a single path component,
 such as one built from an ``extension`` with a ``/`` or ``..`` in it, refuses the
@@ -170,6 +173,20 @@ def refuse_a_linked_reports_dir(report_dir: PathLike) -> None:
         raise ReportPathLinkRefused(
             f"the reports directory {directory.as_posix()} is {kind}"
         )
+
+
+def ensure_reports_dir(report_dir: PathLike) -> Path:
+    """Create the reports directory, after refusing it if it is a link.
+
+    ``mkdir`` on a dangling link fails with ``FileExistsError``, and on a link to a
+    directory succeeds and keeps the link, so creating the directory first would end
+    in a crash or a write through the link instead of the refusal. Every place that
+    sets up ``reports/`` for a run creates it through this.
+    """
+    directory = Path(report_dir)
+    refuse_a_linked_reports_dir(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
 
 
 def refuse_report_names_outside(report_dir: PathLike, names: Iterable[str]) -> None:

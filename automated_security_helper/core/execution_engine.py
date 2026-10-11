@@ -14,6 +14,7 @@ from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.metrics_table import display_metrics_table
 from automated_security_helper.core.phases.convert_phase import ConvertPhase
 from automated_security_helper.core.phases.report_phase import ReportPhase
+from automated_security_helper.utils.report_path_links import ensure_reports_dir
 from automated_security_helper.core.phases.scan_phase import ScanPhase
 from automated_security_helper.core.phases.inspect_phase import InspectPhase
 from automated_security_helper.core.progress import (
@@ -459,9 +460,8 @@ class ScanExecutionEngine:
             if self._context.work_dir:
                 self._context.work_dir.mkdir(parents=True, exist_ok=True)
 
-        # Always ensure reports directory exists
-        reports_dir = self._context.output_dir.joinpath("reports")
-        reports_dir.mkdir(parents=True, exist_ok=True)
+        # Always ensure reports directory exists, refusing a link there first.
+        ensure_reports_dir(self._context.output_dir.joinpath("reports"))
 
         self.progress_display.start()
 

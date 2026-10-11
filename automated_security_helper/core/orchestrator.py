@@ -33,6 +33,10 @@ from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.report_path_links import (
+    ensure_reports_dir,
+    refuse_a_linked_reports_dir,
+)
 
 
 class ASHScanOrchestrator(BaseModel):
@@ -494,7 +498,14 @@ class ASHScanOrchestrator(BaseModel):
 
         Creates work_dir if it doesn't exist or if no_cleanup
         is True, and output_dir if it doesn't exist.
+
+        Raises:
+            ReportPathLinkRefused: ``reports/`` is a symlink or a directory
+                junction, dangling or not. Refused before anything here clears or
+                creates it: rmtree fails on a link to a directory, and mkdir on a
+                dangling one.
         """
+        refuse_a_linked_reports_dir(self.output_dir.joinpath("reports"))
         try:
             # Create output directory if it doesn't exist
             ASH_LOGGER.debug(
@@ -504,8 +515,7 @@ class ASHScanOrchestrator(BaseModel):
 
             # If we're using existing results, only ensure the reports directory exists
             if self.existing_results_path and self.existing_results_path.exists():
-                path_reports_dir = self.output_dir.joinpath("reports")
-                path_reports_dir.mkdir(parents=True, exist_ok=True)
+                ensure_reports_dir(self.output_dir.joinpath("reports"))
             else:
                 # Otherwise, set up all working directories
                 for working_dir in ["analysis", "reports", "scanners", "converted"]:
@@ -576,15 +586,15 @@ class ASHScanOrchestrator(BaseModel):
                         if phase is not None
                     ]
 
-                    # Ensure the reports directory exists but don't clean up any other directories
-                    reports_dir = self.output_dir.joinpath("reports")
-                    reports_dir.mkdir(parents=True, exist_ok=True)
-
                 except Exception as e:
                     ASH_LOGGER.error(f"Failed to load existing results: {str(e)}")
                     raise ASHValidationError(
                         f"Failed to load existing results: {str(e)}"
                     )
+                # Ensure the reports directory exists but don't clean up any other
+                # directories. Outside the handler above, which would report a link
+                # refused here as results that failed to load.
+                ensure_reports_dir(self.output_dir.joinpath("reports"))
             # Only identify files to scan if we're not using existing results
             elif "convert" in phases or "scan" in phases:
                 ASH_LOGGER.info("Identifying non-ignored files to include in scans")

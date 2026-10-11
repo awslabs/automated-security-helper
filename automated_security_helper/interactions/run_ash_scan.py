@@ -87,6 +87,7 @@ from automated_security_helper.utils.report_path_links import (
     ReportPathLinkRefused,
     ReportPathRefused,
     linked_report_path,
+    refuse_a_linked_reports_dir,
 )
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 from automated_security_helper.utils.severity_ladder import (
@@ -1558,7 +1559,15 @@ def _discard_prior_run_artifacts(opts: ScanOptions, logger) -> None:
       single-project tree per project under ``projects/<key>/`` and only the unified
       top-level files are rewritten by the outer run, so a workspace scan that removed
       ``projects/`` would delete the per-project reports it is about to summarize.
+
+    A ``reports/`` that is itself a link, to a directory or dangling, refuses the run
+    first, as a local scan refuses it: rmtree fails on a link to a directory, and
+    removing a dangling one would hide that the operator put a link there.
     """
+    try:
+        refuse_a_linked_reports_dir(opts.output_dir / "reports")
+    except ReportPathRefused as refusal:
+        _refuse_report_path_link(refusal)
     if opts.existing_results:
         # The one shape that legitimately consumes a file from before this invocation.
         # --use-existing resolves to a path in this directory and the inner scan is asked

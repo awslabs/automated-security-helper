@@ -115,6 +115,7 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_path_links import (
+    ensure_reports_dir,
     refuse_linked_report_paths,
     refuse_report_names_outside,
 )
@@ -574,8 +575,7 @@ def emit_workspace_reports(
             the manifest is a link. Nothing is written.
     """
     output_dir = Path(output_dir)
-    reports_dir = output_dir / REPORTS_DIR_NAME
-    reports_dir.mkdir(parents=True, exist_ok=True)
+    reports_dir = ensure_reports_dir(output_dir / REPORTS_DIR_NAME)
 
     context, config_lookup = _workspace_context(
         plan.workspace_root, output_dir, ignore_suppressions

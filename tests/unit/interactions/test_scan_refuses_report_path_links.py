@@ -231,3 +231,42 @@ def test_a_workspace_scan_with_a_linked_report_is_refused_before_any_project(tmp
     # Refused before any project ran.
     assert not (output / "projects").exists()
     assert _files_holding_marker(output) == []
+
+
+@pytest.mark.parametrize("target", ["a directory", "nothing"])
+@pytest.mark.parametrize("run", ["fresh", "existing results"])
+def test_a_reports_directory_that_is_a_link_refuses_the_scan(tmp_path, target, run):
+    """A link at ``reports/`` itself is refused, naming it, before ASH creates or clears it.
+
+    Linked to a directory or dangling, in a fresh scan (which clears ``reports/``
+    while setting up its directories) and with ``--use-existing`` (which keeps it).
+    """
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "app.py").write_text("x = 1\n", encoding="utf-8")
+    output = tmp_path / "out"
+    output.mkdir()
+    outside = tmp_path / "outside"
+    if target == "a directory":
+        outside.mkdir()
+        (outside / "keep.txt").write_text("unchanged", encoding="utf-8")
+    reports = output / "reports"
+    reports.symlink_to(outside, target_is_directory=True)
+    extra = ["--use-existing"] if run == "existing results" else ["--phases", "report"]
+    if run == "existing results":
+        _write_existing_results(output)
+
+    completed = _ash_scan(
+        tmp_path, "--source-dir", str(source), "--output-dir", str(output), *extra
+    )
+
+    console = _console(completed)
+    assert completed.returncode == 1, console[-4000:]
+    expected = f"reports directory {reports.as_posix()} is a symlink"
+    assert expected in console, console[-4000:]
+    assert "Traceback" not in console, console[-4000:]
+    assert reports.is_symlink()
+    if target == "a directory":
+        assert sorted(path.name for path in outside.iterdir()) == ["keep.txt"]
+    else:
+        assert not outside.exists()

@@ -1709,6 +1709,42 @@ class TestMergeCli:
             "ash.sarif"
         ]
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    @pytest.mark.parametrize("target", ["a directory", "nothing"])
+    def test_a_reports_directory_that_is_a_link_refuses_the_reports(
+        self, tmp_path, target
+    ):
+        """A link at ``reports/`` itself, to a directory or dangling, exits 1 naming it."""
+        shard_paths = write_shards(tmp_path / "artifacts", build_shards(3))
+        output_dir = tmp_path / "merged"
+        output_dir.mkdir()
+        outside = tmp_path / "outside"
+        if target == "a directory":
+            outside.mkdir()
+            (outside / "keep.txt").write_text("unchanged", encoding="utf-8")
+        reports = output_dir / "reports"
+        reports.symlink_to(outside, target_is_directory=True)
+
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(output_dir), "--output-formats", "sarif"]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 1, result.output
+        assert not isinstance(result.exception, OSError), repr(result.exception)
+        console = "".join(re.sub(r"\x1b\[[0-9;]*m", "", result.output).split())
+        expected = f"reports directory {reports.as_posix()} is a symlink"
+        assert "".join(expected.split()) in console, result.output
+        assert reports.is_symlink()
+        if target == "a directory":
+            assert sorted(path.name for path in outside.iterdir()) == ["keep.txt"]
+        else:
+            assert not outside.exists()
+
 
 def _incomplete_entries(
     model: AshAggregatedResults, scanner: str, status: ScannerStatus
