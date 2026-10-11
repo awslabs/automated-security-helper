@@ -119,8 +119,9 @@ def test_with_config(isolated_config_file):
 `tests/pytest-temp` is the tests' scratch area, inside the checkout, and other
 workers create and remove directories there throughout a parallel run. A walk that
 descends into it, such as `REPO_ROOT.rglob("*.md")` or `os.walk(REPO_ROOT)`, races
-them: on Python 3.10 to 3.12 `rglob` raises `FileNotFoundError` when a directory goes
-away mid-walk, and on every version it returns whatever the other workers wrote.
+them: on Python 3.10 and 3.11 `rglob` raises `FileNotFoundError` when a directory goes
+away mid-walk (3.12 and later skip it silently), and on every version it returns
+whatever the other workers wrote.
 
 To list files in the checkout, ask git (`git ls-files`), or walk with
 `tests.utils.helpers.iter_repo_files(root)`, which skips the scratch tree before it
@@ -129,8 +130,9 @@ descends. Walking a subtree no per-run directory is under, such as
 
 `tests/unit/test_repo_walkers_skip_scratch.py` enforces this. It evaluates every walk
 in `tests/`, and in the script functions a test loads, imports or runs, and fails on
-one that can enter `tests/pytest-temp`, `.ash/ash_output`, `.venv` or a `node_modules`,
-or whose directory it cannot work out from the code. A walk of a directory that only
+one that can enter `tests/pytest-temp`, `.ash/ash_output`, `.venv`, or the `node_modules`
+beside a tracked `package.json` outside `tests/` (one under `tests/` is a fixture), or
+whose directory it cannot work out from the code. A walk of a directory that only
 exists at run time, and is safe, is listed in that file's `_EXEMPT` with the reason.
 
 ## Marking Tests as Non-Parallel
