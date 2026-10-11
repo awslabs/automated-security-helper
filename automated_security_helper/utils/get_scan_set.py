@@ -210,6 +210,20 @@ def _is_link_to_directory(path: str | Path) -> bool:
     return bool(isjunction is not None and isjunction(path))
 
 
+def _walk_unless_link(top: str | Path):
+    """``os.walk(top)``, or nothing when *top* is a link or junction to a directory.
+
+    ``os.walk`` lists a link to a directory below its top without descending it,
+    but it follows one given as the top. Every walk that counts files ASH did not
+    scan goes through here, so a link the repository placed, at any depth, is
+    never followed: nothing behind it is in a scan set, honored or not, and
+    following it would read wherever the link points, outside the tree included.
+    """
+    if _is_link_to_directory(top):
+        return iter(())
+    return os.walk(top)
+
+
 #: The log files the running scan has already opened in its output directory when
 #: the scan set is built. Not counted among the files found there.
 _THIS_RUNS_LOG_FILES = frozenset({"ash.log", "ash.log.jsonl"})
@@ -237,7 +251,7 @@ def _directory_identity(
 def _count_files_in_own_output(directory: str) -> int:
     """How many files were already in ASH's output directory, this run's logs aside."""
     count = 0
-    for root, _dirs, files in os.walk(directory):
+    for root, _dirs, files in _walk_unless_link(directory):
         count += sum(
             1
             for name in files
@@ -308,7 +322,7 @@ def _count_templates(directory: str) -> int:
     """``*.template.json`` files under *directory*: the forced inclusion keeps them."""
     return sum(
         1
-        for root, _dirs, files in os.walk(directory)
+        for root, _dirs, files in _walk_unless_link(directory)
         for name in files
         if name.endswith(".template.json")
         and not _is_bundled_cdk_path(os.path.join(root, name))
@@ -334,13 +348,11 @@ def _count_files_ash_would_scan(
     bundled aws-cdk path is not entered, and a ``.git`` directory or a CDK asset
     directory is only searched for the ``*.template.json`` files the forced
     inclusion keeps. Links to directories are not followed, as in the walk that
-    pruned *directory*: not *directory* itself, which ``os.walk`` would follow, and
-    not one below it.
+    pruned *directory*: neither *directory* itself nor one below it, including a
+    ``.git`` or asset directory searched for templates (:func:`_walk_unless_link`).
     """
-    if _is_link_to_directory(directory):
-        return 0
     count = 0
-    for root, dirs, files in os.walk(directory):
+    for root, dirs, files in _walk_unless_link(directory):
         parts = _relative_parts(root, source)
         kept_dirs = []
         for d in dirs:
@@ -482,10 +494,9 @@ def _collect_ignorefiles_and_all_files(
             # The pruned files are still counted: they are missing from the scan set
             # because of the root .gitignore, and a count that left them out would
             # report less than the file removed. Counted, not listed, so a pruned
-            # node_modules costs a walk and no memory. A link is not counted: the
-            # walk never enters one, so nothing behind it was going to be scanned,
-            # and following it would read wherever the repository points it.
-            if pruned_counts is None or _is_link_to_directory(Path(root) / d):
+            # node_modules costs a walk and no memory. A link counts nothing: the
+            # count walks through _walk_unless_link, as every count does.
+            if pruned_counts is None:
                 continue
             removed = _count_files_ash_would_scan(Path(root) / d, path, own_output_id)
             pruned_counts[pruned_key] = pruned_counts.get(pruned_key, 0) + removed

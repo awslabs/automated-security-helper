@@ -260,6 +260,67 @@ class TestAPrunedLinkIsNotFollowed:
         assert walked == [os.path.abspath(root)], walked
         assert _names(root, scan_set(source=str(root))) == {".gitignore", "app.py"}
 
+    @pytest.mark.parametrize(
+        "link_name",
+        [".git", "cdk.out/asset.1"],
+        ids=["git-directory", "cdk-asset-directory"],
+    )
+    def test_a_link_below_a_pruned_directory_is_not_walked(
+        self, tmp_path, monkeypatch, link_name
+    ):
+        """One level down, under the names the count searches for templates.
+
+        A ``.git`` directory and a CDK asset directory below a pruned directory are
+        searched only for ``*.template.json`` files. As links, they point wherever
+        the repository says, and their templates are in no scan set either way.
+        """
+        outside = _build(
+            tmp_path / "outside",
+            {f"t{i}.template.json": "{}\n" for i in range(5)},
+        )
+        root = _build(
+            tmp_path / "src",
+            {".gitignore": "build/\n", "app.py": "x = 1\n", "build/real.txt": "r\n"},
+        )
+        link = root / "build" / link_name
+        link.parent.mkdir(parents=True, exist_ok=True)
+        _symlink_or_skip(link, outside)
+        walked = []
+        real_walk = os.walk
+
+        def recording_walk(top, *args, **kwargs):
+            walked.append(os.path.abspath(top))
+            return real_walk(top, *args, **kwargs)
+
+        monkeypatch.setattr(gss.os, "walk", recording_walk)
+        record = _record(root)
+
+        assert not any(
+            top == os.path.abspath(link) or top.startswith(os.path.abspath(outside))
+            for top in walked
+        ), walked
+        assert record["by_ignore_file"] == {".gitignore": 1}, record
+        assert record["excluded_file_count"] == 1, record
+
+    def test_every_count_walk_refuses_a_link_given_as_its_top(self, tmp_path):
+        """The one guard the counts share, asked directly for each count."""
+        outside = _build(
+            tmp_path / "outside",
+            {"a.txt": "a\n", "b.template.json": "{}\n", "sub/c.txt": "c\n"},
+        )
+        root = _build(tmp_path / "src", {"app.py": "x = 1\n"})
+        link = root / "linked"
+        _symlink_or_skip(link, outside)
+        assert list(gss._walk_unless_link(link)) == []
+        assert gss._count_templates(str(link)) == 0
+        assert gss._count_files_in_own_output(str(link)) == 0
+        assert gss._count_files_ash_would_scan(link, str(root)) == 0
+        # The control: the same directory, reached as itself, is walked.
+        assert [Path(top) for top, _dirs, _files in gss._walk_unless_link(outside)][
+            0
+        ] == outside
+        assert gss._count_templates(str(outside)) == 1
+
     def test_a_link_inside_the_tree_is_not_counted_twice(self, tmp_path):
         root = _build(
             tmp_path / "src",
