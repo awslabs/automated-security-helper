@@ -57,6 +57,7 @@ ash_config:
   ash_plugin_modules: []
   build: null
   content_db_staleness: fail
+  content_db_staleness_offline_image_default: true
   content_db_staleness_overrides: []
   converters:
     archive:
@@ -82,6 +83,7 @@ ash_config:
         - /fail_on_incomplete_scanners
         - /content_db_staleness
         - /content_db_staleness_overrides
+        - /content_db_staleness_offline_image_default
         - /sandbox
         - /sandbox/**
         - /ash_plugin_modules

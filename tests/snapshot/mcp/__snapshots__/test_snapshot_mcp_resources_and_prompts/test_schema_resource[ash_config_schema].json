@@ -173,6 +173,12 @@
           "title": "Content Db Staleness",
           "type": "string"
         },
+        "content_db_staleness_offline_image_default": {
+          "default": true,
+          "description": "Whether an image built with OFFLINE=YES holds trivy-db to 'warn' rather than to content_db_staleness: fail. Such an image carries the trivy database it was built with, and trivy's own bound would fail every scan in it from a day after the build; with this, those scans pass and every report records the stale database. Only trivy-db: grype-db and the offline rulesets keep content_db_staleness. The image's ASH_OFFLINE_AT_BUILD_TIME=YES turns it on, so it does nothing anywhere else, whatever this says; set false to hold trivy-db to content_db_staleness in the image too. A content_db_staleness_overrides entry for trivy-db outranks it, and either form of --allow-stale-content-db sets this to false for that scan.",
+          "title": "Content Db Staleness Offline Image Default",
+          "type": "boolean"
+        },
         "content_db_staleness_overrides": {
           "default": [],
           "description": "Per-database exceptions to content_db_staleness, each with a required expiration date and reason. An entry holds one named database to its own policy until 00:00 UTC on its expiration date, and every database not named keeps content_db_staleness. An expired entry is ignored with a warning. Empty by default. Either form of --allow-stale-content-db clears this list for that scan, so the flag still decides for every database.",
@@ -253,6 +259,7 @@
                   "/fail_on_incomplete_scanners",
                   "/content_db_staleness",
                   "/content_db_staleness_overrides",
+                  "/content_db_staleness_offline_image_default",
                   "/sandbox",
                   "/sandbox/**",
                   "/ash_plugin_modules",
@@ -720,6 +727,7 @@
                 "/fail_on_incomplete_scanners",
                 "/content_db_staleness",
                 "/content_db_staleness_overrides",
+                "/content_db_staleness_offline_image_default",
                 "/sandbox",
                 "/sandbox/**",
                 "/ash_plugin_modules",
@@ -774,6 +782,7 @@
               "/fail_on_incomplete_scanners",
               "/content_db_staleness",
               "/content_db_staleness_overrides",
+              "/content_db_staleness_offline_image_default",
               "/sandbox",
               "/sandbox/**",
               "/ash_plugin_modules",
@@ -3662,6 +3671,7 @@
             "/fail_on_incomplete_scanners",
             "/content_db_staleness",
             "/content_db_staleness_overrides",
+            "/content_db_staleness_offline_image_default",
             "/sandbox",
             "/sandbox/**",
             "/ash_plugin_modules",

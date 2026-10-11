@@ -717,6 +717,8 @@ class RuntimeOverridesConfig(BaseModel):
         # out-of-date vulnerability database pass.
         "/content_db_staleness",
         "/content_db_staleness_overrides",
+        # Turning it back on after the operator turned it off would relax trivy-db.
+        "/content_db_staleness_offline_image_default",
         # The scanner sandbox: a client must not be able to switch it off, hand a
         # scanner a network, or widen what it can read.
         "/sandbox",
@@ -1196,6 +1198,25 @@ class AshConfig(BaseModel):
             )
         ),
     ] = []
+
+    content_db_staleness_offline_image_default: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether an image built with OFFLINE=YES holds trivy-db to 'warn' rather "
+                "than to content_db_staleness: fail. Such an image carries the trivy "
+                "database it was built with, and trivy's own bound would fail every scan "
+                "in it from a day after the build; with this, those scans pass and every "
+                "report records the stale database. Only trivy-db: grype-db and the "
+                "offline rulesets keep content_db_staleness. The image's "
+                "ASH_OFFLINE_AT_BUILD_TIME=YES turns it on, so it does nothing anywhere "
+                "else, whatever this says; set false to hold trivy-db to "
+                "content_db_staleness in the image too. A content_db_staleness_overrides "
+                "entry for trivy-db outranks it, and either form of "
+                "--allow-stale-content-db sets this to false for that scan."
+            )
+        ),
+    ] = True
 
     ash_plugin_modules: Annotated[
         List[str],

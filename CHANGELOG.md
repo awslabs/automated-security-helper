@@ -133,9 +133,13 @@
     (`utils/content_db_refresh.py`): it runs from an empty directory outside the
     scanned tree with an explicit `--config`, so a `trivy.yaml` in the scanned
     repository cannot change where the database comes from. An image built with `OFFLINE=YES`
-    ships the database, which the 24h bound fails a day after it was published (see
-    `docs/content/docs/building-your-own-image.md`), and the nix shell updates it on
-    every entry.
+    ships the database and holds it to `warn` rather than `fail`: from a day after it
+    was published that image's scans still pass, and every report records the stale
+    database, while grype's database and the offline rulesets keep `fail`.
+    `content_db_staleness_offline_image_default: false`, or either form of
+    `--allow-stale-content-db`, turns that off (see
+    `docs/content/docs/building-your-own-image.md`). The nix shell updates the
+    database on every entry.
 
   Options that name something a tool executes or loads are not taken from a config
   file inside the scanned tree: actionlint's `shellcheck` and `pyflakes` accept only
@@ -739,7 +743,8 @@
   **Who it affects.** Anyone running offline images, or the trivy plugin, with
   databases older than the bounds above. Online grype and trivy scans already refresh
   a stale database themselves and fail if they cannot, so they are unaffected unless
-  the refresh is disabled.
+  the refresh is disabled. An image built with `OFFLINE=YES` holds the trivy
+  database to `warn` instead (see the trivy scanner under Features).
 
   **What to do.** Refresh the database: rebuild the offline image with
   `ash build-image --offline` (it downloads a current grype database and current

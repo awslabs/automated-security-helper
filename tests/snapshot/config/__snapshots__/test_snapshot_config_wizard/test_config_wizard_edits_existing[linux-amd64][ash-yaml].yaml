@@ -14,6 +14,7 @@ global_settings:
       - /fail_on_incomplete_scanners
       - /content_db_staleness
       - /content_db_staleness_overrides
+      - /content_db_staleness_offline_image_default
       - /sandbox
       - /sandbox/**
       - /ash_plugin_modules
@@ -31,6 +32,7 @@ sandbox:
   extra_read_paths: []
 content_db_staleness: fail
 content_db_staleness_overrides: []
+content_db_staleness_offline_image_default: true
 ash_plugin_modules:
 - my_org.ash_plugins
 external_reports_to_include: []

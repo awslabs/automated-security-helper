@@ -99,6 +99,8 @@ import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from types import MappingProxyType
+from typing import Mapping
 
 # The key prefix's version. Bump it when the bucket arithmetic changes, so entries keyed under
 # the old arithmetic are never restored by the new one.
@@ -121,6 +123,41 @@ DEFAULT_STALENESS_POLICY = STALENESS_FAIL
 STALENESS_CONFIG_FIELD = "content_db_staleness"
 #: Per-database exceptions to ``content_db_staleness``, each with a required expiration date.
 STALENESS_OVERRIDES_CONFIG_FIELD = "content_db_staleness_overrides"
+#: Whether an image built with ``OFFLINE=YES`` applies ``OFFLINE_IMAGE_POLICIES``. The config
+#: can only turn it off; see ``OFFLINE_IMAGE_POLICIES``.
+STALENESS_OFFLINE_IMAGE_CONFIG_FIELD = "content_db_staleness_offline_image_default"
+
+#: Set by the Dockerfile from its ``OFFLINE`` build argument (``ENV
+#: ASH_OFFLINE_AT_BUILD_TIME="${OFFLINE}"``), so it is ``YES`` only in an image built with
+#: ``OFFLINE=YES``. It describes the image, not the scan: ``ASH_OFFLINE`` says whether a scan
+#: runs offline, and is also set by ``--offline`` and the nix shell.
+OFFLINE_IMAGE_ENV = "ASH_OFFLINE_AT_BUILD_TIME"
+
+#: The policy a database is held to by default in an image built with ``OFFLINE=YES``, in
+#: place of ``content_db_staleness: fail``.
+#:
+#: Why trivy-db, and only trivy-db: such an image carries the databases it was built with.
+#: trivy's bound is its own 24h ``NextUpdate``, so without this every scan in the image
+#: failed from a day after it was built, and keeping the image usable meant rebuilding it
+#: daily. Its scans now pass, and the stale-database warning goes into every report, so the
+#: age stays visible to whoever reads them. grype's 120h bound and the rulesets' bound leave
+#: a rebuild cadence a release can meet, and they keep ``fail``.
+#:
+#: Fixed here rather than read from the environment or the config, so neither can widen it to
+#: another database. ``OFFLINE_IMAGE_ENV`` turns it on; ``content_db_staleness_offline_image_default:
+#: false``, either form of ``--allow-stale-content-db``, or a ``content_db_staleness_overrides``
+#: entry naming the database outranks it; ``content_db_staleness: warn`` makes it moot.
+OFFLINE_IMAGE_POLICIES: Mapping[str, str] = MappingProxyType(
+    {"trivy-db": STALENESS_WARN}
+)
+
+
+def built_offline(environ: Mapping[str, str]) -> bool:
+    """Whether ``environ`` is an image built with ``OFFLINE=YES`` (``OFFLINE_IMAGE_ENV``).
+
+    The same spellings ``ASH_OFFLINE`` accepts (``core/constants.is_offline_mode``).
+    """
+    return str(environ.get(OFFLINE_IMAGE_ENV, "NO")).upper() in ("YES", "TRUE", "1")
 
 
 def content_db_staleness_override(allow_stale: bool) -> str:
@@ -133,14 +170,17 @@ def content_db_staleness_override(allow_stale: bool) -> str:
 def content_db_staleness_flag_overrides(allow_stale: bool) -> list[str]:
     """Every ``--config-overrides`` entry either form of the flag means.
 
-    The policy, and an empty ``content_db_staleness_overrides``: the flag decides for one
-    scan and every database, so a per-database entry in the config file cannot outrank it.
+    The policy, an empty ``content_db_staleness_overrides``, and the offline image's
+    default turned off: the flag decides for one scan and every database, so neither a
+    per-database entry in the config file nor ``OFFLINE_IMAGE_POLICIES`` can outrank it.
     Without the second entry, ``--no-allow-stale-content-db`` would not restore ``fail``
-    for a database the config file relaxes.
+    for a database the config file relaxes; without the third, for trivy-db in an image
+    built with ``OFFLINE=YES``.
     """
     return [
         content_db_staleness_override(allow_stale),
         f"{STALENESS_OVERRIDES_CONFIG_FIELD}=[]",
+        f"{STALENESS_OFFLINE_IMAGE_CONFIG_FIELD}=false",
     ]
 
 

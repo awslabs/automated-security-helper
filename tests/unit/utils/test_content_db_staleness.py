@@ -624,11 +624,19 @@ class TestTheFlag:
             ([], None),
             (
                 ["--allow-stale-content-db"],
-                ["content_db_staleness=warn", "content_db_staleness_overrides=[]"],
+                [
+                    "content_db_staleness=warn",
+                    "content_db_staleness_overrides=[]",
+                    "content_db_staleness_offline_image_default=false",
+                ],
             ),
             (
                 ["--no-allow-stale-content-db"],
-                ["content_db_staleness=fail", "content_db_staleness_overrides=[]"],
+                [
+                    "content_db_staleness=fail",
+                    "content_db_staleness_overrides=[]",
+                    "content_db_staleness_offline_image_default=false",
+                ],
             ),
         ],
     )
@@ -837,6 +845,209 @@ class TestPerDatabaseOverrides:
         assert [r.name for r in staleness.stale_content_databases(model)] == [
             "grype-db"
         ]
+
+
+# --------------------------------------------------------------------------- offline image
+
+
+def _offline_image_env(monkeypatch, value: str | None = "YES") -> None:
+    """The variable the image sets from its OFFLINE build argument, as an image has it."""
+    if value is None:
+        monkeypatch.delenv(cdb.OFFLINE_IMAGE_ENV, raising=False)
+    else:
+        monkeypatch.setenv(cdb.OFFLINE_IMAGE_ENV, value)
+
+
+class TestTheOfflineImageDefault:
+    """An image built with OFFLINE=YES holds trivy-db, and only trivy-db, to warn.
+
+    Such an image carries the trivy database it was built with, and trivy's own 24h
+    bound would fail every scan from a day after the build. The maintainer's ruling: the
+    scan stays green and every report records the stale database; grype-db and the
+    offline rulesets keep ``fail``. The scope is fixed in code, the trigger is the
+    image's own environment, and the config can only turn it off.
+    """
+
+    def test_it_names_exactly_trivy_db(self):
+        assert dict(cdb.OFFLINE_IMAGE_POLICIES) == {"trivy-db": cdb.STALENESS_WARN}
+        assert cdb.OFFLINE_IMAGE_ENV == "ASH_OFFLINE_AT_BUILD_TIME"
+
+    def test_a_stale_trivy_db_warns_and_every_report_says_why(self, tmp_path):
+        scanner = _trivy_case(tmp_path, _over("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        (record,) = staleness.assess_scanner(
+            scanner, sarif, cdb.STALENESS_FAIL, offline_image=True
+        )
+        assert record.stale and not record.enforced
+        assert record.policy == cdb.STALENESS_WARN
+        assert "OFFLINE=YES" in (record.policy_source or "")
+        assert "OFFLINE=YES" in record.message()
+        assert "ash build-image --offline" in record.message()
+
+        model = _model(sarif)
+        assert _exit_code(tmp_path, model) == 0
+        reports = _reports(model)
+        notes = _notifications(reports["sarif"])
+        assert [n["level"] for n in notes] == ["warning"]
+        assert "OFFLINE=YES" in notes[0]["message"]["text"]
+        assert "### Stale content databases" in reports["markdown"]
+        assert "OFFLINE=YES" in reports["markdown"]
+        assert "OFFLINE=YES" in reports["text"]
+        (flat,) = json.loads(reports["flat"])["content_databases"]
+        assert (flat["name"], flat["policy"], flat["enforced"]) == (
+            "trivy-db",
+            "warn",
+            False,
+        )
+        assert "OFFLINE=YES" in flat["policy_source"]
+
+    @pytest.mark.parametrize(
+        "name", ["grype-db", "semgrep-offline-rules", "opengrep-offline-rules"]
+    )
+    def test_every_other_database_still_fails(self, tmp_path, name):
+        scanner = CASES[name](tmp_path, _over(name))
+        sarif = _sarif(scanner.config.name)
+        (record,) = staleness.assess_scanner(
+            scanner, sarif, cdb.STALENESS_FAIL, offline_image=True
+        )
+        assert record.enforced and record.policy_source is None
+        assert _exit_code(tmp_path, _model(sarif)) == 1
+
+    def test_outside_an_offline_image_trivy_db_still_fails(self, tmp_path):
+        scanner = _trivy_case(tmp_path, _over("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        (record,) = staleness.assess_scanner(scanner, sarif, cdb.STALENESS_FAIL)
+        assert record.enforced and record.policy_source is None
+        assert _exit_code(tmp_path, _model(sarif)) == 1
+
+    def test_a_fresh_trivy_db_is_not_reported(self, tmp_path):
+        scanner = _trivy_case(tmp_path, _under("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        (record,) = staleness.assess_scanner(
+            scanner, sarif, cdb.STALENESS_FAIL, offline_image=True
+        )
+        assert not record.stale
+        assert staleness.stale_content_databases(_model(sarif)) == []
+
+    def test_an_override_entry_outranks_it(self, tmp_path):
+        overrides = _overrides(_relax("trivy-db", policy="fail"))
+        scanner = _trivy_case(tmp_path, _over("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        (record,) = staleness.assess_scanner(
+            scanner,
+            sarif,
+            cdb.STALENESS_FAIL,
+            overrides=overrides,
+            offline_image=True,
+        )
+        assert record.enforced
+        assert "content_db_staleness_overrides entry" in (record.policy_source or "")
+
+    def test_an_expired_override_falls_back_to_it_and_says_so(self, tmp_path, caplog):
+        overrides = _overrides(
+            _relax("trivy-db", policy="fail", expiration="2020-01-01")
+        )
+        scanner = _trivy_case(tmp_path, _over("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        with caplog.at_level("WARNING"):
+            (record,) = staleness.assess_scanner(
+                scanner,
+                sarif,
+                cdb.STALENESS_FAIL,
+                overrides=overrides,
+                offline_image=True,
+            )
+        assert not record.enforced and "OFFLINE=YES" in (record.policy_source or "")
+        (expired,) = [m for m in caplog.messages if "expired at" in m]
+        assert "OFFLINE=YES" in expired
+        assert "content_db_staleness (fail)" not in expired
+
+    def test_under_warn_it_changes_nothing(self, tmp_path):
+        scanner = _trivy_case(tmp_path, _over("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        (record,) = staleness.assess_scanner(
+            scanner, sarif, cdb.STALENESS_WARN, offline_image=True
+        )
+        assert record.policy == cdb.STALENESS_WARN and record.policy_source is None
+
+    @pytest.mark.parametrize(
+        "env,field,expected",
+        [
+            (None, True, False),
+            ("NO", True, False),
+            ("", True, False),
+            ("YES", True, True),
+            ("yes", True, True),
+            ("YES", False, False),
+        ],
+    )
+    def test_only_the_image_turns_it_on_and_the_config_can_only_turn_it_off(
+        self, monkeypatch, env, field, expected
+    ):
+        _offline_image_env(monkeypatch, env)
+        config = AshConfig(
+            project_name="x", content_db_staleness_offline_image_default=field
+        )
+        assert staleness.resolve_offline_image_default(config) is expected
+
+    def test_the_config_default_leaves_it_on(self, monkeypatch):
+        _offline_image_env(monkeypatch)
+        assert AshConfig(project_name="x").content_db_staleness_offline_image_default
+        assert get_default_config().content_db_staleness_offline_image_default
+        assert staleness.resolve_offline_image_default(AshConfig(project_name="x"))
+
+    @pytest.mark.parametrize("allow_stale", [False, True])
+    def test_either_form_of_the_flag_turns_it_off(self, monkeypatch, allow_stale):
+        _offline_image_env(monkeypatch)
+        overridden = apply_config_overrides(
+            AshConfig(project_name="x"),
+            cdb.content_db_staleness_flag_overrides(allow_stale=allow_stale),
+        )
+        assert overridden.content_db_staleness_offline_image_default is False
+        assert staleness.resolve_offline_image_default(overridden) is False
+
+    def test_a_runtime_patch_cannot_turn_it_back_on(self):
+        from automated_security_helper.config.ash_config import RuntimeOverridesConfig
+
+        assert (
+            "/content_db_staleness_offline_image_default"
+            in RuntimeOverridesConfig().denied_paths
+        )
+
+    def test_the_config_validator_accepts_the_key(self):
+        from automated_security_helper.config.config_validator import ConfigValidator
+
+        assert (
+            "content_db_staleness_offline_image_default"
+            in ConfigValidator.VALID_TOP_LEVEL_FIELDS
+        )
+
+    @pytest.mark.parametrize("env,enforced", [("YES", False), (None, True)])
+    def test_the_executor_applies_it_from_the_environment(
+        self, tmp_path, monkeypatch, test_plugin_context, env, enforced
+    ):
+        from automated_security_helper.core.phases.scanner_executor import (
+            ScannerExecutor,
+        )
+
+        _offline_image_env(monkeypatch, env)
+        test_plugin_context.config = get_default_config()
+        scanner = _trivy_case(tmp_path, _over("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        executor = ScannerExecutor(
+            plugin_context=test_plugin_context, progress_display=None, scanner_tasks=[]
+        )
+        executor._assess_content_databases(scanner, sarif)
+        (record,) = staleness.content_db_records(_model(sarif))
+        assert record.stale and record.enforced is enforced
+
+    def test_the_image_sets_it_from_its_offline_build_argument_only(self):
+        dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+        assignments = re.findall(
+            rf"^\s*ENV\s+{cdb.OFFLINE_IMAGE_ENV}=(\S+)", dockerfile, re.MULTILINE
+        )
+        assert assignments == ['"${OFFLINE}"'], assignments
+        assert re.search(r'^ARG OFFLINE="NO"$', dockerfile, re.MULTILINE)
 
 
 # --------------------------------------------------------------------------- the registry

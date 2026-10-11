@@ -1235,7 +1235,8 @@ built. Measured with grype 0.111.0 under ASH's offline settings, a database buil
 10 days earlier scanned with exit 0 and no warning. ASH now reads each content
 database's own build time after its scanner runs and exits 1 when it is past the
 declared bound (grype 120h, trivy 24h, the offline semgrep and opengrep rulesets
-30 days):
+30 days). In an image built with `OFFLINE=YES`, a stale trivy database warns instead;
+see [Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database):
 
 ```console
 $ ash scan --offline

@@ -274,6 +274,7 @@ class ScannerExecutor:
         from automated_security_helper.schemas.sarif_schema_model import SarifReport
         from automated_security_helper.utils.content_db_staleness import (
             assess_scanner,
+            resolve_offline_image_default,
             resolve_overrides,
             resolve_policy,
         )
@@ -286,6 +287,7 @@ class ScannerExecutor:
             raw_results,
             resolve_policy(config),
             overrides=resolve_overrides(config),
+            offline_image=resolve_offline_image_default(config),
         )
 
     # ------------------------------------------------------------------

@@ -214,11 +214,31 @@ way is reported the same as under `warn`, and the message names the entry and it
 expiry. Each database can appear in at most one entry, and an unknown database
 name is a config error. The list is empty by default.
 
+An image built with `OFFLINE=YES` (`ash build-image --offline`) holds `trivy-db` to
+`warn` rather than to `content_db_staleness: fail`. The image carries the trivy
+database it was built with, and the 24h bound would otherwise fail every scan in it
+from a day after the build. So those scans pass, and each report records the stale
+database as it does under `warn`, with a message saying the offline image's default
+let the scan pass. Only `trivy-db` is relaxed: `grype-db` and the offline rulesets
+still fail the scan once they are past their bounds. What turns this on is the
+image's own `ASH_OFFLINE_AT_BUILD_TIME=YES`, so it never applies outside such an
+image, whatever the config says. To hold `trivy-db` to `content_db_staleness` in the
+image as well:
+
+```yaml
+content_db_staleness_offline_image_default: false  # default true
+```
+
+A `content_db_staleness_overrides` entry for `trivy-db` outranks this default, and
+once the entry expires the database returns to it.
+
 The CLI flag takes precedence over the config value in both directions:
 `--no-allow-stale-content-db` restores `fail` for one scan even when the config
 says `warn`, and either form of the flag also clears
-`content_db_staleness_overrides` for that scan. Like `fail_on_incomplete_scanners`,
-neither key can be changed by an MCP runtime patch.
+`content_db_staleness_overrides` and sets `content_db_staleness_offline_image_default`
+to false for that scan, so it decides for every database, `trivy-db` in an offline
+image included. Like `fail_on_incomplete_scanners`, none of these keys can be
+changed by an MCP runtime patch.
 
 This gate is independent of `fail_on_incomplete_scanners` and does not need it
 turned on. When the scan also has actionable findings, the exit code is 1 rather

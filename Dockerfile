@@ -154,6 +154,10 @@ ENV ASH_BIN_PATH="${ASH_BIN_PATH}"
 ENV OFFLINE="${OFFLINE}"
 ENV OFFLINE_AT_BUILD_TIME="${OFFLINE}"
 ENV ASH_OFFLINE="${OFFLINE}"
+# YES only in an image built with OFFLINE=YES. ASH reads it as "this image carries the
+# databases it was built with" and then holds trivy-db to warn rather than fail
+# (OFFLINE_IMAGE_POLICIES in utils/content_databases.py), so it must keep following the
+# build argument and nothing else.
 ENV ASH_OFFLINE_AT_BUILD_TIME="${OFFLINE}"
 ENV OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}"
 ENV TZ=UTC
@@ -432,9 +436,10 @@ RUN trivy --version
 # trivy's cache, shared by the trivy and trivy-repo scanners and writable by the
 # non-root user, as GRYPE_DB_CACHE_DIR is for grype. An offline image downloads the
 # vulnerability database into it here; trivy is a default scanner, and offline with no
-# database it is MISSING, which fails the scan. ASH holds that database to trivy's own
-# 24-hour bound (utils/content_databases.py), so an offline image's trivy scans need a
-# rebuild, or `content_db_staleness: warn`, once the database is a day old. The
+# database it is MISSING, which fails the scan. trivy's own bound for that database is
+# 24 hours (utils/content_databases.py); in this image ASH holds it to `warn` rather
+# than `fail` (ASH_OFFLINE_AT_BUILD_TIME above), so once it is a day old the scans still
+# pass and each report records the stale database until the image is rebuilt. The
 # artifact is checked rather than OFFLINE re-tested, for the reason given above.
 ENV TRIVY_CACHE_DIR="/deps/.trivy"
 RUN set -ue; mkdir -p "${TRIVY_CACHE_DIR}" && chmod 777 "${TRIVY_CACHE_DIR}"; \
