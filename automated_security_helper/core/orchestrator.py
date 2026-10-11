@@ -102,6 +102,16 @@ class ASHScanOrchestrator(BaseModel):
             ),
         ),
     ] = False
+    remote_client: Annotated[
+        bool,
+        Field(
+            description=(
+                "The scan was started by a remote MCP client, so a config file "
+                "the operator did not set aside resolves no !ENV. Passed to "
+                "resolve_config; see its docstring."
+            ),
+        ),
+    ] = False
     trusted_config_path: Annotated[
         Optional[Path | str],
         Field(
@@ -260,6 +270,7 @@ class ASHScanOrchestrator(BaseModel):
                 ("config_path", self.config_path),
                 ("config_overrides", self.config_overrides),
                 ("untrusted_config", self.untrusted_config),
+                ("remote_client", self.remote_client),
                 ("trusted_config_path", self.trusted_config_path),
                 ("client_config_policy", self.client_config_policy),
             )
@@ -315,6 +326,7 @@ class ASHScanOrchestrator(BaseModel):
                 trusted_config_path=self.trusted_config_path,
                 untrusted_config=self.untrusted_config,
                 client_config_policy=self.client_config_policy,
+                remote_client=self.remote_client,
             )
 
         # Surface config resolution warnings prominently

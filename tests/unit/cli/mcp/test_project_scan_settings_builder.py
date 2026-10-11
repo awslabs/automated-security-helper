@@ -202,6 +202,8 @@ def _opts(tmp_path: Path) -> ScanOptions:
         # The registered profile the MCP server passes when a client patched the
         # session's copy, which ``config`` then names. Not read here, only carried.
         trusted_config_path=str(tmp_path / "operator" / "profile.yaml"),
+        # A remote MCP caller's run: which project configs resolve no !ENV.
+        remote_client=True,
     )
 
 
@@ -250,6 +252,7 @@ def _expected(tmp_path: Path) -> Dict[str, Any]:
         "default_config_path": str(tmp_path / "work" / ".ash.yaml"),
         "trusted_config_path": str(tmp_path / "operator" / "profile.yaml"),
         "client_config_rules": _RULES,
+        "remote_client": True,
     }
 
 

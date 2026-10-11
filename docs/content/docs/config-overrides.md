@@ -225,7 +225,8 @@ ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
   not; write `${VAR_NAME:default_value}`. A reference must also be the whole
   value, not part of a longer string.
 
-  Under the MCP server, a configuration file an MCP client delivered, or names
-  outside the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, may not use
-  `!ENV` at all, whatever the name; see
+  Under the MCP server, a configuration file an MCP client delivered may not use
+  `!ENV` at all, whatever the name, and for a remote client neither may any other
+  file outside `ASH_MCP_ALLOWED_CONFIG_ROOTS` and the session's own `config/`
+  directory, a scan target's own config included; see
   [Config files in delivered source](mcp/streamable-http.md#config-files-in-delivered-source).

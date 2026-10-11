@@ -403,6 +403,10 @@ class ProjectScanSettings:
     #: tools with the same value they resolved the plan with; None takes the
     #: trusted base's, which is ``default_config_path``'s.
     client_config_rules: Optional["ClientConfigRules"] = None
+    #: The run was started by a remote MCP client, so a project config the
+    #: operator did not set aside resolves no ``!ENV`` (``resolve_config``). The
+    #: same value the plan was resolved with.
+    remote_client: bool = False
 
 
 @dataclass
@@ -928,6 +932,7 @@ def _project_config_with_policy(
             else settings.default_config_path
         ),
         client_config_policy=settings.client_config_rules,
+        remote_client=settings.remote_client,
     )
 
     # The scanners' own checks on tool config file paths (config/path_trust.py)

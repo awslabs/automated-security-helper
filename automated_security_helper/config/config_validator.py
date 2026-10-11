@@ -103,7 +103,7 @@ class ConfigValidator:
         config_path: Path,
         source_dir: Optional[Path] = None,
         permit_base: Optional[Callable[[Path], bool]] = None,
-        client_delivered: bool = False,
+        refuse_env: Optional[Callable[[Path], bool]] = None,
     ) -> Tuple[bool, List[str]]:
         """Validate a configuration file and return validation results.
 
@@ -113,9 +113,9 @@ class ConfigValidator:
                         If None, inferred from config_path location.
             permit_base: Optional check every ``extends`` base must also pass;
                 see ``config/config_sources.py``.
-            client_delivered: The file holds content an MCP client sent, wherever
-                it was written. A file an MCP client delivered may not use
-                ``!ENV``; one under the MCP workspace root counts without this.
+            refuse_env: Which files of the chain may not use ``!ENV``, as
+                ``config_sources.resolve_config_document`` takes it. None refuses
+                the files an MCP client delivered.
 
         Returns:
             Tuple of (is_valid, list_of_errors)
@@ -125,18 +125,16 @@ class ConfigValidator:
         is_toml = config_path.name.endswith(".toml")
 
         try:
-            delivered = client_delivered or config_is_client_delivered(config_path)
+            delivered = (refuse_env or config_is_client_delivered)(config_path)
             # Load the config file. YAML and JSON are parsed exactly as before;
             # TOML (an ashrc.toml, or pyproject.toml's [tool.ash] table) goes
             # through the loader's reader, which is the only TOML reader ASH has.
-            # So does a file an MCP client delivered, so that a use of !ENV is
+            # So does a file that may not use !ENV, so that a use of it is
             # reported as the refusal a scan of the file would meet. Without
             # !ENV the reader returns what yaml.safe_load and json.load would.
             if is_toml or delivered:
                 try:
-                    config_data = read_config_file(
-                        config_path, client_delivered=delivered
-                    )
+                    config_data = read_config_file(config_path, refuse_env=refuse_env)
                 except ASHConfigEnvNotResolvedError as e:
                     errors.append(f"{cls.ENV_NOT_RESOLVED_ERROR_PREFIX}{e}")
                     return False, errors
@@ -168,13 +166,13 @@ class ConfigValidator:
                         config_path,
                         confine_to=default_confinement_root(config_path, source_dir),
                         permit_base=permit_base,
-                        client_delivered=delivered,
+                        refuse_env=refuse_env,
                     ).data
                 except ASHConfigInputNotPermittedError as e:
                     errors.append(f"{cls.NOT_PERMITTED_ERROR_PREFIX}{e}")
                     chain_resolved = False
                 except ASHConfigEnvNotResolvedError as e:
-                    # A base an MCP client delivered.
+                    # A base that may not use !ENV.
                     errors.append(f"{cls.ENV_NOT_RESOLVED_ERROR_PREFIX}{e}")
                     chain_resolved = False
                 except ASHConfigSourceError as e:

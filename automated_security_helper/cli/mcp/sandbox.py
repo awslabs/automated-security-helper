@@ -352,6 +352,9 @@ def client_named_config_is_untrusted(config_path: str | Path) -> bool:
     config in another repository under the allowed scan roots: the operator let
     the server scan it, not take its config as their own. Checked both as named
     and as resolved, as ``config_is_client_supplied`` is.
+
+    For a remote caller this is also which config files resolve no ``!ENV``,
+    named or not (``config_sources.env_refused_for``).
     """
     if config_is_client_supplied(config_path):
         return True
@@ -813,6 +816,7 @@ def validate_config_chain(
 
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
+        env_refused_for,
         resolve_config_document,
     )
     from automated_security_helper.core.exceptions import (
@@ -823,12 +827,16 @@ def validate_config_chain(
     if not path.is_file():
         return None
     try:
+        # Read as the scan reads it, so a file that may not use !ENV is refused
+        # for that before an `extends` whose value !ENV would choose is followed:
+        # the refusal must not depend on the server's environment.
         resolve_config_document(
             path,
             confine_to=default_confinement_root(
                 path, Path(source_dir) if source_dir is not None else None
             ),
             permit_base=config_base_gate(session_id),
+            refuse_env=env_refused_for(caller_is_remote(session_id)),
         )
     except ASHConfigInputNotPermittedError as exc:
         return config_chain_refusal(config_path, exc)

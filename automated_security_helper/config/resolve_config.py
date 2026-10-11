@@ -11,10 +11,12 @@ from automated_security_helper.config.client_config_policy import (
     clear_client_supplied_marks,
 )
 from automated_security_helper.config.config_sources import (
+    RefuseEnv,
     _resolve_dict_key,
     default_confinement_root,
     describe_config_path,
     discover_config_source,
+    env_refused_for,
     log_config_discovery,
     resolve_config_document,
 )
@@ -213,6 +215,7 @@ def resolve_config(
     trusted_config_path: Path | str | None = None,
     untrusted_config: bool = False,
     client_config_policy: Optional[ClientConfigRules] = None,
+    remote_client: bool = False,
 ) -> AshConfig:
     """
     Load configuration from file or return default configuration.
@@ -250,6 +253,13 @@ def resolve_config(
             None takes the trusted base's. When set, ``config_overrides`` are the
             client's too (the MCP workspace tools' ``config_overrides``): what
             they set is marked and confined as a delivered file's is.
+        remote_client: The config is read for an MCP call from a remote client
+            (``cli/mcp/sandbox.caller_is_remote``). Every file of the chain the
+            operator did not set aside then resolves no ``!ENV``, and one that
+            uses it is refused; otherwise only a file an MCP client delivered is.
+            See "Environment variables" in ``config/config_sources.py``. The
+            operator's own files (``trusted_config_path``, ``ASH_CONFIG``) are
+            read as before.
 
     A file of the chain an MCP client delivered
     (``cli/mcp/sandbox.config_is_client_supplied``) is confined as a file inside
@@ -270,7 +280,7 @@ def resolve_config(
         permit_base,
         chain,
         documents,
-        client_delivered=untrusted_config,
+        refuse_env=env_refused_for(remote_client),
     )
     if config is None:
         return config
@@ -410,13 +420,13 @@ def _resolve_config(
     permit_base: Optional[Callable[[Path], bool]],
     chain: List[Path],
     documents: Dict[Path, Any],
-    client_delivered: bool = False,
+    refuse_env: Optional[RefuseEnv] = None,
 ) -> AshConfig:
     """resolve_config without the sandbox confinement.
 
     Appends every file read to ``chain``, and each file's parsed document to
-    ``documents``. ``client_delivered`` reads ``config_path`` as an MCP client's
-    wherever it is, so it resolves no ``!ENV`` (``config_sources``).
+    ``documents``. ``refuse_env`` decides which files of the chain resolve no
+    ``!ENV`` (``config_sources``).
     """
     try:
         # Start with default config
@@ -506,7 +516,7 @@ def _resolve_config(
                 Path(config_path),
                 confine_to=confine_to,
                 permit_base=permit_base,
-                client_delivered=client_delivered,
+                refuse_env=refuse_env,
             )
             config = AshConfig.model_validate(document.data, strict=True)
             chain.extend(document.chain)

@@ -429,6 +429,7 @@ def _resolve_project_config(
     workspace_root: Optional[Path] = None,
     client_config_rules: Optional[ClientConfigRules] = None,
     trusted_config: Optional[Path] = None,
+    remote_client: bool = False,
 ) -> Tuple[AshConfig, Optional[Path]]:
     """Load one project's config through ASH's ordinary resolution path.
 
@@ -505,6 +506,7 @@ def _resolve_project_config(
                 trusted_config if trusted_config is not None else default_config
             ),
             client_config_policy=client_config_rules,
+            remote_client=remote_client,
         )
         return config, config_path
     except ASHConfigValidationError as exc:
@@ -851,6 +853,7 @@ def resolve_workspace(
     default_config: Optional[PathLike] = None,
     client_config_rules: Optional[ClientConfigRules] = None,
     trusted_config: Optional[PathLike] = None,
+    remote_client: bool = False,
 ) -> WorkspacePlan:
     """Resolve and validate a workspace, returning an inspectable plan.
 
@@ -889,6 +892,10 @@ def resolve_workspace(
             profile, when the MCP client patched the session's copy of it. None
             takes ``default_config``. Must reach
             ``ProjectScanSettings.trusted_config_path`` too.
+        remote_client: The workspace is resolved for a remote MCP client, so a
+            project config the operator did not set aside resolves no ``!ENV``
+            (``resolve_config``). Must reach ``ProjectScanSettings.remote_client``
+            too.
 
     Returns:
         A :class:`~automated_security_helper.workspace.plan.WorkspacePlan` with
@@ -941,6 +948,7 @@ def resolve_workspace(
             workspace_root=definition.root,
             client_config_rules=client_config_rules,
             trusted_config=Path(trusted_config) if trusted_config else None,
+            remote_client=remote_client,
         )
         scanners, pins = _scanner_state(config)
         label = _project_label(config, candidate.key)

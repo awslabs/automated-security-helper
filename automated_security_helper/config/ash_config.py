@@ -207,7 +207,7 @@ def resolve_env_references(value: str) -> Optional[str]:
 
 
 class EnvReferenceNotResolved(Exception):
-    """``load_yaml_config(..., resolve_env=False)`` met an ``!ENV`` value.
+    """``load_yaml_config(..., env="refuse")`` met an ``!ENV`` value.
 
     ``line`` is 1-based. ``config_sources.read_config_file`` turns this into the
     ``ASHConfigEnvNotResolvedError`` that names the file.
@@ -218,12 +218,15 @@ class EnvReferenceNotResolved(Exception):
         self.line = line
 
 
-def load_yaml_config(stream: Any, resolve_env: bool = True) -> Any:
+def load_yaml_config(
+    stream: Any, env: Literal["resolve", "refuse", "keep"] = "resolve"
+) -> Any:
     """Parse an ASH YAML config, resolving ``!ENV`` references as it goes.
 
-    With ``resolve_env`` False, the first ``!ENV`` value, tagged or matched by
-    the implicit resolver, raises ``EnvReferenceNotResolved`` before anything is
-    read from the environment.
+    With ``env="refuse"``, the first ``!ENV`` value, tagged or matched by the
+    implicit resolver, raises ``EnvReferenceNotResolved`` before anything is read
+    from the environment. With ``env="keep"``, each one is the reference as
+    written, which is what a raw view of the file shows.
     """
 
     # Use a local subclass to avoid mutating the global SafeLoader
@@ -233,8 +236,10 @@ def load_yaml_config(stream: Any, resolve_env: bool = True) -> Any:
     _AshConfigLoader.add_implicit_resolver("!ENV", ENV_REFERENCE_PATTERN, None)
 
     def constructor_env_variables(loader, node):
-        if not resolve_env:
+        if env == "refuse":
             raise EnvReferenceNotResolved(node.start_mark.line + 1)
+        if env == "keep":
+            return loader.construct_scalar(node)
         return resolve_env_references(loader.construct_scalar(node))
 
     _AshConfigLoader.add_constructor("!ENV", constructor_env_variables)
@@ -252,6 +257,36 @@ def _represent_config_str(dumper: yaml.SafeDumper, value: str) -> yaml.ScalarNod
 
 
 _ConfigDumper.add_representer(str, _represent_config_str)
+
+
+class _QuotedStr(str):
+    """A string ``_rewrite_config_with_entry`` writes quoted, as ``_ConfigDumper``
+    would, among existing values it writes as they were."""
+
+    __slots__ = ()
+
+
+class _EntryRewriteDumper(yaml.SafeDumper):
+    pass
+
+
+_EntryRewriteDumper.add_representer(
+    _QuotedStr,
+    lambda dumper, value: dumper.represent_scalar(
+        "tag:yaml.org,2002:str", str(value), style="'"
+    ),
+)
+
+
+def _quote_references(value: Any) -> Any:
+    """``value`` with every string that reads as ``!ENV`` marked to be quoted."""
+    if isinstance(value, dict):
+        return {k: _quote_references(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_quote_references(v) for v in value]
+    if isinstance(value, str) and ENV_REFERENCE_PATTERN.match(value):
+        return _QuotedStr(value)
+    return value
 
 
 # Define BuildConfig class
@@ -1445,21 +1480,26 @@ class AshConfig(BaseModel):
         config_path: Path,
         confine_to: Optional[Path] = None,
         permit_base: Optional[Callable[[Path], bool]] = None,
+        refuse_env: Optional[Callable[[Path], bool]] = None,
     ) -> "AshConfig":
         """Load configuration from a file, following any ``extends`` chain.
 
         ``config_path`` may be YAML, JSON, an ``ashrc.toml``-style TOML file, or a
         ``pyproject.toml`` (whose ``[tool.ash]`` table is read). ``extends`` and
         ``patch`` are resolved by ``config/config_sources.py``, which documents
-        the merge rules and the confinement of base paths to ``confine_to`` and
-        ``permit_base``.
+        the merge rules, the confinement of base paths to ``confine_to`` and
+        ``permit_base``, and which files ``refuse_env`` keeps from resolving
+        ``!ENV``.
         """
         from automated_security_helper.config.config_sources import (
             load_config_document,
         )
 
         config_data = load_config_document(
-            Path(config_path), confine_to=confine_to, permit_base=permit_base
+            Path(config_path),
+            confine_to=confine_to,
+            permit_base=permit_base,
+            refuse_env=refuse_env,
         )
         return cls.model_validate(config_data, strict=True)
 
@@ -1702,16 +1742,23 @@ def _serialize_entry_lines(entry: dict, item_indent: str) -> list[str]:
     """Render one suppression entry as indented YAML lines.
 
     Serialized with ``yaml.safe_dump`` so a reason (or any value) containing
-    ``"``, ``\\``, ``:`` or ``#`` is quoted and escaped correctly.
+    ``"``, ``\\``, ``:`` or ``#`` is quoted and escaped correctly, and a value
+    shaped like an ``!ENV`` reference is quoted so it loads back as written.
     ``safe_dump([entry])`` emits the item at column 0 (``- key: value`` then
     ``  key: value``); each line is prefixed with ``item_indent``.
     """
-    dumped = yaml.safe_dump([entry], default_flow_style=False, sort_keys=False)
+    dumped = yaml.dump(
+        [entry], Dumper=_ConfigDumper, default_flow_style=False, sort_keys=False
+    )
     return [f"{item_indent}{line}\n" for line in dumped.splitlines()]
 
 
 def _rewrite_config_with_entry(config_path: Path, data: dict, entry: dict) -> None:
-    """Full ``safe_dump`` rewrite. Only for files with no comments to preserve."""
+    """Full ``safe_dump`` rewrite. Only for files with no comments to preserve.
+
+    The new entry's values are quoted where they read as ``!ENV``; the file's
+    existing values are written as they were, references included.
+    """
     if not isinstance(data, dict):
         data = {}
     global_settings = data.setdefault("global_settings", {})
@@ -1722,9 +1769,15 @@ def _rewrite_config_with_entry(config_path: Path, data: dict, entry: dict) -> No
     if not isinstance(suppressions_list, list):
         suppressions_list = []
         global_settings["suppressions"] = suppressions_list
-    suppressions_list.append(entry)
+    suppressions_list.append(_quote_references(entry))
     with open(config_path, mode="w", encoding="utf-8") as f:
-        yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+        yaml.dump(
+            data,
+            f,
+            Dumper=_EntryRewriteDumper,
+            default_flow_style=False,
+            sort_keys=False,
+        )
 
 
 def _has_top_level_key(lines: list, key: str) -> bool:

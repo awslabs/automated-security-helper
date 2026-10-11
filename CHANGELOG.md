@@ -95,6 +95,20 @@
 
 ### Behavior changes
 
+- **Under the MCP server, a config file the operator did not set aside resolves no
+  `!ENV` for a remote client.** `!ENV` reads the server's environment. For a remote
+  caller, every file outside `ASH_MCP_ALLOWED_CONFIG_ROOTS` and the session's own
+  `config/` directory is refused with a config error naming the file if it uses
+  `!ENV` (`error_type: config_env_not_resolved`): a file the client delivered or
+  names, one found in a directory it names, a scan target's own `.ash.yaml`, and
+  every base such a file extends. Before, each resolved, and `get_config` returned
+  the value. Over stdio only a file under the MCP workspace root is refused, and a
+  repository config the local user names keeps `!ENV`. To use `!ENV` in a remote
+  scan, move the setting into a registered profile or a file under
+  `ASH_MCP_ALLOWED_CONFIG_ROOTS`. The session config `select_profile` writes, and a
+  suppression `ash inspect` adds, keep a value shaped like `${VAR:default}` as
+  written instead of resolving it when read.
+
 - **A config file an MCP client delivered may not change a field the session's
   runtime-override policy denies.** That covers an upload named as
   `config_path`, a delivered tree's own `.ash.yaml`, a project config in a
@@ -979,13 +993,6 @@
 - `ash mcp --profile NAME=path/to/ash.yaml` works. The server registered profiles
   given with `--profile`, but `ash mcp` did not accept the option and exited 2 with
   `No such option: --profile`, so `list_profiles` always returned an empty list.
-
-- Under the MCP server, a config file an MCP client delivered (a file in a delivered
-  tree, an upload named as `config_path`, or `validate_config`'s `config_content`), or
-  one it names outside the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, no
-  longer resolves `!ENV` from the server's environment; one that uses `!ENV` is refused
-  with a config error naming the file (`error_type: config_env_not_resolved`). The session config `select_profile` writes keeps
-  a value shaped like `${VAR:default}` as written instead of resolving it when read.
 
 - `ash dependencies install --tool ArchiveConverter` works again. Building each plugin
   from its own config section renamed the archive converter's selector to `archive`,

@@ -105,12 +105,13 @@ def _delivered_config_env_error(
     changes after this check.
     """
     from automated_security_helper.cli.mcp.sandbox import (
-        client_named_config_is_untrusted,
+        caller_is_remote,
         config_base_gate,
     )
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
         discover_config_source,
+        env_refused_for,
         resolve_config_document,
     )
     from automated_security_helper.core.exceptions import (
@@ -132,8 +133,7 @@ def _delivered_config_env_error(
             path,
             confine_to=confine_to,
             permit_base=config_base_gate(session_id),
-            client_delivered=config_path is not None
-            and client_named_config_is_untrusted(config_path),
+            refuse_env=env_refused_for(caller_is_remote(session_id)),
         )
     except ASHConfigEnvNotResolvedError as exc:
         return exc
@@ -191,6 +191,7 @@ def _client_config_denial(
     only reports early.
     """
     from automated_security_helper.cli.mcp.sandbox import (
+        caller_is_remote,
         client_named_config_is_untrusted,
         config_base_gate,
     )
@@ -201,6 +202,7 @@ def _client_config_denial(
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
         discover_config_source,
+        env_refused_for,
         resolve_config_document,
     )
     from automated_security_helper.core.exceptions import (
@@ -228,7 +230,7 @@ def _client_config_denial(
             path,
             confine_to=confine,
             permit_base=permit_base,
-            client_delivered=named_by_client,
+            refuse_env=env_refused_for(caller_is_remote(session_id)),
         ).documents
     except Exception as exc:  # noqa: BLE001 -- reported by the scan's own read
         _logger.debug(f"Config chain not read before the scan: {exc}")
@@ -502,6 +504,7 @@ async def _run_scan_async(
         resolve_session_trusted_config_path,
     )
     from automated_security_helper.cli.mcp.sandbox import (
+        caller_is_remote,
         config_base_gate,
         client_named_config_is_untrusted,
     )
@@ -532,6 +535,10 @@ async def _run_scan_async(
     trusted_config_path = (
         resolve_session_trusted_config_path(session_id) if untrusted_config else None
     )
+    # For a remote caller, every config file the operator did not set aside
+    # resolves no !ENV, the target's own .ash.yaml included; see "Environment
+    # variables" in config/config_sources.py.
+    remote_client = caller_is_remote(session_id)
     # Every file of the chain a client delivered, the named upload or the
     # target's own .ash.yaml, is checked against this session's policy.
     try:
@@ -587,6 +594,7 @@ async def _run_scan_async(
                     untrusted_config=untrusted_config,
                     trusted_config_path=trusted_config_path,
                     client_config_policy=client_config_policy,
+                    remote_client=remote_client,
                 )
         else:
             return run_ash_scan(
@@ -601,6 +609,7 @@ async def _run_scan_async(
                 untrusted_config=untrusted_config,
                 trusted_config_path=trusted_config_path,
                 client_config_policy=client_config_policy,
+                remote_client=remote_client,
             )
 
     try:
@@ -1366,7 +1375,6 @@ def mcp_get_config(
         ``config_input_not_permitted``, and a file the client delivered that
         uses ``!ENV`` the same with ``config_env_not_resolved``.
     """
-    import yaml as _yaml
     from automated_security_helper.cli.mcp.profile_registry import (
         DEFAULT_SESSION_ID,
         resolve_session_trusted_config_path,
@@ -1386,8 +1394,10 @@ def mcp_get_config(
         resolve_config,
         find_config_file,
     )
+    from automated_security_helper.config.ash_config import load_yaml_config
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
+        env_refused_for,
         read_config_file,
     )
     from automated_security_helper.config.default_config import get_default_config
@@ -1429,24 +1439,24 @@ def mcp_get_config(
     if path is None:
         return get_default_config().model_dump()
 
+    # Which files resolve no !ENV for this caller: for a remote one, every file
+    # the operator did not set aside, named or discovered; see "Environment
+    # variables" in config/config_sources.py.
+    remote_client = caller_is_remote(session_id)
+    refuse_env = env_refused_for(remote_client)
+
     if raw:
         # pyproject.toml yields its [tool.ash] table, as when it is loaded. A
-        # file the client delivered is read by the loader too, which returns
+        # file that may not use !ENV is read by the loader too, which returns
         # what safe_load would unless the file uses !ENV, and refuses it then
-        # as a scan of it would.
-        named_by_client = config_path is not None and client_named_config_is_untrusted(
-            path
-        )
-        if (
-            path.name.endswith(".toml")
-            or named_by_client
-            or config_is_client_supplied(path)
-        ):
+        # as a scan of it would. Any other file shows a reference as written.
+        if path.name.endswith(".toml") or refuse_env(path):
             try:
-                return read_config_file(path, client_delivered=named_by_client) or {}
+                return read_config_file(path, refuse_env=refuse_env) or {}
             except ASHConfigEnvNotResolvedError as exc:
                 return _config_env_refusal(exc, "get_config")
-        return _yaml.safe_load(path.read_text()) or {}
+        with open(path, encoding="utf-8") as f:
+            return load_yaml_config(f, env="keep") or {}
 
     # resolve_config short-circuits to default when source_dir is None, so
     # supply one to force it to read the specified file. It is also where
@@ -1490,6 +1500,7 @@ def mcp_get_config(
                 else None
             ),
             client_config_policy=_session_client_rules(session_id),
+            remote_client=remote_client,
         )
     except ASHConfigInputNotPermittedError as exc:
         return _config_refusal(config_chain_refusal(path, exc), "get_config")
@@ -1522,13 +1533,18 @@ def mcp_validate_config(
     import tempfile
 
     from automated_security_helper.cli.mcp.sandbox import (
-        client_named_config_is_untrusted,
+        caller_is_remote,
         config_base_gate,
         validate_config_input,
+    )
+    from automated_security_helper.config.config_sources import (
+        env_refused_for,
+        refuse_env_everywhere,
     )
     from automated_security_helper.config.config_validator import ConfigValidator
 
     permit_base = config_base_gate(session_id)
+    remote_client = caller_is_remote(session_id)
 
     def _classify(raw: str) -> Dict[str, Any]:
         # First: a refused base's message names its file, and a file name such as
@@ -1567,13 +1583,16 @@ def mcp_validate_config(
         # A private, otherwise empty directory rather than the shared temp dir:
         # the file's directory is where an `extends` in the content may look
         # for bases, and nothing a client did not send should be found there.
-        # The client sent the content, so it is held to the rules for a
-        # delivered config wherever the file is written.
+        # Content a remote client sent may not use !ENV, wherever the file is
+        # written. On stdio the caller launched this server, and the same text
+        # as a local file of its own would resolve.
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir) / "config.yaml"
             tmp_path.write_text(config_content, encoding="utf-8")
             valid, raw_errors = ConfigValidator.validate_config_file(
-                tmp_path, permit_base=permit_base, client_delivered=True
+                tmp_path,
+                permit_base=permit_base,
+                refuse_env=refuse_env_everywhere if remote_client else None,
             )
     elif config_path is not None:
         # Before the existence check, so a refused path is reported as refused
@@ -1605,7 +1624,7 @@ def mcp_validate_config(
         valid, raw_errors = ConfigValidator.validate_config_file(
             path,
             permit_base=permit_base,
-            client_delivered=client_named_config_is_untrusted(path),
+            refuse_env=env_refused_for(remote_client),
         )
     else:
         return {
@@ -1652,6 +1671,7 @@ def _validated_document_denials(
     )
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
+        env_refused_for,
         resolve_config_document,
     )
 
@@ -1683,10 +1703,13 @@ def _validated_document_denials(
             ]
         elif config_path is not None:
             path = Path(config_path)
+            # Read as the validator reads it, so an `extends` whose value !ENV
+            # would choose is refused rather than followed.
             documents = resolve_config_document(
                 path,
                 confine_to=default_confinement_root(path),
                 permit_base=config_base_gate(session_id),
+                refuse_env=env_refused_for(caller_is_remote(session_id)),
             ).documents
             # A named path the client chose counts as delivered, every file of
             # its chain with it, as resolve_config(untrusted_config=True) does.

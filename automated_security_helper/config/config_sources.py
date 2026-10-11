@@ -103,25 +103,38 @@ constructor calls), and JSON with no interpolation, as before. The
 ``ASH_CONFIG_ENV_VAR_PREFIX`` / ``ASH_CONFIG_ENV_VAR_ALLOWLIST`` bound therefore
 holds for every value in the merged result, whichever file it came from.
 
-A file an MCP client delivered resolves no environment variable at all, and one
-that uses ``!ENV`` (tagged, a plain ``${VAR:default}`` scalar, or a TOML string
-starting with one) is refused with ``ASHConfigEnvNotResolvedError`` naming the
-file and the line or key. Delivered means ``cli/mcp/sandbox
-.config_is_client_supplied``: a delivered tree, an upload or its staging, in any
-session, judged on the path as named and on the file it resolves to. A caller
-that holds client content written somewhere else (``validate_config``'s
-``config_content``) says so with ``client_delivered``. Each file in a chain is
-judged on its own location, so an operator's file keeps its ``!ENV`` whoever
-extends it.
+Some files resolve no environment variable at all, and one of them that uses
+``!ENV`` (tagged, a plain ``${VAR:default}`` scalar, or a TOML string starting
+with one) is refused with ``ASHConfigEnvNotResolvedError`` naming the file and
+the line or key. Which files is a ``RefuseEnv`` predicate the caller passes to
+``read_config_file`` and ``resolve_config_document``; ``env_refused_for`` gives
+the MCP server's two:
+
+* For a remote caller (``cli/mcp/sandbox.caller_is_remote``), every file the
+  operator did not set aside: anything outside ``ASH_MCP_ALLOWED_CONFIG_ROOTS``
+  and the sessions' ``config/`` directories
+  (``cli/mcp/sandbox.client_named_config_is_untrusted``). That covers a path the
+  client names, a file discovered in a directory it names, and a scan target's
+  own config, as well as anything it delivered.
+* For any other caller, the CLI included, and the default when none is passed:
+  a file an MCP client delivered (``cli/mcp/sandbox.config_is_client_supplied``),
+  that is anything under the MCP workspace root outside the sessions'
+  ``config/`` directories, judged on the path as named and on the file it
+  resolves to. A local stdio caller launched the server and holds its
+  environment already, so its own repository config keeps ``!ENV``.
+
+``validate_config``'s ``config_content`` from a remote caller is refused
+wherever it is written (``refuse_env_everywhere``). Each base is judged by the
+same predicate, and every base of a refused file is refused with it: the file
+that names a base is what chose it.
 
 The bound above cannot cover this case. There the variables are the operator's
-own, set wherever ASH runs; here they are the MCP server's, and the client that
-wrote the file reads the result back (``get_config`` returns the resolved
-config). Refused rather than left as written, because a value that silently
-stays a literal is a config that is not what either side meant, and the other
-refusals for delivered configs work the same way. Operator and repository
-configs, including one inside a tree the operator scans with the CLI, keep
-``!ENV`` exactly as before.
+own, set wherever ASH runs; here they are the MCP server's, and a remote client
+reads the result back (``get_config`` returns the resolved config, and a scan's
+results carry it). Refused rather than left as written, because a value that
+silently stays a literal is a config that is not what either side meant, and
+the other refusals for delivered configs work the same way. A config the CLI
+reads keeps ``!ENV`` exactly as before.
 
 Failure
 -------
@@ -193,6 +206,10 @@ PATCH_KEY = "patch"
 #: Decides whether one resolved base path may be read. True permits it. See
 #: "Base paths" in the module docstring.
 PermitBase = Callable[[Path], bool]
+
+#: Decides whether one config file may not resolve ``!ENV``. True refuses it. See
+#: "Environment variables" in the module docstring.
+RefuseEnv = Callable[[Path], bool]
 
 SOURCE_KIND_EXPLICIT = "explicit"
 SOURCE_KIND_DEDICATED = "dedicated"
@@ -447,13 +464,43 @@ def _toml_env_reference(value: Any, key: str = "") -> Optional[str]:
 def config_is_client_delivered(path: Path) -> bool:
     """Whether an MCP client delivered `path`; see "Environment variables".
 
-    ``cli.mcp.sandbox.config_is_client_supplied``, imported when called.
+    ``cli.mcp.sandbox.config_is_client_supplied``, imported when called. The
+    ``RefuseEnv`` every caller gets unless it passes another.
     """
     # Imported here, as config/path_trust.py does: importing cli.mcp runs its
     # __init__, which imports profile_registry and through it ash_config.
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
 
     return config_is_client_supplied(path)
+
+
+def env_refused_for(remote_client: bool) -> RefuseEnv:
+    """The files that resolve no ``!ENV`` for a caller; see "Environment variables".
+
+    ``remote_client`` is ``cli.mcp.sandbox.caller_is_remote`` for the MCP call
+    the config is read for, and False for everything else.
+    """
+    if not remote_client:
+        return config_is_client_delivered
+    from automated_security_helper.cli.mcp.sandbox import (
+        client_named_config_is_untrusted,
+    )
+
+    return client_named_config_is_untrusted
+
+
+def refuse_env_everywhere(path: Path) -> bool:
+    """A ``RefuseEnv`` that refuses every file: content a remote client sent."""
+    return True
+
+
+def _refuse_env_nowhere(path: Path) -> bool:
+    return False
+
+
+def _env_rule(refused: bool) -> RefuseEnv:
+    """The ``RefuseEnv`` for one file of a chain, once its refusal is decided."""
+    return refuse_env_everywhere if refused else _refuse_env_nowhere
 
 
 def _env_not_resolved(path: Path, where: str) -> ASHConfigEnvNotResolvedError:
@@ -465,20 +512,20 @@ def _env_not_resolved(path: Path, where: str) -> ASHConfigEnvNotResolvedError:
     )
 
 
-def read_config_file(path: Path, client_delivered: bool = False) -> Any:
+def read_config_file(path: Path, refuse_env: Optional[RefuseEnv] = None) -> Any:
     """Parse one config file, without resolving its `extends`.
 
     A ``pyproject.toml`` yields its ``[tool.ash]`` table; any other ``.toml``
     file is a config at its top level. YAML and JSON are read exactly as
     ``AshConfig.from_file`` always read them, except that a YAML or TOML file
-    an MCP client delivered (by location, or ``client_delivered``) is refused if
-    it uses ``!ENV``; see "Environment variables". JSON has no ``!ENV``.
+    ``refuse_env`` refuses (by default, one an MCP client delivered) is refused
+    if it uses ``!ENV``; see "Environment variables". JSON has no ``!ENV``.
     """
     path = Path(path)
     if path.name.endswith(".json"):
         with open(path, mode="r", encoding="utf-8") as f:
             return json.load(f)
-    delivered = client_delivered or config_is_client_delivered(path)
+    delivered = (refuse_env or config_is_client_delivered)(path)
     if path.name.endswith(".toml"):
         try:
             text = _read_toml_text(path)
@@ -515,7 +562,7 @@ def read_config_file(path: Path, client_delivered: bool = False) -> Any:
         return _resolve_toml_env(document)
     with open(path, mode="r", encoding="utf-8") as f:
         try:
-            return load_yaml_config(f, resolve_env=not delivered)
+            return load_yaml_config(f, env="refuse" if delivered else "resolve")
         except EnvReferenceNotResolved as exc:
             raise _env_not_resolved(path, f"line {exc.line}") from exc
 
@@ -563,7 +610,7 @@ class ResolvedConfigDocument:
 class _ChainState:
     root: Path
     permit_base: Optional[PermitBase] = None
-    root_client_delivered: bool = False
+    refuse_env: RefuseEnv = config_is_client_delivered
     files_read: int = 0
     order: List[Path] = field(default_factory=list)
     documents: Dict[Path, Any] = field(default_factory=dict)
@@ -743,6 +790,7 @@ def _resolve(
     stack: Tuple[Path, ...],
     state: _ChainState,
     ref: Optional[str] = None,
+    env_refused_above: bool = False,
 ) -> Any:
     real = path.resolve()
     if real in stack:
@@ -764,9 +812,10 @@ def _resolve(
 
     if not stack:
         # The root config: parse errors behave exactly as they always have.
-        # Read as named rather than as `real`, so a refusal names the path the
-        # caller gave and not the target of a symlink.
-        data = read_config_file(path, client_delivered=state.root_client_delivered)
+        # Read and judged as named rather than as `real`, so a refusal names the
+        # path the caller gave and not the target of a symlink.
+        env_refused = state.refuse_env(path)
+        data = read_config_file(path, refuse_env=_env_rule(env_refused))
     else:
         extending = stack[-1]
         if not real.is_file():
@@ -774,8 +823,9 @@ def _resolve(
                 f"'{EXTENDS_KEY}: {ref}' in {describe_config_path(extending)} names "
                 f"{real.as_posix()}, which does not exist or is not a file"
             )
+        env_refused = env_refused_above or state.refuse_env(real)
         try:
-            data = read_config_file(real)
+            data = read_config_file(real, refuse_env=_env_rule(env_refused))
         except ASHConfigSourceError:
             raise
         except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as exc:
@@ -808,7 +858,8 @@ def _resolve(
                 base_ref, real, state.root, state.permit_base
             )
             merged = deep_merge(
-                merged, _resolve(base_path, stack + (real,), state, base_ref)
+                merged,
+                _resolve(base_path, stack + (real,), state, base_ref, env_refused),
             )
         merged = deep_merge(merged, own)
         if ops is not None:
@@ -832,16 +883,15 @@ def resolve_config_document(
     config_path: Path,
     confine_to: Optional[Path] = None,
     permit_base: Optional[PermitBase] = None,
-    client_delivered: bool = False,
+    refuse_env: Optional[RefuseEnv] = None,
 ) -> ResolvedConfigDocument:
     """Read `config_path` and every base it extends into one merged document.
 
     `permit_base` is checked for every base, in addition to `confine_to`; see
     "Base paths" in the module docstring. It is not checked for `config_path`
     itself, which the caller chose and is responsible for having checked.
-    `client_delivered` marks `config_path` as content an MCP client sent,
-    wherever it was written; each base is still judged on its own location (see
-    "Environment variables").
+    `refuse_env` decides which files of the chain resolve no ``!ENV``; None
+    refuses the files an MCP client delivered. See "Environment variables".
     """
     config_path = Path(config_path)
     root = (
@@ -850,7 +900,9 @@ def resolve_config_document(
         else default_confinement_root(config_path)
     )
     state = _ChainState(
-        root=root, permit_base=permit_base, root_client_delivered=client_delivered
+        root=root,
+        permit_base=permit_base,
+        refuse_env=refuse_env or config_is_client_delivered,
     )
     data = _resolve(config_path, (), state)
     return ResolvedConfigDocument(
@@ -862,7 +914,11 @@ def load_config_document(
     config_path: Path,
     confine_to: Optional[Path] = None,
     permit_base: Optional[PermitBase] = None,
+    refuse_env: Optional[RefuseEnv] = None,
 ) -> Any:
     return resolve_config_document(
-        config_path, confine_to=confine_to, permit_base=permit_base
+        config_path,
+        confine_to=confine_to,
+        permit_base=permit_base,
+        refuse_env=refuse_env,
     ).data

@@ -143,6 +143,11 @@ class ScanOptions(BaseModel):
     # grants come from instead. Both go to resolve_config, in local mode only.
     untrusted_config: bool = False
     trusted_config_path: Optional[str] = None
+    # The scan was started by a remote MCP client (cli/mcp/sandbox.caller_is_remote),
+    # so every config file the operator did not set aside resolves no !ENV; see
+    # "Environment variables" in config/config_sources.py. Applied by every config
+    # read below, and carried to each project in workspace mode.
+    remote_client: bool = False
     # The session's ClientConfigRules, which a config file an MCP client
     # delivered is checked against. Goes to
     # resolve_config, in local mode only. Typed Any to keep config imports out of
@@ -1246,10 +1251,12 @@ def _load_with_confinement(
     config_path_str: str,
     source_dir: Path,
     permit_base: Optional[Callable[[Path], bool]] = None,
+    remote_client: bool = False,
 ):
     """Load a config file with its `extends` bases confined as a scan would."""
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
+        env_refused_for,
     )
 
     config_path = Path(config_path_str)
@@ -1257,6 +1264,7 @@ def _load_with_confinement(
         config_path,
         confine_to=default_confinement_root(config_path, source_dir),
         permit_base=permit_base,
+        refuse_env=env_refused_for(remote_client),
     )
 
 
@@ -1286,7 +1294,11 @@ def _load_config_file(opts: ScanOptions):
 
     try:
         return _load_with_confinement(
-            AshConfig, config_path_str, opts.source_dir, opts.config_base_gate
+            AshConfig,
+            config_path_str,
+            opts.source_dir,
+            opts.config_base_gate,
+            opts.remote_client,
         )
     except Exception:
         return None
@@ -1438,6 +1450,7 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
             source_dir=opts.source_dir,
             config_overrides=list(opts.config_overrides or []),
             permit_base=opts.config_base_gate,
+            remote_client=opts.remote_client,
         )
         if SandboxMode(config.sandbox.mode) == SandboxMode.off:
             return
@@ -1997,6 +2010,7 @@ def _run_local_mode(
             config_overrides=opts.config_overrides or [],
             config_base_gate=opts.config_base_gate,
             untrusted_config=opts.untrusted_config,
+            remote_client=opts.remote_client,
             trusted_config_path=opts.trusted_config_path,
             client_config_policy=opts.client_config_policy,
             verbose=opts.verbose or opts.debug,
@@ -2159,7 +2173,11 @@ def _resolve_workspace_execution_config(opts: ScanOptions):
 
     try:
         return _load_with_confinement(
-            AshConfig, config_path_str, opts.source_dir, opts.config_base_gate
+            AshConfig,
+            config_path_str,
+            opts.source_dir,
+            opts.config_base_gate,
+            opts.remote_client,
         ).workspace
     except Exception as exc:  # noqa: BLE001 -- scheduling knobs, not policy
         logging.getLogger(__name__).warning(
@@ -2297,6 +2315,8 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         # The rules a project config an MCP client delivered is checked against.
         # The same value the plan was resolved with, for the reason above.
         client_config_rules=opts.client_config_policy,
+        # Which project configs resolve no !ENV. Also the plan's, for that reason.
+        remote_client=opts.remote_client,
     )
 
 
@@ -3017,6 +3037,7 @@ def run_ash_scan(
     untrusted_config: bool = False,
     trusted_config_path: Optional[str] = None,
     client_config_policy: "Optional[ClientConfigRules]" = None,
+    remote_client: bool = False,
     *args,
     **kwargs,
 ):
@@ -3089,6 +3110,7 @@ def run_ash_scan(
         untrusted_config=untrusted_config,
         trusted_config_path=trusted_config_path,
         client_config_policy=client_config_policy,
+        remote_client=remote_client,
     )
 
     # Only the local orchestrator resolves with these. Container and nix mode run
@@ -3097,8 +3119,10 @@ def run_ash_scan(
     # be dropped without a word.
     for name, value, workspace_ok in (
         ("untrusted_config", opts.untrusted_config, False),
-        # Workspace mode carries it to every project through the settings builder.
+        # Workspace mode carries these to every project through the settings
+        # builder.
         ("client_config_policy", opts.client_config_policy, True),
+        ("remote_client", opts.remote_client, True),
     ):
         if value and (
             opts.mode in (RunMode.container, RunMode.nix)
