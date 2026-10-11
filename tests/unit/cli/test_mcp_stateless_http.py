@@ -182,10 +182,9 @@ class TestHostBinding:
     ) -> None:
         """No allowlist and no opt-out: the build refuses, or the app checks Host.
 
-        Building for 0.0.0.0 used to switch the SDK's Host and Origin checks off
-        entirely, so any Host was served. A deployment behind a proxy names its
-        hostname with ``allowed_hosts`` (tested below); one whose Host checking
-        happens in front of ASH says so with the explicit opt-out.
+        A deployment behind a proxy names its hostname with ``allowed_hosts``
+        (tested below); one whose Host checking happens in front of ASH says so
+        with the explicit opt-out.
         """
         try:
             app = build_streamable_http_app(

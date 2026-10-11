@@ -3,15 +3,11 @@
 
 """stdio's local trust goes only to a caller ASH knows is the local client.
 
-An MCP SDK Context with no HTTP request behind it resolved to ``__default__``,
-stdio's session with local trust, on the absence of a request alone. mcp 2.2.0
-attaches the request on every HTTP path, so no network caller reaches that
-branch today; an SDK release that dropped it on one path would hand network
-callers local trust without any test failing. The local client is now
-identified positively: ``run_mcp_server`` (stdio) serves inside
-``serving_local_client()``, and so does an in-process client its embedder
-drives. Any other caller without a request is ``__unidentified__``: remote,
-with no sandbox. A real stdio server keeping local trust is covered by
+``run_mcp_server`` (stdio) serves inside ``serving_local_client()``, and so does
+an in-process client its embedder drives. Inside it, an MCP SDK Context with no
+HTTP request behind it is ``__default__``, stdio's session with local trust.
+Anywhere else such a Context is ``__unidentified__``: remote, with no sandbox.
+A real stdio server keeping local trust is covered by
 ``test_stdio_servers_share_the_default_workspace.py``, which delivers a tree
 through ``ash mcp`` and finds it in ``__default__``.
 """

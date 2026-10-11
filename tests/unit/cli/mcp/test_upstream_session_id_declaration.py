@@ -230,8 +230,8 @@ def test_a_stateful_server_ignores_a_header_it_did_not_issue_on_the_newer_protoc
     The header on such a request names no session this server issued, so it
     must not open that session's sandbox.
     """
-    victim = workspace / "victim-session" / "source" / ".ash" / "ash_output"
-    (victim / "reports").mkdir(parents=True)
+    other_output = workspace / "other-session" / "source" / ".ash" / "ash_output"
+    (other_output / "reports").mkdir(parents=True)
     app = build_streamable_http_app(
         mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
     )
@@ -241,7 +241,7 @@ def test_a_stateful_server_ignores_a_header_it_did_not_issue_on_the_newer_protoc
         "method": "tools/call",
         "params": {
             "name": "get_scan_result_paths",
-            "arguments": {"output_dir": str(victim)},
+            "arguments": {"output_dir": str(other_output)},
             "_meta": {
                 "io.modelcontextprotocol/protocolVersion": "2026-07-28",
                 "io.modelcontextprotocol/clientCapabilities": {},
@@ -255,7 +255,7 @@ def test_a_stateful_server_ignores_a_header_it_did_not_issue_on_the_newer_protoc
             headers={
                 **STREAMABLE_HEADERS,
                 "Mcp-Protocol-Version": "2026-07-28",
-                "Mcp-Session-Id": "victim-session",
+                "Mcp-Session-Id": "other-session",
                 "Mcp-Method": "tools/call",
                 "Mcp-Name": "get_scan_result_paths",
             },

@@ -3,10 +3,9 @@
 
 """``set_source_git`` clones without the server's credentials or configuration.
 
-An MCP client names the URL; the server runs git. Whatever git can reach with
-the server account's ssh agent, askpass helper, credential helpers, proxy
-settings or token variables, a client could otherwise reach through this tool.
-The required behavior:
+An MCP client names the URL; the server runs git, without the server account's
+ssh agent, askpass helper, credential helpers, proxy settings or token
+variables. The required behavior:
 
 * git runs with a scrubbed environment: no ``SSH_AUTH_SOCK``, no askpass, no
   credential helper from any config scope, ``GIT_TERMINAL_PROMPT=0``, no system
@@ -57,7 +56,7 @@ REMOTE_URLS = [
     "ssh://git@git.example.invalid/team/repo.git",
     "git@git.example.invalid:team/repo.git",
     "git://git.example.invalid/team/repo.git",
-    "http://169.254.169.254/latest/meta-data/",
+    "http://git.example.invalid/team/repo.git",
 ]
 
 #: Values planted in the server's own environment and git configuration. None
@@ -396,7 +395,7 @@ class TestSetSourceGitTool:
         ids=["option", "ext"],
     )
     def test_a_command_executing_url_is_refused(self, http, git, url) -> None:
-        """Control: refused before and after the change, so the tool path is reached."""
+        """Control: refused, so the tool path is reached."""
         _session, headers = http.open_session()
 
         result = http.call_tool("set_source_git", {"url": url}, headers)

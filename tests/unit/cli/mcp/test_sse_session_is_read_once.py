@@ -4,12 +4,9 @@
 """An sse message names one session, read the way the SDK reads it.
 
 A message POST carries its session in the ``session_id`` query parameter of the
-endpoint URL. When the parameter appears twice, the SDK routes the message (and
-so its result) by the last value, while ASH used to identify the caller by the
-first. A client holding another session's id could then post
-``?session_id=<other>&session_id=<own>``: the call acted as the other session
-and its result came back on the client's own stream. A query that names the
-session more than once now gives the call no session identity.
+endpoint URL. The SDK routes a message whose query repeats the parameter by the
+last value. ASH gives such a call no session identity, so the session a call acts
+for is always the session whose stream receives its result.
 """
 
 from __future__ import annotations

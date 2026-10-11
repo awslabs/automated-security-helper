@@ -8,14 +8,11 @@ Why this exists
 ---------------
 The scan-target and config-input boundaries give two tiers of trust: stdio's
 single client is the process that launched the server and keeps the local tier;
-every other caller is remote. That decision used to be read from the
-``Mcp-Session-Id`` header, a value the client writes. On the sse transport and on
-stateless streamable-HTTP nothing checks it, so a client that sent no header got
-stdio's local trust, and a client that sent another session's id read and
-removed that session's sandbox.
-
-The transport the request arrived on is the one fact a client cannot choose, so
-this module decides from it. :class:`SessionBoundary` is an ASGI middleware ASH
+every other caller is remote. The ``Mcp-Session-Id`` header is a value the client
+writes, and on the sse transport and on stateless streamable-HTTP nothing checks
+it, so it never decides a request's session on its own. The transport the
+request arrived on is the one fact a client cannot choose, so this module
+decides from it. :class:`SessionBoundary` is an ASGI middleware ASH
 puts in front of every HTTP app it builds. It stamps each request's ASGI scope
 with an :class:`HttpCaller` naming the transport and the session the *server*
 issued:
@@ -37,9 +34,9 @@ see ``session_identity.resolve_caller_session_id``.
 Why per app and not process-wide
 --------------------------------
 State lives on the middleware instance, so it belongs to the app that served the
-request. ``cli/mcp/sandbox.py`` records why process-wide transport state was
-removed: it outlived the server and changed the answer for every later call in
-the process.
+request and ends with it. Process-wide transport state would outlive the server
+and change the answer for every later call in the process; see
+``cli/mcp/sandbox.py``.
 
 Failure modes and limits
 ------------------------

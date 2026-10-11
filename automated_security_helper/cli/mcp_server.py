@@ -1545,8 +1545,7 @@ async def set_source_git(
         url: Remote URL to clone: https://, ssh:// or user@host:path. Refused if
              it begins with '-' or uses the ext:: transport, both of which make
              git run a command, and unless its host is on the operator's list.
-             An ssh:// url with %, ?, #, [ or ] before the path is refused too:
-             git reads its host differently from the one checked.
+             An ssh:// url with %, ?, #, [ or ] before the path is refused too.
         ref: Optional branch, tag, or commit. Defaults to the remote's default branch.
         ssh_key_id: Must be omitted. The server registers no ssh keys, so any id
                     is refused. Raw private keys are never accepted over the wire.

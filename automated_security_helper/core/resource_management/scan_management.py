@@ -31,8 +31,8 @@ _logger = ASH_LOGGER
 def _scoped(session_id: Optional[str]) -> Dict[str, str]:
     """The registry keyword that scopes a lookup to ``session_id``, if one is given.
 
-    An unscoped call passes nothing, so it reaches the registry exactly as it did
-    before sessions were recorded.
+    An unscoped call passes nothing, so it reaches the registry's unscoped
+    lookup.
     """
     return {} if session_id is None else {"session_id": session_id}
 

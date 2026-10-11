@@ -4,17 +4,16 @@
 """A session's delivered tree does not change under a scan of that session.
 
 A scan of a session holds the session's scan lock while it reads
-``<workspace root>/<session id>/source``. ``clear_source`` removed that tree
-without taking the lock, so a client could empty the directory a running scan
-was reading, which can make the scan report clean for code it never examined;
-re-delivering with ``set_source_git`` or ``set_source_zip_finalize`` replaced it
-the same way. Each is now refused while the lock is held, with
-``error_type: source_delivery_busy``, and works again once the scan is done.
+``<workspace root>/<session id>/source``. ``clear_source``, ``set_source_git``
+and ``set_source_zip_finalize`` remove or replace that tree, so each is refused
+while the lock is held, with ``error_type: source_delivery_busy``, and works
+again once the scan is done: a scan whose tree changes under it can report clean
+for code it never examined.
 
-The scan takes that lock on a worker thread, after ``run_ash_scan`` has already
-returned the scan id. A change, or the session ending, in that window went
-through, so the session claims its scan before the id is returned; and a scan
-is refused while a change to the tree is in progress.
+The scan takes that lock on a worker thread, after ``run_ash_scan`` has returned
+the scan id, so the session claims its scan before the id is returned. From then
+on a change to the tree is refused and the session's removal waits for the scan;
+and a scan is refused while a change to the tree is in progress.
 """
 
 from __future__ import annotations

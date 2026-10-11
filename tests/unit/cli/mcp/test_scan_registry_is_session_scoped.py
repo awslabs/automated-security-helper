@@ -9,8 +9,8 @@ one process, so each of those tools has to answer for the caller's own scans
 only: another session's scan id must behave exactly like an id that was never
 issued, and nothing in a response may carry another session's id or sandbox
 path. A sandbox path names its session (``<workspace root>/<session id>/...``),
-and a session id is what selects a sandbox on every later call, so a response
-that leaks either one hands the reader that session's results.
+and a session id selects a sandbox on every later call, so neither appears in
+a response to another session.
 
 How the tests reach the code
 ----------------------------
@@ -235,7 +235,7 @@ class TestAnotherSessionsScanIsInvisible:
 
 
 # ---------------------------------------------------------------------------
-# The owner keeps its scans (controls: these pass before and after the change)
+# The owner keeps its scans (controls)
 # ---------------------------------------------------------------------------
 
 

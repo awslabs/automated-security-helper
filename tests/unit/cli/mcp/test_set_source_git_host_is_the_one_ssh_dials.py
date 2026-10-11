@@ -4,17 +4,12 @@
 """The host ``ASH_MCP_GIT_ALLOWED_HOSTS`` is checked against is the host ssh dials.
 
 ``test_set_source_git_host_allowlist.py`` compares ``remote_clone_host`` with an
-expected string, which only shows the parser agrees with its own author. git
-percent-decodes an ``ssh://`` url before it splits off the host, and an ``ssh://``
-url has no query or fragment for git, so ``ssh://evil.example%2f@allowed.example``,
-``ssh://allowed.example#@evil.example`` and ``ssh://allowed.example?@evil.example``
-passed an allowlist naming ``allowed.example`` while ssh connected to
-``evil.example``.
-
-These run the real tool and the real git, with ssh replaced by a recorder, and
-ask the real ``ssh -G`` which host the argument git passed resolves to. Every url
-the tool accepts must make ssh dial exactly the host the allowlist was checked
-against; every url it refuses must never reach ssh.
+expected string. These run the real tool and the real git, with ssh replaced by
+a recorder, and ask the real ``ssh -G`` which host the argument git passed
+resolves to. Every url the tool accepts must make ssh dial exactly the host the
+allowlist was checked against, and every url it refuses must never reach ssh.
+An ``ssh://`` url with ``%``, ``?``, ``#``, ``[`` or ``]`` before the path is
+refused.
 """
 
 from __future__ import annotations
@@ -51,21 +46,21 @@ URLS = [
     "ssh://git@allowed.example/team/repo.git",
     "ssh://git@allowed.example:2222/team/repo.git",
     "ssh://Allowed.Example./team/repo.git",
-    "ssh://evil.example%2f@allowed.example/repo",
-    "ssh://evil.example%2F@allowed.example/repo",
-    "ssh://allowed.example#@evil.example/repo",
-    "ssh://allowed.example?@evil.example/repo",
-    "ssh://evil.example:2222%2f@allowed.example/repo",
-    "ssh://allowed.example%23@evil.example/repo",
-    "ssh://user@evil.example@allowed.example/repo",
-    "ssh://allowed.example:22@evil.example/repo",
+    "ssh://other.example%2f@allowed.example/repo",
+    "ssh://other.example%2F@allowed.example/repo",
+    "ssh://allowed.example#@other.example/repo",
+    "ssh://allowed.example?@other.example/repo",
+    "ssh://other.example:2222%2f@allowed.example/repo",
+    "ssh://allowed.example%23@other.example/repo",
+    "ssh://user@other.example@allowed.example/repo",
+    "ssh://allowed.example:22@other.example/repo",
     "ssh://[allowed.example]/repo",
     "git@allowed.example:team/repo.git",
     "allowed.example:team/repo.git",
-    "evil.example%2f@allowed.example:repo",
-    "allowed.example#@evil.example:repo",
-    "allowed.example?@evil.example:repo",
-    "user@evil.example@allowed.example:repo",
+    "other.example%2f@allowed.example:repo",
+    "allowed.example#@other.example:repo",
+    "allowed.example?@other.example:repo",
+    "user@other.example@allowed.example:repo",
 ]
 
 
@@ -117,7 +112,7 @@ def test_ssh_dials_the_host_the_allowlist_was_checked_against(
     # Allow exactly the host ASH reads, so a refusal can only come from the url.
     monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", checked or "allowed.example")
 
-    result = mcp_set_source_git(url=url, session_id="b1")
+    result = mcp_set_source_git(url=url, session_id="clone-session")
 
     calls = _recorded(ssh_calls)
     if checked is None:
@@ -138,7 +133,7 @@ def test_a_url_python_cannot_split_is_refused_rather_than_raised(
 ) -> None:
     monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", "allowed.example")
 
-    result = mcp_set_source_git(url=url, session_id="b1")
+    result = mcp_set_source_git(url=url, session_id="clone-session")
 
     assert result.get("success") is False, result
     assert _recorded(ssh_calls) == []

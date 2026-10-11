@@ -425,9 +425,8 @@ class StdioServerPresence:
     """Marks this process as a live stdio server sharing the default workspace.
 
     Every stdio server of one user resolves the same
-    ``<workspace root>/__default__``, so a server that removed it on exit took
-    the tree and bound profile of every other stdio server still running. Each
-    server holds an exclusive lock on its own entry under
+    ``<workspace root>/__default__``, so it is removed only when the last of
+    them exits. Each server holds an exclusive lock on its own entry under
     ``<workspace root>/.stdio-servers`` for its lifetime. On exit it drops its
     entry and removes the default workspace only if no other entry is still
     locked; an entry whose lock can be taken belongs to a server that died, and

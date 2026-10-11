@@ -170,9 +170,8 @@ def _validate_bind(
 
     The MCP SDK checks Host and Origin (its DNS-rebinding protection) only when
     the app is built for one of :data:`_SDK_PROTECTED_HOSTS`. Building for any
-    other address without an explicit allowlist switches the check off, so a
-    page in a browser that resolves its own name to the server reaches every
-    tool. That has to be a decision the operator states, not a default:
+    other address without an explicit allowlist leaves both headers unchecked,
+    so how Host is checked is a decision the operator states, not a default:
     ``--allowed-host`` keeps the check on with the names clients use, and
     ``--trust-upstream-host-check`` says a proxy or platform in front of ASH
     checks Host and Origin instead.
@@ -210,9 +209,8 @@ def _transport_security(
 ):
     """The ``transport_security`` to build an app with.
 
-    On a loopback bind with no allowlist the SDK's own check would accept any
-    ``localhost`` origin on any port, so a page served by any other local web
-    server could drive this one from the user's browser. The server accepts its
+    On a loopback bind with no allowlist the SDK's own check accepts a
+    ``localhost`` origin on any port. This server accepts its
     own origin only: Host ``127.0.0.1``, ``localhost`` or ``[::1]`` with the
     port it is bound to, and the same as ``http://`` origins. On port 80 the
     names without a port are accepted too, because clients and browsers leave

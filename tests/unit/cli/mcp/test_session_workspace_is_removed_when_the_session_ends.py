@@ -187,7 +187,7 @@ class TestStatefulSessionTermination:
     def test_clear_source_removes_the_callers_sandbox(
         self, http, workspace_root
     ) -> None:
-        """Control: the harness reaches the deletion path, before and after."""
+        """Control: the harness reaches the deletion path."""
         session_id, headers = http.open_session()
         _deliver_http(http, headers)
 

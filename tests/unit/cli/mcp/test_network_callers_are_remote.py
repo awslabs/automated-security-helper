@@ -127,8 +127,8 @@ class TestStatelessStreamableHttp:
     def test_a_caller_without_a_session_header_gets_config_confinement_under_a_grant(
         self, stateless, layout, monkeypatch
     ) -> None:
-        """A grant narrows scan targets for every caller, but config confinement
-        is the remote tier's, so it is the half a header-less caller still lacked."""
+        """A grant narrows scan targets for every caller; config confinement is the
+        remote tier's, and a caller with no session header is remote."""
         monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(layout["granted"]))
         _issued, headers = stateless.open_session()
 
@@ -344,8 +344,8 @@ def test_serving_a_network_transport_leaves_stdio_trust_unchanged(
 
     ``mcp_command`` serves a stateless app (one request through it, in place of
     uvicorn); a stdio-shaped call in the same process afterwards still has the
-    local tier. Process-wide state was removed once already for leaking into
-    every later call in the process (cli/mcp/sandbox.py).
+    local tier. Process-wide state would carry into every later call in the
+    process (cli/mcp/sandbox.py).
     """
     from automated_security_helper.cli.mcp import mcp_command
 

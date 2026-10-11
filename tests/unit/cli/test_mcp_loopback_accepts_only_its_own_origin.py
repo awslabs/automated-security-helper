@@ -3,14 +3,11 @@
 
 """A loopback server accepts only its own origin.
 
-On a loopback bind the MCP SDK's own check accepts Host ``127.0.0.1:*``,
-``localhost:*`` and ``[::1]:*`` and the matching ``http://`` origins on any
-port. So a page served by any other local web server -- a dev server on another
-port, say -- passes the Origin check and can drive the MCP server from the
-user's browser. ASH now accepts only the port the server is bound to: Host
-``127.0.0.1:PORT``, ``localhost:PORT`` or ``[::1]:PORT``, and those as
-``http://`` origins. A request without an Origin (every non-browser client)
-is unaffected.
+The MCP SDK's own loopback check accepts Host ``127.0.0.1:*``, ``localhost:*``
+and ``[::1]:*`` and the matching ``http://`` origins on any port. ASH accepts
+only the port the server is bound to: Host ``127.0.0.1:PORT``,
+``localhost:PORT`` or ``[::1]:PORT``, and those as ``http://`` origins. A
+request without an Origin (every non-browser client) needs only the right Host.
 """
 
 from __future__ import annotations
@@ -93,7 +90,7 @@ OWN = f"http://{OWN_HOST}"
         "http://127.0.0.1:9999",
         "http://[::1]:5173",
         f"https://127.0.0.1:{PORT}",
-        "http://evil.example",
+        "http://other.example",
     ],
 )
 def test_another_origin_is_refused(status, origin) -> None:

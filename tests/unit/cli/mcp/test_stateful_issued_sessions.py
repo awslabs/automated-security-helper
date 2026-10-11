@@ -4,13 +4,11 @@
 """A stateful app counts as issued only the sessions the SDK actually opened.
 
 The SDK puts an ``Mcp-Session-Id`` on the response to a refused opening request
-too, and then discards that session. ASH recorded every id it saw on a response,
-so each refused request grew the set of sessions it treated as live, and nothing
-but a DELETE or shutdown removed them. An id is now recorded only from a
-successful response, and when the SDK answers 404 on its own session path for
-an id ASH recorded (the SDK discarded it, for example after its idle timeout),
-ASH ends that session too. A 404 from the newer protocol's path, which can mean
-an unknown method, ends nothing.
+too, and then discards that session. ASH records an id only from a successful
+response. When the SDK answers 404 on its own session path for an id ASH
+recorded (the SDK discarded it, for example after its idle timeout), ASH ends
+that session too. A 404 from the newer protocol's path, which can mean an
+unknown method, ends nothing.
 """
 
 from __future__ import annotations

@@ -5,11 +5,10 @@
 
 Every stdio server of one user resolves the same ``<workspace root>/__default__``
 (the root depends only on ``ASH_MCP_WORKSPACE_ROOT``, ``XDG_CACHE_HOME`` and
-``HOME``). Removing it whenever any stdio server exited took the tree, and the
-bound profile, of every other stdio server still running -- two IDE windows, or
-two agents -- in the middle of a scan as easily as between calls. A server now
-removes it on exit only when no other live stdio server shares the root; a
-server that died without exiting cleanly does not count as live.
+``HOME``): two IDE windows, or two agents, share it. A server removes it on exit
+only when no other live stdio server shares the root, so the tree and bound
+profile of a server still running stay in place. A server that died without
+exiting cleanly does not count as live.
 """
 
 from __future__ import annotations

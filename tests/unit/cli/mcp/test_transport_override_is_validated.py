@@ -3,13 +3,11 @@
 
 """``ASH_MCP_TRANSPORT`` is read case- and space-insensitively, and an unknown value fails closed.
 
-The variable is the operator's override that makes every caller remote. It was
-compared verbatim against ``streamable-http`` and ``sse``, so ``Streamable-HTTP``
-or a stray space, or a typo like ``streamable_http``, silently kept local trust
-for every caller -- the opposite of what the operator set it to do. A value that
-names a network transport in any spelling now counts as one, an unknown value
-counts as remote for an in-process caller, and ``ash mcp`` refuses to start with
-an unknown value.
+The variable is the operator's override that makes every caller remote. A value
+that names a network transport in any spelling (``Streamable-HTTP``, a stray
+space) counts as one, an unknown value such as ``streamable_http`` counts as
+remote for an in-process caller, and ``ash mcp`` refuses to start with an
+unknown value.
 """
 
 from __future__ import annotations

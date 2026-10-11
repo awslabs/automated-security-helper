@@ -40,8 +40,8 @@ transport the call arrived on (``session_identity.resolve_caller_session_id``):
 every network caller resolves to a server-issued id or to
 ``UNIDENTIFIED_SESSION_ID``, never to stdio's default, so it is remote whatever
 headers it sends. That function carries the reasoning; the short version is that
-process-wide transport state outlives the server object and made the answer
-depend on what ran earlier in the process.
+process-wide transport state outlives the server object and would make the
+answer depend on what ran earlier in the process.
 
 **Ambient rather than capability.** Authority was whatever the launching process
 happened to have. A :class:`SessionSandbox` is an object resolved for a named
@@ -190,8 +190,7 @@ def get_server_transport() -> str:
     """Return ``ASH_MCP_TRANSPORT`` stripped and lower-cased, or the default if unset.
 
     Normalized because the variable is typed by an operator: ``Streamable-HTTP``
-    or a trailing newline from a secrets file names the same transport, and
-    compared verbatim it named none, which kept local trust.
+    or a trailing newline from a secrets file names the same transport.
     """
 
     return (os.environ.get(ASH_MCP_TRANSPORT_ENV) or "").strip().lower() or (

@@ -3,14 +3,11 @@
 
 """Project confinement applies before any project's config is read.
 
-``run_ash_workspace_scan`` refused a workspace with a project outside the
-permitted roots, but only after resolving the plan, which reads every project's
-own ``.ash.yaml``; ``resolve_ash_workspace`` did not confine projects at all and
-returned the plan. So both tools read a config file outside the roots, and the
-resolve tool reported what it said (each project's label, scanners and
-threshold) while a config that did not parse came back as a validation error
-quoting it. Both now refuse such a workspace with the confinement refusal
-(exit 4) before any project config is read.
+``run_ash_workspace_scan`` and ``resolve_ash_workspace`` check every project of a
+workspace against the permitted roots while they resolve the plan, before any
+project's own ``.ash.yaml`` is read. A workspace with a project outside the roots
+is refused with the confinement refusal (exit 4), and the response carries
+nothing from that project's config, whether or not the config parses.
 """
 
 from __future__ import annotations

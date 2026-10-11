@@ -449,11 +449,8 @@ _CLONE_SCHEMES = ("https", "ssh")
 #: interpreted, so this parser and git's cannot disagree about the host.
 _HOST_NAME = re.compile(r"[a-z0-9][a-z0-9.-]*")
 
-#: Characters refused between ``ssh://`` and the first ``/``. git percent-decodes
-#: an ``ssh://`` url before it splits off the host, so ``%2f`` ends the host where
-#: a url parser does not; to git ``?`` and ``#`` are ordinary characters, where a
-#: url parser ends the host at them; and ``[``/``]`` are git's own host brackets.
-#: With any of them, git hands ssh a host other than the one the allowlist checks.
+#: Characters refused between ``ssh://`` and the first ``/``. Without them, the
+#: host the allowlist checks is the host git hands ssh.
 _SSH_AUTHORITY_REFUSED = frozenset("%?#[]")
 
 
@@ -495,8 +492,7 @@ def remote_clone_host(url: str) -> str:
         if scheme == "ssh" and refused:
             raise ValueError(
                 f"refusing an ssh:// clone url with {' '.join(refused)} before the "
-                f"path: git reads the host of such a url differently from the one "
-                f"checked against the allowed hosts. Write the host and user plainly."
+                f"path; write the host and user plainly."
             )
         try:
             host = urlsplit(url).hostname or ""

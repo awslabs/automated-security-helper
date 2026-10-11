@@ -218,10 +218,11 @@ async def mcp_scan_directory(
                 ],
             )
 
-    # Claimed before the scan id is returned: the scan takes the session's lock
-    # only later, on a worker thread, and a change to the delivered tree or the
-    # session ending in between would otherwise go through. Refused while such a
-    # change is in progress. See MCPSession.try_claim_scan.
+    # Claimed before the scan id is returned, because the scan takes the
+    # session's lock only later, on a worker thread: from here on a change to
+    # the delivered tree is refused and the session's removal waits for the
+    # scan. Refused while such a change is in progress. See
+    # MCPSession.try_claim_scan.
     claimed_session = None
     if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
         from automated_security_helper.cli.mcp.sessions import (

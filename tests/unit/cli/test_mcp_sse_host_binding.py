@@ -82,11 +82,9 @@ class TestHostReachesTheApp:
     ) -> None:
         """No allowlist and no opt-out: the build refuses, or the app checks Host.
 
-        Passing the bind host through fixed the 421 on every proxied request, and
-        also switched the SDK's Host and Origin checks off for 0.0.0.0, so any
-        Host was served. A proxied deployment names its hostname with
-        ``allowed_hosts`` (``TestAllowedHostsReachesTheApp``); one whose Host
-        checking happens in front of ASH says so with the explicit opt-out.
+        A proxied deployment names its hostname with ``allowed_hosts``
+        (``TestAllowedHostsReachesTheApp``); one whose Host checking happens in
+        front of ASH says so with the explicit opt-out.
         """
         try:
             app = build_sse_app(mount_path="/sse", host="0.0.0.0")

@@ -3,12 +3,11 @@
 
 """The TTL sweep removes only directories ASH created as session workspaces.
 
-The sweep used to remove every old directory under the workspace root, so an
-operator whose ``ASH_MCP_WORKSPACE_ROOT`` held anything else -- notes, backups,
-a ``.git`` directory -- lost it on the first request to any HTTP server. ASH now
-marks each session workspace when it creates one, and the sweep removes marked
-directories only. Every way a workspace comes into being is covered: source
-delivery, the session registry, and a profile bound with ``select_profile``.
+ASH marks each session workspace when it creates one, and the sweep removes
+marked directories only, so anything else under ``ASH_MCP_WORKSPACE_ROOT`` --
+notes, backups, a ``.git`` directory -- stays. Every way a workspace comes into
+being is covered: source delivery, the session registry, and a profile bound with
+``select_profile``.
 """
 
 from __future__ import annotations

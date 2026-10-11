@@ -5,12 +5,11 @@
 
 The MCP SDK checks the Host and Origin headers (its DNS-rebinding protection)
 only when the app is built for a loopback host, and ASH builds the app with the
-host it binds. So ``ash mcp --host 0.0.0.0`` with no ``--allowed-host`` serves
-any Host and any Origin. The required behavior is a startup refusal with an
-actionable error naming ``--allowed-host``, unless the operator passes an
-explicit opt-out that says Host and Origin checking happens in front of ASH.
-That opt-out is not exercised here because its spelling belongs to the change
-that adds it; its tests belong with it.
+host it binds. ``ash mcp`` with a non-loopback ``--host`` and no
+``--allowed-host`` therefore refuses to start, with an actionable error naming
+``--allowed-host``. The opt-out that says Host and Origin are checked in front
+of ASH, ``--trust-upstream-host-check``, is covered in
+``test_mcp_upstream_host_check.py``.
 
 The controls show the same path still starts for a loopback host and for a
 non-loopback host that names its allowlist, and that the container entrypoint
@@ -187,8 +186,8 @@ def _refused_or_status(build, base_url: str, headers: Dict[str, str], path: str)
 class TestLoopbackAliasKeepsProtection:
     """``127.0.0.2`` is a loopback address the SDK does not recognize as one.
 
-    A page resolving its own name to any 127/8 address reaches a server bound
-    there, so the Host check matters as much as it does for ``127.0.0.1``.
+    ASH treats it like any other non-loopback address: the build refuses, or
+    the app checks Host as it does for ``127.0.0.1``.
     """
 
     def test_streamable_http_rejects_a_foreign_host(self) -> None:
@@ -211,7 +210,7 @@ class TestLoopbackAliasKeepsProtection:
 
 
 # ---------------------------------------------------------------------------
-# Deploy targets keep starting (guard: green before the change, must stay green)
+# Deploy targets keep starting (guard)
 # ---------------------------------------------------------------------------
 
 
