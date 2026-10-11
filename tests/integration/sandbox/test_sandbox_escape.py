@@ -392,6 +392,11 @@ def test_every_attempt_succeeds_without_a_sandbox(tmp_path, listeners):
         if v != "succeeded" and k not in CONTROL_EXEMPT
     }
     assert not failed, f"attempts that should have succeeded unsandboxed: {failed}"
+    exempt_escaped = {k: outcomes[k] for k in CONTROL_EXEMPT if k in outcomes}
+    assert all(v.startswith(BLOCKED_BY) for v in exempt_escaped.values()), (
+        f"attempts ASH blocks even unsandboxed got through: {exempt_escaped}"
+    )
+    assert set(exempt_escaped) == set(CONTROL_EXEMPT), "an exempt attempt was not made"
     assert listeners.reached() == listeners.kinds
     assert works == EXPECTED_WORKS
 
@@ -416,10 +421,13 @@ BLOCKED_BY = (
 )
 
 
-#: Attempts the negative control is not expected to make succeed, and why. Empty:
-#: unsandboxed, ASH's writes behave exactly as open() and follow a planted link,
-#: which is what makes _parent_writes_contained a real control.
-CONTROL_EXEMPT: dict = {}
+#: Attempts the negative control is not expected to make succeed, and why. Each is
+#: asserted blocked in the control too, so an entry that starts succeeding fails.
+CONTROL_EXEMPT: dict = {
+    "_parent_writes_contained": "ASH's own writes refuse a symlink below the output "
+    "directory with or without a sandbox (fs_guard.open_for_write), so the links "
+    "the probe plants are not written through unsandboxed either",
+}
 
 #: Attempts a backend is documented not to block (docs/content/docs/scanner-sandbox.md).
 #: Listed here rather than skipped, so each one is asserted to be exactly the known

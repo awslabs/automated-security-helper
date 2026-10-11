@@ -681,7 +681,9 @@ file outside the source tree (a planted `~/.ssh/id_rsa`), write outside its resu
 directory, open a network socket under `--offline`, and modify the source tree. CI runs
 it under each backend available on the runner. Each attempt must fail with the sandbox
 on, and succeed with `--sandbox off`, which is the negative control that proves the
-attempts are real. CI also runs every builtin scanner under bubblewrap on Linux and
+attempts are real. The one exception is the links the fixture plants for ASH to write
+through: ASH refuses those with the sandbox off too, and the control checks that it
+does. CI also runs every builtin scanner under bubblewrap on Linux and
 under sandbox-exec on macOS against the snapshot fixture, offline and online, and
 asserts the findings match the unsandboxed run.
 
