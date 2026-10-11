@@ -114,6 +114,7 @@ trivy exits 0 whether or not it finds anything (ASH does not pass
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
@@ -141,6 +142,24 @@ TRIVY_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
 
 #: Characters trivy's ``--skip-dirs`` reads as glob syntax.
 _GLOB_SPECIAL = frozenset("*?[]{}\\")
+
+#: trivy's ``--timeout`` when ASH's ``scan_timeout`` is null (unbounded). trivy has no
+#: value that means "no deadline": measured with 0.75.0, ``--timeout=0s`` is a deadline
+#: that has already passed, and a scan that analyzes files one at a time (secret
+#: scanning, OS packages) exits 1 with "context deadline exceeded". This is the largest
+#: whole number of hours a Go duration holds, about 292 years; one hour more is refused
+#: as an invalid duration.
+UNBOUNDED_TRIVY_TIMEOUT = "2562047h"
+
+
+def trivy_timeout(seconds: Optional[float]) -> str:
+    """ASH's scan timeout in seconds, or None for unbounded, as trivy's ``--timeout``.
+
+    Rounded up to a whole second and never below one, so a bound is never ``0s``.
+    """
+    if seconds is None:
+        return UNBOUNDED_TRIVY_TIMEOUT
+    return f"{max(1, math.ceil(seconds))}s"
 
 
 def skip_dirs_value(path: str) -> str:
@@ -363,11 +382,11 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         final_args = self._resolve_arguments(target=target, results_file=results_file)
         # Each flag and its value as one token, so no path can be read as a flag.
         extra: List[str] = []
-        timeout = self._effective_scan_timeout()
         # trivy's own deadline is 5 minutes and fails the scan when it passes.
         # Matched to ASH's, so the bound the operator set is the one that applies;
-        # an unbounded ASH timeout is trivy's 0s, which trivy reads as no deadline.
-        extra.append(f"--timeout={int(timeout) if timeout is not None else 0}s")
+        # an unbounded ASH timeout is UNBOUNDED_TRIVY_TIMEOUT, since trivy reads 0s
+        # as a deadline already passed.
+        extra.append(f"--timeout={trivy_timeout(self._effective_scan_timeout())}")
         output_inside = self._output_dir_inside(target)
         if output_inside is not None:
             # ASH's own output under the target holds the converted copies of

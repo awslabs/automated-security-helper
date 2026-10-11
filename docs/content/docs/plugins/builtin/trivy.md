@@ -48,7 +48,8 @@ scanners:
       # Passed to trivy as --severity (this level and above).
       severity_threshold: null
       # Seconds before the trivy process is killed; also passed as trivy --timeout.
-      # null leaves both unbounded (trivy --timeout=0s; trivy's own default is 5m).
+      # null leaves both unbounded: trivy gets --timeout=2562047h (about 292
+      # years), since it reads 0s as a deadline already passed. Its default is 5m.
       scan_timeout: 1800
 ```
 

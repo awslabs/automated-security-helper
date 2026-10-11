@@ -233,6 +233,17 @@ def test_the_output_dir_inside_the_target_is_skipped_by_trivy(tmp_path, trivy_en
     assert any(uri == "previous/requirements.txt" for _, uri in _pairs(report))
 
 
+def test_an_unbounded_scan_timeout_scans(tmp_path, trivy_env):
+    """trivy reads --timeout=0s as a deadline already passed: secret scanning (any
+    analyzer that takes files one by one) then fails with "context deadline exceeded"."""
+    source = _copy_fixture(tmp_path)
+    scanner, report = _scan_direct(
+        source, tmp_path / "out", scan_timeout=None, scanners=["vuln", "secret"]
+    )
+    assert scanner.exit_code == 0
+    assert STABLE <= _pairs(report)
+
+
 # --------------------------------------------------------------------------- #
 # ash scan, end to end
 # --------------------------------------------------------------------------- #

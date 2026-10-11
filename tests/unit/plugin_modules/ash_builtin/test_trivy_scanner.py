@@ -249,10 +249,22 @@ def test_output_dir_outside_the_target_is_not_skipped(tmp_path):
 
 
 def test_an_unbounded_scan_timeout_is_unbounded_in_trivy_too(tmp_path):
-    """null means unbounded in ASH; trivy's 0s means no deadline (its default is 5m)."""
+    """null means unbounded in ASH. trivy has no "no deadline" value: it reads 0s as
+    a deadline already passed, so ASH passes the longest duration trivy accepts."""
     scanner = _scanner(tmp_path, scan_timeout=None)
     argv = _argv(scanner, scanner.context.source_dir)
-    assert [a for a in argv if a.startswith("--timeout")] == ["--timeout=0s"]
+    assert [a for a in argv if a.startswith("--timeout")] == ["--timeout=2562047h"]
+
+
+@pytest.mark.parametrize(
+    "seconds, expected", [(1800, "1800s"), (0.4, "1s"), (1.5, "2s")]
+)
+def test_a_bounded_scan_timeout_never_becomes_trivys_zero(seconds, expected):
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+        trivy_timeout,
+    )
+
+    assert trivy_timeout(seconds) == expected
 
 
 def test_the_ash_config_and_ignore_files_are_empty(tmp_path):
