@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A malicious scanner tries to escape; every attempt fails under each sandbox.
+"""A fixture scanner tries to act outside its sandbox; every attempt fails under each sandbox.
 
 The scanner is ``tests/test_data/sandbox_escape``: a third-party-style plugin whose tool
 (escape_probe.py) tries to read a planted ~/.ssh key and a file outside the source
@@ -233,8 +233,8 @@ def _scan(
     outside = home / "outside"
     outside.mkdir()
     (outside / "secret.txt").write_text(CANARY)
-    for victim in ("victim-results.txt", "victim-log.txt"):
-        (outside / victim).write_text("original\n")
+    for link_target in ("outside-results.txt", "outside-log.txt"):
+        (outside / link_target).write_text("original\n")
     source = tmp_path / "src"
     source.mkdir()
     (source / "app.py").write_text("print('hello')\n")
@@ -269,9 +269,9 @@ def _scan(
         "unix_datagram_socket": str(listeners.datagram_path or ""),
         "ipc_env": _ipc_environment(listeners),
         "host_cache": str(host_cache),
-        "victims": {
-            "ASH.ScanResults.json": str(outside / "victim-results.txt"),
-            "SandboxEscapeScanner.stdout.log": str(outside / "victim-log.txt"),
+        "link_targets": {
+            "ASH.ScanResults.json": str(outside / "outside-results.txt"),
+            "SandboxEscapeScanner.stdout.log": str(outside / "outside-log.txt"),
         },
         "shm_file": (
             f"/dev/shm/ash-sandbox-probe-{os.getpid()}-{mode}"  # nosec B108 - the probe's target; asserted never to appear
@@ -342,18 +342,18 @@ def _scan(
     outcomes["_source_untouched"] = (
         "succeeded"
         if (source / "app.py").read_text() != "print('hello')\n"
-        or (source / "pwned.txt").exists()
+        or (source / "written.txt").exists()
         else "blocked: source tree unchanged"
     )
     # Planting the links is allowed (it is the scanner's own directory); what must
     # not happen is ASH writing through them afterwards.
     outcomes.pop("plant_symlinks", None)
-    victims_intact = all(
-        Path(v).read_text() == "original\n" for v in spec["victims"].values()
+    link_targets_intact = all(
+        Path(v).read_text() == "original\n" for v in spec["link_targets"].values()
     )
     outcomes["_parent_writes_contained"] = (
         "blocked: ASH did not write through the planted links"
-        if victims_intact
+        if link_targets_intact
         else "succeeded"
     )
     if spec["shm_file"]:
@@ -372,12 +372,12 @@ def _scan(
         "succeeded"
         if seed.read_text() != "original\n"
         or seed.stat().st_mtime_ns != seed_mtime
-        or (host_cache / "pwned.txt").exists()
+        or (host_cache / "written.txt").exists()
         else "blocked: host cache unchanged"
     )
     outcomes["_outside_untouched"] = (
         "succeeded"
-        if (outside / "pwned.txt").exists() or (output / "pwned.txt").exists()
+        if (outside / "written.txt").exists() or (output / "written.txt").exists()
         else "blocked: nothing written outside the results directory"
     )
     return outcomes, works, result

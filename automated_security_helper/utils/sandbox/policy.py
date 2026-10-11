@@ -48,7 +48,7 @@ class SandboxRequirements:
         cache_env: Variables that move a tool's writable cache (``npm_config_cache``).
             Where ``cache_paths`` are read-only, each variable named here points at
             a private, empty directory for the spawn, so a tool that has to write
-            its cache still can. A cache that is only read, such as a vulnerability
+            its cache still can. A cache that is only read, such as a scanner's
             database prepared before the scan, is not listed.
         env_prefixes: Environment variable name prefixes passed through in addition to
             the baseline allowlist (``GRYPE_``, ``SEMGREP_``, ...). Credential-shaped

@@ -419,7 +419,7 @@ class TestHostCachesAreNotWrittenInPlace:
     def test_bundled_scanners_that_write_a_cache_declare_where(self):
         """Measured under Landlock with the caches read-only: these failed or lost
         findings until redirected (semgrep and opengrep cannot open their log under
-        ~/.semgrep or ~/.opengrep; npm-audit lost the vulnerable ranges it reads
+        ~/.semgrep or ~/.opengrep; npm-audit lost the advisory ranges it reads
         from registry metadata it caches). grype's and trivy's databases are only
         read, so they are not redirected."""
         declared = {
@@ -626,21 +626,21 @@ class TestScope:
         assert "shell" in result.stderr
 
 
-class TestReviewFindings:
-    """Regressions for the gaps the policy review found."""
+class TestPolicyEdges:
+    """Symlinked results directories, tool prefixes under home, and the env filter."""
 
     def test_a_symlinked_results_directory_is_refused(self, layout, tmp_path):
-        victim = tmp_path / "victim"
-        victim.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
         (layout.output / "scanners").mkdir(parents=True)
-        layout.results.symlink_to(victim, target_is_directory=True)
+        layout.results.symlink_to(elsewhere, target_is_directory=True)
         with pytest.raises(SandboxUnavailable, match="symlink"):
             _policy(layout)
 
     def test_a_symlink_above_the_results_directory_is_refused(self, layout, tmp_path):
-        victim = tmp_path / "victim"
-        (victim / "grype").mkdir(parents=True)
-        (layout.output / "scanners").symlink_to(victim, target_is_directory=True)
+        elsewhere = tmp_path / "elsewhere"
+        (elsewhere / "grype").mkdir(parents=True)
+        (layout.output / "scanners").symlink_to(elsewhere, target_is_directory=True)
         with pytest.raises(SandboxUnavailable, match="symlink"):
             _policy(layout)
 
@@ -1585,9 +1585,9 @@ class TestUvToolLock:
     ):
         tools = tmp_path / "uv-tools"
         tools.mkdir()
-        victim = tmp_path / "victim"
-        victim.write_text("")
-        (tools / ".lock").symlink_to(victim)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.write_text("")
+        (tools / ".lock").symlink_to(elsewhere)
         monkeypatch.setenv("UV_TOOL_DIR", str(tools))
         assert _policy(layout).uv_tool_locks == ()
 
@@ -1628,9 +1628,11 @@ class TestScriptInterpreter:
 
     def test_a_binary_is_not_read_as_a_script(self, layout, tmp_path):
         binary = tmp_path / "tool"
-        binary.write_bytes(b"\xcf\xfa\xed\xfe#!/opt/evil/bin/x")
+        binary.write_bytes(b"\xcf\xfa\xed\xfe#!/opt/unlisted-prefix/bin/x")
         policy = _policy(layout, argv0=str(binary))
-        assert not any("evil" in p.as_posix() for p in _resolved(policy.read_only))
+        assert not any(
+            "unlisted-prefix" in p.as_posix() for p in _resolved(policy.read_only)
+        )
 
 
 class TestSandboxExecWorkingDirectory:

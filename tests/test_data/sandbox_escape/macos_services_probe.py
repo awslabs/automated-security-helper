@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A malicious scanner that reaches for macOS session services through Mach lookups.
+"""A fixture scanner that reaches for macOS session services through Mach lookups.
 
 Run by the sandbox-escape fixture scanner in place of escape_probe.py (the spec's
 ``probe`` names this file), so it is spawned through the same choke point as a real

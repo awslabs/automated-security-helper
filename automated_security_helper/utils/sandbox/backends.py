@@ -76,7 +76,7 @@ def _private_caches(
     a fresh directory under the results directory, the one place the scanner may
     write, removed once the process has exited. A tool redirected this way starts
     from an empty cache, so online it fetches what it needs and offline it has
-    nothing cached. A cache that is only read, such as a vulnerability database,
+    nothing cached. A cache that is only read, such as a scanner's database,
     is not redirected and stays read-only.
     """
     if not policy.cache_env:

@@ -39,13 +39,13 @@ def test_a_parent_component_replaced_by_a_link_is_refused(tree):
 
 def test_a_link_at_the_file_name_is_replaced_not_followed(tree):
     root, elsewhere = tree
-    victim = elsewhere / "victim.txt"
-    victim.write_text("original\n")
+    linked = elsewhere / "linked.txt"
+    linked.write_text("original\n")
     target = root / "source" / "out.log"
-    target.symlink_to(victim)
+    target.symlink_to(linked)
     with fs_guard.open_for_write(target) as f:
         f.write("written\n")
-    assert victim.read_text() == "original\n"
+    assert linked.read_text() == "original\n"
     assert not target.is_symlink()
     assert target.read_text() == "written\n"
 
@@ -106,11 +106,11 @@ def test_the_sweep_removes_links_and_does_not_enter_them(tree):
 
 def test_outside_a_registered_root_it_is_plain_open(tmp_path):
     """No sandbox, no change: the write follows a link exactly as open() does."""
-    victim = tmp_path / "victim.txt"
-    victim.write_text("original\n")
+    linked = tmp_path / "linked.txt"
+    linked.write_text("original\n")
     target = tmp_path / "unregistered" / "out.log"
     target.parent.mkdir()
-    target.symlink_to(victim)
+    target.symlink_to(linked)
     with fs_guard.open_for_write(target) as f:
         f.write("written\n")
-    assert victim.read_text() == "written\n"
+    assert linked.read_text() == "written\n"

@@ -4,9 +4,9 @@
 """A timed-out scanner under Landlock leaves no process behind.
 
 Landlock does not end a process's descendants with it, so its wrapper is a child
-subreaper that kills what its scanner leaves. A timeout used to SIGKILL the wrapper,
-which can do nothing after that; ASH now sends SIGTERM first and the wrapper ends the
-whole tree. Measured here by a detached process that would write a file after the
+subreaper that kills what its scanner leaves. On a timeout ASH sends the wrapper
+SIGTERM first, and the wrapper ends the whole tree; a SIGKILL would leave it no way
+to. Measured here by a detached process that would write a file after the
 timeout: the file must never appear.
 """
 

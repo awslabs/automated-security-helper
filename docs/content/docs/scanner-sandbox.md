@@ -153,7 +153,7 @@ it needs.
   SIGTERM first (SIGKILL after 10 seconds), so the Landlock wrapper gets to end its
   whole tree rather than being killed outright.
 - Network: under `--offline` no scanner gets a network. Online, only scanners that
-  declare a network need get one (to fetch a vulnerability database, a rule pack, or
+  declare a network need get one (to fetch a content database, a rule pack, or
   audit data from a package registry); everything else runs with no network.
 
 ### Per-scanner needs
@@ -244,9 +244,9 @@ set that (see below). Without a network every candidate counts as unverified, so
 sandboxed scan whose settings verify reports the candidates that verification would
 have dropped, and ASH logs a warning naming the setting.
 
-detect-secrets and cdk-nag are Python libraries. They used to run inside the ASH
-process, where no OS sandbox can reach them; they now run in worker subprocesses that
-use the same interpreter and the same library calls, so their findings are unchanged
+detect-secrets and cdk-nag are Python libraries. They run in worker subprocesses,
+not in the ASH process, where no OS sandbox could reach them. The workers use the
+same interpreter and the same library calls, so their findings are unchanged
 and the sandbox wraps them like any other scanner. To let detect-secrets verify
 secrets under the sandbox, pass `--config-overrides 'sandbox.network_scanners=[detect-secrets]'`
 (plus any other scanners that need a network). Under `--offline` it gets none.
@@ -380,16 +380,16 @@ in its `failure`. Nothing a converter starts runs unsandboxed under a sandbox.
 
 The sandbox is for three cases.
 
-1. A malicious or compromised scanner, plugin, or rule pack. A typosquatted or
+1. A scanner, plugin, or rule pack that does more than it says. A typosquatted or
    hijacked package on PyPI or npm, a scanner binary replaced on disk, a community
    rule pack that runs code.
-2. Scanned content that exploits a scanner. Scanners parse untrusted input and some
+2. Scanned content that takes control of a scanner. Scanners parse untrusted input and some
    execute it on purpose: tool configuration files committed to the repository
    (`trivy.yaml`, `.semgrep.yml`, `.checkov.yaml`, `.npmrc`, `.bandit`) change what a
    scanner does, plugin systems `eval` code found in the tree, and parser bugs give
    code execution or path traversal on write.
-3. Exfiltration. Code running in any of the above reading credentials (`~/.ssh`,
-   `~/.aws`, tokens in the environment) and sending them out over the network.
+3. Data sent off the machine. Code running in any of the above reading credentials
+   (`~/.ssh`, `~/.aws`, tokens in the environment) and sending them over the network.
 
 Inside the sandbox such code can read the source tree (it is scanning it), write its
 own results, and, if the scanner is allowed a network, talk to the network. It cannot
@@ -420,10 +420,10 @@ Out of scope:
   refuses Unix sockets.
 - A scanner allowed a network can still send what it can read (the source tree)
   wherever it likes. The online allowlist is per scanner, not per host. Host-level
-  filtering would need a proxy inside the sandbox, which tools can bypass unless the
+  filtering would need a proxy inside the sandbox, which tools can go around unless the
   network namespace forces all traffic through it; that is future work.
-- Results integrity. A compromised scanner can still lie in its own results file.
-- Kernel exploits. All backends share the host kernel.
+- Results integrity. A scanner can still write false results to its own results file.
+- Kernel defects. All backends share the host kernel.
 
 ## Design
 
@@ -447,7 +447,7 @@ never installs a tool.
 `tests/unit/utils/test_sandbox_choke_point.py` fails the build if any module in the
 package outside a short, reasoned exemption list calls `subprocess.run`,
 `subprocess.Popen`, `os.system`, `os.exec*` or the like directly, so a new spawn site
-cannot bypass the choke point. The scope is per thread: a scanner that started a
+cannot go around the choke point. The scope is per thread: a scanner that started a
 process from a thread it created itself would not inherit it. No builtin scanner does.
 
 ### Linux: bubblewrap (preferred)
@@ -483,8 +483,8 @@ instead, as under the other backends, and the log says so.
 
 ### Linux: firejail (fallback)
 
-firejail is a setuid-root binary, which is attack surface of its own (it has had
-privilege-escalation CVEs), and its filesystem model is "everything visible, then
+firejail is a setuid-root binary, a privileged program of its own (it has had
+privilege-escalation advisories), and its filesystem model is "everything visible, then
 restrict" rather than "nothing visible, then allow". ASH uses
 `--noprofile --private-dev --nonewprivs --caps.drop=all --seccomp --nogroups`,
 `--dbus-user=none --dbus-system=none`, `--net=none` when the scanner gets no network,
@@ -665,7 +665,7 @@ its command line maps one to one onto the policy above.
 
 ## Verifying it
 
-`tests/integration/sandbox/` holds a malicious fixture scanner that tries to read a
+`tests/integration/sandbox/` holds a fixture scanner that tries to read a
 file outside the source tree (a planted `~/.ssh/id_rsa`), write outside its results
 directory, open a network socket under `--offline`, and modify the source tree. CI runs
 it under each backend available on the runner. Each attempt must fail with the sandbox
