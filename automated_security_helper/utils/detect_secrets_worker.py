@@ -21,9 +21,9 @@ when verification may not run; this also stops a filter or plugin that verifies 
 another name. Every detect-secrets plugin's ``verify()`` uses ``requests``, and
 detect-secrets reads a failed request as "unverified", so the secret is reported.
 The scanner also starts the worker with ``ASH_DETECT_SECRETS_REFUSE_HTTP=1`` in its
-environment, which this module reads when it is imported: the processes of a
-``spawn`` multiprocessing pool (macOS, Windows) import it again rather than inherit
-the worker's state, and refuse too.
+environment, which this module reads when it runs as the worker or as a pool process:
+the processes of a ``spawn`` multiprocessing pool (macOS, Windows) import it again,
+as ``__mp_main__``, rather than inherit the worker's state, and refuse too.
 
 OUTPUT is written only on success, as a JSON list of ``[key, [secret, ...]]`` pairs in
 the collection's own key order, each secret in ``PotentialSecret.json()`` form. The key
@@ -108,7 +108,10 @@ def main(argv: List[str]) -> int:
     return 0
 
 
-if os.environ.get(REFUSE_HTTP_ENV) == "1":
+# Only as the worker itself (``python -m``) or as a spawned pool process, which
+# imports the worker as ``__mp_main__``. ASH imports this module for REFUSE_HTTP_ENV,
+# and the variable must not turn off HTTP in ASH's own process.
+if __name__ in ("__main__", "__mp_main__") and os.environ.get(REFUSE_HTTP_ENV) == "1":
     refuse_http_requests()
 
 if __name__ == "__main__":
