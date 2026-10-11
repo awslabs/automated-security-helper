@@ -366,9 +366,9 @@ class TestACheckTheSandboxRefusedIsNotRemembered:
     """A check the scanner sandbox refused never ran, so it has no verdict to keep.
 
     Verdicts are memoized for the whole process. A check made under a scope that
-    refuses every spawn (a scanner that cannot be sandboxed as requested) used to be
-    remembered as "could not execute", and every later check of the same tool, in
-    any scope and any later scan of the process, got that answer without running.
+    refuses every spawn (a scanner that cannot be sandboxed as requested) is not
+    remembered, so a later check of the same tool, in another scope or a later scan
+    of the process, runs and decides.
     """
 
     def test_the_refused_check_is_unverifiable_and_says_why(self, tool_env):

@@ -289,8 +289,8 @@ SIGNAL_TOOL_SOURCE = (
 class TestAToolKilledByASignalIsAnError:
     """A tool a signal ended has not completed, whatever number the signal has.
 
-    Python reports such a child as ``-N``. Taking the absolute value put signals 1,
-    2 and 3 inside common success sets: a tool killed by SIGHUP read as exit 1,
+    Python reports such a child as ``-N``. Its absolute value would put signals 1, 2
+    and 3 inside common success sets: a tool killed by SIGHUP would read as exit 1,
     "findings found", for a ``{0, 1}`` scanner. It is recorded the way a shell
     reports it, ``128 + N``, which no scanner accepts.
     """
@@ -336,7 +336,8 @@ def test_each_target_is_judged_by_its_own_run(plugin_context, tmp_path):
     """The converted target's exit 1 is not hidden by the source target's exit 2.
 
     ``_process_command_response`` keeps the largest code any run returned, and with
-    grype's ``{0, 2}`` a 2 from one target used to accept a 1 from the next.
+    grype's ``{0, 2}`` a 2 from one target would accept a 1 from the next, so each
+    target's own code is recorded before its results file is read.
     """
     prepared = tmp_path / "prepared"
     prepared.write_text(json.dumps(_sarif([])), encoding="utf-8")
@@ -372,10 +373,10 @@ def test_each_target_is_judged_by_its_own_run(plugin_context, tmp_path):
 class TestTheRunnersOwnFailureIsAnError:
     """ASH failing to run the tool is not an accepted exit code.
 
-    ``_run_subprocess`` catches an exception from its own runner and used to record
-    exit code 1, which ``{0, 1}`` accepts. With a results file already in place the
-    template then graded it. It is recorded as ``SPAWN_FAILURE_RETURNCODE``, as a
-    command the OS could not start is, and the row says what failed.
+    ``_run_subprocess`` catches an exception from its own runner. Recorded as exit
+    code 1, which ``{0, 1}`` accepts, it would let the template grade a results file
+    already in place. It is recorded as ``SPAWN_FAILURE_RETURNCODE``, as a command
+    the OS could not start is, and the row says what failed.
     """
 
     def test_the_row_is_error_even_with_a_results_file_in_place(

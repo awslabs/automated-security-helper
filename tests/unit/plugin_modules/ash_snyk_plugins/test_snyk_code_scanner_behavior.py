@@ -553,8 +553,8 @@ def test_exit_code_one_means_findings_not_failure(
 ):
     """Snyk exits 1 when it finds issues; that is a completed scan, not a failure.
 
-    It used to raise: the scan checked ``exit_code != 0`` instead of the scanner's
-    accepted set, so a snyk run that found something reported a scanner failure.
+    The scan checks the scanner's accepted set, not ``exit_code != 0``, so a snyk run
+    that found something reports its findings rather than a scanner failure.
     """
     subprocess_double.side_effect = writes_sarif(snyk_sarif(), exit_code=1)
 

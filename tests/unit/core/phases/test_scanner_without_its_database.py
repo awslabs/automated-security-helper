@@ -1,9 +1,8 @@
 """A scanner that ran without its content database is ERROR, never PASSED.
 
 grype matches packages against its database. Measured with an empty cache
-and the update endpoint refused: grype exited 1 and wrote a zero-byte report, and the
-scanner was graded PASSED with 0 findings, the scan exiting 0 under
-``--allow-stale-content-db``. The rejected exit code alone now makes that ERROR
+and the update endpoint refused: grype exits 1 and writes a zero-byte report. The
+rejected exit code alone makes that ERROR
 (``test_scanner_executor_rejected_exit_codes.py``). This holds the second signal ASH
 has: after the scan ASH asks the tool for the database's build time
 (``utils/content_db_staleness.py``), and when the tool says the database does not

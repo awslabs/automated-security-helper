@@ -260,7 +260,7 @@ def test_reading_a_missing_results_file_raises(plugin_context, tmp_path):
 
 
 def test_handle_empty_results_raises_by_default(plugin_context):
-    """An empty results file is nothing to grade; it used to be an empty report."""
+    """An empty results file is nothing to grade, so the default raises."""
     scanner = _scanner(plugin_context)
 
     with pytest.raises(ScannerError, match="nothing to grade"):
@@ -400,7 +400,7 @@ def test_a_timed_out_tool_is_reported_as_a_timeout_not_a_missing_file(
 
 
 def test_an_empty_results_file_fails_the_scan(plugin_context, tmp_path):
-    """It used to yield an empty report, which was graded PASSED with no findings."""
+    """An empty results file is a failed scan, not an empty report graded PASSED."""
     scanner = _scanner(plugin_context, execute_scan=_execute_writing(""))
     target = _populated_target(tmp_path)
 
@@ -441,8 +441,8 @@ def test_the_empty_results_warning_quotes_captured_stderr_when_present(
 def test_a_results_file_that_is_not_sarif_fails_the_scan(plugin_context, tmp_path):
     """Unparsable output is a failed scan, not a dict that reads as a clean one.
 
-    It used to be returned as the raw dict, which the executor graded PASSED with
-    no findings because the dict carried no verdict.
+    Returned as the raw dict, it would carry no verdict, and the executor would grade
+    it on its zero findings.
     """
     scanner = _scanner(
         plugin_context, execute_scan=_execute_writing(json.dumps({"not": "sarif"}))

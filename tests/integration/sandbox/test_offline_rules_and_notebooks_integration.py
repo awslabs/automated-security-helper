@@ -3,19 +3,17 @@
 Three behaviors, each through ``ash scan`` with the real tools:
 
 1. semgrep exits 7 when it cannot use a rule configuration and still writes SARIF that
-   holds only error notifications. The scanner's row must be ERROR and the scan must
-   not exit 0, with or without a sandbox. Measured before the change: ``PASSED``, 0
-   findings, exit 0 under ``--fail-on-findings``.
+   holds only error notifications. The scanner's row is ERROR and the scan does not
+   exit 0, with or without a sandbox.
 2. An offline scan under ``--sandbox bwrap`` reads the operator's
-   ``$SEMGREP_RULES_CACHE_DIR``. Measured before the change: semgrep could not see the
-   directory, exited 7, and the scan reported no findings and exited 0.
+   ``$SEMGREP_RULES_CACHE_DIR``: semgrep finds the rule's match, and the scan exits 2
+   under ``--fail-on-findings``.
 3. Under ``--sandbox bwrap`` nbconvert runs in the sandbox. The stand-in is a
    ``sitecustomize.py`` on ``$PYTHONPATH``, which nbconvert loads when it starts and
    which records the network namespace it ran in, whether a credential-shaped
    variable reached it, and whether it could read the original notebook in the
-   scanned tree, when it is handed a staged copy. Measured before the change: the
-   host's namespace, with the home directory and the variable visible. Measured
-   before nbconvert's reads were narrowed: the original notebook readable.
+   scanned tree, when it is handed a staged copy. Under bwrap: a namespace of its
+   own, the variable absent, the original notebook unreadable.
 
 The ``--sandbox off`` runs are the controls. Skipped unless ``--run-integration`` is
 given, and per test when semgrep, nbconvert or bubblewrap is not installed.

@@ -1326,9 +1326,9 @@ class TestAHardFailureReachesTheGate:
     status is invisible to it, whichever way the default points. Measured on grype
     with an empty-but-writable cache and its update endpoint refused: grype logs
     that it failed to load its database (the database does not exist), exits 1 and
-    writes a zero-byte report. ASH used to grade that ``grype ... 0 findings ...
-    PASSED`` and exit 0 with ``--min-severity low --fail-on-findings
-    --fail-on-incomplete-scanners`` all passed.
+    writes a zero-byte report. Graded on that report, the row would read ``grype ...
+    0 findings ... PASSED``, and the scan would exit 0 with ``--min-severity low
+    --fail-on-findings --fail-on-incomplete-scanners`` all passed.
 
     Required: the scanner's row is ERROR (grype's success set is ``{0, 2}``, so 1 is
     a failure), and the scan therefore exits 1 with the gate on or defaulted. With

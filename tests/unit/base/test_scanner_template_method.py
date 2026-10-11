@@ -657,9 +657,8 @@ class TestNonZeroExitWithAnEmptyResultsFile:
 
     Measured on grype with an empty-but-writable cache and its update endpoint
     refused: grype logs ``failed to load vulnerability db``, exits 1 and writes a
-    zero-byte report. ``scan()`` used to read that empty file, return an empty
-    SARIF and let the scanner be graded ``PASSED ... 0 findings``, and ASH exited 0
-    with ``--fail-on-incomplete-scanners`` passed. The stub below reproduces the
+    zero-byte report. ``scan()`` does not read that file: an empty SARIF from it
+    would grade the scanner ``PASSED ... 0 findings``. The stub below reproduces the
     shape with grype's own ``success_exit_codes = {0, 2}``, so exit 1 is a failure
     code for it rather than the base class's accepted 1.
 
@@ -788,7 +787,7 @@ class TestNonZeroExitWithAnEmptyResultsFile:
     def test_a_failed_tool_is_not_reported_as_a_successful_execution(
         self, plugin_context, scanner_config, tmp_path
     ):
-        """The scanner's row is ERROR: not PASSED, which is how it used to read."""
+        """The scanner's row is ERROR, not PASSED."""
         from automated_security_helper.core.enums import ScannerStatus
 
         row = self._row(plugin_context, scanner_config, tmp_path)

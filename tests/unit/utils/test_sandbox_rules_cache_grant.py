@@ -265,15 +265,15 @@ def test_sandbox_exec_runs_no_program_from_the_rule_cache(layout, backend, monke
 
 
 def test_a_variable_naming_a_file_grants_nothing(layout, backend, monkeypatch):
-    """The variable names a rules directory; a file (a credentials file, say) is not one.
+    """The variable names a rules directory; a file is not one.
 
     Online, so the scanner does not read that path as its rule cache first.
     """
     tmp, home, _source, _output = layout
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
-    named = home / ".aws" / "credentials"
+    named = home / "settings" / "notes.txt"
     named.parent.mkdir(parents=True)
-    named.write_text("[default]\n")
+    named.write_text("notes\n")
     monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(named))
 
     policy = _policy(layout, backend, "semgrep")

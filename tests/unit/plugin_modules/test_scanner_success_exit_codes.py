@@ -1,6 +1,6 @@
 """Each scanner accepts exactly the exit codes its tool uses for a completed run.
 
-The table is the reviewed answer, per tool, to "which codes mean the tool finished".
+The table records, per tool, which codes mean the tool finished.
 A code that means findings were found is a success; any code the tool uses for an
 error is not. A set that is too narrow turns ordinary scans into errors, and one that
 is too wide records a failed tool as a clean scan, so every entry names its source:

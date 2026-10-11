@@ -651,8 +651,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         The default raises ``ScannerError``: there is nothing to grade. bandit,
         checkov and semgrep write SARIF with one run even when there is nothing for
         them to scan (measured), and grype's and opengrep's SARIF writers always add
-        one, so an empty file is not a clean scan. It used to be returned as an empty
-        report and graded PASSED with 0 findings. A scanner whose tool really does
+        one, so an empty file is not a clean scan. A scanner whose tool really does
         write an empty file for a clean scan overrides this to return a report.
         """
         raise ScannerError("its results file is empty, so there is nothing to grade")
@@ -876,8 +875,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             try:
                 sarif_report: SarifReport = SarifReport.model_validate(raw)
             except Exception as e:
-                # Not returned as it is: a dict without a verdict was graded PASSED
-                # with no findings, which is how a clean scan reads.
+                # Not returned as it is: the executor would grade a dict without a
+                # verdict on its zero findings, which is how a clean scan reads.
                 raise ScannerError(
                     f"its results file is not SARIF ASH can read, so its findings "
                     f"could not be graded: {e}"

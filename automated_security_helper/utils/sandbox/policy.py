@@ -482,8 +482,7 @@ def _env_named_read_paths(names: Sequence[str]) -> List[Path]:
         if not value or not os.path.isabs(value):
             continue
         if not os.path.isdir(value):
-            # A rules directory, not a file such as a credentials file, and not
-            # a path that does not exist.
+            # A rules directory, not a file, and not a path that does not exist.
             if os.path.lexists(value):
                 from automated_security_helper.utils.log import ASH_LOGGER
 

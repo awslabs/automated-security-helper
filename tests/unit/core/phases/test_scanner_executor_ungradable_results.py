@@ -2,11 +2,11 @@
 
 The executor grades a SARIF report by its findings and a dict by its ``status``,
 ``severity_counts`` or ``findings``. A dict with none of those carries nothing to
-grade, and it used to be graded PASSED with 0 findings. Two routes produce one: the
-template ``scan()`` returns the parsed JSON as it is when it is not SARIF (a tool that
-wrote ``{"errors": [...]}`` and exited 0), and a scanner that overrides ``scan()`` can
-return its tool's JSON when it does not parse (ferret-scan does). Either way the
-scanner's findings were not read, so the row is ERROR and says so.
+grade, and graded on its zero findings it would read as PASSED. Two routes produce
+one: the template ``scan()`` handed JSON that is not SARIF (a tool that wrote
+``{"errors": [...]}`` and exited 0), and a scanner that overrides ``scan()`` and
+returns its tool's JSON when it does not parse (ferret-scan does). Either way the
+scanner's findings are not read, so the row is ERROR and says so.
 
 The controls are the dict shapes the executor does grade: ``severity_counts``, a
 ``findings`` list, and ``status: failed``.
@@ -188,8 +188,7 @@ class TestAResultWithNoRunIsAnError:
     bandit, checkov and semgrep write SARIF with exactly one run even when there is
     nothing for them to scan (measured, clean tree and a tree of a text file), and
     grype's and opengrep's SARIF writers always add one. A file with no run is
-    therefore not a clean scan, and with an accepted exit code it used to be graded
-    PASSED with 0 findings.
+    therefore not a clean scan, even with an accepted exit code.
     """
 
     @pytest.mark.parametrize(
@@ -248,7 +247,7 @@ class TestAResultOfAnotherTypeIsAnError:
 
     The executor grades a SARIF report, a dict, a CycloneDX report (an SBOM, which
     has no findings) and ``True``. Anything else (a list of findings, a string, a
-    number) used to fall through every branch and be graded on its zero findings,
+    number) carries nothing it reads, so graded on its zero findings it would read as
     PASSED. The controls are the two non-dict types it does accept.
     """
 
