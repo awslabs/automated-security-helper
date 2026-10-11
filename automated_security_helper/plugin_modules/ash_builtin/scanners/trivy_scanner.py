@@ -51,7 +51,10 @@ declared 24h.
   ``utils/content_db_refresh.py``), and the scan fails if that update does. trivy
   then runs with ``--skip-db-update`` against the database the update wrote.
   trivy's own rule (a database past its ``NextUpdate`` is replaced) is the
-  registry's 24h bound, so the post-scan check agrees with it.
+  registry's 24h bound, so the post-scan check agrees with it. When the operator
+  turns trivy's update off (``TRIVY_SKIP_DB_UPDATE``, or ``db.skip-update`` in an
+  honored ``config_file``), ASH's update is left out with a warning and trivy reads
+  the cached database as it is; the post-scan check still holds it to the bound.
 * Offline, ASH passes ``--skip-db-update`` (with ``--skip-java-db-update``,
   ``--offline-scan`` and ``--skip-check-update``), which makes trivy use any
   database it has. The post-scan check is what holds that database to the bound.

@@ -1123,6 +1123,8 @@ def _update_env(tmp_path, monkeypatch, fake):
     monkeypatch.setattr(trivy_base, "find_executable", lambda name: f"/bin/{name}")
     monkeypatch.setenv("TRIVY_CACHE_DIR", str(tmp_path / "trivy-cache"))
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    for name in ("TRIVY_SKIP_DB_UPDATE", "TRIVY_SKIP_UPDATE", "TRIVY_EXIT_CODE"):
+        monkeypatch.delenv(name, raising=False)
     refresh.forget_prepared()
     ran = []
 
@@ -1169,6 +1171,57 @@ def test_the_scan_skips_the_update_it_ran_first(tmp_path, monkeypatch):
     assert "--skip-check-update" not in final
     # In place, so the invocation ASH records is the one that ran.
     assert command == final
+
+
+@pytest.mark.parametrize("kind", ["trivy", "trivy-repo"])
+def test_an_operators_opt_out_of_the_update_is_honored(tmp_path, monkeypatch, kind):
+    """TRIVY_SKIP_DB_UPDATE makes trivy refuse --download-db-only, so ASH does not run
+    it: the scan reads the cache as it is, and the post-scan check still measures it."""
+    fake = _FakeTrivy()
+    ran = _update_env(tmp_path, monkeypatch, fake)
+    monkeypatch.setenv("TRIVY_SKIP_DB_UPDATE", "true")
+    scanner = _scanner(tmp_path) if kind == "trivy" else _repo_scanner(tmp_path)
+    command = ["trivy", "fs" if kind == "trivy" else "repository", "/t"]
+
+    scanner._run_subprocess(command=command, results_dir=tmp_path / "results")
+
+    assert not [c for c in fake.calls if "--download-db-only" in c]
+    # trivy-repo runs misconfig, whose checks bundle has an opt-out of its own.
+    assert [c[1] for c in fake.calls] == ([] if kind == "trivy" else ["config"])
+    (final,) = ran
+    assert "--skip-db-update" in final and _cache_flag(tmp_path) in final
+    assert scanner.content_database_probe_context().cache_dir == (
+        (tmp_path / "trivy-cache").absolute().as_posix()
+    )
+
+
+def test_the_operators_trivy_config_can_turn_the_update_off(tmp_path, monkeypatch):
+    fake = _FakeTrivy()
+    _update_env(tmp_path, monkeypatch, fake)
+    chosen = tmp_path / "operator" / "trivy.yaml"
+    chosen.parent.mkdir()
+    chosen.write_text("db:\n  skip-update: true\n", encoding="utf-8")
+    scanner = _scanner(tmp_path, operator=True, config_file=str(chosen))
+
+    scanner._run_subprocess(command=["trivy", "fs", "/t"], results_dir=tmp_path)
+
+    assert fake.calls == []
+
+
+def test_a_tree_set_trivy_config_cannot_turn_the_update_off(tmp_path, monkeypatch):
+    """Not honored, the file never reaches the update, so neither does its opt-out."""
+    fake = _FakeTrivy()
+    _update_env(tmp_path, monkeypatch, fake)
+    chosen = tmp_path / "elsewhere" / "trivy.yaml"
+    chosen.parent.mkdir()
+    chosen.write_text("db:\n  skip-update: true\n", encoding="utf-8")
+    scanner = _scanner(tmp_path, config_file=str(chosen))
+
+    scanner._run_subprocess(command=["trivy", "fs", "/t"], results_dir=tmp_path)
+
+    (update,) = fake.calls
+    assert update[1:3] == ["image", "--download-db-only"]
+    assert Path(_value(update, "--config")).name == "empty-config.yaml"
 
 
 def test_misconfig_also_fetches_the_checks_bundle_and_skips_it(tmp_path, monkeypatch):

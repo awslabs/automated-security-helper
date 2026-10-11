@@ -264,6 +264,26 @@ def test_an_operators_exit_code_setting_keeps_the_report(
     assert STABLE <= _pairs(report)
 
 
+@pytest.mark.parametrize("where", ["env", "config"])
+def test_an_operators_opt_out_of_the_database_update_is_honored(
+    tmp_path, trivy_env, monkeypatch, where
+):
+    """trivy refuses --download-db-only when its settings say to skip the update; ASH
+    then leaves the update out and scans the cached database as it is."""
+    source = _copy_fixture(tmp_path)
+    options: dict = {}
+    if where == "env":
+        monkeypatch.setenv("TRIVY_SKIP_DB_UPDATE", "true")
+    else:
+        operator_config = tmp_path / "operator" / "trivy.yaml"
+        operator_config.parent.mkdir()
+        operator_config.write_text("db:\n  skip-update: true\n", encoding="utf-8")
+        options = {"operator": True, "config_file": str(operator_config)}
+    scanner, report = _scan_direct(source, tmp_path / "out", **options)
+    assert scanner.exit_code == 0
+    assert STABLE <= _pairs(report)
+
+
 # --------------------------------------------------------------------------- #
 # ash scan, end to end
 # --------------------------------------------------------------------------- #

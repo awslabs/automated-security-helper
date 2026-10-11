@@ -156,6 +156,9 @@
     scan downloads the database again; set `TRIVY_CACHE_DIR` to keep one location.
     Both scanners run with `--exit-code=0`, so `TRIVY_EXIT_CODE` or an `exit-code`
     in the operator's trivy.yaml no longer turns a scan with findings into a failure.
+    An operator's `TRIVY_SKIP_DB_UPDATE=true` (or `db.skip-update: true` in the
+    honored `config_file`) turns ASH's database update off too, with a warning;
+    the scan reads the cached database, and the staleness check still applies.
 
   Options that name something a tool executes or loads are not taken from a config
   file inside the scanned tree: actionlint's `shellcheck` and `pyflakes` accept only

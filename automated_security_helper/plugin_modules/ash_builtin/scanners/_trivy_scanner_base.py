@@ -280,6 +280,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         at the cache the update wrote (``--cache-dir``), which is also the one the
         sandbox mounts. The scan-time staleness check
         (``utils/content_db_staleness.py``) still measures the database after.
+        An update the operator's own trivy settings turn off (``TRIVY_SKIP_DB_UPDATE``,
+        or ``db.skip-update`` in the honored ``config_file``) is left out, with a
+        warning (``content_db_refresh.trivy_update_opt_outs``), and the scan reads
+        the cache as it is.
 
         Not done offline, where ``OFFLINE_FLAGS`` already skip every update.
         """
