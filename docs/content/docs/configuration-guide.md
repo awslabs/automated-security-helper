@@ -40,10 +40,11 @@ one without that table is not a config source. The lists come from
 `automated_security_helper/core/constants.py`.
 
 Sources are never merged. If more than one exists, ASH logs which one it used
-and logs a warning naming each one it ignored. The scan repeats each of those
-warnings under "CONFIGURATION WARNING" in its summary and records it in the
+and logs a warning naming each one it ignored, once. The scan repeats each of
+those warnings under "CONFIGURATION WARNING" in its summary and records it in the
 results as a `config_warning` entry of `validation_checkpoints`, because the
-settings in an ignored source are not applied. The names in items 1-12 are
+settings in an ignored source are not applied; `ash merge` keeps one copy of a
+warning every shard recorded. The names in items 1-12 are
 deprecated in favor of an `ashrc` file or `[tool.ash]`, and the warning says so
 when one of them shadows a newer source. They still take precedence, so adding a
 `[tool.ash]` table to a repository that already has `.ash/.ash.yaml` does not

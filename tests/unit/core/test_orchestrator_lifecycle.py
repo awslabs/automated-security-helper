@@ -521,7 +521,11 @@ class TestIgnoredConfigSources:
 
         assert orch.config.project_name == "used"
         warned = [str(c.args[0]) for c in mock_logger.warning.call_args_list]
-        assert any("CONFIG WARNING" in m and ".ashrc.toml" in m for m in warned)
+        # Named: nothing logged it before the orchestrator. Discovered: resolution
+        # logged it, so the orchestrator does not log it again.
+        assert (
+            any("CONFIG WARNING" in m and ".ashrc.toml" in m for m in warned) is named
+        )
         checkpoints = [
             c
             for c in returned.validation_checkpoints
@@ -531,6 +535,74 @@ class TestIgnoredConfigSources:
         assert ".ashrc.toml" in checkpoints[0]["message"]
         assert "takes precedence" in checkpoints[0]["message"]
         assert checkpoints[0]["metadata"]["source"] == "config_resolution"
+
+    @pytest.mark.parametrize(
+        "named", [pytest.param(False, id="discovered"), pytest.param(True, id="named")]
+    )
+    def test_the_ignored_source_is_logged_once(
+        self, tmp_path, monkeypatch, caplog, named
+    ):
+        """Discovery's warning is logged once in a scan, then shown in the summary.
+
+        Named is how ``ash scan`` runs: run_ash_scan discovers the file and passes
+        its path, and the orchestrator resolves it.
+        """
+        import logging
+
+        from automated_security_helper.interactions.run_ash_scan import (
+            _discovered_config_path,
+        )
+
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        src = tmp_path / "src"
+        used = self._two_sources(src)
+        engine = _EngineStub(phases_result=AshAggregatedResults())
+
+        with caplog.at_level(logging.WARNING):
+            if named:
+                assert _discovered_config_path(src, log_selection=True) == (
+                    used.as_posix()
+                )
+            orch = _bare(
+                src, tmp_path / "out", config_path=used.as_posix() if named else None
+            )
+            with patch(
+                "automated_security_helper.core.orchestrator.ScanExecutionEngine",
+                return_value=engine,
+            ):
+                orch.initialize()
+
+        logged = [
+            r.getMessage() for r in caplog.records if ".ashrc.toml" in r.getMessage()
+        ]
+        assert len(logged) == 1, logged
+
+    def test_the_checkpoint_says_the_settings_are_not_applied(
+        self, tmp_path, monkeypatch
+    ):
+        """Not "suppressions may not be active", which reads as a broken config."""
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        src = tmp_path / "src"
+        self._two_sources(src)
+        engine = _EngineStub(phases_result=AshAggregatedResults())
+        orch = _bare(src, tmp_path / "out")
+        with patch(
+            "automated_security_helper.core.orchestrator.ScanExecutionEngine",
+            return_value=engine,
+        ):
+            orch.initialize()
+        with patch(
+            "automated_security_helper.core.orchestrator.scan_set", return_value=[]
+        ):
+            returned = orch.execute_scan(phases=["scan"])
+
+        (checkpoint,) = [
+            c
+            for c in returned.validation_checkpoints
+            if c.get("type") == "config_warning"
+        ]
+        assert "may not be active" not in checkpoint["metadata"]["impact"]
+        assert "not applied" in checkpoint["metadata"]["impact"]
 
     def test_control_a_single_source_adds_no_checkpoint(self, tmp_path, monkeypatch):
         monkeypatch.delenv("ASH_CONFIG", raising=False)

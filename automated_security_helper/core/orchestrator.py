@@ -10,7 +10,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from automated_security_helper.base.plugin_context import PluginContext
 
-from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.config.resolve_config import (
+    LoggedResolutionWarning,
+    resolve_config,
+)
 from automated_security_helper.core.enums import ExecutionStrategy
 from automated_security_helper.core.progress import (
     ExecutionPhaseType,
@@ -357,10 +360,12 @@ class ASHScanOrchestrator(BaseModel):
                 client_overrides=self.client_overrides,
             )
 
-        # Surface config resolution warnings prominently
+        # Surface config resolution warnings prominently, once: resolution has
+        # already logged some of them (LoggedResolutionWarning).
         if self.config._resolution_warnings:
             for warning in self.config._resolution_warnings:
-                ASH_LOGGER.warning(f"⚠️  CONFIG WARNING: {warning}")
+                if not isinstance(warning, LoggedResolutionWarning):
+                    ASH_LOGGER.warning(f"⚠️  CONFIG WARNING: {warning}")
 
         ASH_LOGGER.verbose("Setting up working directories")
 
@@ -658,7 +663,7 @@ class ASHScanOrchestrator(BaseModel):
                             "message": warning,
                             "metadata": {
                                 "source": "config_resolution",
-                                "impact": "Suppressions and custom settings may not be active",
+                                "impact": "Settings named in this message are not applied as written",
                             },
                         }
                     )

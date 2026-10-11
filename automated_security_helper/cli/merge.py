@@ -895,7 +895,16 @@ def merge_shard_results(
             merged.sarif.merge_sarif_report(shard.sarif)
             _merge_tool_extensions(merged, shard)
 
-        merged.validation_checkpoints.extend(shard.validation_checkpoints)
+        # Every shard read the same config, so each recorded the same config
+        # warnings; those are kept once. Other checkpoints are per shard.
+        merged.validation_checkpoints.extend(
+            checkpoint
+            for checkpoint in shard.validation_checkpoints
+            if not (
+                checkpoint.get("type") == "config_warning"
+                and checkpoint in merged.validation_checkpoints
+            )
+        )
         merged.used_suppressions.update(shard.used_suppressions)
 
         for name, converter_result in shard.converter_results.items():

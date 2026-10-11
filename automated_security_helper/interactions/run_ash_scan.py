@@ -1230,15 +1230,17 @@ def _discovered_config_path(
     workspace knobs and the orchestrator all read the same file -- including a
     pyproject.toml [tool.ash] table or an ashrc file. Discovery errors are left
     to the caller.
+
+    Nothing is logged here, ``log_selection`` or not: the caller logs the file it
+    uses, and the sources discovery ignored become resolution warnings when the
+    orchestrator resolves this file, which logs each one once and records it with
+    the results. Logging them here as well printed each one twice.
     """
     from automated_security_helper.config.config_sources import (
         discover_config_source,
-        log_config_discovery,
     )
 
     discovery = discover_config_source(source_dir)
-    if log_selection:
-        log_config_discovery(discovery, announce_selected=False)
     if discovery.selected is None:
         return None
     return discovery.selected.path.as_posix()

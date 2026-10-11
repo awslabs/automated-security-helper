@@ -53,6 +53,17 @@ from automated_security_helper.core.exceptions import (
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
+class LoggedResolutionWarning(str):
+    """A resolution warning resolve_config has already logged.
+
+    Every resolution warning is reported with a scan's results; the orchestrator
+    also logs each one, except these, so that none is logged twice. The sources
+    discovery ignored are logged by discovery when resolve_config discovers.
+    """
+
+    __slots__ = ()
+
+
 def find_config_file(search_dir: Path | None = None) -> Optional[Path]:
     """Return the config source a scan of search_dir would use, or None.
 
@@ -712,7 +723,10 @@ def _resolve_config(
                 "No configuration file provided, checking for default paths"
             )
             discovery = discover_config_source(source_dir)
-            ignored_sources = log_config_discovery(discovery)
+            ignored_sources = [
+                LoggedResolutionWarning(message)
+                for message in log_config_discovery(discovery)
+            ]
             if discovery.selected is not None:
                 config_path = discovery.selected.path
                 confine_to = source_dir

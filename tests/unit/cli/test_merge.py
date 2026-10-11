@@ -2484,3 +2484,43 @@ class TestConverterRowsAcrossShards:
         merge_shard_results(as_loaded(shards))
 
         assert [m.converter_results["jupyter"].model_dump() for m in shards] == before
+
+
+class TestConfigWarningsAreMergedOnce:
+    """Every shard of one scan reads the same config, so each records the same
+    config warnings; the merged report lists each one once."""
+
+    @staticmethod
+    def _warning(message: str) -> Dict:
+        return {
+            "type": "config_warning",
+            "severity": "warning",
+            "message": message,
+            "metadata": {"source": "config_resolution"},
+        }
+
+    def test_a_config_warning_every_shard_carries_appears_once(self):
+        shards = build_shards(3)
+        for shard in shards:
+            shard.validation_checkpoints.append(self._warning("ignored source"))
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert [
+            c
+            for c in merged.validation_checkpoints
+            if c.get("type") == "config_warning"
+        ] == [self._warning("ignored source")]
+
+    def test_control_different_config_warnings_are_all_kept(self):
+        shards = build_shards(2)
+        shards[0].validation_checkpoints.append(self._warning("first"))
+        shards[1].validation_checkpoints.append(self._warning("second"))
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert [
+            c["message"]
+            for c in merged.validation_checkpoints
+            if c.get("type") == "config_warning"
+        ] == ["first", "second"]
