@@ -21,10 +21,14 @@ from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
 )
 
+#: In the refusal of an overlay a file of which is not the operator's.
+_NOT_THE_OPERATORS = "must be the operator's"
+
 
 @pytest.fixture(autouse=True)
 def _no_ash_config(monkeypatch):
     monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
 
 
 def _write(path: Path, document) -> Path:
@@ -220,22 +224,81 @@ def test_a_grant_only_the_project_sets_is_still_confined(tmp_path):
     assert config.sandbox.extra_read_paths == []
 
 
-def test_an_overlay_inside_the_scanned_tree_grants_nothing(tmp_path):
-    """Layering does not make a file the operator's: where it sits decides."""
+def test_an_overlay_inside_the_scanned_tree_is_refused(tmp_path):
+    """Layering does not make a file the operator's: where it sits decides, and a
+    file the repository wrote cannot be made final over the repository."""
     project = _project(tmp_path, {})
     inside = _write(
         tmp_path / "repo" / "ops.yaml",
         {"sandbox": {"extra_read_paths": ["/inside/x"]}},
     )
 
+    with pytest.raises(ASHConfigValidationError, match=_NOT_THE_OPERATORS) as raised:
+        resolve_config(
+            config_path=project,
+            source_dir=tmp_path / "repo",
+            trusted_config_path=inside,
+            overlay_config_path=inside,
+        )
+
+    assert "ops.yaml" in str(raised.value)
+
+
+def test_an_overlay_extending_a_base_inside_the_scanned_tree_is_refused(tmp_path):
+    """The operator's directory holds the scanned tree, so the base passes the
+    extends confinement and only the check that it is the operator's refuses it."""
+    ops = tmp_path / "ops"
+    base = _write(ops / "ws" / "shared" / "base.yaml", {"fail_on_findings": False})
+    operator = _write(
+        ops / "ash.yaml", {"extends": "ws/shared/base.yaml", "project_name": "op"}
+    )
+    project = _write(ops / "ws" / "repo" / ".ash" / ".ash.yaml", {})
+
+    with pytest.raises(ASHConfigValidationError, match=_NOT_THE_OPERATORS) as raised:
+        resolve_config(
+            config_path=project,
+            source_dir=ops / "ws" / "repo",
+            scanned_root=ops / "ws",
+            trusted_config_path=operator,
+            overlay_config_path=operator,
+        )
+
+    assert base.name in str(raised.value)
+
+
+def test_the_same_overlay_layers_when_its_base_is_outside_the_scanned_tree(tmp_path):
+    """Control for the test above: the base moved out of the tree is the operator's."""
+    ops = tmp_path / "ops"
+    _write(ops / "shared" / "base.yaml", {"fail_on_findings": False})
+    operator = _write(ops / "ash.yaml", {"extends": "shared/base.yaml"})
+    project = _write(ops / "ws" / "repo" / ".ash" / ".ash.yaml", {})
+
     config = resolve_config(
         config_path=project,
-        source_dir=tmp_path / "repo",
-        trusted_config_path=inside,
-        overlay_config_path=inside,
+        source_dir=ops / "ws" / "repo",
+        scanned_root=ops / "ws",
+        trusted_config_path=operator,
+        overlay_config_path=operator,
     )
 
-    assert config.sandbox.extra_read_paths == []
+    assert config.fail_on_findings is False
+
+
+def test_an_overlay_an_mcp_client_delivered_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
+    project = _project(tmp_path, {})
+    delivered = _write(
+        tmp_path / "mcp-workspaces" / "sess" / "upload" / "ash.yaml",
+        {"fail_on_findings": False},
+    )
+
+    with pytest.raises(ASHConfigValidationError, match=_NOT_THE_OPERATORS):
+        resolve_config(
+            config_path=project,
+            source_dir=tmp_path / "repo",
+            trusted_config_path=delivered,
+            overlay_config_path=delivered,
+        )
 
 
 def test_the_overlays_extends_chain_counts_as_set(tmp_path):
@@ -256,15 +319,57 @@ def test_a_project_config_that_cannot_be_read_falls_back_to_the_overlay(tmp_path
     project = tmp_path / "repo" / ".ash" / ".ash.yaml"
     project.parent.mkdir(parents=True)
     project.write_text("fail_on_findings: [unclosed\n", encoding="utf-8")
-    operator = _operator(tmp_path, {"fail_on_incomplete_scanners": True})
+    # Not the default, so falling back to the defaults would fail this.
+    operator = _operator(tmp_path, {"fail_on_incomplete_scanners": False})
 
     config = _resolve(tmp_path, project, operator)
 
-    assert config.fail_on_incomplete_scanners is True
+    assert config.fail_on_incomplete_scanners is False
     assert any(
-        "Failed to load configuration file" in warning
+        "Failed to load configuration file" in warning and "alone" in warning
         for warning in config._resolution_warnings
     )
+
+
+def test_an_unexpected_error_in_the_project_config_falls_back_to_the_overlay(
+    tmp_path, monkeypatch
+):
+    from automated_security_helper.config import resolve_config as module
+
+    project = _project(tmp_path, {"project_name": "p"})
+    operator = _operator(tmp_path, {"fail_on_incomplete_scanners": False})
+    real = module.resolve_config_document
+
+    def failing(path, *args, **kwargs):
+        if Path(path) == project:
+            raise RuntimeError("unexpected")
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(module, "resolve_config_document", failing)
+
+    config = _resolve(tmp_path, project, operator)
+
+    assert config.fail_on_incomplete_scanners is False
+
+
+def test_with_no_project_config_found_the_overlay_is_used_alone(tmp_path):
+    (tmp_path / "repo").mkdir()
+    operator = _operator(tmp_path, {"fail_on_incomplete_scanners": False})
+
+    config = resolve_config(source_dir=tmp_path / "repo", overlay_config_path=operator)
+
+    assert config.fail_on_incomplete_scanners is False
+
+
+def test_with_no_source_and_no_config_the_overlay_is_used_alone(tmp_path, monkeypatch):
+    # The working directory is the tree then, so the operator's file is outside it.
+    (tmp_path / "cwd").mkdir()
+    monkeypatch.chdir(tmp_path / "cwd")
+    operator = _operator(tmp_path, {"fail_on_incomplete_scanners": False})
+
+    config = resolve_config(overlay_config_path=operator)
+
+    assert config.fail_on_incomplete_scanners is False
 
 
 def test_a_missing_overlay_is_refused(tmp_path):
@@ -283,7 +388,23 @@ def test_an_overlay_that_does_not_validate_is_refused_and_named(tmp_path):
     project = _project(tmp_path, {})
     operator = _operator(tmp_path, {"fail_on_findings": "sometimes"})
 
-    with pytest.raises(ASHConfigValidationError, match="operator"):
+    with pytest.raises(ASHConfigValidationError) as raised:
+        _resolve(tmp_path, project, operator)
+
+    # Refused on its own, before anything is layered.
+    assert f"'{operator.as_posix()}'" in str(raised.value)
+    assert "layered over" not in str(raised.value)
+
+
+def test_an_invalid_overlay_is_refused_when_the_project_config_is_unreadable(
+    tmp_path,
+):
+    project = tmp_path / "repo" / ".ash" / ".ash.yaml"
+    project.parent.mkdir(parents=True)
+    project.write_text("x: [unclosed\n", encoding="utf-8")
+    operator = _operator(tmp_path, {"fail_on_findings": "sometimes"})
+
+    with pytest.raises(ASHConfigValidationError):
         _resolve(tmp_path, project, operator)
 
 

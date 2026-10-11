@@ -311,14 +311,15 @@ def resolve_config(
             replaces the selected config's. ``config_overrides`` apply after it.
             Where the default config would be used instead of a selected file
             (none was found, or it could not be loaded), this file is used
-            alone. Workspace mode passes the
-            operator's ``--config`` here for a project that has a config of its
-            own (``workspace/resolver.py``), and the same file as
-            ``trusted_config_path``, so a field the operator set is its trusted
-            value. Its files join the chain: one inside the scanned tree, or one
-            an MCP client delivered, is checked and confined as any other file of
-            the chain is. Refused when it is missing or does not validate on its
-            own, and not combined with ``untrusted_config``.
+            alone. Workspace mode passes the operator's ``--config`` here for a
+            project that has a config of its own (``workspace/resolver.py``), and
+            the same file as ``trusted_config_path``, so a field the operator set
+            is its trusted value. Every file it is built from must be the
+            operator's: one inside the scanned tree (from ``scanned_root``) or
+            one an MCP client delivered would make its settings final over the
+            tree, so such an overlay is refused (``check_operator_config``), as
+            is one that is missing or does not validate on its own. Not combined
+            with ``untrusted_config``.
 
     A file of the chain an MCP client delivered
     (``cli/mcp/sandbox.config_is_client_supplied``) is confined as a file inside
@@ -368,6 +369,13 @@ def resolve_config(
         if overlay_config_path is not None
         else None
     )
+    if overlay is not None:
+        _refuse_unless_the_operators(
+            overlay,
+            scanned_root
+            if scanned_root is not None
+            else (source_dir if source_dir is not None else Path.cwd()),
+        )
     config = _resolve_config(
         config_path,
         source_dir,
@@ -759,6 +767,58 @@ def _load_overlay(
             f"{str(e)}. Run 'ash config lint' to identify and fix issues."
         ) from e
     return document
+
+
+def _refuse_unless_the_operators(
+    overlay: ResolvedConfigDocument, scanned_root: Path | str
+) -> None:
+    """Refuse ``overlay`` when a file it is built from is not the operator's.
+
+    The overlay is final over every project's own config, so a file of its chain
+    inside the scanned tree, or one an MCP client delivered
+    (``_not_the_operators``), would make that file's settings final over the tree
+    that wrote it. Refused rather than confined: confining it field by field
+    would still leave every field outside the confined settings final.
+    """
+    others = _not_the_operators(
+        overlay.chain, scanned_trees(Path(scanned_root)), overlay.names
+    )
+    if not others:
+        return
+    root = overlay.chain[-1]
+    files = ", ".join(f"'{describe_config_path(path)}'" for path in others)
+    verb = "is" if len(others) == 1 else "are each"
+    raise ASHConfigValidationError(
+        f"The operator config '{describe_config_path(root)}' is layered over each "
+        "project's own config, so every file it is built from must be the "
+        f"operator's. {files} {verb} inside the tree being scanned or delivered "
+        "by an MCP client. Keep the config, and every base it extends, outside "
+        "the scanned tree and outside the MCP workspace root."
+    )
+
+
+def check_operator_config(
+    operator_config_path: Path | str,
+    scanned_root: Path | str,
+    permit_base: Optional[Callable[[Path], bool]] = None,
+    remote_client: bool = False,
+) -> None:
+    """Refuse an operator config that cannot be layered over a workspace's projects.
+
+    The checks ``resolve_config`` makes of an ``overlay_config_path``: the file
+    must exist, resolve and validate on its own, and every file of its chain must
+    be the operator's (``_refuse_unless_the_operators``). Workspace resolution
+    runs them once for the whole workspace, so a project with no config of its
+    own, which uses the operator's file alone, is refused with the rest.
+
+    Raises:
+        ASHConfigValidationError: The config cannot be used; exit 3 in workspace
+            mode.
+    """
+    overlay = _load_overlay(
+        operator_config_path, None, permit_base, env_refused_for(remote_client)
+    )
+    _refuse_unless_the_operators(overlay, scanned_root)
 
 
 def _overlaid(

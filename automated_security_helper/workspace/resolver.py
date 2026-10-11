@@ -131,6 +131,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.client_config_policy import ClientConfigRules
 from automated_security_helper.config.resolve_config import (
+    check_operator_config,
     find_config_file,
     resolve_config,
 )
@@ -427,6 +428,20 @@ def _as_named(path: Optional[Path]) -> Optional[str]:
     return Path(os.path.abspath(path)).as_posix() if path is not None else None
 
 
+def _operator_config(
+    default_config: Optional[Path], trusted_config: Optional[Path]
+) -> Optional[Path]:
+    """The operator's config a workspace layers over each project's own, or None.
+
+    ``trusted_config`` when there is one: under the MCP server, the profile as the
+    operator registered it, never the client's patched ``default_config``.
+    Otherwise ``default_config``, which ``check_operator_config`` then refuses if
+    it is a client's file, so a client's copy is never layered for want of the
+    registered one.
+    """
+    return trusted_config if trusted_config is not None else default_config
+
+
 def _resolve_project_config(
     candidate: _Candidate,
     config_overrides: Tuple[str, ...] = (),
@@ -488,6 +503,14 @@ def _resolve_project_config(
     the profile sets (``profile_registry.materialize_session_config``), so the
     project still fills the rest.
 
+    Every file the operator's config is built from must be the operator's.
+    ``resolve_workspace`` refuses one with a file inside the workspace or one an
+    MCP client delivered (``resolve_config.check_operator_config``), as a config
+    error, before any project resolves; ``resolve_config`` refuses such an
+    overlay again for each project. There is no fallback from a missing
+    ``trusted_config`` to a client's ``default_config``: that copy is a client's
+    file, so it is refused rather than layered (``_operator_config``).
+
     These values must reach BOTH this function and
     ``execution._project_config_with_policy``, which re-resolves at scan time:
     the plan's reported threshold comes from this call and the scan's actual
@@ -522,7 +545,7 @@ def _resolve_project_config(
             message is re-issued with the project key so the operator knows which
             of N projects to look at.
     """
-    operator = trusted_config if trusted_config is not None else default_config
+    operator = _operator_config(default_config, trusted_config)
     try:
         # The project directory is one the caller may read, but a source found
         # there may be a link out of it, and discovery reads a pyproject.toml to
@@ -987,6 +1010,15 @@ def resolve_workspace(
             f"scan: every folder it lists was skipped. Exiting 0 here would "
             f"report a clean result for a workspace nothing examined."
         )
+
+    operator = _operator_config(
+        Path(default_config) if default_config else None,
+        Path(trusted_config) if trusted_config else None,
+    )
+    if operator is not None:
+        # Once for the whole workspace, so a project with no config of its own,
+        # which uses the operator's file alone, is refused with the rest.
+        check_operator_config(operator, definition.root, remote_client=remote_client)
 
     projects: List[ProjectPlan] = []
     for candidate in candidates:
