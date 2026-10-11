@@ -158,9 +158,11 @@
   their own names there, and cfn-lint's and trivy's `config_file` (a `.cfnlintrc`
   can import Python rules, a `trivy.yaml` can load WASM modules) are honored only
   from `--config-overrides` or a config file outside the tree, for a file outside
-  it. cfn-lint's and zizmor's `tool_version` must be a version constraint, and
-  zizmor's, which picks the release that is installed and accepted, is honored only
-  from the operator; from a config in the tree the default constraint applies.
+  it. cfn-lint's and zizmor's `tool_version` must be a version constraint.
+  zizmor's and cfn-lint's `tool_version`, which pick the release that is installed
+  and accepted, cfn-lint's `ignore_checks` and cfn-guard's `rule_sets`, which narrow
+  what is reported, are honored only from the operator; from a config in the scanned
+  tree each is ignored with a warning and the default applies.
 
   None of the six reads its tool's own config from the scanned repository: see
   "The scanned repository's own scanner configs are not read" under Behavior

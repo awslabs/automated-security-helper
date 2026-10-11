@@ -682,6 +682,68 @@ class TestTheScannedTreeCannotLoadRules:
         assert arg == f"--config-file={operator_rc.resolve().as_posix()}"
 
 
+class TestOptionsOnlyTheOperatorMaySet:
+    """``ignore_checks`` drops findings before ASH sees them, and ``tool_version``
+    chooses the cfn-lint release uv installs. Set by a config in the scanned tree
+    (or an MCP client), each is ignored with a warning and its default is used,
+    as ``config_file`` is."""
+
+    @staticmethod
+    def _args(scanner, repo: Path) -> list:
+        results = repo / "out"
+        results.mkdir(exist_ok=True)
+        return scanner._option_args(results)
+
+    def test_ignore_checks_from_the_scanned_tree_are_ignored(self, repo, caplog):
+        scanner = _scanner(repo, ignore_checks=["E", "W"])
+        with caplog.at_level("WARNING"):
+            args = self._args(scanner, repo)
+        assert "--ignore-checks" not in args
+        assert "Ignoring scanners.cfn-lint.options.ignore_checks" in caplog.text
+
+    @pytest.mark.parametrize("how", ["outside-config", "override"])
+    def test_ignore_checks_set_by_the_operator_are_passed(self, repo, how):
+        if how == "outside-config":
+            scanner = _scanner(repo, operator=True, ignore_checks=["W2001"])
+        else:
+            scanner = _scanner(
+                repo,
+                overrides=("scanners.cfn-lint.options.ignore_checks=[W2001]",),
+                ignore_checks=["W2001"],
+            )
+        args = self._args(scanner, repo)
+        assert args[args.index("--ignore-checks") + 1] == "W2001"
+
+    def test_tool_version_from_the_scanned_tree_is_ignored(self, repo, caplog):
+        with caplog.at_level("WARNING"):
+            scanner = _scanner(repo, tool_version="==1.43.3")
+            constraint = scanner._get_tool_version_constraint()
+        assert constraint == ">=1.43.3,<2.0.0"
+        assert "Ignoring scanners.cfn-lint.options.tool_version" in caplog.text
+        assert not any("1.43.3," not in c for c in scanner.uv_tool_install_commands)
+
+    def test_tool_version_set_by_the_operator_is_used(self, repo):
+        scanner = _scanner(repo, operator=True, tool_version="==1.57.2")
+        assert scanner._get_tool_version_constraint() == "==1.57.2"
+
+    def test_each_refusal_is_logged_once_per_scanner(self, repo, caplog):
+        with caplog.at_level("WARNING"):
+            scanner = _scanner(repo, ignore_checks=["E"], tool_version="==1.43.3")
+            for _ in range(3):
+                self._args(scanner, repo)
+                scanner._get_tool_version_constraint()
+        assert (
+            caplog.text.count("Ignoring scanners.cfn-lint.options.ignore_checks") == 1
+        )
+        assert caplog.text.count("Ignoring scanners.cfn-lint.options.tool_version") == 1
+
+    def test_a_tree_value_equal_to_the_default_is_not_warned_about(self, repo, caplog):
+        with caplog.at_level("WARNING"):
+            scanner = _scanner(repo, ignore_checks=[], tool_version=">=1.43.3,<2.0.0")
+            self._args(scanner, repo)
+        assert "Ignoring scanners.cfn-lint" not in caplog.text
+
+
 class TestToolVersionIsOnlyAVersionConstraint:
     """tool_version is appended to the package name for uv; it must stay a constraint."""
 

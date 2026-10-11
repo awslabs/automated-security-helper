@@ -477,6 +477,38 @@ def test_a_relative_path_in_the_operators_cfnlintrc_never_reaches_the_tree(tmp_p
     )
 
 
+def test_the_scanned_trees_config_cannot_narrow_what_is_reported(tmp_path):
+    """ignore_checks and rule_sets drop findings before ASH sees them, and
+    tool_version picks the cfn-lint release. Set by the tree's .ash/.ash.yaml,
+    each is ignored with a warning and the default is used."""
+    _require_tools()
+    proc, output = _scan_with_tree_config(
+        tmp_path,
+        {
+            "scanners": {
+                "cfn-lint": {
+                    "options": {"ignore_checks": ["E", "W"], "tool_version": "==1.43.3"}
+                },
+                "cfn-guard": {"options": {"rule_sets": ["wa-Reliability-Pillar"]}},
+            }
+        },
+        scanners="cfn-lint,cfn-guard",
+    )
+
+    log = proc.stdout[-3000:] + proc.stderr[-3000:]
+    lint = _results(output, "cfn-lint")
+    assert {(r["ruleId"], _where(r)[1]) for r in lint} == CFN_LINT_EXPECTED, log
+    guard = _results(output, "cfn-guard")
+    assert {r["ruleId"] for r in guard} == CFN_GUARD_EXPECTED_RULES, log
+    ash_log = (output / "ash.log").read_text(encoding="utf-8", errors="replace")
+    for option in (
+        "cfn-lint.options.ignore_checks",
+        "cfn-lint.options.tool_version",
+        "cfn-guard.options.rule_sets",
+    ):
+        assert f"Ignoring scanners.{option}" in ash_log, option
+
+
 def test_the_operator_can_name_a_cfnlintrc_outside_the_tree(tmp_path):
     """The control: the same kind of rules file is imported when the operator names it."""
     _require_cfn_lint()

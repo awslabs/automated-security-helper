@@ -400,20 +400,29 @@ class TestRuleSelection:
         assert caplog.text.count("Ignoring scanners.cfn-guard.options.rules_paths") == 1
         assert caplog.text.count("ASH's default rule set") == 1
 
-    def test_rules_paths_from_the_tree_leave_the_chosen_rule_sets_alone(
-        self, repo, rules_root, caplog
+    @pytest.mark.parametrize("with_rules_paths", [False, True])
+    def test_rule_sets_from_the_scanned_tree_are_ignored(
+        self, repo, rules_root, caplog, with_rules_paths
     ):
+        """A narrower set drops findings: wa-Reliability-Pillar alone turned 24
+        findings on the fixture into 9, losing every S3 public-access, encryption
+        and logging one. From the scanned tree, rule_sets is ignored with a
+        warning and the default set runs."""
         directory = _fake_bundle(rules_root)
-        (repo / "policy.guard").write_text("rule mine { }\n")
-        scanner = _scanner(
-            repo,
-            operator=False,
-            rule_sets=["custom-set"],
-            rules_paths=["policy.guard"],
-        )
+        options = {"rule_sets": ["custom-set"]}
+        if with_rules_paths:
+            (repo / "policy.guard").write_text("rule mine { }\n")
+            options["rules_paths"] = ["policy.guard"]
+        scanner = _scanner(repo, operator=False, **options)
         with caplog.at_level("WARNING"):
-            assert scanner.rule_files() == [directory / "custom-set.guard"]
-        assert "default rule set" not in caplog.text
+            assert scanner.rule_files() == [directory / "wa-Security-Pillar.guard"]
+        assert "Ignoring scanners.cfn-guard.options.rule_sets" in caplog.text
+        assert f"ASH's default rule set, {DEFAULT_RULE_SET}" in caplog.text
+
+    def test_rule_sets_set_by_the_operator_are_used(self, repo, rules_root):
+        directory = _fake_bundle(rules_root)
+        scanner = _scanner(repo, operator=True, rule_sets=["custom-set"])
+        assert scanner.rule_files() == [directory / "custom-set.guard"]
 
     def test_an_operator_rules_directory_is_read_as_cfn_guard_reads_one(
         self, repo, rules_root, ash_temp_path

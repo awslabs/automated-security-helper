@@ -69,9 +69,10 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Tuple
+import copy
+from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
-from pydantic import AnyUrl, Field, field_validator
+from pydantic import AnyUrl, Field, PrivateAttr, field_validator
 
 from automated_security_helper.base.options import (
     ScannerOptionsBase,
@@ -102,7 +103,11 @@ from automated_security_helper.utils.cfn_template_discovery import (
     discover_templates,
     display_path,
 )
-from automated_security_helper.utils.config_trust import operator_path
+from automated_security_helper.utils.config_trust import (
+    NOT_THE_OPERATORS,
+    operator_path,
+    set_by_operator,
+)
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.output_excerpt import tool_output_excerpt
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
@@ -205,7 +210,9 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "cfn-lint rule ids or prefixes to skip, e.g. ['W2001', 'W3']. Prefer "
                 "ASH suppressions for individual findings; this removes the rule from "
-                "every template."
+                "every template. Honored only when set by --config-overrides or a "
+                "config file outside the scanned tree; otherwise it is ignored with "
+                "a warning."
             ),
         ),
     ] = []
@@ -231,7 +238,9 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "Version constraint for the cfn-lint installation, in pip requirement "
                 "syntax. The default is the range the scanner's SARIF handling was "
-                "verified against."
+                "verified against. Honored only when set by --config-overrides or a "
+                "config file outside the scanned tree; otherwise it is ignored with "
+                "a warning."
             )
         ),
     ] = ">=1.43.3,<2.0.0"
@@ -279,6 +288,10 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     # package. An operator's config_file outside the tree needs extra_read_paths.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
+    # Options already refused with a warning; each is read on every invocation and
+    # warned about once per scanner.
+    _refused_options: Set[str] = PrivateAttr(default_factory=set)
+
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
             self.config = CfnLintScannerConfig()
@@ -299,9 +312,39 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             )
         return options
 
+    def _operator_option(self, name: str) -> Any:
+        """``options.<name>`` when the operator set it, else its default.
+
+        For the options that decide what cfn-lint reports or which cfn-lint runs:
+        ``ignore_checks`` drops findings before ASH sees them, so they are neither
+        reported nor counted as suppressed (measured: ``ignore_checks: [E, W]`` in
+        the scanned tree's ``.ash/.ash.yaml`` turned 3 findings into a PASSED scan),
+        and ``tool_version`` chooses the release uv installs. A value from a config
+        in the scanned tree or from an MCP client is ignored with a warning, once
+        per scanner, as ``config_file`` is; a value equal to the default is used
+        silently, since using it changes nothing.
+        """
+        options = self._options()
+        value = getattr(options, name)
+        default = type(options).model_fields[name].default
+        if value == default or set_by_operator(
+            self.context.config if self.context is not None else None,
+            f"scanners.cfn-lint.options.{name}",
+            value,
+        ):
+            return value
+        if name not in self._refused_options:
+            self._refused_options.add(name)
+            self._plugin_log(
+                f"Ignoring scanners.cfn-lint.options.{name} ({value!r}): "
+                f"{NOT_THE_OPERATORS}. cfn-lint uses the default, {default!r}.",
+                level=logging.WARNING,
+            )
+        return copy.deepcopy(default)
+
     def _get_tool_version_constraint(self) -> str | None:
-        """The configured ``tool_version``; its default is the verified range."""
-        return self._options().tool_version
+        """The operator's ``tool_version``, else the verified range."""
+        return self._operator_option("tool_version")
 
     def _get_tool_package_extras(self) -> List[str] | None:
         """cfn-lint's SARIF formatter is behind its ``sarif`` extra."""
@@ -383,8 +426,9 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             )
         if options.regions:
             args.extend(["--regions", *options.regions])
-        if options.ignore_checks:
-            args.extend(["--ignore-checks", *options.ignore_checks])
+        ignore_checks = self._operator_option("ignore_checks")
+        if ignore_checks:
+            args.extend(["--ignore-checks", *ignore_checks])
         if options.include_checks:
             args.extend(["--include-checks", *options.include_checks])
         return args

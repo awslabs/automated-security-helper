@@ -65,6 +65,8 @@ For the same reason `config_file` is honored only when the operator sets it, thr
 
 `tool_version` is appended to the package name when ASH installs cfn-lint, so it must be a version constraint such as `>=1.43.3,<2.0.0`. Anything else, including a direct reference such as `@ file:///...`, is ignored with a warning and the default constraint is used.
 
+`ignore_checks` and `tool_version` are honored only when you set them as the operator, with `--config-overrides` or an ASH config file outside the scanned tree. `ignore_checks` drops findings before ASH sees them, so they are neither reported nor counted as suppressed, and `tool_version` chooses the cfn-lint release that is installed. Set by an ASH config inside the tree, or by an MCP client, each is ignored with a warning and its default is used. To silence a finding in a repository, use an ASH suppression.
+
 ### Severity mapping
 
 cfn-lint classifies every rule by the first letter of its id. ASH maps that letter to an ASH severity and sets the SARIF level to match, so every report agrees:
@@ -157,6 +159,8 @@ scanners:
 ```
 
 A rule-set name with a `.guard` extension or characters outside letters, digits, `.`, `_` and `-` fails config validation. A well-formed name that is not in the bundle makes the scanner MISSING, with the list of available names.
+
+`rule_sets` is honored only when you set it as the operator, with `--config-overrides` or an ASH config file outside the scanned tree. A narrower set drops findings before ASH sees them: `wa-Reliability-Pillar` alone turns the 24 findings on ASH's test template into 9, losing every public-access, encryption and logging finding. Set by an ASH config inside the tree, or by an MCP client, it is ignored with a warning and `wa-Security-Pillar` is evaluated.
 
 `rules_paths` is honored only when you set it as the operator, with `--config-overrides` or an ASH config file outside the scanned tree; a path the operator names may be inside the scanned tree. Set by an ASH config inside the tree, or by an MCP client, it is ignored with a warning, and if `rule_sets` is empty as well, cfn-guard evaluates the default `wa-Security-Pillar` set instead of nothing. cfn-guard prints a rules file it cannot parse, all of it, in its error, so a path the scanned repository chose could otherwise put any file the scan can read into the report.
 

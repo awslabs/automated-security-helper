@@ -104,7 +104,11 @@ from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
-from automated_security_helper.utils.config_trust import operator_paths
+from automated_security_helper.utils.config_trust import (
+    NOT_THE_OPERATORS,
+    operator_paths,
+    set_by_operator,
+)
 from automated_security_helper.utils.output_excerpt import tool_output_excerpt
 from automated_security_helper.utils.rules_bundles import (
     RulesBundleUnavailable,
@@ -175,7 +179,9 @@ class CfnGuardScannerConfigOptions(ScannerOptionsBase):
                 "file name without the .guard extension, e.g. "
                 "['wa-Security-Pillar', 'cis-aws-benchmark-level-1']. Defaults to the "
                 "Well-Architected Security Pillar set. Set to [] to evaluate only "
-                "rules_paths."
+                "rules_paths. Honored only when set by --config-overrides or a "
+                "config file outside the scanned tree; otherwise it is ignored with "
+                "a warning and the default set is evaluated."
             ),
         ),
     ] = [DEFAULT_RULE_SET]
@@ -403,10 +409,9 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
 
     def _selected_rules(self) -> List[_RuleFile]:
         """The rules cfn-guard will be given, in order. See ``rule_files``."""
-        options = self._options()
         source_dir = self._source_dir()
         operator_rules, refused = self._operator_rules(source_dir)
-        rule_sets = list(options.rule_sets)
+        rule_sets = self._operator_rule_sets()
         if refused and not rule_sets:
             # The repository emptied rule_sets and supplied its own rules. Its
             # rules are not read, and it does not get to switch cfn-guard off.
@@ -431,6 +436,30 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 "rule_sets is empty and rules_paths names no rules file"
             )
         return selected
+
+    def _operator_rule_sets(self) -> List[str]:
+        """``rule_sets`` when the operator chose it, else the default set.
+
+        A narrower set drops findings before ASH sees them, so they are neither
+        reported nor counted as suppressed: ``rule_sets: [wa-Reliability-Pillar]``
+        in the scanned tree's ``.ash/.ash.yaml`` turned 24 findings on the fixture
+        into 9, losing every S3 public-access, encryption and logging finding. A
+        value from a config in the scanned tree or from an MCP client is ignored
+        with a warning, as ``rules_paths`` is; one equal to the default is used.
+        """
+        value = list(self._options().rule_sets)
+        if value == [DEFAULT_RULE_SET] or set_by_operator(
+            self.context.config if self.context is not None else None,
+            "scanners.cfn-guard.options.rule_sets",
+            value,
+        ):
+            return value
+        self._warn_rules_once(
+            f"Ignoring scanners.cfn-guard.options.rule_sets ({value!r}): "
+            f"{NOT_THE_OPERATORS}. cfn-guard evaluates ASH's default rule set, "
+            f"{DEFAULT_RULE_SET}."
+        )
+        return [DEFAULT_RULE_SET]
 
     def rule_files(self) -> List[Path]:
         """The rules files cfn-guard will be evaluated with, in order.
