@@ -2,9 +2,10 @@
 
 Infrastructure as code for running ASH as a service in your own AWS account. Four
 deployment targets, each available as a CDK stack with a committed CloudFormation
-template and as a Terraform module. The two implementations take the same parameters
-and produce the same shape, so the choice between them is a question of which tool
-your organization already runs, not which one gets you more.
+template and as a Terraform module. The two implementations take mostly the same
+parameters, under the same names in snake case, and produce the same shape, so the
+choice between them is a question of which tool your organization already runs, not
+which one gets you more.
 
 ## Why this directory exists
 
@@ -12,10 +13,11 @@ ASH is a CLI first, and running it in CI is a matter of installing it and callin
 These stacks are for the cases where a CLI invocation is not enough:
 
 - A team wants ASH available to agents over MCP, without every agent installing it.
-- A team wants scans to run on a schedule against many repositories, on compute that
-  is not a shared CI runner.
-- A team wants a repository to reject a push that introduces a finding, which needs
-  something listening to the repository rather than something a developer runs.
+- A team wants one MCP endpoint inside its own VPC that several agents share.
+- A team wants every pull request scanned, with the result posted on the pull request
+  and, optionally, an approval vote that blocks the merge once an approval rule
+  requires it. That needs something listening to the repository rather than
+  something a developer runs.
 - A team has a monorepo large enough that one scan does not finish inside a build
   timeout, and needs the work split across parallel executors.
 
@@ -27,46 +29,52 @@ than one stack with switches.
 | Target | What it gives you | Compute | Entry point | Target-specific parameters |
 | --- | --- | --- | --- | --- |
 | AgentCore | ASH's MCP server, reachable by agents | Bedrock AgentCore runtime | MCP over streamable HTTP | `McpStatelessHttp`, `McpAuthHeaderName`, `McpAuthHeaderValue`, `McpMountPath`, `McpAllowedHost` |
-| ECS Fargate | Scheduled and on-demand scans of one or more repositories | ECS task on Fargate | Task invocation | — |
-| Lambda CodeCommit gate | A scan on every push, with the result reported back to the repository | Lambda function | CodeCommit trigger | `CodeCommitRepositoryArn` |
-| CodePipeline distributed executor | One logical scan split across parallel shards, results merged | CodeBuild projects in a pipeline | Pipeline execution | `ShardCount` |
+| ECS Fargate | ASH's MCP server, reachable from inside your VPC | ECS service on Fargate behind an internal Application Load Balancer | MCP over streamable HTTP through the load balancer | `McpStatelessHttp`, `McpAuthHeaderName`, `McpAuthHeaderValue`, `McpMountPath`, `McpAllowedHost`, `McpIngressCidr` |
+| Lambda CodeCommit gate | A scan when a pull request is opened or its source branch is updated, posted as a comment on the pull request | Lambda function | EventBridge rule on CodeCommit pull request events | `CodeCommitRepositoryArn`, `ApprovalGate`, `ChangedFilesOnly`, `MinSeverity`, `VpcId`, `VpcSubnetIds`, `ScanEgressCidr` |
+| CodePipeline distributed executor | One logical scan split across parallel shards, results merged | CodeBuild projects in a pipeline | Pipeline execution | `ShardCount` (in CDK, chosen when the template is synthesized; see below) |
 
-Every target builds the ASH container image into your own ECR repository as part of
-deployment. None of them pull a prebuilt image, because there is no public one to
-pull. See [Trust and the container image](#trust-and-the-container-image).
+Every target builds the ASH container image into your own ECR repository. None of
+them pull a prebuilt image, because there is no public one to pull. See
+[Trust and the container image](#trust-and-the-container-image).
 
 ## What deploying actually costs you
 
 Building the image per deployment is the price of there being no public one, and it
 has consequences worth knowing before the first `create-stack` rather than after:
 
-- The first deployment includes a container build. It is slow — minutes, and longer
-  with `AshOfflineMode` enabled, which vendors scanner rulesets into the image.
-- Two of the targets cannot create their workload until that build finishes, so the
+- AgentCore, Fargate and the CodeCommit gate build the image during stack creation.
+  The build is slow: minutes, and longer with `AshOfflineMode` enabled, which builds
+  scanner rulesets and databases into the image. The distributed pipeline builds its
+  image in the pipeline's first stage on its first run, and the `AshImagePipeline`
+  stack builds only on its schedule or when you start the build project.
+- Those three targets cannot create their workload until that build finishes, so the
   build gates stack creation rather than running alongside it. A stack that looks
   stuck early on is usually waiting on the build.
 - `RebuildSchedule` patches the **repository**. Rolling a newly built image into an
   already-running workload is a further step, documented per target — a rebuild
   alone does not update a running service.
-- Deleting a stack leaves the ECR repository and the artifact buckets behind, on
-  purpose. An image that took twenty minutes to build should not vanish because a
-  rollback removed the stack that referenced it. Deleting them is a deliberate,
+- Deleting a stack leaves the ECR repository, the buckets, the log groups and the
+  stack's KMS key behind, on purpose. An image that took twenty minutes to build
+  should not vanish because a rollback removed the stack that referenced it. Deleting them is a deliberate,
   separate action.
 
 ## Which tool, and where the detail lives
 
 `cdk/` holds the CDK apps and the synthesized templates in `cdk/templates/`. You can
 launch any of them straight from the CloudFormation console without running `cdk` at
-all — the console uploads the template for you, so template size never comes up.
-`terraform/` mirrors the same targets with the same parameter names.
+all. The console uploads the template for you, so template size never comes up.
+`terraform/` mirrors the same targets, with mostly the same names in snake case;
+`terraform/README.md` under "Variable contract" lists the exceptions.
 
 Scripting the launch is where size does come up. CloudFormation caps an inline
-`--template-body` at 51,200 bytes. `AshAgentCore` and `AshCodeCommitGate` fit;
-`AshImagePipeline`, `AshFargate` and `AshDistributedPipeline` do not, and have to be
-uploaded to S3 and launched with `--template-url` instead, where the cap is 1 MB.
-`cdk/README.md` has the sizes and both commands. `AshDistributedPipeline` is roughly
-2.5 times the inline cap and will not be brought under it: it emits one CodeBuild
-action per shard, which is the entire point of that target.
+`aws cloudformation create-stack --template-body` at 51,200 bytes. Only `AshAgentCore`
+fits; `AshCodeCommitGate`, `AshImagePipeline`, `AshFargate` and
+`AshDistributedPipeline` do not, and have to be uploaded to S3 and launched with
+`aws cloudformation create-stack --template-url` instead, where the cap is 1 MB.
+`cdk/README.md` lists which template needs which and gives both commands; run
+`wc -c cdk/templates/*.template.json` for the current sizes. `AshDistributedPipeline`
+is about three times the inline cap and will not be brought under it: it emits one
+CodeBuild action per shard, which is the entire point of that target.
 
 The canonical parameter names live in `cdk/lib/ash-config.ts` and are treated as a
 contract: renaming one is a breaking change for adopters.
@@ -90,16 +98,16 @@ one structural one, both of which will cost you a failed plan if you guess:
 
 | Parameter | Applies to | Meaning |
 | --- | --- | --- |
-| `AshOfflineMode` | all | Run ASH with no network egress at scan time. Scanner vulnerability databases and rulesets are baked into the image at build time instead of fetched per scan. Trades image size and rebuild frequency for a scan that cannot fail on a network problem and cannot reach out from inside your account. |
-| `AshBaseConfigYaml` | image build | The contents of the `.ash.yaml` the deployment scans with, as a string, so the deployed configuration is part of the stack rather than something baked into the image. A repository's own `.ash.yaml` still applies on top of it. |
+| `AshOfflineMode` | all | Build the image in offline mode (`YES` or `NO`). Scanner vulnerability databases and rulesets are built into the image, and ASH runs offline, so a scan does not download them. Trades image size and rebuild frequency for a scan that does not depend on reaching those sources. It does not block network egress; each target's network configuration decides that. |
+| `AshBaseConfigYaml` | each target template in CDK; the `ash-image-pipeline` module in Terraform | An ASH config file's contents, as a string, so the deployed configuration is part of the stack rather than something baked into the image. ASH uses one config file per scan and never merges two. On AgentCore and Fargate, a scan uses the scanned directory's own config file, or the file the client names, when there is one, and this one only when there is none. The CDK distributed pipeline uses this one and never reads the scanned repository's own config file; with this parameter empty, it scans with ASH's built-in defaults. The CDK CodeCommit gate does not apply it. The Terraform READMEs describe the Terraform modules. |
 | `AshVersion` | image build | The ASH version the image is built from. Pin it, so a rebuild reproduces the same scanner set rather than silently moving to whatever is newest. |
 | `RebuildSchedule` | image build | How often the image is rebuilt. An image built once and never rebuilt ages, and the scanners inside it age with it — the tradeoff called out in the trust note below. Offline deployments need this most, because their vulnerability databases are only as fresh as the last build. |
-| `McpStatelessHttp` | MCP-serving targets | Whether the MCP server runs stateless. Defaults to true on AgentCore, and that default is not cosmetic — see [Why `McpStatelessHttp` defaults to true on AgentCore](#why-mcpstatelesshttp-defaults-to-true-on-agentcore). |
+| `McpStatelessHttp` | MCP-serving targets | Whether the MCP server runs stateless. Defaults to true, and that default is not cosmetic. See [Why `McpStatelessHttp` defaults to true](#why-mcpstatelesshttp-defaults-to-true). |
 | `McpAuthHeaderName` | MCP-serving targets | The header the MCP server requires on every request. Names the header only; the value is separate so the two can be rotated independently. |
-| `McpAuthHeaderValue` | MCP-serving targets | The expected value of that header. Supply it from a secret rather than a literal — it is a bearer credential, and a stack parameter is visible to anyone who can describe the stack. |
-| `McpMountPath` | MCP-serving targets | The path the MCP server is mounted at. Worth setting when something else already occupies the default path on the same host. |
-| `McpAllowedHost` | MCP-serving targets | The `Host` value the server accepts, which is what stops a request that arrives with someone else's `Host` header from being served. |
-| `ShardCount` | CodePipeline distributed executor | How many parallel shards one logical scan is split into. Higher is faster up to the point where per-shard startup dominates; a shard still pays image pull and scanner initialization before it scans anything. |
+| `McpAuthHeaderValue` | MCP-serving targets | The expected value of that header. It is a bearer credential. The parameter is `NoEcho`, the stack stores the value in Secrets Manager, and the container receives only the secret's ARN. |
+| `McpMountPath` | MCP-serving targets | The path the MCP server listens on. Leave it at `/mcp` on AgentCore, which routes nothing else; change it only on Fargate, when something else already occupies the default path. |
+| `McpAllowedHost` | MCP-serving targets | Comma-separated `Host` values the server accepts, which keeps DNS-rebinding protection on. Empty accepts any `Host` on AgentCore and the load balancer's DNS name on Fargate. It is enforced only when the ASH in the image has the `ash mcp` option `--allowed-host`, which v3.7.0, the default `AshVersion`, does not. |
+| `ShardCount` | CodePipeline distributed executor | How many parallel shards one logical scan is split into. In CDK it is the `shardCount` context value, read when the template is synthesized (4 in `cdk.json`), and is not a stack parameter; Terraform takes it as `shard_count`. Shards split the set of scanners, not the files, so a count above the number of enabled scanners only adds empty shards, and each shard pays image pull and scanner initialization before it scans anything. |
 | `CodeCommitRepositoryArn` | Lambda CodeCommit gate | The repository the gate watches. |
 
 ## Where the Terraform surface differs
@@ -112,26 +120,34 @@ module and the four target modules do not accept them. Passing
 The targets consume the base config indirectly, through
 `base_config_ssm_parameter_name` and `base_config_ssm_parameter_arn`. The value is
 a whole `.ash.yaml` document, so it is stored in an SSM parameter at the
-image-build layer and the container entrypoint materializes it to
-`.ash/.ash.yaml` at startup. It travels that way because AgentCore Runtime
-exposes only a flat environment map, which a real configuration file does not fit
-into.
+image-build layer, and the container entrypoint writes it to `.ash/.ash.yaml` under
+`/tmp` at startup and points `ASH_CONFIG` at it. It travels that way because
+AgentCore Runtime exposes only a flat environment map, which a real configuration
+file does not fit into.
 
 The full per-module variable matrix is in `terraform/README.md` under "Variable
 contract". Where this table and that one disagree, that one is authoritative for
 Terraform.
 
-## Why `McpStatelessHttp` defaults to true on AgentCore
+## Why `McpStatelessHttp` defaults to true
 
-AgentCore injects its own `Mcp-Session-Id` header into requests it forwards. Measured
-against ASH's MCP server: given a session id the server never issued, the server in
-stateful mode answers `404 Session not found`, while in stateless mode it answers
-`200`. Since AgentCore supplies an id ASH did not issue, stateful mode rejects
-AgentCore's traffic. Stateless is therefore the default for that target rather than
-something an adopter has to discover from a 404.
+Measured against ASH's MCP server: given a session id the server never issued, the
+server in stateful mode answers `404 Session not found`, while in stateless mode it
+answers `200`. AgentCore returns a new `Mcp-Session-Id` on every response, and its
+protocol contract tells clients to send the returned id on the next request. A
+stateful server honors only the id it issued at `initialize`, so a client that follows
+that guidance is refused on its third call. On Fargate, with more than one task behind
+the load balancer, consecutive requests in one session can reach different tasks, and
+a stateful task that did not issue the session answers 404 the same way. Stateless is
+therefore the default on both targets rather than something an adopter has to
+discover from a 404.
 
-The default is target-specific on purpose. A deployment where clients complete ASH's
-own session handshake does not need it, and stateless mode gives up per-session
+What differs between the targets is what happens when the ASH in the image has no
+`ash mcp --stateless-http` option, which is the case for v3.7.0, the default
+`AshVersion`: AgentCore starts a stateful server and logs a warning, and Fargate's
+container refuses to start. Set `AshVersion` to a tag or commit whose ASH has the
+option. A deployment where every client completes ASH's own session handshake and
+keeps the id it issued can run stateful; stateless mode gives up per-session
 server-side state.
 
 ## Trust and the container image
@@ -140,10 +156,9 @@ ASH publishes no container image to any public registry, and will not. Every sta
 here builds the image into your own ECR repository, which is why each of them
 provisions a build step you might otherwise expect to be a `docker pull`.
 
-That is a deliberate position, not an omission, and the reasoning — along with the
-rebuild cadence it obliges you to own — is set out in
-[Building your own container image](../docs/content/docs/building-your-own-image.md)
-([published copy](https://awslabs.github.io/automated-security-helper/docs/building-your-own-image/)).
+That is a deliberate position, not an omission. Building and hosting your own image,
+and the rebuild cadence that obliges you to own, are covered in
+[Run ASH in a container](https://awslabs.github.io/automated-security-helper/how-to/run-in-a-container/#own-image).
 Read it before deploying any of these targets, because `RebuildSchedule` is the
 parameter that decides whether you actually hold up your end of it.
 
@@ -155,7 +170,7 @@ cost of a file that can go stale against the code that produces it.
 
 | Artifact | Generated from | Regenerate with |
 | --- | --- | --- |
-| `cdk/templates/<StackName>.template.json` | the CDK app in `cdk/` | `cd deploy/cdk && npm ci && rm -rf cdk.out && npx cdk synth --all --output cdk.out --no-lookups --quiet && find templates -type f -name '*.template.json' -delete && cp cdk.out/*.template.json templates/` |
+| `cdk/templates/<StackName>.template.json` | the CDK app in `cdk/` | `cd deploy/cdk && npm ci && ./scripts/synth-templates.sh` |
 | `cdk-constructs/buildspec*.yml` | the construct in `cdk-constructs/` | `cd deploy/cdk-constructs && npm ci && npm run generate:buildspec` |
 
 One generator run emits several buildspecs, not one: the top-level spec, the
@@ -195,7 +210,7 @@ means an incorrect reason is public — write it for a reviewer, not to silence 
 
 ## Constraints and assumptions
 
-- **The stacks synthesize offline.** `cdk synth` runs in CI with `--no-lookups` and no
+- **The stacks synthesize offline.** CI runs `cdk synth --no-lookups` with no
   AWS credentials, so no stack may depend on a context lookup unless its resolved
   `cdk.context.json` is committed. A stack that needs to read an existing VPC or AMI
   at synthesis time cannot be validated by the drift gate.
