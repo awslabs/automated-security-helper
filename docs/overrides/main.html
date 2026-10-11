@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{#
+  The site is built from the main branch, while install commands pin the latest
+  release. Say so on every page, so a reader who finds a flag missing from their
+  installed version knows why. Remove this block when the docs are versioned.
+#}
+{% block announce %}
+These docs describe the main branch. A feature described here may not be in the latest release yet:
+<a href="{{ 'how-to/install/' | url }}#install-from-main">install from main</a> to use it now.
+{% endblock %}

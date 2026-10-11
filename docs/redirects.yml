@@ -5,9 +5,80 @@
 # checks every entry (scripts/docs_checks.py check_nav): the old page must no longer
 # exist, and the new one must, including any #anchor.
 #
-# Example:
-#
-#   redirects:
-#     docs/quick-start-guide.md: getting-started/quick-start.md
-#     docs/cli-reference.md: reference/cli.md#scan
-redirects: {}
+# docs/contributing.md is not listed: it was served at /contributing/, the URL the new
+# contributing/index.md is served at, so that URL keeps working without a redirect.
+redirects:
+  developer-guide/scanner-validation-system.md: contributing/testing.md
+  developer-guide/unified-metrics.md: concepts/how-ash-works.md
+  developer-guide/uv-tool-management.md: docs/advanced-usage.md
+  docs/GENAI-GUIDE-IMPLEMENTATION.md: docs/genai-steering-guide.md
+  docs/MCP-FILTER-TESTING.md: reference/mcp-tools.md
+  docs/MCP-FILTERING-GUIDE.md: reference/mcp-tools.md
+  docs/MCP-IMPROVEMENTS-SUMMARY.md: reference/mcp-tools.md
+  docs/MCP-SERVER-TESTING-GUIDE.md: contributing/testing.md
+  docs/MCP-TOOLS-REFERENCE.md: reference/mcp-tools.md
+  docs/api-reference.md: reference/python-api.md
+  docs/architecture.md: concepts/how-ash-works.md
+  docs/building-your-own-image.md: how-to/run-in-a-container.md
+  docs/cli-reference-generated.md: reference/cli.md
+  docs/cli-reference.md: reference/cli.md
+  docs/concepts.md: concepts/how-ash-works.md
+  docs/config-overrides.md: how-to/configure.md
+  docs/configuration-guide.md: how-to/configure.md
+  docs/glossary.md: concepts/glossary.md
+  docs/installation-guide.md: how-to/install.md
+  docs/mcp-performance-scalability.md: how-to/mcp-server.md
+  docs/mcp-server-guide.md: how-to/mcp-server.md
+  docs/mcp/streamable-http.md: how-to/mcp-server.md
+  docs/mcp/workspace-mode.md: how-to/scale-large-repos.md
+  docs/migration-guide.md: how-to/migrate-from-v2.md
+  docs/output-formats.md: reference/output-files.md
+  docs/plugins/architecture.md: plugins/index.md
+  docs/plugins/aws/bedrock-summary-reporter-diagrams.md: plugins/aws.md
+  docs/plugins/aws/bedrock-summary-reporter.md: plugins/aws.md
+  docs/plugins/aws/cloudwatch-logs-reporter-diagrams.md: plugins/aws.md
+  docs/plugins/aws/cloudwatch-logs-reporter.md: plugins/aws.md
+  docs/plugins/aws/index.md: plugins/aws.md
+  docs/plugins/aws/s3-reporter-diagrams.md: plugins/aws.md
+  docs/plugins/aws/s3-reporter.md: plugins/aws.md
+  docs/plugins/aws/security-hub-reporter-diagrams.md: plugins/aws.md
+  docs/plugins/aws/security-hub-reporter.md: plugins/aws.md
+  docs/plugins/builtin/converters-diagrams.md: reference/converters.md
+  docs/plugins/builtin/converters.md: reference/converters.md
+  docs/plugins/builtin/event-handlers-diagrams.md: plugins/event-subscribers.md
+  docs/plugins/builtin/event-handlers.md: plugins/event-subscribers.md
+  docs/plugins/builtin/index.md: reference/scanners.md
+  docs/plugins/builtin/reporters-diagrams.md: reference/reporters.md
+  docs/plugins/builtin/reporters.md: reference/reporters.md
+  docs/plugins/builtin/scanners-diagrams.md: reference/scanners.md
+  docs/plugins/builtin/scanners.md: reference/scanners.md
+  docs/plugins/converter-plugins-diagrams.md: plugins/write-a-converter.md
+  docs/plugins/converter-plugins.md: plugins/write-a-converter.md
+  docs/plugins/development-guide.md: plugins/write-a-scanner.md
+  docs/plugins/event-subscribers-diagrams.md: plugins/event-subscribers.md
+  docs/plugins/event-subscribers.md: plugins/event-subscribers.md
+  docs/plugins/index.md: plugins/index.md
+  docs/plugins/plugin-best-practices.md: plugins/index.md
+  docs/plugins/reporter-plugins-diagrams.md: plugins/write-a-reporter.md
+  docs/plugins/reporter-plugins.md: plugins/write-a-reporter.md
+  docs/plugins/scanner-plugins-diagrams.md: plugins/write-a-scanner.md
+  docs/plugins/scanner-plugins.md: plugins/write-a-scanner.md
+  docs/quick-start-guide.md: getting-started/local.md
+  docs/support.md: support.md
+  docs/supported-languages.md: reference/coverage.md
+  docs/suppressions.md: how-to/suppress-findings.md
+  docs/testing/index.md: contributing/testing.md
+  docs/testing/parallel_testing.md: contributing/testing.md
+  docs/testing/test_organization.md: contributing/testing.md
+  docs/testing/test_selection.md: contributing/testing.md
+  docs/testing/test_utilities.md: contributing/testing.md
+  docs/testing/writing_effective_tests.md: contributing/testing.md
+  docs/troubleshooting-uv-installation.md: how-to/troubleshoot.md
+  docs/troubleshooting.md: how-to/troubleshoot.md
+  docs/uv-tool-installation-guide.md: docs/advanced-usage.md
+  tutorials/mcp-streaming-guide.md: how-to/mcp-server.md
+  tutorials/running-ash-in-ci.md: getting-started/ci.md
+  tutorials/running-ash-locally.md: getting-started/local.md
+  tutorials/using-ash-with-mcp.md: getting-started/agents.md
+  tutorials/using-ash-with-pre-commit.md: how-to/pre-commit.md
+  user-guide/scanner-statistics.md: how-to/read-results.md

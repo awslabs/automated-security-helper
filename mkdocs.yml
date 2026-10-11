@@ -1,11 +1,15 @@
 site_name: ASH - Automated Security Helper
-site_description: "Your one-stop shop for code security scanning"
+site_description: "Run a pinned set of security scanners with one command, one config and one report"
 site_url: "https://awslabs.github.io/automated-security-helper"
 repo_name: "awslabs/automated-security-helper"
 repo_url: "https://github.com/awslabs/automated-security-helper"
-edit_uri: "edit/main/site/content"
+edit_uri: "edit/main/docs/content"
 copyright: "&copy; Amazon Web Services, Inc. or its affiliates. All rights reserved."
 docs_dir: "docs/content"
+# The .md.template files are the sources the version bump renders pages from
+# (scripts/version_template_manager.py); they are not pages, so they are not published.
+exclude_docs: |
+  *.template
 site_dir: "public"
 # use_directory_urls: true
 
@@ -89,6 +93,14 @@ theme:
 
 markdown_extensions:
   - admonition
+  # {#id} after a heading gives it a stable anchor that survives a reworded title.
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
   # to_alt writes an emoji shortcode as its Unicode character. The default generator
   # writes an <img> from a CDN, which the privacy plugin then has to download.
   - pymdownx.emoji:

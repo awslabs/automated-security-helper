@@ -29,14 +29,13 @@ class VersionTemplateManager:
         # Files to process (relative to project root)
         self.target_files = [
             "README.md",
-            "docs/content/index.md",
-            "docs/content/faq.md",
-            "docs/content/docs/installation-guide.md",
-            "docs/content/docs/quick-start-guide.md",
-            "docs/content/docs/migration-guide.md",
+            "docs/content/getting-started/local.md",
+            "docs/content/getting-started/platform-teams.md",
+            "docs/content/how-to/install.md",
+            "docs/content/how-to/agent-plugins.md",
+            "docs/content/how-to/run-in-a-container.md",
+            "docs/content/how-to/suppress-findings.md",
             "docs/content/docs/advanced-usage.md",
-            "docs/content/tutorials/running-ash-in-ci.md",
-            "docs/content/tutorials/running-ash-locally.md",
             "examples/streamlit_ui/README.md",
         ]
 
