@@ -328,6 +328,11 @@ jobs:
           version: latest
           # Off on pull_request and merge_group; see RESTORE_CACHES above.
           enable-cache: ${{ env.RESTORE_CACHES }}
+          # Named for the same reason as `version`: without it setup-uv takes
+          # `cache-dir` from the checkout's uv.toml or `[tool.uv]` and restores and
+          # saves the cache there. This is the path it uses by default on a hosted
+          # runner, so existing cache entries still match.
+          cache-local-path: ${{ runner.temp }}/setup-uv-cache
           # Save only from a push; a pull request restores its base branch's entry.
           # The same unpruned key as the lint job in ash-unified-ci.yml, which
           # carries the measurement: one ~254 MB copy per open pull request,

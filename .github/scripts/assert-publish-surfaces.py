@@ -701,6 +701,7 @@ ALLOWLIST: tuple[Entry, ...] = (
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_UV,
         publishes=(
+            "cache-local-path=${{ runner.temp }}/setup-uv-cache "
             "enable-cache=${{ env.RESTORE_CACHES }} "
             "save-cache=${{ github.event_name == 'push' }}"
         ),
@@ -708,7 +709,8 @@ ALLOWLIST: tuple[Entry, ...] = (
         + " Saved from a push only, which narrows who writes the entry. Not"
         " restored either on pull_request or merge_group (RESTORE_CACHES), where"
         " the run's own cache scope can hold entries written by other jobs that"
-        " run the pull request's code.",
+        " run the pull request's code. cache-local-path is setup-uv's own default"
+        " on a hosted runner, named so that the checkout's cache-dir is not read.",
     ),
     Entry(
         file=".github/workflows/ash-iac-drift.yml",

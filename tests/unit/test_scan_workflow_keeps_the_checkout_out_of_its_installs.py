@@ -357,3 +357,31 @@ class TestUvItselfIsNotChosenByTheCheckout:
             assert "version-file" not in inputs, (
                 f"step {step.get('name')!r} reads its uv version from a file"
             )
+
+    def test_every_setup_uv_step_in_the_scan_job_names_its_cache_directory(self):
+        """Without `cache-local-path`, setup-uv takes `cache-dir` from the checkout.
+
+        setup-uv v10 (src/utils/inputs.ts, getCacheLocalPath) reads `cache-dir` from the
+        checkout's uv.toml or `[tool.uv]` in pyproject.toml before its own default, and
+        restores and saves the cache at that path. An explicit input comes first.
+        """
+        _, job = _workflow_and_job()
+        steps = [
+            step
+            for step in job.get("steps") or []
+            if str(step.get("uses") or "").startswith("astral-sh/setup-uv@")
+        ]
+        assert steps, "the scan job has no setup-uv step; this compared nothing"
+        sandbox_runner_temp = "/home/runner/work/_temp"
+        for step in steps:
+            value = (step.get("with") or {}).get("cache-local-path")
+            assert value, (
+                f"step {step.get('name')!r} sets no cache-local-path, so a cache-dir in "
+                "the scanned checkout's uv.toml or pyproject.toml decides where the uv "
+                "cache is restored and saved"
+            )
+            rendered = ga.to_string(ga.render(value, ga.base_context()))
+            assert rendered.startswith(sandbox_runner_temp + "/"), (
+                f"step {step.get('name')!r} puts the uv cache at {rendered!r}, not "
+                "under RUNNER_TEMP"
+            )
