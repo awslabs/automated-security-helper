@@ -122,5 +122,7 @@ def test_plugin_list_bad_config(project_dir, text_snapshot):
 
     run = run_cli(["plugin", "list", "-c", "bad.yaml"])
 
-    assert run.exit_code == 1, run.output
+    # 3, the code for an invalid configuration, as `ash scan` exits on this file;
+    # it used to be the generic 1.
+    assert run.exit_code == 3, run.output
     assert text_snapshot("txt") == run.document

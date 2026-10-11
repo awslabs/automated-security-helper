@@ -218,7 +218,10 @@ async def test_get_config(isolated_mcp_state, snapshot):
     assert defaults == snapshot(name="no_config_found_returns_defaults")
     assert discovered_raw == snapshot(name="discovered_raw")
     assert explicit == snapshot(name="explicit_path_resolved")
-    assert missing == snapshot(name="explicit_path_missing_returns_defaults")
+    # A named file that does not exist is an error, not the default config, which
+    # it used to return: that told the client the file resolved to no settings.
+    assert missing["result"]["success"] is False
+    assert missing == snapshot(name="explicit_path_missing_is_refused")
 
 
 @pytest.mark.asyncio
