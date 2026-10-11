@@ -502,8 +502,10 @@ error.
 
 `ash merge` holds the configuration each shard recorded in its results to every
 row of the table above, against the operator's defaults, `--config` and
-`--config-overrides` at merge time, and imports only the `ash_plugin_modules`
-entries the operator's configuration names; see
+`--config-overrides` at merge time. It imports only the `ash_plugin_modules`
+entries the operator's configuration names, and takes `enabled` of the reporters
+in the `enabled` row from the operator in both directions, so a shard's
+`enabled: false` is ignored too; see
 [Settings a shard's recorded configuration cannot choose](cli-reference.md#settings-a-shards-recorded-configuration-cannot-choose).
 
 ### Configs an MCP client delivered

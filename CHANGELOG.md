@@ -1125,7 +1125,11 @@
 
   `ash_plugin_modules` is stricter than in a scan: `ash merge` imports only the
   modules the operator's configuration names, so an installed plugin module a
-  shard recorded is dropped unless the operator names it too.
+  shard recorded is dropped unless the operator names it too. So is `enabled` of
+  a reporter that sends findings off the host: it comes from the operator's
+  configuration, or the reporter's default where that is silent. A scan applies a
+  repository's `enabled: false`, but `ash merge` ignores a shard's `enabled: false`
+  with a warning, as it ignores a shard's `enabled: true`.
 
   The settings the verdict reads (`fail_on_findings`, `fail_on_incomplete_scanners`,
   `global_settings.severity_threshold`, `global_settings.suppressions`,
@@ -1149,8 +1153,8 @@
   names; a reporter or plugin module the shards did not configure is added with
   `--config-overrides`, for example
   `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_aws_plugins"]'`.
-  Loading that package makes all four AWS reporters available, each on unless its
-  configuration turns it off, so turn off the ones you do not want; the
+  Loading that package makes all four AWS reporters available, each on unless the
+  operator's configuration turns it off, so turn off the ones you do not want; the
   [`ash merge` reference](docs/content/docs/cli-reference.md#settings-a-shards-recorded-configuration-cannot-choose)
   has an S3-only example. Shards that disagree on a verdict setting merge once
   `--config-overrides` sets it for all of them.

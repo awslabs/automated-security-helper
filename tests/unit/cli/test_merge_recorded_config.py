@@ -744,6 +744,98 @@ class TestEnablementIsTheOperators:
         assert "ash_plugin_modules" in ignored
         assert "reporters.s3.options.bucket_name" in ignored
 
+    def test_a_shard_does_not_turn_off_s3_the_operators_config_turns_on(self, harness):
+        """The operator enables S3 with its bucket; a shard records it off. It runs."""
+        harness.satisfy(harness.S3Reporter)
+        shard_paths = harness.write_shards(
+            {"ash_plugin_modules": [AWS], "reporters": {"s3": {"enabled": False}}}
+        )
+        operator = _write_yaml(
+            harness.tmp_path / "operator" / "ash.yaml",
+            {
+                "ash_plugin_modules": [AWS],
+                "reporters": {
+                    "s3": {
+                        "enabled": True,
+                        "options": {
+                            "bucket_name": "operator-bucket",
+                            "aws_region": "us-east-2",
+                        },
+                    }
+                },
+            },
+        )
+
+        result = harness.merge(shard_paths, "--config", str(operator))
+
+        _assert_merged(result, harness)
+        assert "S3Reporter" in harness.reported
+        assert [upload["Bucket"] for upload in harness.uploads] == ["operator-bucket"]
+        named = [m for m in harness.ignoring() if "reporters.s3.enabled" in m]
+        assert named, harness.warnings
+        assert "ash merge's --config-overrides or --config" in named[0]
+
+    def test_a_shard_does_not_turn_off_a_reporter_the_operator_leaves_on_by_default(
+        self, harness
+    ):
+        """The operator's config is silent, so the reporter's default (on) applies."""
+        harness.satisfy(harness.SecurityHubReporter)
+        shard_paths = harness.write_shards(
+            {
+                "ash_plugin_modules": [AWS],
+                "reporters": {"aws-security-hub": {"enabled": False}},
+            }
+        )
+        operator = _write_yaml(
+            harness.tmp_path / "operator" / "ash.yaml", {"ash_plugin_modules": [AWS]}
+        )
+
+        result = harness.merge(shard_paths, "--config", str(operator))
+
+        _assert_merged(result, harness)
+        built = _section(harness.instance(harness.SecurityHubReporter).config)
+        assert built["enabled"] is True
+        assert "SecurityHubReporter" in harness.reported
+        assert "reporters.aws-security-hub.enabled" in harness.ignored_keys()
+
+    def test_a_shard_does_not_turn_off_a_plugin_reporter_with_destinations(
+        self, harness
+    ):
+        """The rule covers a reporter a plugin module adds that declares destinations."""
+        harness.reporters.append(_EndpointReporter)
+        shard_paths = harness.write_shards(
+            {"reporters": {"endpoint-reporter": {"enabled": False}}}
+        )
+
+        result = harness.merge(shard_paths)
+
+        _assert_merged(result, harness)
+        written = json.loads(
+            (harness.output_dir / "reports" / "ash.endpoint.json").read_text("utf-8")
+        )
+        assert written == {"endpoint": ENDPOINT_DEFAULT}
+        named = [m for m in harness.ignoring() if "endpoint-reporter.enabled" in m]
+        assert named, harness.warnings
+        assert "ash merge's --config-overrides or --config" in named[0]
+
+    def test_a_shard_that_repeats_the_operators_enabled_is_not_warned_about(
+        self, harness
+    ):
+        """Control: the operator and the shard both turn S3 off, so nothing differs."""
+        shard_paths = harness.write_shards(
+            {"ash_plugin_modules": [AWS], "reporters": {"s3": {"enabled": False}}}
+        )
+        operator = _write_yaml(
+            harness.tmp_path / "operator" / "ash.yaml",
+            {"ash_plugin_modules": [AWS], "reporters": {"s3": {"enabled": False}}},
+        )
+
+        result = harness.merge(shard_paths, "--config", str(operator))
+
+        _assert_merged(result, harness)
+        assert _section(harness.instance(harness.S3Reporter).config)["enabled"] is False
+        assert "reporters.s3.enabled" not in harness.ignored_keys()
+
 
 def _documented_s3_example_overrides() -> List[str]:
     """The ``--config-overrides`` values of the S3 example in the ash merge docs."""
