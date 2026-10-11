@@ -225,10 +225,23 @@ class TestACompleteSectionWithoutEnabledContactsNothing:
             color=False,
         )
 
+    @pytest.mark.parametrize("guards", ["both", "default-only"])
     @pytest.mark.parametrize("name", sorted(COMPLETE_SECTIONS))
     def test_a_section_with_every_option_but_enabled_contacts_nothing(
-        self, tmp_path, requests, sessions, name
+        self, tmp_path, monkeypatch, requests, sessions, name, guards
     ):
+        """Two things keep it off: its ``enabled: false`` default, and the rule that
+        an off-host reporter runs only when its section enables it. With
+        ``default-only`` the rule is switched off, so the default is checked on
+        its own rather than hidden behind the rule.
+        """
+        if guards == "default-only":
+            monkeypatch.setattr(
+                "automated_security_helper.core.phases.report_phase."
+                "off_host_reporter_refused",
+                lambda reporter_class, plugin_config: False,
+            )
+
         self._scan(tmp_path, name, "")
 
         assert requests == []
@@ -264,6 +277,13 @@ def _aws_reporter_configs():
         S3ReporterConfig,
         SecurityHubReporterConfig,
     ]
+
+
+@pytest.mark.parametrize(
+    "config_class", _aws_reporter_configs(), ids=lambda cls: cls.__name__
+)
+def test_every_aws_reporter_ships_disabled(config_class):
+    assert config_class().enabled is False
 
 
 class TestTheEnvironmentIsReadWhenAConfigIsBuilt:
