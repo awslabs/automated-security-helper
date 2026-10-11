@@ -48,6 +48,7 @@ from automated_security_helper.workspace.aggregation import (
     workspace_ignore_file_exclusions,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+from tests.utils.helpers import importing_this_checkout
 
 HONORED = IgnoreFileExclusions(
     honored=True,
@@ -249,15 +250,16 @@ class TestTheWorkspaceAggregate:
 # --------------------------------------------------------------------------- whole runs
 
 # Run in a child, as the whole-scan tests do: ASH's own CLI, nothing replaced.
-_DRIVER = textwrap.dedent(
-    """
-    import sys
+# From this checkout, which `-I` alone would not import; see importing_this_checkout.
+_DRIVER = importing_this_checkout(
+    textwrap.dedent(
+        """
+        from automated_security_helper.cli.main import app
 
-    from automated_security_helper.cli.main import app
-
-    sys.argv = ["ash", *sys.argv[1:]]
-    app()
-    """
+        sys.argv = ["ash", *sys.argv[1:]]
+        app()
+        """
+    )
 )
 
 _PROJECT = {

@@ -72,6 +72,8 @@ from typing import Callable, Dict, List
 
 import pytest
 
+from tests.utils.helpers import importing_this_checkout
+
 # Proposed names; see the module docstring.
 SWITCH_OFF_FLAG = "--no-honor-ignore-files"
 CONFIG_KEY = "honor_ignore_files"
@@ -125,16 +127,17 @@ EXPECTED_TOTAL = 7
 KEPT_BY_NEGATION = ("keep.log", "sub/keep.tmp", "sub/deep/trace.log")
 ASH_OWN_EXCLUSION = ".git/HEAD"
 
-# Run in the child: ASH's own CLI, nothing replaced.
-DRIVER = textwrap.dedent(
-    """
-    import sys
+# Run in the child: ASH's own CLI from this checkout, nothing replaced. `-I` alone
+# would import the interpreter's installed ASH; see importing_this_checkout.
+DRIVER = importing_this_checkout(
+    textwrap.dedent(
+        """
+        from automated_security_helper.cli.main import app
 
-    from automated_security_helper.cli.main import app
-
-    sys.argv = ["ash", *sys.argv[1:]]
-    app()
-    """
+        sys.argv = ["ash", *sys.argv[1:]]
+        app()
+        """
+    )
 )
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -178,8 +181,8 @@ def child_env() -> Dict[str, str]:
 
 def run_ash(cwd: Path, *args: str):
     # A fixed argv: this interpreter and the driver above, no shell. `-I` keeps the
-    # child's imports to the interpreter's own site-packages, which is the ASH under
-    # test.
+    # caller's PYTHONPATH and working directory off the child's sys.path; the driver
+    # puts this checkout first and exits 86 if ASH still comes from elsewhere.
     return subprocess.run(
         [sys.executable, "-I", "-c", DRIVER, *args],
         capture_output=True,
