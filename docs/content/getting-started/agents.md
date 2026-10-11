@@ -28,8 +28,8 @@ Then install the tools the scanners run:
 ash dependencies install
 ```
 
-You can skip this step. ASH then installs the Python-based scanners, such as bandit, checkov,
-and semgrep, with uv during the scan, which needs uv on your `PATH` and network access. Every
+You can skip this step. In an online scan with the sandbox off, ASH then installs bandit,
+cfn-lint, checkov, semgrep, and zizmor itself with uv, which needs uv on your `PATH`. Every
 other scanner whose tool is missing is reported as MISSING, and the scan ends with status
 `incomplete`. [Manage scanner tools](../docs/advanced-usage.md) explains where ASH looks for
 tools.
