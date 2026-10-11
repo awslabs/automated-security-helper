@@ -99,7 +99,10 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         return open_in_scanned_tree(path, self.context.source_dir)
 
     def record_refused_input(
-        self, refusal: TreeInputRefused, member: str | None = None
+        self,
+        refusal: TreeInputRefused,
+        member: str | None = None,
+        limit: str | None = None,
     ) -> None:
         """Warn once about a refused input and keep it for the results row.
 
@@ -107,18 +110,26 @@ class ConverterPluginBase(PluginBase, Generic[T]):
             refusal: What :meth:`open_source_file` raised, or an equivalent built for
                 an archive member.
             member: The archive member's name, when the refusal is of a member.
+            limit: The name of the extraction-limit option the input exceeded, when
+                that is why it was refused. Such a refusal leaves the scan
+                incomplete; see ``RefusedInputInfo.limit``.
         """
+        # The names come from the scanned tree, so they are logged as data.
         if member is None:
             ASH_LOGGER.warning(
-                f"Skipped converter input '{refusal.path}': {refusal.reason}"
+                f"Skipped converter input '{refusal.path}': {refusal.reason}",
+                extra=NO_MARKUP,
             )
         else:
             ASH_LOGGER.warning(
                 f"Skipped member '{member}' of archive '{refusal.path}': "
-                f"{refusal.reason}"
+                f"{refusal.reason}",
+                extra=NO_MARKUP,
             )
         self.refused_inputs.append(
-            RefusedInputInfo(path=refusal.path, member=member, reason=refusal.reason)
+            RefusedInputInfo(
+                path=refusal.path, member=member, reason=refusal.reason, limit=limit
+            )
         )
 
     def record_failed_input(self, path: Path | str, reason: str) -> None:

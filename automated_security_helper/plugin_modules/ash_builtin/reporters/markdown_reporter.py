@@ -19,6 +19,10 @@ from automated_security_helper.core.unified_metrics import (
 from automated_security_helper.utils.content_db_staleness import (
     stale_content_databases,
 )
+from automated_security_helper.utils.converter_refusals import (
+    converter_refusals,
+    summary_lines,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
 )
@@ -26,6 +30,19 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_se
     markdown_workspace_section,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+
+_MARKDOWN_INLINE_SPECIALS = "\\`*_[]<>|"
+
+
+def _escape_markdown_inline(text: str) -> str:
+    """``text`` as literal inline markdown: one line, its markup characters escaped.
+
+    For text the scanned tree chose, such as an archive member's name, which would
+    otherwise render as a link, an image or a heading in a summary posted to a pull
+    request.
+    """
+    flat = " ".join(text.splitlines())
+    return "".join(f"\\{ch}" if ch in _MARKDOWN_INLINE_SPECIALS else ch for ch in flat)
 
 
 class MarkdownReporterConfigOptions(ReporterOptionsBase):
@@ -312,6 +329,23 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                         f"- **{record.name}** ({record.scanner}, {verdict}): "
                         f"{record.message()}"
                     )
+                md_parts.append("")
+
+            # Same placement and reasoning again: a converter input that was not read
+            # never reaches a scanner, so no scanner row can say it went unscanned.
+            # An archive refused for an extraction limit is marked, because it is
+            # what failed the completeness gate; the rest are reported only.
+            refusals = converter_refusals(model)
+            if refusals:
+                md_parts.append("### Converter inputs not scanned")
+                md_parts.append("")
+                md_parts.append(
+                    "These inputs were not read by their converter, so their contents "
+                    "were not scanned:"
+                )
+                md_parts.append("")
+                for line in summary_lines(refusals):
+                    md_parts.append(f"- {_escape_markdown_inline(line)}")
                 md_parts.append("")
 
             # Add top hotspots (files with most findings)

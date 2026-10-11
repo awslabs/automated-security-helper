@@ -30,6 +30,10 @@ global_settings:
       - /global_settings/suppressions
       - /reporters/bedrock-summary-reporter/options/aws_*
       - /reporters/cloudwatch-logs/**
+      - /converters/archive/options/max_members
+      - /converters/archive/options/max_member_bytes
+      - /converters/archive/options/max_total_bytes
+      - /converters/archive/options/max_compression_ratio
       denied_value_patterns: {}
 fail_on_findings: false
 fail_on_incomplete_scanners: true
@@ -49,7 +53,11 @@ converters:
   archive:
     name: archive
     enabled: true
-    options: {}
+    options:
+      max_members: 100000
+      max_member_bytes: 268435456
+      max_total_bytes: 1073741824
+      max_compression_ratio: 100
   jupyter:
     name: jupyter
     enabled: true

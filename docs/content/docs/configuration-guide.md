@@ -449,8 +449,16 @@ converters:
       tool_version: null      # Version constraint for the conversion tool
       install_timeout: 300    # Seconds allowed for tool installation
   archive:
-    enabled: true             # The archive converter exposes no options
+    enabled: true
+    options:                  # Extraction limits; a config in the scanned tree can only lower them
+      max_members: 100000
+      max_member_bytes: 268435456
+      max_total_bytes: 1073741824
+      max_compression_ratio: 100
 ```
+
+The archive converter's options bound what extracting one archive may write; see
+[Extraction limits](plugins/builtin/converters.md#extraction-limits).
 
 ### Scanners Configuration
 

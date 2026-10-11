@@ -336,6 +336,22 @@ class RefusedInputInfo(BaseModel):
         ),
     ] = None
     reason: Annotated[str, Field(description="Why the input was not read.")]
+    # Left out of a dump when None, so every other refusal's record reads as it did
+    # before the field existed.
+    limit: Annotated[
+        str | None,
+        Field(
+            default=None,
+            exclude_if=lambda value: value is None,
+            description=(
+                "The extraction-limit option the input exceeded, such as "
+                "max_total_bytes, when that is why it was refused. None for every "
+                "other refusal. A refusal with a limit leaves the whole input "
+                "unscanned, so the completeness gate counts it as incomplete "
+                "conversion."
+            ),
+        ),
+    ] = None
 
 
 class FailedInputInfo(BaseModel):
@@ -429,8 +445,9 @@ class ConverterStatusInfo(BaseModel):
             "Inputs this converter did not read because they failed the "
             "scanned-tree check: a symlink, a path outside the scanned tree, a "
             "file that is not a regular file or has more than one hard link, or "
-            "an archive member that is a link or would be extracted outside its "
-            "destination."
+            "an archive member that is a link, would be extracted outside its "
+            "destination, or is itself an archive. An archive over an extraction "
+            "limit is recorded here too, with the limit named in limit."
         ),
     )
 

@@ -17,7 +17,12 @@
         },
         "options": {
           "$ref": "#/$defs/ArchiveConverterConfigOptions",
-          "default": {},
+          "default": {
+            "max_compression_ratio": 100,
+            "max_member_bytes": 268435456,
+            "max_members": 100000,
+            "max_total_bytes": 1073741824
+          },
           "description": "Configure Archive converter"
         }
       },
@@ -26,7 +31,37 @@
     },
     "ArchiveConverterConfigOptions": {
       "additionalProperties": true,
-      "properties": {},
+      "description": "Limits on what extracting one archive may write.\n\nEach is an inclusive maximum, checked against what the archive declares, for\nevery member, before anything is written. An archive over any of them is not\nextracted at all. The defaults are far above an ordinary source archive. Set\ninside the scanned tree (``.ash/.ash.yaml``), by a config an MCP client\nsupplied, or by a workspace project's own config, a value can only lower a\nlimit; raise one with ``--config-overrides`` or a config file outside the tree.",
+      "properties": {
+        "max_compression_ratio": {
+          "default": 100,
+          "description": "The most times its own size on disk that an archive's members may declare added up. An archive that declares more is not extracted.",
+          "exclusiveMinimum": 0,
+          "title": "Max Compression Ratio",
+          "type": "integer"
+        },
+        "max_member_bytes": {
+          "default": 268435456,
+          "description": "The largest size in bytes one member of an archive may declare. An archive with a larger member is not extracted. Default 256 MiB.",
+          "exclusiveMinimum": 0,
+          "title": "Max Member Bytes",
+          "type": "integer"
+        },
+        "max_members": {
+          "default": 100000,
+          "description": "The most members an archive may have, directories included. An archive with more is not extracted.",
+          "exclusiveMinimum": 0,
+          "title": "Max Members",
+          "type": "integer"
+        },
+        "max_total_bytes": {
+          "default": 1073741824,
+          "description": "The most bytes an archive's members may declare added up. An archive whose members declare more is not extracted. Default 1 GiB.",
+          "exclusiveMinimum": 0,
+          "title": "Max Total Bytes",
+          "type": "integer"
+        }
+      },
       "title": "ArchiveConverterConfigOptions",
       "type": "object"
     },
@@ -79,7 +114,12 @@
             "archive": {
               "enabled": true,
               "name": "archive",
-              "options": {}
+              "options": {
+                "max_compression_ratio": 100,
+                "max_member_bytes": 268435456,
+                "max_members": 100000,
+                "max_total_bytes": 1073741824
+              }
             },
             "jupyter": {
               "enabled": true,
@@ -157,7 +197,11 @@
                   "/global_settings/ignore_paths",
                   "/global_settings/suppressions",
                   "/reporters/bedrock-summary-reporter/options/aws_*",
-                  "/reporters/cloudwatch-logs/**"
+                  "/reporters/cloudwatch-logs/**",
+                  "/converters/archive/options/max_members",
+                  "/converters/archive/options/max_member_bytes",
+                  "/converters/archive/options/max_total_bytes",
+                  "/converters/archive/options/max_compression_ratio"
                 ],
                 "denied_value_patterns": {},
                 "enabled": false
@@ -559,7 +603,11 @@
                 "/global_settings/ignore_paths",
                 "/global_settings/suppressions",
                 "/reporters/bedrock-summary-reporter/options/aws_*",
-                "/reporters/cloudwatch-logs/**"
+                "/reporters/cloudwatch-logs/**",
+                "/converters/archive/options/max_members",
+                "/converters/archive/options/max_member_bytes",
+                "/converters/archive/options/max_total_bytes",
+                "/converters/archive/options/max_compression_ratio"
               ],
               "denied_value_patterns": {},
               "enabled": false
@@ -619,7 +667,11 @@
               "/global_settings/ignore_paths",
               "/global_settings/suppressions",
               "/reporters/bedrock-summary-reporter/options/aws_*",
-              "/reporters/cloudwatch-logs/**"
+              "/reporters/cloudwatch-logs/**",
+              "/converters/archive/options/max_members",
+              "/converters/archive/options/max_member_bytes",
+              "/converters/archive/options/max_total_bytes",
+              "/converters/archive/options/max_compression_ratio"
             ],
             "denied_value_patterns": {},
             "enabled": false
@@ -1490,7 +1542,12 @@
           "default": {
             "enabled": true,
             "name": "archive",
-            "options": {}
+            "options": {
+              "max_compression_ratio": 100,
+              "max_member_bytes": 268435456,
+              "max_members": 100000,
+              "max_total_bytes": 1073741824
+            }
           },
           "description": "Configure the options for the ArchiveConverter"
         },
@@ -3168,7 +3225,11 @@
             "/global_settings/ignore_paths",
             "/global_settings/suppressions",
             "/reporters/bedrock-summary-reporter/options/aws_*",
-            "/reporters/cloudwatch-logs/**"
+            "/reporters/cloudwatch-logs/**",
+            "/converters/archive/options/max_members",
+            "/converters/archive/options/max_member_bytes",
+            "/converters/archive/options/max_total_bytes",
+            "/converters/archive/options/max_compression_ratio"
           ],
           "description": "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). Defaults block the most dangerous fields on the real AshConfig schema.",
           "items": {

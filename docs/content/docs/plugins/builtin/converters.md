@@ -19,22 +19,73 @@ ASH includes 2 built-in converters that preprocess files to make them suitable f
 
 **Supported Formats**:
 - ZIP files (.zip)
-- TAR archives (.tar, .tar.gz, .tgz)
+- TAR archives (.tar, .tar.gz). A file is selected by its last suffix only, so a
+  `.tgz` is not extracted.
 
 **Configuration**:
 ```yaml
 converters:
   archive:
     enabled: true
-    # The archive converter exposes no options. It extracts supported archives
-    # so their contents can be scanned; there is nothing to tune per run.
+    options:
+      max_members: 100000             # members, directories included
+      max_member_bytes: 268435456     # 256 MiB, one member's declared size
+      max_total_bytes: 1073741824     # 1 GiB, all members' declared sizes added up
+      max_compression_ratio: 100      # that total over the archive's size on disk
 ```
 
 **Key Features**:
-- Recursive extraction of nested archives
-- Size and depth limits for security
-- Permission preservation
+- One level of extraction. A member that is itself an archive (a `.zip`, `.tar` or
+  `.gz` suffix, in any case) is not extracted; it is recorded as not scanned.
+- Extraction limits, described below
+- Only members with a scannable extension are written, as regular files
 - Automatic cleanup after scanning
+
+#### Extraction limits
+
+Before anything is written, every member of an archive is checked against four
+limits. Each is an inclusive maximum on what the archive declares:
+
+| Option                  | Default             | Bounds                                                  |
+|-------------------------|---------------------|---------------------------------------------------------|
+| `max_members`           | 100000              | the number of members, directories included             |
+| `max_member_bytes`      | 268435456 (256 MiB) | the size one member declares                            |
+| `max_total_bytes`       | 1073741824 (1 GiB)  | the sizes all members declare, added up                 |
+| `max_compression_ratio` | 100                 | that total divided by the archive's size on disk        |
+
+Every member counts, including members that would not be extracted, because reading
+a compressed tar means decompressing every member to reach the next header. An
+archive over any limit is refused whole: nothing from it is written or scanned, and
+it is recorded once, with the limit named, under
+`converter_results.archive.refused_inputs` (see below). Such a refusal counts as
+incomplete conversion, so with `fail_on_incomplete_scanners` on (the default) the
+scan exits 1 and names the archive and the limit. The refusal is also listed in the
+console summary, `ash.summary.txt`, `ash.summary.md`, `ash.flat.json`
+(`converter_refusals`) and `ash.sarif` (an execution notification at level `error`).
+
+While copying, no member is written past the size it declares. For a sparse tar
+member, whose map tarfile writes before it truncates the file to its declared size,
+a map that places data past that size refuses the member.
+
+The defaults let ordinary source archives through. GitHub refuses files larger than
+100 MiB in a repository, and an AWS Lambda deployment package may hold up to 250 MB
+unzipped, so a member of 256 MiB and a total of 1 GiB leave room above both. Source
+code compresses by a few times (2 MiB of ASH's own Python sources: 3.1 times as a
+zip, 3.7 as a tar.gz), while a file of zeros compresses by about 1000. Apache POI
+refuses a zip part that compresses better than 1%, a ratio of 100, by default; the
+ratio here is taken over the whole archive, so one very compressible member among
+ordinary ones does not reach it.
+
+**Who can raise a limit**: an operator, with `--config-overrides` (for example
+`--config-overrides converters.archive.options.max_total_bytes=4294967296`) or a
+config file outside the scanned tree, such as `ASH_CONFIG`'s or one passed with
+`--config`. A config file the scanned repository wrote (`.ash/.ash.yaml` in the
+tree, or a workspace project's own config) and a config an MCP client supplied can
+lower a limit but not raise it: a higher value is replaced by the trusted one, with
+a warning naming the option. A repository's own config file replaces `ASH_CONFIG`
+as any selected config file does, so a limit it leaves out is the default. MCP
+runtime overrides of the four options, or of a section holding them, are refused by
+the default `global_settings.mcp.runtime_overrides.denied_paths`.
 
 **Use Cases**:
 - Scanning packaged applications
@@ -118,8 +169,8 @@ converters:
 converters:
   archive:
     enabled: true
-    # The archive converter exposes no options. It extracts supported archives
-    # so their contents can be scanned; there is nothing to tune per run.
+    options:
+      max_total_bytes: 268435456   # A lower limit than the default is always kept
 
   jupyter:
     enabled: true
@@ -135,7 +186,9 @@ converters:
 ```yaml
 converters:
   archive:
-    enabled: false             # The only lever is whether extraction runs at all
+    enabled: true
+    options:
+      max_compression_ratio: 50  # Lower a limit; only an operator can raise one
 ```
 
 ### Jupyter Processing
@@ -157,7 +210,10 @@ skips, with one warning naming the file:
 - a file with more than one hard link.
 
 Inside an archive, the archive converter also skips members that are symlinks, hard
-links or special files, and members whose names are absolute or contain `..`.
+links or special files, members whose names are absolute or contain `..`, sparse
+members whose map reaches past their declared size, and members that are themselves
+archives, which are not extracted. An archive over an extraction limit is skipped
+whole.
 
 Each skipped input is recorded in `ash_aggregated_results.json` under
 `converter_results.<converter>.refused_inputs`, with its path relative to the scanned
@@ -166,11 +222,18 @@ tree, the archive member's name where there is one, and the reason:
 ```json
 "refused_inputs": [
   {"path": "notebooks/report.ipynb", "member": null, "reason": "it is a symbolic link"},
-  {"path": "dist/app.tar", "member": "../setup.py", "reason": "its path contains a '..' component"}
+  {"path": "dist/app.tar", "member": "../setup.py", "reason": "its path contains a '..' component"},
+  {"path": "dist/app.zip", "member": "vendor/lib.tar.gz", "reason": "it is named as an archive (.zip, .tar or .gz), and an archive inside an archive is not extracted, so its contents are not scanned"},
+  {"path": "data/dump.zip", "member": null, "reason": "its members declare more than 1073741824 bytes, the max_total_bytes extraction limit", "limit": "max_total_bytes"}
 ]
 ```
 
-To have a skipped file converted, replace the link with the file itself.
+`limit` is present only for an archive refused for an extraction limit, which is the
+one kind of refusal that leaves the scan incomplete. The others are reported in the
+summaries and reports as well, and do not change the exit code.
+
+To have a skipped file converted, replace the link with the file itself. To have a
+nested archive's contents scanned, extract it into the tree before the scan.
 
 ## Inputs a converter could not convert
 
@@ -222,12 +285,13 @@ converters:
     enabled: true                # An archive that fails to extract is a failed input
 ```
 
-**Large archives**:
-```yaml
-converters:
-  archive:
-    enabled: true
+**Large archives**: an archive over an extraction limit is refused and the scan exits
+1, naming the archive and the limit. Raise the limit as an operator:
+```bash
+ash scan --config-overrides 'converters.archive.options.max_total_bytes=4294967296'
 ```
+or exclude the archive with `global_settings.ignore_paths` if its contents need not
+be scanned.
 
 ### Jupyter Issues
 

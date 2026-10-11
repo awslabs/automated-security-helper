@@ -89,6 +89,7 @@
     }
   ],
   "content_databases": [],
+  "converter_refusals": [],
   "top_hotspots": [
     {
       "location": "main.tf",

@@ -26,6 +26,10 @@ from automated_security_helper.core.unified_metrics import (
 from automated_security_helper.utils.content_db_staleness import (
     stale_content_databases,
 )
+from automated_security_helper.utils.converter_refusals import (
+    converter_refusals,
+    summary_lines,
+)
 
 
 class TextReporterConfigOptions(ReporterOptionsBase):
@@ -227,6 +231,15 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 for record in stale_dbs:
                     verdict = "FAILED THE SCAN" if record.enforced else "WARNING"
                     text_parts.append(f"- [{verdict}] {record.message()}")
+                text_parts.append("")
+
+            # See the matching section in the markdown reporter.
+            refusals = converter_refusals(model)
+            if refusals:
+                text_parts.append("CONVERTER INPUTS NOT SCANNED")
+                text_parts.append("----------------------------")
+                for line in summary_lines(refusals):
+                    text_parts.append(f"- {line}")
                 text_parts.append("")
 
             # Add top hotspots (files with most findings)

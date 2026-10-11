@@ -150,6 +150,33 @@
 
 ### Behavior changes
 
+- **The archive converter enforces extraction limits, and an archive over one makes
+  the scan incomplete.** `converters.archive.options` gains `max_members` (100000),
+  `max_member_bytes` (256 MiB), `max_total_bytes` (1 GiB) and
+  `max_compression_ratio` (100), inclusive maximums checked against what every member
+  of an archive declares before anything is written. An archive over any of them is
+  not extracted at all, is recorded in `converter_results.archive.refused_inputs`
+  with the limit named in `limit`, and counts as incomplete conversion: with
+  `fail_on_incomplete_scanners` on (the default) the scan exits 1 and names the
+  archive and the limit. No member is written past the size it declares, on either
+  tar extraction path; a sparse tar member whose map reaches past its size is
+  refused. A config file in the scanned tree, a workspace project's own config and a
+  config an MCP client supplied can lower these limits but not raise them (a higher
+  value is replaced by the trusted one, with a warning), and the default
+  `runtime_overrides.denied_paths` refuses MCP runtime overrides of them. Raise them
+  with `--config-overrides` or a config file outside the tree.
+
+- **An archive inside an archive is recorded as not scanned.** Extraction is one level
+  deep, as before, but a member with a `.zip`, `.tar` or `.gz` suffix used to be left
+  out without a trace. It is now a refused member of its archive, with a warning, and
+  does not change the exit code.
+
+- **Every input a converter did not read is in the reports.** The console summary,
+  `ash.summary.txt`, `ash.summary.md`, `ash.flat.json` (`converter_refusals`, always
+  present) and `ash.sarif` (one execution notification per input, `error` for an
+  archive over a limit, `warning` otherwise) list them; before, they were in `ash.log`
+  and `ash_aggregated_results.json` only.
+
 - **trivy-repo and syft read no config file from the scanned tree, online or
   offline.** A `trivy.yaml` in the scanned repository
   could turn on a VEX repository download or client/server mode, and a `.syft.yaml`

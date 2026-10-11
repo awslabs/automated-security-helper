@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from pydantic import ValidationError
 import yaml
+from automated_security_helper.config.archive_limits import confine_archive_limits
 from automated_security_helper.config.ash_config import AshConfig, SandboxConfig
 from automated_security_helper.config.config_sources import (
     ResolvedConfigDocument,
@@ -432,7 +433,8 @@ def resolve_config(
             detect-secrets' secret verification and the plugin and filter files it
             imports (``config/secret_verification_trust.py``), and its
             ``honor_ignore_files`` is replaced by the trusted value
-            (:func:`confine_honor_ignore_files`).
+            (:func:`confine_honor_ignore_files`), and so are its archive extraction
+            limits (``config/archive_limits.py``).
         client_overrides: ``config_overrides`` came from an MCP client (a
             workspace tool's), not the operator, so a tool path they name is not
             the operator's (``path_trust.OperatorPaths``).
@@ -550,6 +552,7 @@ def resolve_config(
     )
     confine_detect_secrets_settings(config, trusted, config_overrides, in_tree, reason)
     confine_honor_ignore_files(config, trusted, config_overrides, in_tree, reason)
+    confine_archive_limits(config, trusted, config_overrides, in_tree)
     return config
 
 

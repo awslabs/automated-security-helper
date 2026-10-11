@@ -120,6 +120,12 @@ reporters:
 }
 ```
 
+The report also carries `converter_refusals`, always present: every input a converter
+did not read, as `{"converter", "path", "member", "reason", "limit",
+"scan_incomplete"}`. `scan_incomplete` is true for an archive refused for an
+extraction limit, which fails the completeness gate; see
+[Inputs a converter does not read](converters.md#inputs-a-converter-does-not-read).
+
 **Use Cases**:
 - Simple data processing scripts
 - Custom integrations
@@ -374,6 +380,10 @@ reporters:
 - GitHub Security tab integration
 - Rich metadata and locations
 - Tool interoperability
+- Converter inputs that were not scanned, as an extra invocation per converter
+  whose `toolExecutionNotifications` carry descriptor id
+  `ASH-CONVERTER-INPUT-NOT-SCANNED`, located at the input: level `error` for an
+  archive refused for an extraction limit, `warning` for every other refusal
 
 **Use Cases**:
 - IDE security annotations

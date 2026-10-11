@@ -450,6 +450,22 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
             }
         },
     ),
+    **{
+        f"/converters/archive/options/{limit}": (
+            {
+                "op": "replace",
+                "path": f"/converters/archive/options/{limit}",
+                "value": 10**15,
+            },
+            {"converters": {"archive": {"options": {limit: 10**15}}}},
+        )
+        for limit in (
+            "max_members",
+            "max_member_bytes",
+            "max_total_bytes",
+            "max_compression_ratio",
+        )
+    },
 }
 
 

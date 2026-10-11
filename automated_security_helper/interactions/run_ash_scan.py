@@ -626,6 +626,19 @@ def _failed_inputs_reason(failed_inputs: Sequence[Any], shown: int = 5) -> str:
     return f"could not convert {len(paths)} {noun}: {named}"
 
 
+def _limit_refusals_reason(refused_inputs: Sequence[Any], shown: int = 5) -> str:
+    """``refused 1 input over an extraction limit: a.zip (max_total_bytes)``."""
+    named = [
+        f"{getattr(item, 'path', '?')} ({getattr(item, 'limit', '?')})"
+        for item in refused_inputs
+    ]
+    listed = ", ".join(named[:shown])
+    if len(named) > shown:
+        listed += f" and {len(named) - shown} more"
+    noun = "input" if len(named) == 1 else "inputs"
+    return f"refused {len(named)} {noun} over an extraction limit: {listed}"
+
+
 def incomplete_converters(
     results: Optional[AshAggregatedResults],
 ) -> List[tuple[str, str]]:
@@ -637,7 +650,7 @@ def incomplete_converters(
     any verdict -- the scanners that ran reported PASSED on the targets they were
     handed, and nothing asked whether the targets that should have existed did.
 
-    Three conditions, read off the recorded row rather than re-derived:
+    Four conditions, read off the recorded row rather than re-derived:
 
     1. ``failure`` is set -- the converter raised, or was dropped by the plugin
        filter for a reason its own dependency check did not explain. ConvertPhase
@@ -646,9 +659,15 @@ def incomplete_converters(
        could not be converted: nbconvert exited non-zero on a notebook, or an
        archive could not be extracted. Each one is a file the scanners never saw in
        converted form, which is the same loss as condition 1 at a smaller scale.
-    3. ``dependencies_satisfied`` is False -- its external tool was not available.
+    3. A ``refused_inputs`` entry names a ``limit`` -- an archive over one of the
+       archive converter's extraction limits, which is refused whole, so none of
+       its contents reached the scanners. A refusal without a limit (a symlinked
+       input, a link or ``..`` member, a nested archive) does not count: those
+       refuse one input or member that is not to be read at all, and the scan
+       reports them without failing on them.
+    4. ``dependencies_satisfied`` is False -- its external tool was not available.
 
-    ``excluded`` is checked first and wins over both. It is the converter-side
+    ``excluded`` is checked first and wins over all of them. It is the converter-side
     counterpart of a SKIPPED scanner: work the run was never meant to do, which is
     what a config-disabled converter and one dropped by
     ``--python-based-plugins-only`` are. A gate that failed on those would fail every
@@ -675,10 +694,20 @@ def incomplete_converters(
             continue
         failure = getattr(row, "failure", None)
         failed_inputs = list(getattr(row, "failed_inputs", None) or [])
+        over_limit = [
+            item
+            for item in getattr(row, "refused_inputs", None) or []
+            if getattr(item, "limit", None)
+        ]
         if failure:
             listed.append((name, str(failure)))
-        elif failed_inputs:
-            listed.append((name, _failed_inputs_reason(failed_inputs)))
+        elif failed_inputs or over_limit:
+            reasons = []
+            if failed_inputs:
+                reasons.append(_failed_inputs_reason(failed_inputs))
+            if over_limit:
+                reasons.append(_limit_refusals_reason(over_limit))
+            listed.append((name, "; ".join(reasons)))
         elif getattr(row, "dependencies_satisfied", True) is False:
             # An unavailable converter costs coverage only if it had inputs. The count
             # is established without its tool, which is what makes it answerable for a
@@ -785,7 +814,10 @@ def print_incompleteness_message(
             "fix or exclude the files it could not convert, disable the converter "
             "if its inputs are not wanted, or drop --fail-on-incomplete-scanners to "
             "accept a partial scan. A converter with nothing to convert never "
-            "reports here.[/yellow]"
+            "reports here. An archive over an extraction limit is extracted once the "
+            "limit named is raised, with --config-overrides "
+            "converters.archive.options.<limit>=<value> or a config file outside "
+            "every git checkout.[/yellow]"
         )
     elif not stale_database_records:
         print("[bold red]ERROR (1) Exiting due to exception during ASH scan[/bold red]")

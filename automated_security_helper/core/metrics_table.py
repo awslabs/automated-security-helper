@@ -240,6 +240,37 @@ def print_stale_content_databases(
         console.print(f"{label} {escape(record.message())}")
 
 
+def print_converter_refusals(
+    asharp_model: AshAggregatedResults, console: Console
+) -> None:
+    """One line per converter input that was not read, after the table.
+
+    No scanner row can say an input went unscanned when a converter never handed it
+    on. A refusal that left the scan incomplete (an archive over an extraction
+    limit) is printed in red, because the completeness gate counts it; the rest in
+    yellow. See ``utils/converter_refusals.py``.
+    """
+    from automated_security_helper.utils.converter_refusals import (
+        SHOWN_IN_SUMMARY,
+        converter_refusals,
+    )
+
+    refusals = converter_refusals(asharp_model)
+    for refusal in refusals[:SHOWN_IN_SUMMARY]:
+        label = (
+            "[bold red]Not scanned (scan incomplete):[/bold red]"
+            if refusal.scan_incomplete
+            else "[bold yellow]Not scanned:[/bold yellow]"
+        )
+        console.print(f"{label} {escape(refusal.message())}")
+    if len(refusals) > SHOWN_IN_SUMMARY:
+        console.print(
+            f"[bold yellow]Not scanned:[/bold yellow] {len(refusals) - SHOWN_IN_SUMMARY} "
+            "more converter input(s), listed under converter_results in "
+            "ash_aggregated_results.json."
+        )
+
+
 def display_metrics_table(
     asharp_model: AshAggregatedResults,
     source_dir: str | Path | None = None,
@@ -338,6 +369,7 @@ def display_metrics_table(
             print_coverage_shortfalls(asharp_model, console)
             print_inputs_not_scanned(asharp_model, console)
             print_stale_content_databases(asharp_model, console)
+            print_converter_refusals(asharp_model, console)
         except (ValueError, OSError, BrokenPipeError) as io_error:
             # stdout/stderr may be closed (e.g., in MCP server context)
             # Log the error but don't fail the scan

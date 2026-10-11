@@ -701,6 +701,13 @@ class RuntimeOverridesConfig(BaseModel):
         # AWS-credential-bearing reporter options (plugin-provided, hyphenated names).
         "/reporters/bedrock-summary-reporter/options/aws_*",
         "/reporters/cloudwatch-logs/**",
+        # The archive converter's extraction limits bound what extracting an
+        # archive in the scanned tree may write, so a client may not raise them.
+        # A write at an ancestor (/converters/archive, /converters) is refused too.
+        "/converters/archive/options/max_members",
+        "/converters/archive/options/max_member_bytes",
+        "/converters/archive/options/max_total_bytes",
+        "/converters/archive/options/max_compression_ratio",
     ]
 
     denied_value_patterns: Annotated[
