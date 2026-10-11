@@ -892,6 +892,36 @@ class UnmountablePathError(ContainerInputError):
     """A host path that would be mounted holds a character ``--mount`` cannot carry."""
 
 
+def _refuse_config_linked_out_of_the_tree(config: str, source_dir: Path) -> None:
+    """Refuse a config the scanned repository points at a file outside its tree.
+
+    A config named inside the scanned tree (the outermost checkout at or above the
+    source directory, as ``config/sandbox_grants.scanned_trees`` defines it) is the
+    repository's path to define. When it, or a directory on the way to it, is a
+    link to something outside that tree, mounting what it resolves to would put a
+    host file of the repository's choosing into a container that runs the
+    repository's code. A link that stays inside the tree is followed.
+    """
+    from automated_security_helper.config.sandbox_grants import (
+        is_within,
+        scanned_trees,
+    )
+
+    named = Path(os.path.abspath(config))
+    trees = scanned_trees(Path(source_dir))
+    if not any(named.is_relative_to(tree) for tree in trees):
+        return
+    resolved = Path(config).resolve()
+    if any(is_within(resolved, tree) for tree in trees):
+        return
+    raise ContainerInputError(
+        f"The config file {config!r} is inside the scanned tree but is a link, or "
+        f"is reached through one, to {resolved}, which is outside it. ASH does not "
+        "mount a file the repository being scanned points it at. Name the file "
+        "itself, outside the repository, or a config inside it."
+    )
+
+
 def _refuse_absolute_extends(config: str) -> None:
     """Refuse a config whose ``extends`` chain names a base by absolute path.
 
@@ -957,6 +987,7 @@ def _require_mountable_inputs(
     _require_mountable("source directory", source)
     _require_mountable("output directory", Path(output_dir).resolve())
     if config:
+        _refuse_config_linked_out_of_the_tree(config, source)
         _refuse_absolute_extends(config)
         _host_file_in_container(
             config, source, CONTAINER_CONFIG_ROOT, follow_extends=True
@@ -980,13 +1011,19 @@ def _unreadable_config(config: str | None) -> str | None:
     """
     if config is None:
         return None
-    if config and Path(config).is_file():
-        return None
-    return (
-        f"Config file not found: {config!r}. --config (or ASH_CONFIG) has to name an "
-        "existing file: container mode mounts it read-only for the scan inside the "
-        "container."
-    )
+    if not config or not Path(config).is_file():
+        return (
+            f"Config file not found: {config!r}. --config (or ASH_CONFIG) has to name "
+            "an existing file: container mode mounts it read-only for the scan inside "
+            "the container."
+        )
+    if not os.access(config, os.R_OK):
+        # The runner mounts with its own rights, which can be wider than ASH's.
+        return (
+            f"Config file cannot be read: {config!r}. ASH does not hand the container "
+            "runner a file it cannot read itself."
+        )
+    return None
 
 
 #: Tells the scan inside the container that its --config was written by the
@@ -1173,6 +1210,7 @@ def _assemble_run_command(
     inner_config = None
     config_from_scanned_repository = False
     if config:
+        _refuse_config_linked_out_of_the_tree(config, source_dir)
         _refuse_absolute_extends(config)
         config_mounts, inner_config, config_files = _host_file_in_container(
             config, source_dir, CONTAINER_CONFIG_ROOT, follow_extends=True

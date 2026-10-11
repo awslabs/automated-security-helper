@@ -212,18 +212,20 @@ class TestTheConfigIsReadableInsideTheContainer:
         assert _flag(cmd, "--config") == "/ash-config/ash.yaml"
         assert _mounts(cmd)["/ash-config/ash.yaml"]["source"] == str(config)
 
-    def test_a_link_inside_the_source_to_a_file_outside_mounts_the_file(self, tree):
-        """Its target is what is read, and the target is not under /src."""
+    def test_a_link_inside_the_source_to_a_file_outside_is_refused(self, tree):
+        """Rewritten: this asserted the link's target was mounted.
+
+        The source directory is the scanned repository's, so a link there to a file
+        outside it is the repository choosing which host file the container gets;
+        see test_container_config_link_out_of_the_tree.py.
+        """
         target = tree["operator"] / "ash.yaml"
         target.write_text("project_name: p\n", encoding="utf-8")
         link = tree["source"] / ".ash" / ".ash.yaml"
         link.symlink_to(target)
 
-        cmd = _assemble(tree["source"], tree["output"], config=str(link))
-
-        inner = _flag(cmd, "--config")
-        assert inner == "/ash-config/ash.yaml"
-        assert _mounts(cmd)[inner]["source"] == str(target)
+        with pytest.raises(ValueError, match="link"):
+            _assemble(tree["source"], tree["output"], config=str(link))
 
     def test_a_relative_config_is_taken_from_the_working_directory(
         self, tree, monkeypatch

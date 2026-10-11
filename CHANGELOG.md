@@ -160,7 +160,8 @@
   chain, for one outside the source directory) and the inner scan is given the path it
   has in the container; one that is not an existing file refuses the scan with exit 3,
   as does an `extends` entry that names a base by absolute path, which inside the
-  container is not the same file.
+  container is not the same file, a config named inside the scanned tree that links
+  out of it (its target would have been mounted), and a config file ASH cannot read.
   A config inside the scanned checkout but outside `--source-dir` keeps the limits a
   local scan gives a repository's config: the host decides, and passes the scan inside
   `--config-from-scanned-repository`, since it sees that file only at `/ash-config`.

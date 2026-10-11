@@ -404,3 +404,75 @@ class TestAConfigTheScannedRepositoryWroteKeepsItsLimits:
         inner = _inner_args(_only(calls, "run"))
         assert "--config-from-scanned-repository" not in inner
         assert _flag(inner, "--config") == "/ash-config/ash.yaml"
+
+
+class TestAConfigLinkedOutOfTheTreeIsRefused:
+    """A config named inside the scanned checkout that links to a file outside it.
+
+    Mounting the link's target would put a host file of the repository's choosing
+    into the container; the wrapper refuses with exit 3 instead.
+    """
+
+    @pytest.fixture
+    def checkout(self, tmp_path):
+        root = tmp_path / "repo"
+        (root / ".git").mkdir(parents=True)
+        (root / ".ash").mkdir()
+        secret = tmp_path / "home" / ".docker" / "config.json"
+        secret.parent.mkdir(parents=True)
+        secret.write_text("{}\n")
+        return root, secret
+
+    def test_a_file_link_is_refused(self, fake_runner, checkout):
+        root, secret = checkout
+        (root / ".ash" / ".ash.yaml").symlink_to(secret)
+
+        rc, output, calls = _run_ash_status(
+            fake_runner, root, ["--no-build", "--config", ".ash/.ash.yaml"]
+        )
+
+        assert rc == 3, output
+        assert calls == []
+
+    def test_a_directory_link_is_refused(self, fake_runner, checkout):
+        root, secret = checkout
+        (root / "conf").symlink_to(secret.parent, target_is_directory=True)
+
+        rc, output, calls = _run_ash_status(
+            fake_runner, root, ["--no-build", "--config", "conf/config.json"]
+        )
+
+        assert rc == 3, output
+        assert calls == []
+
+    def test_a_link_that_stays_inside_still_runs(self, fake_runner, checkout):
+        """Control."""
+        root, _ = checkout
+        (root / ".ash" / "real.yaml").write_text("project_name: p\n")
+        (root / ".ash" / ".ash.yaml").symlink_to("real.yaml")
+
+        rc, output, calls = _run_ash_status(
+            fake_runner, root, ["--no-build", "--config", ".ash/.ash.yaml"]
+        )
+
+        assert rc == 0, output
+        assert (
+            _flag(_inner_args(_only(calls, "run")), "--config") == "/src/.ash/real.yaml"
+        )
+
+    @pytest.mark.skipif(
+        os.geteuid() == 0, reason="root reads a file whatever its mode says"
+    )
+    def test_an_unreadable_config_is_refused(self, fake_runner, project, tmp_path):
+        unreadable = tmp_path / "operator.yaml"
+        unreadable.write_text("project_name: p\n")
+        unreadable.chmod(0)
+        try:
+            rc, output, calls = _run_ash_status(
+                fake_runner, project, ["--no-build", "--config", str(unreadable)]
+            )
+        finally:
+            unreadable.chmod(0o600)
+
+        assert rc == 3, output
+        assert calls == []

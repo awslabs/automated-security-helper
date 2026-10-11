@@ -172,9 +172,41 @@ if [[ "${NO_RUN}" = "NO" && ( "${CONFIG_GIVEN}" = "YES" || -n "${CONFIG_PATH}" )
     echo "ERROR: Config file not found: '${CONFIG_PATH}'. --config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container." >&2
     exit 3
   fi
+  # The runner mounts with its own rights, which can be wider than this user's.
+  if [[ ! -r "${CONFIG_PATH}" ]]; then
+    echo "ERROR: Config file cannot be read: '${CONFIG_PATH}'. ASH does not hand the container runner a file it cannot read itself." >&2
+    exit 3
+  fi
   CONFIG_REAL="$(resolve_file "${CONFIG_PATH}")"
+  CONFIG_NAMED="$(cd "$(dirname "${CONFIG_PATH}")" && pwd -L)/$(basename "${CONFIG_PATH}")"
   require_mountable "config file" "${CONFIG_REAL}"
   SOURCE_REAL="$(cd "${SOURCE_DIR}" && pwd -P)"
+  # The scanned tree, as a local scan defines it: the outermost directory at or
+  # above the source dir holding a .git entry, under its logical and physical names.
+  TREES=()
+  for start in "${SOURCE_DIR}" "${SOURCE_REAL}"; do
+    dir="${start}"
+    checkout="${start}"
+    while :; do
+      if [ -e "${dir}/.git" ]; then checkout="${dir}"; fi
+      if [ "${dir}" = "/" ] || [ -z "${dir}" ]; then break; fi
+      dir="$(dirname "${dir}")"
+    done
+    TREES+=("${checkout}" "$(cd "${checkout}" && pwd -P)")
+  done
+  named_in_tree="NO"
+  real_in_tree="NO"
+  for tree in "${TREES[@]}"; do
+    case "${CONFIG_NAMED}" in "${tree%/}"/*) named_in_tree="YES" ;; esac
+    case "${CONFIG_REAL}" in "${tree%/}"/*) real_in_tree="YES" ;; esac
+  done
+  # A config named inside the tree that links, itself or through a directory, to a
+  # file outside it: mounting the target would put a host file of the scanned
+  # repository's choosing into the container.
+  if [[ "${named_in_tree}" = "YES" && "${real_in_tree}" = "NO" ]]; then
+    echo "ERROR: The config file '${CONFIG_PATH}' is inside the scanned tree but is a link, or is reached through one, to '${CONFIG_REAL}', which is outside it. ASH does not mount a file the repository being scanned points it at." >&2
+    exit 3
+  fi
   case "${CONFIG_REAL}" in
     "${SOURCE_REAL%/}"/*)
       CONFIG_ASH_ARGS=(--config "/src/${CONFIG_REAL#"${SOURCE_REAL%/}"/}")
@@ -182,26 +214,12 @@ if [[ "${NO_RUN}" = "NO" && ( "${CONFIG_GIVEN}" = "YES" || -n "${CONFIG_PATH}" )
     *)
       CONFIG_RUN_ARGS=(--mount "type=bind,source=${CONFIG_REAL},destination=/ash-config/$(basename "${CONFIG_REAL}"),readonly")
       CONFIG_ASH_ARGS=(--config "/ash-config/$(basename "${CONFIG_REAL}")")
-      # A config elsewhere in the scanned checkout -- the outermost directory at or
-      # above the source dir holding a .git entry, as a local scan defines it -- was
-      # written by the repository being scanned. The scan inside sees it only at
-      # /ash-config, outside its own tree, so it is told.
-      for start in "${SOURCE_DIR}" "${SOURCE_REAL}"; do
-        dir="${start}"
-        checkout="${start}"
-        while :; do
-          if [ -e "${dir}/.git" ]; then checkout="${dir}"; fi
-          if [ "${dir}" = "/" ] || [ -z "${dir}" ]; then break; fi
-          dir="$(dirname "${dir}")"
-        done
-        checkout_real="$(cd "${checkout}" && pwd -P)"
-        case "${CONFIG_REAL}" in
-          "${checkout_real%/}"/*)
-            CONFIG_ASH_ARGS+=(--config-from-scanned-repository)
-            break
-            ;;
-        esac
-      done
+      # A config elsewhere in the scanned tree was written by the repository being
+      # scanned. The scan inside sees it only at /ash-config, outside its own tree,
+      # so it is told.
+      if [[ "${real_in_tree}" = "YES" ]]; then
+        CONFIG_ASH_ARGS+=(--config-from-scanned-repository)
+      fi
       ;;
   esac
 fi

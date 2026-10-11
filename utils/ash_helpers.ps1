@@ -262,6 +262,14 @@ function Invoke-ASH {
                 Write-Error "Config file not found: '$Config'. -Config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container."
                 exit 3
             }
+            # The runner mounts with its own rights, which can be wider than this user's.
+            try {
+                [System.IO.File]::OpenRead((Get-Item -LiteralPath $Config).FullName).Close()
+            }
+            catch {
+                Write-Error "Config file cannot be read: '$Config'. ASH does not hand the container runner a file it cannot read itself."
+                exit 3
+            }
             $configFull = (Get-Item -LiteralPath $Config).FullName
             Assert-Mountable 'config file' $configFull
             $separators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
@@ -287,6 +295,20 @@ function Invoke-ASH {
                 }
                 $checkoutPrefix = $checkout.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
                 $configFromRepository = $configFull.StartsWith($checkoutPrefix, $pathComparison)
+                # The runner resolves links when it mounts, so a config the scanned
+                # repository reaches through a link -- the file itself or a directory on
+                # the way to it -- could put a host file of its choosing into the
+                # container. Any link on that path refuses the run.
+                if ($configFromRepository) {
+                    $item = Get-Item -LiteralPath $configFull
+                    while ($null -ne $item -and $item.FullName.StartsWith($checkoutPrefix, $pathComparison)) {
+                        if ($item.LinkType) {
+                            Write-Error "The config file '$Config' is inside the scanned tree and is reached through a link ('$($item.FullName)'). ASH does not mount a file the repository being scanned points it at."
+                            exit 3
+                        }
+                        $item = Get-Item -LiteralPath (Split-Path -Parent $item.FullName)
+                    }
+                }
             }
             $ashCmdArgs.Add("--config")
             $ashCmdArgs.Add("`"$configInner`"")

@@ -208,7 +208,10 @@ for a file in `.ash/`), so relative bases resolve as they do on the host; only t
 files are mounted, not the directory. A `--config` that is not an existing file, or is
 empty, refuses the scan with exit 3 before anything is built, and so does an `extends`
 entry anywhere in the chain that names its base by absolute path: inside the container
-that path is not the same file. A config the scanned
+that path is not the same file. A `--config` named inside the scanned tree that is a link,
+or is reached through one, to a file outside that tree is refused with exit 3 too, since
+mounting the link's target would put a host file the repository chose into the
+container; so is a config file ASH cannot read itself. A config the scanned
 repository wrote keeps the limits a local scan gives it (see
 [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)):
 when the config or a file it extends is inside the outermost git checkout at or above
