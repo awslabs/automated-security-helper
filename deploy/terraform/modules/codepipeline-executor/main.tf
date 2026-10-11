@@ -36,6 +36,8 @@ locals {
 
   results_arn_prefix = "${aws_s3_bucket.artifacts.arn}/${var.results_prefix}"
 
+  codebuild_project_arn_prefix = "arn:${data.aws_partition.current.partition}:codebuild:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:project/"
+
   # Implicit variable in CodePipeline's reserved namespace, resolved per
   # execution. It is what gives every action in one run a shared, unique S3
   # prefix, so two concurrent executions cannot read each other's shards.
@@ -585,6 +587,12 @@ data "aws_iam_policy_document" "pipeline" {
     resources = [var.codecommit_repository_arn]
   }
 
+  # Named by the projects' shared prefix rather than listed, so the document does not
+  # grow with shard_count: 100 listed shard ARNs under the longest name_prefix
+  # allowed are over the 10,240 characters IAM allows for a role's inline policies.
+  # A project name holds no "/", so the pattern reaches only projects whose name
+  # starts with this module's shard prefix. Both ARNs are built from names, not read
+  # off the projects, so the document is known at plan time.
   statement {
     sid    = "StartBuilds"
     effect = "Allow"
@@ -595,10 +603,10 @@ data "aws_iam_policy_document" "pipeline" {
       "codebuild:StopBuild",
     ]
 
-    resources = concat(
-      aws_codebuild_project.shard[*].arn,
-      [aws_codebuild_project.merge.arn],
-    )
+    resources = [
+      "${local.codebuild_project_arn_prefix}${var.name_prefix}-shard-*",
+      "${local.codebuild_project_arn_prefix}${var.name_prefix}-merge",
+    ]
   }
 
   dynamic "statement" {

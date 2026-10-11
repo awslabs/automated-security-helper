@@ -196,7 +196,11 @@ two actions of one role apart, and a CodeBuild action runs as its project's role
 so this takes a project per shard. The index is a project environment variable;
 the execution id arrives as a per-action `EnvironmentVariables` override.
 CodePipeline enforces a 1000-character limit on an action configuration value,
-which that override does not approach.
+which that override does not approach. The pipeline role may start builds of
+`<name_prefix>-shard-*` and `<name_prefix>-merge` rather than of a listed ARN per
+shard, so its inline policy stays the same size at any `shard_count`; a listed ARN
+per shard would put it over IAM's inline-policy size limit at 100 shards with a long
+`name_prefix`.
 
 **The results bucket also holds pipeline artifacts.** One bucket with two
 prefixes, versioning on because CodePipeline requires it on its artifact bucket.
