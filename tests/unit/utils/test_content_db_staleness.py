@@ -442,6 +442,51 @@ class TestMeasurement:
         )
         assert record.stale and "not found" in (record.error or "")
 
+    def test_grype_reporting_a_database_path_that_does_not_exist_is_absent(
+        self, tmp_path
+    ):
+        """No build time, an error that does not say so, and no file at the path."""
+        status = {
+            "schemaVersion": "",
+            "path": str(tmp_path / "cache" / "6" / "vulnerability.db"),
+            "valid": False,
+            "error": "unable to load the database",
+        }
+        exe = _executable(
+            tmp_path,
+            "grype",
+            f"import sys\nprint({json.dumps(status)!r})\nsys.exit(1)\n",
+        )
+        record = staleness.measure(
+            cdb.get("grype-db"),
+            staleness.ProbeContext(env=dict(os.environ), executable=str(exe)),
+            cdb.STALENESS_WARN,
+        )
+        assert record.absent, record.error
+
+    @pytest.mark.parametrize(
+        "name", ["semgrep-offline-rules", "opengrep-offline-rules"]
+    )
+    def test_a_ruleset_with_no_directory_configured_is_absent(self, name):
+        record = staleness.measure(
+            cdb.get(name), staleness.ProbeContext(env={}), cdb.STALENESS_WARN
+        )
+        assert record.absent and "no offline rules cache directory" in record.error
+
+    @pytest.mark.parametrize(
+        "name", ["semgrep-offline-rules", "opengrep-offline-rules"]
+    )
+    def test_a_ruleset_directory_without_rules_files_is_absent(self, tmp_path, name):
+        cache = tmp_path / "rules"
+        cache.mkdir()
+        (cache / "README.txt").write_text("not a rule\n")
+        record = staleness.measure(
+            cdb.get(name),
+            staleness.ProbeContext(env={}, cache_dir=str(cache)),
+            cdb.STALENESS_WARN,
+        )
+        assert record.absent and "no rules files found" in record.error
+
     def test_ruleset_manifest_wins_over_a_fresh_mtime(self, tmp_path):
         """A copy resets mtime to now; the recorded download time still says 40 days."""
         fetched = datetime.now(UTC) - timedelta(days=40)

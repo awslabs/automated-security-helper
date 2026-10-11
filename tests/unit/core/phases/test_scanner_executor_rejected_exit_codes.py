@@ -328,3 +328,40 @@ class TestAToolKilledByASignalIsAnError:
 
         assert scanner.exit_code == 129
         assert not scanner._exit_code_accepted()
+
+
+def test_each_target_is_judged_by_its_own_run(plugin_context, tmp_path):
+    """The converted target's exit 1 is not hidden by the source target's exit 2.
+
+    ``_process_command_response`` keeps the largest code any run returned, and with
+    grype's ``{0, 2}`` a 2 from one target used to accept a 1 from the next.
+    """
+    prepared = tmp_path / "prepared"
+    prepared.write_text(json.dumps(_sarif([])), encoding="utf-8")
+    converted = plugin_context.work_dir
+    (converted / "converted.py").write_text("y = 2\n")
+    scanner = _scanner_class({0, 2})(config=_ToolConfig(), context=plugin_context)
+    scanner.prepared_results = str(prepared)
+    codes = iter([2, 1])
+    original = scanner._execute_scan
+
+    def execute(target, target_type, global_ignore_paths):
+        scanner.tool_exit_code = next(codes)
+        return original(target, target_type, global_ignore_paths)
+
+    object.__setattr__(scanner, "_execute_scan", execute)
+    executor = ScannerExecutor(
+        plugin_context=plugin_context, progress_display=MagicMock(), scanner_tasks=[]
+    )
+
+    source_row, converted_row = executor._execute_scanner(
+        SCANNER_NAME,
+        scanner,
+        [
+            {"path": plugin_context.source_dir, "type": "source"},
+            {"path": converted, "type": "converted"},
+        ],
+    )
+
+    assert (source_row.status, source_row.exit_code) == (ScannerStatus.PASSED, 2)
+    assert (converted_row.status, converted_row.exit_code) == (ScannerStatus.ERROR, 1)

@@ -10,10 +10,10 @@ Three behaviors, each through ``ash scan`` with the real tools:
    ``$SEMGREP_RULES_CACHE_DIR``. Measured before the change: semgrep could not see the
    directory, exited 7, and the scan reported no findings and exited 0.
 3. Under ``--sandbox bwrap`` nbconvert runs in the sandbox. The stand-in is a
-   ``jupyter_nbconvert_config.py`` in ``$JUPYTER_CONFIG_DIR``, which nbconvert loads
-   when it starts and which records the network namespace it ran in. Measured before
-   the change: the host's namespace, with the home directory and a credential-shaped
-   variable visible.
+   ``sitecustomize.py`` on ``$PYTHONPATH``, which nbconvert loads when it starts and
+   which records the network namespace it ran in and whether a credential-shaped
+   variable reached it. Measured before the change: the host's namespace, with the
+   home directory and the variable visible.
 
 The ``--sandbox off`` runs are the controls. Skipped unless ``--run-integration`` is
 given, and per test when semgrep, nbconvert or bubblewrap is not installed.
@@ -69,19 +69,6 @@ NOTEBOOK = json.dumps(
         "nbformat_minor": 5,
     }
 )
-
-PROBE_CONFIG = """\
-import os
-from pathlib import Path
-
-marker = Path({marker!r})
-try:
-    namespace = os.readlink("/proc/self/ns/net")
-except OSError as error:
-    namespace = "unreadable: " + type(error).__name__
-with marker.open("a", encoding="utf-8") as fh:
-    fh.write(namespace + "\\n")
-"""
 
 
 def _ash_executable() -> str:
@@ -222,62 +209,6 @@ def test_an_offline_unsandboxed_scan_reads_the_rule_cache(tmp_path):
     assert result.returncode == 2, result.stdout[-2000:]
 
 
-def _notebook_scan(tmp_path: Path, sandbox: str):
-    source = _source(tmp_path)
-    (source / "analysis.ipynb").write_text(NOTEBOOK)
-    config_dir = tmp_path / "jupyter-config"
-    config_dir.mkdir()
-    marker = tmp_path / "nbconvert-namespace.txt"
-    (config_dir / "jupyter_nbconvert_config.py").write_text(
-        PROBE_CONFIG.format(marker=str(marker))
-    )
-    rules = _rules(tmp_path, RULE)
-    _result, output = _scan(
-        tmp_path,
-        sandbox,
-        scanners="semgrep",
-        env_extra={
-            "SEMGREP_RULES_CACHE_DIR": str(rules),
-            "JUPYTER_CONFIG_DIR": str(config_dir),
-        },
-        extra=[
-            "--fail-on-findings",
-            "false",
-            "--config-overrides",
-            f"sandbox.extra_read_paths=[{rules}]",
-        ],
-    )
-    converted = sorted((output / "converted").rglob("*-converted.*"))
-    namespaces = marker.read_text().split() if marker.exists() else []
-    return converted, namespaces
-
-
-def test_nbconvert_runs_inside_the_sandbox(tmp_path):
-    _require("semgrep")
-    _require("jupyter-nbconvert")
-    _require_bwrap()
-    host = os.readlink("/proc/self/ns/net")
-
-    converted, namespaces = _notebook_scan(tmp_path, "bwrap")
-
-    assert host not in namespaces, (
-        f"nbconvert ran in the host's network namespace {host} under --sandbox bwrap"
-    )
-    assert converted, "the notebook was not converted under the sandbox"
-
-
-def test_without_a_sandbox_nbconvert_runs_on_the_host(tmp_path):
-    """Control: the probe works, and without a sandbox it reports the host."""
-    _require("semgrep")
-    _require("jupyter-nbconvert")
-    host = os.readlink("/proc/self/ns/net")
-
-    converted, namespaces = _notebook_scan(tmp_path, "off")
-
-    assert host in namespaces, f"the probe did not record the host: {namespaces}"
-    assert converted
-
-
 # Loaded by every Python process started with the probe directory on PYTHONPATH,
 # including nbconvert inside the sandbox: PYTHON* variables pass the environment
 # filter, and a directory on ASH's own sys.path outside $HOME is mounted read-only.
@@ -297,17 +228,86 @@ if os.path.basename(sys.argv[0] if sys.argv else "") == "jupyter-nbconvert":
 """
 
 
+def _write_probe(tmp_path: Path) -> Path:
+    probe_dir = tmp_path / "probe"
+    probe_dir.mkdir()
+    (probe_dir / "sitecustomize.py").write_text(SITECUSTOMIZE, encoding="utf-8")
+    return probe_dir
+
+
+def _recorded(marker: Path) -> list:
+    lines = marker.read_text(encoding="utf-8").split("\n") if marker.exists() else []
+    return [line.split() for line in lines if line.strip()]
+
+
+def _notebook_scan(tmp_path: Path, sandbox: str):
+    source = _source(tmp_path)
+    (source / "analysis.ipynb").write_text(NOTEBOOK)
+    probe_dir = _write_probe(tmp_path)
+    # The jupyter converter's results directory, which nbconvert may write.
+    marker = tmp_path / "out" / "converted" / "jupyter" / "namespace.txt"
+    rules = _rules(tmp_path, RULE)
+    _result, output = _scan(
+        tmp_path,
+        sandbox,
+        scanners="semgrep",
+        env_extra={
+            "SEMGREP_RULES_CACHE_DIR": str(rules),
+            "PYTHONPATH": str(probe_dir),
+            "PYTHONASHPROBE": str(marker),
+            "NOTEBOOK_PROBE_TOKEN": "token-value",
+        },
+        extra=[
+            "--fail-on-findings",
+            "false",
+            "--config-overrides",
+            f"sandbox.extra_read_paths=[{rules}]",
+        ],
+    )
+    converted = sorted((output / "converted").rglob("*-converted.*"))
+    return converted, _recorded(marker)
+
+
+def test_nbconvert_runs_inside_the_sandbox(tmp_path):
+    _require("semgrep")
+    _require("jupyter-nbconvert")
+    _require_bwrap()
+    host = os.readlink("/proc/self/ns/net")
+
+    converted, recorded = _notebook_scan(tmp_path, "bwrap")
+
+    assert recorded, "the probe recorded nothing, so nothing was measured"
+    assert all(namespace != host for namespace, _token in recorded), (
+        f"nbconvert ran in the host's network namespace {host} under --sandbox bwrap"
+    )
+    assert all(token == "absent" for _namespace, token in recorded), (
+        f"a credential-shaped variable reached nbconvert: {recorded}"
+    )
+    assert converted, "the notebook was not converted under the sandbox"
+
+
+def test_without_a_sandbox_nbconvert_runs_on_the_host(tmp_path):
+    """Control: the probe works, and without a sandbox it reports the host."""
+    _require("semgrep")
+    _require("jupyter-nbconvert")
+    host = os.readlink("/proc/self/ns/net")
+
+    converted, recorded = _notebook_scan(tmp_path, "off")
+
+    assert [host, "present"] in recorded, (
+        f"the probe did not record the host: {recorded}"
+    )
+    assert converted
+
+
 @pytest.mark.parametrize("sandbox", ["bwrap", "off"])
 def test_the_converter_runs_nbconvert_in_its_own_namespace(
     tmp_path, monkeypatch, sandbox
 ):
     """The jupyter converter itself, with the real backend: where nbconvert ran.
 
-    The probe above relies on ``JUPYTER_CONFIG_DIR``, which the sandbox's environment
-    filter drops, so under bwrap it records nothing either way. This probe reaches
-    nbconvert inside the sandbox and records its network namespace and whether a
-    credential-shaped variable reached it. ``off`` is the control: the host's
-    namespace and the variable.
+    The same probe as the scans above, without the rest of a scan around it. ``off``
+    is the control: the host's namespace and the variable.
     """
     _require("jupyter-nbconvert")
     if sandbox != "off":
@@ -319,9 +319,7 @@ def test_the_converter_runs_nbconvert_in_its_own_namespace(
     )
 
     AshConfig.model_rebuild()
-    probe_dir = tmp_path / "probe"
-    probe_dir.mkdir()
-    (probe_dir / "sitecustomize.py").write_text(SITECUSTOMIZE, encoding="utf-8")
+    probe_dir = _write_probe(tmp_path)
     source = _source(tmp_path)
     (source / "analysis.ipynb").write_text(NOTEBOOK)
     output = tmp_path / "out"
@@ -343,8 +341,7 @@ def test_the_converter_runs_nbconvert_in_its_own_namespace(
     converted = JupyterConverter(context=context).convert()
 
     assert converted, "the notebook was not converted"
-    lines = marker.read_text(encoding="utf-8").split("\n") if marker.exists() else []
-    recorded = [line.split() for line in lines if line.strip()]
+    recorded = _recorded(marker)
     assert recorded, "the probe recorded nothing, so nothing was measured"
     host = os.readlink("/proc/self/ns/net")
     if sandbox == "off":

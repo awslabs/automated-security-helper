@@ -634,3 +634,51 @@ class TestAFailedSandboxedConversionIsLostCoverage:
 
         assert tools.conversions()
         assert self._incomplete(results) == []
+
+
+class TestTheConverterConfinesItselfOutsideThePhase:
+    """The converter's own guards, used where no convert phase sets a scope.
+
+    A library caller can build a JupyterConverter and call it directly. Its
+    construction probe, its dependency check and its refusal to install must hold
+    without the phase's scopes, and each is tested on its own here: the install
+    guard with the probe scope removed, so the runner's in-scope refusal cannot
+    stand in for it.
+    """
+
+    def test_construction_and_the_dependency_check_are_planned(
+        self, tmp_path, tree, backend, monkeypatch
+    ):
+        tools = _Tools(tmp_path, installed=True)
+        _isolate_tool_lookup(monkeypatch, tools, tree[2], online=True)
+
+        converter = _converter(_context(tree, "bwrap"))
+        converter.validate_plugin_dependencies()
+
+        ran = [c for c in tools.calls() if _mentions_nbconvert(c)]
+        assert ran, f"no nbconvert process ran; calls: {tools.calls()}"
+        planned = [argv for argv, _policy, _env in backend.spawns]
+        unplanned = [
+            c
+            for c in ran
+            if not any(
+                Path(argv[0]).name == c[0] and argv[1:] == c[1:] for argv in planned
+            )
+        ]
+        assert unplanned == [], f"ran without the sandbox backend: {unplanned}"
+
+    def test_the_install_guard_holds_without_a_scope(
+        self, tmp_path, tree, backend, monkeypatch
+    ):
+        from contextlib import nullcontext
+
+        tools = _Tools(tmp_path, installed=False)
+        _isolate_tool_lookup(monkeypatch, tools, tree[2], online=True)
+        converter = _converter(_context(tree, "bwrap"))
+        monkeypatch.setattr(converter, "_probe_scope", lambda: nullcontext())
+
+        converter.validate_plugin_dependencies()
+
+        assert tools.installs() == [], (
+            f"the converter installed a tool under a sandbox: {tools.installs()}"
+        )
