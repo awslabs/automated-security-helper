@@ -125,14 +125,29 @@ export class AshCodeCommitGateStack extends Stack {
         'With no such rule the vote is recorded but blocks nothing.',
     });
 
+    /*
+     * OFF BY DEFAULT, because turning it on changes what the verdict covers.
+     *
+     * With `--changed-files-only --base-ref <destination>`, ASH keeps only findings
+     * whose file appears in `git diff --name-only`. Findings in files the pull request
+     * did not touch stop counting, and so does every finding in a file whose name git
+     * prints C-quoted (a non-ASCII byte, a quote, a backslash or a control character):
+     * the quoted spelling matches no scanned path, nothing warns, and the scan exits 0,
+     * which this gate reports as "passed" and, with ApprovalGate, APPROVEs. Measured:
+     * a bandit finding in `a.py` exits 2 under the flag, the same finding in `é.py`
+     * exits 0. The Terraform gate refuses the option outright; here it stays
+     * available to an operator who accepts the narrowing for the speed.
+     */
     const changedFilesOnly = new CfnParameter(this, 'ChangedFilesOnly', {
       type: 'String',
-      default: 'true',
+      default: 'false',
       allowedValues: ['true', 'false'],
       description:
-        "Scan only files the pull request changed, using ASH's --changed-files-only " +
-        '--base-ref against the destination commit. The repository is still cloned in ' +
-        'full, so scanners keep whole-repository context such as lockfiles.',
+        "Scan only files the pull request changed (ASH's --changed-files-only --base-ref " +
+        'against the destination commit). Off by default: with it on, findings in files ' +
+        'the pull request did not change stop counting, and so do findings in any file ' +
+        'whose name git prints quoted (non-ASCII, quote, backslash or control ' +
+        'characters), so such a pull request can pass.',
     });
 
     const minSeverity = new CfnParameter(this, 'MinSeverity', {

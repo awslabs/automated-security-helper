@@ -493,6 +493,14 @@ aws codecommit associate-approval-rule-template-with-repository \
   --approval-rule-template-name ash-gate --repository-name <GatedRepositoryName>
 ```
 
+The gate scans the whole tree. `ChangedFilesOnly` (default `false`) narrows it to
+the files the pull request changed, with ASH's `--changed-files-only --base-ref`
+against the destination commit. Turning it on changes what the verdict covers:
+findings in files the pull request did not change stop counting, and so does every
+finding in a file whose name git prints quoted (a non-ASCII byte, a quote, a
+backslash or a control character), because the quoted name matches no scanned path.
+Such a pull request passes, and with `ApprovalGate` it is approved.
+
 The scan runs without the function role's credentials. That role can comment on and
 approve pull requests, and the scanners run over code the pull request controls, so
 the handler removes every credential and profile variable from the scan's environment

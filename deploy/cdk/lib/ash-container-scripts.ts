@@ -489,8 +489,9 @@ exec "$@"
  * resolve dependencies, a project file to detect the language. Installing
  * `git-remote-codecommit` into this image flavor lets git clone over the
  * `codecommit::` transport using the function's own IAM role, so ASH sees a real
- * working tree. ASH's own `--changed-files-only --base-ref` then narrows the
- * scan to the pull request's diff while keeping that context.
+ * working tree. With `ChangedFilesOnly` on, ASH's own `--changed-files-only
+ * --base-ref` narrows the findings to the pull request's diff while keeping that
+ * context; it is off by default, and ash-codecommit-gate-stack.ts says why.
  *
  * FAILURE MODES:
  * - Lambda's ceiling is 900 seconds. A large repository or a slow scanner set
@@ -855,7 +856,7 @@ def handler(event, context):
 
     argv = ["ash", "scan", "--source-dir", source_dir, "--output-dir", output_dir,
             "--config", config_path, "--no-progress", "--simple", "--compact-report"]
-    if os.environ.get("ASH_CHANGED_FILES_ONLY", "true") == "true":
+    if os.environ.get("ASH_CHANGED_FILES_ONLY", "false") == "true":
         # Diff against the pull request's destination commit, which is what the
         # reviewer is being asked to merge into.
         argv += ["--changed-files-only", "--base-ref", destination_commit]
