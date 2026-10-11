@@ -445,7 +445,7 @@ Clone a repository into this session's workspace and make it the scan target.
 | `url` | str | *required* | Remote URL to clone: https://, ssh:// or user@host:path. Refused if |
 | `ref` | str |  | Optional branch, tag, or commit. Defaults to the remote's default branch. |
 | `ssh_key_id` | str |  | Must be omitted. The server registers no ssh keys, so any id |
-| `depth` | int | 1 | Shallow-clone depth. Defaults to 1. |
+| `depth` | int | 1 | Shallow-clone depth, a positive whole number. Defaults to 1. |
 
 ### `set_source_zip_chunk`
 

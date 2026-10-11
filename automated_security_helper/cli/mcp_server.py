@@ -1556,8 +1556,8 @@ async def set_source_git(
         ref: Optional branch, tag, or commit. Defaults to the remote's default branch.
         ssh_key_id: Must be omitted. The server registers no ssh keys, so any id
                     is refused. Raw private keys are never accepted over the wire.
-        depth: Shallow-clone depth, a positive whole number of commits. Defaults
-            to 1. Any other value is refused before anything is created.
+        depth: Shallow-clone depth, a positive whole number. Defaults to 1.
+            Any other value is refused before anything is created.
 
     Refused while a scan of this session runs (error_type source_delivery_busy),
     because the clone replaces the tree the scan is reading.
