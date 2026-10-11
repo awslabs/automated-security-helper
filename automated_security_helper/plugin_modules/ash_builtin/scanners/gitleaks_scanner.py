@@ -966,18 +966,30 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 relative
             )
             try:
-                with open_in_scanned_tree(
+                handle = open_in_scanned_tree(
                     target_abs / relative, target_abs, allow_hardlinks=True
-                ) as handle:
-                    size = os.fstat(handle.fileno()).st_size
-                    if size == 0 or (size_limit is not None and size > size_limit):
-                        continue
-                    _write_private_copy(handle, destination)
+                )
             except TreeInputRefused:
                 continue
             except (OSError, ValueError):
-                # Missing, unreadable, or a name no file can have.
+                # Missing, unreadable, or a name no file can have: the directory
+                # scan read nothing there either.
                 continue
+            with handle:
+                size = os.fstat(handle.fileno()).st_size
+                if size == 0 or (size_limit is not None and size > size_limit):
+                    continue
+                try:
+                    _write_private_copy(handle, destination)
+                except OSError as exc:
+                    # ASH's own failure, not the tree's: skipping the file would
+                    # leave what the ignore file hides in it unreported.
+                    raise ScannerError(
+                        "ASH could not copy a file the scanned tree's "
+                        f"{IGNORE_FILE_NAME} names for its re-scan "
+                        f"({exc.strerror or type(exc).__name__}); without the "
+                        "re-scan the findings the file hides would go unreported"
+                    ) from None
             if relative == IGNORE_FILE_NAME:
                 itself = True
             else:

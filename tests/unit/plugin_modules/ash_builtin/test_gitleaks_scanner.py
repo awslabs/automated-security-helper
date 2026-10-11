@@ -1485,3 +1485,24 @@ def test_a_failed_source_run_does_not_fail_a_clean_converted_one(tmp_path, monke
 def test_leaks_in_the_source_do_not_hide_a_failed_converted_run(tmp_path, monkeypatch):
     """The worst code across runs was 2, which is accepted, so exit 1 read as leaks."""
     assert _run_targets(tmp_path, monkeypatch, [LEAKS_EXIT_CODE, 1]) == ["ok", "error"]
+
+
+def test_a_copy_the_re_scan_cannot_write_fails_the_scan(tmp_path, monkeypatch):
+    """Skipping it would leave what the tree's file hides there unreported."""
+    import errno
+
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        gitleaks_scanner as module,
+    )
+
+    def full_disk(source, destination):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(module, "_write_private_copy", full_disk)
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, {})
+    source = Path(scanner.context.source_dir)
+    _write(source, "app/x.py")
+    (source / ".gitleaksignore").write_text("app/x.py:github-pat:1\nmissing.py:r:1\n")
+    with pytest.raises(ScannerError, match="No space left on device"):
+        _add_back(scanner, source, _report(), tmp_path)
+    assert calls == []
