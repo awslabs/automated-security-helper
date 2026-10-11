@@ -60,7 +60,7 @@ Files with the highest number of security findings:
 
 ### Finding 1: github-pat
 
-- **Severity**: HIGH
+- **Severity**: CRITICAL
 - **Scanner**: gitleaks
 - **Rule ID**: github-pat
 - **Location**: docs/example.md:5
@@ -77,7 +77,7 @@ REDACTED
 
 ### Finding 2: slack-bot-token
 
-- **Severity**: HIGH
+- **Severity**: CRITICAL
 - **Scanner**: gitleaks
 - **Rule ID**: slack-bot-token
 - **Location**: app/settings.py:6
@@ -94,7 +94,7 @@ REDACTED
 
 ### Finding 3: github-pat
 
-- **Severity**: HIGH
+- **Severity**: CRITICAL
 - **Scanner**: gitleaks
 - **Rule ID**: github-pat
 - **Location**: app/settings.py:4
@@ -111,7 +111,7 @@ REDACTED
 
 ### Finding 4: aws-access-token
 
-- **Severity**: HIGH
+- **Severity**: CRITICAL
 - **Scanner**: gitleaks
 - **Rule ID**: aws-access-token
 - **Location**: app/settings.py:5

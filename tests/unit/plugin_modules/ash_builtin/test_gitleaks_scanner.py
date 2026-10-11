@@ -411,6 +411,19 @@ def test_every_finding_is_critical_like_detect_secrets(tmp_path):
     assert (counts.high, counts.medium, counts.low, counts.info) == (0, 0, 0, 0)
 
 
+def test_the_flat_reports_read_critical_too(tmp_path):
+    """A bare level "error" reads HIGH in the flat reporters (flat JSON, CSV)."""
+    from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+
+    report = _parse(_scanner(tmp_path), _raw_report())
+    results = report.runs[0].results
+    assert results  # not vacuous
+    flat = [
+        FlatVulnerability.from_sarif_result(r, "gitleaks", "SECRETS") for r in results
+    ]
+    assert {f.severity for f in flat} == {"CRITICAL"}
+
+
 def test_tags_mark_findings_as_secrets(tmp_path):
     report = _parse(_scanner(tmp_path), _raw_report())
     for result in report.get_all_results():

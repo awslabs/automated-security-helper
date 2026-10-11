@@ -504,6 +504,7 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        issue_severity: CRITICAL
         scanner_details:
           tool_invocation:
             duration: 0.5
@@ -586,6 +587,7 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        issue_severity: CRITICAL
         scanner_details:
           tool_invocation:
             duration: 0.5
@@ -668,6 +670,7 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        issue_severity: CRITICAL
         scanner_details:
           tool_invocation:
             duration: 0.5
@@ -750,6 +753,7 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        issue_severity: CRITICAL
         scanner_details:
           tool_invocation:
             duration: 0.5

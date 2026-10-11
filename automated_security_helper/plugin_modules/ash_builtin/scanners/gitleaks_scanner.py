@@ -77,10 +77,11 @@ ASH's previous reports out of this one too.
 Severity
 --------
 gitleaks SARIF results carry no ``level`` (measured on 8.30.1). Every gitleaks
-result is set to ``level: error``, which ASH reports as CRITICAL. That is the
-rating detect-secrets findings get (``detect_secrets_scanner`` sets
-``Level.error`` on each), so a credential reads the same whichever of the two
-found it.
+result is set to ``level: error`` and ``issue_severity: CRITICAL``. ASH reads a
+bare ``error`` two ways (the summary and the scan gate as CRITICAL, the flat
+reporters such as flat JSON and CSV as HIGH), and every reader honors
+``issue_severity``, so with both set each report says CRITICAL, as cfn-lint and
+cfn-guard do for theirs.
 
 It is set rather than left to ASH's SARIF model, whose ``Result.level``
 defaults to "error" too. A default is not a set field, so the ``exclude_unset``
@@ -554,6 +555,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 result.properties = PropertyBag(tags=tags)
             else:
                 result.properties.tags = tags
+            setattr(result.properties, "issue_severity", "CRITICAL")  # noqa: B010
 
             for location in result.locations or []:
                 physical = location.physicalLocation
