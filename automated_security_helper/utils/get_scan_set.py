@@ -1088,10 +1088,27 @@ def get_changed_files(
         ASH_LOGGER.warning("git not available; falling back to full scan")
         return None
     try:
+        # -z and core.quotepath=false, because git otherwise quotes a name holding a
+        # non-ASCII byte, a quote, a backslash or a control character
+        # ("\303\274.py"), and that string names no file: those changes never
+        # matched a finding. -z separates names with NUL and prints them raw, so a
+        # name is never split or stripped either. Decoded as UTF-8, which is how git
+        # stores paths; surrogateescape keeps any other byte, so the Path still
+        # names the file on disk.
         result = subprocess.run(
-            [git, "diff", "--name-only", f"{base_ref}...HEAD"],  # nosec B603
+            [  # nosec B603
+                git,
+                "-c",
+                "core.quotepath=false",
+                "diff",
+                "--name-only",
+                "-z",
+                f"{base_ref}...HEAD",
+            ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
             timeout=30,
             cwd=cwd,
             env=child_environ(),
@@ -1108,12 +1125,9 @@ def get_changed_files(
         )
         return None
 
-    paths: List[Path] = []
-    for line in result.stdout.strip().splitlines():
-        line = line.strip()
-        if line:
-            paths.append(Path(line))
-    return paths
+    # Every name ends in NUL, so the last entry is empty; nothing is stripped, since
+    # a leading or trailing space is part of a name.
+    return [Path(name) for name in result.stdout.split("\0") if name]
 
 
 def parse_args() -> argparse.Namespace:

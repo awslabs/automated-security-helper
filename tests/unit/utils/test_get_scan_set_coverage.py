@@ -622,7 +622,7 @@ def test_get_changed_files_rejects_a_ref_that_fails_the_allowlist(bad_ref):
 
 def test_get_changed_files_accepts_a_conventional_ref_and_parses_the_diff(tmp_path):
     with patch.object(
-        gss.subprocess, "run", return_value=_completed(0, "a/b.py\n\nc.py\n")
+        gss.subprocess, "run", return_value=_completed(0, "a/b.py\0c.py\0")
     ):
         changed = get_changed_files(base_ref="origin/main", cwd=tmp_path)
 
