@@ -369,7 +369,7 @@ can tell the reason apart from a scan that failed to start (`scan_start_failure`
 | `config_field_denied` | `run_ash_scan`, `get_config` | A config file an MCP client delivered or named sets a field the session's runtime-override policy denies; `error` names each field |
 | `denied_by_runtime_policy` | `validate_config`, as an error `type` | The same, one error per field, with the field in `field` |
 | `config_policy_unreadable` | `run_ash_scan`, `get_config`, and as a `validate_config` error `type` | The session's runtime-override policy cannot be established, for example because the profile it bound is no longer registered |
-| `config_env_not_resolved` | `run_ash_scan`, `get_config`, and as a `validate_config` error `type` | Such a file uses `!ENV` |
+| `config_env_not_resolved` | `run_ash_scan`, `get_config`, and as a `validate_config` error `type` | A config file that may not use `!ENV` uses an `!ENV` tag, or a plain value that starts with a `${VAR}` or `${VAR:default}` reference. Which files that covers for a remote and for a stdio caller is in [Config files in delivered source](mcp/streamable-http.md#config-files-in-delivered-source) |
 
 Delivering source while a scan of the same session runs is refused as well:
 `set_source_git` and `set_source_zip_finalize` both return
