@@ -181,6 +181,38 @@ class TestTheCopyIsTakenUnderTheLock:
         thread.join(timeout=30)
         assert finished.is_set()
 
+    def test_a_registration_waits_while_the_registry_lock_is_held(self):
+        """A resolve holds the lock while it copies, so an insert must wait.
+
+        The other half of the pair: without the lock on the insert, a registration
+        could change the dict while a resolve is copying it. Holding the lock shows
+        the insert takes it: the registration cannot finish until it is released.
+        """
+        manager = _manager(seed=3)
+        started = threading.Event()
+        finished = threading.Event()
+
+        def register() -> None:
+            started.set()
+            manager.register_plugin_module(
+                plugin_type="scanner",
+                plugin_module_class="registered-while-locked",
+                plugin_module_path=REAL_SCANNER_MODULE,
+            )
+            finished.set()
+
+        with manager._registry_lock:
+            thread = threading.Thread(target=register)
+            thread.start()
+            assert started.wait(timeout=30)
+            assert not finished.wait(timeout=0.5), (
+                "register_plugin_module inserted without taking the registry lock"
+            )
+            assert "registered-while-locked" not in manager.plugin_library.scanners
+        thread.join(timeout=30)
+        assert finished.is_set()
+        assert "registered-while-locked" in manager.plugin_library.scanners
+
 
 class TestTheCacheFollowsTheRegistrations:
     """What the cache does between resolves."""
