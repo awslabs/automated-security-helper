@@ -63,6 +63,12 @@ which are both, so the scanned tree does not configure gitleaks:
   ASH's output directory, not the operator's baseline. A failed re-run fails the
   scan rather than reporting the first run alone, and the copies are removed when
   it ends. Inline ``gitleaks:allow`` comments still apply.
+* A ``.gitleaksignore`` that is a symlink, not a regular file, or hard-linked
+  stops the scanner before gitleaks runs (``_read_tree_ignore_file``): gitleaks
+  opens the name, follows the link, and logs each line it cannot parse. ASH reads
+  the file once, without following a link, and parses what it read. gitleaks'
+  log is never quoted in an error, and the lines in it that quote the file are
+  cut (``_mask_quoted_ignore_entries``).
 
 Paths
 -----
@@ -106,6 +112,7 @@ import logging
 import os
 import posixpath
 import shutil
+import stat
 from pathlib import Path, PurePosixPath
 from typing import (
     Annotated,
@@ -177,6 +184,14 @@ RESCAN_SELF_DIR = "self"
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _BINARY = getattr(os, "O_BINARY", 0)
 
+#: Most bytes of the tree's ``.gitleaksignore`` ASH reads. A larger file stops
+#: the scan: its entries could not all be re-scanned.
+MAX_IGNORE_FILE_BYTES = 32 * 1024 * 1024
+
+#: What gitleaks logs, at WRN, before each ``.gitleaksignore`` line it cannot
+#: parse, which it then quotes. ``_mask_quoted_ignore_entries`` drops the quote.
+INVALID_ENTRY_LOG = "Invalid .gitleaksignore entry"
+
 #: The config ASH passes when the operator chose none: gitleaks' default rules.
 DEFAULT_RULES_CONFIG = (
     "# Written by ASH: gitleaks' default rules and nothing else, so no gitleaks\n"
@@ -201,6 +216,33 @@ def _write_private_copy(source: BinaryIO, destination: Path) -> None:
     )
     with os.fdopen(fd, "wb") as out:
         shutil.copyfileobj(source, out)
+
+
+def _mask_quoted_ignore_entries(log_path: Path) -> None:
+    """Remove what gitleaks quotes from ``.gitleaksignore`` in its log at ``log_path``.
+
+    gitleaks logs each line of the file it cannot parse as a fingerprint, verbatim
+    (``WRN Invalid .gitleaksignore entry fingerprint=<line>``). The file is the
+    scanned tree's, so the line can be anything the tree holds, a secret included.
+    Each such log line is cut after the message; the rest of the log is kept.
+    """
+    try:
+        fd = os.open(log_path, os.O_RDONLY | _NOFOLLOW | _BINARY)
+    except OSError:
+        return
+    with os.fdopen(fd, "rb") as handle:
+        text = handle.read().decode("utf-8", errors="replace")
+    if INVALID_ENTRY_LOG not in text:
+        return
+    lines = [
+        line[: line.index(INVALID_ENTRY_LOG) + len(INVALID_ENTRY_LOG)]
+        + " (the entry gitleaks quoted here was removed by ASH)"
+        if INVALID_ENTRY_LOG in line
+        else line
+        for line in text.split("\n")
+    ]
+    with open_for_write(log_path, encoding="utf-8", errors="replace") as handle:
+        handle.write("\n".join(lines))
 
 
 class GitleaksScannerConfigOptions(ScannerOptionsBase):
@@ -261,9 +303,9 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     # sandbox's grant gates.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
-    # The target and argv of the run whose report _read_results_file reads next,
-    # for the .gitleaksignore re-scan. Set by _execute_scan.
-    _pending_run: Optional[Tuple[Path, List[str]]] = PrivateAttr(default=None)
+    # The target, argv and .gitleaksignore content of the run whose report
+    # _read_results_file reads next, for the re-scan. Set by _execute_scan.
+    _pending_run: Optional[Tuple[Path, List[str], bytes]] = PrivateAttr(default=None)
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -444,8 +486,9 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         # gitleaks that fails writes no report, and the template reads whatever
         # is at this path.
         results_file.unlink(missing_ok=True)
+        ignore_data = self._read_tree_ignore_file(target)
         final_args = self._build_arguments(target, results_file)
-        self._pending_run = (Path(target), list(final_args))
+        self._pending_run = (Path(target), list(final_args), ignore_data)
         self._plugin_log(
             f"Running: {' '.join(final_args)}",
             target_type=target_type,
@@ -469,11 +512,107 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             )
         raw = super()._read_results_file(results_file)
         if raw is not None and pending is not None:
-            target, final_args = pending
-            self._add_back_gitleaksignore_drops(raw, target, final_args, results_file)
+            target, final_args, ignore_data = pending
+            self._add_back_gitleaksignore_drops(
+                raw, target, final_args, results_file, ignore_data
+            )
         return raw
 
-    def _gitleaksignore_files(self, target: Path) -> List[str]:
+    def _read_tree_ignore_file(self, target: Path) -> bytes:
+        """The content of ``<target>/.gitleaksignore``, or ``b""`` without one.
+
+        Raises:
+            ScannerError: it is a symlink, or not a regular file, or has a second
+                hard link, or is larger than ``MAX_IGNORE_FILE_BYTES``. gitleaks
+                opens the name itself, follows a symlink, blocks on a FIFO, and
+                logs every line it cannot parse, so a link to a file outside the
+                tree (``/proc/self/environ``) would put that file into its log.
+                gitleaks is not run. Read with ``open_in_scanned_tree``, which
+                follows no link, and nothing read is quoted.
+        """
+        path = Path(target) / IGNORE_FILE_NAME
+        try:
+            if stat.S_ISDIR(os.lstat(path).st_mode):
+                # gitleaks reads the name only when it is not a directory.
+                return b""
+        except FileNotFoundError:
+            return b""
+        except OSError:
+            # Not ASH's to decide: gitleaks meets the same error and fails.
+            return b""
+        try:
+            with open_in_scanned_tree(path, target) as handle:
+                data = handle.read(MAX_IGNORE_FILE_BYTES + 1)
+        except TreeInputRefused as refused:
+            raise ScannerError(
+                f"The scanned tree's {IGNORE_FILE_NAME} is refused: "
+                f"{refused.reason}. gitleaks reads that file whatever ASH passes "
+                "and logs each line of it that is not a fingerprint, so gitleaks "
+                "is not run. Make it a regular file in the tree, or remove it."
+            ) from None
+        except OSError:
+            return b""
+        if len(data) > MAX_IGNORE_FILE_BYTES:
+            raise ScannerError(
+                f"The scanned tree's {IGNORE_FILE_NAME} is larger than "
+                f"{MAX_IGNORE_FILE_BYTES} bytes, so ASH cannot re-scan every file "
+                "it names, and gitleaks is not run."
+            )
+        return data
+
+    def _process_command_response(self, response: Dict[str, Any]) -> None:
+        """Count the exit code, and keep gitleaks' stderr out of ``self.errors``.
+
+        gitleaks' stderr can quote the scanned tree's ``.gitleaksignore`` (see
+        ``_mask_quoted_ignore_entries``), and the scanner executor copies
+        ``errors`` into the scan's results. The stream stays in the log file.
+        """
+        super()._process_command_response(
+            {key: value for key, value in response.items() if key != "stderr"}
+        )
+
+    def _run_subprocess(  # type: ignore[override]
+        self,
+        command: List[str],
+        results_dir: str | Path | None = None,
+        **kwargs: Any,
+    ) -> Dict[str, str]:
+        """Run gitleaks, then mask what its log quotes from ``.gitleaksignore``."""
+        response = super()._run_subprocess(command, results_dir=results_dir, **kwargs)
+        if results_dir is not None:
+            _mask_quoted_ignore_entries(
+                Path(results_dir) / f"{self.__class__.__name__}.stderr.log"
+            )
+        return response
+
+    def _describe_scan_failure(
+        self, exc: Exception, results_file: Optional[Path]
+    ) -> str:
+        """The failure and where gitleaks' log is, without quoting the log.
+
+        The base class quotes the tool's stderr. gitleaks' can quote the scanned
+        tree's ``.gitleaksignore``, and this message reaches ``ash.log``, the
+        console and every results file.
+        """
+        detail = f"{self.__class__.__name__} scan failed: {exc}"
+        if results_file is None:
+            # _execute_scan raised: gitleaks was not run, so there is no exit code.
+            return detail
+        verdict = (
+            "an accepted exit code for this scanner"
+            if self._exit_code_accepted()
+            else "not an accepted exit code; success_exit_codes="
+            f"{sorted(self.success_exit_codes)}"
+        )
+        log_path = Path(results_file).parent / f"{self.__class__.__name__}.stderr.log"
+        return (
+            f"{detail} (exit code {self.exit_code}: {verdict}). gitleaks' log is "
+            f"not quoted here; see {log_path.as_posix()}"
+        )
+
+    def _gitleaksignore_files(
+        self, target: Path, data: Optional[bytes] = None
+    ) -> List[str]:
         """The files ``<target>/.gitleaksignore`` names, relative to the target.
 
         A dir-scan fingerprint is ``<file>:<rule id>:<line>``. Entries in another
@@ -486,13 +625,18 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         the first run's; re-scanning ``./app/x.py`` as written reported
         ``./app/x.py``, which matched none of the first run's ``app/x.py``
         results and added each of them a second time.
+
+        ``data`` is the file's content as ``_execute_scan`` read it before the
+        first run; without it the file is read now, under the same rule
+        (``_read_tree_ignore_file``).
         """
-        ignore_file = Path(target) / IGNORE_FILE_NAME
-        if not ignore_file.is_file():
+        if data is None:
+            data = self._read_tree_ignore_file(target)
+        if not data:
             return []
         target_abs = Path(os.path.normpath(Path(target).absolute()))
         names = set()
-        text = ignore_file.read_text(encoding="utf-8", errors="replace")
+        text = data.decode("utf-8", errors="replace")
         for line in text.splitlines():
             entry = line.strip()
             if not entry or entry.startswith("#"):
@@ -513,6 +657,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         target: Path,
         final_args: List[str],
         results_file: Path,
+        ignore_data: Optional[bytes] = None,
     ) -> None:
         """Re-scan the files the tree's ``.gitleaksignore`` names; add what it hid.
 
@@ -531,7 +676,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         and the copies, which hold the tree's secrets, are removed when the run
         ends.
         """
-        relatives = self._gitleaksignore_files(target)
+        relatives = self._gitleaksignore_files(target, ignore_data)
         if not relatives:
             return
         runs = raw.get("runs") or []

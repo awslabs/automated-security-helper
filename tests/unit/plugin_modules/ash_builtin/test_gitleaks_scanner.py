@@ -1036,3 +1036,125 @@ def test_a_relative_gitleaks_config_variable_is_resolved_from_the_source(
     assert calls[0]["env"]["GITLEAKS_CONFIG"] == (
         (source / "rules" / "gl.toml").absolute().as_posix()
     )
+
+
+# --------------------------------------------------------------------------- #
+# The tree's .gitleaksignore is read as a regular file, and never quoted
+# --------------------------------------------------------------------------- #
+
+CANARY = "ash-canary-0b7f3c"
+
+
+def _refused_ignore_file(tmp_path: Path, kind: str) -> GitleaksScanner:
+    """A scanner over a tree whose .gitleaksignore is ``kind``."""
+    scanner = _scanner(tmp_path)
+    source = Path(scanner.context.source_dir)
+    _write(source, "app/x.py")
+    outside = tmp_path / "outside.txt"
+    outside.write_text(f"{CANARY}\n")
+    ignore = source / ".gitleaksignore"
+    if kind == "symlink out of the tree":
+        ignore.symlink_to(outside)
+    elif kind == "symlink in the tree":
+        _write(source, "docs/ignore.txt", f"{CANARY}\n")
+        ignore.symlink_to(source / "docs" / "ignore.txt")
+    elif kind == "fifo":
+        os.mkfifo(ignore)
+    elif kind == "directory":
+        ignore.mkdir()
+    elif kind == "hard link":
+        os.link(outside, ignore)
+    return scanner
+
+
+IGNORE_FILE_KINDS = [
+    pytest.param(
+        "symlink out of the tree",
+        marks=pytest.mark.skipif(sys.platform == "win32", reason="symlinks"),
+    ),
+    pytest.param(
+        "symlink in the tree",
+        marks=pytest.mark.skipif(sys.platform == "win32", reason="symlinks"),
+    ),
+    pytest.param(
+        "fifo", marks=pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs")
+    ),
+    pytest.param(
+        "hard link", marks=pytest.mark.skipif(not hasattr(os, "link"), reason="links")
+    ),
+]
+
+
+@pytest.mark.parametrize("kind", IGNORE_FILE_KINDS)
+def test_a_gitleaksignore_that_is_not_a_regular_file_stops_the_scan(tmp_path, kind):
+    """gitleaks opens the file by name, follows a symlink, blocks on a FIFO, and
+    logs every line it cannot parse; ASH refuses before gitleaks runs."""
+    scanner = _refused_ignore_file(tmp_path, kind)
+    source = Path(scanner.context.source_dir)
+    with pytest.raises(ScannerError) as excinfo:
+        scanner._execute_scan(source, "source", [])
+    message = str(excinfo.value)
+    assert ".gitleaksignore" in message and "gitleaks is not run" in message
+    assert CANARY not in message
+
+
+@pytest.mark.parametrize("kind", IGNORE_FILE_KINDS)
+def test_the_re_scan_reads_no_gitleaksignore_that_is_not_a_regular_file(
+    tmp_path, monkeypatch, kind
+):
+    """Swapped in after gitleaks ran: refused rather than read."""
+    scanner = _refused_ignore_file(tmp_path, kind)
+    source = Path(scanner.context.source_dir)
+    monkeypatch.setattr(
+        scanner, "_run_subprocess", lambda *a, **k: pytest.fail("re-scan ran")
+    )
+    results_file = tmp_path / "res" / "gitleaks.sarif"
+    results_file.parent.mkdir()
+    args = scanner._build_arguments(source, results_file)
+    with pytest.raises(ScannerError) as excinfo:
+        scanner._add_back_gitleaksignore_drops(_report(), source, args, results_file)
+    assert CANARY not in str(excinfo.value)
+
+
+def test_a_regular_gitleaksignore_lets_the_scan_run(tmp_path):
+    scanner = _scanner(tmp_path)
+    source = Path(scanner.context.source_dir)
+    (source / ".gitleaksignore").write_text("app/x.py:github-pat:1\n")
+    final_args, _, _ = scanner._execute_scan(source, "source", [])
+    assert final_args[-2:] == ["--", "."]
+
+
+def test_a_failure_names_gitleaks_log_but_does_not_quote_it(tmp_path):
+    """gitleaks' stderr can repeat lines of the tree's .gitleaksignore."""
+    scanner = _scanner(tmp_path)
+    results_file = scanner.results_dir / "source" / "gitleaks.sarif"
+    results_file.parent.mkdir(parents=True)
+    log = results_file.parent / "GitleaksScanner.stderr.log"
+    log.write_text(f"6:52PM WRN Invalid .gitleaksignore entry fingerprint={CANARY}\n")
+    scanner.exit_code = 1
+    message = scanner._describe_scan_failure(
+        ScannerError("gitleaks exited 1"), results_file
+    )
+    assert CANARY not in message
+    assert log.as_posix() in message
+    assert "gitleaks exited 1" in message
+
+
+def test_gitleaks_stderr_is_not_kept_as_the_scanners_errors(tmp_path):
+    """A timed-out run returns its stderr, which the executor copies into the
+    scan's results."""
+    scanner = _scanner(tmp_path)
+    scanner._process_command_response(
+        {"returncode": 124, "timed_out": True, "stderr": f"fingerprint={CANARY}"}
+    )
+    assert scanner.errors == []
+    assert scanner.exit_code == 124
+
+
+def test_a_directory_named_gitleaksignore_is_not_a_reason_to_stop(tmp_path):
+    """gitleaks reads the name only when it is not a directory."""
+    scanner = _refused_ignore_file(tmp_path, "directory")
+    source = Path(scanner.context.source_dir)
+    final_args, _, _ = scanner._execute_scan(source, "source", [])
+    assert final_args[-2:] == ["--", "."]
+    assert scanner._gitleaksignore_files(source) == []

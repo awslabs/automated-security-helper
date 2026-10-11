@@ -49,6 +49,8 @@ The scanned repository's own gitleaks configuration is not used. A `.gitleaks.to
 
 gitleaks always reads `.gitleaksignore` at the root of the path it scans, whatever `gitleaks --gitleaks-ignore-path` says, and has no flag to turn that off. When the scan root has one, ASH copies the files it names into a directory of its own, at the same paths, runs gitleaks once more over the copies (there is no `.gitleaksignore` there), and reports the findings the first run dropped. Files the first run does not read are not copied: files under `.git` or another directory gitleaks' allowlists skip, files reached through a symlink, and anything that is not a regular file. A failed re-run fails the scan, and the copies are deleted when it ends.
 
+A `.gitleaksignore` at the scan root that is a symlink, a FIFO or another file that is not a regular file, or one with a second hard link, stops the scanner with an error before gitleaks runs: gitleaks would open whatever the name points to and copy lines of it into its log.
+
 gitleaks' options are described by the JSON schema (`automated_security_helper/schemas/AshConfig.json`) and listed above.
 
 ## Severity
@@ -58,6 +60,8 @@ gitleaks reports no severity of its own. ASH rates every gitleaks finding CRITIC
 ## Secret values never reach ASH's output
 
 ASH always runs `gitleaks --redact=100`, so gitleaks writes `REDACTED` in place of each secret in its report and its log. ASH also overwrites any report snippet that is not `REDACTED` before the result is stored, so the value cannot appear in `ash_aggregated_results.json`, the SARIF, or any other report.
+
+gitleaks' log repeats each line of a `.gitleaksignore` it cannot parse. ASH cuts those lines short in the log it keeps (`GitleaksScanner.stderr.log`), and does not quote gitleaks' log in error messages; an error names the log file instead.
 
 ## Suppressing findings
 
