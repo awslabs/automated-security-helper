@@ -468,3 +468,67 @@ class TestWorkspaceReporting:
         assert checked == []
         assert requests == []
         assert sessions == []
+
+    @pytest.mark.parametrize(
+        "output_formats, expect_checked",
+        [(["sarif"], False), (["aws-security-hub"], True)],
+        ids=["not-requested", "requested"],
+    )
+    def test_a_workspace_reporter_is_checked_only_when_its_format_is_requested(
+        self, tmp_path, requests, sessions, output_formats, expect_checked
+    ):
+        """The format filter comes before the dependency check.
+
+        A reporter that emits a workspace-level artefact is checked at workspace
+        level, but only once ``--output-format`` has selected it: the check can
+        contact AWS, and a reporter the run will not use has no reason to.
+        """
+        from automated_security_helper.base.plugin_context import PluginContext
+        from automated_security_helper.base.reporter_plugin import (
+            ReporterWorkspaceBehaviour,
+        )
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.workspace.reporting import (
+            SKIP_NOT_REQUESTED,
+            _selected_reporters,
+        )
+
+        checked = []
+
+        class _MergedSecurityHub(SecurityHubReporter):
+            workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
+
+            def validate_plugin_dependencies(self):
+                checked.append(type(self).__name__)
+                self.dependencies_satisfied = True
+                return True
+
+        context = PluginContext(
+            source_dir=tmp_path,
+            output_dir=tmp_path / "out",
+            work_dir=tmp_path / "out" / "work",
+            config=AshConfig(),
+        )
+
+        selected = list(
+            _selected_reporters(
+                context=context,
+                config_lookup=lambda key: {
+                    "enabled": True,
+                    "options": {"aws_region": "us-east-1"},
+                },
+                output_formats=output_formats,
+                python_based_plugins_only=False,
+                reporter_classes=[_MergedSecurityHub],
+            )
+        )
+
+        skipped = [reason for _, _, reason in selected]
+        if expect_checked:
+            assert checked == ["_MergedSecurityHub"]
+            assert skipped == [None]
+        else:
+            assert checked == []
+            assert skipped == [SKIP_NOT_REQUESTED]
+        assert requests == []
+        assert sessions == []
