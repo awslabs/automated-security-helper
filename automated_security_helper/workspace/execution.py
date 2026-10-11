@@ -1282,9 +1282,11 @@ def execute_workspace(
             unsupported in workspace mode. Raised rather than recorded because
             nothing has been scanned yet -- that is an exit-4 refusal, not a
             project failure.
-        ReportPathLinkRefused: When a path a workspace report would be written to
-            is a link: before any project is scanned, or when the report step
-            starts if the link appeared during the scan.
+        ReportPathRefused: When a selected reporter's file name is not a file
+            name, before any project is scanned (``ReportPathLinkRefused``, its
+            subclass, when a path a workspace report would be written to is a
+            link: before any project is scanned, or when the report step starts if
+            the link appeared during the scan).
     """
     if orchestrator_factory is None:
         from automated_security_helper.core.orchestrator import ASHScanOrchestrator

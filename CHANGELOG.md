@@ -776,27 +776,28 @@
   `ash scan` (including `--use-existing`), `ash merge` and MCP scans, whose error
   message now carries the reason; `ash report` checks the files the chosen reporter
   writes itself. A workspace run is refused before any project is scanned, and again
-  when its report step starts if a link appeared in the meantime. In container and
-  nix mode, where the outer process re-derives the verdict from the results file,
-  it exits 1 too when a link is directly in `reports/` after the inner run, rather
-  than reading the results back, and when the inner run refused a report file name,
-  which leaves nothing in `reports/`; see the entry on container and nix read-back.
-  The exit code is never counted from a
-  `reports/ash.sarif` that is a link, and the `--changed-files-only` rewrite of
-  `reports/ash.sarif` refuses a link there the same way. A fresh scan removes `reports/` and anything in
-  it while setting up its directories, so a link left there by an earlier run is
-  cleared rather than refused, as before. A regular file at a report path is still
-  replaced. A reporter without an `extension` now writes `ash.txt`, the name the
-  workspace report step already gave it, rather than `ash.None`. A reporter whose
-  report file name is not a file in the reports directory (an `extension` with a
-  `/`, `\` or `..` that its config did not replace, as a third-party reporter's
-  config may not) stops the run with exit 1 the same way, rather than leaving that
-  report unwritten, and so does such a name among the files a reporter declares it
-  writes beside its report. A workspace run refuses such a name before any project
-  is scanned, for a reporter that writes only per-project reports too. A dangling link at `reports/` is refused the same way rather
-  than failing with `FileExistsError`, each write checks again that `reports/` is
-  not a link, and the exit code is not read through a `reports/ash.sarif` link
-  even when `fail_on_findings` is off.
+  when its report step starts if a link appeared in the meantime. A link at
+  `reports/` itself, to a directory or dangling, is refused the same way in every
+  mode, before ASH creates or clears anything there, rather than failing with a
+  traceback. A fresh scan removes `reports/` and anything in it while setting up its
+  directories, so a link left inside `reports/` by an earlier run is cleared rather
+  than refused, as before. In container and nix mode, where the outer process
+  re-derives the verdict from the results file, it exits 1 too when a link is
+  directly in `reports/` after the inner run, rather than reading the results back,
+  and when the inner run refused a report file name, which leaves nothing in
+  `reports/`; see the entry on container and nix read-back. The exit code is never counted
+  from a `reports/ash.sarif` that is a link, even when `fail_on_findings` is off, and
+  the `--changed-files-only` rewrite of `reports/ash.sarif` refuses a link there the
+  same way. Each write checks again that `reports/` is not a link. A regular file at
+  a report path is still replaced. A reporter without an `extension` now writes
+  `ash.txt`, the name the workspace report step already gave it, rather than
+  `ash.None`. A reporter whose report file name is not a file in the reports
+  directory (an `extension` with a `/`, `\` or `..` that its config did not replace,
+  as a third-party reporter's config may not) stops the run with exit 1 the same
+  way, rather than leaving that report unwritten, and so does such a name among the
+  files a reporter declares it writes beside its report. A workspace run refuses
+  such a name before any project is scanned, for a reporter that writes only
+  per-project reports too.
 
 - **Container and nix mode read the inner run's results back only when that run
   completed.** The outer process gives the inner run an ID (`ASH_OUTER_RUN_ID`).
@@ -857,6 +858,13 @@
   inner run did not complete and names the results file. Build the image from this
   ASH. In nix mode the inner run is the first `ash` on `PATH` inside the Nix shell,
   normally this one.
+
+- **A `reports/` directory that is a symlink is refused.** `ash merge`,
+  `ash scan --use-existing` and workspace runs used to write their reports through a
+  `reports/` that was a symlink to a directory, into the link's target. They now
+  exit 1 before writing any report, with an error naming the link, as a fresh scan
+  does (it used to fail with a traceback). Point `--output-dir` at a real directory,
+  or remove the link.
 
 - **MCP scans can now end in a new terminal status, `incomplete`.** Clients
   should treat it as terminal with partial coverage: the run finished and its

@@ -601,6 +601,8 @@ def emit_workspace_reports(
         ``refused`` into the exit code; nothing here calls ``sys.exit``.
 
     Raises:
+        ReportPathRefused: A file name a reporter here would write is not a file
+            name. Nothing is written.
         ReportPathLinkRefused: ``reports/``, a file a reporter here would write or
             the manifest is a link. Nothing is written.
     """

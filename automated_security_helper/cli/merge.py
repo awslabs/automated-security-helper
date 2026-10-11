@@ -1295,7 +1295,8 @@ def merge_command(
         )
     except ReportPathRefused as exc:
         # Refused before any reporter wrote: a link at the reports directory or at
-        # a report file, or a report file name outside it. Printed like the other refusals here, without a traceback.
+        # a report file, or a report file name outside it. Printed like the other
+        # refusals here, without a traceback.
         print(f"[red]Refusing to write reports: {escape_markup(str(exc))}[/red]")
         raise typer.Exit(1)
 

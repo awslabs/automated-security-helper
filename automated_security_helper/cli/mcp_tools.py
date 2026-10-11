@@ -685,8 +685,9 @@ async def _run_scan_async(
         else:
             error_message = f"ASH exited with code {e.code}"
             # A refusal that carries its reason (ReportPathRefusedExit: a link at a
-            # report path) says why, since the client cannot read the console the
-            # reason was printed to.
+            # report path, or a report file name outside the reports directory)
+            # says why, since the client cannot read the console the reason was
+            # printed to.
             reason = getattr(e, "reason", None)
             if isinstance(reason, str) and reason:
                 error_message = f"{error_message}: {reason}"
