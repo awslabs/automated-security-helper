@@ -126,8 +126,12 @@ TOOL_NOTES: dict[str, dict] = {
                 "notes": "Findings below this are filtered out at scan time"
             },
             "config_path": {
-                "default": "`<source>/.ash/.ash.yaml`",
-                "notes": "Custom config path",
+                "notes": (
+                    "Custom config path. When not set: the profile this session bound "
+                    "with `select_profile`, else the config ASH discovers in the source "
+                    "directory, else the file `ASH_CONFIG` names in the server's "
+                    "environment, else the built-in defaults"
+                ),
             },
             "clean_output": {"notes": "Wipe stale reports before starting"},
         },
@@ -412,8 +416,8 @@ TOOL_NOTES: dict[str, dict] = {
     },
     "list_profiles": {
         "no_params_sentence": (
-            "No parameters. Returns the config profiles the operator registered at server "
-            "startup."
+            "No parameters. Returns the config profiles registered at server startup "
+            "with `ash mcp --profile NAME=path`. Without `--profile` the list is empty."
         ),
     },
     "clear_source": {

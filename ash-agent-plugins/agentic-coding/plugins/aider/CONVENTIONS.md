@@ -124,7 +124,7 @@ Starts a scan asynchronously. Returns a `scan_id` immediately — the scan conti
 |-------|------|---------|-------|
 | `source_dir` | string \| null | current dir | Absolute path to scan |
 | `severity_threshold` | string | `"MEDIUM"` | Findings below this are filtered out at scan time |
-| `config_path` | string \| null | `<source>/.ash/.ash.yaml` | Custom config path |
+| `config_path` | string \| null | `null` | Custom config path. When not set: the profile this session bound with `select_profile`, else the config ASH discovers in the source directory, else the file `ASH_CONFIG` names in the server's environment, else the built-in defaults |
 | `clean_output` | boolean | `true` | Wipe stale reports before starting |
 
 Output reports are written to `<source_dir>/.ash/ash_output/` — there is no parameter to override this. Scanner selection, mode, and other tuning live in `.ash/.ash.yaml`, not in tool arguments.
@@ -307,7 +307,7 @@ A config this session may not read, or one a client delivered that the server re
 
 List the config profiles the operator registered at server startup.
 
-No parameters. Returns the config profiles the operator registered at server startup.
+No parameters. Returns the config profiles registered at server startup with `ash mcp --profile NAME=path`. Without `--profile` the list is empty.
 
 ## list_scanners
 
