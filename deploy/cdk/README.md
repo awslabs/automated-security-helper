@@ -102,7 +102,8 @@ that table can differ: `McpIngressCidr` is `ingress_cidr_blocks` there, and
 `AshImageTag` is `image_tag`. Renaming one here is a breaking change for adopters
 and desynchronizes the two implementations.
 
-| Parameter | Default value | Notes |
+<!-- doctest: options of=cloudformation:deploy/cdk/templates -->
+| Parameter | Default | Notes |
 | --- | --- | --- |
 | `AshVersion` | `v3.7.0` | Git ref cloned and built: a tag or a branch, because the build runs `git clone --branch`, which rejects a commit SHA. Not a PyPI version. v3.7.0 has no `ash mcp --stateless-http`, `ash mcp --allowed-host <host>`, `ash merge` or `ash scan --shard-index <i> --shard-count <n>`; the sections below say what each target needs. |
 | `AshImageTag` | empty | ECR tag the **workload** pulls. Empty tracks the moving tag. Not offered by `AshImagePipeline`, which runs no workload. See below. |
@@ -123,7 +124,8 @@ and desynchronizes the two implementations.
 **VPC attachment for the gate has not been deploy-tested.** The network-interface grant it adds keeps `Resource: "*"`, as Lambda documents, and pins the calls to the stack's Region with `aws:RequestedRegion`. AWS does not document whether Lambda's service-side network-interface calls carry that key. It is a global key present on signed requests, so this is expected to work. If attaching the function fails with a permissions error on `ec2:CreateNetworkInterface`, please report it: the condition is the first suspect. The Terraform module carries the same condition.
 
 The stack creates the gate's security group rather than taking group ids from you because an optional list parameter needs an empty default, and CDK's CloudFormation validator substitutes that default into `SecurityGroupIds` on every branch. It reports that as an empty group id (E1150) whichever way the template is structured. The same substitution puts an empty entry into `SubnetIds`. The validator does not format-check Lambda subnet ids, so it reports nothing there, but it cannot prove that slot non-empty either. The launch-time Rule pairing `VpcId` with `VpcSubnetIds` is what stops a real launch reaching it empty.
-| `ShardCount` | 4 | **Not a CloudFormation parameter.** See below. |
+
+`ShardCount` (4 by default) is not a CloudFormation parameter. See below.
 
 `AshBaseConfigYaml` is stored in an SSM parameter on the Advanced tier. ASH uses
 exactly one config source per scan and never merges two, so where the value

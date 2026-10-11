@@ -97,6 +97,7 @@ one structural one, both of which will cost you a failed plan if you guess:
 - Three parameters are not accepted by the four target modules at all. See
   [Where the Terraform surface differs](#where-the-terraform-surface-differs).
 
+<!-- doctest: options of=cloudformation:deploy/cdk/templates -->
 | Parameter | Applies to | Meaning |
 | --- | --- | --- |
 | `AshOfflineMode` | all | Build the image in offline mode (`YES` or `NO`). Scanner vulnerability databases and rulesets are built into the image, and ASH runs offline, so a scan does not download them. Trades image size and rebuild frequency for a scan that does not depend on reaching those sources. It does not block network egress; each target's network configuration decides that. |
@@ -108,8 +109,15 @@ one structural one, both of which will cost you a failed plan if you guess:
 | `McpAuthHeaderValue` | MCP-serving targets | The expected value of that header. It is a bearer credential. The parameter is `NoEcho`, the stack stores the value in Secrets Manager, and the container receives only the secret's ARN. |
 | `McpMountPath` | MCP-serving targets | The path the MCP server listens on. Leave it at `/mcp` on AgentCore, which routes nothing else; change it only on Fargate, when something else already occupies the default path. |
 | `McpAllowedHost` | MCP-serving targets | Comma-separated `Host` values the server accepts, which keeps DNS-rebinding protection on. Empty accepts any `Host` on AgentCore and the load balancer's DNS name on Fargate. It is enforced only when the ASH in the image has the `ash mcp` option `--allowed-host`, which v3.7.0, the default `AshVersion`, does not. |
-| `ShardCount` | CodePipeline distributed executor | How many parallel shards one logical scan is split into. In CDK it is the `shardCount` context value, read when the template is synthesized (4 in `cdk.json`), and is not a stack parameter; Terraform takes it as `shard_count`. Shards split the set of scanners, not the files, so a count above the number of enabled scanners only adds empty shards, and each shard pays image pull and scanner initialization before it scans anything. |
 | `CodeCommitRepositoryArn` | Lambda CodeCommit gate | The repository the gate watches. |
+
+`ShardCount`, for the CodePipeline distributed executor, is how many parallel shards
+one logical scan is split into. In CDK it is not a stack parameter but the
+`shardCount` context value, read when the template is synthesized (4 in
+`cdk.json`); Terraform takes it as `shard_count`. Shards split the set of scanners,
+not the files, so a count above the number of enabled scanners only adds empty
+shards, and each shard pays image pull and scanner initialization before it scans
+anything.
 
 ## Where the Terraform surface differs
 

@@ -206,7 +206,8 @@ Windows for a file nobody edited.
 `ASHScanStep(id, props)` extends `pipelines.Step` and implements
 `pipelines.ICodePipelineActionFactory`.
 
-| Prop | Type | Default value | Notes |
+<!-- doctest: options of=typescript:deploy/cdk-constructs/src/ash-scan-step.ts:ASHScanStepProps -->
+| Prop | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `input` | `IFileSetProducer` | required | the file set to scan |
 | `shardCount` | `number` | `1` | `1`–`5` in practice: the constructor accepts up to 50, but synthesis fails above 5; above 1 adds the merge action |
