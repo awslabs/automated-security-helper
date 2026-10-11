@@ -191,7 +191,9 @@ class TestReportCommand:
         result = self._report(output_dir)
 
         assert result.exit_code == 1, result.output
-        assert "not enabled" in "".join(result.output.split("\n"))
+        # rich wraps the message at the console width; compare it with the line
+        # breaks and runs of spaces collapsed to one space.
+        assert "not enabled" in " ".join(result.output.split())
         assert security_hub_runs == []
         assert requests == []
         assert sessions == []
