@@ -13,7 +13,8 @@ uploaded), each limit is held to the trusted base's value: the defaults,
 ``ASH_CONFIG``'s file, or the operator's config outside the tree, with
 ``--config-overrides`` replayed onto it. A value at or below the trusted one is
 kept, so such a file can still lower a limit. A higher one is replaced by the
-trusted value, with one warning naming every option that was.
+trusted value, with a warning naming each option and where its value came from:
+the file, when it set the option, or the default, when it left the option out.
 
 A config file in the tree replaces ``ASH_CONFIG`` the way any selected config file
 does (config sources are selected, not merged), so a limit the file leaves out is
@@ -37,6 +38,7 @@ from typing import TYPE_CHECKING, List, Optional, Sequence
 from automated_security_helper.config.config_sources import describe_config_path
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
     EXTRACTION_LIMIT_OPTIONS,
+    ArchiveConverterConfigOptions,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -91,19 +93,40 @@ def confine_archive_limits(
         trusted_config = apply_config_overrides(trusted_config, limit_overrides)
     options = config.converters.archive.options
     trusted = trusted_config.converters.archive.options
-    ignored: List[str] = []
+    defaults = ArchiveConverterConfigOptions()
+    # Split by where the capped value came from, so the warning names its source: a
+    # value equal to the default is the default, which the file took by leaving the
+    # option out (it replaces ASH_CONFIG as any selected config does); any other
+    # value was written by the file. An override cannot be either, because the
+    # overrides are replayed onto the trusted base as well.
+    set_by_file: List[str] = []
+    defaulted: List[str] = []
     for name in EXTRACTION_LIMIT_OPTIONS:
         value = getattr(options, name)
         cap = getattr(trusted, name)
-        if value > cap:
-            ignored.append(f"converters.archive.options.{name} ({value} above {cap})")
-            setattr(options, name, cap)
-    if not ignored:
-        return
+        if value <= cap:
+            continue
+        entry = f"converters.archive.options.{name} ({value} above {cap})"
+        if value == getattr(defaults, name):
+            defaulted.append(entry)
+        else:
+            set_by_file.append(entry)
+        setattr(options, name, cap)
     files = ", ".join(describe_config_path(path) for path in in_tree)
-    ASH_LOGGER.warning(
-        f"Ignoring {', '.join(ignored)} from {files}: the scanned repository or an "
-        "MCP client wrote that file, so it can lower an archive extraction limit "
-        "but not raise it. Raise a limit with --config-overrides or a config file "
-        "outside the scanned tree."
+    remedy = (
+        "Raise a limit with --config-overrides or a config file outside the scanned "
+        "tree."
     )
+    if set_by_file:
+        ASH_LOGGER.warning(
+            f"Ignoring {', '.join(set_by_file)}, set by {files}: the scanned "
+            "repository or an MCP client wrote that file, so it can lower an archive "
+            f"extraction limit but not raise it. {remedy}"
+        )
+    if defaulted:
+        ASH_LOGGER.warning(
+            f"Capping {', '.join(defaulted)}, the default: {files} leaves the option "
+            "out and replaces ASH_CONFIG as any selected config file does, so the "
+            "default applied, and the trusted config sets a lower limit. Set the "
+            f"option in that file to lower it further. {remedy}"
+        )
