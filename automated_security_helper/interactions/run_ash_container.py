@@ -1317,6 +1317,9 @@ def _host_file_in_container(
     mounts: List[str] = []
     for file, destination in placements:
         _require_mountable("config file", file)
+        # The container path is the extends entry as written, which can hold the
+        # character through a link's name while the file's own path does not.
+        _require_mountable("container path of a config file", destination)
         mounts.extend(
             ["--mount", f"type=bind,source={file},destination={destination},readonly"]
         )

@@ -248,7 +248,9 @@ a local scan uses it.
 A path that would be mounted (the source and output directories, the config file and
 the files it extends, the workspace policy) may not contain a comma, a double quote, a
 carriage return or a line feed: `--mount` reads its value as comma-separated fields, so
-such a path would be read as something else. The run is refused with exit 3 before
+such a path would be read as something else. The same holds for the path a base is
+mounted at, which follows the `extends` entry as written and can hold such a character
+through the name of a link the entry goes through. The run is refused with exit 3 before
 anything is built.
 
 `Invoke-ASH` exits with these codes also under `$ErrorActionPreference = 'Stop'` (the

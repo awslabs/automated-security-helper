@@ -16,6 +16,7 @@ exit 3 before anything is built or run.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -144,6 +145,27 @@ def test_a_base_in_the_config_chain_the_mount_cannot_carry_is_refused(
 
     result = rac.run_ash_container(
         source_dir="src", output_dir="out", config=str(config), build=False, run=True
+    )
+
+    assert commands == []
+    _refused(result)
+
+
+@pytest.mark.parametrize("name", UNREPRESENTABLE)
+def test_a_container_path_the_mount_cannot_carry_is_refused(name, commands, tmp_path):
+    """The base's own path is ordinary; the entry reaches it through a link whose
+    name holds the character, and the entry as written is its container path."""
+    (tmp_path / "src").mkdir()
+    operator = tmp_path / "operator"
+    (operator / "sub").mkdir(parents=True)
+    (operator / "sub" / "base.yaml").write_text("project_name: p\n", encoding="utf-8")
+    (operator / name).symlink_to(operator / "sub", target_is_directory=True)
+    config = operator / "ash.yaml"
+    # A JSON string is a YAML double-quoted scalar, escapes included.
+    config.write_text(f"extends: {json.dumps(name + '/base.yaml')}\n", encoding="utf-8")
+
+    result = rac.run_ash_container(
+        source_dir="src", output_dir="out", config=str(config), build=True, run=True
     )
 
     assert commands == []
