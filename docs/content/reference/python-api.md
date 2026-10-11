@@ -37,10 +37,10 @@ The scan also writes its usual output directory, here `.ash/ash_output` under th
 |---|---|
 | exit code 0 | returns an `AshAggregatedResults`, the model that `ash_aggregated_results.json` holds ([Output files](output-files.md)) |
 | actionable findings (exit code 2) | raises `SystemExit(2)`, with no results attached |
-| incomplete scan: a scanner MISSING or ERROR, a converter that lost inputs, a stale content database | raises `ScanIncompleteExit`, a `SystemExit` with code 1 whose `incompleteness` says why and whose `results` holds the model |
+| incomplete scan: a scanner MISSING, ERROR, or with lost targets, no scanner ran, a converter that lost inputs, a rule that could not be evaluated, or a stale content database | raises `ScanIncompleteExit`, a `SystemExit` with code 1 whose `incompleteness` says why and whose `results` holds the model |
 | other errors (exit code 1) | raises `SystemExit(1)` |
 | invalid configuration | raises `SystemExit(3)` |
-| an output directory ASH refuses because it, a directory on the way to it, or one of its `reports`, `scanners`, `converted` or `analysis` directories is a symbolic link | raises `OutputDirRefusedExit`, a `SystemExit` with code 1 whose `found` names the link and whose `reason` says what to do |
+| an output directory ASH refuses because it, a directory on the way to it, or one of its `reports`, `scanners`, `converted`, or `analysis` directories is a symbolic link | raises `OutputDirRefusedExit`, a `SystemExit` with code 1 whose `found` names the link and whose `reason` says what to do |
 
 The exit codes are those of the CLI ([Exit codes](exit-codes.md)). To get the results of a scan that has findings, pass `fail_on_findings=False`, as the example does. To get them from an incomplete scan, catch `ScanIncompleteExit`:
 
@@ -68,7 +68,7 @@ except SystemExit as stopped:
     results = None
 ```
 
-When bandit is not installed, this prints `incomplete: (('bandit', 'MISSING'),)`. `incompleteness.scanners` lists `(name, status)` pairs; `incompleteness.converters` lists `(name, reason)` pairs; `incompleteness.stale_content_databases` lists the databases past their age bound. ASH also prints its incomplete-scan message, even with `quiet=True`.
+When bandit is not installed, this prints `incomplete: (('bandit', 'MISSING'),)`. `incompleteness.scanners` lists `(name, status)` pairs; `incompleteness.converters` lists `(name, reason)` pairs; `incompleteness.stale_content_databases` lists the databases past their age bound; `incompleteness.unevaluated_rules` lists the rules that could not be evaluated; and `incompleteness.no_scanner_ran` is `True` when no scanner reached a verdict, as when every scanner was skipped. ASH also prints its incomplete-scan message, even with `quiet=True`.
 
 With a `workspace_plan`, `run_ash_scan` returns the workspace result instead of `AshAggregatedResults`, and raises `SystemExit` with the workspace exit code when it is not 0.
 
@@ -76,37 +76,61 @@ With a `workspace_plan`, `run_ash_scan` returns the workspace result instead of 
 
 Every parameter is optional and can be passed by keyword. Unless the table says otherwise, a parameter means what the [`ash scan`](cli.md#scan) option of the same name means. `run_ash_scan` also accepts and ignores any other positional or keyword argument, so a misspelled parameter name is silently dropped.
 
-| Parameter | If not passed | Notes |
+<!-- doctest: options of=python.automated_security_helper.interactions.run_ash_scan.run_ash_scan -->
+| Parameter | Default | Notes |
 |---|---|---|
-| `source_dir` | the working directory | |
-| `output_dir` | `.ash/ash_output` under the working directory | Not under `source_dir`, as the CLI's default is. Pass it whenever `source_dir` is not the working directory. |
-| `config` | `None` | Path to a config file. When unset, ASH discovers one in `source_dir`. |
+| `source_dir` | `None` | The directory to scan. `None` scans the working directory. |
+| `output_dir` | `None` | `None` writes to `.ash/ash_output` under the working directory, not under `source_dir` as the CLI does. Pass it whenever `source_dir` is not the working directory. |
+| `config` | `None` | Path to a config file. `None` discovers one in `source_dir`. |
 | `config_overrides` | `None` | List of `key=value` strings, as `--config-overrides` takes. |
-| `offline` | `False` | |
-| `strategy` | `ExecutionStrategy.PARALLEL` | From `automated_security_helper.core.enums`. |
-| `scanners`, `exclude_scanners` | `None` | Lists of scanner names. |
+| `offline` | `False` |  |
+| `strategy` | `ExecutionStrategy.PARALLEL` | An `ExecutionStrategy` from `automated_security_helper.core.enums`. |
+| `scanners` | `None` | List of scanner names. |
+| `exclude_scanners` | `None` | List of scanner names. |
 | `progress` | `True` | Set `False` outside a terminal. |
-| `output_formats` | `None` | List of `ExportFormat` members (`automated_security_helper.core.enums`). |
-| `cleanup` | `False` | |
-| `phases` | `None` (all but inspect) | List of `ExecutionPhase` members. |
-| `inspect` | `False` | |
-| `existing_results` | `None` | Path to an `ash_aggregated_results.json` to report from, which `--use-existing` sets. |
-| `python_based_plugins_only` | `False` | `--python-only`. |
-| `quiet`, `simple`, `verbose`, `debug` | `False` | |
-| `color` | `True` | |
-| `log_level` | `AshLogLevel.INFO` | |
-| `fail_on_findings`, `fail_on_incomplete_scanners` | `None` | `None` takes the value from the config, else `True`. |
-| `ignore_suppressions` | `False` | |
-| `min_severity` | `"low"` | |
-| `changed_files_only`, `base_ref` | `False`, `"origin/main"` | |
-| `shard_index`, `shard_count` | `None` | |
-| `mode` | `RunMode.local` | `RunMode.container`, `RunMode.nix` or `RunMode.precommit` for the other run modes. |
+| `output_formats` | `None` | List of `ExportFormat` members from `automated_security_helper.core.enums`. |
+| `cleanup` | `False` |  |
+| `phases` | `None` | List of `ExecutionPhase` members. `None` runs every phase but inspect. |
+| `inspect` | `False` |  |
+| `existing_results` | `None` | Path to an `ash_aggregated_results.json` to report from, as `--use-existing` sets it. |
+| `python_based_plugins_only` | `False` | As `--python-only`. |
+| `quiet` | `False` |  |
+| `simple` | `False` |  |
+| `verbose` | `False` |  |
+| `debug` | `False` |  |
+| `color` | `True` |  |
+| `fail_on_findings` | `None` | `None` takes the value from the config, else `True`. |
+| `fail_on_incomplete_scanners` | `None` | `None` takes the value from the config, else `True`. |
+| `ignore_suppressions` | `False` |  |
+| `min_severity` | `'low'` |  |
+| `changed_files_only` | `False` |  |
+| `base_ref` | `'origin/main'` |  |
+| `shard_index` | `None` |  |
+| `shard_count` | `None` |  |
+| `mode` | `RunMode.local` | `RunMode.container`, `RunMode.nix`, or `RunMode.precommit` for the other run modes. |
 | `show_summary` | `True` | Prints the results table. |
-| `build`, `run`, `force`, `oci_runner`, `build_target`, `offline_semgrep_rulesets`, `container_uid`, `container_gid`, `ash_revision_to_install`, `custom_containerfile`, `custom_build_arg` | as the CLI | Container mode only. |
-| `container_network` | `"bridge"` | Container mode only: the network the scan container uses when the scan is online. |
-| `ash_plugin_modules` | `None` | Plugin modules to load. This is an operator source: ASH imports every module it names ([Plugins](../plugins/index.md#who-may-load-a-module)). |
-| `workspace_plan`, `allow_missing_projects` | `None`, `False` | A workspace scan, which `--workspace` builds the plan for. |
-| `config_base_gate`, `untrusted_config`, `trusted_config_path`, `client_config_policy` | `None`, `False`, `None`, `None` | Used by the MCP server to apply the MCP-client limits of the [trust model](../concepts/trust-model.md). `untrusted_config` and `client_config_policy` raise `ValueError` in container or nix mode. |
+| `log_level` | `AshLogLevel.INFO` |  |
+| `build` | `True` | Container mode only. |
+| `run` | `True` | Container mode only. |
+| `force` | `False` | Container mode only. |
+| `oci_runner` | `None` | Container mode only. |
+| `build_target` | `None` | Container mode only. |
+| `offline_semgrep_rulesets` | `'p/ci'` | Container mode only. |
+| `container_uid` | `None` | Container mode only. |
+| `container_gid` | `None` | Container mode only. |
+| `ash_revision_to_install` | `None` | Container mode only. |
+| `custom_containerfile` | `None` | Container mode only. |
+| `custom_build_arg` | `None` | Container mode only. |
+| `ash_plugin_modules` | `None` | Plugin modules to load. This is an operator source: ASH imports every module it names ([Who may load a module](../plugins/index.md#who-may-load-a-module)). |
+| `container_network` | `'bridge'` | Container mode only: the network the scan container uses when the scan is online. |
+| `workspace_plan` | `None` | A workspace scan, which `--workspace` builds the plan for. |
+| `allow_missing_projects` | `False` | For a workspace scan. |
+| `config_base_gate` | `None` | Used by the MCP server; see below. |
+| `untrusted_config` | `False` | Used by the MCP server; see below. |
+| `trusted_config_path` | `None` | Used by the MCP server; see below. |
+| `client_config_policy` | `None` | Used by the MCP server; see below. |
+
+The last four parameters let the MCP server apply the MCP-client limits of the [Configuration trust model](../concepts/trust-model.md) to the scans it runs; leave them at their defaults. `untrusted_config` raises `ValueError` in container or nix mode and with a `workspace_plan`, and `client_config_policy` raises it in container or nix mode.
 
 Some `ash scan` options have no parameter. They become config overrides or an environment variable:
 
@@ -123,4 +147,4 @@ Import `automated_security_helper.config.ash_config` before `run_ash_scan`, as t
 
 ## Side effects
 
-`run_ash_scan` runs in your process. It sets environment variables while it runs (`offline=True` sets `ASH_OFFLINE`, and restores the previous value when the scan ends), configures ASH's logger, and registers plugins in a process-wide registry. A plugin module loaded by one call stays loaded for every later call in the same process.
+`run_ash_scan` runs in your process. It sets environment variables while it runs (`offline=True` sets `ASH_OFFLINE`, and restores the previous value when the scan ends), configures ASH's logger, and registers plugins in a process-wide registry. A plugin module loaded by one call stays loaded for every later call in the same process. To change which plugin modules a scan loads, run it in a new process.

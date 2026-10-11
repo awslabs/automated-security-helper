@@ -1,12 +1,12 @@
 # Snyk Code plugin (`snyk-code`)
 
-The `snyk-code` scanner runs `snyk code test`, the static analysis of [Snyk Code](https://snyk.io/product/snyk-code/), on the source directory and reads its SARIF. Snyk Code analyzes the code on Snyk's servers, so the scan uploads the scanned source to Snyk. It is a [community plugin](index.md): it ships with ASH and runs only when its module is loaded, and only the operator can load it.
+The `snyk-code` scanner runs `snyk code test`, the static analysis of [Snyk Code](https://snyk.io/product/snyk-code/), on the source directory and reads its SARIF. Snyk Code analyzes the code on Snyk's servers, so the scan uploads the scanned source to Snyk. It is a [community plugin](index.md): it ships with ASH, `ash scan` runs it only when its module is loaded, and only the operator can load it.
 
 ## Before you start
 
 - Install the Snyk CLI so that `snyk` is on `PATH`, for example with `npm install -g snyk` ([Snyk CLI](https://github.com/snyk/cli)). ASH does not install it, and the ASH container image does not include it.
 - Authenticate it, either with a `SNYK_TOKEN` environment variable or with `snyk auth`, which stores the credential in `~/.config/configstore/snyk.json`. If ASH finds neither, it logs a warning and runs the Snyk CLI anyway.
-- Make sure you may send this source code to Snyk under your organization's rules and your Snyk plan.
+- Make sure you may send this source code to Snyk under your organization's rules and your Snyk plan. Do not install or authenticate the Snyk CLI on a host that runs ASH unless every scan there may send source to Snyk.
 
 ## Load the plugin
 
@@ -30,7 +30,7 @@ scanners:
       severity_threshold: HIGH
 ```
 
-Snyk's SARIF is in `.ash/ash_output/scanners/snyk-code/source/results_sarif.sarif`, and its findings are in every ASH report.
+Snyk's SARIF is in `.ash/ash_output/scanners/snyk-code/source/results_sarif.sarif`, and its findings are in the finding reports under `.ash/ash_output/reports/`, such as `ash.sarif`, `ash.html`, and `ash.csv`.
 
 ## Options
 
@@ -42,12 +42,12 @@ Snyk's SARIF is in `.ash/ash_output/scanners/snyk-code/source/results_sarif.sari
 
 ## Known defect
 
-When Snyk Code reports any issue, `snyk` exits with code 1. In this release ASH treats that exit code as a failure: snyk-code is recorded as ERROR with no findings, and the scan exits with code 1. A Snyk Code run that finds nothing is recorded as PASSED.
+When Snyk Code reports any issue, `snyk` exits with code 1. In this release ASH treats that exit code as a failure: `snyk-code` is recorded as ERROR with no findings, and the scan exits with code 1. A Snyk Code run that finds nothing is recorded as PASSED.
 
-## Offline, container and sandboxed scans
+## Offline, container, and sandboxed scans
 
 - Offline mode (`--offline` or `ASH_OFFLINE`): the scanner is reported MISSING, which fails the scan, so do not load the module in offline scans.
 - Container mode (`--mode container`): the image has no Snyk CLI, and ASH does not pass `SNYK_TOKEN` into the container.
-- Under `--sandbox`, the scanner gets network access, the `SNYK_*` environment variables and read access to `~/.config/configstore/snyk.json`, beyond the sandbox's defaults ([scanner sandbox](../../scanner-sandbox.md)).
+- Under `--sandbox`, the scanner gets network access, the `SNYK_*` environment variables, and read access to `~/.config/configstore/snyk.json`, beyond the sandbox's defaults ([Enable the scanner sandbox](../../scanner-sandbox.md)).
 
 [Snyk plugin in ASH's CI](snyk-plugin-setup.md) describes how the ASH repository's own CI handles the plugin.

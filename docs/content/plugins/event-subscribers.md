@@ -1,8 +1,13 @@
 # Subscribe to scan events
 
-An event subscriber is a function that ASH calls at a point in a scan: when a phase starts, when a scanner finishes, when the whole scan ends. Use one to log progress somewhere ASH does not, to time scans, or to start work that depends on a scanner's result. This page builds a module with two subscribers, one that prints a line as each scanner finishes and one that prints the scan's duration at the end.
+An event subscriber is a function that ASH calls at a point in a scan: when a phase starts, when a scanner finishes, or when the whole scan ends. Use one to log progress somewhere ASH does not, to time scans, or to start work that depends on a scanner's result. This page builds a module with two subscribers, one that prints a line as each scanner finishes and one that prints the scan's duration at the end.
 
-Before you start, you need ASH installed ([Install ASH](../how-to/install.md)) and a repository to scan, with your shell in its top directory. To keep the steps short, this page saves the module in an `ash-plugins` directory there; a module you keep belongs outside the repositories you scan ([Package a third-party plugin](index.md#package-a-third-party-plugin)). [Plugins](index.md) explains how ASH loads plugin modules and what a loaded module can do.
+Prerequisites:
+
+- ASH installed ([Install ASH](../how-to/install.md));
+- a repository to scan, with your shell in its top directory. To keep the steps short, this page saves the module in an `ash-plugins` directory there; a module you keep belongs outside the repositories you scan ([Package a third-party plugin](index.md#package-a-third-party-plugin)).
+
+[Plugins](index.md) explains how ASH loads plugin modules and what a loaded module can do.
 
 ## 1. Write the subscribers
 
@@ -62,23 +67,23 @@ Subscribers to one event run in the order they were subscribed. The order betwee
 
 ## Events
 
-These are the events a scan emits, in the order they happen. Events emitted during a phase also receive `phase` and `plugin_context`.
+`EXECUTION_START` comes before the first phase and `EXECUTION_COMPLETE` after the last. Phases run in the order convert, scan, report, and inspect; each emits its `_PHASE_START` event, then its per-plugin events, then its `_PHASE_COMPLETE` event. Events emitted during a phase also receive `phase` and `plugin_context`.
 
 | Event | When | Keyword arguments |
 |---|---|---|
 | `EXECUTION_START` | once, before the first phase | `phases`, `plugin_context`, `source_dir`, `output_dir`, `enabled_scanners`, `excluded_scanners`, `python_based_plugins_only`, `strategy`, `message` |
-| `CONVERT_PHASE_START`, `SCAN_PHASE_START`, `REPORT_PHASE_START`, `INSPECT_PHASE_START` | when each phase starts; inspect runs only with `--inspect` | the scan phase adds `enabled_scanners`, `excluded_scanners`, `parallel`, `max_workers`, `global_ignore_paths`, `shard_index`, `shard_count`; the report phase adds `report_dir`, `cli_output_formats` |
+| `CONVERT_PHASE_START`, `SCAN_PHASE_START`, `REPORT_PHASE_START`, `INSPECT_PHASE_START` | when each phase starts; inspect runs only with `--inspect` | the scan phase adds `enabled_scanners`, `excluded_scanners`, `parallel`, `max_workers`, `global_ignore_paths`, `shard_index`, and `shard_count`; the report phase adds `report_dir` and `cli_output_formats` |
 | `CONVERT_START` | before each converter runs | `converter`, `converter_class`, `message` |
-| `CONVERT_COMPLETE` | after each converter that did not raise | the same, plus `converted_files`, `file_count` |
-| `SCAN_START` | before each scanner, only with `--strategy sequential` | `scanner`, `scanner_class`, `scan_targets`, `message` |
+| `CONVERT_COMPLETE` | after each converter that did not raise | the same, plus `converted_files` and `file_count` |
+| `SCAN_START` | before each scanner, when scanners run one at a time: with `--strategy sequential`, or when only one scanner runs | `scanner`, `scanner_class`, `scan_targets`, `message` |
 | `SCAN_COMPLETE` | after each scanner, including one that failed | `scanner`, `completed_count`, `total_count`, `remaining_count`, `remaining_scanners`, `message` |
 | `REPORT_START` | before each reporter | `reporter`, `reporter_class`, `message` |
-| `REPORT_COMPLETE` | after each reporter that wrote a file | the same, plus `output_file`, `output_filename` |
+| `REPORT_COMPLETE` | after each reporter that returned a string; when the string was empty, no file was written, and `output_file` and `output_filename` are `None` | the same, plus `output_file` and `output_filename` |
 | `CONVERT_PHASE_COMPLETE`, `SCAN_PHASE_COMPLETE`, `REPORT_PHASE_COMPLETE`, `INSPECT_PHASE_COMPLETE` | when each phase ends | the phase's start arguments, plus `results` |
 | `EXECUTION_COMPLETE` | once, at the end, also when the scan failed | `phases`, `results`, `duration` (seconds), `completed_scanners`, `message` |
 | `ERROR`, `WARNING`, `INFO` | when ASH records a problem or a validation checkpoint | `message`, and details that depend on the source |
 
-`AshEventType` also has `EXECUTION_PROGRESS`, `CONVERT_PHASE_PROGRESS`, `SCAN_PHASE_PROGRESS`, `REPORT_PHASE_PROGRESS`, `INSPECT_PHASE_PROGRESS`, `INSPECT_START` and `INSPECT_COMPLETE`. ASH never emits them. Under the default parallel strategy, `SCAN_START` is not emitted either; use `SCAN_PHASE_START` to learn which scanners will run.
+`AshEventType` also has `EXECUTION_PROGRESS`, `CONVERT_PHASE_PROGRESS`, `SCAN_PHASE_PROGRESS`, `REPORT_PHASE_PROGRESS`, `INSPECT_PHASE_PROGRESS`, `INSPECT_START`, and `INSPECT_COMPLETE`. ASH never emits them. When two or more scanners run under the default parallel strategy, `SCAN_START` is not emitted either; use `SCAN_PHASE_START` to learn which scanners will run.
 
 ## When a subscriber fails
 

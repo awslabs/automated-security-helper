@@ -2,7 +2,12 @@
 
 A converter runs before the scanners and writes files they can read. ASH's own converters extract archives and turn Jupyter notebooks into Python. This page builds `markdown-python`, a converter that copies the Python code blocks out of Markdown files so that Python scanners check the code in your documentation too. It keeps each line at its original line number, so a finding in the converted file points at the same line of the Markdown file.
 
-Before you start, you need ASH installed ([Install ASH](../how-to/install.md)) and a repository to scan, with your shell in its top directory. To keep the steps short, this page saves the plugin package in an `ash-plugins` directory there; a plugin you keep belongs outside the repositories you scan ([Package a third-party plugin](index.md#package-a-third-party-plugin)). [Plugins](index.md) explains how ASH loads plugin packages and what a loaded plugin can do.
+Prerequisites:
+
+- ASH installed ([Install ASH](../how-to/install.md));
+- a repository to scan, with your shell in its top directory. To keep the steps short, this page saves the plugin package in an `ash-plugins` directory there; a plugin you keep belongs outside the repositories you scan ([Package a third-party plugin](index.md#package-a-third-party-plugin)).
+
+[Plugins](index.md) explains how ASH loads plugin packages and what a loaded plugin can do.
 
 ## 1. Write the plugin
 
@@ -132,7 +137,7 @@ The scan exits with code 2 for the hardcoded password in `app.py`. List what the
 ls .ash/ash_output/converted/markdown-python/docs
 ```
 
-The converter wrote `usage.md.py`, which has the two lines of code at lines 6 and 7 and blank lines everywhere else. ASH passes the directory of converted files to every scanner as a second target, after the source directory. A Python scanner, such as bandit or the `ruff-security` scanner from [Write a scanner](write-a-scanner.md), reports the `shell=True` call at `.ash/ash_output/converted/markdown-python/docs/usage.md.py`, line 7.
+The converter wrote `usage.md.py`, which has the two lines of code at lines 6 and 7 and blank lines everywhere else. ASH passes the directory of converted files to every scanner as a second target, after the source directory. This scan ran only detect-secrets, which needs no download, so it shows the conversion but no finding in the converted file. A Python scanner, such as bandit or the `ruff-security` scanner from [Write a scanner plugin](write-a-scanner.md), reports the `shell=True` call at `.ash/ash_output/converted/markdown-python/docs/usage.md.py`, line 7. bandit reports it twice, once from each target, because its run over the source directory does not skip ASH's output directory.
 
 ## How ASH runs a converter
 
@@ -142,10 +147,10 @@ The base class, `ConverterPluginBase`, declares the method as `convert(self, tar
 
 Inside `convert()`:
 
-- Find inputs with `scan_set(source=..., output=...)` from `automated_security_helper.utils.get_scan_set`. It returns the files ASH scans: the files under the source directory that the repository's `.gitignore` and `.ignore` files do not exclude, without ASH's own output directory.
+- Find inputs with `scan_set(source=..., output=...)` from `automated_security_helper.utils.get_scan_set`. It returns the files ASH scans: the files under the source directory that the repository's `.gitignore` and `.ignore` files do not exclude. ASH's output directory is left out, apart from ASH's log file, `ash.log`, which already exists when the scan set is built.
 - Skip the inputs that `global_settings.ignore_paths` covers, as the example does with `ignore_paths_that_skip_scanning` and `file_path_matches`. ASH removes findings under an ignored path after the scan by matching the finding's path, and a converted file's path is under `.ash/ash_output/converted/`, so findings in a converted copy of an ignored file would otherwise be reported. `ignore_paths_that_skip_scanning` leaves out the ignore paths an MCP client supplied, which ASH reports as suppressed findings instead of skipping.
 - Read each input through `self.open_source_file(path)`, not `open()`. It refuses a symbolic link or a path outside the source directory by raising `TreeInputRefused`. Pass that to `self.record_refused_input()`, which logs a warning and lists the input in the converter's results.
-- Write output only under `self.results_dir`, which is `.ash/ash_output/converted/<name>/`. Every file you write there is scanned, whether or not you return it.
+- Write output only under `self.results_dir`, which is `.ash/ash_output/converted/<name>/`. Every file you write there is scanned, whether or not you return it, as long as at least one name under `.ash/ash_output/converted/` has an extension, such as `.py`; if none does, ASH does not scan the converted directory at all.
 - Return a list of the paths you wrote. An empty list means there was nothing to convert.
 
 How a converter's problems affect the scan:

@@ -1,8 +1,13 @@
 # Write a reporter plugin
 
-This page builds `findings-list`, a reporter plugin that writes `ash.findings.txt`: the number of actionable findings, then one line per finding with its scanner, rule and location. A reporter receives the aggregated results after every scanner has run and returns the text of its report; ASH writes the file.
+This page builds `findings-list`, a reporter plugin that writes `ash.findings.txt`: the number of actionable findings, then one line per finding with its scanner, rule, and location. A reporter receives the aggregated results after every scanner has run and returns the text of its report; ASH writes the file.
 
-Before you start, you need ASH installed ([Install ASH](../how-to/install.md)) and a repository to scan, with your shell in its top directory. To keep the steps short, this page saves the plugin package in an `ash-plugins` directory there; a plugin you keep belongs outside the repositories you scan ([Package a third-party plugin](index.md#package-a-third-party-plugin)). [Plugins](index.md) explains how ASH loads plugin packages and what a loaded plugin can do.
+Prerequisites:
+
+- ASH installed ([Install ASH](../how-to/install.md));
+- a repository to scan, with your shell in its top directory. To keep the steps short, this page saves the plugin package in an `ash-plugins` directory there; a plugin you keep belongs outside the repositories you scan ([Package a third-party plugin](index.md#package-a-third-party-plugin)).
+
+[Plugins](index.md) explains how ASH loads plugin packages and what a loaded plugin can do.
 
 ## 1. Write the plugin
 
@@ -90,7 +95,7 @@ It reads:
 detect-secrets	SECRET-SECRET-KEYWORD	app.py:3
 ```
 
-To render the report again from the last scan's results without scanning, use `ash report`, which takes the module through a config override:
+To see the report again from the last scan's results without scanning, use `ash report`, which takes the module through a config override. It prints the report to the terminal and writes no file:
 
 ```bash
 ash report --format findings-list --config-overrides 'ash_plugin_modules+=[acme_ash_plugins]'
@@ -122,20 +127,20 @@ ASH calls `report(model)` once per scan, in the report phase, and handles what i
 
 None of these changes the scan's exit code, which is decided by the findings and by whether the scan was complete.
 
-Set `extension` in the config class. It is the end of the file name, so it must be a plain suffix such as `findings.txt`: a value with `/`, `\` or `..`, from any config, is replaced by the default with a warning, and a reporter with no extension writes `ash.None`. To write a second file beside the report, call `write_report_file(report_dir, filename, content)` from `automated_security_helper.base.reporter_plugin` with `report_dir` set to `Path(self.context.output_dir) / "reports"`. It writes only inside that directory and does not follow a symbolic link at the file name.
+Set `extension` in the config class. It is the end of the file name, so it must be a plain suffix such as `findings.txt`: a value with `/`, `\`, or `..`, from any config, is replaced by the default with a warning, and a reporter with no extension writes `ash.None`. To write a second file beside the report, call `write_report_file(report_dir, filename, content)` from `automated_security_helper.base.reporter_plugin` with `report_dir` set to `Path(self.context.output_dir) / "reports"`. It writes only inside that directory and does not follow a symbolic link at the file name.
 
 ## Read the results model
 
 `model` is an `AshAggregatedResults`, the same data as `.ash/ash_output/ash_aggregated_results.json` ([Output files](../reference/output-files.md)). The parts a reporter usually needs:
 
-- `model.metadata.summary_stats`: `actionable`, `total` (findings not suppressed), and `severity_counts` with `critical`, `high`, `medium`, `low`, `info` and `suppressed`;
-- `model.to_flat_vulnerabilities()`: one flat record per finding, with `scanner`, `rule_id`, `severity`, `file_path`, `line_start`, `line_end`, `description` and `is_suppressed`. The flat `severity` can differ from the severity the summary and the gate use: a SARIF result at level `error` with no `issue_severity` counts as critical in the summary but appears as HIGH here;
+- `model.metadata.summary_stats`: `actionable`, `total` (findings not suppressed), and `severity_counts` with `critical`, `high`, `medium`, `low`, `info`, and `suppressed`;
+- `model.to_flat_vulnerabilities()`: one flat record per finding, with `scanner`, `rule_id`, `severity`, `file_path`, `line_start`, `line_end`, `description`, and `is_suppressed`. The flat `severity` can differ from the severity the summary and the gate use: a SARIF result at level `error` with no `issue_severity` counts as critical in the summary but appears as HIGH here;
 - `model.sarif`: the aggregated SARIF, one run with every scanner's results;
-- `model.scanner_results`: the outcome of each scanner, with `status` (PASSED, FAILED, MISSING, SKIPPED or ERROR) and `finding_count`.
+- `model.scanner_results`: the outcome of each scanner, with `status` (PASSED, FAILED, MISSING, SKIPPED, or ERROR) and `finding_count`.
 
 ## A reporter that sends findings somewhere
 
-ASH keeps the destination and credential options of its own AWS reporters to the operator ([trust model](../concepts/trust-model.md#what-each-tier-may-set)). It does not know which options of a third-party reporter are destinations, so a repository's own config can set any option of yours. If your reporter sends results to a URL, bucket or account, take that destination from an environment variable, or check where the option came from with `set_by_operator` from `automated_security_helper.utils.config_trust`:
+ASH keeps the destination and credential options of its own AWS reporters to the operator ([Configuration trust model](../concepts/trust-model.md#what-each-tier-may-set)). It does not know which options of a third-party reporter are destinations, so a repository's own config can set any option of yours. If your reporter sends results to a URL, bucket, or account, take that destination from an environment variable, or check where the option came from with `set_by_operator` from `automated_security_helper.utils.config_trust`:
 
 ```python
 from automated_security_helper.utils.config_trust import set_by_operator
@@ -146,7 +151,7 @@ def endpoint_from_operator(reporter, endpoint):
     return endpoint if set_by_operator(reporter.context.config, key, endpoint) else None
 ```
 
-`set_by_operator` returns false for a value that a config file inside a git checkout or the scanned directory, or one an MCP client delivered, set and your own sources (`--config-overrides`, a config file outside every checkout) would not have. With the function above, a repository that names an endpoint in its `.ash/.ash.yaml` gets `None`, while the same option passed with `--config-overrides` is used. A reporter that makes network calls also runs in the ASH process, outside the scanner sandbox, so it can reach any host ASH can.
+`set_by_operator` returns false when the value came from a config file inside a git checkout or the scanned directory, or from one an MCP client delivered, and your own sources (`--config-overrides`, a config file outside every checkout) would not give the same value. With the function above, a repository that names an endpoint in its `.ash/.ash.yaml` gets `None`, while the same option passed with `--config-overrides` is used. A reporter that makes network calls also runs in the ASH process, outside the scanner sandbox, so it can reach any host ASH can.
 
 ## Workspace scans
 
