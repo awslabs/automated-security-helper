@@ -385,6 +385,8 @@ After merging the release PR, a second workflow automatically:
 - Publishes a GitHub Release whose body is the version's `CHANGELOG.md` entry followed by GitHub's auto-generated notes
 - Updates the floating major tag for the released version -- `v3` for a 3.x release, `v4` for a 4.x one, creating it if it does not exist yet
 
+The documentation site is published by the `deploy-docs` job of `.github/workflows/ash-repo-docs.yml`, the only job there with `contents: write`, from every push to `main`. The release PR's merge publishes the release's docs that way. No tag push publishes them, and a hand-pushed release tag no longer republishes the site: the workflow has no tag trigger, and the job's `if:` admits only `refs/heads/main`. That holds for commits that carry the current workflow file. A tag pushed on an older commit runs that commit's copy, which still triggers on every tag, so tag creation and updates should be limited to the release path by a tag ruleset; nothing in a workflow file can cover those commits.
+
 #### Release App setup
 
 The release PR's required checks (`ash / SAST, SCA, and IaC Scan`, `Validate PR title`, `required-checks`) run on `pull_request`. When the PR is opened with the workflow's `GITHUB_TOKEN`, GitHub creates those runs in an approval-required state, and nothing starts until a maintainer with write access selects **Approve workflows to run** in the PR's merge box. The release PR says so in its description when that happens. To have the checks start on their own, the workflow opens the PR with a GitHub App token instead, which needs this one-time setup by a repository admin:
