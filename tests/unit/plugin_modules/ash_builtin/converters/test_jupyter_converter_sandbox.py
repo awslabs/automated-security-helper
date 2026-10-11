@@ -757,4 +757,11 @@ class TestNbconvertReadsOnlyItsStagedCopy:
                 f"the staged copy {staged} is not readable: {policy.read_only}"
             )
             assert _inside(converter.results_dir, policy.writable)
+            # nbconvert writes into the directory --output-dir names, so the sandbox
+            # has to leave it writable; a directory beside the staged copy is not.
+            written = Path(argv[argv.index("--output-dir") + 1])
+            assert _inside(written, policy.writable), (
+                f"nbconvert writes into {written}, which is not writable: "
+                f"{policy.writable}"
+            )
         assert len(converted) == 1
