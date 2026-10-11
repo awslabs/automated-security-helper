@@ -34,6 +34,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.secret_masking import mask_secrets_in_results
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
@@ -964,6 +965,10 @@ class AshAggregatedResults(BaseModel):
         # Populate final metrics right before saving (if not already done)
         if not self.scanner_results:
             self._populate_final_metrics()
+
+        # No secret value a finding exposes is written to the file; see
+        # utils/secret_masking.py. In place, so what is reported next is masked too.
+        mask_secrets_in_results(self)
 
         report_dir = output_dir.joinpath("reports")
         report_dir.mkdir(parents=True, exist_ok=True)

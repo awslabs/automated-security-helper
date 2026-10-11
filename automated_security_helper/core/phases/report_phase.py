@@ -13,6 +13,7 @@ from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.secret_masking import mask_secrets_in_results
 
 #: The reporter for this format is switched off in configuration. This is the
 #: common case and the one an operator can fix in a line: ``yaml`` and ``spdx``
@@ -225,6 +226,11 @@ class ReportPhase(EnginePhase):
         """
         ASH_LOGGER.debug("Entering: ReportPhase._execute_phase()")
         report_dir.mkdir(parents=True, exist_ok=True)
+
+        # Every reporter reads the same results, so the secret values findings
+        # expose are masked once, here, before any of them runs; see
+        # utils/secret_masking.py.
+        mask_secrets_in_results(aggregated_results)
 
         # Initialize progress
         self.initialize_progress("Starting report generation...")

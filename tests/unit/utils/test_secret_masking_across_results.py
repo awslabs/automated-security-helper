@@ -1,0 +1,417 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+"""``mask_secrets_in_results``: masking by location and by value, result by result.
+
+The end-to-end tests (``tests/unit/reporters/test_secret_masking_across_reports.py``)
+run a whole scan. These pin the rules on small hand-built reports, including the
+cases a scan does not reach: a value the scanner already masked in its message,
+values too short to mask everywhere, base64 snippets, and running the masking
+twice.
+
+The values are derived at import time, so this source holds no string a secret
+scanner would report.
+"""
+
+import hashlib
+import string
+
+from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.utils.secret_masking import (
+    MASKED_LINE,
+    _mask_secret_value,
+    mask_secrets_in_results,
+)
+
+
+def _derived(label, length):
+    alphabet = string.ascii_lowercase + string.digits
+    digest = hashlib.sha256(label.encode()).digest()
+    return "".join(alphabet[byte % len(alphabet)] for byte in digest)[:length]
+
+
+VALUE = _derived("masking-unit-value", 14)
+SHORT = _derived("masking-unit-short", 3)
+NAME = "pass" + "word"
+HARDCODED = "Possible hardcoded " + NAME + ": "
+
+ASSIGN_LINE = f'{NAME} = "{VALUE}"\n'
+REUSE_LINE = f'run("login --token {VALUE}")\n'
+OTHER_LINE = "import os\n"
+
+
+def _result(rule_id, uri, line, message, snippet=None, context=None, scanner=None):
+    region = {"startLine": line, "endLine": line}
+    if snippet is not None:
+        region["snippet"] = {"text": snippet}
+    physical = {"artifactLocation": {"uri": uri}, "region": region}
+    if context is not None:
+        start, text = context
+        physical["contextRegion"] = {"startLine": start, "snippet": {"text": text}}
+    result = {
+        "ruleId": rule_id,
+        "level": "warning",
+        "message": {"text": message},
+        "locations": [{"physicalLocation": physical}],
+    }
+    if scanner is not None:
+        result["properties"] = {"scanner_name": scanner, "tags": [scanner]}
+    return result
+
+
+def _results(*results):
+    model = AshAggregatedResults()
+    model.sarif = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [{"tool": {"driver": {"name": "test"}}, "results": list(results)}],
+        }
+    )
+    return model
+
+
+def _region_text(result, region="region"):
+    physical = result.locations[0].physicalLocation.root
+    return getattr(physical, region).snippet.text
+
+
+def _message(result):
+    return result.message.root.text
+
+
+class TestMaskingByLocation:
+    def test_a_line_a_secret_finding_reports_is_masked_in_every_result(self):
+        model = _results(
+            _result(
+                "SECRET-KEYWORD",
+                "app.py",
+                2,
+                "Secret of type 'Keyword' detected",
+                scanner="detect-secrets",
+            ),
+            _result(
+                "B404",
+                "app.py",
+                1,
+                "import",
+                snippet=OTHER_LINE,
+                context=(1, OTHER_LINE + ASSIGN_LINE),
+                scanner="bandit",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        b404 = model.sarif.runs[0].results[1]
+        assert _region_text(b404) == OTHER_LINE
+        assert _region_text(b404, "contextRegion") == OTHER_LINE + MASKED_LINE + "\n"
+
+    def test_a_line_in_another_file_is_left_alone(self):
+        model = _results(
+            _result(
+                "SECRET-KEYWORD",
+                "app.py",
+                2,
+                "Secret of type 'Keyword' detected",
+                scanner="detect-secrets",
+            ),
+            _result(
+                "B404",
+                "lib.py",
+                2,
+                "import",
+                snippet=ASSIGN_LINE,
+                scanner="bandit",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _region_text(model.sarif.runs[0].results[1]) == ASSIGN_LINE
+
+    def test_a_binary_snippet_at_a_reported_line_is_dropped(self):
+        model = _results(
+            _result(
+                "SECRET-KEYWORD",
+                "app.bin",
+                1,
+                "Secret of type 'Keyword' detected",
+                scanner="detect-secrets",
+            ),
+        )
+        region = (
+            model.sarif.runs[0].results[0].locations[0].physicalLocation.root.region
+        )
+        from automated_security_helper.schemas.sarif_schema_model import (
+            ArtifactContent,
+        )
+
+        region.snippet = ArtifactContent(binary="AAAA")
+
+        mask_secrets_in_results(model)
+
+        assert region.snippet.binary is None
+
+
+class TestMaskingByValue:
+    def test_a_value_a_message_quotes_is_masked_where_it_is_reused(self):
+        model = _results(
+            _result(
+                "B105",
+                "app.py",
+                1,
+                HARDCODED + "'" + VALUE + "'",
+                snippet=ASSIGN_LINE,
+                scanner="bandit",
+            ),
+            _result(
+                "B602",
+                "deploy.py",
+                5,
+                "subprocess call",
+                snippet=REUSE_LINE,
+                scanner="bandit",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        b602 = model.sarif.runs[0].results[1]
+        assert VALUE not in _region_text(b602)
+        assert _region_text(b602).startswith('run("login --token ')
+        assert VALUE not in _message(model.sarif.runs[0].results[0])
+
+    def test_a_value_the_scanner_already_masked_is_recovered_from_its_own_line(self):
+        """Bandit masks its message before the results are merged.
+
+        The value is then read back from the finding's own snippet, the string
+        literal of the masked value's length and visible first and last
+        characters, so its reuse on another line is masked too.
+        """
+        model = _results(
+            _result(
+                "B105",
+                "app.py",
+                1,
+                HARDCODED + "'" + _mask_secret_value(VALUE) + "'",
+                snippet=ASSIGN_LINE,
+                scanner="bandit",
+            ),
+            _result(
+                "B602",
+                "deploy.py",
+                5,
+                "subprocess call",
+                snippet=REUSE_LINE,
+                scanner="bandit",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert VALUE not in _region_text(model.sarif.runs[0].results[1])
+
+    def test_a_value_recovered_from_the_context_region_only(self):
+        """A finding whose region carries no snippet but whose context does."""
+        model = _results(
+            _result(
+                "B105",
+                "app.py",
+                2,
+                HARDCODED + "'" + _mask_secret_value(VALUE) + "'",
+                context=(1, OTHER_LINE + ASSIGN_LINE),
+                scanner="bandit",
+            ),
+            _result(
+                "B602",
+                "deploy.py",
+                5,
+                "subprocess call",
+                snippet=REUSE_LINE,
+                scanner="bandit",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert VALUE not in _region_text(model.sarif.runs[0].results[1])
+
+    def test_a_short_value_is_masked_only_in_its_own_finding(self):
+        """Replacing a three-character token everywhere would change unrelated code."""
+        model = _results(
+            _result(
+                "B105",
+                "app.py",
+                1,
+                HARDCODED + "'" + SHORT + "'",
+                scanner="bandit",
+            ),
+            _result(
+                "B602",
+                "deploy.py",
+                5,
+                "subprocess call",
+                snippet=f"run('{SHORT}')\n",
+                scanner="bandit",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert SHORT not in _message(model.sarif.runs[0].results[0])
+        assert _region_text(model.sarif.runs[0].results[1]) == f"run('{SHORT}')\n"
+
+    def test_a_value_inside_a_longer_token_is_left_alone(self):
+        longer = "x" + VALUE + "y"
+        model = _results(
+            _result(
+                "B105", "app.py", 1, HARDCODED + "'" + VALUE + "'", scanner="bandit"
+            ),
+            _result(
+                "B602",
+                "deploy.py",
+                5,
+                "subprocess call",
+                snippet=f'run("{longer}")\n',
+                scanner="bandit",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _region_text(model.sarif.runs[0].results[1]) == f'run("{longer}")\n'
+
+
+class TestMaskingAsAWhole:
+    def test_results_without_secret_findings_are_unchanged(self):
+        model = _results(
+            _result(
+                "B602",
+                "deploy.py",
+                5,
+                "subprocess call",
+                snippet=REUSE_LINE,
+                context=(4, OTHER_LINE + REUSE_LINE),
+                scanner="bandit",
+            ),
+        )
+        before = model.sarif.model_dump_json()
+
+        mask_secrets_in_results(model)
+
+        assert model.sarif.model_dump_json() == before
+
+    def test_masking_twice_changes_nothing_more(self):
+        model = _results(
+            _result(
+                "B105",
+                "app.py",
+                1,
+                HARDCODED + "'" + VALUE + "'",
+                snippet=ASSIGN_LINE,
+                scanner="bandit",
+            ),
+            _result(
+                "B602",
+                "deploy.py",
+                5,
+                "subprocess call",
+                snippet=REUSE_LINE,
+                scanner="bandit",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+        once = model.sarif.model_dump_json()
+        mask_secrets_in_results(model)
+
+        assert model.sarif.model_dump_json() == once
+
+    def test_values_in_additional_reports_are_masked(self):
+        model = _results(
+            _result(
+                "B105", "app.py", 1, HARDCODED + "'" + VALUE + "'", scanner="bandit"
+            ),
+        )
+        model.additional_reports = {"other": {"source": {"raw_results": REUSE_LINE}}}
+
+        mask_secrets_in_results(model)
+
+        assert VALUE not in str(model.additional_reports)
+
+
+class TestReportersReceiveMaskedResults:
+    """``ReportPhase`` masks the results before the first reporter is called."""
+
+    def test_the_results_a_reporter_receives_hold_no_secret_value(self, tmp_path):
+        from typing import Literal
+
+        from automated_security_helper.base.plugin_context import PluginContext
+        from automated_security_helper.base.reporter_plugin import (
+            ReporterPluginBase,
+            ReporterPluginConfigBase,
+        )
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.core.phases.report_phase import ReportPhase
+        from automated_security_helper.core.progress import LiveProgressDisplay
+
+        received = []
+
+        class _RecordingReporterConfig(ReporterPluginConfigBase):
+            name: Literal["recording-reporter"] = "recording-reporter"
+            extension: str = "recording.json"
+            enabled: bool = True
+
+        class _RecordingReporter(ReporterPluginBase[_RecordingReporterConfig]):
+            def model_post_init(self, context):
+                if self.config is None:
+                    self.config = _RecordingReporterConfig()
+                return super().model_post_init(context)
+
+            def report(self, model):
+                received.append(model.sarif.model_dump_json())
+                return "{}"
+
+        model = _results(
+            _result(
+                "B105",
+                "app.py",
+                1,
+                HARDCODED + "'" + VALUE + "'",
+                snippet=ASSIGN_LINE,
+                scanner="bandit",
+            ),
+            _result(
+                "B602",
+                "deploy.py",
+                5,
+                "subprocess call",
+                snippet=REUSE_LINE,
+                scanner="bandit",
+            ),
+        )
+        assert VALUE in model.sarif.model_dump_json()
+        output_dir = tmp_path / "out"
+        context = PluginContext(
+            source_dir=tmp_path / "src",
+            output_dir=output_dir,
+            work_dir=output_dir / "work",
+            config=AshConfig(),
+        )
+        phase = ReportPhase(
+            plugins=[_RecordingReporter],
+            plugin_context=context,
+            progress_display=LiveProgressDisplay(show_progress=False),
+            asharp_model=model,
+        )
+
+        phase._execute_phase(
+            report_dir=output_dir / "reports",
+            aggregated_results=model,
+            cli_output_formats=["recording-reporter"],
+            python_based_plugins_only=False,
+        )
+
+        assert len(received) == 1
+        assert VALUE not in received[0]
+        assert VALUE not in (output_dir / "reports" / "ash.recording.json").read_text()

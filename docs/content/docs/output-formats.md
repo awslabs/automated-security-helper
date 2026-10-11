@@ -97,11 +97,11 @@ Each object in the `findings` array has these fields:
 | `suppression_kind` | string or null | `"inSource"` or `"external"`, depending on how it was suppressed |
 | `suppression_justification` | string or null | Reason text provided with the suppression |
 | `detected_at` | string or null | ISO 8601 timestamp of detection |
-| `code_snippet` | string or null | Relevant source code fragment. May span more lines than `line_start`–`line_end` when the scanner supplied surrounding context, so do not use it to infer the line range |
+| `code_snippet` | string or null | Relevant source code fragment. May span more lines than `line_start`–`line_end` when the scanner supplied surrounding context, so do not use it to infer the line range. Lines a secret finding reports are masked; see [Secret values in reports](#secret-values-in-reports) |
 | `tags` | string or null | JSON-encoded array of tags |
 | `properties` | string or null | JSON-encoded map of additional scanner-specific properties |
 | `references` | string or null | JSON-encoded array of reference URIs |
-| `raw_data` | string or null | Full SARIF result object as a JSON string, for lossless access |
+| `raw_data` | string or null | Full SARIF result object as a JSON string, after secret masking (see [Secret values in reports](#secret-values-in-reports)) |
 
 ### Example output
 
@@ -402,6 +402,38 @@ decided from these fields:
   convert, with `path` and `reason`.
 - In workspace mode, each project's `incomplete_converters` lists the converters that
   did not process their inputs, next to `incomplete_scanners`.
+
+## Secret values in reports
+
+A finding can carry the value it found: bandit's B105, B106 and B107 quote it in
+their message, ferret-scan quotes it with `show_match` on, and every scanner's
+snippets (`region.snippet` and `contextRegion.snippet`) hold the lines around a
+finding, which can include a secret on a neighboring line. ASH masks these values
+once, after the scanners' results are merged and before
+`ash_aggregated_results.json` is written or any reporter runs, so every format
+above, the Bedrock summary and MCP responses get the masked results:
+
+- **By location.** Each snippet line, in any finding, at a file and line that a
+  secret finding reports is replaced with
+  `[masked: a secret finding reports this line]`. Its indentation and line ending
+  are kept. A snippet whose line numbers are unknown, in a file with a secret
+  finding, is masked whole, and a base64 (`binary`) snippet at such a line is
+  dropped.
+- **By value.** Each value a secret finding's message quotes
+  (`Possible hardcoded password: '...'`, `Matched text: '...'`) is masked wherever
+  it occurs as a whole token, in any string of any finding, including on lines no
+  secret finding reports. The masked form keeps at most the first two and the last
+  character, for example `hu*************t`. Values shorter than four characters
+  are masked in their own finding's message only.
+
+A secret finding is one from a secrets scanner (detect-secrets, ferret-scan, or a
+result tagged `tool_type::SECRETS`), one tagged `secret` or `secrets`, a bandit
+B105, B106 or B107, a checkov `CKV_SECRET_*` rule, or a rule a tool's own rule
+metadata tags as a secret rule. Snippets with no secret in them are left as they
+were.
+
+The scanner's own output files under `scanners/<name>/` are what the tool wrote,
+and are not masked.
 
 ## Relationship between formats
 

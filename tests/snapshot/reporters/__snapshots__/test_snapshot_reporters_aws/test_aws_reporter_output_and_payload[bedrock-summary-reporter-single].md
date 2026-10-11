@@ -46,7 +46,7 @@ This section contains detailed information about each finding referenced in the 
 | Index | Rule ID | Severity | File | Line Range | Description |
 |-------|---------|----------|------|------------|-------------|
 | 1 | Unknown | None | app/app.py | 9 | subprocess call with shell=True identified, sec... |
-| 2 | Unknown | Note | app/app.py | 5 | Possible hardcoded password: 'hunter2-not-a-rea... |
+| 2 | Unknown | Note | app/app.py | 5 | Possible hardcoded password: 'hu***************... |
 | 3 | Unknown | None | infra/main.tf | 6-9 | S3 Bucket has an ACL defined which allows publi... |
 | 4 | Unknown | Warning | infra/main.tf | 2-4 | Ensure the S3 bucket has access logging enabled |
 | 5 | Unknown | Warning | Dockerfile | 5 | Ensure the last USER is not root |
@@ -122,7 +122,7 @@ This section contains detailed information about each finding referenced in the 
 
 **Location**: app/app.py (lines 5-5)
 
-**Description**: Possible hardcoded password: 'hunter2-not-a-real-secret'
+**Description**: Possible hardcoded password: 'hu**********************t'
 
 <details>
 <summary>Raw JSON</summary>
@@ -132,7 +132,7 @@ This section contains detailed information about each finding referenced in the 
   "ruleId": "B105",
   "level": "note",
   "message": {
-    "text": "Possible hardcoded password: 'hunter2-not-a-real-secret'"
+    "text": "Possible hardcoded password: 'hu**********************t'"
   },
   "locations": [
     {

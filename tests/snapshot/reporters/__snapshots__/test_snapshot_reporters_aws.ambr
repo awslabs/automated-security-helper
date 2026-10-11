@@ -129,7 +129,7 @@
                   
                   FINDING 1:
                   - Rule ID:
-                  - Message: Possible hardcoded password: 'hunter2-not-a-real-secret'
+                  - Message: Possible hardcoded password: 'hu**********************t'
                   - Locations: app/app.py
                   
                   FINDING 2:
@@ -270,7 +270,7 @@
                   FINDING 5:
                   - Rule ID:
                   - Level: note
-                  - Message: Possible hardcoded password: 'hunter2-not-a-real-secret'
+                  - Message: Possible hardcoded password: 'hu**********************t'
                   - Locations: app/app.py
                   
                   FINDING 6:
@@ -354,7 +354,7 @@
                   FINDING 2:
                   - Rule ID:
                   - Level: note
-                  - Message: Possible hardcoded password: 'hunter2-not-a-real-secret'
+                  - Message: Possible hardcoded password: 'hu**********************t'
                   
                   FINDING 3:
                   - Rule ID:
@@ -462,7 +462,7 @@
                   FINDING 2:
                   - Rule ID:
                   - Level: note
-                  - Message: Possible hardcoded password: 'hunter2-not-a-real-secret'
+                  - Message: Possible hardcoded password: 'hu**********************t'
                   - Locations: app/app.py
                   
                   FINDING 3:

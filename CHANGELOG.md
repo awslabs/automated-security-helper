@@ -1552,6 +1552,20 @@
     15 were already suppressed; on a tree where they are not, the scanner's
     high-severity count drops by however many of its rules raised.
 
+- **No secret value a finding exposes reaches a report.** Masking used to cover
+  one field: the message of a bandit B105, B106 or B107 finding. The same values
+  were written in plain text to the SARIF snippets (`region.snippet`,
+  `contextRegion.snippet`), the flat JSON and CSV `code_snippet` and `raw_data`,
+  GitLab SAST `details`, YAML, the markdown summary, the Bedrock summary and
+  `ash_aggregated_results.json`, and a non-secret finding's context could hold a
+  secret from a neighboring line. The results are now masked once, after the
+  scanners' results are merged and before any reporter runs, by location (every
+  snippet line at a line a secret finding reports) and by value (each value a
+  secret finding's message quotes, wherever it recurs). Snippets without a secret
+  are unchanged. The B105-B107 message is now masked in every output, not only the
+  flat model's `description`. See "Secret values in reports" in
+  docs/content/docs/output-formats.md.
+
 ### Configuration sources
 
 - **`pyproject.toml [tool.ash]` and `ashrc` files are config sources (#313).**

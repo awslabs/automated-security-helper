@@ -1262,7 +1262,7 @@
             "kind": "fail",
             "level": "note",
             "message": {
-              "text": "Possible hardcoded password: 'hunter2-not-a-real-secret'",
+              "text": "Possible hardcoded password: 'hu**********************t'",
               "markdown": null,
               "id": null,
               "arguments": [],

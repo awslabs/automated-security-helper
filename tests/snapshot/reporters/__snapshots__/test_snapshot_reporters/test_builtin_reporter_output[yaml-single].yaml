@@ -801,7 +801,7 @@ sarif:
         id: null
         markdown: null
         properties: null
-        text: 'Possible hardcoded password: ''hunter2-not-a-real-secret'''
+        text: 'Possible hardcoded password: ''hu**********************t'''
       occurrenceCount: null
       partialFingerprints: null
       properties:
