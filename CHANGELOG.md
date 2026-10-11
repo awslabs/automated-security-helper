@@ -172,6 +172,10 @@
     workspace level.
   - `ash report --format <aws reporter>` refuses a reporter that is not enabled and
     exits 1, instead of sending the stored findings.
+  - The AWS reporters read `AWS_REGION`, `AWS_PROFILE` and Bedrock's
+    `ASH_BEDROCK_*` variables when their config is built, not when the module is
+    imported, so a process whose environment changes after the import (an MCP
+    server, a test) gets the current values.
 
 - **The archive converter enforces extraction limits, and an archive over one makes
   the scan incomplete.** `converters.archive.options` gains `max_members` (100000),
