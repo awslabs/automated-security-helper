@@ -1506,3 +1506,63 @@ def test_a_copy_the_re_scan_cannot_write_fails_the_scan(tmp_path, monkeypatch):
     with pytest.raises(ScannerError, match="No space left on device"):
         _add_back(scanner, source, _report(), tmp_path)
     assert calls == []
+
+
+# --------------------------------------------------------------------------- #
+# An operator path inside the tree that links out of it
+# --------------------------------------------------------------------------- #
+
+
+def _linked_out(tmp_path: Path, shape: str) -> str:
+    """An in-tree path to a file outside the tree, through a link of ``shape``."""
+    source = tmp_path / "src"
+    source.mkdir(exist_ok=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "creds").write_text(f"{CANARY}\n")
+    if shape == "file":
+        (source / "named.toml").symlink_to(outside / "creds")
+        return "named.toml"
+    if shape == "directory":
+        (source / "linked").symlink_to(outside, target_is_directory=True)
+        return "linked/creds"
+    (source / "deep").mkdir()
+    (source / "deep" / "up").symlink_to(outside, target_is_directory=True)
+    return "deep/up/creds"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
+@pytest.mark.parametrize("option", ["config_file", "baseline_path"])
+@pytest.mark.parametrize("shape", ["file", "directory", "nested directory"])
+def test_an_operator_path_in_the_tree_cannot_link_out_of_it(tmp_path, option, shape):
+    """The scanned repository decides what is at a path inside it; a link there
+    could hand gitleaks any file the scan can read."""
+    value = _linked_out(tmp_path, shape)
+    scanner = _scanner(tmp_path, operator=True, **{option: value})
+    with pytest.raises(ScannerError) as excinfo:
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+    message = str(excinfo.value)
+    assert f"scanners.gitleaks.options.{option}" in message
+    assert "symbolic link" in message and CANARY not in message
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
+@pytest.mark.parametrize("option", ["config_file", "baseline_path"])
+def test_a_link_inside_the_tree_to_a_file_inside_it_is_still_honored(tmp_path, option):
+    scanner = _scanner(tmp_path, operator=True, **{option: "named.json"})
+    source = Path(scanner.context.source_dir)
+    _write(source, "real/file.json", "[]")
+    (source / "named.json").symlink_to(source / "real" / "file.json")
+    args = scanner._build_arguments(source, tmp_path / "o.sarif")
+    flag = "--config=" if option == "config_file" else "--baseline-path="
+    assert any(a.startswith(flag) and a.endswith("real/file.json") for a in args)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
+def test_an_operator_path_outside_the_tree_may_be_a_link(tmp_path):
+    """Outside the tree the operator controls both the path and the link."""
+    scanner = _scanner(tmp_path, operator=True, baseline_path=str(tmp_path / "b.json"))
+    (tmp_path / "real.json").write_text("[]")
+    (tmp_path / "b.json").symlink_to(tmp_path / "real.json")
+    args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+    assert f"--baseline-path={(tmp_path / 'real.json').resolve().as_posix()}" in args

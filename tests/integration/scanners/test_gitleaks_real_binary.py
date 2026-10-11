@@ -523,6 +523,41 @@ def test_an_entry_gitleaks_reads_differently_from_python_is_added_back(
     assert _findings(report) == {("github-pat", file_name, 1)}
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
+@pytest.mark.parametrize("option", ["config_file", "baseline_path"])
+@pytest.mark.parametrize("shape", ["file", "directory"])
+def test_an_operator_path_in_the_tree_that_links_out_is_not_read(
+    tmp_path, path_with_gitleaks, option, shape
+):
+    """gitleaks read the file a link in the tree pointed at, and named it in its
+    log; now gitleaks is not run and nothing outside the tree is read."""
+    from automated_security_helper.core.exceptions import ScannerError
+
+    source = _copy_fixture(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "creds").write_text(f"[default]\nkey = {CANARY}\n", encoding="utf-8")
+    if shape == "file":
+        (source / "named").symlink_to(outside / "creds")
+        value = "named"
+    else:
+        (source / "linked").symlink_to(outside, target_is_directory=True)
+        value = "linked/creds"
+    output = tmp_path / "out"
+    with pytest.raises(ScannerError, match="through a symbolic link"):
+        _scan_direct(source, output, **{option: value})
+    touched = [
+        str(path.relative_to(output))
+        for path in output.rglob("*")
+        if path.is_file()
+        and (
+            outside.as_posix() in path.read_text(encoding="utf-8", errors="replace")
+            or CANARY in path.read_text(encoding="utf-8", errors="replace")
+        )
+    ]
+    assert touched == []
+
+
 def test_an_operator_config_file_still_applies(tmp_path, path_with_gitleaks):
     source = _copy_fixture(tmp_path)
     operator_config = tmp_path / "operator.toml"
