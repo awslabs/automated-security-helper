@@ -591,7 +591,10 @@ here rather than to a variant.
   build environment value, so `codebuild:BatchGetBuilds` and the console do not show
   it, and reading the parameter takes `kms:Decrypt` on that key. Each create or update
   overwrites it and deleting the stack removes it; between those it holds the URL of
-  the last bootstrap, whose stack operation has already completed.
+  the last bootstrap, whose stack operation has already completed. The starter may
+  use the key only to encrypt a parameter under `/ash-bootstrap/` (an encryption
+  context condition), and a delete that fails is written to its log rather than
+  dropped, since the teardown still has to succeed.
 - **The Lambda gate is bounded by Lambda.** 900 seconds is the
   [hard maximum](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html),
   and the clone plus ASH's output share 4 GB of `/tmp`. A large repository or a slow

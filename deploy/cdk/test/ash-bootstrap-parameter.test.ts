@@ -46,7 +46,7 @@ interface Call {
   kwargs: Record<string, any>;
 }
 
-const FAKE_BOTO3 = (log: string) => `import json
+const FAKE_BOTO3 = (log: string, failing: string) => `import json
 class _C:
     def __init__(self, service):
         self._service = service
@@ -56,6 +56,8 @@ class _C:
         def call(*args, **kwargs):
             with open(${JSON.stringify(log)}, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps({"service": self._service, "method": name, "kwargs": kwargs}) + "\\n")
+            if name == ${JSON.stringify(failing)}:
+                raise RuntimeError("stand-in failure of " + name)
             return {}
         return call
 def client(service, *args, **kwargs):
@@ -78,12 +80,21 @@ function starterOf(template: CfnTemplate): { logicalId: string; code: string; ro
   return { logicalId, code: fn.Properties?.Code?.ZipFile as string, role: roleOf(fn.Properties?.Role) };
 }
 
+interface StarterRun {
+  readonly calls: Call[];
+  readonly output: string;
+}
+
 function runStarter(template: CfnTemplate, requestType: string): Call[] {
+  return runStarterWith(template, requestType, '').calls;
+}
+
+function runStarterWith(template: CfnTemplate, requestType: string, failing: string): StarterRun {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ash-bootstrap-parameter-'));
   try {
     fs.mkdirSync(path.join(dir, 'py', 'boto3'), { recursive: true });
     const log = path.join(dir, 'calls.jsonl');
-    fs.writeFileSync(path.join(dir, 'py', 'boto3', '__init__.py'), FAKE_BOTO3(log));
+    fs.writeFileSync(path.join(dir, 'py', 'boto3', '__init__.py'), FAKE_BOTO3(log, failing));
     fs.writeFileSync(path.join(dir, 'index.py'), starterOf(template).code);
     fs.writeFileSync(path.join(dir, 'driver.py'), DRIVER);
     const event = {
@@ -93,7 +104,8 @@ function runStarter(template: CfnTemplate, requestType: string): Call[] {
       RequestId: 'request-1',
       LogicalResourceId: 'ImageBootstrapBuild',
     };
-    spawnSync(python3(), [path.join(dir, 'driver.py'), path.join(dir, 'index.py'), JSON.stringify(event)], {
+    const result = spawnSync(python3(), [path.join(dir, 'driver.py'), path.join(dir, 'index.py'), JSON.stringify(event)], {
+      encoding: 'utf-8',
       env: {
         PATH: process.env.PATH ?? '/usr/bin:/bin',
         PYTHONPATH: path.join(dir, 'py'),
@@ -102,7 +114,7 @@ function runStarter(template: CfnTemplate, requestType: string): Call[] {
         KEY_ARN,
       },
     });
-    return readLines<Call>(log);
+    return { calls: readLines<Call>(log), output: `${result.stdout ?? ''}${result.stderr ?? ''}` };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -150,6 +162,26 @@ describe.each(STACKS)('%s', (_name, template) => {
       `/ash-bootstrap/${PROJECT_NAME}`,
     ]);
     expect(calls.some((c) => c.method === 'start_build')).toBe(false);
+  });
+
+  test('a Delete that cannot remove the parameter says so in the log', () => {
+    const run = runStarterWith(template, 'Delete', 'delete_parameter');
+    expect(run.output).toContain(`/ash-bootstrap/${PROJECT_NAME}`);
+    expect(run.output).toContain('stand-in failure of delete_parameter');
+  });
+
+  test('the starter may use the key only to encrypt a bootstrap parameter', () => {
+    const { role } = starterOf(template);
+    const policies = Object.values(template.Resources).filter(
+      (r) =>
+        r.Type === 'AWS::IAM::Policy' &&
+        JSON.stringify(r.Properties?.Roles) === JSON.stringify([{ Ref: role }]),
+    );
+    const statements = policies.flatMap((r) => r.Properties?.PolicyDocument?.Statement as any[]);
+    const encrypt = statements.filter((s) => ([] as string[]).concat(s.Action).includes('kms:Encrypt'));
+    expect(encrypt.map((s) => s.Condition)).toEqual([
+      { StringLike: { 'kms:EncryptionContext:PARAMETER_ARN': '*:parameter/ash-bootstrap/*' } },
+    ]);
   });
 
   test('the starter may write only that parameter, with the stack key', () => {

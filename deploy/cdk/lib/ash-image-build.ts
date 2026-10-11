@@ -618,10 +618,17 @@ export class AshImageBuild extends Construct {
         resources: [responseParameterArn],
       }),
     );
+    // Systems Manager passes the parameter's ARN as the encryption context, so the
+    // key serves this role only for encrypting a bootstrap parameter. A pattern
+    // rather than the exact ARN: spelling the ARN out again costs AshAgentCore
+    // about 400 bytes of its inline template budget.
     starter.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['kms:Encrypt'],
         resources: [props.encryptionKey.keyArn],
+        conditions: {
+          StringLike: { 'kms:EncryptionContext:PARAMETER_ARN': `*:parameter/${BOOTSTRAP_PARAMETER_PREFIX}/*` },
+        },
       }),
     );
     const responseParameterRead = new iam.Policy(this, 'BootstrapSsmAccess', {
@@ -999,8 +1006,8 @@ def handler(event, context):
     if event["RequestType"] == "Delete":  # never block a teardown on a build
         try:
             ssm.delete_parameter(Name=PARAMETER)
-        except Exception:
-            pass
+        except Exception as exc:
+            print("could not delete %s: %s" % (PARAMETER, exc))
         return send(event, "SUCCESS", "Nothing to undo")
     try:
         ssm.put_parameter(Name=PARAMETER, Value=event["ResponseURL"], Type="SecureString",
@@ -1010,9 +1017,7 @@ def handler(event, context):
             environmentVariablesOverride=[
                 {"name": "CFN_RESPONSE_URL", "value": PARAMETER, "type": "PARAMETER_STORE"}
             ] + [{"name": "CFN_" + n, "value": event[k], "type": "PLAINTEXT"} for n, k in IDS])
-    except Exception as exc:
-        # Nothing else will answer. Likeliest cause: a scheduled rebuild holds the
-        # project's only build slot, so retrying is safe.
+    except Exception as exc:  # nothing else will answer
         send(event, "FAILED", "Could not start the ASH image build. A scheduled rebuild "
              "may hold the project's only build slot; retrying is safe. Cause: %s" % exc)
     # Silent on success: the build answers once the image exists.
