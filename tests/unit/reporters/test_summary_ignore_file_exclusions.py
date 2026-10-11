@@ -109,6 +109,13 @@ class TestTheSummaryLine:
         (line,) = _lines(text_reporter.report(_model(record)))
         assert line.endswith("excluded 1 file from the scan set"), line
 
+    def test_files_left_out_of_the_output_directory_are_named(self, text_reporter):
+        record = IgnoreFileExclusions(
+            honored=False, excluded_file_count=0, output_dir_file_count=2
+        )
+        (line,) = _lines(text_reporter.report(_model(record)))
+        assert "2 files already in ASH's output directory" in line, line
+
     @pytest.mark.parametrize("fixture", ["text_reporter", "markdown_reporter"])
     def test_results_without_a_record_print_no_line(self, request, fixture):
         """Results an older ASH wrote, or a run that built no scan set."""
@@ -174,7 +181,25 @@ class TestTheWorkspaceAggregate:
                 "services/api/vendor/.gitignore": 3,
                 ".gitignore": 2,
             },
+            "output_dir_file_count": 0,
         }
+
+    def test_output_directory_counts_are_summed(self):
+        aggregate = workspace_ignore_file_exclusions(
+            [
+                _outcome(
+                    "api",
+                    "api",
+                    IgnoreFileExclusions(honored=True, output_dir_file_count=2),
+                ),
+                _outcome(
+                    "web",
+                    "web",
+                    IgnoreFileExclusions(honored=True, output_dir_file_count=1),
+                ),
+            ]
+        )
+        assert aggregate["output_dir_file_count"] == 3, aggregate
 
     def test_projects_without_a_record_are_left_out(self):
         aggregate = workspace_ignore_file_exclusions(
@@ -333,6 +358,7 @@ class TestAWorkspaceScan:
                 "web/.gitignore": 3,
                 "web/.ignore": 1,
             },
+            "output_dir_file_count": 0,
         }
 
     @pytest.mark.parametrize("extension", ["txt", "md"])

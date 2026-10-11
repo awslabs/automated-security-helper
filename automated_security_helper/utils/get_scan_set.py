@@ -4,6 +4,7 @@
 
 import io
 import re
+import stat
 import subprocess  # nosec B404
 import sys
 from typing import Any, Dict, List, Optional, Sequence
@@ -209,6 +210,42 @@ def _is_link_to_directory(path: str | Path) -> bool:
     return bool(isjunction is not None and isjunction(path))
 
 
+#: The log files the running scan has already opened in its output directory when
+#: the scan set is built. Not counted among the files found there.
+_THIS_RUNS_LOG_FILES = frozenset({"ash.log", "ash.log.jsonl"})
+
+
+def _directory_identity(
+    path: str | Path, follow_symlinks: bool = False
+) -> Optional[tuple[int, int]]:
+    """``(st_dev, st_ino)`` of the directory at *path*, or None when it is not one.
+
+    Two spellings of one directory share it: a link in the source path, the bind
+    mounts container mode uses (the output at /out and again at
+    /src/.ash/ash_output), and a case-only difference on a case-insensitive
+    filesystem. Comparing path strings missed all three.
+    """
+    try:
+        status = os.stat(path, follow_symlinks=follow_symlinks)
+    except (OSError, ValueError):
+        return None
+    if not stat.S_ISDIR(status.st_mode):
+        return None
+    return (status.st_dev, status.st_ino)
+
+
+def _count_files_in_own_output(directory: str) -> int:
+    """How many files were already in ASH's output directory, this run's logs aside."""
+    count = 0
+    for root, _dirs, files in os.walk(directory):
+        count += sum(
+            1
+            for name in files
+            if not (root == directory and name in _THIS_RUNS_LOG_FILES)
+        )
+    return count
+
+
 #: The ``ASH_INCLUSIONS`` entries :func:`_excluded_by_ash_itself` restates. A change
 #: to ``ASH_INCLUSIONS`` has to change that function too; a test compares them.
 _RESTATED_ASH_INCLUSIONS = (".git", "**/cdk.out/asset.*", "!**/*.template.json")
@@ -280,13 +317,14 @@ def _count_files_ash_would_scan(
     directory: Path,
     own_spec: IgnoreParser,
     forced_inclusions: IgnoreParser,
-    own_output: Optional[str] = None,
+    own_output: Optional[tuple[int, int]] = None,
 ) -> int:
     """How many files under *directory* stay in the scan set when no ignore file applies.
 
     The test is :func:`get_files_not_matching_spec`'s, with ``ASH_INCLUSIONS`` as
     the whole spec. A file ASH leaves out on its own (``.git``, CDK assets, the
-    bundled aws-cdk tree, its own output directory *own_output*) was not removed
+    bundled aws-cdk tree, its own output directory, whose
+    :func:`_directory_identity` is *own_output*) was not removed
     by the ignore file that pruned its directory, so it is not counted. Links to
     directories are not followed, as in the walk that pruned the directory: not
     *directory* itself, which ``os.walk`` would follow, and not one below it.
@@ -297,7 +335,9 @@ def _count_files_ash_would_scan(
     for root, dirs, files in os.walk(directory):
         if own_output is not None:
             dirs[:] = [
-                d for d in dirs if os.path.abspath(os.path.join(root, d)) != own_output
+                d
+                for d in dirs
+                if _directory_identity(os.path.join(root, d)) != own_output
             ]
         for name in files:
             full_path = os.path.join(root, name)
@@ -320,6 +360,7 @@ def _collect_ignorefiles_and_all_files(
     honor_ignore_files: bool = True,
     pruned_counts: Optional[Dict[str, int]] = None,
     own_output: Optional[str] = None,
+    own_output_counts: Optional[Dict[str, int]] = None,
 ) -> tuple[List[str], List[str]]:
     """Walk the directory tree once to collect ignore files and all file paths.
 
@@ -344,7 +385,13 @@ def _collect_ignorefiles_and_all_files(
             log and reports are not part of the code being scanned. Without
             this, only a ``.gitignore`` kept them out (``ash config init``
             writes ``.ash/.gitignore`` for it), so turning the ignore files off
-            put ASH's log into the scan set.
+            put ASH's log into the scan set. Recognized by
+            :func:`_directory_identity`, not by its spelling.
+        own_output_counts: Filled, when given, with the output directory (as
+            walked) mapped to the number of files already in it when the walk
+            reached it, this run's log files aside
+            (:func:`_count_files_in_own_output`). They are left out like the rest
+            of the directory, and the caller reports them.
 
     Returns a tuple of (ignore_file_paths, all_file_paths).
     """
@@ -391,18 +438,22 @@ def _collect_ignorefiles_and_all_files(
     own_spec: Optional[IgnoreParser] = None
     forced_inclusions: Optional[IgnoreParser] = None
     pruned_key = os.path.join(path, ".gitignore")
-    # abspath and not resolve, like _confine_base_path: the walked paths keep
-    # whatever prefix the caller spelled, and a symlinked output directory is
-    # refused before any scan set is built.
-    own_output_abs = os.path.abspath(own_output) if own_output else None
+    # The output directory is followed if it is a link: it is where ASH writes,
+    # whatever it is called. The orchestrator refuses a symlinked one anyway.
+    own_output_id = (
+        _directory_identity(own_output, follow_symlinks=True) if own_output else None
+    )
 
     for root, dirs, files in os.walk(path):
-        if own_output_abs is not None:
-            dirs[:] = [
-                d
-                for d in dirs
-                if os.path.abspath(os.path.join(root, d)) != own_output_abs
-            ]
+        if own_output_id is not None:
+            kept_dirs = []
+            for d in dirs:
+                candidate = os.path.join(root, d)
+                if _directory_identity(candidate) != own_output_id:
+                    kept_dirs.append(d)
+                elif own_output_counts is not None:
+                    own_output_counts[candidate] = _count_files_in_own_output(candidate)
+            dirs[:] = kept_dirs
         # Prune directories that are ignored by the root .gitignore.
         # This prevents descending into .venv/, node_modules/, etc.
         # and picking up their internal .gitignore files.
@@ -434,7 +485,7 @@ def _collect_ignorefiles_and_all_files(
                 own_spec = _ash_own_exclusion_spec(path)
                 forced_inclusions = _forced_inclusion_spec(path)
             removed = _count_files_ash_would_scan(
-                Path(root) / d, own_spec, forced_inclusions, own_output_abs
+                Path(root) / d, own_spec, forced_inclusions, own_output_id
             )
             pruned_counts[pruned_key] = pruned_counts.get(pruned_key, 0) + removed
 
@@ -867,7 +918,10 @@ def report_ignore_file_exclusions(
 
 
 def ignore_file_exclusion_record(
-    counts: Dict[str, int], honored: bool, excluded_file_count: int
+    counts: Dict[str, int],
+    honored: bool,
+    excluded_file_count: int,
+    output_dir_file_count: int = 0,
 ) -> Dict[str, Any]:
     """The ``metadata.ignore_file_exclusions`` record of one scan set.
 
@@ -886,6 +940,8 @@ def ignore_file_exclusion_record(
             (:func:`_files_removed_by_ignore_files` plus the pruned files), not
             from *counts*: the attribution names a file for each removal, and the
             total must not depend on it naming the right one.
+        output_dir_file_count: Files already in ASH's own output directory inside
+            the tree, left out whatever the ignore files say.
     """
     by_ignore_file: Dict[str, int] = {}
     for marker, count in counts.items():
@@ -897,6 +953,7 @@ def ignore_file_exclusion_record(
         "honored": honored,
         "excluded_file_count": excluded_file_count,
         "by_ignore_file": by_ignore_file,
+        "output_dir_file_count": output_dir_file_count,
     }
 
 
@@ -1183,6 +1240,7 @@ def scan_set(
             )
 
     pruned_counts: Dict[str, int] = {}
+    own_output_counts: Dict[str, int] = {}
     if not ashignore_content or not ashscanset_list:
         # Single os.walk pass collects both ignore files and the full file list
         discovered_ignores, all_files = _collect_ignorefiles_and_all_files(
@@ -1192,7 +1250,21 @@ def scan_set(
             honor_ignore_files=honor_ignore_files,
             pruned_counts=pruned_counts,
             own_output=output,
+            own_output_counts=own_output_counts,
         )
+        for directory, found in own_output_counts.items():
+            if found:
+                ASH_LOGGER.warning(
+                    "%d %s already in ASH's output directory %s, and %s left out "
+                    "of the scan set: ASH does not scan its own output directory, "
+                    "whatever the ignore files say. Files from an earlier run are "
+                    "expected there. If these belong to the repository, write "
+                    "ASH's output outside the scanned tree with --output-dir.",
+                    found,
+                    "file was" if found == 1 else "files were",
+                    _source_dir_marker(source, directory),
+                    "it was" if found == 1 else "they were",
+                )
 
     if not ashignore_content:
         ashignore_content = get_ash_ignorespec_lines(
@@ -1236,7 +1308,10 @@ def scan_set(
             ) + sum(pruned_counts.values())
             exclusions.update(
                 ignore_file_exclusion_record(
-                    counts, honored=honor_ignore_files, excluded_file_count=removed
+                    counts,
+                    honored=honor_ignore_files,
+                    excluded_file_count=removed,
+                    output_dir_file_count=sum(own_output_counts.values()),
                 )
             )
     else:

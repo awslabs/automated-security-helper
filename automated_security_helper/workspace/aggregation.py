@@ -703,6 +703,9 @@ def workspace_ignore_file_exclusions(
             outcome.ignore_file_exclusions.excluded_file_count for outcome in recorded
         ),
         "by_ignore_file": by_ignore_file,
+        "output_dir_file_count": sum(
+            outcome.ignore_file_exclusions.output_dir_file_count for outcome in recorded
+        ),
     }
 
 

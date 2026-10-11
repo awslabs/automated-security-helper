@@ -90,22 +90,44 @@ class IgnoreFileExclusions(BaseModel):
         ),
     ]
 
+    output_dir_file_count: Annotated[
+        int,
+        Field(
+            ge=0,
+            description=(
+                "How many files were already in ASH's own output directory when "
+                "the scan set was built, when that directory is inside the scanned "
+                "tree. ASH leaves its output directory out of the scan set whatever "
+                "honor_ignore_files says, so these files were not scanned either; "
+                "they are files from an earlier run, or repository files that sit "
+                "where ASH writes. This run's own log files are not counted."
+            ),
+        ),
+    ] = 0
+
     def summary_text(self) -> str:
         """The sentence the text and markdown summaries print for this record."""
         files = "file" if self.excluded_file_count == 1 else "files"
         if self.honored:
-            return (
+            text = (
                 "the scanned repository's .gitignore and .ignore files excluded "
                 f"{self.excluded_file_count} {files} from the scan set"
             )
-        text = (
-            "not honored for this scan (honor_ignore_files: false), so the scanned "
-            "repository's .gitignore and .ignore files excluded no files"
-        )
-        if self.excluded_file_count:
+        else:
+            text = (
+                "not honored for this scan (honor_ignore_files: false), so the scanned "
+                "repository's .gitignore and .ignore files excluded no files"
+            )
+            if self.excluded_file_count:
+                text += (
+                    f"; ignore files named by the caller excluded "
+                    f"{self.excluded_file_count} {files}"
+                )
+        if self.output_dir_file_count:
+            found = self.output_dir_file_count
             text += (
-                f"; ignore files named by the caller excluded "
-                f"{self.excluded_file_count} {files}"
+                f"; {found} {'file' if found == 1 else 'files'} already in ASH's "
+                f"output directory {'was' if found == 1 else 'were'} left out as well"
             )
         return text
 

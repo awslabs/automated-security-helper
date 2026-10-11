@@ -8631,6 +8631,13 @@
           "description": "Whether the scanned repository's .gitignore and .ignore files decided which files were scanned. False when the operator set honor_ignore_files: false or passed --no-honor-ignore-files.",
           "title": "Honored",
           "type": "boolean"
+        },
+        "output_dir_file_count": {
+          "default": 0,
+          "description": "How many files were already in ASH's own output directory when the scan set was built, when that directory is inside the scanned tree. ASH leaves its output directory out of the scan set whatever honor_ignore_files says, so these files were not scanned either; they are files from an earlier run, or repository files that sit where ASH writes. This run's own log files are not counted.",
+          "minimum": 0,
+          "title": "Output Dir File Count",
+          "type": "integer"
         }
       },
       "required": [

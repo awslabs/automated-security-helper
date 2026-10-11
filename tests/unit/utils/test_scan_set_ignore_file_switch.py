@@ -394,6 +394,7 @@ class TestNotHonored:
             "honored": False,
             "excluded_file_count": 0,
             "by_ignore_file": {},
+            "output_dir_file_count": 0,
         }
 
     def test_the_ignore_report_says_so(self, tmp_path):
@@ -473,6 +474,79 @@ class TestAshsOwnOutputDirectory:
         scan_set(source=str(root), output=str(output), exclusions=exclusions)
         # .ash/.gitignore itself, and nothing from the output directory.
         assert exclusions["by_ignore_file"] == {".gitignore": 1}, exclusions
+
+    @pytest.mark.parametrize("honor", [True, False])
+    def test_files_already_in_it_are_counted_and_warned_about(self, tmp_path, honor):
+        """Repository files there are left out too; the record and the log say so.
+
+        This run's own log files are not counted: the logger has opened them by the
+        time the scan set is built, so every scan would report them.
+        """
+        root = _build(
+            tmp_path / "src",
+            {
+                "app.py": "x = 1\n",
+                ".ash/ash_output/ash.log": "log\n",
+                ".ash/ash_output/ash.log.jsonl": "{}\n",
+                ".ash/ash_output/stack.template.json": "{}\n",
+                ".ash/ash_output/nb/analysis.ipynb": "{}\n",
+            },
+        )
+        output = root / ".ash" / "ash_output"
+        exclusions: dict = {}
+        with patch.object(gss.ASH_LOGGER, "warning") as warning:
+            found = scan_set(
+                source=str(root),
+                output=str(output),
+                honor_ignore_files=honor,
+                exclusions=exclusions,
+            )
+        assert _names(root, found) == {"app.py"}
+        assert exclusions["output_dir_file_count"] == 2, exclusions
+        assert exclusions["excluded_file_count"] == 0, exclusions
+        messages = [
+            str(call.args[0]) % call.args[1:] for call in warning.call_args_list
+        ]
+        assert any(
+            "2 files" in m and "${SOURCE_DIR}/.ash/ash_output" in m for m in messages
+        ), messages
+
+    def test_only_this_runs_log_files_is_no_warning(self, tmp_path):
+        root = _build(
+            tmp_path / "src",
+            {"app.py": "x = 1\n", ".ash/ash_output/ash.log": "log\n"},
+        )
+        exclusions: dict = {}
+        with patch.object(gss.ASH_LOGGER, "warning") as warning:
+            scan_set(
+                source=str(root),
+                output=str(root / ".ash" / "ash_output"),
+                exclusions=exclusions,
+            )
+        assert exclusions["output_dir_file_count"] == 0, exclusions
+        assert warning.call_args_list == []
+
+    def test_it_is_recognized_whatever_the_source_is_spelled(self, tmp_path):
+        """The same directory reached through a link to the source tree.
+
+        Container mode reaches it as /src/.ash/ash_output while the output is
+        mounted at /out; a symlinked checkout path does the same locally.
+        """
+        real = _build(
+            tmp_path / "real",
+            {"app.py": "x = 1\n", ".ash/ash_output/ash.log": "log\n"},
+        )
+        link = tmp_path / "link"
+        _symlink_or_skip(link, real)
+        found = _names(
+            link,
+            scan_set(
+                source=str(link),
+                output=str(real / ".ash" / "ash_output"),
+                honor_ignore_files=False,
+            ),
+        )
+        assert found == {"app.py"}, found
 
     def test_control_a_directory_of_that_name_elsewhere_is_scanned(self, tmp_path):
         root = _build(

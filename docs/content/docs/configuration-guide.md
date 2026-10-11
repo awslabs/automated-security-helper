@@ -345,7 +345,8 @@ Every scan records the outcome in `ash_aggregated_results.json`, under
     "vendor/.gitignore": 2,
     "sub/.ignore": 1,
     "sub/deep/.gitignore": 0
-  }
+  },
+  "output_dir_file_count": 0
 }
 ```
 
@@ -359,6 +360,15 @@ directory the root `.gitignore` excludes count for the root `.gitignore`. A syml
 (or junction) to a directory is never followed, so the files behind it are in no scan
 set and are not counted. With `honor_ignore_files: false` the record reads
 `"honored": false` with a count of 0.
+
+ASH's own output directory is left out whatever `honor_ignore_files` says. It is
+recognized as the same directory however its path is spelled (through a link in the
+source path, or as `/src/.ash/ash_output` and `/out` in container mode), not by its
+name. Files that are already in it when the scan set is built, this run's `ash.log`
+and `ash.log.jsonl` aside, are counted in `output_dir_file_count`, the summaries say
+they were left out, and a warning names the directory. They are an earlier run's
+output, or repository files that sit where ASH writes; to scan repository files
+there, write ASH's output outside the scanned tree with `--output-dir`.
 
 `ash.summary.txt` and `ash.summary.md` print the total in their scan metadata, for
 example `Ignore files: the scanned repository's .gitignore and .ignore files
