@@ -1646,6 +1646,82 @@ SITE_DEFECTS = [
         WORKFLOW,
         "privacy plugin is not configured",
     ),
+    (
+        "external script fetched",
+        MKDOCS + "extra_javascript:\n  - https://cdn.example.com/lib/x.js\n",
+        WORKFLOW,
+        "cdn.example.com/lib/x.js is an external asset the privacy plugin downloads",
+    ),
+    (
+        "theme fonts fetched",
+        MKDOCS + "theme:\n  name: material\n",
+        WORKFLOW,
+        "theme.font",
+    ),
+    (
+        "mermaid fetched",
+        MKDOCS.replace(
+            "  - pymdownx.superfences\n",
+            "  - pymdownx.superfences:\n      custom_fences:\n        - name: mermaid\n"
+            "          class: mermaid\n",
+        )
+        + "theme:\n  name: material\n  font: false\n",
+        WORKFLOW,
+        "unpkg.com/mermaid",
+    ),
+    (
+        "emoji from a CDN",
+        MKDOCS
+        + "  - pymdownx.emoji:\n      emoji_generator: !!python/name:pymdownx.emoji.to_svg\n",
+        WORKFLOW,
+        "emoji_generator",
+    ),
+    (
+        "build failure ignored with ||",
+        MKDOCS,
+        WORKFLOW.replace("--strict", "--strict || true"),
+        "cannot fail the step",
+    ),
+    (
+        "build failure ignored with ;",
+        MKDOCS,
+        WORKFLOW.replace("--strict", "--strict; true"),
+        "cannot fail the step",
+    ),
+    (
+        "build piped",
+        MKDOCS,
+        WORKFLOW.replace("--strict", "--strict | tee build.log"),
+        "cannot fail the step",
+    ),
+    (
+        "build in the background",
+        MKDOCS,
+        WORKFLOW.replace("--strict", "--strict &"),
+        "cannot fail the step",
+    ),
+    (
+        "errexit turned off",
+        MKDOCS,
+        WORKFLOW.replace(
+            "      - run: uv run", "      - run: |\n          set +e\n          uv run"
+        ),
+        "set +e",
+    ),
+    (
+        "step may fail",
+        MKDOCS,
+        WORKFLOW.replace(
+            "      - run:", "      - continue-on-error: true\n        run:"
+        ),
+        "continue-on-error",
+    ),
+    (
+        "job may fail",
+        MKDOCS,
+        WORKFLOW.replace("  build:\n", "  build:\n    continue-on-error: true\n"),
+        "continue-on-error",
+    ),
 ]
 
 
@@ -1746,6 +1822,55 @@ VERSIONING_DEFECTS = [
 )
 def test_site_build_check_reports_versioning_defects(tmp_path, case, site, expected):
     _assert_reports(dc.check_site_build(_site(tmp_path, CLEAN_PAGES, **site)), expected)
+
+
+def test_an_external_image_in_a_page_must_be_left_external(tmp_path):
+    """The privacy plugin downloads every external image a page shows, at build time.
+    One that no assets_exclude pattern covers needs the network to build."""
+    pages = dict(CLEAN_PAGES)
+    pages["docs/content/b.md"] = pages["docs/content/b.md"] + (
+        "\n![build](https://img.shields.io/badge/build-passing-green.svg)\n"
+        '\n<img src="https://example.com/logo.png" alt="logo">\n'
+    )
+    findings = dc.check_site_build(_site(tmp_path, pages))
+    _assert_reports(findings, "img.shields.io/badge/build-passing-green.svg")
+    _assert_reports(findings, "example.com/logo.png")
+    excluded = MKDOCS.replace(
+        "  - privacy\n",
+        "  - privacy:\n      assets_exclude:\n        - 'img.shields.io/*'\n"
+        "        - 'example.com/*'\n",
+    )
+    assert dc.check_site_build(_site(tmp_path / "b", pages, mkdocs=excluded)) == []
+
+
+def test_an_offline_safe_privacy_setup_passes(tmp_path):
+    """Controls: excluded assets, no fonts, Material's inline-SVG emoji, and a build
+    command that is the step's last word all pass."""
+    mkdocs = (
+        MKDOCS.replace(
+            "  - privacy\n",
+            "  - privacy:\n      assets_exclude:\n        - 'unpkg.com/mermaid@*'\n"
+            "        - 'cdn.example.com/*'\n",
+        ).replace(
+            "  - pymdownx.superfences\n",
+            "  - pymdownx.superfences:\n      custom_fences:\n        - name: mermaid\n"
+            "          class: mermaid\n"
+            "  - pymdownx.emoji:\n"
+            "      emoji_generator: !!python/name:material.extensions.emoji.to_svg\n",
+        )
+        + "theme:\n  name: material\n  font: false\n"
+        + "extra_javascript:\n  - https://cdn.example.com/lib/x.js\n"
+    )
+    workflow = WORKFLOW.replace(
+        "      - run: uv run mkdocs build --clean --strict\n",
+        "      - run: |\n          uv sync\n          uv run mkdocs build --clean --strict\n",
+    )
+    assert (
+        dc.check_site_build(
+            _site(tmp_path, CLEAN_PAGES, mkdocs=mkdocs, workflow=workflow)
+        )
+        == []
+    )
 
 
 def test_the_real_mkdocs_config_is_strict_and_offline():

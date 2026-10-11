@@ -13,8 +13,13 @@ exclude_docs: |
 site_dir: "public"
 # use_directory_urls: true
 
-# Every option below that makes the build strict or offline is checked by
-# scripts/docs_checks.py check_site_build, so removing one fails the lint job.
+# scripts/docs_checks.py check_site_build checks, in the lint job: the validation
+# levels below, the redirect hook, that every external asset a page or the theme
+# loads is in the privacy plugin's assets_exclude (so nothing is downloaded at build
+# time), theme.font, the emoji generator, and that the docs workflow runs
+# `mkdocs build --strict` in a step whose failure fails the job.
+# tests/integration/docs/test_site_builds_offline.py builds the site through a proxy
+# that records every request and requires none.
 
 # Every build is strict, not only the ones that pass --strict: mike runs `mkdocs build`
 # without it when it publishes a version. To preview a page that still has warnings,

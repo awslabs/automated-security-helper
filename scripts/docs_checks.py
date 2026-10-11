@@ -5174,20 +5174,15 @@ def check_site_build(root: Path = REPO_ROOT) -> list[Finding]:
         findings.append(
             Finding("site", REDIRECT_HOOK, 1, "the redirect hook does not exist")
         )
-    plugins = site.config.get("plugins") or []
-    names = [
-        p if isinstance(p, str) else next(iter(p))
-        for p in plugins
-        if isinstance(p, (str, dict))
-    ]
-    if "privacy" not in names:
+    privacy = _plugin_config(site, "privacy")
+    if privacy is None:
         findings.append(
             Finding("site", MKDOCS_YML, 1, "the privacy plugin is not configured")
         )
-    mike = next(
-        (p["mike"] for p in plugins if isinstance(p, dict) and "mike" in p),
-        {} if "mike" in names else None,
-    )
+    else:
+        findings += _privacy_fetch_findings(site, root, privacy)
+    findings += _emoji_findings(site)
+    mike = _plugin_config(site, "mike")
     if mike is None:
         findings.append(
             Finding(
@@ -5200,7 +5195,7 @@ def check_site_build(root: Path = REPO_ROOT) -> list[Finding]:
         )
     else:
         for key, wanted in REQUIRED_MIKE_PLUGIN.items():
-            value = (mike or {}).get(key)
+            value = mike.get(key)
             if value != wanted:
                 findings.append(
                     Finding(
@@ -5219,23 +5214,16 @@ def check_site_build(root: Path = REPO_ROOT) -> list[Finding]:
                 "the docs versions script does not exist",
             )
         )
-    runs = _workflow_runs(root / DOCS_WORKFLOW)
-    if runs is not None:
-        builds = [r for r in runs if re.search(r"\bmkdocs\s+build\b", r)]
-        if not builds:
-            findings.append(
-                Finding("site", DOCS_WORKFLOW, 1, "no step runs mkdocs build")
-            )
-        for run in builds:
-            if "--strict" not in run:
-                findings.append(
-                    Finding(
-                        "site",
-                        DOCS_WORKFLOW,
-                        1,
-                        f"'{run.strip()}' does not pass --strict",
-                    )
-                )
+    workflow = root / DOCS_WORKFLOW
+    if workflow.is_file():
+        import yaml
+
+        document = yaml.safe_load(workflow.read_text(encoding="utf-8")) or {}
+        findings += [
+            Finding("site", DOCS_WORKFLOW, 1, problem)
+            for problem in _build_step_problems(document)
+        ]
+        runs = list(_strings_under_keys(document, {"run"}))
         for run in runs:
             if re.search(r"\bgh-deploy\b", run):
                 findings.append(
@@ -5285,6 +5273,212 @@ def check_site_build(root: Path = REPO_ROOT) -> list[Finding]:
             )
         )
     return findings
+
+
+#: Emoji generators that write no image link: the Unicode character, or Material's
+#: inline SVG. pymdownx's other generators (to_png is its default) link CDN images,
+#: which the privacy plugin would download at build time.
+OFFLINE_EMOJI_GENERATORS = frozenset(
+    {"pymdownx.emoji.to_alt", "material.extensions.emoji.to_svg"}
+)
+#: What Material loads for a mermaid fence, and for its fonts unless theme.font is
+#: false. The privacy plugin downloads both at build time unless they are excluded.
+MERMAID_ASSET = "https://unpkg.com/mermaid@11/dist/mermaid.min.js"
+GOOGLE_FONTS_ASSET = "https://fonts.googleapis.com/css"
+#: An external image, script, media source or stylesheet in a page's markdown or HTML.
+_PAGE_ASSET = re.compile(
+    r"!\[[^\]]*\]\(\s*<?(https?://[^)\s>]+)"
+    r"|<(?:img|script|source|video|audio)\b[^>]*\bsrc=[\"'](https?://[^\"']+)"
+    r"|<link\b[^>]*\bhref=[\"'](https?://[^\"']+)",
+    re.IGNORECASE,
+)
+
+
+def _plugin_config(site: Site, name: str) -> dict[str, Any] | None:
+    """A plugin's options from mkdocs.yml: {} when listed bare, None when absent."""
+    for entry in site.config.get("plugins") or []:
+        if entry == name:
+            return {}
+        if isinstance(entry, dict) and name in entry:
+            return entry[name] if isinstance(entry[name], dict) else {}
+    return None
+
+
+def _asset_path(url: str) -> str:
+    """The URL as the privacy plugin matches assets_exclude against it: host and path."""
+    import posixpath
+    from urllib.parse import urlsplit
+
+    parsed = urlsplit(url)
+    return parsed.netloc + posixpath.normpath(parsed.path or "/")
+
+
+def _external_assets(site: Site, root: Path) -> list[tuple[str, int, str, str]]:
+    """(file, line, url, why) for every external asset a page or the theme loads."""
+    assets: list[tuple[str, int, str, str]] = []
+    for key in ("extra_javascript", "extra_css"):
+        for item in site.config.get(key) or []:
+            url = item.get("path") if isinstance(item, dict) else item
+            if isinstance(url, str) and re.match(r"https?://", url):
+                assets.append((MKDOCS_YML, 1, url, f"listed in {key}"))
+    theme = site.config.get("theme") or {}
+    theme = {"name": theme} if isinstance(theme, str) else theme
+    if theme.get("name") == "material":
+        _extensions, configs = _markdown_extensions(site)
+        fences = (configs.get("pymdownx.superfences") or {}).get("custom_fences") or []
+        if any(isinstance(f, dict) and f.get("name") == "mermaid" for f in fences):
+            assets.append(
+                (MKDOCS_YML, 1, MERMAID_ASSET, "Material loads it for a mermaid fence")
+            )
+        if theme.get("font") is not False:
+            assets.append(
+                (
+                    MKDOCS_YML,
+                    1,
+                    GOOGLE_FONTS_ASSET,
+                    "Material loads Google Fonts unless theme.font is false",
+                )
+            )
+    for path in sorted(site.docs_dir.rglob("*.md")):
+        page = parse_page(path, root)
+        for number, text in page.prose:
+            for match in _PAGE_ASSET.finditer(_SPAN.sub("", text)):
+                url = next(group for group in match.groups() if group)
+                assets.append((page.rel, number, url, "the page shows it"))
+    return assets
+
+
+def _privacy_fetch_findings(
+    site: Site, root: Path, privacy: dict[str, Any]
+) -> list[Finding]:
+    """External assets the privacy plugin would download, which needs the network."""
+    from fnmatch import fnmatch
+
+    if privacy.get("enabled", True) is False or privacy.get("assets", True) is False:
+        return []  # the plugin leaves every external asset alone
+    include = [str(p) for p in privacy.get("assets_include") or []]
+    exclude = [str(p) for p in privacy.get("assets_exclude") or []]
+    findings = []
+    for rel, line, url, why in _external_assets(site, root):
+        path = _asset_path(url)
+        if include and not any(fnmatch(path, pattern) for pattern in include):
+            continue
+        if any(fnmatch(path, pattern) for pattern in exclude):
+            continue
+        if privacy.get("assets_fetch", True) is False:
+            effect = "with assets_fetch false the plugin warns about it, which fails --strict"
+        else:
+            effect = (
+                "the privacy plugin downloads it at build time, so the build needs the "
+                "network"
+            )
+        theme_hint = "; or set theme.font: false" if url == GOOGLE_FONTS_ASSET else ""
+        findings.append(
+            Finding(
+                "site",
+                rel,
+                line,
+                f"{path} is an external asset the privacy plugin downloads ({why}): "
+                f"{effect}. Add a pattern for it to plugins.privacy.assets_exclude"
+                f"{theme_hint}",
+            )
+        )
+    return findings
+
+
+def _emoji_findings(site: Site) -> list[Finding]:
+    extensions, configs = _markdown_extensions(site)
+    if "pymdownx.emoji" not in extensions:
+        return []
+    generator = (configs.get("pymdownx.emoji") or {}).get(
+        "emoji_generator", "pymdownx.emoji.to_png"
+    )
+    name = (
+        generator
+        if isinstance(generator, str)
+        else f"{getattr(generator, '__module__', '')}.{getattr(generator, '__name__', '')}"
+    )
+    if name in OFFLINE_EMOJI_GENERATORS:
+        return []
+    return [
+        Finding(
+            "site",
+            MKDOCS_YML,
+            1,
+            f"pymdownx.emoji's emoji_generator is {name}, which links CDN images that "
+            "the privacy plugin downloads at build time; use pymdownx.emoji.to_alt or "
+            "material.extensions.emoji.to_svg",
+        )
+    ]
+
+
+_MKDOCS_BUILD = re.compile(r"\bmkdocs\s+build\b")
+#: Shell control operators: after the build on its line, each one hands the step's
+#: exit status to something else.
+_CONTROL_OPERATORS = frozenset({"|", "||", "&", "&&", ";", ";;", "|&"})
+
+
+def _build_step_problems(document: dict[str, Any]) -> list[str]:
+    """Why the docs workflow's mkdocs build step could pass with a failed build."""
+    import shlex
+
+    problems: list[str] = []
+    found = False
+    jobs = document.get("jobs") if isinstance(document, dict) else None
+    for job_name, job in (jobs or {}).items():
+        if not isinstance(job, dict):
+            continue
+        for step in job.get("steps") or []:
+            run = step.get("run") if isinstance(step, dict) else None
+            if not isinstance(run, str) or not _MKDOCS_BUILD.search(run):
+                continue
+            found = True
+            if "--strict" not in run:
+                problems.append(f"'{run.strip()}' does not pass --strict")
+            for where, value in (("job", job), ("step", step)):
+                if value.get("continue-on-error") not in (None, False):
+                    problems.append(
+                        f"the {where} that runs mkdocs build (job {job_name}) sets "
+                        "continue-on-error, so a failed build does not fail the workflow"
+                    )
+            shell = step.get("shell")
+            if isinstance(shell, str) and "{0}" in shell and "-e" not in shell:
+                problems.append(
+                    f"shell: {shell} runs the script without -e, so a command after the "
+                    "build decides the step's result"
+                )
+            script = re.sub(r"\\\n", " ", run)
+            lines = script.splitlines()
+            for index, line in enumerate(lines):
+                build = _MKDOCS_BUILD.search(line)
+                if build is None:
+                    continue
+                before = "\n".join(lines[:index])
+                if re.search(
+                    r"^\s*set\s+(\+e\b|\+o\s+errexit\b)", before, re.MULTILINE
+                ):
+                    problems.append(
+                        "the build step runs set +e before mkdocs build, so a failed "
+                        "build does not stop the script"
+                    )
+                lexer = shlex.shlex(
+                    line[build.end() :], posix=True, punctuation_chars=True
+                )
+                lexer.whitespace_split = True
+                try:
+                    tokens = list(lexer)
+                except ValueError:
+                    tokens = []
+                operators = sorted(set(tokens) & _CONTROL_OPERATORS)
+                if operators:
+                    problems.append(
+                        f"'{line.strip()}': its exit status cannot fail the step, because "
+                        f"{' '.join(operators)} after mkdocs build hands the result to "
+                        "another command; run mkdocs build on its own line"
+                    )
+    if not found:
+        problems.append("no step runs mkdocs build")
+    return problems
 
 
 def site_pages(files: Iterable[Path], root: Path) -> list[Path]:
