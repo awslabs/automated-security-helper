@@ -399,6 +399,12 @@ jobs:
       # the checkout's copy. An absolute path is the operator's and is left as it
       # is. A config that names none of these is passed on byte for byte.
       #
+      # The copies sit outside the scanned tree, so ASH applies them as operator
+      # files, including a checkov config it refuses inside the tree. Paths written
+      # INSIDE a fetched tool config still resolve in the checkout, so an option
+      # there that loads code from a relative path (checkov's external-checks-dir
+      # and a nested config-file) fails the step; see CODE_LOADING_KEYS.
+      #
       # The config is parsed with the PyYAML that the installed ASH brings, by code
       # that does not import ASH, so it works with any ASH revision. The rewritten
       # copy is YAML, and every string keeps its meaning: what ASH would resolve as
@@ -509,6 +515,38 @@ jobs:
               )
 
 
+          # Options of a fetched tool config that load code from a path. The copy is
+          # applied as the operator's file, but checkov still resolves a relative path
+          # in it against its working directory, the checkout, so a relative value
+          # would load the pull request's code: `external-checks-dir` loads Python
+          # checks, and a nested `config-file` brings options of its own. An absolute
+          # or home-relative path is the operator's. Both spellings of each key.
+          CODE_LOADING_KEYS = {
+              "checkov": ("external-checks-dir", "external_checks_dir", "config-file", "config_file"),
+          }
+
+
+          def refuse_code_paths(name, relative, target):
+              keys = CODE_LOADING_KEYS.get(name)
+              if not keys:
+                  return
+              try:
+                  tool_config = yaml.safe_load(target.read_text(encoding="utf-8"))
+              except (yaml.YAMLError, UnicodeDecodeError) as error:
+                  fail(f"{relative} at {ref} is not YAML that can be checked for options that load code ({error}); refusing to scan with it.")
+              if tool_config is None:
+                  return
+              if not isinstance(tool_config, dict):
+                  fail(f"{relative} at {ref} is not a mapping, so it cannot be checked for options that load code; refusing to scan with it.")
+              for key in keys:
+                  values = tool_config.get(key)
+                  for value in values if isinstance(values, list) else [values]:
+                      if value is None:
+                          continue
+                      if not isinstance(value, str) or not value.startswith(("/", "~")):
+                          fail(f"{relative} at {ref} sets {key} to '{value}', a path that resolves in the checkout, so {name} would load code from the pull request's tree. Use an absolute path outside the repository, or remove it.")
+
+
           # (scanner, option, is a path, may be a directory). `config_file` names a
           # file the scanner's tool reads for every scanner that has the option.
           OPTIONS = [
@@ -586,6 +624,8 @@ jobs:
                   target = fetch(relative, directories)
                   if target is None:
                       fail(f"{where} names {relative}, which {ref} does not have; refusing to scan with the checkout's copy instead.")
+                  if option == "config_file":
+                      refuse_code_paths(name, relative, target)
                   options[option] = str(target)
                   rewritten.append(f"{where}: {relative} as of {ref}")
 

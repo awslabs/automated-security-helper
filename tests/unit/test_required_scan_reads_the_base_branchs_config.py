@@ -1069,3 +1069,84 @@ class TestRuleFilesComeFromTheBaseCommit:
         run, _ = _run_config_ref_step(repo, context, _required_inputs(context))
         assert run is not None and run.proc.returncode != 0, run and run.describe()
         assert "scanners.semgrep.options.config" in run.proc.stdout, run.describe()
+
+
+# --------------------------------------------------------------------------- 7
+
+CHECKOV_CONFIG_BASE = (
+    "project_name: base\n"
+    "scanners:\n"
+    "  checkov:\n"
+    "    options:\n"
+    "      config_file: .ash/.checkov.yaml\n"
+)
+
+
+class TestFetchedToolConfigsLoadNoCodeFromTheCheckout:
+    """A fetched tool config applies as the operator's file, but paths inside it do not move.
+
+    ASH refuses an in-tree checkov config (config/path_trust.py); the copy config-ref
+    fetches sits outside the tree, so it is applied. Paths inside it still resolve in
+    checkov's working directory, the checkout. For a path that loads code, that would
+    run the pull request's code in the required job: checkov's `external-checks-dir`
+    loads Python checks, and a nested `config-file` brings its own. A relative value of
+    either is refused; an absolute or home-relative one is the operator's.
+    """
+
+    def _run(self, tmp_path, checkov_config: str):
+        repo = Repository(
+            tmp_path,
+            base_files={
+                CONFIG_PATH: CHECKOV_CONFIG_BASE,
+                ".ash/.checkov.yaml": checkov_config,
+            },
+            checkout_files={"checks/check.py": "# the pull request's check\n"},
+        )
+        context = _pull_request(repo.base_sha, fork=False)
+        return _run_config_ref_step(repo, context, _required_inputs(context))
+
+    @pytest.mark.parametrize(
+        "checkov_config,key",
+        [
+            ("external-checks-dir: checks\n", "external-checks-dir"),
+            (
+                "external-checks-dir:\n  - /opt/checks\n  - ./checks\n",
+                "external-checks-dir",
+            ),
+            ("external_checks_dir: checks\n", "external_checks_dir"),
+            ("config-file: .ash/other-checkov.yaml\n", "config-file"),
+        ],
+    )
+    def test_a_relative_code_loading_path_is_refused(
+        self, tmp_path, checkov_config, key
+    ):
+        run, steps = self._run(tmp_path, checkov_config)
+        assert run is not None, "no step reads the config from config-ref"
+        assert run.proc.returncode != 0, (
+            f"a fetched checkov config with a relative {key} was accepted:\n"
+            + run.describe()
+        )
+        assert "::error::" in run.proc.stdout and key in run.proc.stdout, run.describe()
+        assert steps.get("config-ref-files", {}).get("outcome") == "failure", steps
+
+    @pytest.mark.parametrize(
+        "checkov_config",
+        [
+            "external-checks-dir: /opt/operator-checks\n",
+            "external-checks-dir:\n  - ~/operator-checks\n",
+            "compact: true\nskip-check:\n  - CKV_AWS_1\n",
+            "",
+        ],
+    )
+    def test_an_operator_path_or_no_such_option_is_accepted(
+        self, tmp_path, checkov_config
+    ):
+        run, steps = self._run(tmp_path, checkov_config)
+        assert run is not None and run.proc.returncode == 0, run and run.describe()
+        assert steps["config-ref-files"]["outcome"] == "success"
+
+    def test_a_checkov_config_that_is_not_a_mapping_is_refused(self, tmp_path):
+        """It cannot be checked for those options, so it is not passed on."""
+        run, _ = self._run(tmp_path, "- external-checks-dir\n- checks\n")
+        assert run is not None and run.proc.returncode != 0, run and run.describe()
+        assert "::error::" in run.proc.stdout, run.describe()
