@@ -25,12 +25,15 @@ Why this is a hybrid rather than a pure derivation
 The file carries operational knowledge that exists in no docstring and no
 schema. The clearest example:
 
-    **`is_complete` does not flip to `True` for cancelled scans** ... Polling on
-    `is_complete` alone will loop forever on a cancelled scan.
+    **Decide on `status`, not `is_complete`.** ... Polling on `is_complete`
+    alone never ends for a cancelled or failed scan that writes no results file.
 
-That is a correction TO the server's own docstring. A generator that rendered
-only what the code says about itself would delete it, making the document
-cheaper to maintain and worse to read. So the split is:
+That is a correction TO the server's own docstring and its ``next_steps`` advice.
+A generator that rendered only what the code says about itself would delete it,
+making the document cheaper to maintain and worse to read. The cost is that the
+notes are claims about behavior that nothing re-derives: each was checked against
+the server code (``scan_registry.py``, ``mcp_tools.py``) when written, and a change
+to that behavior needs the note changed by hand. So the split is:
 
 * Derived from the registry, because this is what drifted: which tools exist,
   which resources exist, the counts, and each tool's parameter names, types,
@@ -130,7 +133,10 @@ TOOL_NOTES: dict[str, dict] = {
         "params": {
             "source_dir": {"default": "current dir", "notes": "Absolute path to scan"},
             "severity_threshold": {
-                "notes": "Findings below this are filtered out at scan time"
+                "notes": (
+                    "Recorded with the scan and returned by `get_scan_progress`; it "
+                    "does not change which findings the scan reports"
+                )
             },
             "config_path": {
                 "default": "`<source>/.ash/.ash.yaml`",
@@ -163,16 +169,16 @@ TOOL_NOTES: dict[str, dict] = {
             ),
             (
                 "**Heads-up:** the server's own docstring and the `important.next_steps` array "
-                "suggest polling `progress['is_complete']`. This is incomplete advice — "
-                "`is_complete` stays `False` for cancelled scans. Always check `status` "
-                "independently. (See `get_scan_progress` below.)"
+                "suggest polling `progress['is_complete']`. Decide on `status` instead: "
+                "`is_complete` can stay `False` for a cancelled or failed scan that "
+                "writes no results file. (See `get_scan_progress` below.)"
             ),
         ],
     },
     "get_scan_progress": {
         "intro": (
-            "Poll progress every 5 seconds until complete. Keeps the MCP connection alive "
-            "while the scan runs."
+            "Poll progress every 5 seconds until `status` is `completed`, `incomplete`, "
+            "`failed`, or `cancelled`."
         ),
         "params": {"scan_id": {"notes": "From `run_ash_scan`"}},
         "returns": """{
@@ -217,11 +223,12 @@ TOOL_NOTES: dict[str, dict] = {
                 "`start_time` and `end_time` (or from current time while running)."
             ),
             (
-                "**`is_complete` does not flip to `True` for cancelled scans** — it returns "
-                "`True` for `completed` and `incomplete`, and for `failed` once a results file "
-                "exists. Always check `status` independently: stop polling when `status` is "
-                "`completed`, `incomplete`, `failed`, or `cancelled`. Polling on "
-                "`is_complete` alone will loop forever on a cancelled scan."
+                "**Decide on `status`, not `is_complete`.** `is_complete` is `True` for "
+                "`completed` and `incomplete`, and for `failed` or `cancelled` once a results "
+                "file exists in the output directory, which an earlier scan of the same "
+                "directory may have left. Stop polling when `status` is `completed`, "
+                "`incomplete`, `failed`, or `cancelled`. Polling on `is_complete` alone "
+                "never ends for a cancelled or failed scan that writes no results file."
             ),
             (
                 "**`incomplete` is terminal, with partial coverage.** The run finished and its "
@@ -295,16 +302,29 @@ TOOL_NOTES: dict[str, dict] = {
         "no_params_sentence": "No parameters. Returns a list of scan summaries.",
     },
     "cancel_scan": {
-        "intro": "Stop a running scan and free resources.",
-        "params": {"scan_id": {"notes": "The scan to stop"}},
-        "caveats": ["Returns confirmation."],
+        "intro": (
+            "Marks a running scan `cancelled`. It does not stop the scan: the scan keeps "
+            "running in the server process and can still write its results, while its "
+            "`status` stays `cancelled`."
+        ),
+        "params": {"scan_id": {"notes": "The scan to mark cancelled"}},
+        "caveats": [
+            (
+                "Returns `success`, `status`, and `message`. A scan that has already "
+                "finished is not changed, and the response has `success: false` and the "
+                "scan's status."
+            ),
+        ],
     },
     "check_installation": {
         "intro": (
-            "Verify ASH is installed and the MCP server can spawn it. Run before the first "
-            "scan in a session if you're unsure of the install state."
+            "Reports the version of the ASH package the MCP server runs. It does not run "
+            "a scan or check that any scanner's tool is installed."
         ),
-        "no_params_sentence": "No parameters. Returns version string and feature flags.",
+        "no_params_sentence": (
+            "No parameters. Returns `version`, with `installed` and "
+            "`ash_command_available` both `true` when the version could be read."
+        ),
     },
     "set_source_zip_chunk": {
         "params": {
@@ -500,7 +520,7 @@ def _render_tool(name: str, description: str, schema: dict, func) -> list[str]:
 def render() -> str:
     """The agent-facing tool-reference.md."""
     header, body = _render_parts()
-    return "\n".join(header + body)
+    return "\n".join(header + _adapt_markdown(body, strip_bold=False))
 
 
 def render_reference_page() -> str:
@@ -521,7 +541,7 @@ def render_reference_page() -> str:
         ),
         "",
     ]
-    return "\n".join(_docs_site_markdown(lines + body))
+    return "\n".join(_adapt_markdown(lines + body, strip_bold=True))
 
 
 #: Marker the docs doctest reads on a fenced JSON block that is an example, not an
@@ -531,15 +551,17 @@ _RESPONSE_EXAMPLE_MARKER = (
 )
 
 
-def _docs_site_markdown(lines: list[str]) -> list[str]:
-    """Adapt the agent-facing markdown to the docs site's rules.
+def _adapt_markdown(lines: list[str], strip_bold: bool) -> list[str]:
+    """Make the response examples pass the docs checks, and on the docs site drop bold.
 
-    * No bold in running prose (the docs' house style). Bold that wraps a code span
-      is unwrapped too; ``**`` inside a code span or a fence is left alone.
     * A ```json response example that does not parse as JSON (``bool``, ``[...]``
-      placeholders) becomes a ```text block, because the docs doctest parses every
+      placeholders) becomes a ```text block, because the docs checks parse every
       JSON block. One that parses keeps its language and gets the marker saying it
-      is an example rather than an ASH config.
+      is an example rather than an ASH config. Both files get this: the docs
+      checks read the agent-facing file and every copy the transpiler makes of it.
+    * With ``strip_bold``, no bold in running prose (the docs site's house style).
+      Bold that wraps a code span is unwrapped too; ``**`` inside a code span or a
+      fence is left alone. The agent-facing file keeps its bold.
     """
     import json
     import re
@@ -568,7 +590,7 @@ def _docs_site_markdown(lines: list[str]) -> list[str]:
             out.append("```")
             i = end + 1
             continue
-        if line.startswith("```"):
+        if line.startswith("```") or not strip_bold:
             out.append(line)
             i += 1
             continue

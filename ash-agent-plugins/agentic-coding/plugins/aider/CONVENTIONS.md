@@ -123,13 +123,15 @@ Starts a scan asynchronously. Returns a `scan_id` immediately — the scan conti
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `source_dir` | string \| null | current dir | Absolute path to scan |
-| `severity_threshold` | string | `"MEDIUM"` | Findings below this are filtered out at scan time |
+| `severity_threshold` | string | `"MEDIUM"` | Recorded with the scan and returned by `get_scan_progress`; it does not change which findings the scan reports |
 | `config_path` | string \| null | `<source>/.ash/.ash.yaml` | Custom config path |
 | `clean_output` | boolean | `true` | Wipe stale reports before starting |
 
 Output reports are written to `<source_dir>/.ash/ash_output/` — there is no parameter to override this. Scanner selection, mode, and other tuning live in `.ash/.ash.yaml`, not in tool arguments.
 
 Returns:
+
+<!-- doctest: config kind=other reason="example MCP tool response" -->
 ```json
 {
   "success": true,
@@ -147,18 +149,19 @@ Returns:
 
 The `directory_path` field tells you the resolved absolute path the server is scanning — derive `output_dir` for `get_scan_results` from this value (`<directory_path>/.ash/ash_output`) rather than constructing it independently.
 
-**Heads-up:** the server's own docstring and the `important.next_steps` array suggest polling `progress['is_complete']`. This is incomplete advice — `is_complete` stays `False` for cancelled scans. Always check `status` independently. (See `get_scan_progress` below.)
+**Heads-up:** the server's own docstring and the `important.next_steps` array suggest polling `progress['is_complete']`. Decide on `status` instead: `is_complete` can stay `False` for a cancelled or failed scan that writes no results file. (See `get_scan_progress` below.)
 
 ## get_scan_progress
 
-Poll progress every 5 seconds until complete. Keeps the MCP connection alive while the scan runs.
+Poll progress every 5 seconds until `status` is `completed`, `incomplete`, `failed`, or `cancelled`.
 
 | Param | Type | Notes |
 |-------|------|-------|
 | `scan_id` | string | From `run_ash_scan` |
 
 Returns:
-```json
+
+```text
 {
   "scan_id": "...",
   "directory_path": "/path/to/scanned/project",
@@ -195,7 +198,7 @@ There is no overall percentage field. To compute progress, use `completed_scanne
 
 There is no top-level `duration` field — derive elapsed time from `start_time` and `end_time` (or from current time while running).
 
-**`is_complete` does not flip to `True` for cancelled scans** — it returns `True` for `completed` and `incomplete`, and for `failed` once a results file exists. Always check `status` independently: stop polling when `status` is `completed`, `incomplete`, `failed`, or `cancelled`. Polling on `is_complete` alone will loop forever on a cancelled scan.
+**Decide on `status`, not `is_complete`.** `is_complete` is `True` for `completed` and `incomplete`, and for `failed` or `cancelled` once a results file exists in the output directory, which an earlier scan of the same directory may have left. Stop polling when `status` is `completed`, `incomplete`, `failed`, or `cancelled`. Polling on `is_complete` alone never ends for a cancelled or failed scan that writes no results file.
 
 **`incomplete` is terminal, with partial coverage.** The run finished and its results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost targets), no scanner reached a verdict, a converter did not run, a rule could not be evaluated, or a content database was past its declared age bound. `incomplete_scanners` names each scanner and why, and `stale_content_databases` each stale database. The findings are real but partial, so read them, and do not report the target as clean. `failed` means the run crashed or left no readable results. `coverage_complete` is `null` while running and for `failed` or `cancelled`; with `fail_on_incomplete_scanners: false` a scan is `completed` with `coverage_complete: false` when scanners did not run.
 
@@ -245,19 +248,19 @@ No parameters. Returns a list of scan summaries.
 
 ## cancel_scan
 
-Stop a running scan and free resources.
+Marks a running scan `cancelled`. It does not stop the scan: the scan keeps running in the server process and can still write its results, while its `status` stays `cancelled`.
 
 | Param | Type | Notes |
 |-------|------|-------|
-| `scan_id` | string | The scan to stop |
+| `scan_id` | string | The scan to mark cancelled |
 
-Returns confirmation.
+Returns `success`, `status`, and `message`. A scan that has already finished is not changed, and the response has `success: false` and the scan's status.
 
 ## check_installation
 
-Verify ASH is installed and the MCP server can spawn it. Run before the first scan in a session if you're unsure of the install state.
+Reports the version of the ASH package the MCP server runs. It does not run a scan or check that any scanner's tool is installed.
 
-No parameters. Returns version string and feature flags.
+No parameters. Returns `version`, with `installed` and `ash_command_available` both `true` when the version could be read.
 
 ## clear_source
 
