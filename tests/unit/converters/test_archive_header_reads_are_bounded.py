@@ -87,10 +87,9 @@ def convert(context, monkeypatch, name: str, raw: bytes):
 
 def assert_refused_for_header_reads(converter, results, name: str) -> None:
     assert results == []
-    assert [(r.path, r.scan_incomplete) for r in converter.refused_inputs] == [
-        (name, True)
-    ], converter.refused_inputs
-    assert "header" in converter.refused_inputs[0].reason, converter.refused_inputs
+    assert [r.path for r in converter.failed_inputs] == [name], converter.failed_inputs
+    assert "header" in converter.failed_inputs[0].reason, converter.failed_inputs
+    assert converter.refused_inputs == []
 
 
 def test_an_extended_header_over_the_read_cap_is_refused(
@@ -200,9 +199,8 @@ def test_a_sparse_map_whose_entries_overlap_is_refused(
 
     (extracted,) = results
     assert not (extracted / "s.py").exists()
-    assert [(r.member, r.scan_incomplete) for r in converter.refused_inputs] == [
-        ("s.py", False)
-    ]
+    assert [(r.member, r.limit) for r in converter.refused_inputs] == [("s.py", None)]
+    assert converter.failed_inputs == []
 
 
 def test_a_sparse_map_in_order_is_extracted(test_plugin_context, monkeypatch):

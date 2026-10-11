@@ -626,30 +626,17 @@ def _failed_inputs_reason(failed_inputs: Sequence[Any], shown: int = 5) -> str:
     return f"could not convert {len(paths)} {noun}: {named}"
 
 
-def _leaves_scan_incomplete(item: Any) -> bool:
-    """Whether a refused input's record says its whole content went unscanned."""
-    return bool(getattr(item, "scan_incomplete", False) or getattr(item, "limit", None))
-
-
 def _limit_refusals_reason(refused_inputs: Sequence[Any], shown: int = 5) -> str:
-    """``refused 1 input over an extraction limit: a.zip (max_total_bytes)``.
-
-    An input refused because it could not be read is named with ``(unreadable)``,
-    and the sentence then says the inputs were not extracted rather than that they
-    were over a limit.
-    """
-    limits = [getattr(item, "limit", None) for item in refused_inputs]
+    """``refused 1 input over an extraction limit: a.zip (max_total_bytes)``."""
     named = [
-        f"{getattr(item, 'path', '?')} ({limit or 'unreadable'})"
-        for item, limit in zip(refused_inputs, limits)
+        f"{getattr(item, 'path', '?')} ({getattr(item, 'limit', '?')})"
+        for item in refused_inputs
     ]
     listed = ", ".join(named[:shown])
     if len(named) > shown:
         listed += f" and {len(named) - shown} more"
     noun = "input" if len(named) == 1 else "inputs"
-    if all(limits):
-        return f"refused {len(named)} {noun} over an extraction limit: {listed}"
-    return f"refused {len(named)} {noun} that could not be extracted: {listed}"
+    return f"refused {len(named)} {noun} over an extraction limit: {listed}"
 
 
 def incomplete_converters(
@@ -672,13 +659,12 @@ def incomplete_converters(
        could not be converted: nbconvert exited non-zero on a notebook, or an
        archive could not be extracted. Each one is a file the scanners never saw in
        converted form, which is the same loss as condition 1 at a smaller scale.
-    3. A ``refused_inputs`` entry has ``scan_incomplete`` set -- an archive over
-       one of the archive converter's extraction limits (``limit`` names it) or
-       one that could not be read, refused whole, so none of its contents reached
-       the scanners. A refusal without it (a symlinked input, a link or ``..``
-       member, a nested archive) does not count: those refuse one input or member
-       that is not to be read at all, and the scan reports them without failing
-       on them.
+    3. A ``refused_inputs`` entry names a ``limit`` -- an archive over one of the
+       archive converter's extraction limits, refused whole, so none of its
+       contents reached the scanners. A refusal without one (a symlinked input, a
+       link or ``..`` member, a nested archive, a Git LFS pointer) does not count:
+       those refuse one input or member that is not to be read at all, and the
+       scan reports them without failing on them.
     4. ``dependencies_satisfied`` is False -- its external tool was not available.
 
     ``excluded`` is checked first and wins over all of them. It is the converter-side
@@ -711,17 +697,20 @@ def incomplete_converters(
         over_limit = [
             item
             for item in getattr(row, "refused_inputs", None) or []
-            if _leaves_scan_incomplete(item)
+            if getattr(item, "limit", None)
+        ]
+        lost = [
+            reason
+            for reason in (
+                _failed_inputs_reason(failed_inputs) if failed_inputs else "",
+                _limit_refusals_reason(over_limit) if over_limit else "",
+            )
+            if reason
         ]
         if failure:
             listed.append((name, str(failure)))
-        elif failed_inputs or over_limit:
-            reasons = []
-            if failed_inputs:
-                reasons.append(_failed_inputs_reason(failed_inputs))
-            if over_limit:
-                reasons.append(_limit_refusals_reason(over_limit))
-            listed.append((name, "; ".join(reasons)))
+        elif lost:
+            listed.append((name, "; ".join(lost)))
         elif getattr(row, "dependencies_satisfied", True) is False:
             # An unavailable converter costs coverage only if it had inputs. The count
             # is established without its tool, which is what makes it answerable for a
@@ -828,8 +817,8 @@ def print_incompleteness_message(
             "fix or exclude the files it could not convert, disable the converter "
             "if its inputs are not wanted, or drop --fail-on-incomplete-scanners to "
             "accept a partial scan. A converter with nothing to convert never "
-            "reports here. An archive over an extraction limit is extracted once the "
-            "limit named is raised, with --config-overrides "
+            "reports here. An archive over an extraction limit is extracted once "
+            "the limit named is raised, with --config-overrides "
             "converters.archive.options.<limit>=<value> or a config file outside "
             "every git checkout.[/yellow]"
         )

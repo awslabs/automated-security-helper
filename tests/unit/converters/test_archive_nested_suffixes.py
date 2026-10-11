@@ -64,7 +64,8 @@ def test_every_nested_archive_suffix_is_recorded_as_not_scanned(converter):
     (extracted,) = converter.convert()
 
     assert sorted(r.member for r in converter.refused_inputs) == sorted(NESTED)
-    assert all(not r.scan_incomplete for r in converter.refused_inputs)
+    assert all(r.limit is None for r in converter.refused_inputs)
+    assert converter.failed_inputs == []
     assert (extracted / "top.py").is_file()
     assert (extracted / "x.zip.py").is_file(), "a .py member is not an archive"
 

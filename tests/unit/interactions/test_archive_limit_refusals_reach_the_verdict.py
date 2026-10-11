@@ -278,3 +278,67 @@ class TestTheReports:
         text = console.export_text()
         assert "Not scanned (scan incomplete): archive: 'vendor/declared.zip'" in text
         assert "Not scanned: archive: member 'inner.zip' of 'dist/outer.zip'" in text
+
+
+class TestFailedInputsInTheReports:
+    """An input a converter could not convert is listed with the refusals.
+
+    It is recorded under ``failed_inputs`` rather than ``refused_inputs``, and it
+    fails the completeness gate, so the reports mark it as leaving the scan
+    incomplete, as they mark an archive over an extraction limit.
+    """
+
+    @staticmethod
+    def _model():
+        from automated_security_helper.models.asharp_model import FailedInputInfo
+
+        model = AshAggregatedResults(ash_config=get_default_config())
+        model.converter_results["archive"] = ConverterStatusInfo(
+            converted_paths=[],
+            refused_inputs=[NESTED],
+            failed_inputs=[
+                FailedInputInfo(path="dist/cut.tar", reason="ReadError: truncated")
+            ],
+        )
+        return model
+
+    def test_a_failed_input_is_listed_first_and_marked_incomplete(self):
+        refusals = converter_refusals(self._model())
+
+        assert [(r.path, r.member, r.scan_incomplete) for r in refusals] == [
+            ("dist/cut.tar", None, True),
+            ("dist/outer.zip", "inner.zip", False),
+        ]
+        assert refusals[0].message() == (
+            "archive: 'dist/cut.tar' was not scanned: ReadError: truncated"
+        )
+
+    def test_the_flat_json_and_sarif_carry_the_failed_input(self):
+        model = self._model()
+
+        rows = json.loads(FlatJSONReporter(context=_context()).report(model))[
+            "converter_refusals"
+        ]
+        doc = json.loads(SarifReporter(context=_context()).report(model))
+        levels = {
+            note["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]: note[
+                "level"
+            ]
+            for run in doc["runs"]
+            for invocation in run.get("invocations") or []
+            for note in invocation.get("toolExecutionNotifications") or []
+        }
+
+        assert [(r["path"], r["scan_incomplete"]) for r in rows] == [
+            ("dist/cut.tar", True),
+            ("dist/outer.zip", False),
+        ]
+        assert levels == {"dist/cut.tar": "error", "dist/outer.zip": "warning"}
+
+    def test_the_text_summary_names_the_failed_input(self):
+        report = TextReporter(context=_context()).report(self._model())
+
+        assert (
+            "- [scan incomplete] archive: 'dist/cut.tar' was not scanned: "
+            "ReadError: truncated"
+        ) in report.splitlines()

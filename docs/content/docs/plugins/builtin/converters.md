@@ -86,8 +86,8 @@ header, a GNU long name or a sparse map into memory while it parses the header,
 before any of the limits above can be checked. The decompressor is chosen from the
 archive's leading bytes (gzip, bzip2, xz, and zstd on Python 3.14), a single read
 of more than 1 MiB while parsing headers is refused, and the header pass may read
-4 MiB plus 2 KiB per member in all. An archive over either is refused as one that
-cannot be read. Real headers are a few hundred bytes; GNU tar's pax format, which
+4 MiB plus 2 KiB per member in all. An archive over either is a failed input, as
+an archive that cannot be read is (see below). Real headers are a few hundred bytes; GNU tar's pax format, which
 writes an extended header for every member, reads about 1.5 KiB per member.
 
 While copying, no member is written past the size it declares. For a sparse tar
@@ -257,8 +257,7 @@ tree, the archive member's name where there is one, and the reason:
   {"path": "notebooks/report.ipynb", "member": null, "reason": "it is a symbolic link"},
   {"path": "dist/app.tar", "member": "../setup.py", "reason": "its path contains a '..' component"},
   {"path": "dist/app.zip", "member": "vendor/lib.tar.gz", "reason": "it is named as an archive or compressed file (such as .zip, .tar.gz, .jar or .7z), and an archive inside an archive is not extracted, so its contents are not scanned"},
-  {"path": "data/dump.zip", "member": null, "reason": "its members declare more than 1073741824 bytes, the max_total_bytes extraction limit", "limit": "max_total_bytes", "scan_incomplete": true},
-  {"path": "dist/old.tar", "member": null, "reason": "it could not be read as an archive (ReadError: unexpected end of data)", "scan_incomplete": true}
+  {"path": "data/dump.zip", "member": null, "reason": "its members declare more than 1073741824 bytes, the max_total_bytes extraction limit", "limit": "max_total_bytes"}
 ]
 ```
 
@@ -267,18 +266,17 @@ one, with a warning each. The rest are one record, with `member` null and
 `unlisted_members` set to how many more there were, and one warning, so an archive
 of thousands of links or nested archives does not produce thousands of records.
 
-`limit` is present only for an archive refused for an extraction limit. That record
-and the record of an archive that could not be read carry `"scan_incomplete": true`:
-those are the refusals that leave a whole archive unscanned, and the completeness
-gate counts them. The others are reported in the summaries and reports as well, and
-do not change the exit code.
+`limit` is present only for an archive refused for an extraction limit, which is the
+one kind of refusal that leaves a whole archive unscanned: the completeness gate
+counts it. The others are reported in the summaries and reports as well, and do not
+change the exit code.
 
 A `.gz` that is one gzip-compressed file rather than a tarball, such as
 `data.json.gz`, is decompressed to the name without `.gz` (`data.json`) and that file
 is scanned, within the extraction limits and the scan's budget like an archive with
 one member. Its size is known only by reading it, so at most the limit is written
 before it is refused. A name ending `.tar.gz` says the content is a tarball, and a
-`.tar.gz` that holds no tar is refused as unreadable.
+`.tar.gz` that holds no tar is a failed input.
 
 A Git LFS pointer named like an archive, which is what a checkout without its LFS
 objects holds in place of each LFS-tracked `.zip` or `.tar.gz`, is recorded as a
@@ -289,42 +287,38 @@ in the pointer format counts: under 1024 bytes, UTF-8 text, the
 `version https://git-lfs.github.com/spec/v1` line first, `key value` lines, and an
 `oid sha256:` and a `size` line.
 
-Any other archive that zipfile and tarfile cannot read is refused whole: a bad CRC, a
-truncated or damaged stream (a damaged single-file gzip included), an empty file, or
-headers over the read limits above. Anything already written from it is removed, so
-the scanners never read a partial extraction as the archive, and the scan exits 1
-with `fail_on_incomplete_scanners` on. Exclude such a file with
-`global_settings.ignore_paths` if its contents need not be scanned.
-
 To have a skipped file converted, replace the link with the file itself. To have a
 nested archive's contents scanned, extract it into the tree before the scan.
 
 ## Inputs a converter could not convert
 
 A notebook nbconvert could not convert (it exited non-zero, timed out, or wrote no
-output) and an archive that could not be extracted are recorded under
+output) and an archive that zipfile and tarfile cannot read are recorded under
 `converter_results.<converter>.failed_inputs`, with the reason:
 
 ```json
 "failed_inputs": [
-  {"path": "notebooks/report.ipynb", "reason": "nbconvert exited with code 1"}
+  {"path": "notebooks/report.ipynb", "reason": "nbconvert exited with code 1"},
+  {"path": "dist/old.tar", "reason": "ReadError: unexpected end of data"}
 ]
 ```
 
 Other errors are recorded the same way, as `<Type>: <message>`. The progress line and
 the convert-complete event say how many files could not be converted.
 
+An archive that cannot be read is not extracted at all: a bad CRC, a truncated or
+damaged stream (a damaged single-file gzip included), an empty file, a `.tar.gz` that
+holds no tar, or headers over the read limits above. Anything already written from it
+is removed, so the scanners never read a partial extraction as the archive.
+
 The scanners never saw those files in converted form, so with
 `fail_on_incomplete_scanners` on (the default) the scan exits 1 and names the
 converter and the files, as it does for a converter whose tool is missing while it
-had inputs.
-`ash merge` combines every shard's failed inputs, and workspace mode reports them
-per project in `incomplete_converters`.
-
-The archive converter takes `.zip`, `.tar` and `.gz` files. One that neither zipfile
-nor tarfile can read is a failed input, except a `.gz` that is a single compressed
-file rather than a tarball, such as `data.json.gz`: that is not an archive, has
-nothing to extract, and is skipped.
+had inputs. `ash merge` combines every shard's failed inputs, and workspace mode
+reports them per project in `incomplete_converters`. The summaries, the flat JSON
+report (`converter_refusals`, with `scan_incomplete` true) and `ash.sarif` (an
+execution notification at level `error`) list them with the refusals. Exclude such a
+file with `global_settings.ignore_paths` if its contents need not be scanned.
 
 ## Integration with Scanners
 
@@ -346,7 +340,7 @@ ash analysis.ipynb --scanners bandit,detect-secrets
 ```yaml
 converters:
   archive:
-    enabled: true                # An archive that cannot be read is refused and fails the completeness gate
+    enabled: true                # An archive that cannot be read is a failed input and fails the completeness gate
 ```
 
 **Large archives**: an archive over an extraction limit is refused and the scan exits

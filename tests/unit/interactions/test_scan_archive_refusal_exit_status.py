@@ -213,3 +213,25 @@ def test_a_plain_gzip_is_scanned_and_an_lfs_pointer_does_not_fail_the_scan(
         ("warning", "assets.zip")
     ]
     assert "git lfs pull" in out
+
+
+@pytest.fixture(scope="module")
+def corrupt(tmp_path_factory):
+    raw = bytearray(zip_bytes({"ok.py": "print(1)\n", "bad.py": "print(2)\n"}))
+    # A zip whose second member fails its CRC check after the first is written.
+    import struct
+
+    second = raw.rfind(b"PK\x01\x02")
+    struct.pack_into("<I", raw, second + 16, 0xDEADBEEF)
+    return _scan(tmp_path_factory.mktemp("corrupt"), {"crc.zip": bytes(raw)})
+
+
+def test_a_corrupt_archive_is_a_failed_input_that_fails_the_scan(corrupt):
+    code, out, output = corrupt
+
+    assert code == 1, out[-4000:]
+    results = json.loads((output / "ash_aggregated_results.json").read_text())
+    row = results["converter_results"]["archive"]
+    assert [item["path"] for item in row.get("failed_inputs") or []] == ["crc.zip"]
+    assert not list((output / "converted").rglob("ok.py")), "partial output left"
+    assert "could not convert 1 input: crc.zip" in out

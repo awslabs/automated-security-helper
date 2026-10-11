@@ -104,7 +104,6 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         refusal: TreeInputRefused,
         member: str | None = None,
         limit: str | None = None,
-        scan_incomplete: bool = False,
         unlisted_members: int | None = None,
     ) -> None:
         """Warn once about a refused input and keep it for the results row.
@@ -116,9 +115,6 @@ class ConverterPluginBase(PluginBase, Generic[T]):
             limit: The name of the extraction-limit option the input exceeded, when
                 that is why it was refused. Such a refusal leaves the scan
                 incomplete; see ``RefusedInputInfo.limit``.
-            scan_incomplete: The refusal left the input's whole content unscanned
-                for another reason, such as an archive that could not be read. Set
-                as well whenever ``limit`` is.
             unlisted_members: The record stands for this many more members of the
                 archive, refused for the same reason and not listed one by one.
         """
@@ -148,7 +144,6 @@ class ConverterPluginBase(PluginBase, Generic[T]):
                 member=member,
                 reason=refusal.reason,
                 limit=limit,
-                scan_incomplete=scan_incomplete or limit is not None,
                 unlisted_members=unlisted_members,
             )
         )
@@ -167,7 +162,12 @@ class ConverterPluginBase(PluginBase, Generic[T]):
             if self.context is not None
             else Path(path).as_posix()
         )
-        ASH_LOGGER.error(f"Could not convert '{display}': {reason}", extra=NO_MARKUP)
+        # The path comes from the scanned tree: logged as data, control characters
+        # escaped, as record_refused_input does.
+        ASH_LOGGER.error(
+            f"Could not convert '{inert_text(display)}': {inert_text(reason)}",
+            extra=NO_MARKUP,
+        )
         self.failed_inputs.append(FailedInputInfo(path=display, reason=reason))
 
     def candidate_input_count(self) -> int | None:

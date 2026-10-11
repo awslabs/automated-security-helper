@@ -1,15 +1,15 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""An archive the converter cannot read is refused, cleaned up, and fails the gate.
+"""An archive the converter cannot read is a failed input, cleaned up, and fails the gate.
 
 A `.zip`, `.tar` or `.gz` that zipfile and tarfile cannot read (a bad CRC, a
 truncated stream, a damaged gzip file, an empty file) used
 to leave only a log line, and a zip that failed part way left the members already
 written on disk, where the scanners read them as if the archive had been
-extracted. Each is now one refused input with ``scan_incomplete`` set, nothing it
-wrote is left behind, and the completeness gate counts it as it counts an archive
-over an extraction limit.
+extracted. Each is now one failed input (``converter_results.archive.failed_inputs``,
+the record a notebook that could not be converted gets), nothing it wrote is left
+behind, and the completeness gate counts it.
 """
 
 from __future__ import annotations
@@ -114,17 +114,16 @@ def files_under(converter) -> List[str]:
 
 
 @pytest.mark.parametrize("name, data", UNREADABLE)
-def test_an_unreadable_archive_is_refused_once_and_leaves_nothing(
+def test_an_unreadable_archive_is_one_failed_input_and_leaves_nothing(
     name, data, test_plugin_context, monkeypatch, ash_warnings
 ):
     converter, results = convert(test_plugin_context, monkeypatch, name, data)
 
     assert results == []
     assert files_under(converter) == [], "a member of the unreadable archive is left"
-    assert [
-        (r.path, r.member, r.limit, r.scan_incomplete) for r in converter.refused_inputs
-    ] == [(name, None, None, True)]
-    assert converter.refused_inputs[0].reason
+    assert [r.path for r in converter.failed_inputs] == [name]
+    assert converter.failed_inputs[0].reason
+    assert converter.refused_inputs == []
     assert [w.getMessage() for w in ash_warnings if f"'{name}'" in w.getMessage()] != []
 
 
@@ -135,7 +134,7 @@ def test_an_unreadable_archive_fails_the_completeness_gate(
     converter, _ = convert(test_plugin_context, monkeypatch, name, data)
     model = AshAggregatedResults()
     model.converter_results["archive"] = ConverterStatusInfo(
-        converted_paths=[], refused_inputs=list(converter.refused_inputs)
+        converted_paths=[], failed_inputs=list(converter.failed_inputs)
     )
 
     listed = incomplete_converters(model)
@@ -151,6 +150,7 @@ def test_a_valid_empty_zip_is_not_refused(test_plugin_context, monkeypatch):
 
     assert len(results) == 1
     assert converter.refused_inputs == []
+    assert converter.failed_inputs == []
 
 
 def test_a_readable_archive_is_extracted_as_before(test_plugin_context, monkeypatch):

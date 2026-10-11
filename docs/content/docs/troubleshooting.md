@@ -578,3 +578,39 @@ A notebook's name is not the cause: nbconvert reads its notebook argument as a g
 
 Read the reason in `failed_inputs`, or rerun with `--debug` to see nbconvert's own error output. Then fix or remove the notebook or archive, exclude it with `ignore_paths`, disable the converter if its inputs are not wanted, or accept the partial scan with `--no-fail-on-incomplete-scanners`.
 
+
+## An Archive Makes the Scan Incomplete
+
+**Symptom**
+
+The scan exits 1 with `Exiting because conversion was incomplete`, naming the
+`archive` converter and one or more `.zip`, `.tar` or `.gz` files, or the summary
+lists an archive under "Converter inputs not scanned".
+
+**Cause**
+
+One of three things, named in `converter_results.archive` in
+`ash_aggregated_results.json`:
+
+1. The archive is over an extraction limit: its `refused_inputs` record names the
+   limit, such as `max_total_bytes`.
+2. The archive cannot be read (damaged, truncated, empty, or a `.tar.gz` that is not
+   a tarball): it is in `failed_inputs`.
+3. The file is a Git LFS pointer rather than the archive, because the checkout did not
+   fetch the LFS objects. This is reported but does not fail the scan.
+
+**Fix**
+
+For a limit, raise it as the operator; a config file inside the scanned tree cannot
+raise it:
+
+```bash
+ash scan --config-overrides 'converters.archive.options.max_total_bytes=4294967296'
+```
+
+For an archive that cannot be read, replace it with an intact copy, or exclude it with
+`global_settings.ignore_paths` if its contents need not be scanned.
+
+For an LFS pointer, fetch the LFS objects before the scan: `git lfs pull`, or
+`lfs: true` on the CI checkout step. See
+[Archive Converter](plugins/builtin/converters.md#archive-converter).

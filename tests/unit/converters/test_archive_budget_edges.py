@@ -83,9 +83,8 @@ def test_a_tar_header_with_a_negative_size_is_an_archive_that_cannot_be_read(
     )
 
     assert results == []
-    assert [(r.path, r.scan_incomplete) for r in converter.refused_inputs] == [
-        ("neg.tar", True)
-    ]
+    assert [r.path for r in converter.failed_inputs] == ["neg.tar"]
+    assert converter.refused_inputs == []
 
 
 def test_the_copy_path_writes_a_member_larger_than_one_chunk_whole(

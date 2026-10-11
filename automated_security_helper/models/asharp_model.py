@@ -365,21 +365,6 @@ class RefusedInputInfo(BaseModel):
             ),
         ),
     ] = None
-    # Left out of a dump when False, as limit is when None.
-    scan_incomplete: Annotated[
-        bool,
-        Field(
-            default=False,
-            exclude_if=lambda value: value is False,
-            description=(
-                "True when refusing the input left its whole content unscanned: an "
-                "archive over an extraction limit (limit names it) or one that "
-                "could not be read. The completeness gate counts these as "
-                "incomplete conversion; the other refusals, of one link or member "
-                "ASH does not read by design, it does not."
-            ),
-        ),
-    ] = False
 
 
 class FailedInputInfo(BaseModel):
@@ -475,9 +460,9 @@ class ConverterStatusInfo(BaseModel):
             "file that is not a regular file or has more than one hard link, or "
             "an archive member that is a link, would be extracted outside its "
             "destination, or is itself an archive. An archive over an extraction "
-            "limit is recorded here too, with the limit named in limit, and so is "
-            "one that could not be read; both have scan_incomplete set. A Git LFS "
-            "pointer named like an archive is recorded without it."
+            "limit is recorded here too, with the limit named in limit, and so is a "
+            "Git LFS pointer named like an archive. An archive that could not be "
+            "read is in failed_inputs instead."
         ),
     )
 

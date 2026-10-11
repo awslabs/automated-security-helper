@@ -86,7 +86,9 @@ def written(converter) -> Dict[str, bytes]:
 def gate(converter) -> List[str]:
     model = AshAggregatedResults()
     model.converter_results["archive"] = ConverterStatusInfo(
-        converted_paths=[], refused_inputs=list(converter.refused_inputs)
+        converted_paths=[],
+        refused_inputs=list(converter.refused_inputs),
+        failed_inputs=list(converter.failed_inputs),
     )
     return [name for name, _ in incomplete_converters(model)]
 
@@ -152,9 +154,8 @@ class TestPlainGzip:
 
         assert results == []
         assert written(converter) == {}
-        assert [(r.path, r.scan_incomplete) for r in converter.refused_inputs] == [
-            ("cut.json.gz", True)
-        ]
+        assert [r.path for r in converter.failed_inputs] == ["cut.json.gz"]
+        assert converter.refused_inputs == []
         assert gate(converter) == ["archive"]
 
     def test_a_gz_that_holds_a_tar_is_extracted_as_a_tar(
@@ -176,9 +177,8 @@ class TestPlainGzip:
         )
 
         assert results == []
-        assert [(r.path, r.scan_incomplete) for r in converter.refused_inputs] == [
-            ("pkg.tar.gz", True)
-        ]
+        assert [r.path for r in converter.failed_inputs] == ["pkg.tar.gz"]
+        assert converter.refused_inputs == []
 
     def test_a_plain_gzip_named_as_a_nested_archive_is_recorded_not_scanned(
         self, test_plugin_context, monkeypatch
@@ -187,9 +187,10 @@ class TestPlainGzip:
         converter, _ = convert(test_plugin_context, monkeypatch, {"inner.zip.gz": data})
 
         assert written(converter) == {}
-        assert [(r.member, r.scan_incomplete) for r in converter.refused_inputs] == [
-            ("inner.zip", False)
+        assert [(r.member, r.limit) for r in converter.refused_inputs] == [
+            ("inner.zip", None)
         ]
+        assert converter.failed_inputs == []
 
 
 class TestGitLfsPointers:
@@ -207,11 +208,8 @@ class TestGitLfsPointers:
         assert results == []
         assert written(converter) == {}
         (refusal,) = converter.refused_inputs
-        assert (refusal.path, refusal.member, refusal.scan_incomplete) == (
-            name,
-            None,
-            False,
-        )
+        assert (refusal.path, refusal.member, refusal.limit) == (name, None, None)
+        assert converter.failed_inputs == []
         assert "Git LFS pointer" in refusal.reason
         assert "git lfs pull" in refusal.reason
         assert gate(converter) == []
@@ -237,9 +235,8 @@ class TestGitLfsPointers:
         converter, results = convert(test_plugin_context, monkeypatch, {"x.zip": data})
 
         assert results == []
-        assert [(r.path, r.scan_incomplete) for r in converter.refused_inputs] == [
-            ("x.zip", True)
-        ]
+        assert [r.path for r in converter.failed_inputs] == ["x.zip"]
+        assert converter.refused_inputs == []
         assert gate(converter) == ["archive"]
 
     def test_a_tar_whose_first_name_starts_like_a_pointer_is_still_a_tar(

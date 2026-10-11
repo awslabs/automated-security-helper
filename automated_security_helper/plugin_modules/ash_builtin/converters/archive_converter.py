@@ -1024,15 +1024,16 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 # that is not a tarball, an empty file. None of it is scanned, and
                 # whatever was written before the failure is removed, so the
                 # scanners do not read a partial extraction as the archive.
+                # Recorded, not only logged: the completeness gate reads
+                # failed_inputs, and an archive that could not be extracted is
+                # coverage lost.
                 if created_target is not None:
                     shutil.rmtree(created_target, ignore_errors=True)
                 reason = (
                     e.reason
                     if isinstance(e, _UnreadableArchive)
-                    else f"it could not be read as an archive ({type(e).__name__}: {e})"
+                    else f"{type(e).__name__}: {e}"
                 )
-                self.record_refused_input(
-                    TreeInputRefused(archive_display, reason), scan_incomplete=True
-                )
+                self.record_failed_input(archive_file, reason)
 
         return results

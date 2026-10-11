@@ -74,8 +74,8 @@ def test_the_first_refusals_are_listed_and_the_rest_counted(
     listed = [r for r in converter.refused_inputs if r.member is not None]
     summaries = [r for r in converter.refused_inputs if r.member is None]
     assert [r.member for r in listed] == [f"vendor/p{i:03d}.whl" for i in range(LISTED)]
-    assert [(s.path, s.unlisted_members, s.scan_incomplete) for s in summaries] == [
-        ("outer.zip", 5, False)
+    assert [(s.path, s.unlisted_members, s.limit) for s in summaries] == [
+        ("outer.zip", 5, None)
     ]
     assert summaries[0].reason == listed[0].reason
     naming = [w for w in ash_warnings if "'outer.zip'" in w.getMessage()]

@@ -186,20 +186,22 @@
   extraction limits can be checked. The tar stream is now read through a reader that
   refuses any single read over 1 MiB and bounds the header pass to 4 MiB plus 2 KiB
   per member; the decompressor is chosen from the archive's leading bytes. An
-  archive over either is refused as one that cannot be read, and a sparse member
-  whose map entries overlap or are out of order is refused.
+  archive over either is a failed input, as an unreadable archive is, and a sparse
+  member whose map entries overlap or are out of order is refused.
 
 - **An archive the converter cannot read makes the scan incomplete.** A `.zip`,
   `.tar` or `.gz` that zipfile and tarfile cannot read (a bad CRC, a truncated or
   damaged stream, an empty file) used to leave a log line, and a zip that failed part
-  way left its first members on disk, where the scanners read them. It is now refused
-  whole, with `scan_incomplete` in its `refused_inputs` record; anything written from
-  it is removed; and with `fail_on_incomplete_scanners` on the scan exits 1 naming it.
+  way left its first members on disk, where the scanners read them. It is now
+  recorded in `converter_results.archive.failed_inputs` (the record a converter's
+  input that could not be converted gets); anything written from it is removed; and
+  with `fail_on_incomplete_scanners` on the scan exits 1 naming it. The summaries,
+  `ash.flat.json` and `ash.sarif` list failed inputs with the refusals.
 
 - **A single-file `.gz` is decompressed and scanned.** A `.gz` that is one compressed
   file rather than a tarball, such as `data.json.gz`, used to be passed over. It is
   decompressed to `data.json` within the extraction limits and the scan's budget,
-  and scanned. A `.tar.gz` that holds no tar is refused as unreadable.
+  and scanned. A `.tar.gz` that holds no tar is a failed input.
 
 - **A Git LFS pointer named like an archive is reported, not failed.** A checkout
   without its LFS objects holds a pointer file where each LFS-tracked `.zip` or
