@@ -52,8 +52,10 @@ gate does not enforce its check that every selected scanner completed. Set
 ## Variable contract
 
 These names are shared with the CDK implementation of the same targets. Terraform
-uses `snake_case`; the mapping is one to one. Not every target takes every
-variable — a blank cell means the variable does not apply there.
+uses `snake_case`, and the names in this table map one to one. Parameters outside
+it can differ: `McpIngressCidr` is the `ingress_cidr_blocks` list on the fargate
+module. Not every target takes every variable — a blank cell means the variable
+does not apply there.
 
 | Shared name | Terraform name | image-pipeline | agentcore | fargate | codecommit-gate | codepipeline-executor |
 |---|---|---|---|---|---|---|

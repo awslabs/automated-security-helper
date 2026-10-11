@@ -63,8 +63,9 @@ has consequences worth knowing before the first `create-stack` rather than after
 `cdk/` holds the CDK apps and the synthesized templates in `cdk/templates/`. You can
 launch any of them straight from the CloudFormation console without running `cdk` at
 all. The console uploads the template for you, so template size never comes up.
-`terraform/` mirrors the same targets, with mostly the same names in snake case;
-`terraform/README.md` under "Variable contract" lists the exceptions.
+`terraform/` mirrors the same targets. The parameters listed in `terraform/README.md`
+under "Variable contract" keep their names in snake case; others can differ, such as
+`McpIngressCidr`, which is the `ingress_cidr_blocks` list on the fargate module.
 
 Scripting the launch is where size does come up. CloudFormation caps an inline
 `aws cloudformation create-stack --template-body` at 51,200 bytes. Only `AshAgentCore`
