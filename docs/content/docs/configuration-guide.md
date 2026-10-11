@@ -456,7 +456,9 @@ delivered tree, named as `config_path`) is limited the same way, wherever it is.
 file any MCP client delivered also counts as inside the scanned tree for the path
 and module checks below: everything under the MCP workspace root
 (`$ASH_MCP_WORKSPACE_ROOT`, by default `~/.cache/ash-mcp/`) except each session's
-`config/` directory, which only the server writes.
+`config/` directory, which only the server writes. A profile a client patched with
+`select_profile` is written to the session's `client-config/` directory instead, so
+it counts as the client's.
 
 | Setting | From a config file inside the scanned tree |
 |---|---|
@@ -505,8 +507,12 @@ on which:
   points. A file under the MCP workspace root is a client's whoever names it: a
   `--config` or `ASH_CONFIG` naming one, on the CLI as well, gets the limits of a
   config inside the scanned tree, and the server's runtime-override policy is
-  never read from it (the built-in defaults apply instead). The table above applies, and so does the session's runtime-override
-  policy, `global_settings.mcp.runtime_overrides`:
+  never read from it (the built-in defaults apply instead). A profile after the
+  client's `select_profile` `patch_ops` or `override_yaml` is the client's too,
+  held to the registered profile as its trusted base, and so are the MCP
+  workspace tools' `config_overrides`, even for keys the runtime-override
+  allowlist lets the client change. The table above applies, and so does the
+  session's runtime-override policy, `global_settings.mcp.runtime_overrides`:
 
   - The file may not change a field that `denied_paths` or
     `denied_value_patterns` denies. Entries match either `-` or `_`, every

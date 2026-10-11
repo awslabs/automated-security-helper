@@ -199,6 +199,9 @@ def _opts(tmp_path: Path) -> ScanOptions:
         ash_plugin_modules=["my_plugins"],
         allow_missing_projects=True,
         client_config_policy=_RULES,
+        # The registered profile the MCP server passes when a client patched the
+        # session's copy, which ``config`` then names. Not read here, only carried.
+        trusted_config_path=str(tmp_path / "operator" / "profile.yaml"),
     )
 
 
@@ -245,6 +248,7 @@ def _expected(tmp_path: Path) -> Dict[str, Any]:
         "project_timeout": 90.0,
         "allow_missing_projects": True,
         "default_config_path": str(tmp_path / "work" / ".ash.yaml"),
+        "trusted_config_path": str(tmp_path / "operator" / "profile.yaml"),
         "client_config_rules": _RULES,
     }
 

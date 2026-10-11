@@ -392,6 +392,12 @@ class ProjectScanSettings:
     #: plan the scan does not run, with nothing raising. The MCP workspace tools
     #: set both from one variable for that reason.
     default_config_path: Optional[str] = None
+    #: The operator's config the trust checks take as the trusted base, when it is
+    #: not ``default_config_path``: the registered profile, when an MCP client
+    #: patched the session's copy and ``default_config_path`` names that copy.
+    #: None takes ``default_config_path``. The same value as the resolver's
+    #: ``trusted_config``, for the reason given above.
+    trusted_config_path: Optional[str] = None
     #: The rules a project config an MCP client delivered is checked against,
     #: the session's (config/client_config_policy.py). Set by the MCP workspace
     #: tools with the same value they resolved the plan with; None takes the
@@ -916,7 +922,11 @@ def _project_config_with_policy(
         # A project's own config replaces the operator's default config. The
         # operator's file still decides the sandbox when the project's is in the
         # tree, the same as it would for a project that has none.
-        trusted_config_path=settings.default_config_path,
+        trusted_config_path=(
+            settings.trusted_config_path
+            if settings.trusted_config_path is not None
+            else settings.default_config_path
+        ),
         client_config_policy=settings.client_config_rules,
     )
 

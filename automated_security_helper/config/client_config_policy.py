@@ -676,6 +676,7 @@ def apply_client_config_rules(
     permit_base: Optional[Callable[[Path], bool]],
     scanned_root: Path | str | None = None,
     all_delivered: bool = False,
+    client_overrides: bool = False,
 ) -> AshConfig:
     """``config``, checked for denied fields its client-delivered files set.
 
@@ -687,7 +688,11 @@ def apply_client_config_rules(
     ``scanned_root`` is the tree being scanned (the source directory when None).
     ``all_delivered`` counts every file of the chain as delivered, for a config
     path a client named (``resolve_config``'s ``untrusted_config``), wherever
-    the file is.
+    the file is. ``client_overrides`` says ``config`` carries overrides an MCP
+    client supplied (the workspace tools' ``config_overrides``), so what no file
+    of the chain the client did not deliver supplies is marked and moved even
+    when no file was delivered. The overrides themselves were already checked
+    against the same allowlist (``cli/mcp/workspace._gate_client_overrides``).
     """
     from automated_security_helper.config.client_scanner_exclusions import (
         strip_client_scanner_exclusions,
@@ -697,7 +702,7 @@ def apply_client_config_rules(
     is_delivered: Callable[[Path], bool] = (
         (lambda _path: True) if all_delivered else config_is_client_supplied
     )
-    if not any(is_delivered(path) for path in documents):
+    if not client_overrides and not any(is_delivered(path) for path in documents):
         return config
     if rules is None:
         rules = rules_from(

@@ -278,6 +278,7 @@ def _resolve(
     config_overrides: Optional[Sequence[str]],
     default_config: Optional[str] = None,
     client_config_rules: Optional["ClientConfigRules"] = None,
+    trusted_config: Optional[str] = None,
 ) -> WorkspacePlan:
     """Resolve the workspace, or raise.
 
@@ -292,6 +293,10 @@ def _resolve(
     ``mcp_resolve_workspace`` report a plan the scan does not run -- and a dry run
     that describes a different scan is worse than no dry run, because it is the
     artifact a client checks before committing to N repository scans.
+
+    ``trusted_config`` is the registered profile ``default_config`` is resolved
+    against, which differs from it when the client patched the session's profile
+    (``_resolve_session_config``).
     """
     return resolve_workspace(
         Path(workspace_file),
@@ -302,6 +307,7 @@ def _resolve(
         config_overrides=tuple(config_overrides or ()),
         default_config=Path(default_config) if default_config else None,
         client_config_rules=client_config_rules,
+        trusted_config=Path(trusted_config) if trusted_config else None,
     )
 
 
@@ -613,15 +619,21 @@ def _resolve_override_key(
 def _resolve_session_config(
     session_id: Optional[str],
     profile: Optional[str],
-) -> Optional[str]:
-    """Return the config path a workspace scan should run under, or None.
+) -> Tuple[Optional[str], Optional[str]]:
+    """Return the config a workspace scan should run under and its trusted base.
 
-    Two sources, in order of specificity:
+    ``(config_path, trusted_config_path)``, or ``(None, None)``. Two sources, in
+    order of specificity:
 
     * ``profile``, naming a registered profile for this one call. Materialized
       into the session's sandbox the same way ``select_profile`` does, so one code
-      path produces the file and one boundary covers it.
-    * the config this session already bound with ``select_profile``.
+      path produces the file and one boundary covers it, under its own name
+      (``CALL_PROFILE_FILENAME``) so the session's own binding is left as it was.
+      It is the operator's profile, so it is its own trusted base.
+    * the config this session already bound with ``select_profile``, and the
+      registered profile it is resolved against. They differ when the client
+      patched the profile: the config is then the client's copy in
+      ``client-config/``, and the trusted base the profile in ``config/``.
 
     None means neither applies, and then nothing is passed -- each project's own
     ``.ash.yaml`` discovery runs as it always has. Inventing a path here would
@@ -634,9 +646,11 @@ def _resolve_session_config(
     """
 
     from automated_security_helper.cli.mcp.profile_registry import (
+        CALL_PROFILE_FILENAME,
         get_profile_registry,
         materialize_session_config,
         resolve_session_config_path,
+        resolve_session_trusted_config_path,
     )
 
     if profile is not None:
@@ -647,9 +661,15 @@ def _resolve_session_config(
             raise ProfileNotRegisteredError(
                 f"unknown profile {profile!r}; known: {known}"
             )
-        return materialize_session_config(session_id, entry.config)
+        path = materialize_session_config(
+            session_id, entry.config, filename=CALL_PROFILE_FILENAME
+        )
+        return path, path
 
-    return resolve_session_config_path(session_id)
+    return (
+        resolve_session_config_path(session_id),
+        resolve_session_trusted_config_path(session_id),
+    )
 
 
 def _scan_options(
@@ -663,6 +683,7 @@ def _scan_options(
     allow_missing_projects: bool,
     config_path: Optional[str] = None,
     client_config_rules: Optional["ClientConfigRules"] = None,
+    trusted_config_path: Optional[str] = None,
 ) -> ScanOptions:
     """Assemble the ``ScanOptions`` the shared settings builder reads.
 
@@ -690,6 +711,8 @@ def _scan_options(
         # the shared builder rather than set on the settings record afterwards, so
         # the CLI and MCP paths cannot disagree about which field carries it.
         config=config_path,
+        # The registered profile ``config`` is resolved against, as for the plan.
+        trusted_config_path=trusted_config_path,
         # The same rules the plan was resolved with; see ``_resolve``.
         client_config_policy=client_config_rules,
         workspace_plan=plan,
@@ -1106,7 +1129,7 @@ async def mcp_resolve_workspace(
         )
 
     try:
-        session_config = _resolve_session_config(session_id, profile)
+        session_config, trusted_config = _resolve_session_config(session_id, profile)
     except (ProfileNotRegisteredError, OSError, RuntimeError) as exc:
         return _error_response(
             exc,
@@ -1132,6 +1155,7 @@ async def mcp_resolve_workspace(
             config_overrides,
             default_config=session_config,
             client_config_rules=rules,
+            trusted_config=trusted_config,
         )
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "resolve_workspace")
@@ -1259,7 +1283,7 @@ async def mcp_scan_workspace(
             )
 
     try:
-        session_config = _resolve_session_config(session_id, profile)
+        session_config, trusted_config = _resolve_session_config(session_id, profile)
     except (ProfileNotRegisteredError, OSError, RuntimeError) as exc:
         return _error_response(
             exc,
@@ -1287,6 +1311,7 @@ async def mcp_scan_workspace(
             # ``_resolve`` and ``ProjectScanSettings.default_config_path``.
             default_config=session_config,
             client_config_rules=rules,
+            trusted_config=trusted_config,
         )
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "scan_workspace")
@@ -1326,6 +1351,7 @@ async def mcp_scan_workspace(
                 allow_missing_projects=allow_missing_projects,
                 config_path=session_config,
                 client_config_rules=rules,
+                trusted_config_path=trusted_config,
             )
         )
         project_outputs = _prepare_project_outputs(

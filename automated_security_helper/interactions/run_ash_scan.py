@@ -2291,6 +2291,9 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         # threaded through two layers, and silently ignored, which is the same
         # shape of defect as the ``ASH_OFFLINE`` one recorded in cli/mcp/workspace.
         default_config_path=opts.config,
+        # The registered profile ``opts.config`` is resolved against when an MCP
+        # client patched the session's copy; None takes ``opts.config``.
+        trusted_config_path=opts.trusted_config_path,
         # The rules a project config an MCP client delivered is checked against.
         # The same value the plan was resolved with, for the reason above.
         client_config_rules=opts.client_config_policy,

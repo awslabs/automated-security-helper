@@ -73,6 +73,8 @@ await mcp__ash__run_ash_scan()  # runs under "strict"
 
 The returned `config_path` names a file the server materialized inside your session's own workspace. That is how the binding reaches the scan: the scan entry point takes a config path rather than a config object, so the resolved config is written out and the path passed down. The file is inside the session sandbox, so this session may read it and another session may not. `clear_source` removes it along with the rest of the session workspace, after which calls fall back to ordinary config discovery.
 
+Where the file is depends on the mode. The profile as registered is always written to the session's `config/ash.yaml`, and a static binding (or one with an empty `patch_ops`) returns that path. A binding with a non-empty `patch_ops`, or with `override_yaml`, returns `client-config/ash.yaml`, which holds the profile after your change and counts as your config, not the operator's; see [A patched value is the client's](#a-patched-value-is-the-clients). Binding again without a patch removes `client-config/ash.yaml`.
+
 Sessions do not share a binding, and re-binding replaces the previous one for that session only.
 
 #### Before v3.4
@@ -162,9 +164,9 @@ Any of these triggers an immediate failure. Out-of-order sequences, checksum mis
 
 ### Config files in delivered source
 
-A delivered tree can carry its own `.ash.yaml`, and a client can name any file in its session workspace as `run_ash_scan`'s `config_path`. Such a file was written by the client, not the operator. So was any other file a client names as `config_path` (or to `get_config` and `validate_config`), unless it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or in the session's own `config/` directory: a config in another checkout the server may scan is that checkout's, and the operator let the server scan it, not take its settings. A path is judged where it sits as well as by the file it reaches, so a link a client delivered is the client's wherever it points. Everything below applies to all of these.
+A delivered tree can carry its own `.ash.yaml`, and a client can name any file in its session workspace as `run_ash_scan`'s `config_path`. Such a file was written by the client, not the operator. So was any other file a client names as `config_path` (or to `get_config` and `validate_config`), unless it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or in the session's own `config/` directory: a config in another checkout the server may scan is that checkout's, and the operator let the server scan it, not take its settings. A path is judged where it sits as well as by the file it reaches, so a link a client delivered is the client's wherever it points. The profile `select_profile` writes after a client's `patch_ops` or `override_yaml`, `client-config/ash.yaml`, is the client's too, and so are the workspace tools' `config_overrides` (see [A patched value is the client's](#a-patched-value-is-the-clients)). Everything below applies to all of these.
 
-First, it may not change a field the session's runtime-override policy denies. `denied_paths` and `denied_value_patterns` apply to every file of the config's chain that a client delivered, as resolution parsed it, matched as for `patch_ops` (either `-` or `_`, every spelling of a plugin's section, globs). They apply whether or not runtime overrides are enabled, since a config file is not an override. Only what the file changes counts: a value equal to the server's at the same key (an `ash config init` file writes the defaults) is accepted, while every op in the file's `patch` is checked as written.
+First, it may not change a field the session's runtime-override policy denies. `denied_paths` and `denied_value_patterns` apply to every file of the config's chain that a client delivered, as resolution parsed it, matched as for `patch_ops` (either `-` or `_`, every spelling of a plugin's section, globs). They apply whether or not runtime overrides are enabled, since a config file is not an override. Only what the file changes counts: a value equal to the server's at the same key (an `ash config init` file writes the defaults) is accepted, and so is a mapping key the server's config already has, which a `denied_value_patterns` entry also matches, while every op in the file's `patch` is checked as written.
 
 - The policy is the registered profile the session bound with `select_profile`, or else the one in `ASH_CONFIG` (the defaults when it sets none). It is never read from the session's copy of the profile, which a client's `patch_ops` produced, and `/global_settings/mcp` is a default `denied_paths` entry, so a client cannot change the policy.
 - Under the default `denied_paths`, `sandbox` and `ash_plugin_modules` are checked against the server's own settings instead (below), and a delivered tree's own `global_settings.suppressions` and `global_settings.ignore_paths` apply, as they do on the CLI. Each suppression and ignore path the operator did not supply is marked `client_supplied: true` in the results' config, and a SARIF suppression from one carries `properties.clientSupplied`. Scanners and converters skip only the operator's ignore paths, so the files under a client-supplied ignore path are still scanned, and each finding there is kept as a suppressed result marked the same way rather than dropped. The results show what the client's config hid.
@@ -187,7 +189,7 @@ Its reporter destinations and credentials, each scanner's own config file, and w
 
 Such a file also resolves no environment variables, since the environment `!ENV` would read is the server's. A file the client delivered or named that uses `!ENV`, tagged or as a plain `${VAR:default}` value, is refused with a config error naming the file and the line or key: `run_ash_scan` returns `error_type` `config_env_not_resolved` instead of starting the scan, and `get_config` and `validate_config` report the same `error_type`. The same applies to `validate_config`'s `config_content`. A symlink in a delivered tree counts as delivered wherever it points. A base the file `extends` is judged on its own location, so an operator's base keeps its `!ENV`.
 
-Everything else in the file applies as usual. The config the server materializes for `select_profile`, under the session's `config/` directory, is the operator's and keeps its grants, as does a file under `ASH_MCP_ALLOWED_CONFIG_ROOTS`, which also resolves `!ENV` as usual.
+Everything else in the file applies as usual. The registered profile the server materializes for `select_profile`, the session's `config/ash.yaml`, is the operator's and keeps its grants, as does a file under `ASH_MCP_ALLOWED_CONFIG_ROOTS`, which also resolves `!ENV` as usual. A patched profile in `client-config/ash.yaml` is the client's, and `config/ash.yaml` is the trusted base it is held to.
 
 `get_config` shows the sandbox section the same way, as a scan of the session's delivered source (or, with none delivered, the working directory) would apply it.
 
@@ -243,6 +245,21 @@ Additional invariants enforced by `apply_runtime_patch`:
 - Any rejection raises `RuntimePatchDeniedError` with the offending op and the rule that fired; nothing is applied.
 
 The full allowlist is exposed at runtime via the `ash://schema/runtime-overrides` resource so clients can introspect what is patchable before composing a patch.
+
+### A patched value is the client's
+
+The allowlist decides which keys a client may change. It does not make the value the client writes the operator's. So `select_profile` writes the profile after a non-empty `patch_ops`, or after `override_yaml`, to the session's `client-config/ash.yaml`, and every tool that uses the session's config (`run_ash_scan`, `get_config`, `validate_config`, `resolve_ash_workspace` and `run_ash_workspace_scan`) resolves that file as a config the client delivered, with the rules in [Config files in delivered source](#config-files-in-delivered-source):
+
+- A suppression or ignore path the patch added is marked `client_supplied`, and a finding it hides is reported suppressed and marked.
+- An exclusion the patch added to a scanner's own options is reported, not applied. A `scanners.trivy-repo.options.ignore_file` it sets is not passed to trivy, and is read for marked suppressions only when it is inside the scanned tree, so a file in another checkout has no effect.
+- A scanner config file the patch names (`config_file` of bandit, grype or syft) is replaced by the registered profile's, and a tool path inside the scanned tree or in a delivered file is refused as for any config.
+- Its sandbox settings and plugin modules are restrict-only.
+
+The trusted base is the profile as the operator registered it, written unpatched to the session's `config/ash.yaml`: the profile's own suppressions, sandbox grants and tool config files still apply, and only what the patch changed is the client's. The policy a patched profile is checked against is the registered profile's too, never the patched copy's.
+
+The workspace tools' `config_overrides` get the same rules. An override the allowlist accepts changes each project's config, and what it sets is marked, reported or confined as a patched value is.
+
+A profile a workspace tool is given for one call (`profile`) is the operator's, and is written to `config/call-profile.yaml`, so it leaves the session's own binding as it was.
 
 ### Overrides are patches
 

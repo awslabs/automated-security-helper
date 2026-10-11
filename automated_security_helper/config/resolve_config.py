@@ -246,7 +246,15 @@ def resolve_config(
             its reporter destinations (``config/reporter_trust.py``).
         client_config_policy: The rules a file of the chain that an MCP client
             delivered is checked against; see ``config/client_config_policy.py``.
-            None takes the trusted base's.
+            None takes the trusted base's. When set, ``config_overrides`` are the
+            client's too (the MCP workspace tools' ``config_overrides``): what
+            they set is marked and confined as a delivered file's is.
+
+    A file of the chain an MCP client delivered
+    (``cli/mcp/sandbox.config_is_client_supplied``) is confined as a file inside
+    the scanned tree is, wherever it is, and is never the trusted base: a
+    session's client-patched profile is one. ``untrusted_config`` extends the
+    same to a file a client named anywhere else.
 
     Returns:
         The resolved AshConfig object
@@ -265,6 +273,9 @@ def resolve_config(
     )
     if config is None:
         return config
+    # Under the MCP server the overrides come from the client, held to the
+    # session's allowlist; see operator_overrides below.
+    client_overrides = client_config_policy is not None and bool(config_overrides)
     config = clear_client_supplied_marks(config)
     config = apply_client_config_rules(
         config,
@@ -275,21 +286,23 @@ def resolve_config(
         permit_base=permit_base,
         scanned_root=scanned_root,
         all_delivered=untrusted_config,
+        client_overrides=client_overrides,
     )
     if scanned_root is None:
         scanned_root = source_dir if source_dir is not None else Path.cwd()
     trees = scanned_trees(Path(scanned_root))
     if chain:
         in_tree = list(chain) if untrusted_config else _not_the_operators(chain, trees)
-        if not in_tree:
-            return config
         default_in_tree = _not_the_operators(default_config_chain(), trees)
     else:
         # With no config file, the config is get_default_config(): ASH_CONFIG's
         # file when that variable names one, which can be inside the tree too.
         in_tree = default_in_tree = _not_the_operators(default_config_chain(), trees)
-        if not in_tree:
-            return config
+    if client_overrides:
+        # Named in the warnings as the source of what is confined.
+        in_tree = [*in_tree, Path("config_overrides")]
+    if not in_tree:
+        return config
     operator = _load_operator_config(trusted_config_path, source_dir, permit_base)
     if operator is not None and not _not_the_operators(operator[1], trees):
         trusted = operator[0]

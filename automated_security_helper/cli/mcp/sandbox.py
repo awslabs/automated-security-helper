@@ -143,6 +143,13 @@ SOURCE_DIR_NAME = "source"
 #: so one boundary covers the config and the source it configures.
 CONFIG_DIR_NAME = "config"
 
+#: Subdirectory of a session sandbox holding a profile after a client's
+#: ``select_profile`` ``patch_ops`` or ``override_yaml``. The server writes it, but
+#: the values the patch set are the client's, so it is outside ``config/`` and
+#: ``config_is_client_supplied`` counts it as the client's like anything else in
+#: the sandbox. The session's own sandbox root covers it for reading.
+CLIENT_CONFIG_DIR_NAME = "client-config"
+
 #: Transports that carry callers the server does not otherwise trust.
 _NETWORKED_TRANSPORTS = frozenset({"streamable-http", "sse"})
 
@@ -462,6 +469,17 @@ class SessionSandbox:
                 "directory; pass a session_id resolved from the transport"
             )
         return self.root / CONFIG_DIR_NAME
+
+    @property
+    def client_config_dir(self) -> Path:
+        """Where a profile a client patched with ``select_profile`` lands."""
+
+        if self.root is None:
+            raise RuntimeError(
+                "this caller has no session sandbox, so it has no client config "
+                "directory; pass a session_id resolved from the transport"
+            )
+        return self.root / CLIENT_CONFIG_DIR_NAME
 
     def owns(self, resolved: Path) -> bool:
         """True when ``resolved`` is this session's own sandbox or inside it."""
@@ -896,6 +914,7 @@ __all__ = [
     "ASH_MCP_ALLOWED_ROOTS_ENV",
     "ASH_MCP_TRANSPORT_ENV",
     "DEFAULT_TRANSPORT",
+    "CLIENT_CONFIG_DIR_NAME",
     "CONFIG_DIR_NAME",
     "SOURCE_DIR_NAME",
     "SessionSandbox",

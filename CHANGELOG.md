@@ -137,6 +137,32 @@
   while a scan of the session runs is refused. See
   [Config files in delivered source](docs/content/docs/mcp/streamable-http.md#config-files-in-delivered-source).
 
+- **A value a client patched into its session profile is the client's.**
+  `select_profile`'s `patch_ops` and `override_yaml` still change only the keys
+  the profile's `runtime_overrides` allowlist permits, but a binding with either
+  is now written to the session's `client-config/ash.yaml`, not `config/ash.yaml`,
+  so `run_ash_scan`, `get_config`, `validate_config` and the workspace tools read
+  it as a config the client delivered. A suppression or ignore path the patch
+  added is marked `client_supplied`, a scanner exclusion it added (such as a
+  `scanners.trivy-repo.options.ignore_file` in another checkout) is reported
+  rather than applied, a bandit, grype or syft `config_file` it names is replaced
+  by the profile's, and its sandbox settings are restrict-only. Before, the
+  patched copy counted as the operator's, so all of these applied as the
+  operator's would. The trusted base is the registered profile, written unpatched
+  to `config/ash.yaml`, so the profile's own entries and grants still apply.
+  The workspace tools' `config_overrides` are treated the same way: before, a
+  value the allowlist accepted was honored as the operator's. A binding without
+  a patch, or with an empty `patch_ops`, is still `config/ash.yaml` and the
+  operator's, and it removes an earlier patched copy. A workspace tool's
+  per-call `profile` is written to `config/call-profile.yaml` and no longer
+  replaces the session's bound config. Any file under the MCP workspace root
+  outside a session's `config/` directory is now confined as a delivered config
+  wherever it is resolved, and is never taken as the trusted base. A
+  `denied_value_patterns` entry no longer refuses a delivered file for a mapping
+  key the server's config already has, so a patched profile that repeats the
+  operator's keys is not refused for them. See
+  [A patched value is the client's](docs/content/docs/mcp/streamable-http.md#a-patched-value-is-the-clients).
+
 - **A delivered config's exclusions in a scanner's own options are reported,
   not applied.** An entry it adds to bandit's `excluded_paths`, checkov's
   `skip_path`, opengrep's or semgrep's `exclude`, syft's `exclude` or

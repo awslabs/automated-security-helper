@@ -694,8 +694,10 @@ def config_document_denials(
     ``config`` is the trusted config. Its plugin sections add to the keys a glob
     denial is matched over, and a leaf whose value equals what ``config`` has at
     the same place (``_trusted_value``) changes nothing, so it is not refused: an
-    ``ash config init`` file writes the defaults. A ``patch`` op is refused
-    whatever it writes.
+    ``ash config init`` file writes the defaults. Nor is a mapping key ``config``
+    already has there, which a value pattern would otherwise refuse in every file
+    that repeats the trusted config, a session's client-patched profile among
+    them. A ``patch`` op is refused whatever it writes.
 
     A write at or under a pattern in ``exempt`` is not checked against
     ``denied_paths``, though value patterns still apply to it. A write at or
@@ -735,9 +737,9 @@ def config_document_denials(
                     reason = exc.rule
         if reason is None:
             continue
-        if kind == "leaf" and config is not None and dump is not None:
+        if kind != "patch" and config is not None and dump is not None:
             present, value = _trusted_value(config, dump, path, plugin_keys)
-            if present and value == _as_json(op["value"]):
+            if present and (kind == "key" or value == _as_json(op["value"])):
                 continue
         denials.append(DocumentDenial(key, path, reason, kind == "patch"))
     return denials

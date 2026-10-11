@@ -225,6 +225,12 @@ class SessionState:
     takes a config *path*. The path here names a file
     :func:`materialize_session_config` wrote inside the session's own sandbox, so
     a scan can be handed it and the confinement boundary permits reading it.
+
+    ``trusted_config_path`` names the registered profile as the operator
+    registered it, materialized in the session's ``config/`` directory. It is
+    ``config_path`` itself for a binding without a client patch. With one,
+    ``config_path`` is the patched copy in ``client-config/``, which is the
+    client's, and this is the trusted base it is resolved against.
     """
 
     session_id: str
@@ -233,6 +239,7 @@ class SessionState:
     patch_ops: Optional[List[Dict]] = field(default=None)
     override_yaml: Optional[str] = None
     config_path: Optional[str] = None
+    trusted_config_path: Optional[str] = None
 
 
 _session_lock = RLock()
@@ -266,9 +273,25 @@ def get_session_state(session_id: Optional[str] = None) -> SessionState:
 #: profile the session ever selected.
 SESSION_CONFIG_FILENAME = "ash.yaml"
 
+#: Filename, in the session's ``config/`` directory, of a profile a workspace tool
+#: was given for one call (``profile``). Not ``SESSION_CONFIG_FILENAME``: that file
+#: is the profile the session bound, and the trusted base of a patched binding, so
+#: a call that names another profile must not replace it.
+CALL_PROFILE_FILENAME = "call-profile.yaml"
 
-def materialize_session_config(session_id: Optional[str], config: AshConfig) -> str:
+
+def materialize_session_config(
+    session_id: Optional[str],
+    config: AshConfig,
+    *,
+    client_patched: bool = False,
+    filename: str = SESSION_CONFIG_FILENAME,
+) -> str:
     """Write ``config`` into the session's sandbox and return the path.
+
+    Into ``config/``, which counts as the operator's, unless ``client_patched``:
+    a profile after a client's ``patch_ops`` or ``override_yaml`` goes into
+    ``client-config/``, which counts as the client's (``sandbox.CLIENT_CONFIG_DIR_NAME``).
 
     Why a file at all
     -----------------
@@ -329,12 +352,50 @@ def materialize_session_config(session_id: Optional[str], config: AshConfig) -> 
             "cannot materialize a session config: no MCP workspace root could "
             "be resolved. Set ASH_MCP_WORKSPACE_ROOT."
         )
-    config_dir = sandbox.config_dir
+    config_dir = sandbox.client_config_dir if client_patched else sandbox.config_dir
     config_dir.mkdir(parents=True, exist_ok=True)
-    target = config_dir / SESSION_CONFIG_FILENAME
+    target = config_dir / filename
     # Written to the native path; only the recorded spelling is normalized.
     config.save(target)
     return target.as_posix()
+
+
+def materialize_session_binding(
+    session_id: Optional[str],
+    registered: AshConfig,
+    patched: Optional[AshConfig] = None,
+) -> Tuple[str, str]:
+    """Write a ``select_profile`` binding; return ``(config_path, trusted_config_path)``.
+
+    ``registered`` is the profile as the operator registered it, written to
+    ``config/``. ``patched`` is the profile after the client's ``patch_ops`` or
+    ``override_yaml``, written to ``client-config/``; None for a binding without
+    a patch, whose config is ``registered`` and whose previous patched copy, if
+    any, is removed, so the session holds no client copy it is not bound to.
+
+    The client's side changes first: the patched copy is written, or the old one
+    removed, before the operator copy is replaced, so the operator copy is never
+    replaced under an older client copy. The binding is recorded by the caller
+    only after both, so a failure in between leaves the previous binding with a
+    different client copy, still resolved as the client's against the previous
+    profile, or with none, which leaves it unbound.
+
+    Raises:
+        RuntimeError: as ``materialize_session_config`` does.
+        OSError: when a file cannot be written or removed.
+    """
+    from automated_security_helper.cli.mcp.sandbox import session_sandbox
+
+    if patched is not None:
+        config_path = materialize_session_config(
+            session_id, patched, client_patched=True
+        )
+        return config_path, materialize_session_config(session_id, registered)
+    sandbox = session_sandbox(session_id or DEFAULT_SESSION_ID)
+    if sandbox.root is not None:
+        (sandbox.client_config_dir / SESSION_CONFIG_FILENAME).unlink(missing_ok=True)
+    trusted = materialize_session_config(session_id, registered)
+    return trusted, trusted
 
 
 def bind_session_config(
@@ -345,6 +406,7 @@ def bind_session_config(
     patch_ops: Optional[List[Dict]] = None,
     override_yaml: Optional[str] = None,
     config_path: Optional[str] = None,
+    trusted_config_path: Optional[str] = None,
 ) -> SessionState:
     """Bind a resolved config to ``session_id``.
 
@@ -352,10 +414,12 @@ def bind_session_config(
     so a future ``mcp__ash__get_session`` tool can show *how* the config was
     derived (static, inherit-and-patch, full-override).
 
-    ``config_path`` names the materialized file a scan will be handed. Passed in
-    rather than written here so that a caller which fails to materialize -- no
-    resolvable workspace root -- reports that as its own failure instead of
-    binding a config nothing can reach.
+    ``config_path`` names the materialized file a scan will be handed, and
+    ``trusted_config_path`` the registered profile's copy it is resolved against
+    (``materialize_session_binding`` returns both). Passed in rather than written
+    here so that a caller which fails to materialize -- no resolvable workspace
+    root -- reports that as its own failure instead of binding a config nothing
+    can reach.
     """
     sid = session_id or DEFAULT_SESSION_ID
     with _session_lock:
@@ -366,6 +430,7 @@ def bind_session_config(
             patch_ops=patch_ops,
             override_yaml=override_yaml,
             config_path=config_path,
+            trusted_config_path=trusted_config_path,
         )
         _session_state[sid] = state
         return state
@@ -394,6 +459,28 @@ def resolve_session_config_path(session_id: Optional[str] = None) -> Optional[st
     with _session_lock:
         state = _session_state.get(session_id or DEFAULT_SESSION_ID)
         recorded = state.config_path if state is not None else None
+    if recorded is None:
+        return None
+    return recorded if Path(recorded).is_file() else None
+
+
+def resolve_session_trusted_config_path(
+    session_id: Optional[str] = None,
+) -> Optional[str]:
+    """The trusted base a config this session's client supplied is resolved against, or None.
+
+    The registered profile the session bound, as the operator registered it: its
+    copy in the session's ``config/`` directory, never the client-patched copy
+    ``resolve_session_config_path`` returns for a patched binding. None for an
+    unbound session, or when the file is gone, as for that function (the two
+    files are removed together, with the session workspace); the caller then
+    takes the server's default config as the trusted base, as for a client's
+    config in an unbound session.
+    """
+
+    with _session_lock:
+        state = _session_state.get(session_id or DEFAULT_SESSION_ID)
+        recorded = state.trusted_config_path if state is not None else None
     if recorded is None:
         return None
     return recorded if Path(recorded).is_file() else None

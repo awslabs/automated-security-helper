@@ -428,14 +428,23 @@ def _resolve_project_config(
     default_config: Optional[Path] = None,
     workspace_root: Optional[Path] = None,
     client_config_rules: Optional[ClientConfigRules] = None,
+    trusted_config: Optional[Path] = None,
 ) -> Tuple[AshConfig, Optional[Path]]:
     """Load one project's config through ASH's ordinary resolution path.
 
-    ``workspace_root`` and ``default_config`` are passed on as ``scanned_root``
-    and ``trusted_config_path``, as ``execution._project_config_with_policy`` does,
-    so what an in-tree config may set (sandbox grants, ``ash_plugin_modules``) is
-    decided against the whole workspace here too. The plan's plugin list is what
-    the registry is pre-warmed from, before any project's scan resolves its config.
+    ``workspace_root`` and ``trusted_config`` (``default_config`` when None) are
+    passed on as ``scanned_root`` and ``trusted_config_path``, as
+    ``execution._project_config_with_policy`` does, so what an in-tree config may
+    set (sandbox grants, ``ash_plugin_modules``) is decided against the whole
+    workspace here too. The plan's plugin list is what the registry is pre-warmed
+    from, before any project's scan resolves its config.
+
+    The two differ under the MCP server when a client patched the session's
+    profile: ``default_config`` is then the client's copy, and ``trusted_config``
+    the profile as the operator registered it. Taking the client's copy as the
+    trusted base would let it grant what it sets; it is refused as one
+    (``resolve_config``), and falling back to the defaults would drop the
+    profile's own grants.
 
     The config file is located once and passed back in, rather than letting
     resolution search again, so the file the plan reports is definitionally the
@@ -492,7 +501,9 @@ def _resolve_project_config(
             fallback_to_default=True,
             config_overrides=list(config_overrides),
             scanned_root=workspace_root,
-            trusted_config_path=default_config,
+            trusted_config_path=(
+                trusted_config if trusted_config is not None else default_config
+            ),
             client_config_policy=client_config_rules,
         )
         return config, config_path
@@ -732,6 +743,7 @@ def _apply_workspace_policy(
     workspace_config: Optional[PathLike],
     default_config: Optional[PathLike] = None,
     client_config_rules: Optional[ClientConfigRules] = None,
+    trusted_config: Optional[PathLike] = None,
 ) -> Optional[Path]:
     """Resolve the workspace policy and fold it into every active project.
 
@@ -806,7 +818,7 @@ def _apply_workspace_policy(
                 for resolved in resolved_for.values()
             ],
             definition.root,
-            default_config,
+            trusted_config if trusted_config is not None else default_config,
             client_config_rules,
         )
 
@@ -838,6 +850,7 @@ def resolve_workspace(
     config_overrides: Tuple[str, ...] = (),
     default_config: Optional[PathLike] = None,
     client_config_rules: Optional[ClientConfigRules] = None,
+    trusted_config: Optional[PathLike] = None,
 ) -> WorkspacePlan:
     """Resolve and validate a workspace, returning an inspectable plan.
 
@@ -869,6 +882,13 @@ def resolve_workspace(
             bound with ``select_profile``; see
             :func:`_resolve_project_config` on why the same value has to reach
             ``ProjectScanSettings.default_config_path`` as well.
+        client_config_rules: The rules a config an MCP client delivered is
+            checked against (``config/client_config_policy.py``).
+        trusted_config: The operator's config the trust checks take as the
+            trusted base, when it is not ``default_config``: the registered
+            profile, when the MCP client patched the session's copy of it. None
+            takes ``default_config``. Must reach
+            ``ProjectScanSettings.trusted_config_path`` too.
 
     Returns:
         A :class:`~automated_security_helper.workspace.plan.WorkspacePlan` with
@@ -920,6 +940,7 @@ def resolve_workspace(
             default_config=Path(default_config) if default_config else None,
             workspace_root=definition.root,
             client_config_rules=client_config_rules,
+            trusted_config=Path(trusted_config) if trusted_config else None,
         )
         scanners, pins = _scanner_state(config)
         label = _project_label(config, candidate.key)
@@ -950,6 +971,7 @@ def resolve_workspace(
         workspace_config,
         default_config=default_config,
         client_config_rules=client_config_rules,
+        trusted_config=trusted_config,
     )
 
     return WorkspacePlan(

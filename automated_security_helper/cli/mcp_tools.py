@@ -14,7 +14,7 @@ import asyncio
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
@@ -499,7 +499,7 @@ async def _run_scan_async(
     )
 
     from automated_security_helper.cli.mcp.profile_registry import (
-        resolve_session_config_path,
+        resolve_session_trusted_config_path,
     )
     from automated_security_helper.cli.mcp.sandbox import (
         config_base_gate,
@@ -520,7 +520,9 @@ async def _run_scan_async(
     # A config the client delivered into a session sandbox (an upload or a clone)
     # is the client's, not the operator's, wherever the scan target is. It is
     # resolved restrict-only for sandbox settings, with the profile this session
-    # bound, if any, as the trusted base the grants come from.
+    # bound, if any, as the trusted base the grants come from: the registered
+    # profile, not the session's copy of it after the client's patch, which is
+    # itself a config the client supplied.
     # A config path the client named is the client's unless the operator set it
     # aside (client_named_config_is_untrusted), even when it is a file in another
     # repository the server may scan.
@@ -528,7 +530,7 @@ async def _run_scan_async(
         config_path
     )
     trusted_config_path = (
-        resolve_session_config_path(session_id) if untrusted_config else None
+        resolve_session_trusted_config_path(session_id) if untrusted_config else None
     )
     # Every file of the chain a client delivered, the named upload or the
     # target's own .ash.yaml, is checked against this session's policy.
@@ -1367,7 +1369,7 @@ def mcp_get_config(
     import yaml as _yaml
     from automated_security_helper.cli.mcp.profile_registry import (
         DEFAULT_SESSION_ID,
-        resolve_session_config_path,
+        resolve_session_trusted_config_path,
     )
     from automated_security_helper.cli.mcp.sandbox import (
         caller_is_remote,
@@ -1483,7 +1485,9 @@ def mcp_get_config(
             scanned_root=scanned_root,
             untrusted_config=untrusted_config,
             trusted_config_path=(
-                resolve_session_config_path(session_id) if untrusted_config else None
+                resolve_session_trusted_config_path(session_id)
+                if untrusted_config
+                else None
             ),
             client_config_policy=_session_client_rules(session_id),
         )
@@ -1850,11 +1854,19 @@ def mcp_select_profile(
     scan that names no config is handed this path. Before that, the resolved
     config was stored in a field nothing read, so this call returned
     ``success: True`` and changed nothing a client could detect.
+
+    Where it is written decides whose it is. The registered profile always goes
+    to the session's ``config/`` directory, which counts as the operator's. A
+    profile a client changed (a non-empty ``patch_ops``, or any ``override_yaml``)
+    goes to ``client-config/``, which counts as the client's: the allowlist lets
+    the client set those keys, and does not make its values the operator's. That
+    copy is what ``config_path`` names, and every consumer resolves it with the
+    client's rules against the registered profile in ``config/`` as the trusted
+    base (``resolve_session_trusted_config_path``).
     """
     from automated_security_helper.cli.mcp.profile_registry import (
         bind_session_config,
         get_profile_registry,
-        materialize_session_config,
     )
     from automated_security_helper.config.runtime_patch import (
         RuntimePatchDeniedError,
@@ -1935,24 +1947,24 @@ def mcp_select_profile(
             )
         except RuntimePatchDeniedError as exc:
             return {"success": False, "error": f"override denied: {exc}"}
-        materialized = _materialize_or_error(
-            materialize_session_config, session_id, new_cfg
-        )
+        materialized = _materialize_or_error(session_id, base_cfg, new_cfg)
         if isinstance(materialized, dict):
             return materialized
+        config_path, trusted_config_path = materialized
         bind_session_config(
             session_id,
             config=new_cfg,
             profile_name=profile_name,
             override_yaml=override_yaml,
-            config_path=materialized,
+            config_path=config_path,
+            trusted_config_path=trusted_config_path,
         )
         return {
             "success": True,
             "mode": "override",
             "profile_name": profile_name,
             "session_id": session_id or _default_session_id(),
-            "config_path": materialized,
+            "config_path": config_path,
         }
 
     if patch_ops is not None:
@@ -1962,55 +1974,61 @@ def mcp_select_profile(
             )
         except RuntimePatchDeniedError as exc:
             return {"success": False, "error": f"patch denied: {exc}"}
+        # An empty patch changes nothing, so there is no client value to keep apart.
         materialized = _materialize_or_error(
-            materialize_session_config, session_id, patched
+            session_id, base_cfg, patched if patch_ops else None
         )
         if isinstance(materialized, dict):
             return materialized
+        config_path, trusted_config_path = materialized
         bind_session_config(
             session_id,
             config=patched,
             profile_name=profile_name,
             patch_ops=patch_ops,
-            config_path=materialized,
+            config_path=config_path,
+            trusted_config_path=trusted_config_path,
         )
         return {
             "success": True,
             "mode": "inherit_and_patch",
             "profile_name": profile_name,
             "session_id": session_id or _default_session_id(),
-            "config_path": materialized,
+            "config_path": config_path,
         }
 
-    materialized = _materialize_or_error(
-        materialize_session_config, session_id, base_cfg
-    )
+    materialized = _materialize_or_error(session_id, base_cfg, None)
     if isinstance(materialized, dict):
         return materialized
+    config_path, trusted_config_path = materialized
     bind_session_config(
         session_id,
         config=base_cfg,
         profile_name=profile_name,
-        config_path=materialized,
+        config_path=config_path,
+        trusted_config_path=trusted_config_path,
     )
     return {
         "success": True,
         "mode": "static",
         "profile_name": profile_name,
         "session_id": session_id or _default_session_id(),
-        "config_path": materialized,
+        "config_path": config_path,
     }
 
 
 def _materialize_or_error(
-    materialize: Callable[[Optional[str], "AshConfig"], str],
     session_id: Optional[str],
-    config: "AshConfig",
-) -> Union[str, Dict[str, Any]]:
-    """Write the resolved config out, or return this tool's failure shape.
+    registered: "AshConfig",
+    patched: Optional["AshConfig"],
+) -> Union[Tuple[str, str], Dict[str, Any]]:
+    """Write the binding out, or return this tool's failure shape.
 
-    Returns the path on success and an error dict on failure, which the caller
-    distinguishes with ``isinstance(..., dict)``. The alternative -- letting the
+    ``profile_registry.materialize_session_binding`` writes ``registered`` to
+    the session's ``config/`` and ``patched``, the client's version, to its
+    ``client-config/``. Returns ``(config_path, trusted_config_path)`` on success
+    and an error dict on failure, which the caller distinguishes with
+    ``isinstance(..., dict)``. The alternative -- letting the
     exception escape -- would surface as an unhandled error from a tool whose
     other failure modes all return ``success: False``, so a client would need two
     ways to detect the same class of problem.
@@ -2020,12 +2038,15 @@ def _materialize_or_error(
     missing file and fail with a config error naming a path the client never
     supplied.
     """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        materialize_session_binding,
+    )
     from automated_security_helper.core.resource_management.error_handling import (
         ErrorCategory,
     )
 
     try:
-        return materialize(session_id, config)
+        return materialize_session_binding(session_id, registered, patched)
     except (OSError, RuntimeError) as exc:
         _logger.error(f"Could not materialize the session config: {exc}")
         return {
