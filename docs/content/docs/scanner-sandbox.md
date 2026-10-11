@@ -29,7 +29,7 @@ never falls back to running a scanner unsandboxed after you asked for a sandbox.
 | `auto` | any | one of the below | Linux: `bwrap`, then `firejail`, then `landlock`. macOS: `sandbox-exec`. Windows: none. |
 | `bwrap` | Linux | `bubblewrap`, unprivileged user namespaces | Recommended. |
 | `firejail` | Linux | `firejail` | Fallback. Weaker filesystem hiding, see below. |
-| `landlock` | Linux 5.13+ | nothing (kernel LSM) | No package to install. Needs Landlock enabled in the kernel's LSM list. |
+| `landlock` | Linux 6.2+ (Landlock ABI 3) | nothing (kernel LSM) | No package to install. Needs Landlock enabled in the kernel's LSM list. Below ABI 3 it counts as unavailable. |
 | `sandbox-exec` | macOS | ships with macOS | Apple marks `sandbox-exec` deprecated. See risks. |
 
 Container mode (`--mode container`) ignores the setting: the container is the boundary,
@@ -75,13 +75,17 @@ it needs.
   `fanal/fanal.db` in a cache directory it may only read, and exits 1. A cache can
   be read-only outside a sandbox too, when it is shared or baked into an image.
 - The cache directory is the one grype or trivy itself uses on the host:
-  `GRYPE_DB_CACHE_DIR` or `TRIVY_CACHE_DIR` when set, else `$XDG_CACHE_HOME` when set
-  (on macOS, grype only), else `~/.cache` on Linux and `~/Library/Caches` on macOS.
-  The sandbox does not pass `XDG_CACHE_HOME`, so ASH names the directory to the scan
-  (`--cache-dir`, `GRYPE_DB_CACHE_DIR`), to the update and to the staleness check, and
-  all three read the same database. A `cache.dir` in a `trivy.yaml` or a `db.cache-dir`
-  in a grype config does not move it; set the variable instead. ASH logs a warning
-  naming the grype config when it sets `db.cache-dir`.
+  `GRYPE_DB_CACHE_DIR` or `TRIVY_CACHE_DIR` when set, else `$XDG_CACHE_HOME` when it
+  is an absolute path (for trivy, not on macOS), else `~/.cache` on Linux,
+  `~/Library/Caches` on macOS, and `%LOCALAPPDATA%\cache` (grype) or
+  `%LocalAppData%` (trivy) on Windows. grype keeps its database in `grype/db` under
+  it and trivy in `trivy`. The sandbox does not pass `XDG_CACHE_HOME`, so in every
+  run, sandboxed or not, ASH names the directory to the scan (`--cache-dir`,
+  `GRYPE_DB_CACHE_DIR`), to the update and to the staleness check, and all three read
+  the same database. A `cache.dir` in a `trivy.yaml` or a `db.cache-dir` in a grype
+  config does not move it; set the variable instead. ASH logs a warning naming the
+  grype config when it sets `db.cache-dir`; a trivy `cache.dir` is overridden
+  without one.
 - System directories (`/usr`, `/etc`, `/opt`, `/nix`) and the directories on `PATH`
   are read-only. Inside `$HOME` only `PATH` entries named `bin`, `sbin` or `Scripts`
   are mounted, and a tool's install prefix only when it is deeper than a directory
@@ -132,9 +136,9 @@ it needs.
 | checkov | no | uv cache | uv-managed Python |
 | semgrep | yes (registry rules, `p/ci`) | uv cache, `~/.semgrep` | uv-managed Python |
 | opengrep | yes (registry rules) | `~/.opengrep` | single binary; on macOS it unpacks itself into a private directory per spawn |
-| grype | yes (database update) | grype database cache (read-only) | single binary |
+| grype | yes (database update) | grype database cache (read-only, or a throwaway overlay under bwrap) | single binary |
 | syft | no | syft cache | single binary |
-| trivy | yes (database update) | trivy cache (read-only) | single binary |
+| trivy-repo | yes (database update) | trivy cache (read-only, or a throwaway overlay under bwrap) | single binary |
 | npm-audit | yes (registry audit API) | `~/.npm` | Node.js |
 | cfn-nag | no | none | Ruby and its gem paths |
 | detect-secrets | only when `sandbox.network_scanners` names it | none | ASH's Python, in a worker subprocess |
@@ -214,7 +218,7 @@ To give an extra scanner network access, or take it away:
 ```yaml
 sandbox:
   mode: bwrap
-  network_scanners: [grype, trivy]   # replaces the per-scanner defaults
+  network_scanners: [grype, trivy-repo]   # replaces the per-scanner defaults
   extra_read_paths: [/opt/company-ca]
 ```
 
@@ -223,24 +227,29 @@ below that let a scanner have what its own options ask for. A config file the
 scanned repository could have written can't grant any of them. That means a config
 file inside any git checkout, where a directory at or above the file, by its own path
 or its resolved path, holds a `.git` entry (a directory, or the file a submodule or
-linked worktree has). Only `--config-overrides`, the `--sandbox` flag, and config
-files outside every git checkout can grant. For a scanned directory outside any
-checkout, such as an extracted archive, a config file inside that directory can't
-grant either, whether it is reached by the directory's own name, its resolved path,
-or the shell's working directory (`$PWD`).
+linked worktree has). Only `--config-overrides` and config files outside every git
+checkout can grant; the `--sandbox` flag sets only the mode. For a scanned directory
+outside any checkout, such as an extracted archive, a config file inside that
+directory can't grant either, whether it is reached by the directory's own name, its
+resolved path, or the shell's working directory (`$PWD`).
 
 When any file the config was built from can't grant (the discovered `.ash/.ash.yaml`,
 a `--config` path, an `extends` base, or the file `ASH_CONFIG` names), the four
-settings are taken from the operator's config file if it is outside every checkout,
-else `ASH_CONFIG`'s if that is, else the defaults, plus `--config-overrides`. ASH
-logs a warning that names the file and the setting. A `network_scanners` list in such
-a file still takes network away: a scanner it doesn't name gets none, so a repository
-can keep its own scan offline with `network_scanners: []`.
+settings are taken from the files that can: in workspace mode the operator's
+default config, else `ASH_CONFIG`'s file, else the defaults, plus
+`--config-overrides`. A file that can grant itself but extends a base that can't
+keeps the settings its own `sandbox` section writes. For example, a `--config`
+outside every checkout that extends the scanned repository's config keeps the grants
+it sets, and loses what it inherits from the repository's file or changes with
+`patch`. ASH logs a warning that names the files that can't grant and the settings it
+dropped. A `network_scanners` list in such a file still takes network away: a scanner
+it doesn't name gets none, so a repository can keep its own scan offline with
+`network_scanners: []`.
 
 This applies to a trusted config kept in a checkout of its own as well, such as an
 ops or dotfiles repository: its grants are dropped with the same warning. Pass them
 with `--config-overrides` instead, for example
-`--config-overrides 'sandbox.network_scanners=[grype,trivy]'`.
+`--config-overrides 'sandbox.network_scanners=[grype,trivy-repo]'`.
 
 A plugin scanner can take its read paths or environment variables from its options,
 such as a rules file outside the source tree, or a token for an online check. The
@@ -265,8 +274,9 @@ warning, and the candidates the baseline would have marked are reported.
 
 A config file is judged by the name it was found under as well as by the file it
 resolves to, so a `.ash/.ash.yaml` that is a symlink out of the scanned directory
-still counts as inside it. Tool config files that scanner options name, and plugin
-modules, are judged by the same rule; see
+still counts as inside it. An `extends` base is judged by the file it resolves to.
+Tool config files that scanner options name, and plugin modules, are judged by the
+same rule; see
 [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose).
 
 Sandbox grants follow a scanner's own name, the one its code gives it. If a config
@@ -418,9 +428,13 @@ Landlock.
 
 ### Linux: Landlock
 
-Landlock is an unprivileged kernel LSM (Linux 5.13+), so this mode needs nothing
-installed. ASH starts a small wrapper (`utils/sandbox/landlock_exec.py`, standard
-library only) that restricts itself and then `exec`s the scanner:
+Landlock is an unprivileged kernel LSM, so this mode needs nothing installed. It
+needs Landlock ABI 3 (Linux 6.2) or later, the first that controls truncation: on an
+older kernel a scanner could truncate files it may only read, so ASH reports
+Landlock unavailable there. `--sandbox landlock` then records each scanner `MISSING`
+with the ABI in the reason, and `auto` does not use it. ASH starts a small wrapper
+(`utils/sandbox/landlock_exec.py`, standard library only) that restricts itself and
+then `exec`s the scanner:
 
 - Landlock filesystem rules: read and execute beneath the read-only paths, full access
   beneath the results directory and a fresh private temporary directory (`TMPDIR`).

@@ -337,11 +337,13 @@ warning says that an MCP client supplied the file.
 Pass the setting on the command line:
 
 ```bash
-ash --sandbox auto --config-overrides 'sandbox.network_scanners=[grype,trivy]'
+ash --sandbox auto --config-overrides 'sandbox.network_scanners=[grype,trivy-repo]'
 ```
 
 Or move the config file somewhere outside every git checkout and outside the
-scanned directory, and pass it with `--config`.
+scanned directory, and pass it with `--config`. Such a file can extend the
+repository's own config: it keeps the sandbox settings it writes itself, and the
+warning then names only the repository's file and what that file set.
 
 ## A Plugin Module From a Config File Is Not Imported
 
@@ -399,3 +401,28 @@ ash --sandbox auto \
   --config-overrides 'sandbox.read_path_scanners=[my-scanner]' \
   --config-overrides 'sandbox.extra_read_paths=[/opt/my-scanner-rules]'
 ```
+
+## Landlock Is Unavailable on an Older Kernel
+
+**Symptom**
+
+With `--sandbox landlock`, every scanner is recorded `MISSING` with a reason like:
+
+```
+Landlock ABI 2 is below 3 (Linux 6.2), so it cannot stop a scanner from truncating files it may only read, and the source tree would not be read-only
+```
+
+With `--sandbox auto` on a machine without a working bubblewrap or firejail, the
+scanners are recorded `MISSING` with the same reason in the list of backends `auto`
+tried.
+
+**Cause**
+
+Landlock controls truncation only from ABI 3, which Linux 6.2 introduced. On an
+older kernel a scanner could truncate files in the source tree, so ASH does not use
+Landlock there.
+
+**Fix**
+
+Install bubblewrap and use `--sandbox bwrap` (or `auto`, which tries it first), run
+on a kernel with Landlock ABI 3 or later, or use container mode.

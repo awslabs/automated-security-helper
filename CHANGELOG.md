@@ -69,13 +69,17 @@
   `--config`, it is an `extends` base, or `ASH_CONFIG` names it. That includes a
   trusted config kept in an ops or dotfiles repository: its grants are dropped with a
   warning naming the file and the setting, and have to be passed with
-  `--config-overrides`. For a scanned directory outside any checkout, a config file
+  `--config-overrides`. A config file outside every checkout that extends one inside
+  it, such as an operator's `--config` built on the repository's own config, keeps
+  the sandbox settings it writes itself and loses only what it inherits. For a
+  scanned directory outside any checkout, a config file
   inside that directory cannot set them either. Such a file's `network_scanners` can
   still remove network. `sandbox.mode` is a floor: when `--sandbox`, `ASH_CONFIG` or
   the operator's config turns the sandbox on, no repository config can turn it off or
-  switch backends. A scanner whose options ask for extra read paths or environment
-  variables declares them with `read_paths_require_grant` or `env_requires_grant` and
-  gets them only when `sandbox.read_path_scanners` or `sandbox.env_scanners` names it.
+  switch backends. A plugin scanner whose options ask for extra read paths or
+  environment variables declares them with `read_paths_require_grant` or
+  `env_requires_grant` and gets them only when `sandbox.read_path_scanners` or
+  `sandbox.env_scanners` names it; none of the scanners ASH ships declares either.
   In workspace mode, an operator `--config` that does not validate is now refused
   (exit 3) even for projects that have their own config file, because the sandbox
   mode is read from it. Under a sandbox, a detect-secrets `baseline_file` outside the
@@ -92,6 +96,9 @@
   `MISSING` with the reason and the scan exits 1. ASH never falls back to running it
   unsandboxed. `auto` picks bubblewrap, then firejail, then Landlock on Linux, and
   sandbox-exec on macOS. There is no Windows backend: use WSL2 or container mode.
+  Landlock needs ABI 3 (Linux 6.2) or later, because older ABIs cannot stop a
+  scanner from truncating files it may only read; below that it counts as
+  unavailable.
   firejail counts as available only when a test command it runs lands in a sandbox:
   inside a container with its own PID namespace firejail runs commands without one,
   so there it is unavailable and `auto` moves on to Landlock.
@@ -138,17 +145,24 @@
   - ferret-scan's `tool_version` no longer accepts a bare version or `latest`;
     write `==1.2.3`, or leave it unset for the supported range.
 
+  For these checks and the sandbox grants alike, a file counts as inside the scanned
+  tree when it is inside any git checkout, by its own path or its resolved path, or
+  inside the source directory when that is outside a checkout. A tool config or
+  ignore file a setting names (checkov's and ferret-scan's `config_file`,
+  detect-secrets `file://` plugins and filters, trivy-repo's `ignore_file` and
+  `secret_config_file`, `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`) is judged by
+  where it is, whoever names it, `--config-overrides` included. One kept in a
+  checkout of your own, such as an ops repository, is therefore not passed to the
+  tool: a `.trivyignore` kept there, for example, no longer removes findings. Keep
+  such files outside every checkout. A virtualenv inside a git checkout counts as
+  inside it for `ash_plugin_modules`, and the warning names the module's location
+  and the checkout. A file a setting names is judged by the path as written as well
+  as by the file it resolves to, so a symlink the scanned repository planted counts
+  as inside the tree wherever it points.
+
   Under the MCP server, a config a client delivered is limited the same way, and a
   file any MCP client delivered (under the MCP workspace root, except each session's
-  `config/` directory) counts as inside the scanned tree for these checks. For
-  these checks and the sandbox grants alike, a file counts as inside the scanned
-  tree when it is inside any git checkout, by its own path or its resolved path, or
-  inside the source directory when that is outside a checkout. A tool config file
-  or plugin module kept in a checkout of your own is therefore not used either, and
-  a virtualenv inside a git checkout counts as inside it: the warning names the
-  module's location and the checkout. A file a setting names is judged by the path
-  as written as well as by the file it resolves to, so a symlink the scanned
-  repository planted counts as inside the tree wherever it points. The
+  `config/` directory) counts as inside the scanned tree for these checks. The
   workspace tools' `config_overrides` are checked against the session config's
   `runtime_overrides` allowlist, as `select_profile`'s `patch_ops` and
   `override_yaml` are, and are refused while runtime overrides are off (the
@@ -647,15 +661,18 @@
 
   **Which database is checked.** ASH resolves each tool's cache directory the way the
   tool does on the host: `GRYPE_DB_CACHE_DIR` or `TRIVY_CACHE_DIR`, else
-  `$XDG_CACHE_HOME` (which trivy ignores on macOS), else `~/.cache` on Linux and
-  `~/Library/Caches` on macOS. It names that one directory to the scan, to the age
-  check and to the database update it runs before a sandboxed online scan, so all
-  three read the same database. The age check and the update run from a directory
+  `$XDG_CACHE_HOME` when it is an absolute path (trivy ignores it on macOS), else
+  `~/.cache` on Linux, `~/Library/Caches` on macOS and the local application-data
+  directory on Windows. In every run, sandboxed or not, it names that one directory
+  to the scan, to the age check and to the database update it runs before a
+  sandboxed online scan, so all three read the same database. The age check and the update run from a directory
   outside the scanned tree with an empty config file ASH ships, so a `trivy.yaml` or
   grype config in the scanned repository cannot point them at another database. The
   scan gets the directory as `GRYPE_DB_CACHE_DIR` or `--cache-dir`, which beat a
   config file, so a `db.cache-dir` in a grype config is not used, and ASH logs a
-  warning naming the file; set `GRYPE_DB_CACHE_DIR` to move the database.
+  warning naming the file; set `GRYPE_DB_CACHE_DIR` to move the database. A
+  `cache.dir` in a `trivy.yaml` is overridden the same way, without a warning; set
+  `TRIVY_CACHE_DIR`.
   trivy-repo keeps its scan cache in memory (`--cache-backend=memory`) in every run,
   so a scan that does not update the database itself (offline, or sandboxed) also
   works from a cache it may only read, such as one shared between jobs or baked into

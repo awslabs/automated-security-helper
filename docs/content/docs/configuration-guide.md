@@ -452,11 +452,15 @@ scanned tree" here means inside any git checkout, found from the file's own path
 its resolved path, or inside the source directory when the source directory is
 outside a checkout. A checkout is something other people can push to, so this
 includes a config file, tool config or plugin kept in a checkout of your own, such
-as an ops or dotfiles repository; pass those settings with `--config-overrides`, or
-keep the files outside every checkout. A file a setting below names is judged by the
-path as written, relative to the source directory, as well as by the file it
-resolves to, so a symlink the scanned repository planted counts as inside the tree
-wherever it points.
+as an ops or dotfiles repository. Pass `ash_plugin_modules` and the sandbox
+settings with `--ash-plugin-modules` or `--config-overrides` instead, or keep the
+config file outside every checkout. A file that one of the path settings below names
+is judged by where the file is, whoever names it, `--config-overrides` included: a
+tool config or ignore file kept in an ops repository is not passed to the tool, so,
+for example, its ignore rules stop removing findings. Keep such a file outside every
+checkout. It is judged by the path as written, relative to the source directory, as
+well as by the file it resolves to, so a symlink the scanned repository planted
+counts as inside the tree wherever it points.
 
 Under the MCP server, a config file a client delivered (an upload or a file in a
 delivered tree, named as `config_path`) is limited the same way, wherever it is. A
@@ -465,16 +469,16 @@ and module checks below: everything under the MCP workspace root
 (`$ASH_MCP_WORKSPACE_ROOT`, by default `~/.cache/ash-mcp/`) except each session's
 `config/` directory, which only the server writes.
 
-| Setting | From a config file inside the scanned tree |
+| Setting | Limit |
 |---|---|
 | `scanners.<name>.options.tool_version`, `converters.jupyter.options.tool_version` | Must be a PEP 440 version specifier set such as `>=1.2,<2` or `==1.4.1`. This applies from every source, including `--config-overrides`. Any other value is replaced by the scanner's default constraint. |
 | `scanners.opengrep.options.version` | Must be a release tag such as `v1.15.1`, from every source. Any other value is replaced by the pinned version. |
-| `ash_plugin_modules` | An entry is imported only if it names an installed module that Python finds outside the scanned tree. An entry that is not importable, or that would be imported from a file in the tree, is skipped. A virtualenv inside a git checkout counts as inside it, so a module installed there is skipped too; the warning gives the module's location and the checkout. |
-| `scanners.checkov.options.config_file`, `scanners.ferret-scan.options.config_file` | Passed to the tool only when the file is outside the scanned tree. The same applies to the `.checkov.yaml` and `ferret.yaml` files these scanners look for by name. ferret-scan then uses its bundled config. checkov and ferret-scan also read such a file from their working directory on their own, so ASH runs both from the filesystem root and always passes ferret-scan a `--config`; finding paths are unchanged. |
-| `scanners.detect-secrets.options.scan_settings` plugins and filters | An entry that names a file (`file://...`) is kept only when the file is outside the scanned tree. This includes entries read from a baseline file. detect-secrets' built-in plugins and filters are unaffected. |
-| trivy-repo's ignore file and secret config | trivy-repo always gets `--ignorefile` and `--secret-config`, so trivy does not read a `.trivyignore` or `trivy-secret.yaml` from the scanned repository. `scanners.trivy-repo.options.ignore_file` and `secret_config_file`, or `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`, name the files to use; each is passed only when it is outside the scanned tree, and a file that sets nothing is passed otherwise. |
-| `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`, `sandbox.env_scanners` | Not used: these grant sandbox access. A `network_scanners` list still removes network from the scanners it does not name. See [Scanner sandbox](scanner-sandbox.md). |
-| `sandbox.mode` | Applies only when nothing the operator set turns the sandbox on. When `--sandbox`, `ASH_CONFIG` or the operator's config file turns it on, this cannot turn it off or switch backends. |
+| `ash_plugin_modules` | From a config file inside the scanned tree, an entry is imported only if it names an installed module that Python finds outside the scanned tree. An entry that is not importable, or that would be imported from a file in the tree, is skipped. A virtualenv inside a git checkout counts as inside it, so a module installed there is skipped too; the warning gives the module's location and the checkout. |
+| `scanners.checkov.options.config_file`, `scanners.ferret-scan.options.config_file` | Passed to the tool only when the file is outside the scanned tree, whoever names it. The same applies to the `.checkov.yaml` and `ferret.yaml` files these scanners look for by name. ferret-scan then uses its bundled config. checkov and ferret-scan also read such a file from their working directory on their own, so ASH runs both from the filesystem root and always passes ferret-scan a `--config`; finding paths are unchanged. |
+| `scanners.detect-secrets.options.scan_settings` plugins and filters | An entry that names a file (`file://...`) is kept only when the file is outside the scanned tree, whoever names it. This includes entries read from a baseline file. detect-secrets' built-in plugins and filters are unaffected. |
+| trivy-repo's ignore file and secret config | trivy-repo always gets `--ignorefile` and `--secret-config`, so trivy does not read a `.trivyignore` or `trivy-secret.yaml` from the scanned repository. `scanners.trivy-repo.options.ignore_file` and `secret_config_file`, or `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`, name the files to use; each is passed only when it is outside the scanned tree, whoever names it, and a file that sets nothing is passed otherwise. |
+| `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`, `sandbox.env_scanners` | Not used from a config file inside the scanned tree: these grant sandbox access. A `network_scanners` list still removes network from the scanners it does not name. See [Scanner sandbox](scanner-sandbox.md). |
+| `sandbox.mode` | From a config file inside the scanned tree, applies only when nothing the operator set turns the sandbox on. When `--sandbox`, `ASH_CONFIG` or the operator's config file turns it on, this cannot turn it off or switch backends. |
 
 Each setting that is not honored is logged once, as a warning that names it.
 
