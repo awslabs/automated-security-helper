@@ -688,3 +688,39 @@ def test_an_operator_rules_directory_is_read_but_not_a_link_out_of_it(tmp_path):
     assert "resolves outside the rules directory" in ash_log, log
     guard = _results(output, "cfn-guard")
     assert {r["ruleId"] for r in guard} == {"ASH_OPERATOR_RULE"}, log
+
+
+@pytest.mark.parametrize("named", ["file", "directory"])
+def test_an_operator_rules_path_in_the_tree_cannot_be_a_link_out_of_it(tmp_path, named):
+    """The operator may name rules inside the scanned tree, but the tree decides
+    what is at that path. A link there that leaves the tree is refused, so the
+    file it points at never reaches cfn-guard, which would print it whole."""
+    _require_tools()
+    secret = _secret(tmp_path)
+    source = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, source)
+    if named == "file":
+        _symlink_or_skip(source / "policy.guard", secret)
+        value = "policy.guard"
+    else:
+        outside = tmp_path / "elsewhere" / "rules"
+        outside.mkdir()
+        _symlink_or_skip(outside / "creds.guard", secret)
+        (outside / "plain.guard").write_text(secret.read_text(), encoding="utf-8")
+        _symlink_or_skip(source / "policy", outside)
+        value = "policy"
+
+    proc, output = _scan_with_tree_config(
+        tmp_path,
+        {},
+        "--config-overrides",
+        f'scanners.cfn-guard.options.rules_paths=["{value}"]',
+        scanners="cfn-guard",
+    )
+
+    log = proc.stdout[-3000:] + proc.stderr[-3000:]
+    assert _files_mentioning(output, _LEAK_MARKER) == [], log
+    assert _LEAK_MARKER not in proc.stdout + proc.stderr
+    assert _scanner_results(output)["cfn-guard"]["status"] == "MISSING", log
+    ash_log = (output / "ash.log").read_text(encoding="utf-8", errors="replace")
+    assert "outside the scanned tree" in ash_log, log

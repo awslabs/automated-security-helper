@@ -104,9 +104,11 @@ from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.utils.config_trust import (
     NOT_THE_OPERATORS,
     operator_paths,
+    scan_root,
     set_by_operator,
 )
 from automated_security_helper.utils.output_excerpt import tool_output_excerpt
@@ -156,6 +158,31 @@ _RULE_SUFFIXES = (".guard", ".ruleset")
 
 #: Under the results directory, where the operator's rules are copied for cfn-guard.
 _STAGED_RULES_DIR = "cfn-guard-rules"
+
+
+def _enters_and_leaves_the_tree(value: str, source_dir: Path, root: Path) -> bool:
+    """Whether ``value``, resolved one component at a time, enters the scanned tree
+    and then leaves it.
+
+    ``operator_paths`` resolves an entry before it is checked, so a path the operator
+    names inside the scanned tree is judged by where it leads, and the tree decides
+    that: a ``policy.guard`` there can be a link to any file the scan can read, and
+    cfn-guard prints a rules file it cannot parse, whole. Each component is resolved
+    from its parent's resolved location, as the kernel does, so a link at any depth
+    inside the tree is seen, a directory link as much as a file link.
+    """
+    path = Path(os.path.expanduser(str(value)))
+    if not path.is_absolute():
+        path = Path(os.path.abspath(source_dir)) / path
+    current = Path(path.anchor)
+    entered = False
+    for part in path.parts[1:]:
+        current = Path(os.path.realpath(current / part))
+        inside = in_scanned_tree(current, root)
+        if entered and not inside:
+            return True
+        entered = entered or inside
+    return False
 
 
 @dataclass(frozen=True)
@@ -329,8 +356,10 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 f"Ignoring scanners.cfn-guard.options.rules_paths entry {raw!r}: "
                 f"{reason}."
             )
+        root = scan_root(config, source_dir)
+        real_root = Path(os.path.realpath(root))
         rules: List[_RuleFile] = []
-        for entry in chosen:
+        for raw, entry in zip(options.rules_paths, chosen):
             if entry.path is None:
                 continue
             if not entry.path.exists():
@@ -338,11 +367,26 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     f"scanners.cfn-guard.options.rules_paths names {entry.path}, "
                     "which does not exist"
                 )
+            if _enters_and_leaves_the_tree(raw, source_dir, root):
+                raise RulesBundleUnavailable(
+                    f"scanners.cfn-guard.options.rules_paths names {raw!r}, a path "
+                    "inside the scanned tree that resolves outside the scanned tree "
+                    "through a symbolic link. The scanned repository decides what is "
+                    "at that path, so it is not read."
+                )
             if entry.path.is_dir():
                 rules.extend(self._rules_in_directory(entry.path))
             else:
+                # Inside the tree, read under the tree's root, so a link swapped in
+                # after the check above is refused when the file is opened. Outside
+                # it the operator controls the path and the link it may be.
+                read_root = (
+                    real_root
+                    if entry.path.is_relative_to(real_root)
+                    else entry.path.parent
+                )
                 try:
-                    rules.append(self._read_rule(entry.path, entry.path.parent))
+                    rules.append(self._read_rule(entry.path, read_root))
                 except TreeInputRefused as unusable:
                     # Named directly, so no other rule to fall back on: the
                     # operator asked for this file and it cannot be used.

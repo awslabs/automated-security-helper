@@ -128,6 +128,15 @@ def repo(ash_temp_path) -> Path:
     return target
 
 
+def _cfn_guard_on_path():
+    """cfn-guard found, whether or not this host has one."""
+    return patch(
+        "automated_security_helper.plugin_modules.ash_builtin.scanners."
+        "cfn_guard_scanner.find_executable",
+        return_value="/usr/local/bin/cfn-guard",
+    )
+
+
 def _symlink_or_skip(link: Path, target: Path) -> None:
     try:
         link.symlink_to(target)
@@ -477,6 +486,75 @@ class TestRuleSelection:
         mine.write_text("rule mine { }\n")
         scanner = _scanner(repo, rule_sets=[], rules_paths=[str(mine)])
         assert scanner.rule_files() == [mine.resolve()]
+
+    @pytest.mark.parametrize("named", ["file", "directory", "parent-directory"])
+    def test_an_operator_rules_path_in_the_tree_cannot_link_out_of_it(
+        self, repo, rules_root, tmp_path, named
+    ):
+        """The operator may name rules inside the scanned tree, but the tree
+        decides what is at that path. cfn-guard prints a rules file it cannot
+        parse, whole, so a link there to a file outside the tree would put that
+        file in the report (measured with 3.2.1 in a full scan: the file's
+        content reached ash.sarif and ash.log). Such a path is MISSING."""
+        # tmp_path, not ash_temp_path: the repo fixture lives inside this checkout,
+        # which counts as the scanned tree.
+        secret = tmp_path / "elsewhere" / "credentials"
+        secret.parent.mkdir()
+        secret.write_text("aws_secret_access_key = not-a-rule\n")
+        if named == "file":
+            _symlink_or_skip(repo / "policy.guard", secret)
+            value = "policy.guard"
+        else:
+            outside = tmp_path / "elsewhere" / "rules"
+            outside.mkdir()
+            (outside / "plain.guard").write_text(secret.read_text())
+            _symlink_or_skip(repo / "policy", outside)
+            value = "policy" if named == "directory" else "policy/plain.guard"
+        scanner = _scanner(repo, rule_sets=[], rules_paths=[value])
+        with pytest.raises(RulesBundleUnavailable, match="outside the scanned tree"):
+            scanner.rule_files()
+        with _cfn_guard_on_path():
+            assert scanner.validate_plugin_dependencies() is False
+        assert value in scanner.dependency_unavailable_reason
+
+    def test_a_link_swapped_in_after_the_check_is_refused_when_read(
+        self, repo, rules_root, tmp_path
+    ):
+        """The check above runs before the file is read. A rules file inside the
+        tree is read under the tree's root, so a link swapped in between is
+        refused when the file is opened, rather than followed."""
+        secret = tmp_path / "elsewhere" / "credentials"
+        secret.parent.mkdir()
+        secret.write_text("aws_secret_access_key = not-a-rule\n")
+        named = repo / "policy.guard"
+        named.write_text("rule mine { }\n")
+
+        def check_then_swap(*_args):
+            named.unlink()
+            _symlink_or_skip(named, secret)
+            return False
+
+        scanner = _scanner(repo, rule_sets=[], rules_paths=["policy.guard"])
+        with (
+            patch(
+                "automated_security_helper.plugin_modules.ash_builtin.scanners."
+                "cfn_guard_scanner._enters_and_leaves_the_tree",
+                side_effect=check_then_swap,
+            ),
+            pytest.raises(RulesBundleUnavailable, match="cannot be used"),
+        ):
+            scanner.rule_files()
+
+    def test_an_operator_rules_path_in_the_tree_may_link_inside_it(
+        self, repo, rules_root
+    ):
+        (repo / "policy").mkdir()
+        (repo / "policy" / "real.guard").write_text("rule real { }\n")
+        _symlink_or_skip(repo / "current.guard", Path("policy") / "real.guard")
+        scanner = _scanner(repo, rule_sets=[], rules_paths=["current.guard"])
+        (rule,) = scanner._selected_rules()
+        assert rule.path == (repo / "policy" / "real.guard").resolve()
+        assert rule.content == "rule real { }\n"
 
     def test_own_rules_paths_that_do_not_exist_are_refused(self, repo, rules_root):
         with pytest.raises(RulesBundleUnavailable, match="does not exist"):

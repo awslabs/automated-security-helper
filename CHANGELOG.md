@@ -241,7 +241,8 @@
   `config_file` are also refused when the file is inside the scanned tree, even when
   the operator names it; actionlint's, gitleaks' and zizmor's `config_file`,
   gitleaks' `baseline_path` and cfn-guard's `rules_paths` may name a file in the tree
-  when the operator sets them. With `rules_paths` ignored and `rule_sets` empty,
+  when the operator sets them; a cfn-guard `rules_paths` entry there that leads out
+  of the tree through a symbolic link makes cfn-guard MISSING. With `rules_paths` ignored and `rule_sets` empty,
   cfn-guard falls back to `wa-Security-Pillar`. In an operator's rules directory, a
   rules file that resolves outside it through a symlink is refused, and cfn-guard
   is given copies of the files ASH read. Inline `gitleaks:allow` comments still
