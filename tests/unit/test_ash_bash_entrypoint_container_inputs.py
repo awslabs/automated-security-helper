@@ -96,9 +96,10 @@ def project(tmp_path):
     return root
 
 
-def run_ash(
+def _run_ash_status(
     fake_runner, cwd: Path, args: List[str], extra_env: Optional[Dict[str, str]] = None
-) -> List[List[str]]:
+):
+    """Run ./ash against the fake runner: (returncode, stdout and stderr, calls)."""
     runner, log_dir = fake_runner
     env = {k: v for k, v in os.environ.items() if k not in _SCRUBBED_ENV}
     env.update(
@@ -114,10 +115,17 @@ def run_ash(
         timeout=180,
         check=False,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
     calls = []
     for record in sorted(log_dir.iterdir()):
         calls.append(record.read_bytes().decode().split("\0")[:-1])
+    return result.returncode, result.stdout + result.stderr, calls
+
+
+def run_ash(
+    fake_runner, cwd: Path, args: List[str], extra_env: Optional[Dict[str, str]] = None
+) -> List[List[str]]:
+    returncode, output, calls = _run_ash_status(fake_runner, cwd, args, extra_env)
+    assert returncode == 0, output
     return calls
 
 
@@ -229,30 +237,6 @@ class TestTheBuildTargetIsTheOneRequested:
         calls = run_ash(fake_runner, project, ["--no-run", "--build-target", "ci"])
 
         assert _flag(_only(calls, "build"), "--target") == "ci"
-
-
-def _run_ash_status(
-    fake_runner, cwd: Path, args: List[str], extra_env: Optional[Dict[str, str]] = None
-):
-    """Like ``run_ash``, for a run that may stop early: (returncode, stderr, calls)."""
-    runner, log_dir = fake_runner
-    env = {k: v for k, v in os.environ.items() if k not in _SCRUBBED_ENV}
-    env.update({"OCI_RUNNER": str(runner), "FAKE_RUNNER_LOG_DIR": str(log_dir)})
-    env.update(extra_env or {})
-    result = subprocess.run(  # nosec B603 B607 — fixed script path, list args, no shell
-        ["bash", str(ASH_SCRIPT), *args],
-        capture_output=True,
-        text=True,
-        cwd=str(cwd),
-        env=env,
-        timeout=180,
-        check=False,
-    )
-    calls = [
-        record.read_bytes().decode().split("\0")[:-1]
-        for record in sorted(log_dir.iterdir())
-    ]
-    return result.returncode, result.stderr, calls
 
 
 def _inner_args(call: List[str]) -> List[str]:
