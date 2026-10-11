@@ -714,6 +714,100 @@ scanners:
 
 If you have been using Syft separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory for a file named ```.syft.yaml``` or ```.syft.yml```. If either of these files are found, ASH will use the settings found in the file. For more details on using a Syft configuration file, refer to the Syft [documentation](https://github.com/anchore/syft/wiki/Configuration).
 
+### actionlint
+
+```yaml
+scanners:
+  actionlint:
+    enabled: true
+    options:
+      config_file: null  # an actionlint config; operator-only, may be inside the tree
+      shellcheck: null   # "shellcheck" to enable it; another program or a path is operator-only
+      pyflakes: null     # "pyflakes" to enable it; same rule as shellcheck
+```
+
+actionlint lints the workflows in `.github/workflows`. The scanned repository's own `.github/actionlint.yaml` is not read. See [actionlint](plugins/builtin/actionlint.md).
+
+### cfn-lint
+
+```yaml
+scanners:
+  cfn-lint:
+    enabled: true
+    options:
+      config_file: null      # a .cfnlintrc; operator-only, outside the scanned tree
+      regions: []            # e.g. [us-east-1, eu-west-1] or [ALL_REGIONS]
+      ignore_checks: []      # rule ids or prefixes to skip
+      include_checks: []     # e.g. [I] for informational rules
+      tool_version: ">=1.43.3,<2.0.0"
+      install_timeout: 300
+```
+
+A `.cfnlintrc` in the scanned repository or the home directory is not read. See [cfn-lint and cfn-guard](plugins/builtin/cfn-lint-and-cfn-guard.md).
+
+### cfn-guard
+
+```yaml
+scanners:
+  cfn-guard:
+    enabled: true
+    options:
+      rule_sets: [wa-Security-Pillar]  # bundled Guard Rules Registry sets, by name
+      rules_paths: []                  # your own .guard files or directories; operator-only
+```
+
+See [cfn-lint and cfn-guard](plugins/builtin/cfn-lint-and-cfn-guard.md) for the bundled rule sets and how a rules directory is read.
+
+### gitleaks
+
+```yaml
+scanners:
+  gitleaks:
+    enabled: true
+    options:
+      config_file: null           # a gitleaks TOML config; operator-only, may be inside the tree
+      baseline_path: null         # a gitleaks report whose findings are ignored; same rule
+      max_target_megabytes: null  # skip files larger than this
+```
+
+A `.gitleaks.toml` in the scanned repository is not read, and findings a root `.gitleaksignore` drops are reported anyway. See [Gitleaks](plugins/builtin/gitleaks.md).
+
+### trivy
+
+```yaml
+scanners:
+  trivy:
+    enabled: true
+    options:
+      scanners: [vuln]           # vuln, misconfig, secret, license
+      ignore_unfixed: false
+      license_full: false
+      disable_telemetry: true
+      config_file: null          # a trivy.yaml; operator-only, outside the scanned tree
+      ignore_file: null          # a .trivyignore; same rule
+      secret_config_file: null   # a trivy-secret.yaml; same rule
+      offline: false
+      severity_threshold: null   # passed to trivy as --severity
+```
+
+A scanner-level `severity_threshold` is passed to trivy as `--severity`, so findings below it are dropped by trivy itself and never reported or counted. See [Trivy filesystem scanner](plugins/builtin/trivy.md).
+
+### zizmor
+
+```yaml
+scanners:
+  zizmor:
+    enabled: true
+    options:
+      persona: regular       # regular, pedantic or auditor
+      config_file: null      # a zizmor config; operator-only, may be inside the tree
+      online_audits: false   # operator-only; GitHub API audits with the token from the environment
+      tool_version: ">=1.29.0,<2.0.0"
+      install_timeout: 300
+```
+
+zizmor runs with `--no-config` and `--offline` unless the operator sets these. See [zizmor](plugins/builtin/zizmor.md).
+
 ## UV Tool Management
 
 ASH v3 uses UV's tool isolation system to automatically manage scanner dependencies. This provides several benefits:

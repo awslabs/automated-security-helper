@@ -71,7 +71,7 @@ To accept a finding, prefer an ASH suppression, which is recorded in the reports
 
 ## Severity
 
-Each finding is reported at trivy's own severity for it (CRITICAL, HIGH, MEDIUM, LOW). That is the severity trivy's `--severity` filter uses, which is how `severity_threshold` reaches trivy, so a finding cannot pass the filter as HIGH and be reported as MEDIUM. A finding trivy rates UNKNOWN falls back to ASH's usual SARIF mapping: the rule's CVSS score (`security-severity`), then the SARIF level.
+Each finding is reported at trivy's own severity for it (CRITICAL, HIGH, MEDIUM, LOW). That is the severity trivy's `--severity` filter uses, which is how `severity_threshold` reaches trivy, so a finding cannot pass the filter as HIGH and be reported as MEDIUM. A finding below the threshold is dropped by trivy itself: it is not reported, suppressed or counted, unlike a scanner whose threshold ASH applies after the scan. A finding trivy rates UNKNOWN falls back to ASH's usual SARIF mapping: the rule's CVSS score (`security-severity`), then the SARIF level.
 
 ## Suppressions
 

@@ -124,7 +124,8 @@
     or action that resolves outside the scan root is skipped with a warning.
   - trivy: `trivy fs` (0.75.0), `vuln` only by default, held to
     the trivy database's 24h bound; offline with no database it is MISSING with the
-    reason. trivy and trivy-repo share trivy's cache and run at the same time, so
+    reason. A scanner-level `severity_threshold` is passed as `--severity`, so lower
+    findings are dropped by trivy and never reported. trivy and trivy-repo share trivy's cache and run at the same time, so
     online ASH updates the database once per scan, under a lock in that cache, and
     both scanners then run with `--skip-db-update` and `--skip-java-db-update` (and
     `--skip-check-update` when `misconfig` is on), pointed at that cache with
@@ -132,8 +133,9 @@
     (`utils/content_db_refresh.py`): it runs from an empty directory outside the
     scanned tree with an explicit `--config`, so a `trivy.yaml` in the scanned
     repository cannot change where the database comes from. An image built with `OFFLINE=YES`
-    ships the database, and the
-    nix shell updates it on every entry.
+    ships the database, which the 24h bound fails a day after it was published (see
+    `docs/content/docs/building-your-own-image.md`), and the nix shell updates it on
+    every entry.
 
   Options that name something a tool executes or loads are not taken from a config
   file inside the scanned tree: actionlint's `shellcheck` and `pyflakes` accept only
@@ -168,7 +170,13 @@
   config now reports their findings too, and a run whose host lacks one of their tools
   records it MISSING, which fails the incomplete-scan gate (exit 1) exactly as a
   missing grype or semgrep does. Run `ash dependencies install`, use the container
-  image, or set `scanners.<name>.enabled: false` for any you do not want. trivy reads
+  image, or set `scanners.<name>.enabled: false` for any you do not want. Their
+  findings count toward `fail_on_findings` like any scanner's, so a scan that passed
+  can now exit 2. Callers of the reusable workflow
+  `.github/workflows/run-ash-security-scan.yml` in its default `ash-mode: local` need
+  its new `install-actionlint`, `install-cfn-guard`, `install-gitleaks` and
+  `install-trivy` inputs set to true (they default to false), or use
+  `ash-mode: container`; otherwise those scanners are MISSING. trivy reads
   its vulnerability database, so online it downloads it, and offline it needs the
   database in its cache (`TRIVY_CACHE_DIR`). Configs that list the community Trivy
   plugin for `trivy-repo` now run trivy twice; set `scanners.trivy.enabled: false` to
