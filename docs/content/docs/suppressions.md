@@ -188,20 +188,26 @@ Python's.
 
 You can also reinstall ASH with `[symbols]` added to the source you installed it
 from. For uvx that is the only way that lasts: uvx rebuilds its cached environment
-from its own arguments, so an extra installed into it is dropped. For the release
-these docs describe:
+from its own arguments, so an extra installed into it is dropped.
+
+The `symbols` extra is available from the next release, the first after v3.7.1.
+v3.7.1 and earlier define only `cdk`, and asking one of them for `[symbols]`
+installs it without the extra, with only a warning. Until that release, install
+from the `main` branch:
 
 ```bash
 # ASH installed with uv tool install
-uv tool install --force "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+uv tool install --force "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@main"
 # ASH installed with pipx install
-pipx install --force "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+pipx install --force "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@main"
 # the uvx alias from the installation guide
-alias ash="uvx --from 'automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0' ash"
+alias ash="uvx --from 'automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@main' ash"
 ```
 
-For a checkout or a commit, put that source after the `@` instead
-(`automated-security-helper[symbols] @ file:///path/to/checkout`, or `@ git+...@<commit>`).
+`main` moves, so these commands also replace the ASH you run with the newest code.
+To stay on one version, or to use a checkout, put that source after the first `@`
+instead (`automated-security-helper[symbols] @ git+...@<commit from main>`, or
+`@ file:///path/to/checkout`).
 Keep the `@` and the source. ASH is not published on PyPI, and the PyPI project
 with ASH's name is unrelated and has no `symbols` extra, so asking for the extra by
 the bare name installs that project instead.

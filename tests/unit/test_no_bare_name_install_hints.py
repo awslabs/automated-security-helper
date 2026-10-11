@@ -769,6 +769,51 @@ def test_the_mcp_testing_guide_keeps_the_checkouts_extras():
     assert [line for line in syncs if "--inexact" not in line] == [], syncs
 
 
+def test_the_mcp_testing_guide_does_not_call_the_ash_package_warning_harmless():
+    """uv's warning about a package named ``ash`` means the unrelated project ran.
+
+    The guide used to call that warning safe to ignore; it now says to switch
+    the configuration to ``uv run``.
+    """
+    guide = REPO_ROOT / "docs" / "content" / "docs" / "MCP-SERVER-TESTING-GUIDE.md"
+    lines = guide.read_text(encoding="utf-8").splitlines()
+    warning = [
+        i for i, line in enumerate(lines) if "is not provided by package `ash`" in line
+    ]
+    assert warning, "the guide no longer shows uv's warning; update this test"
+    for index in warning:
+        labels = [line for line in lines[:index] if line.startswith("**")]
+        label = labels[-1] if labels else ""
+        assert "ignore" not in label.lower(), (index + 1, label)
+        after = "\n".join(lines[index : index + 8])
+        assert "`uv run`" in after, (index + 1, after)
+
+
+def test_the_example_plugin_package_pins_the_packaged_release():
+    """The commented git dependency in the example names the release this repo ships.
+
+    `[tool.commitizen] version_files` is the only thing that keeps it current:
+    the version-pin walk's ``@v`` patterns do not read poetry's ``tag = "v..."``.
+    """
+    import tomllib
+
+    pyproject = tomllib.loads(
+        (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    packaged = pyproject["tool"]["commitizen"]["version"]
+    tags = re.findall(
+        r'^#\s*automated-security-helper\s*=\s*\{[^}]*\btag\s*=\s*"v([^"]+)"',
+        EXAMPLE_PYPROJECT.read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    assert tags == [packaged], tags
+    entries = pyproject["tool"]["commitizen"]["version_files"]
+    assert any(
+        entry.startswith("examples/ash_plugins_example/pyproject.toml:")
+        for entry in entries
+    ), entries
+
+
 def test_the_example_plugin_package_depends_on_ash_by_path():
     """The example's live dependency on ASH is a path dependency on this checkout."""
     text = EXAMPLE_PYPROJECT.read_text(encoding="utf-8")

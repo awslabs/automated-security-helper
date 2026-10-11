@@ -261,12 +261,14 @@ version = "3.7.0"
 # a test rather than shipping. Adding a pin here without adding it there is
 # safe; the reverse is what this comment exists to prevent.
 #
-# building-your-own-image.md, suppressions.md and
-# examples/ash_plugins_example/pyproject.toml joined when their install commands
-# stopped naming ASH's distribution bare, which PyPI resolves to an unrelated
-# project, and started naming the git tag instead. The example pins it as a
-# poetry `tag = "v..."`, which the tree walk's `@v` patterns do not see, so this
-# entry is its only maintenance.
+# building-your-own-image.md and examples/ash_plugins_example/pyproject.toml
+# joined when their install commands stopped naming ASH's distribution bare,
+# which PyPI resolves to an unrelated project, and started naming the git tag
+# instead. The example pins it as a poetry `tag = "v..."`, which the tree walk's
+# `@v` patterns do not see, so this entry is its only maintenance.
+# suppressions.md is not listed: its install commands ask for the `symbols`
+# extra, which no tag up to v3.7.1 defines, so they name `main` until a release
+# has it.
 #
 # On pattern choice: commitizen matches each regex per line, then replaces the
 # bare current version within the matching lines. `ash_version` is used rather
@@ -293,7 +295,6 @@ version_files = [
     "docs/content/docs/mcp-performance-scalability.md:automated-security-helper@",
     "docs/content/docs/plugins/community/trivy-plugin.md:automated-security-helper.git@",
     "docs/content/docs/building-your-own-image.md:automated-security-helper.git@",
-    "docs/content/docs/suppressions.md:automated-security-helper.git@",
     "examples/ash_plugins_example/pyproject.toml:automated-security-helper.git",
 ]
 # Rewriting _base/ is only half the chain: the 17 generated trees are still on

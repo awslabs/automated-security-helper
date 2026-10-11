@@ -513,6 +513,45 @@ def test_the_suppressions_page_lists_the_packages_of_the_extra():
     assert documented == {_name_and_clauses(r) for r in declared}
 
 
+#: The first release whose pyproject.toml defines the ``symbols`` extra, as a
+#: version tuple. None until one is tagged: v3.7.0 and v3.7.1 define only
+#: ``cdk``. Set it when that release ships; docs may then pin it or a later one.
+FIRST_RELEASE_WITH_SYMBOLS: tuple[int, ...] | None = None
+
+_SYMBOLS_PIN = re.compile(r"\[symbols\][^\n]*?@v(\d+(?:\.\d+)*)")
+
+
+def test_no_docs_page_pins_the_symbols_extra_to_a_release_without_it():
+    """A ``[symbols]`` requirement pinned to a tag must name a tag that has it.
+
+    Asking a release for an extra it does not define installs that release
+    without it (uv and pip only warn), so the command does nothing for symbol
+    suppressions while replacing the ASH it runs on.
+    """
+    pages = [
+        *sorted((REPO_ROOT / "docs").rglob("*.md")),
+        *sorted((REPO_ROOT / "docs").rglob("*.md.template")),
+        REPO_ROOT / "README.md",
+        REPO_ROOT / "README.md.template",
+    ]
+    pins = [
+        (page.relative_to(REPO_ROOT).as_posix(), match.group(1))
+        for page in pages
+        for match in _SYMBOLS_PIN.finditer(page.read_text(encoding="utf-8"))
+    ]
+    if FIRST_RELEASE_WITH_SYMBOLS is None:
+        assert pins == [], pins
+        page = REPO_ROOT / "docs" / "content" / "docs" / "suppressions.md"
+        assert "next release" in page.read_text(encoding="utf-8")
+    else:
+        too_old = [
+            (path, pin)
+            for path, pin in pins
+            if tuple(int(part) for part in pin.split(".")) < FIRST_RELEASE_WITH_SYMBOLS
+        ]
+        assert too_old == [], too_old
+
+
 @pytest.mark.parametrize("shape", ["git", "editable-with-space-and-brackets"])
 def test_the_mcp_reinstall_hint_names_this_install_on_one_line(
     capsys, monkeypatch, tmp_path, shape

@@ -518,10 +518,14 @@ INFO: Scan started with ID: 2e0cd8d2-132c-4eb1-a822-38dd237067f3
 INFO: Scanner bandit completed
 ```
 
-**Warnings (safe to ignore):**
+**Warnings (need attention):**
 ```
 warning: An executable named `ash` is not provided by package `ash`
 ```
+
+This one means the client ran `uvx` without `--from`, so uvx installed the
+unrelated PyPI project named `ash` instead of ASH. Switch the configuration to the
+`uv run` form in [Configure MCP Client to Use Local Code](#1-configure-mcp-client-to-use-local-code).
 
 **Errors (need attention):**
 ```
