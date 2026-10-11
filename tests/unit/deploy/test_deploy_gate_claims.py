@@ -14,9 +14,10 @@ more strongly than they behave:
     still hands some scanners a configuration file committed in the scanned tree
     (an in-tree ``bandit.yaml`` is passed to bandit), so the claim has to be limited
     to ASH's own config.
-*   The shard and merge projects "never read the repository's config". They do when
-    ``AshBaseConfigYaml`` is empty: the build unsets the dangling ``ASH_CONFIG`` and
-    ``ash scan`` discovers the repository's file.
+*   The shard and merge projects "never read the repository's config". They never
+    read its ASH config (they scan with the base config or ``{}``), but scanners
+    still read their own config files committed in the scanned tree, so the claim
+    has to be limited to ASH's config here too.
 *   ``--changed-files-only`` and ``--base-ref`` are refused because "a narrowed scan
     switches off the completeness check". Measured, it does not: with both scanners
     MISSING the narrowed scan still exits 1. What narrowing does is stop findings

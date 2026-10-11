@@ -523,9 +523,6 @@ export class AshDistributedPipelineStack extends Stack {
               // no results), a scanner crashed (no results), findings were found
               // (results present) or the shard was clean (results present).
               [
-                // See MATERIALIZE_CONFIG_COMMAND: ASH refuses an ASH_CONFIG that names
-                // no file, and pre_build writes one only when a base config exists.
-                '[ -f "$ASH_CONFIG" ] || unset ASH_CONFIG',
                 'set +e',
                 'ash scan --source-dir "$CODEBUILD_SRC_DIR" --output-dir ./ash-shard-output \\',
                 '  --shard-index "$ASH_SHARD_INDEX" --shard-count "$ASH_SHARD_COUNT" \\',
@@ -673,7 +670,6 @@ export class AshDistributedPipelineStack extends Stack {
               // flag per shard directory, so a shard that vanished between the
               // check above and here still fails rather than being skipped.
               [
-                '[ -f "$ASH_CONFIG" ] || unset ASH_CONFIG',
                 'ash merge \\',
                 ...resultsFlags,
                 '  --output-dir ./ash-merged-output',
@@ -701,7 +697,7 @@ export class AshDistributedPipelineStack extends Stack {
 }
 
 /**
- * Write the deployment-wide ASH config into the build, when one was supplied.
+ * Write the deployment-wide ASH config into the build, or `{}` when none was supplied.
  *
  * The CodeBuild environment runs the ASH image but not its MCP entrypoint, so
  * nothing has materialized the config yet. Same mechanism as the entrypoint:
@@ -709,12 +705,12 @@ export class AshDistributedPipelineStack extends Stack {
  *
  * `ASH_CONFIG` is set as a PROJECT environment variable, not exported here. An
  * `export` inside one buildspec command is not guaranteed to reach a later
- * phase's shell, so the path is always set and only the FILE is conditional.
- * The command that runs ASH therefore unsets it, in its own shell, when the file is
- * absent: ASH treats an explicit config path that names no file as a config error
- * and refuses the scan, so a pipeline deployed without `AshBaseConfigYaml` would
- * otherwise fail every shard. `unset` has the same phase limit as `export`, which is
- * why it sits in the build command itself rather than here.
+ * phase's shell, so the path is always set and the file is always written. With
+ * no `AshBaseConfigYaml` the file is `{}`, ASH's defaults, the same document the
+ * CodeCommit gate writes. Without a config ASH would look for one in the scanned
+ * checkout, so the repository would choose the scanners, ignore paths and
+ * `fail_on_findings` the shards record, and `ash merge` forms its verdict from
+ * what the shards record. An empty file is no substitute: ASH refuses it.
  *
  * THE READ IS THE SAME ONE THE ENTRYPOINT MAKES, DELIBERATELY. Character for
  * character the same `python3 -c` as `MCP_ENTRYPOINT_SCRIPT`, for two reasons.
@@ -730,5 +726,7 @@ const MATERIALIZE_CONFIG_COMMAND = `if [ -n "\${ASH_BASE_CONFIG_SSM_PARAMETER:-}
   python3 -c "import os, sys, boto3; sys.stdout.write(boto3.client('ssm').get_parameter(Name=os.environ['ASH_BASE_CONFIG_SSM_PARAMETER'], WithDecryption=True)['Parameter']['Value'])" \\
     > "$ASH_CONFIG"
 else
-  echo "No ASH base configuration supplied; ASH will use its built-in defaults."
+  mkdir -p "$(dirname "$ASH_CONFIG")"
+  printf '{}\\n' > "$ASH_CONFIG"
+  echo "No ASH base configuration supplied; scanning with ASH's defaults."
 fi`;

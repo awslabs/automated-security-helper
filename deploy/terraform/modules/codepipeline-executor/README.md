@@ -143,6 +143,14 @@ configuration you supplied — a wrong result with no error. Invoking it explici
 is also correct if a future CodeBuild release did run the entrypoint, since the
 work it does is idempotent.
 
+With `base_config_ssm_parameter_name` null, `ash-container-init` sets no
+`ASH_CONFIG`, so both buildspecs write `{}`, ASH's defaults, to a temporary
+directory outside the checkout and point `ASH_CONFIG` at it. Without a config
+ASH would look for one in the scanned repository, which would then choose the
+scanners, ignore paths and `fail_on_findings` the shards record and the merge
+judges by. Scanners still read their own config files committed in the scanned
+tree (bandit's `.bandit`, grype's `.grype.yaml`).
+
 ## Variables
 
 | Variable | Contract | Type | Default | Notes |

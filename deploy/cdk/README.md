@@ -129,10 +129,10 @@ edit to the parameter is read by nothing.
 ASH selects one config source rather than merging them, so what `ASH_CONFIG` means
 depends on how the target runs ASH. An MCP scan of a directory that carries its own
 `.ash.yaml` uses that file; `ASH_CONFIG` is the default for directories without one.
-The pipeline's shard and merge projects run `ash scan`, whose `--config` option
-reads `ASH_CONFIG`, so with `AshBaseConfigYaml` set the repository's own ASH config
-is not read there; with it empty they leave `ASH_CONFIG` unset and ASH uses the
-repository's config if it has one. The CodeCommit gate always passes `--config`:
+The pipeline's shard and merge projects run `ash scan` and `ash merge`, and
+`ASH_CONFIG` always names a file there: the base config, or `{}` (ASH's defaults)
+when `AshBaseConfigYaml` is empty, so the repository's own ASH config is not read.
+The CodeCommit gate always passes `--config`:
 the base config, read from the parameter on every invocation, or `{}` (ASH's
 defaults) when none was supplied, so a pull request's own ASH config is never read.
 That covers ASH's configuration only: ASH still passes some scanners a

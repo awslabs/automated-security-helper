@@ -54,9 +54,18 @@ phases:
       # It materializes the config, then execs the rest of the argv, so it is
       # correct even if a future CodeBuild release did run the entrypoint: the
       # work is idempotent.
+      #
+      # With no base config ash-container-init sets no ASH_CONFIG, and ASH would
+      # then read a config committed in the scanned repository. So this writes
+      # `{}`, ASH's defaults, outside the checkout and points ASH_CONFIG at it.
       - |
         set -eu
         mkdir -p ash_output
+        if [ -z "$ASH_BASE_CONFIG_SSM_PARAMETER" ]; then
+          ASH_CONFIG="$(mktemp -d)/.ash.yaml"
+          printf '{}\n' > "$ASH_CONFIG"
+          export ASH_CONFIG
+        fi
         set +e
         /usr/local/bin/ash-container-init ash scan \
           --source-dir . \

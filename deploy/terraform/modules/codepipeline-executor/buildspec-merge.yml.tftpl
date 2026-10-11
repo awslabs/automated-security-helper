@@ -82,12 +82,20 @@ phases:
       # it the base config would never reach disk and the merge would run against
       # different configuration than the shards did.
       #
+      # With no base config the merge gets `{}`, ASH's defaults, for the same
+      # reason each shard does: no ASH config committed in the repository is read.
+      #
       # errexit is disabled around the merge so its exit code can be captured and
       # propagated from post_build after the results are safely uploaded. The
       # explicit set +e / set -e pair is used rather than `if ! ash merge`,
       # because that form disables errexit for the whole compound statement.
       - |
         set -eu
+        if [ -z "$ASH_BASE_CONFIG_SSM_PARAMETER" ]; then
+          ASH_CONFIG="$(mktemp -d)/.ash.yaml"
+          printf '{}\n' > "$ASH_CONFIG"
+          export ASH_CONFIG
+        fi
         set -- /usr/local/bin/ash-container-init ash merge \
           --output-dir merged \
           --min-severity "$MIN_SEVERITY"

@@ -9,6 +9,8 @@ from the committed template:
       mkdir -p "$(dirname "$ASH_CONFIG")"
       python3 -c "... get_parameter(..., WithDecryption=True) ..." > "$ASH_CONFIG"
     else
+      mkdir -p "$(dirname "$ASH_CONFIG")"
+      printf '{}\\n' > "$ASH_CONFIG"
       echo "No ASH base configuration supplied; ..."
     fi
 
@@ -255,19 +257,19 @@ class TestDecryption:
 
 
 class TestBranches:
-    def test_no_parameter_supplied_writes_no_config(
+    def test_no_parameter_supplied_writes_the_defaults_document(
         self, child_env: dict[str, str], tmp_path: pathlib.Path
     ):
         """The else branch. AshBaseConfigYaml defaults empty, so this is the
-        path almost every adopter takes, and it must not create a config file --
-        ASH falls through to its built-in defaults instead."""
+        path almost every adopter takes. It writes `{}`, ASH's defaults, so ASH
+        is given a config and does not look for one in the scanned checkout."""
         config = tmp_path / "ash-config" / ".ash.yaml"
 
         result = run_ssm_command(child_env, config, parameter_name=None)
 
         assert result.returncode == 0, result.stderr
-        assert "built-in defaults" in result.stdout, result.stdout
-        assert not config.exists(), "the else branch must not create a config file"
+        assert "ASH's defaults" in result.stdout, result.stdout
+        assert config.read_bytes() == b"{}\n"
 
     def test_an_empty_parameter_name_takes_the_else_branch(
         self, child_env: dict[str, str], tmp_path: pathlib.Path
@@ -283,8 +285,8 @@ class TestBranches:
         result = run_ssm_command(child_env, config, parameter_name="")
 
         assert result.returncode == 0, result.stderr
-        assert "built-in defaults" in result.stdout
-        assert not config.exists()
+        assert "ASH's defaults" in result.stdout
+        assert config.read_bytes() == b"{}\n"
 
     def test_the_parent_directory_is_created(
         self, child_env: dict[str, str], secure_parameter, tmp_path: pathlib.Path

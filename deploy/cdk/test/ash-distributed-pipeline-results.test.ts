@@ -15,14 +15,14 @@
  *
  * WHY THE CONFIG PATH MATTERS
  * ---------------------------
- * The shard projects set `ASH_CONFIG` as a project environment variable and write the
- * file only when a base config was supplied. Some ASH versions read a missing
- * `ASH_CONFIG` file as "use defaults"; others refuse an explicit config path that
- * does not exist, with exit 3 as a config error, which would fail every shard of a
- * pipeline deployed without `AshBaseConfigYaml`. Whatever reaches `ash` has to be
- * a config file that exists, or no `ASH_CONFIG` at all. The phases are run in
- * separate shells, as the stack's own comment warns an `export` does not reliably
- * cross phases.
+ * The shard projects set `ASH_CONFIG` as a project environment variable, and pre_build
+ * writes the base config there, or `{}` (ASH's defaults) when none was supplied.
+ * Without a config file ASH looks for one in the scanned checkout, and some ASH
+ * versions refuse an explicit config path that names no file. So `ash` always gets
+ * a file that exists. The phases are run in separate shells, as the stack's own
+ * comment warns an `export` does not reliably cross phases.
+ * test_deploy_pipeline_config_source.py runs the real `ash` over a checkout that
+ * carries its own config.
  */
 
 import { spawnSync } from 'child_process';
@@ -207,14 +207,13 @@ describe('shard config path', () => {
     expect(ash.effective_config_content).toBe(doc);
   });
 
-  test('with no base config, ash is not pointed at a config file that does not exist', () => {
+  test('with no base config, the shard scans with `{}`, ASH\'s defaults', () => {
     const [ash] = runShard({});
 
     expect(ash).toBeDefined();
-    expect({ configPath: ash.effective_config, exists: ash.effective_config_exists }).toEqual(
-      ash.effective_config === null
-        ? { configPath: null, exists: false }
-        : { configPath: ash.effective_config, exists: true },
-    );
+    expect({ exists: ash.effective_config_exists, content: ash.effective_config_content }).toEqual({
+      exists: true,
+      content: '{}\n',
+    });
   });
 });
