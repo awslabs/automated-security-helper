@@ -199,11 +199,14 @@ async def test_diff_scan_results(allowed, snapshot):
 
 
 @pytest.mark.asyncio
-async def test_get_config(isolated_mcp_state, snapshot):
+async def test_get_config(isolated_mcp_state, snapshot, monkeypatch):
     cwd = Path.cwd()
     defaults = await _call("get_config")
     config = cwd / ".ash" / ".ash.yaml"
     config.parent.mkdir()
+    # A config path a client names is the operator's only in a directory the
+    # operator set aside; elsewhere it is checked as the client's.
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(config.parent))
     config.write_text(
         "project_name: snapshot-project\n"
         "fail_on_findings: false\n"

@@ -2556,7 +2556,8 @@ scanners:
         - all
       additional_formats: []
       skip_path: []
-      config_file: .ash/.checkov.yaml
+      # .ash/.checkov.yaml is not named here: a checkov config file inside the
+      # scanned tree is not passed to checkov, whoever names it.
       severity_threshold: LOW
   detect-secrets:
     enabled: true

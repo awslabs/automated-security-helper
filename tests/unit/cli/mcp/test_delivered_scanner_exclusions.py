@@ -701,6 +701,22 @@ def test_a_trivy_ignore_file_above_the_delivered_tree_is_not_read(
     _no_trace_of_the_host_file(config, tmp_path)
 
 
+def test_a_trivy_ignore_file_in_another_sessions_source_is_not_read(
+    _server, tmp_path: Path
+) -> None:
+    """Another session's delivered files are not this scan's tree."""
+    from automated_security_helper.config.ash_config import AshConfig
+
+    other = _server["workspace"] / "other-session" / "source" / "notes.txt"
+    other.parent.mkdir(parents=True)
+    other.write_text(SECRET_LINE + "\n", encoding="utf-8")
+    source = _trivy_delivered({"app.py": "x = 1\n"}, str(other))
+    config = _scan_resolution(source)
+    assert isinstance(config, AshConfig), config
+    assert not _trivy_options(config).get("ignore_file")
+    _no_trace_of_the_host_file(config, tmp_path)
+
+
 def test_an_unparsable_trivy_ignore_file_is_not_quoted(tmp_path: Path) -> None:
     from automated_security_helper.config.ash_config import AshConfig
 
@@ -850,6 +866,10 @@ NON_PATH_EXCLUSIONS = [
     ("ferret-scan", "validator_budget", "all=1ms"),
     ("trivy-repo", "license_full", False),
     ("trivy-repo", "scanners", ["vuln"]),
+    ("npm-audit", "offline", True),
+    ("grype", "offline", True),
+    ("trivy-repo", "offline", True),
+    ("ferret-scan", "max_live_bytes", "1KB"),
 ]
 _NON_PATH_IDS = [f"{scanner}.{option}" for scanner, option, _ in NON_PATH_EXCLUSIONS]
 
@@ -867,6 +887,12 @@ def _option_defaults() -> Dict[tuple, Any]:
     )
     from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
         DetectSecretsScannerConfigOptions,
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
+        GrypeScannerConfigOptions,
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
+        NpmAuditScannerConfigOptions,
     )
     from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
         OpengrepScannerConfigOptions,
@@ -886,6 +912,8 @@ def _option_defaults() -> Dict[tuple, Any]:
         "cdk-nag": CdkNagScannerConfigOptions(),
         "checkov": CheckovScannerConfigOptions(),
         "detect-secrets": DetectSecretsScannerConfigOptions(),
+        "grype": GrypeScannerConfigOptions(),
+        "npm-audit": NpmAuditScannerConfigOptions(),
         "opengrep": OpengrepScannerConfigOptions(),
         "semgrep": SemgrepScannerConfigOptions(),
         "ferret-scan": FerretScannerConfigOptions(),
@@ -944,8 +972,21 @@ def test_every_non_path_exclusion_is_a_default_denial() -> None:
 
 
 def _denied_at_or_below(pointer: str, denied: List[str]) -> bool:
-    """Whether ``pointer``, or a key inside it, is a default ``denied_paths`` entry."""
-    return any(entry == pointer or entry.startswith(pointer + "/") for entry in denied)
+    """Whether ``pointer``, or a key inside it, is a default ``denied_paths`` entry.
+
+    A glob segment in an entry (``/scanners/*/options/offline``) matches the
+    pointer's segment at the same place.
+    """
+    from fnmatch import fnmatchcase
+
+    parts = pointer.split("/")
+    for entry in denied:
+        segments = entry.split("/")
+        if len(segments) >= len(parts) and all(
+            fnmatchcase(part, segment) for part, segment in zip(parts, segments)
+        ):
+            return True
+    return False
 
 
 def test_a_delivered_config_may_turn_on_more_cdk_nag_packs() -> None:
@@ -964,54 +1005,47 @@ def test_a_delivered_config_may_turn_on_more_cdk_nag_packs() -> None:
     assert isinstance(_scan_resolution(source), AshConfig)
 
 
-#: Scanner options whose names suggest they filter findings but that a
-#: delivered config may still change, each with why.
-_REVIEWED_NOT_HIDING = {
+#: Every scanner option a delivered config may change that is neither denied
+#: by default nor re-applied as a marked suppression, and why changing it leaves
+#: no finding out. ``"*"`` stands for every scanner with the option. Each option
+#: of each shipped scanner is in one of the three, so a new option is classified
+#: before it reaches a delivered config.
+_REVIEWED_OPTIONS: Dict[tuple, str] = {
+    ("*", "severity_threshold"): (
+        "decides which reported findings fail the scan, as "
+        "global_settings.severity_threshold does; it reports no fewer"
+    ),
+    ("*", "scan_timeout"): (
+        "a scanner that runs out of time fails, and a failed scanner is reported "
+        "incomplete (fail_on_incomplete_scanners is denied)"
+    ),
+    ("*", "install_timeout"): (
+        "a tool that cannot be installed is reported missing, which counts as "
+        "incomplete"
+    ),
     ("bandit", "ignore_nosec"): "the default honors # nosec; True reports more",
+    ("bandit", "additional_formats"): "extra report files; findings come from SARIF",
+    ("checkov", "additional_formats"): "extra report files; findings come from SARIF",
     ("checkov", "skip_ash_output_dir"): "the default skips only ASH's own output",
+    ("syft", "additional_outputs"): (
+        "extra output files; components come from the CycloneDX report"
+    ),
+    ("opengrep", "metrics"): "usage metrics, not findings",
+    ("semgrep", "metrics"): "usage metrics, not findings",
     ("detect-secrets", "skip_generated_lockfiles"): "on by default; off reports more",
     ("trivy-repo", "ignore_unfixed"): "on by default; off reports more",
+    ("trivy-repo", "disable_telemetry"): "telemetry, not findings",
     ("cdk-nag", "include_compliant_checks"): "adds passing checks to the output",
     ("ferret-scan", "fail_on_incomplete"): "decides the verdict, hides nothing",
     ("ferret-scan", "skip_version_check"): "tool installation, not findings",
-    ("trivy-repo", "disable_telemetry"): "telemetry, not findings",
+    ("ferret-scan", "show_match"): "shows matched text in findings; reports no fewer",
+    ("ferret-scan", "explain"): "annotates findings; reports no fewer",
+    ("ferret-scan", "ferret_debug"): "ferret-scan's own log level",
+    ("ferret-scan", "ferret_verbose"): "ferret-scan's own log level",
 }
 
-#: Words in an option's name that mark it as one that may filter findings.
-_FILTER_WORDS = (
-    "skip",
-    "exclude",
-    "ignore",
-    "disable",
-    "framework",
-    "severity",
-    "confidence",
-    "limit",
-    "check",
-    "pack",
-    "baseline",
-    "settings",
-    "recursive",
-    "profile",
-    "pattern",
-    "scanners",
-    "budget",
-    "preprocessor",
-    "license",
-    "config",
-)
 
-
-def test_every_option_that_may_filter_findings_is_classified() -> None:
-    """Each such option is re-applied as a marked suppression, denied, or reviewed.
-
-    Keeps a new scanner option that drops findings from reaching a delivered
-    config unnoticed.
-    """
-    from automated_security_helper.config.ash_config import RuntimeOverridesConfig
-    from automated_security_helper.config.client_scanner_exclusions import (
-        SCANNER_EXCLUSION_OPTIONS,
-    )
+def _scanner_option_models() -> Dict[str, Any]:
     from automated_security_helper.plugin_modules.ash_builtin.scanners import (
         bandit_scanner,
         cdk_nag_scanner,
@@ -1034,7 +1068,7 @@ def test_every_option_that_may_filter_findings_is_classified() -> None:
         trivy_repo_scanner,
     )
 
-    models = {
+    return {
         "bandit": bandit_scanner.BanditScannerConfigOptions,
         "cdk-nag": cdk_nag_scanner.CdkNagScannerConfigOptions,
         "cfn-nag": cfn_nag_scanner.CfnNagScannerConfigOptions,
@@ -1049,29 +1083,54 @@ def test_every_option_that_may_filter_findings_is_classified() -> None:
         "snyk-code": snyk_code_scanner.SnykCodeScannerConfigOptions,
         "trivy-repo": trivy_repo_scanner.TrivyRepoScannerConfigOptions,
     }
+
+
+def test_every_scanner_option_is_classified() -> None:
+    """Each option of each shipped scanner is denied, marked, or reviewed.
+
+    An explicit table rather than a guess from the option's name, so an option
+    whose name says nothing about findings is classified too.
+    """
+    from automated_security_helper.config.ash_config import RuntimeOverridesConfig
+    from automated_security_helper.config.client_scanner_exclusions import (
+        SCANNER_EXCLUSION_OPTIONS,
+    )
+    from automated_security_helper.config.runtime_patch import _SHIPPED_PLUGIN_KEYS
+
+    models = _scanner_option_models()
+    assert set(models) == set(_SHIPPED_PLUGIN_KEYS["scanners"])
     denied = RuntimeOverridesConfig().denied_paths
     marked = {(spec.scanner, spec.option) for spec in SCANNER_EXCLUSION_OPTIONS}
     unclassified = []
     for scanner, model in models.items():
         for option in model.model_fields:
-            if not any(word in option for word in _FILTER_WORDS):
-                continue
-            if option in ("config_file", "secret_config_file"):
-                # A tool's own config file: honored only from outside the tree
-                # (config/path_trust.py), whoever names it.
-                continue
-            if option == "severity_threshold":
-                # Decides which reported findings fail the scan, as
-                # global_settings.severity_threshold does; it reports no fewer.
-                continue
             if (
                 (scanner, option) in marked
                 or _denied_at_or_below(f"/scanners/{scanner}/options/{option}", denied)
-                or (scanner, option) in _REVIEWED_NOT_HIDING
+                or (scanner, option) in _REVIEWED_OPTIONS
+                or ("*", option) in _REVIEWED_OPTIONS
             ):
                 continue
             unclassified.append(f"{scanner}.{option}")
     assert unclassified == []
+
+
+def test_every_reviewed_option_is_a_real_one() -> None:
+    """A reviewed entry for an option that is gone, or now denied, is stale."""
+    from automated_security_helper.config.ash_config import RuntimeOverridesConfig
+
+    models = _scanner_option_models()
+    denied = RuntimeOverridesConfig().denied_paths
+    stale = []
+    for scanner, option in _REVIEWED_OPTIONS:
+        owners = list(models) if scanner == "*" else [scanner]
+        having = [name for name in owners if option in models[name].model_fields]
+        if not having or any(
+            _denied_at_or_below(f"/scanners/{name}/options/{option}", denied)
+            for name in having
+        ):
+            stale.append(f"{scanner}.{option}")
+    assert stale == []
 
 
 def test_the_plugin_option_defaults_are_the_plugins() -> None:

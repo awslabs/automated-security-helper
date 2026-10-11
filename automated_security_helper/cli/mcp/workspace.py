@@ -376,28 +376,45 @@ def _refuse_config_inputs_outside_the_permitted_roots(
     return None
 
 
-def _refuse_a_client_delivered_policy(
+def _refuse_a_client_chosen_policy(
     plan: WorkspacePlan,
 ) -> Optional[MCPResourceError]:
-    """Refuse a plan whose workspace policy an MCP client delivered.
+    """Refuse a plan whose workspace policy the operator did not set aside.
 
     A policy sets suppressions and ignore paths for every project, the fields
-    the runtime-override denylist keeps from a client. Checked on the file the
-    resolver applied (``workspace_config_source``, already resolved) rather than
-    on a path worked out beforehand: discovery runs beside the resolved
-    definition, so a symlinked definition, or a file added between a check and
-    the resolution, would make a separate lookup check a different file.
+    the runtime-override denylist keeps from a client. Under the MCP tools the
+    client names the definition and may name the policy, so either way the
+    policy file is the client's choice unless it sits where the operator keeps
+    config: a directory ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, or a session's
+    own ``config/`` directory (``client_named_config_is_untrusted``). A file a
+    client delivered is always the client's, and so is a policy in a checkout
+    the server may scan, named or found beside the definition.
+
+    Checked on the file the resolver applied (``workspace_config_source``,
+    already resolved) rather than on a path worked out beforehand: discovery
+    runs beside the resolved definition, so a symlinked definition, or a file
+    added between a check and the resolution, would make a separate lookup
+    check a different file.
     """
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.cli.mcp.sandbox import (
+        ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV,
+        client_named_config_is_untrusted,
+        config_is_client_supplied,
+    )
 
     source = plan.workspace_config_source
-    if source is None or not config_is_client_supplied(Path(source)):
+    if source is None or not client_named_config_is_untrusted(Path(source)):
         return None
+    how = (
+        "was delivered by an MCP client"
+        if config_is_client_supplied(Path(source))
+        else f"is not in a directory {ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV} names"
+    )
     return MCPResourceError(
         "Workspace scan refused: the workspace policy file "
-        f"{Path(source).as_posix()} was delivered by an MCP client. A policy sets "
-        "suppressions and ignore paths for every project, so only an operator's "
-        "policy file is used.",
+        f"{Path(source).as_posix()} {how}. A policy sets suppressions and ignore "
+        "paths for every project, so only a policy file the operator keeps in a "
+        f"directory {ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV} names is used.",
         context={"config_input": "workspace policy"},
     )
 
@@ -1119,7 +1136,7 @@ async def mcp_resolve_workspace(
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "resolve_workspace")
 
-    policy_refusal = _refuse_a_client_delivered_policy(plan)
+    policy_refusal = _refuse_a_client_chosen_policy(plan)
     if policy_refusal is not None:
         return _error_response(
             policy_refusal,
@@ -1274,7 +1291,7 @@ async def mcp_scan_workspace(
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "scan_workspace")
 
-    policy_refusal = _refuse_a_client_delivered_policy(plan)
+    policy_refusal = _refuse_a_client_chosen_policy(plan)
     if policy_refusal is not None:
         return _error_response(
             policy_refusal,

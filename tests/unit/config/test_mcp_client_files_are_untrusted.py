@@ -90,12 +90,15 @@ def test_an_uploaded_config_cannot_add_an_uninstalled_module(workspace):
         "  - no_such_module_anywhere\n"
         "  - automated_security_helper.plugin_modules.ash_trivy_plugins\n"
     )
-    config = resolve_config(
-        config_path=upload,
-        source_dir=source,
-        untrusted_config=True,
-        fallback_to_default=True,
-    )
-    assert config.ash_plugin_modules == [
-        "automated_security_helper.plugin_modules.ash_trivy_plugins"
-    ]
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    # Refused, naming the module, rather than resolved with it left out.
+    with pytest.raises(ASHConfigFieldDeniedError) as refused:
+        resolve_config(
+            config_path=upload,
+            source_dir=source,
+            untrusted_config=True,
+            fallback_to_default=True,
+        )
+    assert "no_such_module_anywhere" in str(refused.value)
+    assert "ash_trivy_plugins" not in str(refused.value)

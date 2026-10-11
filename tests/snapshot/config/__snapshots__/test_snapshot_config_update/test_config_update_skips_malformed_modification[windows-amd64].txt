@@ -49,8 +49,31 @@ global_settings:
       - /scanners/ferret-scan/options/validator_budget
       - /scanners/trivy-repo/options/license_full
       - /scanners/trivy-repo/options/scanners
+      - /scanners/*/options/offline
+      - /scanners/ferret-scan/options/max_live_bytes
+      - /scanners/bandit/options/config_file
+      - /scanners/checkov/options/config_file
+      - /scanners/ferret-scan/options/config_file
+      - /scanners/grype/options/config_file
+      - /scanners/syft/options/config_file
+      - /scanners/trivy-repo/options/secret_config_file
+      - /scanners/*/options/tool_version
+      - /converters/jupyter/options/tool_version
+      - /scanners/opengrep/options/version
+      - /scanners/opengrep/options/sha256
       - /reporters/bedrock-summary-reporter/options/aws_*
       - /reporters/cloudwatch-logs/**
+      - /reporters/aws-security-hub/options/aws_region
+      - /reporters/aws-security-hub/options/aws_profile
+      - /reporters/aws-security-hub/options/account_id
+      - /reporters/bedrock-summary-reporter/options/model_id
+      - /reporters/bedrock-summary-reporter/options/output_file
+      - /reporters/bedrock-summary-reporter/options/output_executive_file
+      - /reporters/bedrock-summary-reporter/options/output_technical_file
+      - /reporters/s3/options/aws_region
+      - /reporters/s3/options/aws_profile
+      - /reporters/s3/options/bucket_name
+      - /reporters/s3/options/key_prefix
       denied_value_patterns: {}
 fail_on_findings: false
 fail_on_incomplete_scanners: true

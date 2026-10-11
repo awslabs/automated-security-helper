@@ -261,13 +261,12 @@ def test_an_uploaded_config_is_covered(tmp_path, ash_log):
     source = tmp_path / "repo"
     source.mkdir()
 
-    config = resolve_config(
-        config_path=upload, source_dir=source, untrusted_config=True
-    )
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
-    assert _options(config, "bedrock-summary-reporter").get("aws_region") != (
-        "repo-region-1"
-    )
+    # Refused, naming the option, rather than resolved with it reset.
+    with pytest.raises(ASHConfigFieldDeniedError) as refused:
+        resolve_config(config_path=upload, source_dir=source, untrusted_config=True)
+    assert "aws_region" in str(refused.value)
 
 
 # Walks every built-in reporter's config model in a subprocess, because loading a

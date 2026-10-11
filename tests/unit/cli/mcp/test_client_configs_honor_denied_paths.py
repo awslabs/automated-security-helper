@@ -265,10 +265,8 @@ def test_the_other_default_denials_hold_for_an_upload(_server, text, key) -> Non
     )
 
 
-def test_sandbox_and_plugin_modules_in_an_upload_are_left_restrict_only(
-    _server,
-) -> None:
-    """Not refused here: sandbox_grants and plugin_module_trust already bound them."""
+def test_sandbox_and_plugin_modules_asking_for_more_are_refused(_server) -> None:
+    """Restrict-only: a value beyond the server's is refused, not left out."""
     operator = _server["tmp"] / "operator" / "ash.yaml"
     operator.write_text("sandbox:\n  mode: bwrap\n", encoding="utf-8")
     source = _upload(
@@ -279,11 +277,35 @@ def test_sandbox_and_plugin_modules_in_an_upload_are_left_restrict_only(
             )
         }
     )
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    outcome = _scan_resolution(_server["target"], str(source / "ash.yaml"))
+    assert isinstance(outcome, ASHConfigFieldDeniedError), outcome
+    for key in (
+        "sandbox.mode",
+        "sandbox.extra_read_paths",
+        "ash_plugin_modules",
+        "no_such_module_anywhere",
+    ):
+        assert key in str(outcome), str(outcome)
+
+
+def test_sandbox_and_plugin_modules_within_the_servers_scan(_server) -> None:
+    """An equal or tighter value is accepted."""
+    operator = _server["tmp"] / "operator" / "ash.yaml"
+    operator.write_text("sandbox:\n  mode: bwrap\n", encoding="utf-8")
+    source = _upload(
+        {
+            "ash.yaml": (
+                "sandbox:\n  mode: bwrap\n  network_scanners: []\n"
+                "ash_plugin_modules: []\n"
+            )
+        }
+    )
     config = _scan_resolution(_server["target"], str(source / "ash.yaml"))
     assert not isinstance(config, Exception), config
     assert config.sandbox.mode == "bwrap"
-    assert config.sandbox.extra_read_paths == []
-    assert "no_such_module_anywhere" not in config.ash_plugin_modules
+    assert config.sandbox.network_limit == []
 
 
 def test_a_default_value_in_an_upload_is_accepted(_server) -> None:
@@ -341,12 +363,157 @@ def test_positive_control_an_upload_without_denied_fields_resolves(_server) -> N
 def test_positive_control_an_operator_config_may_set_the_field(
     _server, monkeypatch
 ) -> None:
-    operator = _server["tmp"] / "operator" / "ash.yaml"
+    """A config in a directory ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names is the operator's."""
+    operator = _server["tmp"] / "operator-configs" / "ash.yaml"
+    operator.parent.mkdir()
     operator.write_text(BEDROCK_REGION.replace("uploaded", "operator"))
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(operator.parent))
     config = _scan_resolution(_server["target"], str(operator))
     assert not isinstance(config, Exception), config
     found = config.get_plugin_config("reporter", "bedrock-summary-reporter")
     assert found["options"]["aws_region"] == "us-west-2"
+
+
+def _in_another_checkout(_server: Dict[str, Any]) -> Path:
+    """A config file in a checkout the server may scan, not one a client delivered."""
+    other = _server["target"].parent / "other-checkout" / "ash.yaml"
+    other.parent.mkdir()
+    other.write_text(BEDROCK_REGION, encoding="utf-8")
+    return other
+
+
+def test_a_config_named_in_another_checkout_is_the_clients(_server) -> None:
+    """The operator let the server scan that checkout, not take its config as its own."""
+    _assert_refused(
+        _scan_resolution(_server["target"], str(_in_another_checkout(_server)))
+    )
+
+
+def test_get_config_treats_a_config_in_another_checkout_as_the_clients(
+    _server,
+) -> None:
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+    result = mcp_get_config(
+        config_path=str(_in_another_checkout(_server)), session_id=SESSION
+    )
+    assert result.get("success") is False, result
+    assert result.get("error_type") == "config_field_denied", result
+    assert DENIED_KEY in result["error"], result
+
+
+def test_validate_config_checks_a_config_in_another_checkout(_server) -> None:
+    from automated_security_helper.cli.mcp_tools import mcp_validate_config
+
+    result = mcp_validate_config(
+        config_path=str(_in_another_checkout(_server)), session_id=SESSION
+    )
+    assert result["valid"] is False, result
+    assert any(e["type"] == "denied_by_runtime_policy" for e in result["errors"])
+
+
+def test_a_link_a_client_delivered_is_the_clients_wherever_it_points(
+    _server, monkeypatch
+) -> None:
+    """Judged where it sits as well as by the file it reaches."""
+    elsewhere = _server["tmp"] / "operator-configs" / "ash.yaml"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text(BEDROCK_REGION, encoding="utf-8")
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(elsewhere.parent))
+    source = _upload({"app.py": "x = 1\n"})
+    link = source / "ash.yaml"
+    link.symlink_to(elsewhere)
+    _assert_refused(_scan_resolution(_server["target"], str(link)))
+
+
+_OPERATOR_CHOICES = [
+    (
+        "scanners:\n  bandit:\n    options:\n      config_file: other.ini\n",
+        "scanners.bandit.options.config_file",
+    ),
+    (
+        "scanners:\n  checkov:\n    options:\n      tool_version: '==1.0.0'\n",
+        "scanners.checkov.options.tool_version",
+    ),
+    (
+        "scanners:\n  opengrep:\n    options:\n      version: v0.0.1\n",
+        "scanners.opengrep.options.version",
+    ),
+    (
+        "converters:\n  jupyter:\n    options:\n      tool_version: '==1.0.0'\n",
+        "converters.jupyter.options.tool_version",
+    ),
+    (
+        "reporters:\n  s3:\n    options:\n      bucket_name: other-bucket\n",
+        "reporters.s3.options.bucket_name",
+    ),
+    (
+        (
+            "reporters:\n  aws-security-hub:\n    options:\n"
+            "      account_id: '000000000000'\n"
+        ),
+        "reporters.aws-security-hub.options.account_id",
+    ),
+    (
+        (
+            "reporters:\n  bedrock-summary-reporter:\n    options:\n"
+            "      model_id: other.model\n"
+        ),
+        "reporters.bedrock-summary-reporter.options.model_id",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "text,key", _OPERATOR_CHOICES, ids=[key for _, key in _OPERATOR_CHOICES]
+)
+def test_a_tool_choice_or_report_destination_in_an_upload_is_refused(
+    _server, text, key
+) -> None:
+    """Refused with the field named, rather than left out with a log line."""
+    source = _upload({"ash.yaml": text})
+    _assert_refused(
+        _scan_resolution(_server["target"], str(source / "ash.yaml")), key=key
+    )
+
+
+_NEWER_DENIALS = [
+    (
+        "scanners:\n  opengrep:\n    options:\n      exclude_rule: [some.rule]\n",
+        "scanners.opengrep.options.exclude_rule",
+    ),
+    (
+        (
+            "scanners:\n  detect-secrets:\n    options:\n"
+            "      baseline_file: .secrets.baseline\n"
+        ),
+        "scanners.detect-secrets.options.baseline_file",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "text,key", _NEWER_DENIALS, ids=[key for _, key in _NEWER_DENIALS]
+)
+def test_a_profile_holding_an_earlier_default_list_denies_todays_entries(
+    _server, text, key
+) -> None:
+    """A list an earlier ``ash config init`` wrote is the default, and gets today's entries."""
+    from automated_security_helper.config.client_config_policy import (
+        SHIPPED_DEFAULT_DENIED_PATHS,
+    )
+
+    pointer = "/" + key.replace(".", "/")
+    earlier = next(
+        shipped
+        for shipped in SHIPPED_DEFAULT_DENIED_PATHS
+        if "/sandbox" in shipped and pointer not in shipped
+    )
+    _bind_profile(_server["tmp"], _profile_denying(*sorted(earlier)))
+    source = _upload({"ash.yaml": text})
+    _assert_refused(
+        _scan_resolution(_server["target"], str(source / "ash.yaml")), key=key
+    )
 
 
 @pytest.mark.parametrize("delivered_tree", [False, True])

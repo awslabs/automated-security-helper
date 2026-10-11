@@ -24,7 +24,9 @@ What happens now
   ``--config-overrides`` replayed onto it (``confine_scanner_config_files``). An
   operator who wants a repository's own file names it with
   ``--config-overrides``; that path is used even inside the tree, because the
-  operator chose it.
+  operator chose it. Under the MCP server the default ``denied_paths`` refuse a
+  client's file that names one, and the overrides ``resolve_config`` is handed
+  there are the client's, so none is replayed.
 * The scanners no longer look for a config file by name.
 * Each of them hands its tool an explicit config, the operator's or an empty one
   ASH writes in the results directory, so the tool does not pick a file up from
@@ -40,7 +42,8 @@ Failure modes and known limitations
   name the file with ``--config-overrides`` or in an operator config.
 * Only these three scanners' ``config_file`` are covered here. checkov's and
   ferret-scan's are refused inside the tree by ``config/path_trust.py`` whoever
-  names them. detect-secrets' baseline is not covered here.
+  names them. detect-secrets' baseline is not covered here; under the MCP
+  server it is a default ``denied_paths`` entry.
 """
 
 from __future__ import annotations

@@ -13,7 +13,9 @@ decides that), or from a file an MCP client delivered (``untrusted_config``), th
 options come from the trusted base instead: the defaults, an operator config
 outside the tree, and ``--config-overrides``. Each section a reporter reads under
 any spelling ``AshConfig.get_plugin_config`` accepts is covered, and the values
-that are not honored are named in one warning.
+that are not honored are named in one warning. Under the MCP server the default
+``denied_paths`` refuse a client's file that sets one of them, and the overrides
+``resolve_config`` is handed there are the client's, so none is replayed.
 
 Only the built-in reporters' options are listed. A third-party reporter's
 destination options are its own, and are not known here. Other options of these
@@ -127,8 +129,8 @@ def confine_reporter_destinations(
         return
     files = ", ".join(describe_config_path(path) for path in in_tree)
     ASH_LOGGER.warning(
-        f"Ignoring {', '.join(ignored)} from {files}: the file is inside the scanned "
-        "tree, so the repository being scanned wrote it, and these options choose "
+        f"Ignoring {', '.join(ignored)} from {files}: that config is inside the "
+        "scanned tree or was delivered by an MCP client, and these options choose "
         "where findings are sent or written and which credentials send them. Set "
         "them with --config-overrides or a config file outside the tree."
     )

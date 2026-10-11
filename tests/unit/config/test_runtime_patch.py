@@ -373,13 +373,29 @@ class TestDefaults:
             TrivyRepoScannerConfig,
         )
 
+        from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
+            BedrockSummaryReporterConfig,
+        )
+        from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import (
+            S3ReporterConfig,
+        )
+        from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter import (
+            SecurityHubReporterConfig,
+        )
+
         cfg = AshConfig.model_validate(
             {
+                # The AWS reporters' sections, from their own models, so an
+                # entry under them has to name an option the reporter has.
                 "reporters": {
-                    "bedrock-summary-reporter": {
-                        "options": {"aws_region": "us-east-1"}
-                    },
+                    "aws-security-hub": SecurityHubReporterConfig().model_dump(
+                        by_alias=True
+                    ),
+                    "bedrock-summary-reporter": BedrockSummaryReporterConfig().model_dump(
+                        by_alias=True
+                    ),
                     "cloudwatch-logs": {"options": {"aws_region": "us-east-1"}},
+                    "s3": S3ReporterConfig().model_dump(by_alias=True),
                 },
                 # Plugin scanners' sections, from their own models, so an entry
                 # under them has to name an option the plugin really has.

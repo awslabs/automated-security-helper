@@ -20,7 +20,7 @@ also why the denial tests check the error names the entry, not just
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, get_args
+from typing import Any, Dict, List, Tuple, get_args
 
 import pytest
 import yaml
@@ -433,14 +433,98 @@ _CATEGORY_DENIALS: Dict[str, Any] = {
     "/scanners/ferret-scan/options/validator_budget": "all=1ms",
     "/scanners/trivy-repo/options/license_full": False,
     "/scanners/trivy-repo/options/scanners": ["vuln"],
+    "/scanners/ferret-scan/options/max_live_bytes": "1KB",
 }
+#: Entries with the pointer each case writes and a value other than the
+#: default: a scanner's own config file, which version of a tool runs, and
+#: offline. A glob entry is written at one scanner it covers.
+_POINTED_DENIALS: Dict[str, Tuple[str, Any]] = {
+    "/scanners/*/options/offline": (
+        "/scanners/npm-audit/options/offline",
+        True,
+    ),
+    "/scanners/bandit/options/config_file": (
+        "/scanners/bandit/options/config_file",
+        "/etc/other.ini",
+    ),
+    "/scanners/checkov/options/config_file": (
+        "/scanners/checkov/options/config_file",
+        "/etc/other.yaml",
+    ),
+    "/scanners/ferret-scan/options/config_file": (
+        "/scanners/ferret-scan/options/config_file",
+        "/etc/other.yaml",
+    ),
+    "/scanners/grype/options/config_file": (
+        "/scanners/grype/options/config_file",
+        "/etc/other.yaml",
+    ),
+    "/scanners/syft/options/config_file": (
+        "/scanners/syft/options/config_file",
+        "/etc/other.yaml",
+    ),
+    "/scanners/trivy-repo/options/secret_config_file": (
+        "/scanners/trivy-repo/options/secret_config_file",
+        "/etc/other.yaml",
+    ),
+    "/scanners/*/options/tool_version": (
+        "/scanners/checkov/options/tool_version",
+        "==1.0.0",
+    ),
+    "/converters/jupyter/options/tool_version": (
+        "/converters/jupyter/options/tool_version",
+        "==1.0.0",
+    ),
+    "/scanners/opengrep/options/version": (
+        "/scanners/opengrep/options/version",
+        "v0.0.1",
+    ),
+    "/scanners/opengrep/options/sha256": (
+        "/scanners/opengrep/options/sha256",
+        {"linux/amd64": "0" * 64},
+    ),
+}
+
+#: Destination and credential options of the AWS reporters, which the profile
+#: does not configure, so each case adds the reporter's section.
+_REPORTER_DENIALS: Dict[str, Any] = {
+    "/reporters/aws-security-hub/options/aws_region": "other-region-1",
+    "/reporters/aws-security-hub/options/aws_profile": "other-profile",
+    "/reporters/aws-security-hub/options/account_id": "000000000000",
+    "/reporters/bedrock-summary-reporter/options/model_id": "other.model",
+    "/reporters/bedrock-summary-reporter/options/output_file": "other.md",
+    "/reporters/bedrock-summary-reporter/options/output_executive_file": "other.md",
+    "/reporters/bedrock-summary-reporter/options/output_technical_file": "other.md",
+    "/reporters/s3/options/aws_region": "other-region-1",
+    "/reporters/s3/options/aws_profile": "other-profile",
+    "/reporters/s3/options/bucket_name": "other-bucket",
+    "/reporters/s3/options/key_prefix": "other/",
+}
+
+
+def _nested_at(pointer: str, value: Any) -> Dict[str, Any]:
+    nested: Any = value
+    for segment in reversed(pointer.split("/")[1:]):
+        nested = {segment: nested}
+    return nested
+
+
 for _pointer, _value in _CATEGORY_DENIALS.items():
-    _nested: Any = _value
-    for _segment in reversed(_pointer.split("/")[2:]):
-        _nested = {_segment: _nested}
     _DENIED_CASES[_pointer] = (
         {"op": "add", "path": _pointer, "value": _value},
-        {"scanners": _nested},
+        _nested_at(_pointer, _value),
+    )
+for _entry, (_pointer, _value) in _POINTED_DENIALS.items():
+    _DENIED_CASES[_entry] = (
+        {"op": "add", "path": _pointer, "value": _value},
+        _nested_at(_pointer, _value),
+    )
+for _pointer, _value in _REPORTER_DENIALS.items():
+    _reporter, _option = _pointer.split("/")[2], _pointer.split("/")[-1]
+    _section = {"enabled": True, "options": {_option: _value}}
+    _DENIED_CASES[_pointer] = (
+        {"op": "add", "path": f"/reporters/{_reporter}", "value": _section},
+        {"reporters": {_reporter: _section}},
     )
 
 
@@ -501,20 +585,25 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
         ),
         entry,
     )
+
+    def first_denied_under(section: str) -> str:
+        return next(
+            denied
+            for denied in RuntimeOverridesConfig().denied_paths
+            if denied.startswith(section)
+        )
+
+    # A case that adds a whole reporter section the profile does not configure
+    # is refused, on both routes, by the first denied entry under that section.
+    added_section = patch_op["path"] + "/"
+    if entry.startswith(added_section):
+        covering = first_denied_under(added_section)
     # The override restates the profile, which configures no ferret-scan or
     # trivy-repo section, so its patch adds that whole section and the first
     # denied entry under it is the one named.
     section = "/".join(entry.split("/")[:3]) + "/"
     plugin_section = section in ("/scanners/ferret-scan/", "/scanners/trivy-repo/")
-    covering_override = (
-        next(
-            denied
-            for denied in RuntimeOverridesConfig().denied_paths
-            if denied.startswith(section)
-        )
-        if plugin_section
-        else covering
-    )
+    covering_override = first_denied_under(section) if plugin_section else covering
     assert f"entry {covering!r}" in patched["error"], patched["error"]
     assert f"entry {covering_override!r}" in overridden["error"], overridden["error"]
     _assert_unbound("patch")
@@ -687,3 +776,72 @@ def test_a_glob_denial_on_a_plugin_section_is_refused_in_every_spelling(
         assert f"denied_paths entry {denial!r}" in result["error"], result["error"]
     _assert_unbound("patch")
     _assert_unbound("override")
+
+
+# ---------------------------------------------------------------------------
+# A profile holding an earlier default list
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "pointer,value",
+    [
+        ("/scanners/opengrep/options/exclude_rule", ["some.rule.id"]),
+        ("/scanners/detect-secrets/options/baseline_file", ".secrets.baseline"),
+    ],
+)
+def test_a_profile_holding_an_earlier_default_list_gets_todays_denials(
+    tmp_path: Path, pointer: str, value: Any
+) -> None:
+    """A list an earlier ``ash config init`` wrote is the default, so it denies what today's does.
+
+    The list is the default ASH shipped before these entries were added. Read as
+    written it would let both routes change fields the current default denies.
+    """
+    from automated_security_helper.config.client_config_policy import (
+        SHIPPED_DEFAULT_DENIED_PATHS,
+    )
+
+    earlier = next(
+        shipped
+        for shipped in SHIPPED_DEFAULT_DENIED_PATHS
+        if "/sandbox" in shipped and pointer not in shipped
+    )
+    document = _profile(allowed_paths=["/**"], denied_paths=sorted(earlier))
+    _install(tmp_path, document)
+
+    patched, overridden = _both_routes(
+        {"op": "add", "path": pointer, "value": value},
+        _override_for(document, _nested_at(pointer, value)),
+    )
+
+    for result in (patched, overridden):
+        assert result["success"] is False, result
+        assert f"denied_paths entry {pointer!r}" in result["error"], result["error"]
+    _assert_unbound("patch")
+    _assert_unbound("override")
+
+
+def test_an_edited_list_is_used_as_written(tmp_path: Path) -> None:
+    """Positive control: a list the operator edited is not replaced."""
+    edited = [
+        entry
+        for entry in RuntimeOverridesConfig().denied_paths
+        if entry != "/scanners/opengrep/options/exclude_rule"
+    ]
+    document = _profile(allowed_paths=["/**"], denied_paths=edited)
+    _install(tmp_path, document)
+
+    patched = mcp_select_profile(
+        "op",
+        patch_ops=[
+            {
+                "op": "add",
+                "path": "/scanners/opengrep/options/exclude_rule",
+                "value": ["some.rule.id"],
+            }
+        ],
+        session_id="patch",
+    )
+
+    assert patched["success"] is True, patched

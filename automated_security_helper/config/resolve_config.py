@@ -271,6 +271,7 @@ def resolve_config(
         source_dir=source_dir,
         permit_base=permit_base,
         scanned_root=scanned_root,
+        all_delivered=untrusted_config,
     )
     if scanned_root is None:
         scanned_root = source_dir if source_dir is not None else Path.cwd()
@@ -300,22 +301,30 @@ def resolve_config(
             if operator is not None
             else get_default_config().sandbox.mode
         )
+    # The overrides that count as the operator's choice, replayed onto the trusted
+    # base below. Under the MCP server (``client_config_policy`` set) they are the
+    # client's: the workspace tools' config_overrides, already held to the
+    # session's allowlist. An allowlist that lets a client change a field does
+    # not make the client's value the operator's, so none is replayed there.
+    operator_overrides = (
+        list(config_overrides or []) if client_config_policy is None else []
+    )
     # Only an override under `sandbox` can change the sandbox section, and replaying
     # the rest onto the defaults could fail where the config file supplied the
     # section they write into.
     sandbox_overrides = [
         override
-        for override in config_overrides or []
+        for override in operator_overrides
         if override.partition("=")[0].removesuffix("+").split(".")[0] == "sandbox"
     ]
     if sandbox_overrides:
         trusted = apply_config_overrides(trusted, sandbox_overrides)
     confine_sandbox_grants(config.sandbox, trusted.sandbox, in_tree)
     confine_plugin_modules(
-        config, trusted, config_overrides, Path(scanned_root), in_tree
+        config, trusted, operator_overrides, Path(scanned_root), in_tree
     )
-    confine_reporter_destinations(config, trusted, config_overrides, in_tree)
-    confine_scanner_config_files(config, trusted, config_overrides, in_tree)
+    confine_reporter_destinations(config, trusted, operator_overrides, in_tree)
+    confine_scanner_config_files(config, trusted, operator_overrides, in_tree)
     return config
 
 

@@ -84,6 +84,52 @@ def test_an_operator_config_outside_the_tree_names_the_tool_config(
     assert _config_file(config, scanner) == "/etc/tool.yaml"
 
 
+@pytest.mark.parametrize(
+    "override,read",
+    [
+        (
+            "scanners.bandit.options.config_file=.ash/tool.ini",
+            lambda config: _config_file(config, "bandit"),
+        ),
+        (
+            "reporters.s3.options.bucket_name=other-bucket",
+            lambda config: (
+                (config.get_plugin_config("reporter", "s3") or {}).get("options") or {}
+            ).get("bucket_name"),
+        ),
+    ],
+    ids=["scanner-config-file", "reporter-destination"],
+)
+def test_an_mcp_clients_overrides_are_not_replayed_as_the_operators(
+    tmp_path: Path, override: str, read: Any
+) -> None:
+    """Under the MCP server, ``config_overrides`` are the client's, not the operator's.
+
+    The workspace tools pass a client's overrides, already held to the session's
+    allowlist, with the session's rules (``client_config_policy``). An allowlist
+    that lets a client change a field does not make its value the operator's, so
+    it is not replayed onto the trusted base the way ``--config-overrides`` is.
+    """
+    from automated_security_helper.config.ash_config import (
+        AshConfig,
+        RuntimeOverridesConfig,
+    )
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
+
+    repo = _repo(tmp_path, {"bandit": {"options": {"config_file": ".ash/other.ini"}}})
+    rules = ClientConfigRules(policy=RuntimeOverridesConfig(), base=AshConfig())
+
+    from_the_client = resolve_config(
+        source_dir=repo, config_overrides=[override], client_config_policy=rules
+    )
+    from_the_operator = resolve_config(source_dir=repo, config_overrides=[override])
+
+    assert read(from_the_client) is None
+    assert read(from_the_operator) == override.partition("=")[2]
+
+
 def _context(tmp_path: Path) -> PluginContext:
     from automated_security_helper.config.default_config import get_default_config
 

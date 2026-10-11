@@ -118,11 +118,11 @@ def test_an_uploaded_config_cannot_add_them(tmp_path, ash_log, package):
     source = tmp_path / "repo"
     source.mkdir()
 
-    config = resolve_config(
-        config_path=upload, source_dir=source, untrusted_config=True
-    )
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
-    assert package not in config.ash_plugin_modules
+    with pytest.raises(ASHConfigFieldDeniedError) as refused:
+        resolve_config(config_path=upload, source_dir=source, untrusted_config=True)
+    assert repr(package) in str(refused.value)
 
 
 @pytest.mark.parametrize("package", OFF_HOST)
@@ -154,17 +154,18 @@ def test_a_config_an_mcp_client_delivered_cannot_add_them(
     config_path.write_text(document)
     assert config_is_client_supplied(config_path)
 
-    config = resolve_config(
-        config_path=config_path,
-        source_dir=source,
-        untrusted_config=config_is_client_supplied(config_path),
-        fallback_to_default=True,
-    )
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
-    assert config.ash_plugin_modules == COMMUNITY
-    warnings = _module_warnings(ash_log)
-    assert len(warnings) == 1, _warnings(ash_log)
-    assert repr(package) in warnings[0]
+    # Refused, naming the package, rather than resolved with it left out.
+    with pytest.raises(ASHConfigFieldDeniedError) as refused:
+        resolve_config(
+            config_path=config_path,
+            source_dir=source,
+            untrusted_config=config_is_client_supplied(config_path),
+            fallback_to_default=True,
+        )
+    assert repr(package) in str(refused.value)
+    assert not any(module in str(refused.value) for module in COMMUNITY)
 
 
 @pytest.mark.parametrize("package", OFF_HOST)

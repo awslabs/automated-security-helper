@@ -61,13 +61,14 @@ on a finding's path after the fact:
 Known limitations
 -----------------
 * A tool can also leave files or findings out through a config or ignore file
-  of its own. checkov's and ferret-scan's config files, detect-secrets' plugin
-  files and trivy-repo's ignore and secret files are honored only from outside
-  the scanned tree (``config/path_trust.py``). bandit's, grype's and syft's
-  config files, which those scanners also find by name in the source directory,
-  and an ignore file a tool may read from the tree on its own (such as a
-  ``.semgrepignore``) are not limited by that module, and are not re-applied
-  here.
+  of its own. Those config files are the operator's: checkov's and
+  ferret-scan's config files, detect-secrets' plugin files and trivy-repo's
+  secret file are honored only from outside the scanned tree
+  (``config/path_trust.py``), bandit's, grype's and syft's come only from the
+  trusted config (``config/tool_config_trust.py``), and the default
+  ``denied_paths`` refuse a delivered config that names one. An ignore file a
+  tool reads from the tree on its own (such as a ``.semgrepignore``) is not
+  re-applied here.
 * The glob matching above is an approximation of each tool's own rules. A
   finding it misses is reported unsuppressed, which can fail a scan the
   client's exclusion would have passed; it is never hidden.
@@ -264,6 +265,7 @@ def strip_client_scanner_exclusions(
     *,
     source_dir: Path | str | None,
     scanned_root: Path | str | None,
+    is_delivered: Optional[Any] = None,
 ) -> Any:
     """Move each exclusion a delivered config supplied from its scanner's options to the config.
 
@@ -272,10 +274,9 @@ def strip_client_scanner_exclusions(
     """
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
 
+    delivered = is_delivered or config_is_client_supplied
     operator_documents = [
-        document
-        for path, document in documents.items()
-        if not config_is_client_supplied(path)
+        document for path, document in documents.items() if not delivered(path)
     ]
     root = Path(scanned_root or source_dir or Path.cwd())
     recorded: List[ClientScannerExclusion] = list(

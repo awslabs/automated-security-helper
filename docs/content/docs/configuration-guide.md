@@ -493,8 +493,13 @@ on which:
   table above applies.
 - **An MCP client**: a file the client delivered, such as an upload named as
   `config_path`, a delivered tree's own `.ash/.ash.yaml`, or a project config in
-  a delivered workspace. The table above applies, and so does the session's
-  runtime-override policy, `global_settings.mcp.runtime_overrides`:
+  a delivered workspace. So is any other config path a client names, unless it
+  is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or in the session's own
+  `config/` directory: a config in another checkout the server may scan is that
+  checkout's, not the operator's. A path is judged where it sits as well as by
+  the file it reaches, so a link a client delivered is the client's wherever it
+  points. The table above applies, and so does the session's runtime-override
+  policy, `global_settings.mcp.runtime_overrides`:
 
   - The file may not change a field that `denied_paths` or
     `denied_value_patterns` denies. Entries match either `-` or `_`, every
@@ -504,6 +509,19 @@ on which:
     denied field is refused with `error_type: config_field_denied`, naming each
     field. When the policy cannot be established, a scan that reads such a file is
     refused with `error_type: config_policy_unreadable`.
+  - It may restrict the server's `sandbox` and `ash_plugin_modules` settings but
+    not ask for more than they give: a `network_scanners` entry for a scanner the
+    server's config gives no network, an `extra_read_paths` entry the server's
+    config does not grant, a `mode` other than the server's when the server sets
+    one, or a module the server's config does not load that is inside the scanned
+    tree or sends findings off the host. A file that does is refused the same
+    way, naming the setting; an equal or tighter value scans.
+  - Choices that are the operator's are in the default `denied_paths` too, so a
+    file that sets one is refused rather than scanned without it: each scanner's
+    own config file (`config_file` for bandit, checkov, ferret-scan, grype and
+    syft, and trivy-repo's `secret_config_file`), every scanner's and the jupyter
+    converter's `tool_version`, opengrep's `version` and `sha256`, and the AWS
+    reporters' destinations and credentials listed in the table above.
   - Its own `global_settings.suppressions` and `global_settings.ignore_paths`
     apply. Each entry the operator did not supply is marked `client_supplied: true`,
     the files under a client-supplied ignore path are still scanned, and a finding
@@ -538,10 +556,14 @@ on which:
     | opengrep | `config`, `exclude_rule`, `patterns`, `severity` |
     | semgrep | `config`, `exclude_rule`, `severity` |
     | trivy-repo | `license_full`, `scanners` |
+    | ferret-scan | `max_live_bytes`, which bounds how much extracted content it holds |
+    | every scanner | `offline`: a scanner set offline runs on cached data, and npm audit offline reports no advisories at all |
 
     Options that only tune output or performance, or whose default already
     reports the least they can (trivy-repo's `ignore_unfixed`, bandit's
     `ignore_nosec`, detect-secrets' `skip_generated_lockfiles`), are not listed.
+    `scan_timeout` and `install_timeout` are not either: a scanner that runs out
+    of time or cannot be installed is reported as not completing.
 
 See [Config files in delivered source](mcp/streamable-http.md#config-files-in-delivered-source)
 for the details, including which profile the policy comes from.

@@ -152,7 +152,7 @@ def test_the_current_default_is_a_shipped_default() -> None:
     assert current in ccp.SHIPPED_DEFAULT_DENIED_PATHS
 
 
-@pytest.mark.parametrize("shipped", range(7))
+@pytest.mark.parametrize("shipped", range(len(ccp.SHIPPED_DEFAULT_DENIED_PATHS)))
 def test_a_written_out_shipped_default_still_counts_as_default(shipped: int) -> None:
     listed = sorted(ccp.SHIPPED_DEFAULT_DENIED_PATHS[shipped], reverse=True)
     policy = RuntimeOverridesConfig(denied_paths=listed)

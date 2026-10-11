@@ -418,7 +418,7 @@ async def _run_scan_async(
     )
     from automated_security_helper.cli.mcp.sandbox import (
         config_base_gate,
-        config_is_client_supplied,
+        client_named_config_is_untrusted,
     )
 
     registry = get_scan_registry()
@@ -436,7 +436,10 @@ async def _run_scan_async(
     # is the client's, not the operator's, wherever the scan target is. It is
     # resolved restrict-only for sandbox settings, with the profile this session
     # bound, if any, as the trusted base the grants come from.
-    untrusted_config = config_path is not None and config_is_client_supplied(
+    # A config path the client named is the client's unless the operator set it
+    # aside (client_named_config_is_untrusted), even when it is a file in another
+    # repository the server may scan.
+    untrusted_config = config_path is not None and client_named_config_is_untrusted(
         config_path
     )
     trusted_config_path = (
@@ -1278,6 +1281,7 @@ def mcp_get_config(
         caller_is_remote,
         config_base_gate,
         config_chain_refusal,
+        client_named_config_is_untrusted,
         config_is_client_supplied,
         validate_config_input,
     )
@@ -1360,7 +1364,11 @@ def mcp_get_config(
         scanned_root = (
             delivered if delivered is not None and delivered.is_dir() else Path.cwd()
         )
-    untrusted_config = config_is_client_supplied(path)
+    untrusted_config = (
+        client_named_config_is_untrusted(path)
+        if config_path is not None
+        else config_is_client_supplied(path)
+    )
     try:
         resolved = resolve_config(
             config_path=path,
@@ -1517,28 +1525,22 @@ def _validated_document_denials(
 
     from automated_security_helper.cli.mcp.sandbox import (
         caller_is_remote,
+        client_named_config_is_untrusted,
         config_base_gate,
     )
     from automated_security_helper.config.client_config_policy import (
-        INERT_PATHS,
         client_file_denials,
-        exempt_paths,
     )
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
         resolve_config_document,
     )
-    from automated_security_helper.config.runtime_patch import (
-        config_document_denials,
-    )
-
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
 
     rules = _session_client_rules(session_id)
     checked = (
         caller_is_remote(session_id)
         if config_content is not None
-        else config_path is not None and config_is_client_supplied(config_path)
+        else config_path is not None and client_named_config_is_untrusted(config_path)
     )
     if rules.unreadable is not None and checked:
         return [
@@ -1547,16 +1549,19 @@ def _validated_document_denials(
     found: List[Tuple[str, str]] = []
     try:
         if config_content is not None:
-            if not caller_is_remote(session_id):
+            if not checked:
                 return []
-            denials = config_document_denials(
-                _yaml.safe_load(config_content),
-                allowlist=rules.policy,
-                config=rules.base,
-                exempt=exempt_paths(rules.policy),
-                inert=INERT_PATHS,
-            )
-            found = [(denial.key, denial.reason) for denial in denials]
+            # The same check a scan of a delivered file gets, the restrict-only
+            # settings included.
+            found = [
+                (denial.key, denial.reason)
+                for _file, denials in client_file_denials(
+                    {Path("config_content"): _yaml.safe_load(config_content)},
+                    rules,
+                    all_delivered=True,
+                )
+                for denial in denials
+            ]
         elif config_path is not None:
             path = Path(config_path)
             documents = resolve_config_document(
@@ -1564,9 +1569,13 @@ def _validated_document_denials(
                 confine_to=default_confinement_root(path),
                 permit_base=config_base_gate(session_id),
             ).documents
+            # A named path the client chose counts as delivered, every file of
+            # its chain with it, as resolve_config(untrusted_config=True) does.
             found = [
                 (denial.key, f"{denial.reason}, in {file.name}")
-                for file, denials in client_file_denials(documents, rules)
+                for file, denials in client_file_denials(
+                    documents, rules, all_delivered=checked
+                )
                 for denial in denials
             ]
     except Exception:  # noqa: BLE001 -- a read or chain error is reported already
@@ -1739,7 +1748,6 @@ def mcp_select_profile(
     )
     from automated_security_helper.config.ash_config import (
         AshConfig,
-        AshMcpConfig,
         RuntimeOverridesConfig,
     )
     import yaml as _yaml
@@ -1748,15 +1756,11 @@ def mcp_select_profile(
     def _runtime_overrides_policy(profile_cfg: AshConfig) -> RuntimeOverridesConfig:
         # One reading of the profile's allowlist for both mutating modes, so
         # override_yaml cannot be checked against a different policy than
-        # patch_ops.
-        mcp_cfg: Optional[AshMcpConfig] = getattr(
-            profile_cfg.global_settings, "mcp", None
-        )
-        return (
-            mcp_cfg.runtime_overrides
-            if mcp_cfg is not None
-            else RuntimeOverridesConfig()
-        )
+        # patch_ops, and the same reading the delivered-file check uses
+        # (client_config_policy.policy_of), stale shipped defaults included.
+        from automated_security_helper.config.client_config_policy import policy_of
+
+        return policy_of(profile_cfg)
 
     if patch_ops is not None and override_yaml is not None:
         return {

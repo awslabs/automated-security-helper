@@ -123,10 +123,12 @@ SUPPRESSION_PATHS: Tuple[str, ...] = (
 INERT_PATHS: Tuple[str, ...] = ("/global_settings/mcp", "/global_settings/mcp/**")
 
 #: Every ``RuntimeOverridesConfig.denied_paths`` default ASH has shipped, oldest
-#: first, as sets. A profile whose list equals one of these, as ``ash config
-#: init`` writes it, counts as using the default rather than choosing its own;
-#: only an edited list is the operator's explicit choice. Add the new default
-#: here when it changes (``test_the_current_default_is_a_shipped_default``).
+#: first, as sets, and last the current default. A profile whose list equals one
+#: of these, as ``ash config init`` writes it, counts as using the default rather
+#: than choosing its own, and gets the current list (``effective_policy``); only
+#: an edited list is the operator's explicit choice. When the default changes,
+#: replace the last entry if no release has shipped it, else add the new list
+#: after it (``test_the_current_default_is_a_shipped_default``).
 SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
     frozenset(entries)
     for entries in (
@@ -203,22 +205,6 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/global_settings/suppressions",
             "/global_settings/mcp",
             "/global_settings/mcp/**",
-            "/reporters/bedrock-summary-reporter/options/aws_*",
-            "/reporters/cloudwatch-logs/**",
-        ),
-        (
-            "/fail_on_findings",
-            "/fail_on_incomplete_scanners",
-            "/content_db_staleness",
-            "/content_db_staleness_overrides",
-            "/sandbox",
-            "/sandbox/**",
-            "/ash_plugin_modules",
-            "/ash_plugin_modules/**",
-            "/global_settings/ignore_paths",
-            "/global_settings/suppressions",
-            "/global_settings/mcp",
-            "/global_settings/mcp/**",
             "/scanners/opengrep/options/exclude_rule",
             "/scanners/semgrep/options/exclude_rule",
             "/scanners/detect-secrets/options/baseline_file",
@@ -244,8 +230,31 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/scanners/ferret-scan/options/validator_budget",
             "/scanners/trivy-repo/options/license_full",
             "/scanners/trivy-repo/options/scanners",
+            "/scanners/*/options/offline",
+            "/scanners/ferret-scan/options/max_live_bytes",
+            "/scanners/bandit/options/config_file",
+            "/scanners/checkov/options/config_file",
+            "/scanners/ferret-scan/options/config_file",
+            "/scanners/grype/options/config_file",
+            "/scanners/syft/options/config_file",
+            "/scanners/trivy-repo/options/secret_config_file",
+            "/scanners/*/options/tool_version",
+            "/converters/jupyter/options/tool_version",
+            "/scanners/opengrep/options/version",
+            "/scanners/opengrep/options/sha256",
             "/reporters/bedrock-summary-reporter/options/aws_*",
             "/reporters/cloudwatch-logs/**",
+            "/reporters/aws-security-hub/options/aws_region",
+            "/reporters/aws-security-hub/options/aws_profile",
+            "/reporters/aws-security-hub/options/account_id",
+            "/reporters/bedrock-summary-reporter/options/model_id",
+            "/reporters/bedrock-summary-reporter/options/output_file",
+            "/reporters/bedrock-summary-reporter/options/output_executive_file",
+            "/reporters/bedrock-summary-reporter/options/output_technical_file",
+            "/reporters/s3/options/aws_region",
+            "/reporters/s3/options/aws_profile",
+            "/reporters/s3/options/bucket_name",
+            "/reporters/s3/options/key_prefix",
         ),
     )
 )
@@ -264,12 +273,14 @@ PLUGIN_OPTION_DEFAULTS: Mapping[Tuple[str, str], Any] = {
     ("ferret-scan", "disable_ip_types"): None,
     ("ferret-scan", "enable_preprocessors"): True,
     ("ferret-scan", "finding_limit"): 0,
+    ("ferret-scan", "max_live_bytes"): None,
     ("ferret-scan", "profile"): None,
     ("ferret-scan", "recursive"): True,
     ("ferret-scan", "respect_gitignore"): False,
     ("ferret-scan", "use_default_config"): True,
     ("ferret-scan", "validator_budget"): None,
     ("trivy-repo", "license_full"): True,
+    ("trivy-repo", "offline"): False,
     ("trivy-repo", "scanners"): ["vuln", "secret", "misconfig", "license"],
 }
 
@@ -290,9 +301,32 @@ class ClientConfigRules(BaseModel):
 
 
 def policy_of(config: AshConfig) -> RuntimeOverridesConfig:
-    """``config``'s runtime-override policy, or the defaults when it sets none."""
+    """``config``'s runtime-override policy, or the defaults when it sets none.
+
+    The effective policy (``effective_policy``): a ``denied_paths`` list equal
+    to one ASH shipped earlier is read as today's default list.
+    """
     mcp = getattr(config.global_settings, "mcp", None)
-    return mcp.runtime_overrides if mcp is not None else RuntimeOverridesConfig()
+    if mcp is None:
+        return RuntimeOverridesConfig()
+    return effective_policy(mcp.runtime_overrides)
+
+
+def effective_policy(policy: RuntimeOverridesConfig) -> RuntimeOverridesConfig:
+    """``policy`` with a shipped default ``denied_paths`` read as the current default.
+
+    A profile written by an earlier ``ash config init`` holds the default list of
+    that release. It is the default, not the operator's choice
+    (``policy_is_default``), so it gets every entry the current default has; a
+    stale copy would otherwise let through what the defaults have since denied.
+    An edited list is used as it is.
+    """
+    if "denied_paths" not in policy.model_fields_set or not policy_is_default(policy):
+        return policy
+    current = list(RuntimeOverridesConfig().denied_paths)
+    if list(policy.denied_paths) == current:
+        return policy
+    return policy.model_copy(update={"denied_paths": current})
 
 
 def unreadable_rules(reason: str) -> ClientConfigRules:
@@ -357,25 +391,38 @@ def denied_fields_message(path: Path, denials: Sequence[Any]) -> str:
 
     fields = "; ".join(f"{denial.key} ({denial.reason})" for denial in denials)
     return (
-        f"{describe_config_path(Path(path))} was delivered by an MCP client and sets "
-        f"fields this server's runtime-override policy does not let a client set: "
-        f"{fields}. Remove them from the file, or ask the operator for a profile "
-        f"that sets them."
+        f"{describe_config_path(Path(path))} came from an MCP client (it was "
+        f"delivered, or named outside the directories ASH_MCP_ALLOWED_CONFIG_ROOTS "
+        f"names) and sets fields this server's runtime-override policy does not "
+        f"let a client set: {fields}. Remove them from the file, or ask the "
+        f"operator for a profile that sets them."
     )
 
 
 def client_file_denials(
-    documents: Mapping[Path, Any], rules: ClientConfigRules
+    documents: Mapping[Path, Any],
+    rules: ClientConfigRules,
+    *,
+    scanned_root: Path | str | None = None,
+    all_delivered: bool = False,
 ) -> List[Tuple[Path, List[Any]]]:
-    """(file, denials) for each client-delivered file in ``documents`` that sets a denied field."""
+    """(file, denials) for each client-delivered file in ``documents`` that sets a denied field.
+
+    ``all_delivered`` counts every file of the chain as delivered: the chain of a
+    config path a client named, wherever it is (``resolve_config``'s
+    ``untrusted_config``). Under a default policy the restrict-only settings are
+    checked for anything they ask beyond the trusted base (``_widenings``).
+    """
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
     from automated_security_helper.config.runtime_patch import (
         config_document_denials,
     )
 
     found: List[Tuple[Path, List[Any]]] = []
+    exempt = exempt_paths(rules.policy)
+    root = Path(scanned_root) if scanned_root is not None else Path.cwd()
     for path, document in documents.items():
-        if not config_is_client_supplied(path):
+        if not (all_delivered or config_is_client_supplied(path)):
             continue
         denials = [
             denial
@@ -383,11 +430,13 @@ def client_file_denials(
                 document,
                 allowlist=rules.policy,
                 config=rules.base,
-                exempt=exempt_paths(rules.policy),
+                exempt=exempt,
                 inert=INERT_PATHS,
             )
             if not _writes_plugin_default(document, denial, rules.base)
         ]
+        if set(RESTRICT_ONLY_PATHS) <= set(exempt):
+            denials.extend(_widenings(document, rules.base, root))
         if denials:
             found.append((path, denials))
     return found
@@ -424,6 +473,124 @@ def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
     return False
 
 
+def _scanner_gets_network(name: str, trusted: Any) -> bool:
+    """Whether the trusted sandbox settings give scanner ``name`` a network.
+
+    With ``network_scanners`` unset, a scanner's own declared need decides, read
+    from its class among the scanner classes already imported (nothing is
+    imported here, which would register plugins). A scanner whose class is not
+    known counts as having none.
+    """
+    from automated_security_helper.base.plugin_config import declared_plugin_name
+    from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+
+    if trusted.network_scanners is not None:
+        return name in set(trusted.network_scanners)
+    pending = list(ScannerPluginBase.__subclasses__())
+    while pending:
+        cls = pending.pop()
+        pending.extend(cls.__subclasses__())
+        if declared_plugin_name(cls) != name:
+            continue
+        requirements = getattr(cls, "sandbox_requirements", None)
+        return bool(
+            requirements is not None
+            and requirements.network
+            and not requirements.network_requires_grant
+        )
+    return False
+
+
+def _widenings(document: Any, base: AshConfig, scanned_root: Path) -> List[Any]:
+    """What a delivered ``document`` asks for under ``sandbox`` and ``ash_plugin_modules``
+    beyond the trusted ``base``.
+
+    Those two are exempt from the default ``denied_paths`` because their own
+    limits (``sandbox_grants``, ``plugin_module_trust``) keep a delivered file
+    restrict-only, accepting a value that is equal or tighter. A value that asks
+    for more used to be dropped by those limits with only a log line; it is now
+    a denial, so the file is refused like any other that sets a denied field.
+    """
+    from automated_security_helper.config.plugin_module_trust import (
+        OFF_HOST_PLUGIN_SENDS,
+        off_host_package,
+        refusal_reason,
+        split_plugin_modules,
+    )
+    from automated_security_helper.config.runtime_patch import DocumentDenial, _walk
+
+    found: List[Any] = []
+    trusted = base.sandbox
+    present, sandbox = _walk(document, ["sandbox"])
+    if present and isinstance(sandbox, dict):
+        listed, network = _walk(sandbox, ["network_scanners"])
+        if listed and isinstance(network, list):
+            extra = [
+                str(name)
+                for name in network
+                if not _scanner_gets_network(str(name), trusted)
+            ]
+            if extra:
+                found.append(
+                    DocumentDenial(
+                        "sandbox.network_scanners",
+                        "/sandbox/network_scanners",
+                        f"gives a network to {', '.join(extra)}, which the "
+                        "server's sandbox settings do not",
+                        False,
+                    )
+                )
+        listed, paths = _walk(sandbox, ["extra_read_paths"])
+        if listed and isinstance(paths, list):
+            extra = [
+                str(path) for path in paths if path not in trusted.extra_read_paths
+            ]
+            if extra:
+                found.append(
+                    DocumentDenial(
+                        "sandbox.extra_read_paths",
+                        "/sandbox/extra_read_paths",
+                        f"lets scanners read {', '.join(extra)}, which the "
+                        "server's sandbox settings do not",
+                        False,
+                    )
+                )
+        listed, mode = _walk(sandbox, ["mode"])
+        if listed and trusted.mode != "off" and mode != trusted.mode:
+            found.append(
+                DocumentDenial(
+                    "sandbox.mode",
+                    "/sandbox/mode",
+                    f"replaces the server's sandbox mode {trusted.mode!r}",
+                    False,
+                )
+            )
+    present, modules = _walk(document, ["ash_plugin_modules"])
+    if present:
+        trusted_names = set(split_plugin_modules(base.ash_plugin_modules))
+        refused: List[str] = []
+        for name in split_plugin_modules(modules):
+            if name in trusted_names:
+                continue
+            package = off_host_package(name)
+            if package is not None and package not in trusted_names:
+                refused.append(f"{name!r} ({OFF_HOST_PLUGIN_SENDS[package]})")
+                continue
+            reason = refusal_reason(name, scanned_root)
+            if reason is not None:
+                refused.append(f"{name!r} ({reason})")
+        if refused:
+            found.append(
+                DocumentDenial(
+                    "ash_plugin_modules",
+                    "/ash_plugin_modules",
+                    f"adds {', '.join(refused)}, which a delivered config may not",
+                    False,
+                )
+            )
+    return found
+
+
 def apply_client_config_rules(
     config: AshConfig,
     documents: Mapping[Path, Any],
@@ -433,6 +600,7 @@ def apply_client_config_rules(
     source_dir: Path | str | None,
     permit_base: Optional[Callable[[Path], bool]],
     scanned_root: Path | str | None = None,
+    all_delivered: bool = False,
 ) -> AshConfig:
     """``config``, checked for denied fields its client-delivered files set.
 
@@ -442,13 +610,19 @@ def apply_client_config_rules(
     operator did not supply are moved out of the scanners' options to be applied
     to their results instead (``config/client_scanner_exclusions.py``).
     ``scanned_root`` is the tree being scanned (the source directory when None).
+    ``all_delivered`` counts every file of the chain as delivered, for a config
+    path a client named (``resolve_config``'s ``untrusted_config``), wherever
+    the file is.
     """
     from automated_security_helper.config.client_scanner_exclusions import (
         strip_client_scanner_exclusions,
     )
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
 
-    if not any(config_is_client_supplied(path) for path in documents):
+    is_delivered: Callable[[Path], bool] = (
+        (lambda _path: True) if all_delivered else config_is_client_supplied
+    )
+    if not any(is_delivered(path) for path in documents):
         return config
     if rules is None:
         rules = rules_from(
@@ -462,7 +636,10 @@ def apply_client_config_rules(
         raise ASHConfigPolicyUnreadableError(
             f"A config an MCP client delivered cannot be checked: {rules.unreadable}"
         )
-    found = client_file_denials(documents, rules)
+    root = Path(scanned_root or source_dir or Path.cwd())
+    found = client_file_denials(
+        documents, rules, scanned_root=root, all_delivered=all_delivered
+    )
     if found and DENIED_FIELD_HANDLING == "refuse":
         from automated_security_helper.core.exceptions import (
             ASHConfigFieldDeniedError,
@@ -472,18 +649,22 @@ def apply_client_config_rules(
         raise ASHConfigFieldDeniedError(denied_fields_message(path, denials))
     if found:
         config = _drop_denied_fields(config, found, rules.base)
-    config = _mark_client_supplied(config, documents, rules.base)
+    config = _mark_client_supplied(config, documents, rules.base, is_delivered)
     return strip_client_scanner_exclusions(
         config,
         documents,
         rules.base,
         source_dir=source_dir,
         scanned_root=scanned_root,
+        is_delivered=is_delivered,
     )
 
 
 def _mark_client_supplied(
-    config: AshConfig, documents: Mapping[Path, Any], base: AshConfig
+    config: AshConfig,
+    documents: Mapping[Path, Any],
+    base: AshConfig,
+    is_delivered: Optional[Callable[[Path], bool]] = None,
 ) -> AshConfig:
     """Mark every effective suppression and ignore path the operator did not supply.
 
@@ -501,12 +682,12 @@ def _mark_client_supplied(
         IgnorePathWithReason,
     )
 
+    delivered = is_delivered or config_is_client_supplied
+
     models = {"suppressions": AshSuppression, "ignore_paths": IgnorePathWithReason}
     operators: Dict[str, List[Dict[str, Any]]] = {field: [] for field in models}
     sources: List[Any] = [
-        document
-        for path, document in documents.items()
-        if not config_is_client_supplied(path)
+        document for path, document in documents.items() if not delivered(path)
     ]
     sources.append(base.model_dump(mode="json", by_alias=True))
     for source in sources:

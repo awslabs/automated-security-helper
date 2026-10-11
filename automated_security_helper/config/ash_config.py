@@ -724,9 +724,43 @@ class RuntimeOverridesConfig(BaseModel):
         "/scanners/ferret-scan/options/validator_budget",
         "/scanners/trivy-repo/options/license_full",
         "/scanners/trivy-repo/options/scanners",
-        # AWS-credential-bearing reporter options (plugin-provided, hyphenated names).
+        # Options that can leave findings out without naming them. A scanner
+        # set offline runs on whatever data is cached, and npm audit offline
+        # reports no advisories at all (npm 10.9, exit 0). max_live_bytes bounds
+        # how much extracted content ferret-scan holds at once.
+        "/scanners/*/options/offline",
+        "/scanners/ferret-scan/options/max_live_bytes",
+        # A scanner's own config file, and which version of its tool runs. From a
+        # config file inside the scanned tree these come only from the operator
+        # (config/tool_config_trust.py, the tool_version and version checks), so
+        # a client's file may not set them either; refusing says so instead of
+        # leaving them out with a log line.
+        "/scanners/bandit/options/config_file",
+        "/scanners/checkov/options/config_file",
+        "/scanners/ferret-scan/options/config_file",
+        "/scanners/grype/options/config_file",
+        "/scanners/syft/options/config_file",
+        "/scanners/trivy-repo/options/secret_config_file",
+        "/scanners/*/options/tool_version",
+        "/converters/jupyter/options/tool_version",
+        "/scanners/opengrep/options/version",
+        "/scanners/opengrep/options/sha256",
+        # AWS-credential-bearing reporter options (plugin-provided, hyphenated
+        # names), and every other destination and credential option of the
+        # built-in AWS reporters (config/reporter_trust.py).
         "/reporters/bedrock-summary-reporter/options/aws_*",
         "/reporters/cloudwatch-logs/**",
+        "/reporters/aws-security-hub/options/aws_region",
+        "/reporters/aws-security-hub/options/aws_profile",
+        "/reporters/aws-security-hub/options/account_id",
+        "/reporters/bedrock-summary-reporter/options/model_id",
+        "/reporters/bedrock-summary-reporter/options/output_file",
+        "/reporters/bedrock-summary-reporter/options/output_executive_file",
+        "/reporters/bedrock-summary-reporter/options/output_technical_file",
+        "/reporters/s3/options/aws_region",
+        "/reporters/s3/options/aws_profile",
+        "/reporters/s3/options/bucket_name",
+        "/reporters/s3/options/key_prefix",
     ]
 
     denied_value_patterns: Annotated[

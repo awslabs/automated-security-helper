@@ -101,10 +101,20 @@
   delivered workspace, and every such file in an `extends` chain. Before, only
   `patch_ops`, `override_yaml` and workspace `config_overrides` were checked
   against `denied_paths` and `denied_value_patterns`. A value equal to the
-  server's is accepted, so an `ash config init` file scans; `sandbox` and
-  `ash_plugin_modules` keep their existing restrict-only limits. A file that
-  changes a denied field is refused with the field named
-  (`error_type: config_field_denied`), and `validate_config` reports it. When
+  server's is accepted, so an `ash config init` file scans. `sandbox` and
+  `ash_plugin_modules` may restrict the server's settings, and a file that asks
+  for more than they give (network for another scanner, another read path,
+  another sandbox mode, a module inside the tree or one that sends findings off
+  the host) is refused, where before the extra was left out with a warning. A
+  file that changes a denied field is refused with the field named
+  (`error_type: config_field_denied`), and `validate_config` reports it. A config
+  path a client names counts as the client's unless it is in a directory
+  `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or the session's own `config/` directory,
+  so a config in another checkout the server may scan is checked the same way,
+  and so is a link a client delivered, wherever it points. To use such a file as
+  the operator's, put it in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names. A
+  profile whose `denied_paths` equals a default ASH shipped earlier gets the
+  current default list. When
   the policy cannot be established, a config with a delivered file is refused
   with `error_type: config_policy_unreadable`. A delivered tree's own
   suppressions and ignore paths apply, marked `client_supplied` in the results,
@@ -136,8 +146,13 @@
   `enable_preprocessors`, `finding_limit`, `profile`, `recursive`,
   `respect_gitignore`, `use_default_config` and `validator_budget`, opengrep's
   `config`, `exclude_rule`, `patterns` and `severity`, semgrep's `config`,
-  `exclude_rule` and `severity`, and trivy-repo's `license_full` and `scanners`.
-  Left at its default, each still scans.
+  `exclude_rule` and `severity`, trivy-repo's `license_full` and `scanners`,
+  ferret-scan's `max_live_bytes`, and every scanner's `offline` (npm audit
+  offline reports no advisories). So do the choices that are the operator's:
+  each scanner's own config file (`config_file` of bandit, checkov, ferret-scan,
+  grype and syft, and trivy-repo's `secret_config_file`), every `tool_version`,
+  opengrep's `version` and `sha256`, and the AWS reporters' destinations and
+  credentials. Left at its default, each still scans.
 
 - **A config file inside the scanned tree can no longer choose what ASH installs,
   imports or hands a scanner as its own configuration.** It applies to a discovered
@@ -213,13 +228,18 @@
 
   Under the MCP server, a config a client delivered is limited the same way, and a
   file any MCP client delivered (under the MCP workspace root, except each session's
-  `config/` directory) counts as inside the scanned tree for these checks. The
-  workspace tools' `config_overrides` are checked against the session config's
+  `config/` directory) counts as inside the scanned tree for these checks, as
+  does a config path a client names outside the directories
+  `ASH_MCP_ALLOWED_CONFIG_ROOTS` names. The workspace tools' `config_overrides` are checked against the session config's
   `runtime_overrides` allowlist, as `select_profile`'s `patch_ops` and
   `override_yaml` are, and are refused while runtime overrides are off (the
   default). Each override is checked by the key it names, so one whose value the
-  session config already holds is checked too. A workspace policy file a client
-  delivered, named or found beside the definition, is refused.
+  session config already holds is checked too, and none of them sets what only
+  the operator may, such as a reporter's destination or a scanner's config file,
+  even where the session's allowlist lets it through. The workspace tools use a
+  workspace policy file, named or found beside the definition, only from a
+  directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names; one elsewhere, including one a
+  client delivered, is refused.
   `/ash_plugin_modules` joins the default `denied_paths`, and `denied_paths` and
   `denied_value_patterns` now match a key spelled with either `-` or `_`, and a
   plugin's section under every spelling ASH reads as that plugin's config,

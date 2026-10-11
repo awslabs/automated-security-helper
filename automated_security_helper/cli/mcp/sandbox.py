@@ -312,31 +312,74 @@ def config_is_client_supplied(config_path: str | Path) -> bool:
 
     A scan whose selected config is client-supplied resolves it with
     ``resolve_config(untrusted_config=True)``, which keeps its sandbox settings
-    restrict-only. The path is resolved first, so a symlink is judged by the
-    file it reaches. Ancestry is also checked by file identity
-    (``os.path.samefile``), so on a case-insensitive volume a spelling of the
-    root that differs only in case is still the root.
+    restrict-only. The path is judged both as named and as resolved, so a
+    symlink counts by where it sits as well as by the file it reaches: a link a
+    client delivered is the client's even when it points at a file elsewhere.
+    Ancestry is also checked by file identity (``os.path.samefile``), so on a
+    case-insensitive volume a spelling of the root that differs only in case is
+    still the root.
     """
 
     shared = shared_workspace_root()
     if shared is None:
         return False
-    resolved = Path(config_path).resolve()
-    parts: Optional[Tuple[str, ...]] = None
+    for candidate in (
+        Path(os.path.abspath(config_path)),
+        Path(config_path).resolve(),
+    ):
+        parts = _parts_below(candidate, shared)
+        if parts is not None and not (len(parts) >= 2 and parts[1] == CONFIG_DIR_NAME):
+            return True
+    return False
+
+
+def client_named_config_is_untrusted(config_path: str | Path) -> bool:
+    """Whether a config path an MCP client named is the client's choice, not the operator's.
+
+    A path a client names is the client's unless the operator set it aside: it is
+    in a directory ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, or in a session's own
+    ``config/`` directory, which only the server writes. A file the client
+    delivered (``config_is_client_supplied``) is always the client's. So is a
+    config in another repository under the allowed scan roots: the operator let
+    the server scan it, not take its config as their own. Checked both as named
+    and as resolved, as ``config_is_client_supplied`` is.
+    """
+    if config_is_client_supplied(config_path):
+        return True
+    shared = shared_workspace_root()
+    config_roots = operator_config_roots()
+
+    def chosen_by_operator(candidate: Path) -> bool:
+        if shared is not None:
+            parts = _parts_below(candidate, shared)
+            if parts is not None and len(parts) >= 2 and parts[1] == CONFIG_DIR_NAME:
+                return True
+        return any(_parts_below(candidate, root) is not None for root in config_roots)
+
+    return not all(
+        chosen_by_operator(candidate)
+        for candidate in (
+            Path(os.path.abspath(config_path)),
+            Path(config_path).resolve(),
+        )
+    )
+
+
+def _parts_below(path: Path, root: Path) -> Optional[Tuple[str, ...]]:
+    """``path``'s components below ``root``, matching ancestors by file identity."""
     try:
-        parts = resolved.relative_to(shared).parts
+        return path.relative_to(root).parts
     except ValueError:
-        if shared.exists():
-            for ancestor in resolved.parents:
-                try:
-                    if os.path.samefile(ancestor, shared):
-                        parts = resolved.relative_to(ancestor).parts
-                        break
-                except OSError:
-                    continue
-    if parts is None:
-        return False
-    return not (len(parts) >= 2 and parts[1] == CONFIG_DIR_NAME)
+        pass
+    if not root.exists():
+        return None
+    for ancestor in path.parents:
+        try:
+            if os.path.samefile(ancestor, root):
+                return path.relative_to(ancestor).parts
+        except OSError:
+            continue
+    return None
 
 
 def _validated_session_component(session_id: str) -> str:
@@ -856,6 +899,7 @@ __all__ = [
     "SessionSandbox",
     "config_base_gate",
     "config_chain_refusal",
+    "client_named_config_is_untrusted",
     "config_is_client_supplied",
     "get_server_transport",
     "operator_config_roots",
