@@ -675,3 +675,42 @@ def test_an_outside_cfnlintrc_set_by_the_scanned_tree_is_ignored(repo, tmp_path)
     ]
 
     assert arg.endswith("/ash-empty.cfnlintrc")
+
+
+def test_each_target_starts_from_a_clean_exit_code(repo, monkeypatch):
+    """ScannerExecutor runs one instance over the source, then the converted target.
+
+    The base class keeps the worst exit code across subprocess calls, and the
+    invocation records it. A clean converted target after a source with errors
+    and warnings (exit 6) must record its own 0. Only the process call is
+    replaced, so ``_run_subprocess`` and that accumulation run for real.
+    """
+    converted = repo / ".ash" / "ash_output" / "converted" / "archive.zip"
+    converted.mkdir(parents=True)
+    shutil.copy(repo / "templates" / "compliant.yaml", converted / "t.yaml")
+    runs = iter(
+        [
+            FakeCfnLint({"templates/insecure.yaml": CAPTURED_INSECURE}, returncode=6),
+            FakeCfnLint({}, returncode=0),
+        ]
+    )
+    monkeypatch.setattr(
+        "automated_security_helper.utils.subprocess_utils."
+        "run_command_with_output_handling",
+        lambda command, **_: next(runs)(command),
+    )
+    scanner = _scanner(repo)
+    scanner.use_uv_tool = False
+    with patch.object(
+        CfnLintScanner, "validate_plugin_dependencies", return_value=True
+    ):
+        source = scanner.scan(target=repo, target_type="source")
+        assert source.runs[0].invocations[0].exitCode == 6
+        assert scanner.exit_code == 6
+
+        report = scanner.scan(target=converted.parent, target_type="converted")
+
+    assert scanner.targets_attempted == 1 and scanner.targets_failed == 0
+    assert report.runs[0].results == []
+    assert scanner.exit_code == 0
+    assert report.runs[0].invocations[0].exitCode == 0

@@ -107,7 +107,7 @@ cfn-lint --format sarif --output-file=<results> [options] -- <template> ...
 
 from the source directory, with template paths relative to it, so the SARIF locations are repository-relative. Template paths are escaped before they are passed, because cfn-lint expands each filename argument as a glob pattern: a template named `a[1].yaml` would otherwise not be linted at all. Long template lists are split across several invocations to stay within command-line length limits.
 
-cfn-lint's exit status is a bitmask of the levels it reported (2 error, 4 warning, 8 informational); any combination of those is a completed run. Other exit statuses, a timeout, missing output, or an `E0003` result mark every template in that invocation as not evaluated, so one such template costs the findings of the others in its batch. The scan then reports partial coverage and exits 1 by default, so nothing is lost silently.
+cfn-lint's exit status is a bitmask of the levels it reported (2 error, 4 warning, 8 informational); any combination of those is a completed run. Other exit statuses, a timeout, missing output, or an `E0003` result mark every template in that invocation as not evaluated, so one such template costs the findings of the others in its batch. The scan then reports partial coverage and exits 1 by default, so nothing is lost silently. The source tree and the converted files are separate targets, and each records the worst exit status of its own invocations.
 
 ### License
 
@@ -214,7 +214,7 @@ cfn-guard validate --rules=<rules file>... --data=<template> \
   --output-format=sarif --structured --show-summary=none
 ```
 
-One template at a time because one unparseable data file makes cfn-guard exit 255 with no output for the whole invocation, and because cfn-guard writes result locations as absolute paths, which ASH replaces with the repository-relative path of the template it ran. Exit 0 means every rule passed or was skipped and 19 means at least one failed; any other status, a timeout, or a 19 with no results marks that template as not evaluated.
+One template at a time because one unparseable data file makes cfn-guard exit 255 with no output for the whole invocation, and because cfn-guard writes result locations as absolute paths, which ASH replaces with the repository-relative path of the template it ran. Exit 0 means every rule passed or was skipped and 19 means at least one failed; any other status, a timeout, or a 19 with no results marks that template as not evaluated. As for cfn-lint, the source tree and the converted files each record the worst exit status of their own runs.
 
 ### Licenses
 

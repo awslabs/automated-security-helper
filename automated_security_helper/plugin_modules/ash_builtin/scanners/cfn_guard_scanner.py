@@ -561,9 +561,10 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         *args: Any,
         **kwargs: Any,
     ) -> Any:
-        # Reset above every return; see cfn_lint_scanner.
+        # Reset above every return, the exit code included; see cfn_lint_scanner.
         self.targets_attempted = 0
         self.targets_failed = 0
+        self.exit_code = 0
 
         report = self._empty_report()
         if not target.exists() or not any(target.iterdir()):

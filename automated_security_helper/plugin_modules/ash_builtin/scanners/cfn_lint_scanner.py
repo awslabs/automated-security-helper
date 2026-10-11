@@ -562,9 +562,13 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     ) -> Any:
         # Reset first, above every return, for the reason cfn_nag_scanner gives: the
         # executor reads these after scan() returns, and a return placed above the
-        # reset would report the previous target's counts.
+        # reset would report the previous target's counts. The exit code too:
+        # ScannerExecutor runs this instance over the source and then the converted
+        # target, and the base class keeps the worst code across subprocess calls,
+        # so the converted target's invocation recorded the source's exit code.
         self.targets_attempted = 0
         self.targets_failed = 0
+        self.exit_code = 0
 
         report = self._empty_report(target)
         if not target.exists() or not any(target.iterdir()):
