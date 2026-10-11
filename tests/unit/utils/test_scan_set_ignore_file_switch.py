@@ -565,7 +565,7 @@ class TestAshsOwnExclusionsByName:
             by_parser = gss._is_bundled_cdk_path(str(full)) or (
                 own_spec.match(full) and not forced.match(full)
             )
-            by_name = gss._excluded_by_ash_itself(tuple(path.split("/")))
+            by_name = gss._excluded_by_ash_itself(str(full), tuple(path.split("/")))
             if by_parser != by_name:
                 disagree.append((path, by_parser, by_name))
         assert disagree == [], disagree
@@ -586,6 +586,34 @@ class TestTheBundledCdkTreeIsAshsOwnExclusion:
         )
         record = _record(root)
         assert record["by_ignore_file"] == {"pkg/.gitignore": 1}, record
+
+    def test_a_source_dir_inside_the_bundled_tree_counts_nothing_as_ignored(
+        self, tmp_path
+    ):
+        """The bundled-tree test reads the walked path, so the record has to as well.
+
+        A source directory below ``node_modules/aws-cdk*`` leaves every file out of
+        the scan set, with the ignore files or without them. None of that is an
+        ignore file's doing, so the total is what turning them off adds back: 0.
+        """
+        root = _build(
+            tmp_path / "node_modules" / "aws-cdk-lib" / "proj",
+            {
+                ".gitignore": "build/\n*.log\n",
+                "app.py": "x = 1\n",
+                "a.log": "a\n",
+                "build/x.txt": "x\n",
+            },
+        )
+        honored = _names(root, scan_set(source=str(root)))
+        unhonored = _names(root, scan_set(source=str(root), honor_ignore_files=False))
+        record = _record(root)
+        assert record["excluded_file_count"] == len(unhonored - honored) == 0, (
+            record,
+            sorted(honored),
+            sorted(unhonored),
+        )
+        assert record["by_ignore_file"] == {".gitignore": 0}, record
 
 
 class TestNotHonored:

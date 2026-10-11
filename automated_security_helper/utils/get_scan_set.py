@@ -314,23 +314,25 @@ def _count_files_in_own_output(directory: str) -> int:
 _RESTATED_ASH_INCLUSIONS = (".git", "**/cdk.out/asset.*", "!**/*.template.json")
 
 
-def _excluded_by_ash_itself(parts: Sequence[str]) -> bool:
-    """Whether ASH leaves a file out with no ignore file at all, from its path parts.
+def _excluded_by_ash_itself(walked: str, parts: Sequence[str]) -> bool:
+    """Whether ASH leaves a file out with no ignore file at all, from its path.
 
-    *parts* are the file's path components below the scan root. The answer is
-    :func:`get_files_not_matching_spec`'s with ``ASH_INCLUSIONS`` as the whole spec,
-    worked out from names instead of by matching each file against the parser: a
-    pruned ``node_modules`` holds hundreds of thousands of files, and a parser match
-    per file stats each of them.
+    *walked* is the file's path as the walk spelled it and *parts* its components
+    below the scan root. The answer is :func:`get_files_not_matching_spec`'s with
+    ``ASH_INCLUSIONS`` as the whole spec, worked out from names instead of by
+    matching each file against the parser: a pruned ``node_modules`` holds hundreds
+    of thousands of files, and a parser match per file stats each of them.
 
-    - The bundled aws-cdk tree, the same substring test as :func:`_is_bundled_cdk_path`.
+    - The bundled aws-cdk tree: :func:`_is_bundled_cdk_path` on *walked*, the path
+      the scan set tests, so a scan root that is itself inside that tree counts as
+      inside it here too.
     - Any ``*.template.json`` is kept otherwise, which is what the forced-inclusion
       pass does whatever else matched.
     - A ``.git`` component, file or directory, is left out (rule ``.git``).
     - An ``asset.*`` component directly under a ``cdk.out`` component is left out
       (rule ``**/cdk.out/asset.*``).
     """
-    if "/node_modules/aws-cdk" in "/" + "/".join(parts):
+    if _is_bundled_cdk_path(walked):
         return True
     if parts and parts[-1].endswith(".template.json"):
         return False
@@ -363,7 +365,7 @@ def _files_removed_by_ignore_files(
         1
         for walked in all_files
         if walked not in kept
-        and not _excluded_by_ash_itself(_relative_parts(walked, source))
+        and not _excluded_by_ash_itself(walked, _relative_parts(walked, source))
     )
 
 
@@ -423,7 +425,9 @@ def _count_files_ash_would_scan(
             kept_dirs.append(d)
         dirs[:] = kept_dirs
         count += sum(
-            1 for name in files if not _excluded_by_ash_itself(parts + (name,))
+            1
+            for name in files
+            if not _excluded_by_ash_itself(os.path.join(root, name), parts + (name,))
         )
     return count
 
