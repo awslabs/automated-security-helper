@@ -192,9 +192,9 @@ docker push "$ASH_IMAGE_NAME"
 
 If the rebuild runs in a CI job, run it as
 `env -u CI -u IsCI -u ISCI -u CODEBUILD_BUILD_ID ash build-image ...`, or ASH builds the
-root image. Rebuild offline images within grype's five days, and more often to keep
-trivy's findings current, and online images at least weekly, so the scanner tools get
-their fixes. Keep `content_db_staleness: fail` in the operator config; a repository
+root image. Rebuild offline images more often than every five days, because grype's bound
+also counts from the database's upstream build, and more often still to keep trivy's
+findings current, and online images at least weekly, so the scanner tools get their fixes. Keep `content_db_staleness: fail` in the operator config; a repository
 cannot relax it while you pass `--config`. To hold trivy's database to its bound in an
 offline image too, also set `content_db_staleness_offline_image_default: false`. [Run ASH offline](../how-to/run-offline.md) covers air-gapped hosts,
 and [Content databases](../concepts/content-databases.md) lists every bound.

@@ -108,7 +108,7 @@ Keeping both reports more and costs scan time. A suppression matches findings by
 
 ## Options only the operator can set {#operator-only}
 
-Some scanner options name a file, a rule directory, or a program for the scanner's tool to use. For the scanners in this table, ASH honors these options only from an operator source: `--config-overrides`, or a config file outside every git checkout and outside the scanned directory, named with `--config` or `ASH_CONFIG`. A config file that an MCP client delivered is limited the same way.
+Some scanner options name a file, a rule directory, or a program for the scanner's tool to use. For the scanners in this table, ASH honors these options only from an operator source: `--config-overrides`, or a config file outside every git checkout and outside the scanned directory, named with `--config` or `ASH_CONFIG`. A config file that an MCP client delivered is limited the same way, and under the MCP server's default policy one that sets these options is refused ([What a delivered config cannot set](mcp-server.md#what-a-delivered-config-cannot-set)).
 
 | Scanner | Operator-only options | Path may be inside the scanned repository |
 |---|---|---|
@@ -135,4 +135,4 @@ ash --source-dir . --config-overrides scanners.gitleaks.options.config_file=/etc
 
 These scanners do not read the repository's own config files for their tools, such as `.gitleaks.toml`, `.gitleaksignore`, `zizmor.yml`, `actionlint.yaml`, `.bandit`, `bandit.yaml`, `bandit.toml`, `.grype.yaml`, `.syft.yaml`, `trivy.yaml`, `.trivyignore`, `.cfnlintrc`, or `.hadolint.yaml`. To use one, point the option at it from an operator source.
 
-The options in this table are the only scanner options ASH limits this way. Other scanners' options apply from any config, and some scanners still read tool files they find in the scanned directory, such as detect-secrets' `.secrets.baseline` and semgrep's and opengrep's `.semgrepignore`. When you scan a repository you do not control, set scanner options from an operator source and pass your config with `--config`, so the repository config is not read; [Configuration trust model](../concepts/trust-model.md#not-protected) lists what that does not cover.
+The options in this table are the only scanner options ASH limits this way. Other scanners' options apply from any repository config, and some scanners still read tool files they find in the scanned directory, such as detect-secrets' `.secrets.baseline` and semgrep's and opengrep's `.semgrepignore`. When you scan a repository you do not control, set scanner options from an operator source and pass your config with `--config`, so the repository config is not read; [Configuration trust model](../concepts/trust-model.md#not-protected) lists what that does not cover.

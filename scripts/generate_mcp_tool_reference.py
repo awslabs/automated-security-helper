@@ -148,9 +148,9 @@ TOOL_NOTES: dict[str, dict] = {
             },
             "config_path": {
                 "notes": (
-                    "Custom config path. When not set: the config of the profile this "
-                    "session chose with `select_profile`, or else ASH's config discovery "
-                    "in the source directory"
+                    "Custom config path. When not set: the config ASH discovers in the "
+                    "source directory, else the file `ASH_CONFIG` names in the server's "
+                    "environment, else the built-in defaults"
                 ),
             },
             "clean_output": {
@@ -408,9 +408,27 @@ TOOL_NOTES: dict[str, dict] = {
     },
     "list_profiles": {
         "no_params_sentence": (
-            "No parameters. Returns the config profiles the operator registered at server "
-            "startup."
+            "No parameters. Returns the config profiles registered at server startup. "
+            "`ash mcp` registers none, so the list is empty."
         ),
+    },
+    "resolve_ash_workspace": {
+        "caveats": [
+            (
+                "A workspace policy file, named or found beside the workspace file, is "
+                "used only when it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` "
+                "names; any other refuses the workspace with exit code 4."
+            ),
+        ],
+    },
+    "run_ash_workspace_scan": {
+        "caveats": [
+            (
+                "A workspace policy file, named or found beside the workspace file, is "
+                "used only when it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` "
+                "names; any other refuses the workspace with exit code 4."
+            ),
+        ],
     },
     "clear_source": {
         "no_params_sentence": (
@@ -420,15 +438,16 @@ TOOL_NOTES: dict[str, dict] = {
     "validate_config": {
         "caveats": [
             (
-                "`config_content`, and a `config_path` outside the directories "
-                "`ASH_MCP_ALLOWED_CONFIG_ROOTS` names, count as the client's config. "
-                "Each field such a config may not set under the server's "
-                "runtime-override policy is an error of type "
+                "`config_content` counts as the client's config, and so does a "
+                "`config_path` that a client delivered or that is outside the "
+                "directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names and the session's "
+                "`config/` directory. Each field such a config may not set under the "
+                "server's runtime-override policy is an error of type "
                 "`denied_by_runtime_policy`, and a policy the server cannot read is one "
                 "error of type `config_policy_unreadable`; for `config_content`, both "
-                "only when a remote client calls. A `${VAR:default}` reference or "
-                "`!ENV` tag in such a config is an error of type "
-                "`config_env_not_resolved`."
+                "only when a remote client calls. A `${VAR}` or `${VAR:default}` "
+                "reference at the start of a plain value, or an `!ENV` tag, in such a "
+                "config is an error of type `config_env_not_resolved`."
             ),
         ],
     },

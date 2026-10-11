@@ -24,8 +24,8 @@ reach, serving it over HTTP, and cleaning up after clients. Every option is list
   in the output directory, such as `reports` or `ash.log`, fails the scan, and
   `get_scan_progress` names the link in `error_message` and says to replace it in
   `.ash/ash_output` with a directory. `run_ash_workspace_scan` refuses an `output_dir` that is
-  a link, or has a link inside it or at `projects/<project>`, and asks for a directory that is
-  not a link. [Output files](../reference/output-files.md#links) lists every path ASH checks.
+  a link, or that has a link where ASH writes in it, including `projects` and
+  `projects/<project>`, and asks for a directory that is not a link. [Output files](../reference/output-files.md#links) lists every path ASH checks.
 - MCP scans never run a tool found inside a scanned or delivered tree, whatever
   `ASH_ALLOW_IN_TREE_TOOLS` says, and `ash mcp` has no option to allow it. A scanner installed
   only inside the project, for example in its `.venv`, is reported as MISSING. See
@@ -98,7 +98,7 @@ and their subdirectories, set the variable in the server's environment:
 Separate several directories with `:`, or with `;` on Windows. On stdio this does not limit
 which config files a client can name with `config_path`: those are refused only in the
 directories above. A file a client names counts as the client's, wherever it is, unless it is
-in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names (see
+in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names and no client delivered it (see
 [What a delivered config cannot set](#what-a-delivered-config-cannot-set)).
 
 ## Run over streamable HTTP
@@ -146,9 +146,11 @@ ASH applies its rules for remote clients to every call:
 
 - A client can scan, and read results from, only the directories in `ASH_MCP_ALLOWED_ROOTS`
   and source delivered over MCP. With the variable unset, it can scan only delivered source.
-- A client can name config files (`config_path`, every base an `extends` chain names,
-  workspace files, and workspace policy files) only in `ASH_MCP_ALLOWED_CONFIG_ROOTS`, the
-  scan roots, and its session's config directory.
+- A client can name config files (`config_path`, every base an `extends` chain names, and
+  workspace files) only in `ASH_MCP_ALLOWED_CONFIG_ROOTS`, the scan roots, and its session's
+  config directory. The workspace tools use a workspace policy file only from
+  `ASH_MCP_ALLOWED_CONFIG_ROOTS`, on every transport
+  ([Workspace scans over MCP](scale-large-repos.md#workspaces-mcp)).
 
 These rules limit what the server's client can reach. They do not keep clients apart, so
 serve one trusted client per server.
@@ -201,7 +203,7 @@ not `--stateless-http`. Use it only for a client that cannot use streamable HTTP
 |----------|------------|--------|
 | `ASH_MCP_TRANSPORT` | Not set by `ash mcp`. | Set it to exactly `streamable-http` or `sse` to apply the remote-client rules above to every call. |
 | `ASH_MCP_ALLOWED_ROOTS` | Local clients: everything outside the system directories, the filesystem root, and other sessions' workspaces. Remote clients: only delivered source. | Directories, and their subdirectories, that clients may scan and read results from. |
-| `ASH_MCP_ALLOWED_CONFIG_ROOTS` | Remote clients may read config only from the scan roots and their session's config directory. | Extra directories remote clients may read config files from, such as a shared policy file. A config file a client names there counts as yours, not the client's. |
+| `ASH_MCP_ALLOWED_CONFIG_ROOTS` | Remote clients may read config only from the scan roots and their session's config directory. | Extra directories remote clients may read config files from, such as a shared policy file. A config file a client names there counts as yours, not the client's, unless a client delivered it. |
 | `ASH_MCP_WORKSPACE_ROOT` | `$XDG_CACHE_HOME/ash-mcp`, or `~/.cache/ash-mcp` | Where each session's workspace lives: delivered source, uploads, and session configs. |
 | `ASH_CONFIG` | The built-in defaults. | The server's own config. Its `global_settings.mcp.runtime_overrides` section is the policy that delivered configs are checked against. Check that the file exists: when it does not, ASH uses the built-in defaults without a warning. Keep it outside every git checkout: inside one, its sandbox grants and other restricted settings do not count. |
 
@@ -243,10 +245,10 @@ limit on a scan.
 
 A config file inside delivered source is an MCP-client file. So is a config file a client
 names as `config_path` to `run_ash_scan`, `get_config`, or `validate_config`, wherever it is,
-unless it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or in the session's own
-`config/` directory: a config in another checkout the server may scan is that checkout's, not
-yours. ASH judges a path by where it sits as well as by the file it reaches, so a symbolic
-link a client delivered is the client's wherever it points. A config file that ASH finds by
+unless it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or in a session's `config/`
+directory, which only the server writes: a config in another checkout the server may scan is
+that checkout's, not yours. ASH judges a config path a client names by where it sits as well as
+by the file it reaches, so a symbolic link a client names is the client's wherever it points. A config file that ASH finds by
 itself in a directory the server scans in place is a repository config, trusted the way the
 CLI trusts it; see [Configuration trust model](../concepts/trust-model.md).
 
@@ -268,6 +270,9 @@ than the server's own:
   `exclude_rule`, `config`, and `severity` of `opengrep` and `semgrep`, checkov's `frameworks`,
   cfn-lint's `ignore_checks`, detect-secrets' `baseline_file` and `scan_settings`, and trivy's
   `scanners` and `ignore_unfixed`
+- options that limit how much a scanner reads or reports, or that turn on its own network
+  calls, such as ferret-scan's `finding_limit` and `recursive`, gitleaks'
+  `max_target_megabytes`, zizmor's `online_audits`, and most of guarddog's options
 - any scanner's `offline` option
 - options that name a scanner's own config file or another file or program its tool reads:
   every scanner's `config_file`, and others such as trivy's `ignore_file`, gitleaks'
@@ -288,29 +293,35 @@ load, or has two sections that ASH reads as the same plugin, a config with an MC
 refused with `config_policy_unreadable`. A scan that reads no such file is unaffected.
 
 Under the default `denied_paths`, a delivered config's sandbox settings and plugin modules may
-restrict the server's own but not widen them. A file that asks for more is refused with
+restrict the server's own but not widen them. A file whose own `sandbox` section or
+`ash_plugin_modules` list asks for more in one of these ways is refused with
 `config_field_denied`, naming the setting; an equal or tighter value scans:
 
 - `sandbox.network_scanners` may list only scanners the server's settings give a network. A
   shorter list takes the network away from the scanners it leaves out.
 - `sandbox.extra_read_paths` may list only paths the server's settings grant.
-- `sandbox.mode` can turn the sandbox on, but cannot turn it off or switch backends when the
-  server's config sets a mode.
+- `sandbox.mode` can turn the sandbox on when the server's mode is `off`, and otherwise must
+  equal the server's mode.
 - `ash_plugin_modules` may add only ASH's own plugin modules and modules installed outside
   every git checkout and the scanned directory, and never the AWS or Snyk plugin modules, or a
   module inside either.
+
+Any other sandbox grant or plugin module a delivered file asks for, such as a
+`read_path_scanners` or `env_scanners` entry, is dropped with a warning, as for a repository's
+config.
 
 The server's settings are the ones in the file `ASH_CONFIG` names, and that file grants nothing
 when it is inside a git checkout, so keep it outside every checkout. A delivered config's
 `global_settings.mcp` section has no effect.
 
 An MCP-client file reads no environment variables, since the environment it would read is the
-server's. A file that uses a `${VAR:default}` reference or an `!ENV` tag is refused with
-`error_type` `config_env_not_resolved` by `run_ash_scan`, which does not start the scan, and by
-`get_config` and `validate_config`. The rule follows where the file is, so a CLI scan of a
-delivered tree refuses such a config too, with exit code 3. A base it `extends` is judged on its
-own location, so a base of yours keeps its references, and so does a file in a directory
-`ASH_MCP_ALLOWED_CONFIG_ROOTS` names.
+server's. A file in which a plain value starts with a `${VAR}` or `${VAR:default}` reference,
+or that uses an `!ENV` tag, is refused: `run_ash_scan` and `get_config` return `error_type`
+`config_env_not_resolved`, and `run_ash_scan` does not start the scan; `validate_config` reports
+an error of that type. The rule follows where the file is, so a CLI scan of a delivered tree
+refuses such a config too, with exit code 3. The refusal covers the file a client names as
+`config_path` and every file a client delivered. A file in a directory
+`ASH_MCP_ALLOWED_CONFIG_ROOTS` names keeps its references.
 
 Suppressions and ignore paths in a delivered config are applied, and marked as coming from the
 client:
@@ -338,7 +349,7 @@ registered profile, and the server cannot register one.
 
 To refuse delivered suppressions and ignore paths, give the server's config a `denied_paths`
 list of its own: the full default list, as `ash config init` writes it, followed by these two
-entries:
+entries, which say so explicitly:
 
 <!-- doctest: config kind=other reason="two entries to append to the default denied_paths list, not a config on their own" -->
 ```yaml
@@ -350,17 +361,21 @@ A list of your own replaces the default list and is applied exactly as written, 
 default entry, start each one with `/`, and compare your list with the default again after you
 upgrade ASH. A list equal to a default that ASH has shipped, such as the one an earlier
 `ash config init` wrote, still counts as the default, and gets every entry of the current
-default list. With a list of your own that keeps the `/sandbox` and `/ash_plugin_modules`
-entries, a delivered config that sets either to any value other than the server's is refused,
-even a tighter one. If your list leaves those entries out, ASH no longer refuses a delivered file
-that asks for more: it drops the grants and modules instead, as it does for a repository's
-config.
+default list. Any other list is your own, even the default list with one entry added or
+removed, and every entry in it applies as written. While it keeps the default's
+`/global_settings/suppressions` and `/global_settings/ignore_paths` entries, delivered
+suppressions and ignore paths are refused. While it keeps the `/sandbox` and
+`/ash_plugin_modules` entries, a delivered config that sets either to any value other than the
+server's is refused, even a tighter one. If your list leaves those two entries out, ASH does not
+refuse a delivered file that asks for more: it drops the grants and modules instead, as it does
+for a repository's config.
 
 An entry matches a key spelled with `-` or `_`. Under `/scanners`, `/reporters`, and
 `/converters`, an entry for a plugin's section also matches every spelling ASH reads as that
-plugin. A glob in the plugin segment matches the plugins that ship with ASH and the plugins your
-server config configures, so `/scanners/trivy-*/options/ignore_file` also covers
-`/scanners/TrivyRepo/options/ignore_file`; for any other plugin, write its name.
+plugin. A glob in the plugin segment matches every key it matches as written, and also the other
+spellings of the plugins that ship with ASH and of the plugins your server config configures,
+so `/scanners/trivy-*/options/ignore_file` also covers `/scanners/TrivyRepo/options/ignore_file`;
+to cover another plugin under every spelling, write its name.
 
 ## Clean up
 

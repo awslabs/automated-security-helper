@@ -222,10 +222,11 @@ host.
 
 Under `ash mcp`, for sandbox settings in a config file that an MCP client names as a
 scan's `config_path`, outside the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, the
-reason reads `an MCP client supplied the file, not the operator`. A config file an MCP
-client delivered is refused instead when it gives a scanner network or read access the
-server's sandbox settings do not, turns the sandbox off or switches its backend, or adds
-a plugin module this check would drop; see
+reason reads `an MCP client supplied the file, not the operator`. Under the default
+policy, a config file an MCP client delivered is refused instead when its own `sandbox`
+section gives a scanner a network or an `extra_read_paths` entry the server's settings do
+not, or changes a sandbox mode other than `off` that the server sets, or when its own
+`ash_plugin_modules` list adds a module this check would drop; see
 [What a delivered config cannot set](mcp-server.md#what-a-delivered-config-cannot-set).
 
 Fix: pass the setting with `--config-overrides`, or put it in a config file outside the

@@ -79,7 +79,7 @@ Starts a scan in the server process and returns a `scan_id` at once. The scan st
 |-------|------|---------|-------|
 | `source_dir` | string \| null | not set | Absolute path to scan. When not set: the tree this session delivered with `set_source_git` or `set_source_zip_finalize`. With none delivered, a call with no session id (stdio) scans the server's working directory, and a call with a session id is refused |
 | `severity_threshold` | string | `"MEDIUM"` | Recorded with the scan and returned by `get_scan_progress`; it does not change which findings the scan reports |
-| `config_path` | string \| null | not set | Custom config path. When not set: the config of the profile this session chose with `select_profile`, or else ASH's config discovery in the source directory |
+| `config_path` | string \| null | not set | Custom config path. When not set: the config ASH discovers in the source directory, else the file `ASH_CONFIG` names in the server's environment, else the built-in defaults |
 | `clean_output` | boolean | `true` | Delete the previous `ash_aggregated_results.json` in the output directory before the scan starts |
 
 Output reports are written to `<source_dir>/.ash/ash_output/` — there is no parameter to override this. Scanner selection, mode, and other tuning live in `.ash/.ash.yaml`, not in tool arguments.
@@ -262,7 +262,7 @@ Get the resolved ASH config (defaults + user overrides merged).
 
 List the config profiles the operator registered at server startup.
 
-No parameters. Returns the config profiles the operator registered at server startup.
+No parameters. Returns the config profiles registered at server startup. `ash mcp` registers none, so the list is empty.
 
 ## list_scanners
 
@@ -283,6 +283,8 @@ Resolve a VS Code workspace file into a scan plan without scanning anything.
 | `config_overrides` | array \| null | not set | Optional list of `key=value` config overrides, applied to each project's config so the reported threshold is the enforced one. |
 | `profile` | string \| null | not set | Name of a registered config profile to resolve under for this one call, instead of whatever select_profile bound to this session. Call list_profiles to see what the operator registered. |
 
+A workspace policy file, named or found beside the workspace file, is used only when it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names; any other refuses the workspace with exit code 4.
+
 ## run_ash_workspace_scan
 
 Scan every project in a VS Code workspace and return the per-project verdict.
@@ -300,6 +302,8 @@ Scan every project in a VS Code workspace and return the per-project verdict.
 | `offline` | boolean | `false` | Run without network access. |
 | `clean_output` | boolean | `true` | Remove each project's previous aggregated-results file first. |
 | `profile` | string \| null | not set | Name of a registered config profile to scan under for this one call, instead of whatever select_profile bound to this session. An unknown name refuses the whole scan; running N repository scans under the default config because a profile name was misspelled, and reporting success, is exactly what the confinement refusal above exists to prevent. |
+
+A workspace policy file, named or found beside the workspace file, is used only when it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names; any other refuses the workspace with exit code 4.
 
 ## select_profile
 
@@ -370,7 +374,7 @@ Validate an ASH configuration file or content string.
 | `config_content` | string \| null | not set | YAML/JSON string to validate. |
 | `config_path` | string \| null | not set | Path to the config file to validate. |
 
-`config_content`, and a `config_path` outside the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, count as the client's config. Each field such a config may not set under the server's runtime-override policy is an error of type `denied_by_runtime_policy`, and a policy the server cannot read is one error of type `config_policy_unreadable`; for `config_content`, both only when a remote client calls. A `${VAR:default}` reference or `!ENV` tag in such a config is an error of type `config_env_not_resolved`.
+`config_content` counts as the client's config, and so does a `config_path` that a client delivered or that is outside the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names and the session's `config/` directory. Each field such a config may not set under the server's runtime-override policy is an error of type `denied_by_runtime_policy`, and a policy the server cannot read is one error of type `config_policy_unreadable`; for `config_content`, both only when a remote client calls. A `${VAR}` or `${VAR:default}` reference at the start of a plain value, or an `!ENV` tag, in such a config is an error of type `config_env_not_resolved`.
 
 ## Resources
 

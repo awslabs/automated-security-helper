@@ -109,10 +109,11 @@ The trivy bound is the shortest. On an offline host, refresh the trivy cache mor
 a day, or exclude trivy with `--exclude-scanners trivy`. An offline image holds `trivy-db`
 to `warn` by default, so its trivy scans keep passing after the first day and the reports
 record the stale database; rebuild the image as often as you want trivy's findings current,
-and at least every 5 days for grype. The bounds are fixed in the code; no setting changes
+and more often than every 5 days for grype, whose bound also counts from before the image
+build. The bounds are fixed in the code; no setting changes
 them. When ASH cannot read a database's age at all, it counts the database as stale.
 
-A stale database fails the scan with exit code 1 and a message that names the database,
+Under `fail`, a stale database fails the scan with exit code 1 and a message that names the database,
 its build time, its age, and the bound. The findings are kept in the reports.
 
 ## Allow a stale database {#allow-stale}

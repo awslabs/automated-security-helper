@@ -27,8 +27,9 @@ which belong to the operator:
   directory you scan
 
 When a config file inside the scanned repository names the package, or a module inside
-it, ASH drops that entry, logs a warning that says why, and runs the scan without it. The
-MCP server refuses a config an MCP client delivered that names it.
+it, ASH drops that entry, logs a warning that says why, and runs the scan without it. Under
+its default policy, the MCP server refuses a config an MCP client delivered whose
+`ash_plugin_modules` list names it; in any other case it drops the entry the same way.
 
 Turn off the reporters you do not use in the same operator config. This one sends to S3
 and CloudWatch Logs only:

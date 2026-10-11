@@ -180,7 +180,7 @@ set them; see [Who may grant](#who-may-grant).
 |---|---|---|
 | `network_scanners` | `null` | A network to the scanners named. `null` means each scanner's own need: semgrep, opengrep, grype, trivy, and npm-audit have one, and so do snyk-code and trivy-repo when their plugins are loaded. A list replaces those defaults: a scanner it names gets a network on every online scan, and a scanner it leaves out gets none. |
 | `extra_read_paths` | `[]` | Read-only access to more host paths, for every sandboxed scanner. `~` and `$VARS` are expanded. |
-| `read_path_scanners` | `[]` | To the scanners named, the extra paths their own options point to, when such a path resolves inside the source tree or an `extra_read_paths` entry and is a regular file or a directory. Of the scanners ASH ships, only detect-secrets uses it, for a baseline file outside the source tree. |
+| `read_path_scanners` | `[]` | To the scanners named, the extra paths their own options point to. For a plugin scanner that declares such paths, a path is mounted only when it resolves inside the source tree or an `extra_read_paths` entry and is a regular file or a directory. Of the scanners ASH ships, only detect-secrets uses it, for a `baseline_file` outside the source tree, which ASH reads itself ([detect-secrets](#detect-secrets)). |
 | `env_scanners` | `[]` | To the scanners named, the environment variables their own options ask for. No scanner ASH ships asks for any yet; it is for plugin scanners that declare such a need. |
 
 `--offline` removes the network from every scanner whatever `network_scanners` says.
@@ -190,12 +190,13 @@ scan, ASH refreshes them outside the sandbox; see
 installed rules either: it may read `$ASH_CFN_GUARD_RULES_DIR`, or `share/cfn-guard-rules`
 beside ASH's bin directory.
 
-A file that a scanner option names outside the source directory, such as a `config_file`
-of actionlint, gitleaks, hadolint, trivy, or zizmor, gitleaks' `baseline_path`, trivy's `ignore_file`
-or `secret_config_file`, or a path for actionlint's `shellcheck` or `pyflakes`, is not mounted
-for the scanner. Unless it is under a system directory the sandbox already reads, such as
-`/etc` or `/opt`, add it to `extra_read_paths`. cfn-guard's `rules_paths` need no entry: ASH
-copies those rules into the scanner's results directory.
+A file that a scanner option names outside the source directory, such as any scanner's
+`config_file`, gitleaks' `baseline_path`, trivy's `ignore_file` or `secret_config_file`, or a
+path for actionlint's `shellcheck` or `pyflakes`, is not mounted for the scanner. Under bwrap
+and landlock, add it to `extra_read_paths` unless it is under a directory the sandbox already
+reads, such as `/etc`, `/opt`, or a directory on `PATH`; firejail and sandbox-exec leave files
+outside the home and temporary directories readable. cfn-guard's `rules_paths` need no entry:
+ASH copies those rules into the scanner's results directory.
 
 Grant on the command line for one scan:
 
@@ -239,8 +240,8 @@ sandbox:
 detect-secrets needs a network only when its verification filter is on, and gets one
 only when `network_scanners` names it. Naming it gives it a network on every online scan,
 whether or not the filter is on, so name it only when you use verification. ASH takes a
-relative `baseline_file`, and the `.secrets.baseline` it looks for by name, from the source
-directory. It reads a `baseline_file` outside the source tree only when `read_path_scanners`
+relative `baseline_file`, and the `.ash/.secrets.baseline` and `.secrets.baseline` it looks
+for by name, from the source directory. It reads a `baseline_file` outside the source tree only when `read_path_scanners`
 names it; without that, ASH logs a warning, ignores the baseline, and reports the findings
 the baseline would have marked. A baseline that is not a regular file is skipped the same way,
 with a warning.
@@ -261,7 +262,8 @@ the file keeps the grants its own `sandbox` section writes, and loses what it in
 from any base and what it changes with `patch`, so write each grant in the file itself.
 
 A config file inside any git checkout, meaning a directory at or above it holds a
-`.git` directory or file, by the file's own path or its resolved path, cannot grant. Nor
+`.git` directory or file, by the file's own path, its resolved path, or any symbolic link it
+passes through, cannot grant. Nor
 can a config file inside the scanned directory, or, under `ash mcp`, one an MCP client
 delivered. ASH drops its grants and logs, as `ash.log` records it:
 
@@ -277,9 +279,10 @@ pass the setting with --config-overrides (for example 'sandbox.network_scanners=
 or put it in a config file outside every git checkout and the scanned directory.
 ```
 
-The console shows the same warning with `[grype]` missing from the example. For a file
-an MCP client delivered, the reason reads `an MCP client supplied the file, not the
-operator`.
+The console shows the same warning with `[grype]` missing from the example. For a config
+file an MCP client names as a scan's `config_path`, outside the directories
+`ASH_MCP_ALLOWED_CONFIG_ROOTS` names, the reason reads `an MCP client supplied the file, not the
+operator`. Under the MCP server's default policy, a delivered file whose own `sandbox` section gives a scanner a network or a read path the server's settings do not, or replaces a sandbox mode the server sets, is refused instead ([What a delivered config cannot set](../how-to/mcp-server.md#what-a-delivered-config-cannot-set)); its other grants are dropped the same way.
 
 So a repository can take a network away from its own scan, but cannot add one. The rule
 also covers your own files: a config kept in a checkout of its own, such as an ops or

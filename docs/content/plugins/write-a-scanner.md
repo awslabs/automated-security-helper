@@ -155,11 +155,12 @@ from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
     network=True,
     cache_paths=("~/.cache/acme-rules",),
+    cache_env=("ACME_CACHE_DIR",),
     env_prefixes=("ACME_",),
 )
 ```
 
-`network` asks for a network on online scans, `read_paths` for read-only host paths, `cache_paths` for cache directories the tool writes (writable through a throwaway overlay under bwrap, read-only elsewhere), and `env_prefixes` and `env_names` for environment variables. A variable whose name marks it as a credential passes only when `env_names` names it exactly.
+`network` asks for a network on online scans, `read_paths` for read-only host paths, and `cache_paths` for cache directories the tool keeps. Those are writable through a throwaway overlay under bwrap, where bwrap and the kernel support one, and read-only everywhere else, so a tool that has to write its cache also needs `cache_env`: variables that move the cache, which ASH points at a private, empty directory wherever `cache_paths` are read-only. `env_prefixes` and `env_names` are for environment variables. A variable whose name marks it as a credential passes only when `env_names` names it exactly.
 
 If the read paths or environment variables come from the scanner's own options, which the scanned repository can write, also set `read_paths_require_grant=True` or `env_requires_grant=True`. The sandbox then mounts those paths only for a scanner named in `sandbox.read_path_scanners`, and only when a path resolves inside the source tree or an `extra_read_paths` entry and is a regular file or a directory. It passes those variables only to a scanner named in `sandbox.env_scanners`, and with `read_paths_require_grant` it never mounts the scanner's `cache_paths`. Only the operator can set those lists ([Give a scanner more access](../docs/scanner-sandbox.md#grants)).
 

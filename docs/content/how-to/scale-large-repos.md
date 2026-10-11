@@ -323,8 +323,9 @@ The scan tool refuses the whole workspace, with exit code 4, when any project fo
 resolves outside the roots the server allows (`ASH_MCP_ALLOWED_ROOTS`); see [Run the MCP
 server](mcp-server.md). Both tools use a workspace policy file only when it is in a
 directory that `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, whether `workspace_config` names it or
-ASH finds it beside the workspace file. Any other policy file, including one an MCP client
-delivered, refuses the workspace with exit code 4. In a workspace inside source an MCP
+ASH finds it in the workspace file's directory or its `.ash` directory. Any other policy file
+refuses the workspace with exit code 4. A policy file an MCP client delivered that also sets a
+field the server's policy denies is refused first, with exit code 3. In a workspace inside source an MCP
 client delivered, each project's config file is a delivered config: if one sets a field the
 server's policy denies, both tools fail with exit code 3, with `error_type`
 `ASHConfigValidationError` and a message that names the project (see [What a delivered
