@@ -3308,6 +3308,15 @@ def cli_section(of: str) -> tuple[Section | None, str | None]:
         else:
             names = (param.name, param.name.upper(), param.human_readable_name)
         default = param.default
+        if (
+            getattr(param, "is_flag", False)
+            and default is None
+            and not param.expose_value
+        ):
+            # An action flag (typer's --install-completion): its value never reaches
+            # the command, so not passing it is off. A three-way flag is exposed, and
+            # there None means "not set".
+            default = False
         compare = not callable(default)
         spec = KeySpec(
             names,

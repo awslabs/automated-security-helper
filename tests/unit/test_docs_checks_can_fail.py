@@ -2667,6 +2667,37 @@ def test_sections_read_from_code_can_fail(
     )
 
 
+def test_an_action_flag_that_never_reaches_the_command_is_off(tmp_path):
+    """typer's --install-completion and --show-completion are flags with default None
+    and expose_value False: the value never reaches the command, so not passing one is
+    off. A three-way flag (--fail-on-findings/--no-fail-on-findings, default None and
+    exposed) is still not set, because there unset defers to the config."""
+    clean = _write(
+        tmp_path,
+        "docs/clean.md",
+        "<!-- doctest: options of=cli -->\n| Option | Default |\n|---|---|\n"
+        "| `--install-completion` | off |\n| `--show-completion` | off |\n\n"
+        "<!-- doctest: options of=cli.scan -->\n| Option | Default |\n|---|---|\n"
+        "| `--fail-on-findings` | not set |\n",
+    )
+    assert dc.check_option_tables([clean], tmp_path) == []
+    wrong = _write(
+        tmp_path,
+        "docs/wrong.md",
+        "<!-- doctest: options of=cli -->\n| Option | Default |\n|---|---|\n"
+        "| `--install-completion` | on |\n\n"
+        "<!-- doctest: options of=cli.scan -->\n| Option | Default |\n|---|---|\n"
+        "| `--fail-on-findings` | off |\n",
+    )
+    findings = dc.check_option_tables([wrong], tmp_path)
+    _assert_reports(
+        findings, "'--install-completion' default says on, but the default is `false`"
+    )
+    _assert_reports(
+        findings, "'--fail-on-findings' default says off, but the default is `null`"
+    )
+
+
 def test_an_options_marker_binds_only_to_a_table(fixture_root):
     """Above a fence, or with a gap before the table, it is a markers finding."""
     above_fence = _write(
