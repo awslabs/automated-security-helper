@@ -16,6 +16,7 @@ raises.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -106,14 +107,14 @@ def test_control_exit_two_still_raises(context):
             scanner.scan(target=context.source_dir, target_type="source")
 
 
-def test_a_later_target_does_not_inherit_the_zero(context):
-    """The count is reset per target, so the next run makes its own claim."""
+def test_a_later_target_does_not_inherit_the_exit_code_or_the_zero(context):
+    """The exit code and the count are reset per target, so a run that exits 2 after
+    one that exited 3 is a failure, not a second "no supported files"."""
     scanner = _scanner(context)
     with patch.object(
         SnykCodeScanner, "_run_subprocess", autospec=True, side_effect=_exits(3)
     ):
         scanner.scan(target=context.source_dir, target_type="source")
-    scanner.exit_code = 0
     with patch.object(
         SnykCodeScanner, "_run_subprocess", autospec=True, side_effect=_exits(2)
     ):
@@ -121,3 +122,71 @@ def test_a_later_target_does_not_inherit_the_zero(context):
             scanner.scan(target=context.source_dir, target_type="source")
 
     assert scanner.targets_attempted is None
+
+
+#: One result, so the converted target's findings are what its own run reported.
+SNYK_SARIF = {
+    "version": "2.1.0",
+    "runs": [
+        {
+            "tool": {"driver": {"name": "SnykCode", "rules": [{"id": "python/X"}]}},
+            "results": [
+                {
+                    "ruleId": "python/X",
+                    "level": "error",
+                    "message": {"text": "x"},
+                    "locations": [
+                        {
+                            "physicalLocation": {
+                                "artifactLocation": {"uri": "nb.py"},
+                                "region": {"startLine": 1},
+                            }
+                        }
+                    ],
+                }
+            ],
+        }
+    ],
+}
+
+
+def test_the_converted_target_after_an_exit_three_source_reports_its_findings(
+    context, monkeypatch
+):
+    """One instance over both targets, as the executor runs it, with the real
+    _run_subprocess: the source exits 3, the converted tree exits 0 with a finding.
+    The converted target was graded SKIPPED with no findings, because exit_code kept
+    the worst code of every run of the instance (base/plugin_base.py)."""
+    from automated_security_helper.utils import subprocess_utils
+
+    (context.work_dir / "nb.py").write_text("print(1)\n")
+    source = str(context.source_dir)
+
+    def run(command, *args, **kwargs):
+        command = [str(part) for part in command]
+        if source in command:
+            return {"returncode": 3, "stdout": "", "stderr": "no supported files"}
+        for part in command:
+            if part.startswith("--sarif-file-output="):
+                Path(part.split("=", 1)[1]).write_text(json.dumps(SNYK_SARIF))
+        return {"returncode": 0, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(subprocess_utils, "run_command_with_output_handling", run)
+    executor = ScannerExecutor(
+        plugin_context=context, progress_display=MagicMock(), scanner_tasks=[]
+    )
+
+    containers = executor._execute_scanner(
+        "snyk-code",
+        _scanner(context),
+        [
+            {"path": context.source_dir, "type": "source"},
+            {"path": context.work_dir, "type": "converted"},
+        ],
+    )
+
+    by_target = {container.target_type: container for container in containers}
+    assert by_target["source"].status == ScannerStatus.SKIPPED
+    converted = by_target["converted"]
+    assert converted.finding_count == 1, (converted.status, converted.exit_code)
+    assert converted.status != ScannerStatus.SKIPPED

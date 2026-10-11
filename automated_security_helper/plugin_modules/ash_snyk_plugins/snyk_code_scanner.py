@@ -200,8 +200,13 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             dict: Scan results
         """
         # No claim until this target's run makes one (exit 3 below), so the count
-        # from an earlier target is never read as this one's.
+        # from an earlier target is never read as this one's. The exit code too:
+        # _run_subprocess keeps the worst code of every run of this instance, and the
+        # executor runs one instance over the source tree and then the converted one,
+        # so after a source that exited 3 the converted target read 3 whatever its
+        # own run returned, and was graded SKIPPED with its findings unread.
         self.targets_attempted = None
+        self.exit_code = 0
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (

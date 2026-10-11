@@ -566,14 +566,13 @@ def test_exit_code_one_means_findings_not_failure(
 def test_post_scan_resets_exit_code_one_to_zero(scanner, snyk_on_path):
     """The _post_scan override normalizes snyk's findings-detected exit code.
 
-    Reached here through the empty-target path, which calls _post_scan before
-    any exit-code check.
+    Called directly: scan() now resets the exit code at its start, so setting one
+    and reaching _post_scan through scan() would test that reset instead.
     """
     scanner.exit_code = 1
 
-    result = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+    scanner._post_scan(target=scanner.context.work_dir, target_type="converted")
 
-    assert result is True
     assert scanner.exit_code == 0, (
         "exit code 1 must be normalized to 0 so a findings-detected run is not "
         "reported as a scanner failure"
@@ -584,9 +583,20 @@ def test_post_scan_leaves_other_exit_codes_alone(scanner, snyk_on_path):
     """Only 1 is normalized; a genuine failure code is preserved."""
     scanner.exit_code = 3
 
-    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+    scanner._post_scan(target=scanner.context.work_dir, target_type="converted")
 
     assert scanner.exit_code == 3
+
+
+def test_scan_starts_each_target_with_exit_code_zero(scanner, snyk_on_path):
+    """An earlier target's code is not carried into this one (the empty-target path
+    returns before snyk runs, so the code it ends with is this target's own)."""
+    scanner.exit_code = 3
+
+    result = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert result is True
+    assert scanner.exit_code == 0
 
 
 def test_malformed_results_file_logs_an_error_and_returns_none(
