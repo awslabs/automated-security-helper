@@ -3,12 +3,19 @@
 
 """The flags bandit runs with for each ``config_file``, as its description states.
 
-``BanditScannerConfigOptions.config_file`` says: a file named ``.bandit`` is
-passed with ``bandit --ini`` and any other with ``bandit --configfile``; unless
-``config_file`` names a ``.bandit`` file that exists, ASH passes an empty config
-file with ``bandit --ini``; a path that does not exist is logged as a warning
-and ignored. ``test_bandit_scanner_behavior.py`` checks the flags recorded when
-the options are processed; these check the argv of the scan.
+``BanditScannerConfigOptions.config_file`` says: a file named exactly ``.bandit``
+is passed with ``bandit --ini`` and any other file with ``bandit --configfile``;
+unless ``config_file`` names a ``.bandit`` file, ASH passes an empty config file
+with ``bandit --ini``; a path that is not a file is logged as a warning and
+ignored. ``test_bandit_scanner_behavior.py`` checks the flags recorded when the
+options are processed; these check the argv of the scan, and that a scanner run
+twice (the source and the converted tree) passes one ``--ini`` each time.
+
+A relative path an operator writes is made absolute by ``resolve_config``,
+against the directory of the config file that sets it
+(``test_operator_paths_resolve_from_their_config.py``). The scanner joins a value
+that still reaches it relative to the source directory, which is what the
+relative-path test here pins.
 """
 
 from __future__ import annotations
@@ -41,15 +48,23 @@ def plugin_context(tmp_path: Path) -> PluginContext:
     return context
 
 
-def _argv(context: PluginContext, config_file: Optional[Path]) -> tuple:
-    scanner = BanditScanner(
+def _scanner(context: PluginContext, config_file: Optional[Path]) -> BanditScanner:
+    return BanditScanner(
         context=context,
         config=BanditScannerConfig(
             options=BanditScannerConfigOptions(config_file=config_file)
         ),
     )
+
+
+def _scan_argv(scanner: BanditScanner, context: PluginContext) -> List[str]:
     final_args, _, _ = scanner._execute_scan(context.source_dir, "source", [])
-    return [str(arg) for arg in final_args], Path(scanner.results_dir)
+    return [str(arg) for arg in final_args]
+
+
+def _argv(context: PluginContext, config_file: Optional[Path]) -> tuple:
+    scanner = _scanner(context, config_file)
+    return _scan_argv(scanner, context), Path(scanner.results_dir)
 
 
 def _after(argv: List[str], flag: str) -> List[str]:
@@ -81,7 +96,7 @@ def test_a_dot_bandit_file_is_the_only_ini(plugin_context, tmp_path) -> None:
     assert _after(argv, "--configfile") == []
 
 
-@pytest.mark.parametrize("name", ["bandit.yaml", "bandit.toml"])
+@pytest.mark.parametrize("name", ["bandit.yaml", "bandit.toml", "ops.bandit"])
 def test_another_file_is_a_configfile_beside_the_empty_ini(
     plugin_context, tmp_path, name: str
 ) -> None:
@@ -112,3 +127,54 @@ def test_without_a_usable_file_only_the_empty_ini_is_passed(
             r.getMessage() for r in caplog.records if str(missing) in r.getMessage()
         ]
         assert "is ignored" in warning and "empty config file" in warning, warning
+
+
+def test_a_directory_is_not_passed_as_a_config_file(
+    plugin_context, tmp_path, caplog
+) -> None:
+    """``is_file``, not ``exists``: a directory named ``.bandit`` is ignored too."""
+    directory = tmp_path / "operator" / ".bandit"
+    directory.mkdir(parents=True)
+
+    with caplog.at_level(logging.WARNING):
+        argv, results_dir = _argv(plugin_context, directory)
+
+    assert _after(argv, "--configfile") == []
+    (ini,) = _after(argv, "--ini")
+    assert _is_the_empty_ini(ini, results_dir, plugin_context.source_dir), ini
+    (warning,) = [
+        r.getMessage() for r in caplog.records if str(directory) in r.getMessage()
+    ]
+    assert "is not a file" in warning and "is ignored" in warning, warning
+
+
+def test_a_path_still_relative_at_the_scanner_is_joined_to_the_source_directory(
+    plugin_context,
+) -> None:
+    """resolve_config has already anchored an operator's relative path; one set
+    on the options directly reaches the scanner relative."""
+    in_source = plugin_context.source_dir / "ops" / "bandit.yaml"
+    in_source.parent.mkdir()
+    in_source.write_text("skips: []\n", encoding="utf-8")
+
+    argv, _ = _argv(plugin_context, Path("ops/bandit.yaml"))
+
+    assert _after(argv, "--configfile") == [in_source.as_posix()]
+
+
+@pytest.mark.parametrize("name", [None, ".bandit", "bandit.yaml"])
+def test_each_scan_passes_one_ini(plugin_context, tmp_path, name) -> None:
+    """The source tree and the converted tree are scanned by one scanner."""
+    config_file = None
+    if name is not None:
+        config_file = tmp_path / "operator" / name
+        config_file.parent.mkdir()
+        config_file.write_text("[bandit]\n", encoding="utf-8")
+    scanner = _scanner(plugin_context, config_file)
+
+    first = _scan_argv(scanner, plugin_context)
+    second = _scan_argv(scanner, plugin_context)
+
+    assert len(_after(first, "--ini")) == 1, first
+    assert len(_after(second, "--ini")) == 1, second
+    assert _after(first, "--configfile") == _after(second, "--configfile")

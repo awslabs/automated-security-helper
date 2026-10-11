@@ -39,7 +39,7 @@ class BanditScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description="Path to Bandit configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory."
-            " Used only when the operator sets it, in a config file outside the scanned tree or with --config-overrides: a config file inside the scanned tree, or one an MCP client delivered, does not choose it, and ASH does not look for one by name. A file named `.bandit` is passed with `bandit --ini`, and any other file with `bandit --configfile`. Unless config_file names a `.bandit` file that exists, ASH passes bandit an empty config file with `bandit --ini`, so bandit does not read a `.bandit` file from the scanned tree. A path that does not exist is logged as a warning and ignored.",
+            " Used only when the operator sets it, in a config file outside the scanned tree or with --config-overrides: a config file inside the scanned tree, or one an MCP client delivered, does not choose it, and ASH does not look for one by name. A file named exactly `.bandit` is passed with `bandit --ini`, and any other file with `bandit --configfile`. Unless config_file names a `.bandit` file that exists, ASH passes bandit an empty config file with `bandit --ini`, so bandit does not read a `.bandit` file from the scanned tree. A path that is not a file is logged as a warning and ignored.",
         ),
     ] = None
     confidence_level: Annotated[
@@ -271,8 +271,9 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 config_file_path = Path(self.context.source_dir) / config_file_path
             if not config_file_path.is_file():
                 ASH_LOGGER.warning(
-                    f"Configured bandit config file does not exist: {config_file_path}. "
-                    "It is ignored, and bandit runs with an empty config file."
+                    "Configured bandit config file does not exist or is not a file: "
+                    f"{config_file_path}. It is ignored, and bandit runs with an empty "
+                    "config file."
                 )
             elif config_file_path.name == ".bandit":
                 ini_file = config_file_path
