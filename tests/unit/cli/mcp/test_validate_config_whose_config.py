@@ -178,7 +178,15 @@ def test_a_delivered_config_is_the_clients_inside_the_config_roots(
         os.pathsep.join([str(_server["operator"]), str(resolve_workspace_root())]),
     )
     delivered = _write(_in_session(session_id, "source", "ash.yaml"), DENIED)
+    reference = _write(_in_session(session_id, "source", "ref.yaml"), NO_DEFAULT)
 
     result = _validate(config_path=str(delivered), session_id=session_id)
+    referenced = _validate(config_path=str(reference), session_id=session_id)
 
     assert "denied_by_runtime_policy" in _types(result), result
+    # The denial above is also reached through client_file_denials, which flags
+    # a delivered file on its own. The reference is not: for a remote caller,
+    # which files resolve no reference is client_named_config_is_untrusted alone,
+    # so this is what holds that a delivered file inside the config roots stays
+    # the client's.
+    assert _types(referenced) == ["config_env_not_resolved"], referenced
