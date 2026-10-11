@@ -360,3 +360,75 @@ def test_a_venv_tool_is_not_mistaken_for_a_nix_program(tool_env):
     _, _, script = tool_env
 
     assert pre_installed_tool.find_nix_python_environment(str(script)) is None
+
+
+class TestACheckTheSandboxRefusedIsNotRemembered:
+    """A check the scanner sandbox refused never ran, so it has no verdict to keep.
+
+    Verdicts are memoized for the whole process. A check made under a scope that
+    refuses every spawn (a scanner that cannot be sandboxed as requested) used to be
+    remembered as "could not execute", and every later check of the same tool, in
+    any scope and any later scan of the process, got that answer without running.
+    """
+
+    def test_the_refused_check_is_unverifiable_and_says_why(self, tool_env):
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+
+        _, site_packages, script = tool_env
+        _add_dist(site_packages, "sarif-om", "1.0.4")
+
+        with sandbox_scope(RefusingScope("faketool", "no sandbox backend here")):
+            refused = verify_pre_installed_tool(
+                str(script), "faketool", ["sarif"], None, uv_executable=UV
+            )
+
+        assert refused.status == "unverifiable"
+        assert "no sandbox backend here" in refused.detail, refused.detail
+
+    def test_a_later_check_runs_and_decides(self, tool_env):
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+
+        _, site_packages, script = tool_env
+        _add_dist(site_packages, "sarif-om", "1.0.4")
+        with sandbox_scope(RefusingScope("faketool", "no sandbox backend here")):
+            verify_pre_installed_tool(
+                str(script), "faketool", ["sarif"], None, uv_executable=UV
+            )
+
+        later = verify_pre_installed_tool(
+            str(script), "faketool", ["sarif"], None, uv_executable=UV
+        )
+
+        assert later.status == "satisfied", later.detail
+
+    def test_a_refused_dry_run_is_not_remembered_either(self, tool_env, monkeypatch):
+        """The version probe ran; the sandbox refused only the uv dry run."""
+        from automated_security_helper.utils.sandbox.policy import SandboxUnavailable
+
+        _, site_packages, script = tool_env
+        _add_dist(site_packages, "sarif-om", "1.0.4")
+        real_spawn = pre_installed_tool.spawn_run
+
+        def refuse_uv(argv, *args, **kwargs):
+            if Path(argv[0]).name == "uv":
+                raise SandboxUnavailable("the backend cannot plan uv here")
+            return real_spawn(argv, *args, **kwargs)
+
+        monkeypatch.setattr(pre_installed_tool, "spawn_run", refuse_uv)
+        refused = verify_pre_installed_tool(
+            str(script), "faketool", ["sarif"], None, uv_executable=UV
+        )
+        monkeypatch.setattr(pre_installed_tool, "spawn_run", real_spawn)
+        later = verify_pre_installed_tool(
+            str(script), "faketool", ["sarif"], None, uv_executable=UV
+        )
+
+        assert refused.status == "unverifiable"
+        assert "the backend cannot plan uv here" in refused.detail, refused.detail
+        assert later.status == "satisfied", later.detail

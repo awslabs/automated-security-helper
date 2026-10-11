@@ -120,7 +120,10 @@
   converter row's `failure`, so the scan exits 1 while `fail_on_incomplete_scanners`
   is on. A scanner's own version probe at construction,
   which a sandboxed scan refused with a misleading "renamed by a config file" reason,
-  now runs sandboxed as documented.
+  now runs sandboxed as documented. A probe the sandbox refused never ran, so its
+  outcome is not remembered for the rest of the process: uv's availability, a
+  tool's version, and the check of a pre-installed tool against the scan's
+  requirement are probed again by the next check that asks.
 
   If a sandbox was requested and cannot be provided, the scanner is recorded
   `MISSING` with the reason and the scan exits 1. ASH never falls back to running it
