@@ -1,436 +1,83 @@
-# ASH Ferret Scan Plugin
+# ASH Ferret Scan plugin
 
-This plugin integrates [Ferret Scan](https://github.com/awslabs/ferret-scan) into the Automated Security Helper (ASH) for sensitive data detection.
+This module adds the `ferret-scan` scanner, which runs [Ferret Scan](https://github.com/awslabs/ferret-scan) to find sensitive data in files: credit card numbers, passport and Social Security numbers, API keys and other secrets, email addresses, phone numbers and more. It is a community plugin: it ships with ASH, and a scan runs it only when the module is loaded. The full documentation is the [Ferret Scan plugin](https://awslabs.github.io/automated-security-helper/docs/plugins/community/ferret-scan-plugin/) page.
 
-## Overview
+## Install Ferret Scan
 
-Ferret Scan is a sensitive data detection tool that scans files for potential sensitive information including:
+The plugin runs the `ferret-scan` command it finds on `PATH`, and supports ferret-scan `>=2.4.5,<2.6.0` (`DEFAULT_VERSION_CONSTRAINT` in `ferret_scanner.py`). ASH does not install it during a scan, and the ASH container image does not include it. Install it with ASH, which runs `pip install` with the supported range in the Python environment that runs ASH, and so fails if that environment has no pip, as in one that uv created:
 
-- **Credit Card Numbers** - 15+ card brands with mathematical validation
-- **Passport Numbers** - Multi-country formats (US, UK, Canada, EU, MRZ)
-- **Social Security Numbers** - Domain-aware validation with HR/Tax/Healthcare context
-- **Email Addresses** - RFC-compliant with domain validation
-- **Phone Numbers** - International and domestic formats
-- **API Keys & Secrets** - 40+ patterns (AWS, GitHub, Google Cloud, Stripe, etc.)
-- **IP Addresses** - IPv4 and IPv6 with network context
-- **Social Media Profiles** - LinkedIn, Twitter/X, Facebook, GitHub, etc.
-- **Intellectual Property** - Patents, trademarks, copyrights, trade secrets
-- **Document Metadata** - EXIF and document metadata extraction
-
-## Installation
-
-### Prerequisites
-
-Install Ferret Scan:
-
+<!-- doctest: illustrative reason="installs ferret-scan from PyPI" -->
 ```bash
-# Recommended: let ASH install the version this plugin is tested against
-ash dependencies install --config .ash/.ash_community_plugins.yaml
-
-# Or install by hand. Use the constraint, not a bare `pip install ferret-scan`:
-# the latter resolves to whatever is newest, which is how a release published
-# mid-CI-run once turned every open pull request red.
-pip install 'ferret-scan>=2.4.5,<2.6.0'
-
-# Or build from source
-git clone https://github.com/awslabs/ferret-scan.git
-cd ferret-scan
-make build
+ash dependencies install \
+  --config-overrides 'ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_ferret_plugins]' \
+  --tool ferret-scan
 ```
 
-The supported range is declared in `ferret_scanner.py` (`DEFAULT_VERSION_CONSTRAINT`)
-and is what `ash dependencies install` applies. If the two ever disagree, the
-constant is correct.
+Or install it yourself, with the range: without it you get the newest release, which may be outside it.
 
-### Enable the Plugin
+<!-- doctest: illustrative reason="installs ferret-scan from PyPI" -->
+```bash
+pipx install 'ferret-scan>=2.4.5,<2.6.0'
+```
 
-The ferret-scan plugin is a community plugin that must be explicitly enabled. There are two ways to do this:
+If `ferret-scan` is not on `PATH`, the scanner is reported MISSING and the scan exits with code 1.
 
-#### Option 1: Add to ASH Configuration File (Recommended)
+## Load the plugin
 
-Add the plugin module to your `.ash/.ash.yaml` configuration file:
+Name the module in an ASH config. A repository's own `.ash/.ash.yaml` may load this module:
 
 ```yaml
+project_name: my-service
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_ferret_plugins
-
 scanners:
   ferret-scan:
-    enabled: true
-    options:
-      confidence_levels: "high"
-      checks: "CREDIT_CARD,SECRETS,SSN,PASSPORT"
-```
-
-#### Option 2: Command Line Flag
-
-Use the `--ash-plugin-modules` flag when running ASH:
-
-```bash
-uv run ash scan --source-dir /path/to/code \
-    --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins
-```
-
-### Verify Plugin is Loaded
-
-To verify the plugin is properly loaded:
-
-```bash
-# With config file
-uv run ash plugin list | grep -i ferret
-
-# Or with command line flag
-uv run ash plugin list --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins | grep -i ferret
-```
-
-You should see `ferret-scan` in the list of scanners.
-
-## ASH Convention Compliance
-
-This plugin follows ASH conventions for consistent behavior across all scanners:
-
-### Inherited from ASH (Do NOT configure at plugin level)
-
-| Feature | ASH Convention | Notes |
-|---------|---------------|-------|
-| **Debug Mode** | `ferret_debug: true` | Controls ferret-scan's own debug output (independent of ASH's `--debug`) |
-| **Verbose Mode** | `ferret_verbose: true` | Controls ferret-scan's own verbose output (independent of ASH's `--verbose`) |
-| **Output Format** | Always SARIF | Required by ASH for result aggregation |
-| **Output Directory** | `.ash/ash_output/scanners/ferret-scan/` | Follows ASH conventions |
-| **Offline Mode** | `ASH_OFFLINE=true` | Respects ASH offline mode environment variable |
-| **Suppressions** | `.ash/suppressions.yaml` | Managed centrally by ASH |
-
-### Unsupported Options
-
-The following ferret-scan CLI options are **NOT supported** in the ASH plugin and will raise an error if used:
-
-| Option | Reason |
-|--------|--------|
-| `format`, `output_format` | ASH requires SARIF format. Use ASH reporter plugins for other formats. |
-| `debug` | Use `ferret_debug: true` instead. Bare `debug` is blocked to avoid confusion with ASH's `--debug`. |
-| `verbose` | Use `ferret_verbose: true` instead. Bare `verbose` is blocked to avoid confusion with ASH's `--verbose`. |
-| `web`, `port` | Web server mode is not applicable for ASH integration. |
-| `enable_redaction`, `redaction_*`, `memory_scrub` | Redaction is post-processing, not scanning. |
-| `generate_suppressions`, `show_suppressed`, `suppressions_file` | ASH manages suppressions centrally. |
-| `extract_text` | Text extraction mode is a utility, not scanning. |
-| `preprocess_only` | Outputs extracted text and exits — produces no SARIF results. |
-| `pre_commit_mode` | ASH manages output formatting and exit codes centrally; use ASH's own pre-commit hook. |
-| `list_profiles` | Only prints available profiles and exits — produces no scan results. |
-
-### Security Warning: show_match Option
-
-⚠️ **Data Exfiltration Risk**: The `show_match` option causes ferret-scan to include the actual matched sensitive data (credit card numbers, SSNs, API keys, etc.) in the scan output. This creates significant security risks:
-
-- **Log file exposure**: Matched sensitive data will appear in SARIF reports, CI/CD logs, and ASH output files
-- **Accidental data leakage**: Reports shared with team members or uploaded to security dashboards may contain real sensitive data
-- **Compliance violations**: Logging actual PII/PCI data may violate data protection regulations (GDPR, PCI-DSS, HIPAA)
-
-**Recommendation**: Keep `show_match: false` (the default) in production environments. Only enable it temporarily for debugging in isolated, secure environments where log files are properly protected and purged.
-
-### Note: `API_KEY_OR_SECRET` false positives (SECRETS check)
-
-ferret-scan's `SECRETS` check includes a generic `API_KEY_OR_SECRET` detector that
-matches on the *name* of an assignment when the name is a secret keyword (`session`,
-`token`, `secret`, `password`, `api_key`, …) — **regardless of the value**. So typed
-code and config such as a `session` field on a generated model, a `session` local, or a
-Terraform local named `manage_auth_secret` can be flagged at HIGH confidence even though
-no credential is present.
-
-This detector **cannot be turned off in ferret-scan's config** — the tool only supports
-`disabled_types` for the `INTELLECTUAL_PROPERTY` check, not `SECRETS`. The plugin
-therefore keeps the detector enabled (so real secrets are still found) and expects you to
-manage false positives with ASH's own controls:
-
-- **Suppress** the false positives with a path-scoped ASH suppression:
-  ```yaml
-  global_settings:
-    suppressions:
-      - path: path/to/generated_or_test_file.py
-        rule_id: API_KEY_OR_SECRET
-        reason: "False positive — variable/field name matches the secret-keyword heuristic, not a credential"
-  ```
-- Or **exclude** whole noise directories via the plugin's `exclude_patterns`.
-- Or scope the `checks` option to omit `SECRETS` if you do not need secret detection.
-
-See `DEVELOPMENT.md` → "Design decision: API_KEY_OR_SECRET stays ENABLED" for the full
-rationale.
-
-## Configuration
-
-### Basic Configuration
-
-```yaml
-scanners:
-  ferret-scan:
-    enabled: true
-    options:
-      confidence_levels: "high"       # high, medium, low, or combinations
-      checks: "CREDIT_CARD,SECRETS,SSN,PASSPORT"  # or "all" for everything
-      recursive: true
-      use_default_config: false       # disable bundled config to let CLI args take effect
-      exclude_patterns:
-        - ".venv"
-        - ".git"
-        - "node_modules"
-```
-
-> **Note on `use_default_config`**: The bundled `ferret-config.yaml` is a comprehensive
-> reference config. `use_default_config` controls whether its validator/profile settings
-> (IP `internal_urls`, social-media patterns, named profiles) are loaded — it does **not**
-> affect excludes: ferret-scan's CLI flags take precedence over the config file's defaults,
-> so ASH's `exclude_patterns` and `--recursive` are honoured either way (verified against
-> v2.4.5). Set `false` to rely only on ferret-scan's built-in defaults plus your explicit
-> ASH options; keep it `true` (or use `profile`) to pick up the bundled validator patterns.
-
-> **Note on `exclude_patterns`**: Ferret-scan's `--exclude` matches each pattern with
-> Go's `filepath.Match` glob (`*`, `?`, `[abc]` — `**` globstar is **not** supported)
-> **and** as a plain substring of the full path. So `.venv` excludes any path containing
-> "`.venv`", and `*.log` matches log files; use `.venv` rather than `.venv/**`. Because of
-> the substring branch, a short bare token (e.g. `test`) can over-exclude any path
-> containing it. Patterns are passed as a single comma-separated `--exclude` value.
-
-### Configuration Options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `confidence_levels` | string | `"all"` | Confidence levels: `high`, `medium`, `low`, or combinations |
-| `checks` | string | `"all"` | Specific checks to run (comma-separated) |
-| `recursive` | bool | `true` | Recursively scan directories |
-| `config_file` | string | `null` | Path to custom Ferret YAML config file |
-| `use_default_config` | bool | `true` | Use the default config bundled with this plugin |
-| `profile` | string | `null` | Profile name from config file |
-| `exclude_patterns` | list | `[]` | Patterns to exclude from scanning (directory names or file patterns, e.g., `.venv`, `*.log`) |
-| `show_match` | bool | `false` | ⚠️ Display matched text in findings (see security warning above) |
-| `enable_preprocessors` | bool | `true` | Enable text extraction from documents |
-| `finding_limit` | int | `0` | Max findings ferret-scan emits (`--limit`). `0` = unlimited. ASH defaults to `0` because ferret-scan's own default of `200` silently truncates large scans. |
-| `fail_on_incomplete` | bool | `false` | Pass `--fail-on-incomplete` so ferret-scan exits 3 when a file could not be fully scanned (findings may be missing). ASH still returns the partial SARIF and records the invocation as unsuccessful/incomplete. |
-| `respect_gitignore` | bool | `false` | Pass `--respect-gitignore` to honor `.gitignore`. Off by default — `.gitignore` often hides high-value files (`.env`, `*.pem`) a sensitive-data scan should see. |
-| `disable_ip_types` | string | `null` | Comma-separated `INTELLECTUAL_PROPERTY` sub-types to skip (`--disable-ip-types`): `copyright,patent,trademark,trade_secret,internal_url`. |
-| `explain` | bool | `false` | Pass `--explain` for an offline per-finding rationale + verdict + drafted suppression reason. No data leaves the host. |
-| `validator_budget` | string | `null` | Per-validator time budget (`--validator-budget`), e.g. `SSN=500ms,all=2m`. Over-budget validators stop and mark the scan incomplete. |
-| `max_live_bytes` | string | `null` | Cap on extracted content held in memory (`--max-live-bytes`), e.g. `256MB`/`1GB`. Bounds peak memory on constrained hosts. |
-| `tool_version` | string | `null` | Version constraint for ferret-scan (e.g., `>=1.0.0,<2.0.0`) |
-| `skip_version_check` | bool | `false` | Skip version compatibility check (use with caution) |
-
-### Default Configuration
-
-This plugin includes a default `ferret-config.yaml` that is automatically used when no custom config is specified. The default config includes:
-
-- Comprehensive validator patterns for intellectual property detection
-- Social media platform detection patterns
-- Pre-configured profiles for common use cases (quick, thorough, ci, security-audit, etc.)
-- AWS/Amazon internal URL patterns for IP detection
-
-### Overriding the Default Config
-
-You can override the default configuration in several ways:
-
-#### Option 1: Provide a custom config file path
-
-```yaml
-scanners:
-  ferret-scan:
-    enabled: true
-    options:
-      config_file: "/path/to/your/custom-ferret.yaml"
-```
-
-#### Option 2: Place a config file in your source directory
-
-The plugin searches for config files in this order:
-1. Explicitly specified `config_file` path
-2. `ferret.yaml` or `.ferret.yaml` in the source directory
-3. `.ash/ferret.yaml` or `.ash/ferret-scan.yaml` in the source directory
-4. Default config bundled with this plugin
-
-Simply create a `ferret.yaml` or `.ferret.yaml` in your project root to override the defaults.
-
-#### Option 3: Disable the default config entirely
-
-```yaml
-scanners:
-  ferret-scan:
-    enabled: true
-    options:
-      use_default_config: false  # Use ferret-scan's built-in defaults only
-```
-
-### Advanced Configuration
-
-```yaml
-scanners:
-  ferret-scan:
-    enabled: true
     options:
       confidence_levels: "high,medium"
       checks: "CREDIT_CARD,SECRETS,SSN,PASSPORT"
-      recursive: true
-      profile: "security-audit"  # Use predefined profile from config
-      config_file: "my-ferret-config.yaml"  # Custom config file
-      # show_match: false  # Keep disabled to avoid logging sensitive data
-      enable_preprocessors: true  # Extract text from PDFs, Office docs
-      exclude_patterns:
-        - "*.log"
-        - "node_modules"
-        - "vendor"
 ```
 
-### Version Pinning
-
-Pin to a specific ferret-scan version for reproducible builds:
-
-```yaml
-scanners:
-  ferret-scan:
-    enabled: true
-    options:
-      tool_version: "==2.5.2"  # Exact version
-```
-
-Or use a version range:
-
-```yaml
-scanners:
-  ferret-scan:
-    enabled: true
-    options:
-      tool_version: ">=2.4.5,<2.6.0"  # Compatible range
-```
-
-To bypass version checks (not recommended for production):
-
-```yaml
-scanners:
-  ferret-scan:
-    enabled: true
-    options:
-      skip_version_check: true  # Use with caution
-```
-
-### Available Checks
-
-The authoritative list for your installed version is `ferret-scan --help checks` — do not
-hardcode it, as ferret-scan adds detectors between releases. As of v2.4.5 through v2.5.2 the checks are:
-
-- `BANK_ACCOUNT` - Bank account / IBAN / routing numbers
-- `CLOUD_RESOURCES` - Cloud resource identifiers (AWS ARNs, Azure/GCP/OCI/IBM/Alibaba IDs)
-- `CREDIT_CARD` - Credit card numbers
-- `DATE_OF_BIRTH` - Dates of birth
-- `DRIVERS_LICENSE` - Driver's license numbers (state formats)
-- `EMAIL` - Email addresses
-- `INTELLECTUAL_PROPERTY` - Patents, trademarks, copyrights (internal-URL detection requires config)
-- `IP_ADDRESS` - IPv4 and IPv6 addresses
-- `MEDICAL_ID` - Medical / health identifiers (PHI)
-- `METADATA` - Document, image, audio, and video metadata
-- `OTP` - One-time-passcode / two-factor secrets
-- `PASSPORT` - Passport numbers
-- `PERSON_NAME` - Person names
-- `PHONE` - Phone numbers
-- `PHYSICAL_ADDRESS` - Physical / postal addresses
-- `SECRETS` - API keys, tokens, passwords
-- `SOCIAL_MEDIA` - Social media profiles
-- `SSN` - Social Security Numbers
-- `VIN` - Vehicle Identification Numbers
-
-### Available Profiles (in default config)
-
-- `quick` - Fast security check (high confidence only, no preprocessors)
-- `thorough` - All confidence levels with text extraction
-- `ci` - CI/CD pipeline profile (high+medium confidence, recursive)
-- `precommit` - Pre-commit hook optimized (critical data types, concise output)
-- `security-audit` - Security team scanning (secrets, PCI, identity focused)
-- `comprehensive` - Complete analysis with all features enabled
-- `credit-card` - PCI compliance focused
-- `passport` - Identity verification focused
-- `person-name` - Person name detection focused
-- `social-media` - Social media profile and handle detection
-- `intellectual-property` - IP detection focused
-- `silent` - Minimal output for automation
-
-## Creating a Custom Config File
-
-To create your own config file, you can:
-
-1. Copy the default config from the plugin:
-   ```bash
-   cp $(python -c "import automated_security_helper.plugin_modules.ash_ferret_plugins as p; print(p.__path__[0])")/ferret-config.yaml ./my-ferret-config.yaml
-   ```
-
-2. Or create a minimal config that only overrides what you need:
-   ```yaml
-   # my-ferret-config.yaml
-   defaults:
-     confidence_levels: high,medium
-     checks: SECRETS,CREDIT_CARD,SSN
-   
-   validators:
-     intellectual_property:
-       internal_urls:
-         - "http[s]?:\\/\\/.*\\.mycompany\\.com"
-         - "http[s]?:\\/\\/internal\\..*"
-   ```
-
-## Output
-
-The plugin outputs results in SARIF format, which is automatically aggregated with other ASH scanner results.
-
-Results are written to:
-```
-.ash/ash_output/
-├── scanners/
-│   └── ferret-scan/
-│       └── source/
-│           └── ferret-scan.sarif
-└── reports/
-    └── ash.sarif  # Aggregated results
-```
-
-## Example Usage
+Or name it on the command line with `--ash-plugin-modules`. This lists `ferret-scan` among the scanners:
 
 ```bash
-# Run ASH with Ferret Scan enabled
-uv run ash --source-dir /path/to/code
-
-# Run only Ferret Scan
-uv run ash --source-dir /path/to/code --scanners ferret-scan
-
-# Run with ferret-scan's own debug output
-uv run ash --source-dir /path/to/code --scanners ferret-scan -o ferret_debug=true
-
-# Run with ferret-scan's own verbose output
-uv run ash --source-dir /path/to/code --scanners ferret-scan -o ferret_verbose=true
-
-# Run with a custom config file
-uv run ash --source-dir /path/to/code \
-    --scanners ferret-scan \
-    --config-overrides "scanners.ferret-scan.options.config_file=/path/to/custom.yaml"
+ash plugin list --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins
 ```
 
-## Error Handling
+ferret-scan's SARIF is written to `.ash/ash_output/scanners/ferret-scan/source/ferret-scan.sarif`, and its findings are in every ASH report.
 
-### Unsupported Option Errors
+## Options
 
-If you try to use bare `debug` instead of `ferret_debug`, you'll see a clear error:
+Every option, with its type and default, is in the [scanner reference](https://awslabs.github.io/automated-security-helper/reference/scanners/#ferret-scan). ferret-scan options that conflict with how ASH runs the tool, such as `format`, `debug`, `verbose` and `suppressions_file`, are refused: a config that sets one makes the scanner fail to start. The [plugin page](https://awslabs.github.io/automated-security-helper/docs/plugins/community/ferret-scan-plugin/#options) lists them.
 
-```
-ValueError: Unsupported option 'debug' in ferret-scan plugin configuration. 
-Use 'ferret_debug: true' instead. Bare 'debug' is blocked to avoid confusion with ASH's --debug flag.
-```
+For ferret-scan's own debug or verbose output, set `ferret_debug` or `ferret_verbose`:
 
-### Common Issues
-
-**ferret-scan binary not found:**
+<!-- doctest: illustrative reason="needs ferret-scan installed" -->
 ```bash
-# Install ferret-scan
-pip install ferret-scan
-
-# Verify installation
-ferret-scan --version
+ash scan \
+  --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins \
+  --scanners ferret-scan \
+  --config-overrides 'scanners.ferret-scan.options.ferret_debug=true'
 ```
 
-**Empty directory warnings:**
-The plugin will skip scanning if the target directory is empty or doesn't exist, logging an appropriate warning message.
+Leave `show_match` off where reports or logs are shared. With it on, ferret-scan puts the matched values, such as a card number or a key, into its findings, and from there into the SARIF files, every report and the logs. Some profiles in the bundled `ferret-config.yaml` turn it on; the plugin page names them.
 
-## License
+## The ferret-scan config file
 
-Apache-2.0
+ASH passes ferret-scan one config file: the file that `config_file` names, when that file is outside every git checkout and the scanned directory, and otherwise the `ferret-config.yaml` bundled with this plugin. With `use_default_config: false` and no usable `config_file`, ferret-scan uses its built-in defaults instead.
+
+A ferret-scan config file inside the scanned repository is never used, whether `config_file` names it or ASH finds it by name (`ferret.yaml`, `.ferret.yaml`, `.ash/ferret.yaml` and the like); ASH logs a warning and goes on as if it were not there. To use your own config, keep it outside the repository and name it with `config_file`.
+
+## False positives from the SECRETS check
+
+ferret-scan's `SECRETS` check includes a detector, `API_KEY_OR_SECRET`, that matches the name of an assignment when the name is a secret keyword such as `session`, `token` or `api_key`, whatever the value, so a model field or a local variable named `session` can be reported at HIGH confidence although it holds no credential. ferret-scan's config cannot turn this detector off (its `disabled_types` setting works only for the `INTELLECTUAL_PROPERTY` check), so the plugin keeps it on and you handle its false positives with ASH:
+
+```yaml
+project_name: my-service
+global_settings:
+  suppressions:
+    - path: src/models/generated_model.py
+      rule_id: API_KEY_OR_SECRET
+      reason: "A field name that matches the secret-keyword rule, not a credential"
+```
+
+You can also skip whole directories with the `exclude_patterns` option, or leave `SECRETS` out of `checks` if you do not need secret detection. [DEVELOPMENT.md](DEVELOPMENT.md#design-decision-api_key_or_secret-stays-enabled-false-positives-are-suppressed) records why the plugin does not filter these findings itself.

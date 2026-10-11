@@ -14,12 +14,12 @@ verification run, result, and the pushed commit SHA.
 
 - `ferret-scan` installed: **v2.4.5** (commit 71b171e, go1.27.1, linux/amd64), via mise shim.
 - `uv`, `python3` available.
-- Authoritative `--checks` list from `ferret-scan --help checks` (19 checks + `all`):
+- Authoritative `ferret-scan --checks` list from `ferret-scan --help checks` (19 checks + `all`):
   `BANK_ACCOUNT, CLOUD_RESOURCES, CREDIT_CARD, DATE_OF_BIRTH, DRIVERS_LICENSE, EMAIL,
   INTELLECTUAL_PROPERTY, IP_ADDRESS, MEDICAL_ID, METADATA, OTP, PASSPORT, PERSON_NAME,
   PHONE, PHYSICAL_ADDRESS, SECRETS, SOCIAL_MEDIA, SSN, VIN`.
-- `--limit` default confirmed **200** (`0` = unlimited).
-- `--fail-on-incomplete` confirmed: exit **3** on partial coverage.
+- `ferret-scan --limit` default confirmed **200** (`0` = unlimited).
+- `ferret-scan --fail-on-incomplete` confirmed: exit **3** on partial coverage.
 - Baseline ferret plugin unit tests: **69 passed** (`uv run pytest
   tests/unit/plugin_modules/ash_ferret_plugins/ -q --no-cov -n 0`).
 - `scripts/validate_ferret_plugin.py` → `EXPECTED_MIN_TESTS = 67` (below the 69 present).
@@ -32,7 +32,7 @@ verification run, result, and the pushed commit SHA.
    for anything worth carrying (see analysis §9).
 4. **API_KEY_OR_SECRET:** disable the generic type globally in the bundled config;
    document as an explicit design decision in DEVELOPMENT.md and README.md.
-5. **`--fail-on-incomplete`:** adopt it.
+5. **`ferret-scan --fail-on-incomplete`:** adopt it.
 
 ---
 
@@ -42,7 +42,7 @@ verification run, result, and the pushed commit SHA.
 - Created this work log and the delta document.
 - Updated analysis doc: recorded locked decisions (§8), added old-branch carry-over
   analysis (§9), refreshed posture notes (baseline 69 tests, ferret-scan 2.4.5 verified,
-  `--limit`/exclude semantics confirmed against the installed binary).
+  `ferret-scan --limit`/exclude semantics confirmed against the installed binary).
 - Verification: docs-only change; ferret unit suite still **69 passed**.
 - Commit: `921f1cb`
 
@@ -87,11 +87,11 @@ verification run, result, and the pushed commit SHA.
 - Verification: **74 passed**.
 - Commit: `12f28c0`
 
-### WL-5 — A4: adopt `--fail-on-incomplete` (2026-09-13)
+### WL-5 — A4: adopt `ferret-scan --fail-on-incomplete` (2026-09-13)
 - Verified against v2.4.5: an incomplete scan (forced via `--validator-budget all=1ns`)
   exits **3** and still writes valid SARIF.
 - `ferret_scanner.py`: new `fail_on_incomplete: bool = False` option → emits
-  `--fail-on-incomplete`; `success_exit_codes` overridden to `{0, 1, 3}` (added `Set`
+  `ferret-scan --fail-on-incomplete`; `success_exit_codes` overridden to `{0, 1, 3}` (added `Set`
   import); `scan()` logs a WARNING when `exit_code == 3`. Invocation records
   `executionSuccessful=False, exitCode=3`; partial SARIF still returned.
 - Tests: `test_fail_on_incomplete_default_off`, `test_fail_on_incomplete_when_enabled`,
@@ -103,7 +103,7 @@ verification run, result, and the pushed commit SHA.
   `UP006/UP035` findings; file stays at its pre-existing 21, same as `origin/main`).
 
 ### WL-6 — A6: doc corrections (2026-09-13)
-- Corrected `--exclude` semantics in README + DEVELOPMENT (×2) + the EXCLUDE-GLOB-SYNTAX
+- Corrected `ferret-scan --exclude` semantics in README + DEVELOPMENT (×2) + the EXCLUDE-GLOB-SYNTAX
   check description: it is `filepath.Match` glob (`*`,`?`,`[..]`; no `**`) **plus** a
   substring fallback — not "simple names, not globs". Verified against `cmd/main.go`.
 - Corrected the empty-results note: current ferret-scan emits `results: []`, not `null`
@@ -145,8 +145,8 @@ verification run, result, and the pushed commit SHA.
 - Commit: `2341ce6`
 
 ### WL-9 — Track B: surface v2.4.5 flags as opt-in options (2026-09-14)
-- Pre-checked each flag against the installed binary: `--explain`, `--validator-budget`,
-  `--max-live-bytes`, `--respect-gitignore`, `--disable-ip-types` all accepted and produce
+- Pre-checked each flag against the installed binary: `ferret-scan --explain`, `ferret-scan --validator-budget`,
+  `ferret-scan --max-live-bytes`, `ferret-scan --respect-gitignore`, `ferret-scan --disable-ip-types` all accepted and produce
   valid SARIF.
 - `ferret_scanner.py`: added 5 opt-in options — `respect_gitignore` (bool),
   `disable_ip_types` (str), `explain` (bool), `validator_budget` (str), `max_live_bytes`
@@ -165,7 +165,7 @@ Addressed a code review of the branch:
   is actually the "API_KEY_OR_SECRET cannot be disabled via config" docs commit). Removed
   the duplicate; A5 = `12f28c0`.
 - **Defect 3 (cosmetic):** analysis prose drift — `20 checks`→`19`, removed `KEYWORD_MATCH`
-  (it is an internal validator, not a `--checks` value), `77 green`→`79`. Same 20→19 fix in
+  (it is an internal validator, not a `ferret-scan --checks` value), `77 green`→`79`. Same 20→19 fix in
   this work log's baseline. Shipped README/tests were already correct.
 - **DP1 (hardening):** narrowed the `API_KEY_OR_SECRET` test suppression from `tests/**` to
   the one real FP file `tests/unit/cli/mcp/test_sessions.py`, so a real credential added to
@@ -261,7 +261,7 @@ version-independent defect.
   `_resolve_sarif_uri_base_ids`, which resolves them back to absolute `file://` URIs.
   Measured on the same fixture: every ASH report (sarif, flat json, gitlab-sast) has
   identical paths under 2.4.5 and 2.5.2, including a directory name with a space.
-- `--exclude` (ferret-scan #682 in 2.5.0, #736 in 2.5.2): no substring branch. Under
+- `ferret-scan --exclude` (ferret-scan #682 in 2.5.0, #736 in 2.5.2): no substring branch. Under
   2.4.5, ASH's `.git` ignore skipped `.github/`, and `test-results/**` and
   `tests/pytest-temp/**` excluded nothing. The 2.5.2 self-scan therefore reported one new
   API_KEY_OR_SECRET false positive in `.github/actions/run-scan-test/action.yml`: a comment

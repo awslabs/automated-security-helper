@@ -23,7 +23,7 @@ This document is for maintainers and developers working on the ASH Ferret-Scan p
 
 The ferret-scan plugin follows ASH's scanner plugin architecture:
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                         ASH Orchestrator                         │
 └─────────────────────────────────────────────────────────────────┘
@@ -56,7 +56,7 @@ The primary trust boundary is between the ASH plugin (which validates config and
 constructs arguments) and the ferret-scan binary (which is an external subprocess).
 The plugin trusts ferret-scan's SARIF output and validates it through Pydantic.
 
-```
+```text
 ┌─────────────────────────────────────────────────────┐
 │  ASH Process (trusted)                              │
 │  ┌───────────────────────────────────────────────┐  │
@@ -80,13 +80,14 @@ The plugin trusts ferret-scan's SARIF output and validates it through Pydantic.
 Key security properties:
 - No `shell=True` anywhere in the execution path
 - Unsupported options blocked before reaching subprocess
-- Config file paths validated for existence before passing to ferret-scan
-- `--no-color` always appended to prevent ANSI escape injection in reports
+- Config file paths validated for existence before passing to ferret-scan, and a config
+  file inside a git checkout or the scanned directory never passed (see section 4)
+- `ferret-scan --no-color` always appended to prevent ANSI escape injection in reports
 - `show_match=true` triggers a runtime WARNING about sensitive data exposure
 
 ## File Structure
 
-```
+```text
 automated_security_helper/
 └── plugin_modules/
     └── ash_ferret_plugins/
@@ -119,11 +120,12 @@ docs/
 
 The plugin always outputs SARIF format, which is required by ASH for result aggregation:
 
+<!-- doctest: illustrative reason="a code excerpt, not a complete program" -->
 ```python
 self.args = ToolArgs(
     format_arg="--format",
     format_arg_value="sarif",  # Always SARIF - required by ASH
-    ...
+    # ...
 )
 ```
 
@@ -146,6 +148,7 @@ The `ferret_` prefix makes it explicit that these control the ferret-scan binary
 
 The plugin validates ferret-scan version compatibility during dependency validation:
 
+<!-- doctest: illustrative reason="a code excerpt, not a complete program" -->
 ```python
 # Version constants (update when ferret-scan releases breaking changes)
 MIN_SUPPORTED_VERSION = "2.4.5"
@@ -165,7 +168,7 @@ the same fixtures with the 2.4.5 and 2.5.2 binaries):
   `file://` URIs. ASH does not carry `originalUriBaseIds` into its aggregated SARIF, so
   the plugin resolves these back to absolute URIs (`_resolve_sarif_uri_base_ids`)
   before validation. Both lines then produce identical paths in every ASH report.
-- `--exclude` stopped matching raw substrings (see section 9). The same ASH ignore
+- `ferret-scan --exclude` stopped matching raw substrings (see section 9). The same ASH ignore
   paths now exclude what they say and nothing more.
 - Detector changes only narrowed results on the fixtures: 2.5.2 drops 9 PHONE false
   positives on card numbers and IBANs and adds nothing. The flag surface ASH uses and
@@ -193,10 +196,19 @@ The plugin searches for ferret-scan config files in this order:
    - `.ash/ferret.yaml`, `.ash/ferret-scan.yaml`
 3. Default config bundled with plugin (`ferret-config.yaml`)
 
+A file from step 1 or 2 is used only when it is outside every git checkout and the
+scanned directory (`honored_path` in `config/path_trust.py`). A file inside them is
+skipped with a warning, so a scanned repository cannot hand ferret-scan its own config.
+With `use_default_config: false` and no usable file, or when `config_file` names a file
+that does not exist, the plugin passes an empty config it writes to its results
+directory, which ferret-scan reads as its built-in defaults; `ferret-scan --config` is always passed,
+because without it ferret-scan loads a `ferret.yaml` from its working directory.
+
 ### 5. Unsupported Options Validation
 
 A Pydantic model validator prevents use of incompatible options:
 
+<!-- doctest: illustrative reason="a code excerpt, not a complete program" -->
 ```python
 UNSUPPORTED_FERRET_OPTIONS = {
     "format": "ASH requires SARIF format...",
@@ -230,34 +242,36 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 
 ### Managed by ASH Framework (not plugin-controlled)
 
-| Feature | ASH Flag | Notes |
+| Feature | ASH setting | Notes |
 |---------|----------|-------|
-| Suppressions | `.ash/suppressions.yaml` | ASH manages centrally |
+| Suppressions | `global_settings.suppressions` in the ASH config | ASH manages centrally |
 | Output directory | `--output-dir` | Uses `.ash/ash_output/scanners/ferret-scan/` |
 | Offline mode | `ASH_OFFLINE=true` | Respects environment variable |
 
 ### Plugin-Specific Options (CAN be configured)
 
+<!-- doctest: options of=scanners.ferret-scan -->
 | Option | Description | Default |
 |--------|-------------|---------|
-| `confidence_levels` | Filter by confidence: high, medium, low | `"all"` |
-| `checks` | Specific checks to run | `"all"` |
+| `confidence_levels` | Filter by confidence: high, medium, low | `all` |
+| `checks` | Specific checks to run | `all` |
 | `recursive` | Scan directories recursively | `true` |
-| `config_file` | Path to ferret config file | Auto-discovered |
-| `profile` | Profile name from config file | None |
+| `config_file` | Path to a ferret-scan config file, used only outside the scanned tree (section 4) | `null` |
+| `use_default_config` | Fall back to the bundled `ferret-config.yaml` | `true` |
+| `profile` | Profile name from config file | `null` |
 | `exclude_patterns` | Patterns to exclude from scanning | `[]` |
 | `show_match` | Display matched text in findings | `false` |
 | `enable_preprocessors` | Extract text from documents | `true` |
-| `finding_limit` | Max findings emitted via `--limit` (`0` = unlimited; guards against ferret-scan's 200 default silently truncating) | `0` |
-| `fail_on_incomplete` | Pass `--fail-on-incomplete` → ferret-scan exits 3 on partial coverage (accepted as non-fatal; SARIF still returned) | `false` |
-| `respect_gitignore` | Pass `--respect-gitignore` (off by default; .gitignore hides high-value secret files) | `false` |
-| `disable_ip_types` | Comma-separated INTELLECTUAL_PROPERTY sub-types to skip via `--disable-ip-types` | `None` |
-| `explain` | Pass `--explain` for an offline per-finding rationale/verdict/suppression-reason | `false` |
-| `validator_budget` | Per-validator time budget via `--validator-budget` (e.g. `all=2m`) | `None` |
-| `max_live_bytes` | Memory cap on extracted content via `--max-live-bytes` (e.g. `256MB`) | `None` |
+| `finding_limit` | Max findings emitted via `ferret-scan --limit` (`0` = unlimited; guards against ferret-scan's 200 default silently truncating) | `0` |
+| `fail_on_incomplete` | Pass `ferret-scan --fail-on-incomplete` → ferret-scan exits 3 on partial coverage (accepted as non-fatal; SARIF still returned) | `false` |
+| `respect_gitignore` | Pass `ferret-scan --respect-gitignore` (off by default; .gitignore hides high-value secret files) | `false` |
+| `disable_ip_types` | Comma-separated INTELLECTUAL_PROPERTY sub-types to skip via `ferret-scan --disable-ip-types` | `null` |
+| `explain` | Pass `ferret-scan --explain` for an offline per-finding rationale/verdict/suppression-reason | `false` |
+| `validator_budget` | Per-validator time budget via `ferret-scan --validator-budget` (e.g. `all=2m`) | `null` |
+| `max_live_bytes` | Memory cap on extracted content via `ferret-scan --max-live-bytes` (e.g. `256MB`) | `null` |
 | `ferret_debug` | Enable ferret-scan's own debug logging (preprocessing/validation flow) | `false` |
 | `ferret_verbose` | Enable ferret-scan's own verbose output (detailed finding info) | `false` |
-| `tool_version` | Version constraint for installation | `">=2.4.5,<2.6.0"` |
+| `tool_version` | Version constraint for installation; unset, `DEFAULT_VERSION_CONSTRAINT` (`>=2.4.5,<2.6.0`) applies | `null` |
 | `skip_version_check` | Bypass version validation | `false` |
 
 Note: Bare `debug` and `verbose` are blocked to avoid confusion with ASH's `--debug`/`--verbose` flags. Use the `ferret_` prefixed versions instead.
@@ -271,10 +285,13 @@ When ferret-scan releases a new version:
 1. **Test the new version** with the plugin
 2. **Update constants** in `ferret_scanner.py`:
 
+<!-- doctest: illustrative reason="a code excerpt, not a complete program" -->
 ```python
-# If new version is compatible:
-MAX_SUPPORTED_VERSION = "3.0.0"  # Bump to next major
-DEFAULT_VERSION_CONSTRAINT = ">=0.1.0,<3.0.0"
+# If the new version is compatible, move the window. DEFAULT_VERSION_CONSTRAINT
+# is derived from the two bounds, so it follows.
+MIN_SUPPORTED_VERSION = "2.4.5"
+MAX_SUPPORTED_VERSION = "2.7.0"  # the first version not yet tested
+RECOMMENDED_VERSION = "2.6.1"  # the version you tested
 
 # If new version has breaking changes:
 # Add version-specific handling in the code
@@ -285,6 +302,7 @@ DEFAULT_VERSION_CONSTRAINT = ">=0.1.0,<3.0.0"
 
 ### Version Helper Functions
 
+<!-- doctest: illustrative reason="a code excerpt, not a complete program" -->
 ```python
 parse_version("1.2.3")  # Returns (1, 2, 3)
 compare_versions("1.0.0", "2.0.0")  # Returns -1 (v1 < v2)
@@ -299,6 +317,7 @@ If ferret-scan adds a new option that conflicts with ASH:
 
 1. **Add to `UNSUPPORTED_FERRET_OPTIONS`** dictionary:
 
+<!-- doctest: illustrative reason="a code excerpt, not a complete program" -->
 ```python
 UNSUPPORTED_FERRET_OPTIONS = {
     # ... existing options ...
@@ -308,6 +327,7 @@ UNSUPPORTED_FERRET_OPTIONS = {
 
 2. **Add a test** in `TestFerretScanScannerUnsupportedOptions`:
 
+<!-- doctest: illustrative reason="a code excerpt, not a complete program" -->
 ```python
 def test_unsupported_option_new_option_raises_error(self):
     """Test that using 'new_option' raises an error."""
@@ -335,6 +355,7 @@ def test_unsupported_option_new_option_raises_error(self):
 
 ### Running Tests
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```bash
 # Run all ferret plugin tests
 uv run pytest tests/unit/plugin_modules/ash_ferret_plugins/ -v --no-cov -n 0
@@ -366,6 +387,7 @@ The tests are organized into classes by functionality:
 
 ### Key Test Fixtures (in `conftest.py`)
 
+<!-- doctest: illustrative reason="a code excerpt, not a complete program" -->
 ```python
 @pytest.fixture
 def mock_plugin_context(tmp_path):
@@ -425,6 +447,7 @@ When making changes to the plugin:
 ### Task 2: Add a New Supported Option
 
 1. Add field to `FerretScannerConfigOptions` class:
+   <!-- doctest: illustrative reason="a code excerpt, not a complete program" -->
    ```python
    new_option: Annotated[
        bool,
@@ -433,6 +456,7 @@ When making changes to the plugin:
    ```
 
 2. Add processing in `_process_config_options()`:
+   <!-- doctest: illustrative reason="a code excerpt, not a complete program" -->
    ```python
    if options.new_option:
        self.args.extra_args.append(ToolExtraArg(key="--new-option", value=None))
@@ -445,11 +469,12 @@ When making changes to the plugin:
 
 1. Identify the breaking change
 2. Add version-specific handling:
+   <!-- doctest: illustrative reason="a code excerpt, not a complete program" -->
    ```python
    if compare_versions(self.tool_version, "2.0.0") >= 0:
-       # New behavior for v2.0.0+
+       ...  # New behavior for v2.0.0+
    else:
-       # Old behavior
+       ...  # Old behavior
    ```
 3. Update version constants
 4. Update tests and documentation
@@ -460,13 +485,17 @@ When making changes to the plugin:
 
 When testing the scan workflow, you must mock multiple methods:
 
+<!-- doctest: illustrative reason="a code excerpt, not a complete program" -->
 ```python
-with patch.object(scanner, '_pre_scan', return_value=True), \
-     patch.object(scanner, '_post_scan'), \
-     patch.object(scanner, '_run_subprocess') as mock_subprocess, \
-     patch.object(scanner, '_plugin_log'), \
-     patch("builtins.open", mock_open(read_data=json.dumps(mock_sarif_response))), \
-     patch("pathlib.Path.exists", return_value=True):
+with (
+    patch.object(scanner, "_pre_scan", return_value=True),
+    patch.object(scanner, "_post_scan"),
+    patch.object(scanner, "_run_subprocess") as mock_subprocess,
+    patch.object(scanner, "_plugin_log"),
+    patch("builtins.open", mock_open(read_data=json.dumps(mock_sarif_response))),
+    patch("pathlib.Path.exists", return_value=True),
+):
+    result = scanner.scan(target, target_type="source")
 ```
 
 **Why**: The scanner uses subprocess to run ferret-scan, and we don't want to actually execute it in unit tests.
@@ -481,7 +510,7 @@ The version check runs during `validate_plugin_dependencies()`, not during scann
 
 ### 3. Config File Discovery Order
 
-The config file discovery has a specific priority order. If a user specifies `config_file` but it doesn't exist, the plugin will NOT fall back to auto-discovery - it will return `None` and log a warning.
+The config file discovery has a specific priority order. If a user specifies `config_file` but it doesn't exist, the plugin will NOT fall back to auto-discovery or to the bundled config: `_find_config_file` returns `None` and logs a warning, and ferret-scan gets the empty config (its built-in defaults).
 
 ### 4. Debug/Verbose: ferret_ Prefix Required
 
@@ -490,12 +519,11 @@ Use `ferret_debug: true` and `ferret_verbose: true` to control ferret-scan's own
 
 ASH's logger level is always TRACE (5) — actual filtering happens at the RichHandler level,
 so ASH's flags don't propagate to plugins. The `ferret_` prefix makes the intent explicit.
-See `docs/_investigation/log-level-file-handler-disclosure.md` for full details.
 
 ### 5. SARIF Output File Location
 
 The SARIF output file is written to:
-```
+```text
 {results_dir}/{target_type}/ferret-scan.sarif
 ```
 
@@ -509,7 +537,7 @@ with no findings, current versions (v2.3.1+) emit `results: []` (an empty array,
 older `null`); `SarifReport.model_validate` accepts both. ASH completes with 0 actionable
 findings. No crash, no error — graceful skip.
 
-**Missing directory**: ASH itself throws `FileNotFoundError` before any plugin is invoked (the framework calls `os.chdir(source_dir)` in `run_ash_scan.py`). This is an ASH-level issue, not a plugin concern. The plugin's own `scan()` method also guards against this by returning `True` (skip) for non-existent paths, but that code path is never reached when running through `ash scan`.
+**Missing directory**: ASH stops before any plugin is invoked: `ash scan` prints `Source directory does not exist: <path>. Check --source-dir (or ASH_SOURCE_DIR).` and exits with code 1. This is an ASH-level check, not a plugin concern. The plugin's own `scan()` method also guards against this by returning `True` (skip) for non-existent paths, but that code path is never reached when running through `ash scan`.
 
 ### 7. Pydantic Model Validator Timing
 
@@ -532,7 +560,7 @@ prints one stderr note listing patterns that matched nothing, which is informati
 The rest of this section describes 2.4.x, the minimum supported line.
 
 Correction (verified against ferret-scan v2.4.5, `isExcluded` in `cmd/main.go`): the
-earlier claim that `--exclude` uses "simple names, not globs" is wrong. Each pattern is
+earlier claim that `ferret-scan --exclude` uses "simple names, not globs" is wrong. Each pattern is
 tested several ways — Go `filepath.Match` glob against the full path **and** the
 basename (`*`, `?`, `[abc]` supported; `**` globstar is **not**), a plain
 `strings.Contains` substring match against the full path, and a `dir/`-segment match.
@@ -540,23 +568,23 @@ So `*.pyc` works as a glob, and a bare `.venv` excludes any path containing "`.v
 The practical guidance is unchanged — use `.venv`, not `.venv/**` (globstar is
 unsupported) — but note the substring branch means a short token like `test` or `build`
 can over-exclude any path containing it. The plugin joins all patterns into a single
-comma-separated `--exclude` value (e.g., `--exclude .venv,.git,*.pyc`).
+comma-separated `ferret-scan --exclude` value (e.g., `ferret-scan --exclude .venv,.git,*.pyc`).
 
-### 10. CLI Args Override the Bundled Config's Defaults (`--exclude`, `--recursive`)
+### 10. CLI Args Override the Bundled Config's Defaults (`ferret-scan --exclude`, `ferret-scan --recursive`)
 
 Correction (verified against ferret-scan v2.4.5): an earlier version of this note claimed
 the bundled `ferret-config.yaml`, when loaded via `--config`, overrides CLI arguments so
-ASH's `--exclude` "may be silently ignored" unless `use_default_config: false`. **That is
+ASH's `ferret-scan --exclude` "may be silently ignored" unless `use_default_config: false`. **That is
 backwards.** ferret-scan's CLI flags take precedence over the config file's `defaults`:
 
-```
+```text
 # bundled --config + --exclude skipdir   → skipdir IS excluded (CLI --exclude wins)
 # bundled --config + --recursive          → nested files ARE found, even though the
 #                                            bundled config's defaults set recursive:false
 ```
 
 So ASH's `exclude_patterns` (and the `global_ignore_paths` the plugin folds into
-`--exclude`) are **honoured regardless of `use_default_config`** — a security-relevant
+`ferret-scan --exclude`) are **honoured regardless of `use_default_config`** — a security-relevant
 guarantee: ignore paths are respected. Setting `use_default_config: false` is **not**
 required for excludes to work.
 
@@ -564,7 +592,7 @@ What `use_default_config` actually controls is whether the bundled config's *val
 profile configuration* (IP `internal_urls`, social-media patterns, the named profiles) is
 loaded at all. Choose `false` when you want only ferret-scan's built-in defaults plus your
 explicit ASH options (as `.ash_community_plugins.yaml` does); choose `true` (the default)
-to pick up the bundled validator patterns. Either way, CLI `--exclude`/`--recursive` win.
+to pick up the bundled validator patterns. Either way, CLI `ferret-scan --exclude`/`ferret-scan --recursive` win.
 
 Caveat: this reasoning applies to the *bundled* config, whose `defaults` block declares no
 `exclude_patterns` of its own. A hand-written config file that itself sets excludes could
@@ -619,7 +647,7 @@ validator is a reasonable **upstream feature request** (file against `awslabs/fe
 until it lands, the config knob genuinely does not exist. It was also confirmed
 empirically against v2.4.5:
 
-```
+```text
 # a Pydantic-style file with a field named for a session object, typed and
 # assigned (the exact line is omitted here on purpose — see the "do not quote"
 # gotcha below; writing it verbatim would make THIS doc a finding)
@@ -638,8 +666,8 @@ detection (AWS keys, GitHub tokens, entropy hits), which is unacceptable.
 
 **Alternatives considered.**
 
-| Option | Verdict | Why |
-|--------|---------|-----|
+| Alternative | Verdict | Why |
+|-------------|---------|-----|
 | **1. Disable the generic type in the bundled `ferret-config.yaml`** (`validators.secrets.disabled_types`) | ❌ Not viable | The knob does not exist for `secrets` — silently ignored (proof above). This was the originally-requested approach; it cannot be implemented. |
 | **2. Plugin-level post-filter** — drop `API_KEY_OR_SECRET` results from the SARIF in the plugin, default-on | ❌ Rejected | Works, but silently discards a whole finding type for *every* consumer of the plugin, including real generic-secret hits an entropy/keyword match would otherwise catch. Too blunt, and hides signal in the plugin where users can't see the filtering. |
 | **3. Keep the detector enabled; suppress/exclude the false positives** | ✅ Chosen | Real secrets are still detected. False positives are handled with ASH's existing, visible, per-path suppression + `exclude_patterns` mechanism — the same one already used for the CycloneDX schema and `pyproject.toml`. Each suppression carries a reason and shows up in `ash config validate` / the unused-suppressions report. |
@@ -748,6 +776,7 @@ generator functions seeded with `random.seed(42)` for reproducibility. No hardco
 sensitive-looking strings appear in the Python source.
 
 To regenerate the test data:
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```bash
 uv run python scripts/generate_test_docx.py
 ```
@@ -766,6 +795,7 @@ are still correct in **both** config files. The validation script's check #10
 
 Run this before pushing to catch known CI failure patterns locally:
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```bash
 uv run python scripts/validate_ferret_plugin.py
 ```
@@ -780,7 +810,7 @@ The script checks for:
 | `EXCLUDE-GLOB-SYNTAX` | Exclude patterns using `**/` globstar syntax (ferret-scan's `filepath.Match` supports `*`/`?`/`[..]` but not `**`) |
 | `TEST-COUNT` | Ensures the unit test count hasn't regressed below 67 |
 | `WINDOWS-PATH` | `str(Path)` instead of `Path.as_posix()` in CLI argument building — backslashes break ferret-scan on Windows |
-| `EXCLUDE-MULTIPLE-ARGS` | Looping over exclude patterns to append individual `--exclude` args instead of joining into one comma-separated value |
+| `EXCLUDE-MULTIPLE-ARGS` | Looping over exclude patterns to append individual `ferret-scan --exclude` args instead of joining into one comma-separated value |
 | `FERRET-IN-ASH-YAML` | ferret-scan registered in `.ash.yaml` instead of `.ash_community_plugins.yaml` (it's a community plugin) |
 | `CONFIG-OVERRIDE-EXCLUDES` | *(removed 2026-09-14 — false premise; ferret-scan CLI args override the bundled config's defaults, so excludes are honoured regardless of `use_default_config`. See gotcha §10.)* |
 | `SUPPRESSION-COVERAGE` | SECRET-SECRET-KEYWORD hits in ferret plugin files must have matching suppressions with `line_start`/`line_end` in `.ash_community_plugins.yaml` |
@@ -804,6 +834,7 @@ When you discover a new CI failure pattern, add a check to the script:
 
 Example skeleton:
 
+<!-- doctest: illustrative reason="a code excerpt, not a complete program" -->
 ```python
 # ----------------------------------------------------------------------------
 # 10. Your new check description
@@ -890,7 +921,7 @@ Before releasing changes to the ferret-scan plugin, perform these manual tests t
 ### Test Data Location
 
 The project includes comprehensive test data for ferret-scan at:
-```
+```text
 tests/test_data/scanners/ferret-scan/
 ├── sample.txt                # Text file with various sensitive data patterns
 └── synthetic-pii-test.docx   # Synthetic document for preprocessor testing (generated, Apache-2.0)
@@ -906,30 +937,38 @@ The `sample.txt` file contains examples across confidence levels:
 
 ### Prerequisites
 
+Run these from a checkout of the repository. Install ferret-scan in the supported range
+and load the plugin module for every command below. The scans use
+`tests/test_data/scanners/ferret-scan` as the source directory, so ASH reads no config
+file from the repository root, and the repository's own `.ash/.ash.yaml` deliberately
+does not load this plugin (the validation script's `FERRET-IN-ASH-YAML` check).
+
+<!-- doctest: illustrative reason="installs ferret-scan from PyPI" -->
 ```bash
-# Ensure ferret-scan is installed
-pip install ferret-scan
+pip install 'ferret-scan>=2.4.5,<2.6.0'
 ferret-scan --version
+export ASH_PLUGIN_MODULES=automated_security_helper.plugin_modules.ash_ferret_plugins
+export ASH_OUTPUT_DIR="$PWD/.ash/ash_output"
 ```
 
-Ensure the plugin is enabled in `.ash/.ash.yaml`:
-```yaml
-ash_plugin_modules:
-  - automated_security_helper.plugin_modules.ash_ferret_plugins
-```
+ASH writes results under the source directory unless told otherwise; `ASH_OUTPUT_DIR`
+puts them in `.ash/ash_output` at the repository root, where the commands below read
+them.
 
 ### Test Scenarios
 
 #### 1. Basic Plugin Discovery
 
+<!-- doctest: illustrative reason="needs ferret-scan and a checkout of this repository" -->
 ```bash
-# Verify plugin is discovered by ASH
+# Verify plugin is discovered by ASH (ASH_PLUGIN_MODULES loads it)
 uv run ash plugin list | grep -i ferret
 # Expected: ferret-scan should appear in the list
 ```
 
 #### 2. Basic Scan with Test Data
 
+<!-- doctest: illustrative reason="needs ferret-scan and a checkout of this repository" -->
 ```bash
 # Run a basic scan using the project's test data
 uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan
@@ -941,6 +980,7 @@ ls -la .ash/ash_output/scanners/ferret-scan/source/
 
 #### 3. SARIF Output Verification
 
+<!-- doctest: illustrative reason="needs ferret-scan and a checkout of this repository" -->
 ```bash
 # Verify SARIF format
 cat .ash/ash_output/scanners/ferret-scan/source/ferret-scan.sarif | jq '.version'
@@ -957,26 +997,27 @@ cat .ash/ash_output/scanners/ferret-scan/source/ferret-scan.sarif | jq '[.runs[0
 
 #### 4. Ferret-Scan Debug Mode (ferret_debug)
 
+<!-- doctest: illustrative reason="needs ferret-scan and a checkout of this repository" -->
 ```bash
 # Enable ferret-scan's own debug output (independent of ASH logging)
-uv run ash scan --source-dir tests/test_data/scanners/ferret-scan \
-    --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins \
-    -o ferret_debug=true 2>&1
+uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan \
+    --config-overrides "scanners.ferret-scan.options.ferret_debug=true" 2>&1
 # Expected: ferret-scan debug output showing preprocessing and validation flow
 ```
 
 #### 5. Ferret-Scan Verbose Mode (ferret_verbose)
 
+<!-- doctest: illustrative reason="needs ferret-scan and a checkout of this repository" -->
 ```bash
 # Enable ferret-scan's own verbose output (independent of ASH logging)
-uv run ash scan --source-dir tests/test_data/scanners/ferret-scan \
-    --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins \
-    -o ferret_verbose=true 2>&1
+uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan \
+    --config-overrides "scanners.ferret-scan.options.ferret_verbose=true" 2>&1
 # Expected: ferret-scan verbose output with detailed finding info
 ```
 
 #### 6. Custom Configuration Options
 
+<!-- doctest: illustrative reason="needs ferret-scan and a checkout of this repository" -->
 ```bash
 # Test with high confidence only
 uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan \
@@ -991,6 +1032,7 @@ uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners fer
 
 #### 7. Version Compatibility Warning
 
+<!-- doctest: illustrative reason="needs ferret-scan and a checkout of this repository" -->
 ```bash
 # If you have an incompatible version installed, verify warning is shown
 uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan 2>&1 | grep -i "version"
@@ -998,6 +1040,7 @@ uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners fer
 
 #### 8. Unsupported Option Error
 
+<!-- doctest: illustrative reason="needs ferret-scan and a checkout of this repository" -->
 ```bash
 # Test that bare 'debug' is blocked (must use ferret_debug)
 cat > /tmp/test-ash-config.yaml << 'EOF'
@@ -1017,34 +1060,40 @@ rm /tmp/test-ash-config.yaml
 
 #### 9. Empty Directory Handling
 
+<!-- doctest: illustrative reason="needs ferret-scan and a checkout of this repository" -->
 ```bash
 mkdir -p /tmp/empty-test-dir
-uv run ash scan --source-dir /tmp/empty-test-dir --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins --no-aggregated-results 2>&1
-# Expected: ferret-scan completes with 0 findings, SARIF has results: [] (empty array), no crash
+uv run ash scan --source-dir /tmp/empty-test-dir --scanners ferret-scan 2>&1
+# Expected: the plugin skips the target ("Target directory ... is empty or doesn't exist.
+# Skipping scan."), ferret-scan is not invoked, no crash
 rmdir /tmp/empty-test-dir
 ```
 
 #### 9a. Missing Directory Handling
 
+<!-- doctest: illustrative reason="needs ferret-scan and a checkout of this repository" -->
 ```bash
-uv run ash scan --source-dir /tmp/this-does-not-exist --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins --no-aggregated-results 2>&1
-# Expected: ASH framework throws FileNotFoundError (os.chdir fails before plugin runs)
-# This is an ASH-level issue, not a plugin concern
+uv run ash scan --source-dir /tmp/this-does-not-exist --scanners ferret-scan 2>&1
+# Expected: "Source directory does not exist: /tmp/this-does-not-exist. Check --source-dir
+# (or ASH_SOURCE_DIR)." and exit code 1, before any plugin runs
 ```
 
 #### 10. Missing Binary Handling
 
+<!-- doctest: illustrative reason="needs ferret-scan and a checkout of this repository" -->
 ```bash
 # Temporarily rename ferret-scan binary
 FERRET_PATH=$(which ferret-scan)
 # Rename it, then run:
 uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan 2>&1
-# Expected: Clear error about missing ferret-scan binary
+# Expected: an error naming the missing ferret-scan binary; ferret-scan is reported
+# MISSING and the scan exits with code 1
 # Remember to restore the binary!
 ```
 
 #### 11. Profile Usage
 
+<!-- doctest: illustrative reason="needs ferret-scan and a checkout of this repository" -->
 ```bash
 # Test using a profile from the default config
 uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan \
@@ -1054,6 +1103,7 @@ uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners fer
 
 #### 12. ASH Report Integration
 
+<!-- doctest: illustrative reason="needs ferret-scan and a checkout of this repository" -->
 ```bash
 # Verify ferret-scan results are included in aggregated ASH report
 uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan
@@ -1063,6 +1113,7 @@ cat .ash/ash_output/reports/ash.sarif | jq '.runs[] | select(.tool.driver.name =
 
 #### 13. Combined with Other Scanners
 
+<!-- doctest: illustrative reason="needs ferret-scan and a checkout of this repository" -->
 ```bash
 # Run ferret-scan alongside other scanners
 uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan,bandit
@@ -1071,6 +1122,7 @@ uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners fer
 
 #### 14. Document Preprocessing (DOCX)
 
+<!-- doctest: illustrative reason="needs ferret-scan and a checkout of this repository" -->
 ```bash
 # Test text extraction from Office documents
 uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan \
@@ -1080,10 +1132,11 @@ uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners fer
 
 ### Quick Smoke Test Script
 
+<!-- doctest: illustrative reason="needs ferret-scan and a checkout of this repository" -->
 ```bash
 #!/bin/bash
 # Save as test-ferret-plugin.sh
-# Assumes plugin is enabled in .ash/.ash.yaml
+# Assumes ASH_PLUGIN_MODULES and ASH_OUTPUT_DIR are set as in Prerequisites
 
 set -e
 
@@ -1131,6 +1184,7 @@ echo "=== Test Complete ==="
 
 ### Cleanup
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```bash
 # Remove ASH output (test data is part of the project, don't delete it)
 rm -rf .ash/ash_output
@@ -1154,7 +1208,7 @@ snyk-code, trivy-repo). This plugin follows the same contract.
 
 ### Standard flow
 
-```
+```text
 1. Empty/missing target?     → return True
 2. _pre_scan() failed?       → return False
 3. Dependencies not met?     → return False
@@ -1190,10 +1244,10 @@ Ad-hoc dicts like `{"findings": [], "errors": [...]}` without `"status": "failed
 will be treated as a successful scan with zero findings by `scan_phase.py`. Use
 `return` (None) instead — the framework correctly marks the container as failed.
 
-### Exit codes and `--fail-on-incomplete`
+### Exit codes and `ferret-scan --fail-on-incomplete`
 
 ferret-scan exits `0` on a normal scan (even when it finds sensitive data) and `3`
-when `--fail-on-incomplete` is set (`fail_on_incomplete: true`) and a file could not be
+when `ferret-scan --fail-on-incomplete` is set (`fail_on_incomplete: true`) and a file could not be
 fully scanned — coverage cut short by a timeout/budget, or the file could not be opened.
 
 - `_run_subprocess` runs with `check=False`, so a non-zero exit never raises; `scan()`
@@ -1209,8 +1263,10 @@ fully scanned — coverage cut short by a timeout/budget, or the file could not 
 ## ASH Integration Registration
 
 When adding this plugin to an ASH installation (or contributing it upstream), three
-files outside the plugin directory must be updated. Both the Snyk and Trivy community
-plugins follow this same pattern.
+files outside the plugin directory must be updated. The Trivy community plugin follows
+this same pattern. The Snyk plugin is not in `.ash/.ash_community_plugins.yaml`: that
+file is inside the scanned tree, and such a file cannot load a plugin package that
+sends the scanned source off the host, so CI passes it with `--ash-plugin-modules`.
 
 ### 1. Register in `.ash/.ash_community_plugins.yaml`
 
@@ -1218,7 +1274,6 @@ Add the plugin module to `ash_plugin_modules`:
 
 ```yaml
 ash_plugin_modules:
-  - automated_security_helper.plugin_modules.ash_snyk_plugins
   - automated_security_helper.plugin_modules.ash_trivy_plugins
   - automated_security_helper.plugin_modules.ash_ferret_plugins   # <-- add
 ```
@@ -1246,42 +1301,38 @@ scanners:
 > **Why `use_default_config: false`**: The bundled `ferret-config.yaml` is a
 > comprehensive reference config. Setting `false` means the scan uses only ferret-scan's
 > built-in defaults plus the explicit ASH options above, rather than loading the bundled
-> validator/profile patterns. (It is **not** needed for excludes — CLI `--exclude` and
-> `--recursive` win over the config's defaults regardless; see gotcha §10.)
+> validator/profile patterns. (It is **not** needed for excludes — the CLI's
+> `ferret-scan --exclude` and `ferret-scan --recursive` win over the config's defaults
+> regardless; see gotcha §10.)
 
-> **Why simple directory names in `exclude_patterns`**: Ferret-scan's `--exclude`
-> matches with `filepath.Match` glob plus a substring fallback; the `**` globstar is
-> not supported, so use `.venv` rather than `.venv/**`. Patterns are joined into a
-> single comma-separated `--exclude` value.
+> **Why simple directory names in `exclude_patterns`**: `ferret-scan --exclude` in 2.4.x
+> matches with `filepath.Match` glob plus a substring fallback (2.5.x is glob-only; see
+> gotcha §9); the `**` globstar is not supported, so use `.venv` rather than `.venv/**`.
+> Patterns are joined into a single comma-separated `ferret-scan --exclude` value.
 
-### 2. Update CI workflow (`.github/workflows/ash-repo-scan-validation.yml`)
+### 2. Install the tool in CI (`.github/actions/run-scan-test/action.yml`)
 
-Add a `pip install ferret-scan` step in the "Install Community Plugin Tools" block,
-alongside the Snyk and Trivy installs:
+The "Community Plugins" legs of `.github/workflows/ash-unified-ci.yml` install the
+community tools in the composite action `.github/actions/run-scan-test/action.yml`.
+ferret-scan is installed there with pip, against the range the plugin declares. The
+action reads `DEFAULT_VERSION_CONSTRAINT` from the plugin rather than repeating it, and
+fails when it cannot:
 
-```yaml
-# Install ferret-scan (cross-platform via pip)
-echo "Installing ferret-scan..."
-pip install ferret-scan
-
-# Verify ferret-scan installation
+<!-- doctest: illustrative reason="runs in CI" -->
+```bash
+FERRET_CONSTRAINT="$(python -c 'from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import DEFAULT_VERSION_CONSTRAINT as c; print(c)')"
+pip install "ferret-scan${FERRET_CONSTRAINT}"
 ferret-scan --version
-echo "ferret-scan installation completed!"
 ```
 
-### 3. Update community plugin index (`docs/content/docs/plugins/community/index.md`)
+### 3. Update the community plugin index (`docs/content/docs/plugins/community/index.md`)
 
-Add ferret-scan to the "Available Community Plugins" list:
-
-```markdown
-- **[Ferret Scan Plugin](ferret-scan-plugin.md)** - Integrates Ferret Scan for
-  comprehensive sensitive data detection (credit cards, passports, SSNs, API keys,
-  secrets, and more)
-```
+Add a row for the plugin to the table of community plugins, and a page for it in the
+same directory (`ferret-scan-plugin.md`).
 
 ## Related Resources
 
 - [ferret-scan GitHub Repository](https://github.com/awslabs/ferret-scan)
-- [ASH Plugin Development Guide](../../../docs/content/docs/plugins/development-guide.md)
-- [ASH Scanner Plugin Architecture](../../../docs/content/docs/plugins/scanner-plugins.md)
+- [Write a scanner plugin](https://awslabs.github.io/automated-security-helper/plugins/write-a-scanner/)
+- [Community plugins](https://awslabs.github.io/automated-security-helper/docs/plugins/community/)
 - [SARIF Specification](https://sarifweb.azurewebsites.net/)

@@ -17,19 +17,19 @@ This is the running list of concrete changes shipped in this update. Status lege
 | A1 | Version window → `>=2.4.5,<2.5.0`; `MIN=2.4.5`, `MAX=2.5.0`, `RECOMMENDED=2.4.5` | fix | ☑ | d1a3130 |
 | A2 | Emit `--limit 0` by default (new `finding_limit` option) to stop silent 200-finding truncation | fix | ☑ | e1412f7 |
 | A3 | Keep `API_KEY_OR_SECRET` enabled; suppress the 6 v2.4.5 FPs in the community config + document the policy | fix | ☑ | 35c5dbe |
-| A4 | Adopt `--fail-on-incomplete` (new `fail_on_incomplete` option) + exit-code-3 handling | feature | ☑ | 2b0458c |
+| A4 | Adopt `ferret-scan --fail-on-incomplete` (new `fail_on_incomplete` option) + exit-code-3 handling | feature | ☑ | 2b0458c |
 | A5 | Block-list additions: `preprocess_only`, `pre_commit_mode`, `list_profiles`; always `--quiet` | fix | ☑ | 12f28c0 |
-| A6 | Doc corrections: `--exclude` glob+substring semantics, empty-result `null`→`[]`, full check list, remove dead GenAI references | docs | ☑ | f55ef54 |
+| A6 | Doc corrections: `ferret-scan --exclude` glob+substring semantics, empty-result `null`→`[]`, full check list, remove dead GenAI references | docs | ☑ | f55ef54 |
 
 ## Track B — Feature surfacing (after Track A)
 
 | ID | Change | Type | Status | Commit |
 |----|--------|------|--------|--------|
-| B1 | `respect_gitignore` → `--respect-gitignore` (carried from old branch) | feature | ☑ | 151661a |
-| B2 | `disable_ip_types` → `--disable-ip-types` (carried from old branch) | feature | ☑ | 151661a |
-| B3 | `explain` → `--explain` (offline per-finding rationale) | feature | ☑ | 151661a |
-| B4 | `validator_budget` → `--validator-budget` | feature | ☑ | 151661a |
-| B5 | `max_live_bytes` → `--max-live-bytes` | feature | ☑ | 151661a |
+| B1 | `respect_gitignore` → `ferret-scan --respect-gitignore` (carried from old branch) | feature | ☑ | 151661a |
+| B2 | `disable_ip_types` → `ferret-scan --disable-ip-types` (carried from old branch) | feature | ☑ | 151661a |
+| B3 | `explain` → `ferret-scan --explain` (offline per-finding rationale) | feature | ☑ | 151661a |
+| B4 | `validator_budget` → `ferret-scan --validator-budget` | feature | ☑ | 151661a |
+| B5 | `max_live_bytes` → `ferret-scan --max-live-bytes` | feature | ☑ | 151661a |
 | B6 | Document new detectors in README Available Checks | docs | ☑ | f55ef54 (done in A6) |
 
 ## Track C — Review-driven fixes (post Track A/B)
@@ -37,7 +37,7 @@ This is the running list of concrete changes shipped in this update. Status lege
 | ID | Change | Type | Status | Commit |
 |----|--------|------|--------|--------|
 | C1 | Dedupe DEVELOPMENT `### Suppression Strategy`; narrow the `API_KEY_OR_SECRET` test suppression `tests/**`→`tests/unit/cli/mcp/test_sessions.py`; `success_exit_codes` `{0,1,3}`→`{0,3}` (ferret uses exit 1 for errors); fix stale analysis numbers (`20`→`19` checks, drop `KEYWORD_MATCH`, `77`→`79`) + duplicate A5 delta row | fix | ☑ | 5a62dec |
-| C2 | Correct DEVELOPMENT §10 — bundled config does NOT override CLI `--exclude`/`--recursive` (verified v2.4.5, CLI wins); fix README + registration `use_default_config` notes; **remove** the false-premise `CONFIG-OVERRIDE-EXCLUDES` validation check (now 9 checks); analysis §9.6 + §5.6 corrections | fix | ☑ | e789825 |
+| C2 | Correct DEVELOPMENT §10 — bundled config does NOT override CLI `ferret-scan --exclude`/`ferret-scan --recursive` (verified v2.4.5, CLI wins); fix README + registration `use_default_config` notes; **remove** the false-premise `CONFIG-OVERRIDE-EXCLUDES` validation check (now 9 checks); analysis §9.6 + §5.6 corrections | fix | ☑ | e789825 |
 | C3 | Remove duplicated `use_default_config` blockquote heading in DEVELOPMENT.md | docs | ☑ | 4db2163 |
 | C4 | Update the public docs page `docs/content/docs/plugins/community/ferret-scan-plugin.md` — versions `2.4.5`, all new options, 19-check list, `API_KEY_OR_SECRET` FP note | docs | ☑ | af5c92e |
 

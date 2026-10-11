@@ -22,7 +22,7 @@ incident** (ferret-scan v2.3.3): unquoted-assignment detection flags
 This is what turns PRs red and is the practical reason a version bump was deferred.
 
 This update is fundamentally a **version-window realignment** plus a small set of
-**correctness fixes** (notably `--limit`), with an optional second track of
+**correctness fixes** (notably `ferret-scan --limit`), with an optional second track of
 **feature surfacing** (new detectors and new CLI flags).
 
 ---
@@ -55,7 +55,7 @@ This update is fundamentally a **version-window realignment** plus a small set o
 | `RECOMMENDED_VERSION` | `1.0.0` |
 | Install path | `pip install ferret-scan<constraint>` via `get_installation_commands` |
 | Output | always `--format sarif`, always `--no-color` |
-| Flags emitted | `--format sarif`, `--output`, `--file`, `--confidence`, `--checks`, `--recursive`, `--config`, `--profile`, `--exclude` (single comma-joined), `--show-match`, `--enable-preprocessors`, `--debug` (via `ferret_debug`), `--verbose` (via `ferret_verbose`), `--no-color` |
+| Flags emitted | `ferret-scan --format sarif`, `ferret-scan --output`, `ferret-scan --file`, `ferret-scan --confidence`, `ferret-scan --checks`, `ferret-scan --recursive`, `ferret-scan --config`, `ferret-scan --profile`, `ferret-scan --exclude` (single comma-joined), `ferret-scan --show-match`, `ferret-scan --enable-preprocessors`, `ferret-scan --debug` (via `ferret_debug`), `ferret-scan --verbose` (via `ferret_verbose`), `ferret-scan --no-color` |
 | Supported plugin options | `confidence_levels, checks, recursive, config_file, use_default_config, profile, exclude_patterns, show_match, enable_preprocessors, ferret_debug, ferret_verbose, tool_version, skip_version_check` |
 | Blocked options | `format, output_format, web, port, enable_redaction, redaction_output_dir, redaction_strategy, redaction_audit_log, memory_scrub, generate_suppressions, show_suppressed, suppressions_file, extract_text, debug, verbose` |
 | Documented check list (README) | `CREDIT_CARD, EMAIL, INTELLECTUAL_PROPERTY, IP_ADDRESS, METADATA, PASSPORT, PERSON_NAME, PHONE, SECRETS, SOCIAL_MEDIA, SSN` (11) |
@@ -63,7 +63,7 @@ This update is fundamentally a **version-window realignment** plus a small set o
 
 The plugin behaviour is otherwise solid: no `shell=True`, list-arg subprocess,
 Pydantic-validated options, `Path.as_posix()` for Windows-safe args, exclude joined
-into one comma-separated `--exclude`, and a pre-push validation script
+into one comma-separated `ferret-scan --exclude`, and a pre-push validation script
 (`scripts/validate_ferret_plugin.py`) that mirrors CI checks.
 
 ---
@@ -74,13 +74,13 @@ into one comma-separated `--exclude`, and a pre-push validation script
 > all 2.x work sits under one giant `[Unreleased]` block (git-chglog was removed).
 > Version attribution below is from `git tag` + `git log` cross-checked against prose.
 
-### 4.1 New detector / check types (all work today via `--checks`)
+### 4.1 New detector / check types (all work today via `ferret-scan --checks`)
 `BANK_ACCOUNT`, `OTP` (two-factor), `DATE_OF_BIRTH`, `PHYSICAL_ADDRESS`/`ADDRESS`,
 `DRIVERS_LICENSE`, `MEDICAL_ID` (PHI), `VIN`, `CLOUD_RESOURCES` (AWS ARNs, Azure/GCP/
 OCI/IBM/Alibaba IDs), plus AWS secret-access-key coverage inside
-`SECRETS`. (`KEYWORD_MATCH` is an internal validator, not a selectable `--checks` value —
+`SECRETS`. (`KEYWORD_MATCH` is an internal validator, not a selectable `ferret-scan --checks` value —
 it does not appear in `ferret-scan --help checks`.) **The plugin's `checks` field is a
-free-form string passed straight to `--checks`, so these already function** — but the
+free-form string passed straight to `ferret-scan --checks`, so these already function** — but the
 README/docs advertise only 11 of
 ~21 available checks. Authoritative list is `ferret-scan --help checks` (do NOT
 hardcode).
@@ -89,29 +89,29 @@ hardcode).
 - `--limit <int>` (**default 200**) — truncates displayed findings by confidence.
   **Silent correctness gap** for ASH: large trees can drop findings unless we pass
   `--limit 0`.
-- `--explain` — offline per-finding rationale + real/test/uncertain verdict +
+- `ferret-scan --explain` — offline per-finding rationale + real/test/uncertain verdict +
   drafted suppression reason. Fully local, no network.
-- `--fail-on-incomplete` — exit **3** when files couldn't be fully scanned
+- `ferret-scan --fail-on-incomplete` — exit **3** when files couldn't be fully scanned
   (timeouts/budgets/unreadable). Integrity signal.
-- `--disable-ip-types` — turn off IP sub-types (`copyright,patent,trademark,trade_secret,internal_url`).
+- `ferret-scan --disable-ip-types` — turn off IP sub-types (`copyright,patent,trademark,trade_secret,internal_url`).
 - `--validator-budget NAME=DURATION` — per-validator time budgets (CI hardening).
-- `--max-live-bytes` — memory ceiling for extracted content (constrained hosts).
-- `--respect-gitignore` — opt-in `.gitignore` honoring (default off).
-- `--stdin` / `--stdin-name`, `--preprocess-only`/`-p`, `--quiet`, `--pre-commit-mode`,
-  `--list-profiles` — not relevant to ASH batch scanning.
+- `ferret-scan --max-live-bytes` — memory ceiling for extracted content (constrained hosts).
+- `ferret-scan --respect-gitignore` — opt-in `.gitignore` honoring (default off).
+- `ferret-scan --stdin` / `ferret-scan --stdin-name`, `ferret-scan --preprocess-only`/`-p`, `ferret-scan --quiet`, `ferret-scan --pre-commit-mode`,
+  `ferret-scan --list-profiles` — not relevant to ASH batch scanning.
 
 ### 4.3 Behavioural / breaking changes
 - **SARIF empty results:** `null` → **empty array `[]`** (v2.3.1) when nothing found.
 - **SARIF `file:` URI reshaped:** empty authority + percent-encoded path (v2.4.5, #634).
 - **Validator panics** now surface as SARIF `toolExecutionNotifications` warnings +
-  **exit code 3** under `--fail-on-incomplete` (v2.4.5, #658).
+  **exit code 3** under `ferret-scan --fail-on-incomplete` (v2.4.5, #658).
 - **Text summary moved to bottom** of text output (v2.1.x) — irrelevant to us (SARIF).
 - **Config discovery is now CWD-first:** ferret-scan searches the scanned tree for
   `config.yaml`/`ferret.yaml`/`ferret.yml`/`.ferret-scan.yaml` *before* the user config
   dir. A config file in the target tree now governs the scan (TM-13).
-- **GenAI fully removed:** no Textract/Transcribe/Comprehend, no `--enable-genai`, no
+- **GenAI fully removed:** no Textract/Transcribe/Comprehend, no `ferret-scan --enable-genai`, no
   outbound AWS/HTTP calls anywhere. The tool is offline.
-- **Web server** binds `127.0.0.1` by default now (`--bind` to change) + CSRF/headers.
+- **Web server** binds `127.0.0.1` by default now (`ferret-scan --bind` to change) + CSRF/headers.
 - **Config schema tightened** (v2.2.x): dead documented options removed/renamed;
   unknown keys captured and warned.
 
@@ -143,16 +143,16 @@ not demote it enough. Mitigations (pick one or combine):
 - Add suppressions (`.ash/.ash.yaml` **and** `.ash/.ash_community_plugins.yaml`).
 
 ### 5.3 High — `--limit 200` silently truncates findings (P1)
-The plugin never passes `--limit`, so ferret-scan caps output at 200 findings by
+The plugin never passes `ferret-scan --limit`, so ferret-scan caps output at 200 findings by
 confidence. On a large repo, findings are silently dropped. Fix: emit `--limit 0`
 (or a large explicit value) by default.
 
-### 5.4 Medium — `--exclude` semantics documented incorrectly (P2)
-`DEVELOPMENT.md`/`README.md` state ferret-scan `--exclude` uses "simple name matching,
+### 5.4 Medium — `ferret-scan --exclude` semantics documented incorrectly (P2)
+`DEVELOPMENT.md`/`README.md` state `ferret-scan --exclude` uses "simple name matching,
 not glob patterns." Actual behaviour (`isExcluded`, `cmd/main.go`): Go
 `filepath.Match` glob (`*`, `?`, `[abc]`) **is** supported (only `**` globstar is not),
 **plus** a `strings.Contains` substring branch and a `dir/`-segment branch. The
-single-comma-joined `--exclude` value the plugin builds is correct, but the docs are
+single-comma-joined `ferret-scan --exclude` value the plugin builds is correct, but the docs are
 wrong and the substring branch means a bare token (`test`, `build`) over-excludes any
 path containing it. Update docs; keep the join behaviour.
 
@@ -162,7 +162,7 @@ dir and passes `--config`. Independently, ferret-scan v2.x now auto-discovers
 `config.yaml`/`ferret.yaml` in the **scanned tree (CWD)** even without `--config`. With
 ASH `os.chdir(source_dir)`, a stray config in the target could take effect and could
 even **disable detection** (TM-13). Consider passing an explicit `--config` always, and
-documenting the interaction. (No `--disable-config-discovery` CLI flag exists; that
+documenting the interaction. (No `ferret-scan --disable-config-discovery` CLI flag exists; that
 control is API-only.)
 
 ### 5.6 Low — stale docs / bundled config drift (P3)
@@ -183,8 +183,8 @@ control is API-only.)
 The plugin blocks `enable_redaction`, `redaction_*`, `memory_scrub`,
 `generate_suppressions`, `show_suppressed`, `suppressions_file`, `web`, `port`,
 `extract_text`. **All of these still exist** as real ferret-scan flags, so the guards
-remain valid. There is no `--enable-genai` option to guard (it was removed), so no new
-GenAI block-list entry is needed. `extract_text` maps to `--preprocess-only`/`-p` today.
+remain valid. There is no `ferret-scan --enable-genai` option to guard (it was removed), so no new
+GenAI block-list entry is needed. `extract_text` maps to `ferret-scan --preprocess-only`/`-p` today.
 
 ---
 
@@ -203,18 +203,18 @@ GenAI block-list entry is needed. `extract_text` maps to `--preprocess-only`/`-p
    [API_KEY_OR_SECRET]` to bundled `ferret-config.yaml`, and/or document the
    suppression + exclude approach. Update `scripts/validate_ferret_plugin.py` if the FP
    surface changes.
-4. **Doc corrections** (§5.4, §5.6): fix `--exclude` semantics, empty-result note,
+4. **Doc corrections** (§5.4, §5.6): fix `ferret-scan --exclude` semantics, empty-result note,
    check list, GenAI references.
 
 ### Track B — Feature surfacing (optional, additive)
-5. New plugin options mapping to new flags: `explain` (`--explain`),
-   `fail_on_incomplete` (`--fail-on-incomplete`), `disable_ip_types`
-   (`--disable-ip-types`), `validator_budget` (`--validator-budget`), `max_live_bytes`
-   (`--max-live-bytes`), `respect_gitignore` (`--respect-gitignore`).
+5. New plugin options mapping to new flags: `explain` (`ferret-scan --explain`),
+   `fail_on_incomplete` (`ferret-scan --fail-on-incomplete`), `disable_ip_types`
+   (`ferret-scan --disable-ip-types`), `validator_budget` (`ferret-scan --validator-budget`), `max_live_bytes`
+   (`ferret-scan --max-live-bytes`), `respect_gitignore` (`ferret-scan --respect-gitignore`).
 6. Document the new detectors (`BANK_ACCOUNT, OTP, DATE_OF_BIRTH, PHYSICAL_ADDRESS,
    DRIVERS_LICENSE, MEDICAL_ID, VIN, CLOUD_RESOURCES`) in README's
    Available Checks section.
-7. Handle exit code 3 (`--fail-on-incomplete`) sensibly in the return contract if
+7. Handle exit code 3 (`ferret-scan --fail-on-incomplete`) sensibly in the return contract if
    adopted (currently `executionSuccessful = exit_code == 0`).
 
 ### Track C — Test + CI (accompanies A/B)
@@ -252,7 +252,7 @@ GenAI block-list entry is needed. `extract_text` maps to `--preprocess-only`/`-p
 4. **API_KEY_OR_SECRET policy:** disable the generic type globally in the bundled config
    (cleanest, loses generic-secret detection), or keep it and rely on
    suppressions/excludes (retains detection, more maintenance)?
-5. **`--fail-on-incomplete`:** adopt it (surfaces partial-scan integrity as exit 3, needs
+5. **`ferret-scan --fail-on-incomplete`:** adopt it (surfaces partial-scan integrity as exit 3, needs
    return-contract handling), or leave it off for now?
 
 ---
@@ -271,7 +271,7 @@ GenAI block-list entry is needed. `extract_text` maps to `--preprocess-only`/`-p
 4. **API_KEY_OR_SECRET:** **disable the generic type globally** in the bundled
    `ferret-config.yaml`; document as an explicit design decision in DEVELOPMENT.md and
    README.md. (Named secret patterns stay on.)
-5. **`--fail-on-incomplete`:** **adopt it**, with exit-code-3 handling in the return path.
+5. **`ferret-scan --fail-on-incomplete`:** **adopt it**, with exit-code-3 handling in the return path.
 
 ### 9.2 Posture updates (verified against the installed binary)
 - ferret-scan **v2.4.5 is installed** in this environment; all findings below were
@@ -279,8 +279,8 @@ GenAI block-list entry is needed. `extract_text` maps to `--preprocess-only`/`-p
 - **Authoritative check list = 19 checks** (see work log). README documents 11 — the gap
   is real; A6/B6 will reconcile it. Never hardcode the list (upstream `upstream-asks.md`
   explicitly warns integrators about doc drift).
-- `--limit` default **200** confirmed (`0` = unlimited) → A2 is a genuine correctness fix.
-- `--exclude` help text itself shows glob usage (`--exclude '.git,*.log'`), confirming the
+- `ferret-scan --limit` default **200** confirmed (`0` = unlimited) → A2 is a genuine correctness fix.
+- `ferret-scan --exclude` help text itself shows glob usage (`ferret-scan --exclude '.git,*.log'`), confirming the
   plugin/README "simple names only" wording is wrong (§5.4).
 - Baseline **69 unit tests pass**; `scripts/validate_ferret_plugin.py` `EXPECTED_MIN_TESTS`
   is **67** (stale-low vs the 69 present). DEVELOPMENT.md still cites "66 tests" in places —
@@ -300,8 +300,8 @@ its diff *removes* work we must keep. Classification:
 - Weakened "binary not found" error message. Keep current, richer guidance.
 
 **Worth carrying (genuinely new, additive):**
-- `respect_gitignore` → `--respect-gitignore` → **B1**.
-- `disable_ip_types` → `--disable-ip-types` → **B2**.
+- `respect_gitignore` → `ferret-scan --respect-gitignore` → **B1**.
+- `disable_ip_types` → `ferret-scan --disable-ip-types` → **B2**.
 - Block-list additions `preprocess_only`, `pre_commit_mode`, `list_profiles` → **A5**
   (cheap, safe, correct — pulled forward into Track A).
 - Always append `--quiet` (progress output is noise ASH captures on stderr) → folded into
@@ -315,7 +315,7 @@ its diff *removes* work we must keep. Classification:
   SUPPRESSION-COVERAGE check may need no change since we disable at the tool level, not via
   ASH suppressions — to be confirmed when A3 lands).
 - A4 adds return-contract handling for exit code 3; DEVELOPMENT.md "Scanner Return Contract"
-  section gets a note that `--fail-on-incomplete` can make ferret-scan exit 3 with valid SARIF.
+  section gets a note that `ferret-scan --fail-on-incomplete` can make ferret-scan exit 3 with valid SARIF.
 
 ### 9.5 ⚠️ Assumption invalidated — API_KEY_OR_SECRET cannot be disabled via config (2026-09-13)
 
@@ -383,20 +383,20 @@ and rely on suppressions/excludes** (not the post-filter). Implemented as A3:
   *(Update per WL-10: the `tests/**` suppression above was later narrowed to the single
   real FP file `tests/unit/cli/mcp/test_sessions.py`.)*
 
-### 9.6 ⚠️ Assumption invalidated — bundled config does NOT override CLI `--exclude` (2026-09-14)
+### 9.6 ⚠️ Assumption invalidated — bundled config does NOT override CLI `ferret-scan --exclude` (2026-09-14)
 
 **Original claim (DEVELOPMENT.md gotcha §10, README note, and the `CONFIG-OVERRIDE-EXCLUDES`
 validation check):** with the bundled `ferret-config.yaml` loaded via `--config`, ferret-scan
-overrides CLI args, so ASH's `--exclude` may be "silently ignored" unless
+overrides CLI args, so ASH's `ferret-scan --exclude` may be "silently ignored" unless
 `use_default_config: false`. **This is backwards for v2.4.5.**
 
 **Evidence (tested against the installed binary):**
 - `--config <bundled> --exclude skipdir` (recursive) → `skipdir` **is** excluded; only the
-  other dirs are scanned. CLI `--exclude` wins.
+  other dirs are scanned. CLI `ferret-scan --exclude` wins.
 - `--config <bundled> --recursive` → nested files **are** found, even though the bundled
-  config's `defaults` set `recursive: false`. CLI `--recursive` wins.
+  config's `defaults` set `recursive: false`. CLI `ferret-scan --recursive` wins.
 
-**Consequence:** ASH's `exclude_patterns` + `global_ignore_paths` (folded into `--exclude`)
+**Consequence:** ASH's `exclude_patterns` + `global_ignore_paths` (folded into `ferret-scan --exclude`)
 are honoured **regardless of `use_default_config`** — a security-relevant guarantee (ignore
 paths are respected). `use_default_config` only governs whether the bundled validator/profile
 patterns load. **Resolution:** corrected DEVELOPMENT.md §10, the README + registration

@@ -1,233 +1,44 @@
-# ASH Trivy Plugin
+# ASH Trivy repository plugin
 
-This plugin integrates [Aquasec's Trivy](https://trivy.dev/) CLI tool with the Automated Security Helper (ASH) to provide comprehensive repository scanning for vulnerabilities, misconfigurations, secrets, and license issues.
+This module adds the `trivy-repo` scanner, which runs [trivy](https://github.com/aquasecurity/trivy)'s `trivy repository` command on the source directory with all four of trivy's scanners: vulnerable dependencies (`vuln`), misconfigurations in infrastructure-as-code and Dockerfiles (`misconfig`), secrets (`secret`) and licenses (`license`). It is a community plugin: it ships with ASH, and a scan runs it only when the module is loaded. The full documentation is the [Trivy repository plugin](https://awslabs.github.io/automated-security-helper/docs/plugins/community/trivy-plugin/) page.
 
-## Overview
+ASH also has a built-in `trivy` scanner, on by default, which runs `trivy fs` with only the vulnerability scanner. With both on, trivy runs twice and every vulnerability both find is reported twice. For a new setup, use the built-in scanner and turn on the trivy scanners you want with its `scanners` option; [trivy-repo and the built-in trivy scanner](https://awslabs.github.io/automated-security-helper/docs/plugins/community/#trivy-repo-and-the-built-in-trivy-scanner) compares the two.
 
-The Trivy plugin enables ASH to leverage Trivy's powerful scanning capabilities for:
+## Install trivy
 
-- **Vulnerability Detection**: Identifies known CVEs in dependencies and packages
-- **Misconfiguration Scanning**: Detects security misconfigurations in IaC files
-- **Secret Detection**: Finds hardcoded secrets and sensitive information
-- **License Scanning**: Analyzes software licenses and compliance issues
+trivy-repo runs the same trivy binary as the built-in scanner. `ash dependencies install` installs the release ASH pins, after checking its SHA256, and trivy-repo uses that copy. The ASH container image includes it, and a `trivy` already on `PATH` is used as it is.
 
-## Prerequisites
+## Load the plugin
 
-### Install Trivy CLI
-
-The plugin requires Trivy CLI to be installed and available in your system PATH.
-
-**macOS (Homebrew)**:
-```bash
-brew install trivy
-```
-
-**Linux**:
-```bash
-# Download and install latest release
-curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-```
-
-**Other platforms**: See [Trivy Installation Guide](https://aquasecurity.github.io/trivy/latest/getting-started/installation/)
-
-### Verify Installation
-
-```bash
-trivy --version
-```
-
-## Quick Start
-
-### Basic Configuration
-
-Add to your `.ash/.ash.yaml`:
+Name the module in an ASH config, which a repository's own `.ash/.ash.yaml` may do, and turn the built-in scanner off:
 
 ```yaml
+project_name: my-service
+ash_plugin_modules: [automated_security_helper.plugin_modules.ash_trivy_plugins]
 scanners:
+  trivy:
+    enabled: false
   trivy-repo:
-    enabled: true
-    severity_threshold: "MEDIUM"
-```
-
-### Run Trivy Scan
-
-```bash
-# Scan current directory
-uv run ash --scanners trivy-repo
-
-# Scan specific directory
-uv run ash --scanners trivy-repo /path/to/project
-```
-
-## Configuration Options
-
-### Scanner Types
-
-Configure which types of security issues to detect:
-
-```yaml
-scanners:
-  trivy-repo:
-    enabled: true
     options:
-      scanners: ["vuln", "secret", "misconfig", "license"]  # Default: all types
+      scanners: [vuln, misconfig, secret]
 ```
 
-Available scanner types:
-- `vuln`: Vulnerability detection
-- `secret`: Secret detection  
-- `misconfig`: Misconfiguration detection
-- `license`: License scanning
-
-### Advanced Options
-
-```yaml
-scanners:
-  trivy-repo:
-    enabled: true
-    severity_threshold: "HIGH"
-    options:
-      scanners: ["vuln", "secret"]
-      license_full: true          # Deep license scanning (default: true)
-      ignore_unfixed: true        # Only show fixed vulnerabilities (default: true)
-      disable_telemetry: true     # Disable usage analytics (default: true)
-      ignore_file: /etc/ash/trivyignore  # Passed as --ignorefile; must be outside the scanned tree
-      secret_config_file: /etc/ash/trivy-secret.yaml  # Passed as --secret-config; same rule
-```
-
-trivy-repo always passes `--ignorefile` and `--secret-config`, so a `.trivyignore` or
-`trivy-secret.yaml` committed to the scanned repository is not read. Without the
-options (or `TRIVY_IGNOREFILE` / `TRIVY_SECRET_CONFIG`), trivy gets files that set
-nothing. Under `--sandbox`, an operator file outside the system paths also has to be
-in `sandbox.extra_read_paths`.
-
-## Usage Examples
-
-### Vulnerability Scanning Only
-
-```yaml
-scanners:
-  trivy-repo:
-    enabled: true
-    options:
-      scanners: ["vuln"]
-      ignore_unfixed: false  # Include unfixed vulnerabilities
-```
-
-### Secret Detection Focus
-
-```yaml
-scanners:
-  trivy-repo:
-    enabled: true
-    severity_threshold: "LOW"
-    options:
-      scanners: ["secret"]
-```
-
-### Infrastructure Scanning
-
-```yaml
-scanners:
-  trivy-repo:
-    enabled: true
-    options:
-      scanners: ["misconfig"]
-      severity_threshold: "MEDIUM"
-```
-
-### Combined with Other Scanners
+Or name it on the command line with `--ash-plugin-modules`. This lists `trivy-repo` among the scanners:
 
 ```bash
-# Use Trivy alongside other ASH scanners
-uv run ash --scanners trivy-repo,bandit,semgrep
+ash plugin list --ash-plugin-modules automated_security_helper.plugin_modules.ash_trivy_plugins
 ```
 
-## Output Integration
+trivy's SARIF is written to `.ash/ash_output/scanners/trivy-repo/source/results_sarif.sarif`, and its findings are in every ASH report.
 
-Trivy results are integrated into ASH's unified reporting system:
+## Options
 
-- **SARIF Format**: Machine-readable results for CI/CD integration
-- **HTML Reports**: Visual security dashboard
-- **JSON/CSV**: Structured data for analysis
-- **Markdown**: Human-readable summaries
+Every option, with its type and default, is in the [scanner reference](https://awslabs.github.io/automated-security-helper/reference/scanners/#trivy-repo). trivy-repo's defaults differ from the built-in scanner's: it reports only vulnerabilities that have a fix (`ignore_unfixed: true`) and looks for licenses in file headers too (`license_full: true`).
 
-## Performance Considerations
+## Files that trivy reads
 
-- **First Run**: Trivy downloads vulnerability databases (may take time)
-- **Subsequent Runs**: Uses cached databases for faster scanning
-- **Large Repositories**: Consider using severity thresholds to focus on critical issues
-- **CI/CD**: Database updates can be cached between pipeline runs
+Left to itself, trivy reads a `trivy.yaml`, a `.trivyignore` and a `trivy-secret.yaml` from the directory it scans, so a scanned repository could use them to drop its own findings. ASH therefore always passes trivy its config file, module directory, ignore file and secret config, and those files in the scanned repository are never read. The options `config_file`, `module_dir`, `ignore_file` and `secret_config_file` name files of your own, and ASH uses them only when the operator sets them (with `--config-overrides`, or in a config file outside every git checkout and the scanned directory) for a path outside those directories. Under `--sandbox`, trivy can read such a file only when the sandbox already lets it read that directory or the path is listed in `sandbox.extra_read_paths`. To ignore a finding, use an [ASH suppression](https://awslabs.github.io/automated-security-helper/how-to/suppress-findings/).
 
-## Troubleshooting
+## The vulnerability database
 
-### Common Issues
-
-**Trivy not found**:
-```bash
-# Check if Trivy is in PATH
-which trivy
-
-# Install if missing (macOS)
-brew install trivy
-```
-
-**Database download issues**:
-```bash
-# Manually update Trivy database
-trivy image --download-db-only
-```
-
-**Permission errors**:
-```bash
-# Ensure Trivy cache directory is writable
-ls -la ~/.cache/trivy/
-```
-
-### Debug Mode
-
-Enable verbose logging to troubleshoot issues:
-
-```bash
-uv run ash --scanners trivy-repo --log-level DEBUG
-```
-
-## Integration Examples
-
-### Pre-commit Hook
-
-```yaml
-# .pre-commit-config.yaml
-repos:
-  - repo: local
-    hooks:
-      - id: ash-trivy
-        name: ASH Trivy Security Scan
-        entry: uv run ash --scanners trivy-repo --mode precommit
-        language: system
-        pass_filenames: false
-```
-
-### CI/CD Pipeline
-
-```yaml
-# GitHub Actions example
-- name: Security Scan with Trivy
-  run: |
-    uv run ash --scanners trivy-repo --output-format sarif
-    # Upload SARIF to GitHub Security tab
-    gh api repos/${{ github.repository }}/code-scanning/sarifs \
-      --method POST --field sarif=@.ash/ash_output/reports/results.sarif
-```
-
-## Documentation
-
-For comprehensive documentation and advanced configuration options, see:
-- [ASH Community Plugins Documentation](../../../docs/content/docs/plugins/community/trivy-plugin.md)
-- [Trivy Official Documentation](https://aquasecurity.github.io/trivy/)
-
-## Support
-
-- **ASH Issues**: [GitHub Issues](https://github.com/awslabs/automated-security-helper/issues)
-- **Trivy Issues**: [Trivy GitHub](https://github.com/aquasecurity/trivy/issues)
-- **Community**: [ASH Discussions](https://github.com/awslabs/automated-security-helper/discussions)
+trivy-repo and the built-in scanner share one trivy cache. Before an online scan ASH updates the vulnerability database in it; offline, trivy uses the database already there. Either way, by default ASH fails the scan when the database was built more than 24 hours earlier (`ash scan --allow-stale-content-db` relaxes that). [The vulnerability database and offline scans](https://awslabs.github.io/automated-security-helper/docs/plugins/community/trivy-plugin/#the-vulnerability-database-and-offline-scans) has the details.
