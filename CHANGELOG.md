@@ -638,8 +638,9 @@
   and `warn` alike. Measured: grype with an empty cache was `PASSED` with 0 findings,
   and with `--allow-stale-content-db` the scan exited 0. `warn` relaxes the age bound
   for a database that exists; it no longer makes a missing one acceptable. A
-  trivy-repo scan whose `scanners` leave out `vuln` reads no trivy-db, so it is no
-  longer held to that database's age or existence.
+  trivy-repo scan whose `scanners` list names scanners but not `vuln` reads no
+  trivy-db, so it is no longer held to that database's age or existence; an empty
+  list leaves the choice to trivy, whose default includes `vuln`, and is held.
 
   **A scan that exited 0 can now exit 1.** That is a scanner whose tool was failing
   all along. With `fail_on_incomplete_scanners: false` the `ERROR` row does not fail

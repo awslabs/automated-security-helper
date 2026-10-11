@@ -177,8 +177,12 @@ def test_a_current_database_is_graded_on_findings(layout, monkeypatch):
         (None, ["trivy-db"]),
         (["vuln", "secret"], ["trivy-db"]),
         (["secret", "misconfig", "license"], []),
+        # No --scanners is passed for an empty list, so trivy runs its own default,
+        # vuln and secret (pkg/flag/scan_flags.go ScannersFlag), or what a trivy.yaml
+        # says.
+        ([], ["trivy-db"]),
     ],
-    ids=["default", "with-vuln", "without-vuln"],
+    ids=["default", "with-vuln", "without-vuln", "empty-list"],
 )
 def test_trivy_repo_uses_its_database_only_when_it_looks_for_vulnerabilities(
     layout, scanners, expected

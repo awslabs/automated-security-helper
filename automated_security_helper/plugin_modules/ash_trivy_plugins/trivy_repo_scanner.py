@@ -443,12 +443,15 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 setattr(result.properties, key, value)
 
     def content_databases_in_use(self) -> list:
-        """trivy-db, when the scan looks for vulnerabilities.
+        """trivy-db, unless the scan's ``--scanners`` leave out ``vuln``.
 
-        The secret, misconfiguration and license scanners never open it, so a scan
-        without ``vuln`` is not held to its age, or to its existence.
+        The secret, misconfiguration and license scanners never open it. An empty
+        ``scanners`` list passes no ``--scanners``, so trivy runs its own default
+        (``vuln,secret``, pkg/flag/scan_flags.go) or what a trivy.yaml says, and the
+        database is held to its bounds then too.
         """
-        if "vuln" not in (self.config.options.scanners or []):
+        scanners = self.config.options.scanners or []
+        if scanners and "vuln" not in scanners:
             return []
         return super().content_databases_in_use()
 
