@@ -116,7 +116,19 @@ export interface GateRunOptions {
   readonly ssmValue?: string;
   /** Extra files in the pull request's tree, relative path to content. */
   readonly repoFiles?: Record<string, string>;
+  /** How `ash scan --help` answers; see `AshScanHelp`. Default `listed`. */
+  readonly ashScanHelp?: AshScanHelp;
 }
+
+/**
+ * How the stand-in `ash` answers `ash scan --help`:
+ * - `listed`: lists `--fail-on-incomplete-scanners`, as this repository's ASH does;
+ * - `missing`: omits it, as every release up to v3.7.1 does;
+ * - `coloured`: lists it styled the way rich prints it when colour is forced, each
+ *   dash of the name in its own ANSI span, so the plain name does not appear;
+ * - `fails`: exits non-zero.
+ */
+export type AshScanHelp = 'listed' | 'missing' | 'coloured' | 'fails';
 
 let cachedPython: string | undefined;
 
@@ -210,12 +222,35 @@ if args and args[0] == "clone":
 sys.exit(0)
 `;
 
-/** A stand-in for `ash` that records what it was given, with its record path baked in. */
-export const fakeAshScript = (python: string, recordFile: string, exitCode: number) => `#!${python}
+/**
+ * A stand-in for `ash` that records what it was given, with its record path baked in.
+ *
+ * `ash scan --help` is answered rather than recorded: it is a probe of the options,
+ * not a scan. See `AshScanHelp` for how it answers.
+ */
+export const fakeAshScript = (
+  python: string,
+  recordFile: string,
+  exitCode: number,
+  scanHelp: AshScanHelp = 'listed',
+) => `#!${python}
 import json, os, sys
 
 argv = sys.argv[1:]
 CREDENTIAL_VARIABLES = ${JSON.stringify(CREDENTIAL_VARIABLES)}
+
+if argv[:2] == ["scan", "--help"]:
+    HELP = ${JSON.stringify(scanHelp)}
+    if HELP == "fails":
+        sys.exit(1)
+    print("Usage: ash scan [OPTIONS]")
+    for line in ("--source-dir PATH", "--output-dir PATH", "--config PATH", "--min-severity TEXT"):
+        print("  " + line)
+    if HELP == "listed":
+        print("  --fail-on-incomplete-scanners / --no-fail-on-incomplete-scanners")
+    elif HELP == "coloured":
+        print("\\x1b[1;36m-\\x1b[0m\\x1b[1;36m-fail\\x1b[0m\\x1b[1;36m-on-incomplete-scanners\\x1b[0m")
+    sys.exit(0)
 
 
 def option(names):
@@ -333,7 +368,11 @@ export function runGateHandler(options: GateRunOptions): GateRun {
 
     fs.writeFileSync(path.join(pythonPath, 'boto3', '__init__.py'), FAKE_BOTO3(boto3Log, options.ssmValue));
     fs.writeFileSync(path.join(bin, 'git'), FAKE_GIT(python, gitLog, repo), { mode: 0o755 });
-    fs.writeFileSync(path.join(bin, 'ash'), fakeAshScript(python, ashLog, options.ashExit ?? 0), { mode: 0o755 });
+    fs.writeFileSync(
+      path.join(bin, 'ash'),
+      fakeAshScript(python, ashLog, options.ashExit ?? 0, options.ashScanHelp ?? 'listed'),
+      { mode: 0o755 },
+    );
     const handlerFile = path.join(dir, 'ash_gate_handler.py');
     fs.writeFileSync(handlerFile, CODECOMMIT_GATE_HANDLER);
     const driver = path.join(dir, 'driver.py');

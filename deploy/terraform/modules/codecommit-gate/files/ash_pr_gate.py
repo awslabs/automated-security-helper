@@ -37,6 +37,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -587,6 +588,53 @@ def clone_source(
     return source_dir
 
 
+#: The option that makes a scan whose selected scanners did not all run exit 1.
+COMPLETENESS_FLAG = "--fail-on-incomplete-scanners"
+
+#: Whether this image's ``ash scan`` offers COMPLETENESS_FLAG, once known. Asked once
+#: per execution environment, because the image cannot change under a warm one.
+_completeness_flag_found: bool | None = None
+
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def check_completeness_flag(env: dict[str, str]) -> None:
+    """Refuse to scan with an ASH whose ``ash scan`` cannot fail an incomplete scan.
+
+    ``run_scan`` passes COMPLETENESS_FLAG, and the gate's fail-closed property rests
+    on it: without it a run where no scanner completed exits 0, which is outcome
+    "pass", which APPROVEs. ASH releases up to v3.7.1 have no such option, and their
+    ``ash scan`` collects unknown options rather than refusing them, so the flag was
+    accepted and dropped there. Measured on v3.7.0: bandit and grype both MISSING,
+    the flag passed, exit 0.
+
+    So ``ash scan --help`` is asked once whether the option exists. The probe runs
+    with colour off and a wide terminal, and ANSI codes are stripped before the
+    match, because rich styles each dash of an option name apart when colour is
+    forced and the plain name would then not appear. A probe that fails refuses too
+    and is asked again next time, rather than being read as either answer.
+    """
+    global _completeness_flag_found
+    if _completeness_flag_found is None:
+        probe_env = dict(env, COLUMNS="200", NO_COLOR="1")
+        probe_env.pop("FORCE_COLOR", None)
+        probe = _run(["ash", "scan", "--help"], env=probe_env)
+        if probe.returncode != 0:
+            raise RuntimeError(
+                f"'ash scan --help' exited {probe.returncode}, so this image's ASH could "
+                f"not be checked for {COMPLETENESS_FLAG}. Refusing to scan."
+            )
+        help_text = _ANSI_ESCAPE.sub("", probe.stdout or "")
+        _completeness_flag_found = COMPLETENESS_FLAG in help_text
+    if not _completeness_flag_found:
+        raise RuntimeError(
+            f"The ASH in this image has no {COMPLETENESS_FLAG} option, so a scan whose "
+            "scanners never ran would be reported as a pass. Refusing to scan. Build "
+            f"the gate's base image from an ash_version whose `ash scan` accepts "
+            f"{COMPLETENESS_FLAG}."
+        )
+
+
 def scan_config(source_dir: pathlib.Path) -> pathlib.Path:
     """The config file the scan is given: the operator's, never the pull request's.
 
@@ -679,7 +727,7 @@ def run_scan(
         # _reject_gate_owned_options and the ordering below are for. This flag was
         # hardcoded and still negatable, because ASH_SCAN_EXTRA_ARGS was appended
         # after it and the CLI resolves a repeated option to its last occurrence.
-        "--fail-on-incomplete-scanners",
+        COMPLETENESS_FLAG,
     ]
 
     extra = os.environ.get("ASH_SCAN_EXTRA_ARGS", "").strip()
@@ -697,6 +745,8 @@ def run_scan(
     # caches are unreachable, which handler reads as outcome "error".
     env = _scan_env()
     env["ASH_CONFIG"] = str(config_path)
+    # After the refusals above, so a deployment they refuse never starts ASH at all.
+    check_completeness_flag(env)
     result = _run(argv, env=env)
     log_tail = (result.stderr or result.stdout or "").strip()[-4000:]
     LOGGER.info("ash scan exited %d", result.returncode)

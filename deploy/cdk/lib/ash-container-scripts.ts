@@ -618,6 +618,24 @@ exec "$@"
  * refuses the scan, through the same comment-and-REVOKE path as the offline
  * refusal below, rather than falling back to defaults the operator did not choose.
  *
+ * AN INCOMPLETE SCAN IS AN ERROR, AND AN ASH THAT CANNOT SAY SO IS REFUSED
+ * -----------------------------------------------------------------------
+ * The scan passes `--fail-on-incomplete-scanners`, so a run in which a selected
+ * scanner was MISSING or ERROR exits 1 ("errored") rather than 0 ("passed"), whatever
+ * an operator's base config says about `fail_on_incomplete_scanners`. Releases up to
+ * v3.7.1, including the default `AshVersion`, have no such option, and their
+ * `ash scan` collects unknown options instead of refusing them: the flag would be
+ * accepted and dropped, and a scan with every scanner MISSING would still pass and,
+ * with ApprovalGate on, APPROVE. So `_check_completeness_flag` asks `ash scan --help`
+ * once per execution environment whether the option exists, and when it does not
+ * the scan is refused through the same comment-and-REVOKE path as the offline
+ * refusal below. The probe runs with colour off and a wide terminal, and ANSI codes
+ * are stripped before the match, because rich styles each dash of an option name
+ * separately when colour is forced.
+ *
+ * WHAT THIS COSTS: with the default `AshVersion` (v3.7.0) the gate refuses every pull
+ * request until it is deployed with an `AshVersion` whose `ash scan` has the option.
+ *
  * THE SCAN RUNS WITHOUT THE FUNCTION ROLE'S CREDENTIALS
  * -----------------------------------------------------
  * On Lambda the execution role's credentials are in the function's environment
@@ -656,6 +674,7 @@ export const CODECOMMIT_GATE_HANDLER = `# ASH one-shot CodeCommit pull-request g
 # deploy/cdk/lib/ash-container-scripts.ts.
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -790,6 +809,29 @@ def _verdict(exit_code):
     return "errored", "ASH exited with unexpected code %d." % exit_code
 
 
+# Whether this image's ash scan has the option, asked once per execution
+# environment; see ash-container-scripts.ts.
+COMPLETENESS_FLAG = "--fail-on-incomplete-scanners"
+_completeness_flag_found = None
+
+
+def _check_completeness_flag(scan_env):
+    global _completeness_flag_found
+    if _completeness_flag_found is None:
+        env = dict(scan_env, COLUMNS="200", NO_COLOR="1")
+        env.pop("FORCE_COLOR", None)
+        probe = _run(["ash", "scan", "--help"], env=env)
+        if probe.returncode != 0:
+            raise RuntimeError("'ash scan --help' exited %d, so this image's ASH could not be "
+                               "checked for %s. Refusing to scan." % (probe.returncode, COMPLETENESS_FLAG))
+        _completeness_flag_found = COMPLETENESS_FLAG in re.sub(r"\\x1b\\[[0-9;]*m", "", probe.stdout or "")
+    if not _completeness_flag_found:
+        raise RuntimeError(
+            "The ASH in this image has no %s option, so a scan whose scanners never ran "
+            "would be reported as passing. Refusing to scan. Deploy an AshVersion whose "
+            "'ash scan' accepts %s." % (COMPLETENESS_FLAG, COMPLETENESS_FLAG))
+
+
 def _scan_config(workdir):
     """The operator's config for this scan, outside the clone. See the .ts note."""
     name = os.environ.get("ASH_BASE_CONFIG_SSM_PARAMETER", "")
@@ -833,6 +875,7 @@ def handler(event, context):
     # standing approval rather than failing the invocation silently.
     try:
         scan_env = _scan_env(workdir)
+        _check_completeness_flag(scan_env)
         config_path = _scan_config(workdir)
         scan_env["ASH_CONFIG"] = config_path
     except RuntimeError as exc:
@@ -855,7 +898,8 @@ def handler(event, context):
         raise RuntimeError("could not check out %s: %s" % (source_commit, checkout.stderr))
 
     argv = ["ash", "scan", "--source-dir", source_dir, "--output-dir", output_dir,
-            "--config", config_path, "--no-progress", "--simple", "--compact-report"]
+            "--config", config_path, COMPLETENESS_FLAG,
+            "--no-progress", "--simple", "--compact-report"]
     if os.environ.get("ASH_CHANGED_FILES_ONLY", "false") == "true":
         # Diff against the pull request's destination commit, which is what the
         # reviewer is being asked to merge into.

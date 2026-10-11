@@ -62,6 +62,15 @@ a `{}` document beside the clone, which is ASH's defaults. A pull request's own
 `.ash/.ash.yaml` is never read. A base config that names no file, or resolves inside
 the clone, refuses the scan (outcome `error`, approval revoked).
 
+## The image's ASH must be able to fail an incomplete scan
+
+The scan always passes `--fail-on-incomplete-scanners`. ASH releases up to v3.7.1
+have no such option, and their `ash scan` silently drops options it does not know,
+so on them a scan in which no scanner ran would exit 0 and pass. The handler checks
+once per execution environment, with `ash scan --help`, that the option exists, and
+refuses to scan (outcome `error`, approval revoked) when it does not. Build the base
+image from an `ash_version` that has it.
+
 ## The scan runs without the function's credentials
 
 The function's role can comment on and approve pull requests, and on Lambda its

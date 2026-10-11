@@ -501,6 +501,15 @@ finding in a file whose name git prints quoted (a non-ASCII byte, a quote, a
 backslash or a control character), because the quoted name matches no scanned path.
 Such a pull request passes, and with `ApprovalGate` it is approved.
 
+The scan always passes `--fail-on-incomplete-scanners`, so a scan in which a selected
+scanner was MISSING or ERROR is an error, not a pass, whatever the base config says.
+ASH releases up to v3.7.1, the default `AshVersion` v3.7.0 among them, have no such
+option and their `ash scan` silently drops options it does not know, so on them a
+scan where nothing ran would pass. The handler therefore checks once, with
+`ash scan --help`, that the option exists, and refuses to scan (an error comment and,
+with `ApprovalGate`, a REVOKE) when it does not. Until a release has the option, the
+gate needs an `AshVersion` that is a commit which does.
+
 The scan runs without the function role's credentials. That role can comment on and
 approve pull requests, and the scanners run over code the pull request controls, so
 the handler removes every credential and profile variable from the scan's environment

@@ -258,6 +258,12 @@ def test_run_scan_passes_the_redirected_environment(gate, monkeypatch, tmp_path)
     captured: List[Dict[str, Any]] = []
 
     def _fake_run(argv, cwd=None, env=None):
+        if list(argv) == ["ash", "scan", "--help"]:
+            # The gate's probe of the image's options, answered as an ASH that has
+            # --fail-on-incomplete-scanners; not the scan this test is about.
+            return SimpleNamespace(
+                returncode=0, stdout="--fail-on-incomplete-scanners", stderr=""
+            )
         captured.append({"argv": list(argv), "cwd": cwd, "env": env})
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 

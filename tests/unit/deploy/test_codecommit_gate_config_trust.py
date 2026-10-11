@@ -133,6 +133,12 @@ class _ScanCapture:
 
     def __call__(self, argv, cwd=None, env=None):
         argv = list(argv)
+        if argv == ["ash", "scan", "--help"]:
+            # The gate's probe of the image's options; answered as an ASH that has
+            # --fail-on-incomplete-scanners, and not a scan.
+            return SimpleNamespace(
+                returncode=0, stdout="  --fail-on-incomplete-scanners\n", stderr=""
+            )
         if argv[:2] == ["ash", "scan"]:
             effective = _effective_config(argv, env or {})
             content: Optional[str] = None
