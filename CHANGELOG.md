@@ -133,7 +133,7 @@
     (`utils/content_db_refresh.py`): it runs from an empty directory outside the
     scanned tree with an explicit `--config`, so a `trivy.yaml` in the scanned
     repository cannot change where the database comes from. An image built with `OFFLINE=YES`
-    ships the database and holds it to `warn` rather than `fail`: from a day after it
+    ships the database (its build fails if the download does) and holds it to `warn` rather than `fail`: from a day after it
     was published that image's scans still pass, and every report records the stale
     database, while grype's database and the offline rulesets keep `fail`.
     `content_db_staleness_offline_image_default: false`, or either form of
@@ -861,6 +861,10 @@
   grype's and trivy's databases are downloaded with an empty config file from a
   fresh temporary directory, so a grype or trivy config in the directory the
   shell is entered in no longer applies to the download.
+
+- **An `OFFLINE=YES` image build fails when an offline ruleset cannot be downloaded.**
+  With more than one ruleset in `OFFLINE_SEMGREP_RULESETS`, a ruleset other than the
+  last that failed to download was skipped and the build passed without it.
 
 - `ash dependencies install --tool ArchiveConverter` works again. Building each plugin
   from its own config section renamed the archive converter's selector to `archive`,

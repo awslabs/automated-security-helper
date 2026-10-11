@@ -389,17 +389,25 @@ RUN gitleaks --version
 # so the download time is written down rather than inferred from mtime, which a copy
 # resets. The grype database needs no such file: `grype db status` reports its own
 # build time.
+#
+# Every command is its own statement, separated by `;`, never joined by `&&`. `set -e`
+# does not apply to a command in an AND-OR list other than the last, nor to anything
+# that command runs, so when this block was one `&&` chain the `for` loop ran with
+# `set -e` off: a ruleset that failed to download, other than the last, was skipped
+# and the build passed without it. The trivy step below had the same defect.
+# tests/unit/test_dockerfile_offline_provisioning.py runs both steps with failing
+# stand-in downloads, and rejects `&&` in any RUN that sets `-e`.
 RUN set -uex; if [ "${OFFLINE}" = "YES" ]; then \
-    with-retry 'grype db update' && \
-    mkdir -p ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
+    with-retry 'grype db update'; \
+    mkdir -p ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
     for i in $OFFLINE_SEMGREP_RULESETS; do \
         outfile="${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
         with-retry "curl -sSf https://semgrep.dev/c/${i} -o ${outfile}"; \
         cp "${outfile}" "${OPENGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
-    done && \
-    fetched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" && \
-    printf '%s\n' "${fetched_at}" > "${SEMGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at" && \
-    printf '%s\n' "${fetched_at}" > "${OPENGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at" && \
+    done; \
+    fetched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
+    printf '%s\n' "${fetched_at}" > "${SEMGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at"; \
+    printf '%s\n' "${fetched_at}" > "${OPENGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at"; \
     chmod -R 777 ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
     fi
 
@@ -441,11 +449,15 @@ RUN trivy --version
 # than `fail` (ASH_OFFLINE_AT_BUILD_TIME above), so once it is a day old the scans still
 # pass and each report records the stale database until the image is rebuilt. The
 # artifact is checked rather than OFFLINE re-tested, for the reason given above.
+#
+# `;` between the commands, not `&&`, for the reason given at the grype step: as an
+# `&&` chain, a failed download skipped the emptiness check below and the step still
+# printed "verified" and exited 0.
 ENV TRIVY_CACHE_DIR="/deps/.trivy"
-RUN set -ue; mkdir -p "${TRIVY_CACHE_DIR}" && chmod 777 "${TRIVY_CACHE_DIR}"; \
+RUN set -ue; mkdir -p "${TRIVY_CACHE_DIR}"; chmod 777 "${TRIVY_CACHE_DIR}"; \
     if [ "${OFFLINE}" = "YES" ]; then \
-        with-retry "trivy image --download-db-only --no-progress --cache-dir ${TRIVY_CACHE_DIR}" && \
-        chmod -R 777 "${TRIVY_CACHE_DIR}" && \
+        with-retry "trivy image --download-db-only --no-progress --cache-dir ${TRIVY_CACHE_DIR}"; \
+        chmod -R 777 "${TRIVY_CACHE_DIR}"; \
         if [ -z "$(ls -A "${TRIVY_CACHE_DIR}/db" 2>/dev/null)" ]; then \
             echo "OFFLINE=YES but ${TRIVY_CACHE_DIR}/db is empty: the trivy database was not downloaded." >&2; \
             exit 1; \
