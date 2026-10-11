@@ -239,6 +239,21 @@ fi
 HOST_UID=$(id -u)
 HOST_GID=$(id -g)
 
+# The non-root stage creates its user with `adduser --uid <UID>`, and UID 0 is root,
+# which already exists: that build fails at that step, after the whole core stage has
+# been built. Refused before building, as `ash build-image` does. Any spelling of zero
+# counts, since the build reads UID=00 as 0 too.
+if [[ "${NO_BUILD}" = "NO" && "${TARGET_STAGE}" = "non-root" ]]; then
+  BUILD_UID="${HOST_UID}"
+  if [[ "${CONTAINER_UID_SPECIFIED}" = "YES" ]]; then
+    BUILD_UID="${CONTAINER_UID}"
+  fi
+  if [[ "${BUILD_UID}" =~ ^0+$ ]]; then
+    echo "ERROR: The non-root image stage creates a user with UID 0, which is root: ASH is running as root, or --container-uid 0 was given. Pass --build-target ci to build the image that runs as root, or --container-uid and --container-gid with the IDs the non-root user should have." >&2
+    exit 1
+  fi
+fi
+
 # Resolve any offline mode flags
 if [[ "${OFFLINE}" == "YES" ]]; then
   DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} --network=none"

@@ -360,6 +360,15 @@ function Invoke-ASH {
 
                 # Build the container if not skipped
                 if (-not $NoBuild) {
+                    # The non-root stage creates its user with `adduser --uid <UID>`, and
+                    # UID 0 is root, which already exists: that build fails at that step,
+                    # after the whole core stage. Refused before building, as `ash
+                    # build-image` does; any spelling of zero counts. Without
+                    # -ContainerUID the Dockerfile's own default UID is used.
+                    if ($BuildTarget -eq 'non-root' -and $ContainerUID -match '^0+$') {
+                        [Console]::Error.WriteLine("ERROR: The non-root image stage creates a user with UID 0, which is root: -ContainerUID 0 was given. Pass -BuildTarget ci to build the image that runs as root, or -ContainerUID and -ContainerGID with the IDs the non-root user should have.")
+                        exit 1
+                    }
                     Write-Host "Building image $AshImageName -- this may take a few minutes during the first build..."
 
                     $buildCmd = @()

@@ -154,7 +154,11 @@
   `automated-security-helper:non-root` tag, and its own layer-cache scope on GitHub
   Actions). A job that runs as root (AWS CodeBuild, container-based GitLab or Jenkins
   jobs) cannot build `non-root`, whose user would get UID 0, and is refused before the
-  build with that explanation: pass `--build-target ci` there. This repository's
+  build with that explanation: pass `--build-target ci` there. `./ash` refuses it the
+  same way, as does `Invoke-ASH -ContainerUID 0` (without `-ContainerUID` it builds with
+  the Dockerfile's own UID), and so does any spelling of zero such as `00`. A
+  `--container-uid` or `--container-gid` holding digits other than 0-9 (`²`) is refused
+  as not numeric. This repository's
   validate-container action now passes `--build-target ci` to every build and scan.
 - **Container mode reads the config file you named.** `--config` (or `ASH_CONFIG`) was
   handed to the scan inside the container as the host path, which names nothing there,

@@ -57,7 +57,8 @@ or with `--container-uid` and `--container-gid`. A UID of 0 is root and cannot b
 user, so a `non-root` build with UID 0 is refused before anything is built. That is the
 case when ASH itself runs as root, as many CI jobs do (AWS CodeBuild, container-based
 GitLab and Jenkins jobs): pass `--build-target ci` there, or give the non-root user its
-IDs explicitly.
+IDs explicitly. `./ash` refuses it the same way. `Invoke-ASH` builds with the
+Dockerfile's own UID unless `-ContainerUID` is given, and refuses `-ContainerUID 0`.
 
 Point ASH at your published image with `ASH_IMAGE_NAME`:
 

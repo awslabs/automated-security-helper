@@ -65,6 +65,8 @@ def commands(monkeypatch, tmp_path) -> List[List[str]]:
         pytest.param(None, None, id="default-target-as-root"),
         pytest.param(BuildTarget.NON_ROOT, None, id="explicit-non-root-as-root"),
         pytest.param(None, "0", id="container-uid-0"),
+        # The build reads UID=00 as 0 as well.
+        pytest.param(None, "00", id="container-uid-00"),
     ],
 )
 def test_a_non_root_build_as_uid_0_is_refused_before_building(
@@ -128,3 +130,20 @@ def test_no_build_as_root_runs_the_existing_image(commands):
 
     assert result.returncode == 0
     assert [cmd[1] for cmd in commands] == ["run"]
+
+
+@pytest.mark.parametrize("uid", ["²", "٠"], ids=["superscript-two", "arabic-zero"])
+def test_a_uid_of_digits_other_than_0_to_9_is_not_a_number(uid, commands):
+    """``str.isdigit`` accepts these; the build and ``int`` do not read them as a UID."""
+    result = rac.run_ash_container(
+        source_dir="src",
+        output_dir="out",
+        ash_revision_to_install="v3.7.0",
+        build=True,
+        run=True,
+        container_uid=uid,
+    )
+
+    assert commands == []
+    assert result.returncode == 1
+    assert "Container UID must be a numeric value" in result.stderr

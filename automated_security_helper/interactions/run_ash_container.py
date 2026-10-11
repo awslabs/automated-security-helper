@@ -48,6 +48,8 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 # Pattern for safe git revision values: alphanumeric, dots, hyphens, underscores, forward slashes
 _SAFE_REVISION_PATTERN = re.compile(r"^[A-Za-z0-9._\-/]+$")
+#: A UID or GID as the build and the runner read one.
+_ASCII_DIGITS = re.compile(r"[0-9]+")
 
 # Discovery order for OCI runners (first found wins)
 _OCI_RUNNER_CANDIDATES = ["finch", "docker", "nerdctl", "podman"]
@@ -493,9 +495,11 @@ def _non_root_stage_uid_refusal(build_target: str, container_uid: str) -> str | 
     is root, which already exists: the build would fail at that step, after the
     whole ``core`` stage had been built. A host running as root gets UID 0 by
     default (CI jobs often do), so it is refused here, before any build, with the
-    two ways forward.
+    two ways forward. Compared as a number: the build reads ``UID=00`` as 0 too.
+    ``container_uid`` is a string of digits by now (``run_ash_container`` refuses
+    any other).
     """
-    if build_target != BuildTarget.NON_ROOT.value or container_uid != "0":
+    if build_target != BuildTarget.NON_ROOT.value or int(container_uid) != 0:
         return None
     return (
         "The non-root image stage creates a user with UID 0, which is root: ASH is "
@@ -1713,9 +1717,10 @@ def run_ash_container(
             create_completed_process(args=[], returncode=1, stdout="", stderr=str(e))
         )
 
-    # Validate container UID and GID if specified
+    # Validate container UID and GID if specified. 0-9 only: str.isdigit also accepts
+    # digits such as "²" or "٠", which neither the build nor int() reads as a UID.
     if container_uid is not None:
-        if not container_uid.isdigit():
+        if not _ASCII_DIGITS.fullmatch(container_uid):
             typer.secho("Container UID must be a numeric value", fg=typer.colors.RED)
             return _not_started(
                 create_completed_process(
@@ -1729,7 +1734,7 @@ def run_ash_container(
         container_uid = str(host_uid)
 
     if container_gid is not None:
-        if not container_gid.isdigit():
+        if not _ASCII_DIGITS.fullmatch(container_gid):
             typer.secho("Container GID must be a numeric value", fg=typer.colors.RED)
             return _not_started(
                 create_completed_process(

@@ -539,3 +539,54 @@ class TestADirectoryThatCannotBeEnteredEndsTheRun:
         assert rc == 1, output
         assert calls == []
         assert "missing" in output
+
+
+class TestANonRootBuildAsUid0IsRefused:
+    """The ``non-root`` stage creates its user with ``adduser --uid <UID>``, and UID 0
+    is root, which already exists: the build failed at that step after the whole
+    ``core`` stage had been built. As in ``ash build-image``, the wrapper refuses it
+    before building, with exit 1 and the two ways forward. Any spelling of zero
+    counts: the build reads ``UID=00`` as 0 too."""
+
+    @pytest.mark.parametrize("uid", ["0", "00"])
+    def test_a_container_uid_of_0(self, uid, fake_runner, project):
+        rc, output, calls = _run_ash_status(
+            fake_runner, project, ["--no-run", "--container-uid", uid]
+        )
+
+        assert rc == 1, output
+        assert calls == []
+        assert "--build-target ci" in output
+
+    def test_running_as_root(self, fake_runner, project, tmp_path):
+        fake_bin = tmp_path / "fake-id-bin"
+        fake_bin.mkdir()
+        fake_id = fake_bin / "id"
+        fake_id.write_text("#!/bin/sh\necho 0\n")
+        fake_id.chmod(0o755)
+
+        rc, output, calls = _run_ash_status(
+            fake_runner,
+            project,
+            ["--no-run"],
+            {"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+        )
+
+        assert rc == 1, output
+        assert calls == []
+
+    def test_the_ci_stage_builds_with_uid_0(self, fake_runner, project):
+        """Control: ``ci`` creates no user."""
+        calls = run_ash(
+            fake_runner,
+            project,
+            ["--no-run", "--build-target", "ci", "--container-uid", "0"],
+        )
+
+        assert [call[0] for call in calls] == ["build"]
+
+    def test_no_build_runs_with_uid_0(self, fake_runner, project):
+        """Control: nothing is built, so there is no user to create."""
+        calls = run_ash(fake_runner, project, ["--no-build", "--container-uid", "0"])
+
+        assert [call[0] for call in calls] == ["run"]
