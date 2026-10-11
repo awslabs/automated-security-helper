@@ -47,7 +47,10 @@ entry on disk and does not run git, which reads configuration from the repositor
 Whether a file is in the tree is decided with ``os.path.samefile`` on each of the
 file's parents, not by comparing path strings. A symlink, a ``..`` segment, or a
 case-only difference on a case-insensitive filesystem therefore can't make an
-in-tree file look like it is outside.
+in-tree file look like it is outside. A file reached through a symlink inside the
+tree counts as in the tree wherever the link points, because the repository wrote
+the link: a ``.ash/.ash.yaml`` that links to a file elsewhere is held to the same
+limits as one written in place (``files_inside``).
 
 Known limitation: a trusted config outside the tree that ``extends`` a base inside
 it loses its own grants as well. The merged document no longer records which file
@@ -57,10 +60,11 @@ that layout, set the grants with ``--config-overrides``.
 
 import os
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Mapping, Optional, Sequence
 
 from automated_security_helper.config.ash_config import SandboxConfig
 from automated_security_helper.config.config_sources import describe_config_path
+from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -121,10 +125,31 @@ def scanned_trees(scan_root: Path) -> List[Path]:
     return trees
 
 
-def files_inside(chain: Iterable[Path], trees: Iterable[Path]) -> List[Path]:
-    """The files of ``chain`` that the scanned repository can write."""
+def files_inside(
+    chain: Iterable[Path],
+    trees: Iterable[Path],
+    names: Optional[Mapping[Path, Sequence[Path]]] = None,
+) -> List[Path]:
+    """The files of ``chain`` that the scanned repository wrote or chose.
+
+    A file is one when it is inside a tree, or when it was reached through a
+    symlink that sits inside one: the repository wrote the link, so it chose the
+    file the link reaches, wherever that is. Each file is judged by its own path
+    and by each path in ``names`` it was reached by
+    (``config_sources.ResolvedConfigDocument.names``), and each of those at
+    every symlink on the way (``utils/link_locations``).
+    """
     trees = list(trees)
-    return [path for path in chain if any(is_within(path, tree) for tree in trees)]
+    known = names or {}
+
+    def inside(path: Path) -> bool:
+        for name in (path, *known.get(path, ())):
+            places = [name, *(link.parent for link in link_locations(name))]
+            if any(is_within(place, tree) for place in places for tree in trees):
+                return True
+        return False
+
+    return [path for path in chain if inside(path)]
 
 
 def confine_sandbox_grants(

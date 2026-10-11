@@ -125,8 +125,9 @@ the MCP server's two:
 
 ``validate_config``'s ``config_content`` from a remote caller is refused
 wherever it is written (``refuse_env_everywhere``). Each base is judged by the
-same predicate, and every base of a refused file is refused with it: the file
-that names a base is what chose it.
+same predicate, on the path its ``extends`` entry spells and on the file that
+resolves to, and every base of a refused file is refused with it: the file that
+names a base is what chose it.
 
 The bound above cannot cover this case. There the variables are the operator's
 own, set wherever ASH runs; here they are the MCP server's, and a remote client
@@ -153,7 +154,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 # jsonpatch ships no type information (no py.typed, no stubs package).
 import jsonpatch  # type: ignore[import-untyped]
@@ -598,12 +599,43 @@ class ResolvedConfigDocument:
     as it was parsed, before its ``extends`` and ``patch`` were applied, so a
     caller checking what a file sets checks what was read rather than reading the
     file again.
+
+    ``chain`` and ``documents`` name each file by its resolved path. ``names``
+    gives, for each of them, the paths it was reached by before any symlink was
+    followed: the root config as it was passed or discovered, and a base as its
+    ``extends`` entry spells it, relative to the resolved directory of the file
+    that names it. A check of who wrote a file judges it by each of these and by
+    every symlink on the way (``by_every_name``), since a link's location says who
+    chose the file it reaches.
     """
 
     data: Any
     chain: List[Path] = field(default_factory=list)
     root: Optional[Path] = None
     documents: Dict[Path, Any] = field(default_factory=dict)
+    names: Dict[Path, Tuple[Path, ...]] = field(default_factory=dict)
+
+
+#: The paths each file of a chain was reached by; see ``ResolvedConfigDocument``.
+ChainNames = Mapping[Path, Sequence[Path]]
+
+
+def by_every_name(
+    judge: Callable[[Path], bool], names: Optional[ChainNames] = None
+) -> Callable[[Path], bool]:
+    """``judge`` for a chain file, true when it holds for any name the file has.
+
+    The names are the file's resolved path and each path in ``names`` it was
+    reached by. ``judge`` takes one path, as named; the checks it is used with
+    (``cli/mcp/sandbox.config_is_client_supplied`` and
+    ``client_named_config_is_untrusted``) also judge each symlink on the way.
+    """
+    known = names or {}
+
+    def judged(path: Path) -> bool:
+        return any(judge(name) for name in (path, *known.get(path, ())))
+
+    return judged
 
 
 @dataclass
@@ -614,6 +646,12 @@ class _ChainState:
     files_read: int = 0
     order: List[Path] = field(default_factory=list)
     documents: Dict[Path, Any] = field(default_factory=dict)
+    names: Dict[Path, List[Path]] = field(default_factory=dict)
+
+    def reached(self, real: Path, named: Path) -> None:
+        spellings = self.names.setdefault(real, [])
+        if named != real and named not in spellings:
+            spellings.append(named)
 
 
 def _format_chain(paths: Tuple[Path, ...]) -> str:
@@ -791,8 +829,10 @@ def _resolve(
     state: _ChainState,
     ref: Optional[str] = None,
     env_refused_above: bool = False,
+    named: Optional[Path] = None,
 ) -> Any:
     real = path.resolve()
+    named = path if named is None else named
     if real in stack:
         raise ASHConfigSourceError(
             f"Config '{EXTENDS_KEY}' cycle: {_format_chain(stack + (real,))}"
@@ -823,7 +863,11 @@ def _resolve(
                 f"'{EXTENDS_KEY}: {ref}' in {describe_config_path(extending)} names "
                 f"{real.as_posix()}, which does not exist or is not a file"
             )
-        env_refused = env_refused_above or state.refuse_env(real)
+        # Judged by the name the entry spells as well as the file it reaches, as
+        # the root is: a base reached through a client's link is the client's.
+        env_refused = (
+            env_refused_above or state.refuse_env(named) or state.refuse_env(real)
+        )
         try:
             data = read_config_file(real, refuse_env=_env_rule(env_refused))
         except ASHConfigSourceError:
@@ -842,6 +886,7 @@ def _resolve(
             )
 
     state.documents.setdefault(real, copy.deepcopy(data))
+    state.reached(real, named)
     if not isinstance(data, dict) or (
         EXTENDS_KEY not in data and PATCH_KEY not in data
     ):
@@ -857,9 +902,18 @@ def _resolve(
             base_path = _resolve_base_path(
                 base_ref, real, state.root, state.permit_base
             )
+            spelled = Path(base_ref)
+            base_named = spelled if spelled.is_absolute() else real.parent / spelled
             merged = deep_merge(
                 merged,
-                _resolve(base_path, stack + (real,), state, base_ref, env_refused),
+                _resolve(
+                    base_path,
+                    stack + (real,),
+                    state,
+                    base_ref,
+                    env_refused,
+                    base_named,
+                ),
             )
         merged = deep_merge(merged, own)
         if ops is not None:
@@ -906,7 +960,11 @@ def resolve_config_document(
     )
     data = _resolve(config_path, (), state)
     return ResolvedConfigDocument(
-        data=data, chain=state.order, root=root, documents=state.documents
+        data=data,
+        chain=state.order,
+        root=root,
+        documents=state.documents,
+        names={real: tuple(named) for real, named in state.names.items() if named},
     )
 
 

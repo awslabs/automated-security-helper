@@ -43,7 +43,11 @@ use: the operator config at ``trusted_config_path``, else the server's default
 config.
 
 The check is keyed on where a file is, not on who calls: a CLI resolve of a file
-under the MCP workspace root is checked too.
+under the MCP workspace root is checked too. A file is judged by every path it
+was reached by (``config_sources.ResolvedConfigDocument.names``) and every
+symlink on the way, so a file outside the root that a delivered link reaches is
+checked as a delivered file, and its suppressions, ignore paths and scanner
+exclusions are marked and moved as a delivered file's are.
 
 Rejected alternatives
 ---------------------
@@ -495,18 +499,24 @@ def client_file_denials(
     *,
     scanned_root: Path | str | None = None,
     all_delivered: bool = False,
+    names: Optional[Mapping[Path, Sequence[Path]]] = None,
 ) -> List[Tuple[Path, List[Any]]]:
     """(file, denials) for each client-delivered file in ``documents`` that sets a denied field.
 
     ``all_delivered`` counts every file of the chain as delivered: the chain of a
     config path a client named, wherever it is (``resolve_config``'s
-    ``untrusted_config``). Under a default policy the restrict-only settings are
-    checked for anything they ask beyond the trusted base (``_widenings``).
+    ``untrusted_config``). Otherwise a file is delivered when any path it was
+    reached by is (``names``; ``config_sources.by_every_name``), and it is
+    reported by the first of those, the path the client used, rather than by
+    the file a link of the client's reaches. Under a default policy the
+    restrict-only settings are checked for anything they ask beyond the trusted
+    base (``_widenings``).
     """
     from automated_security_helper.cli.mcp.profile_registry import (
         session_config_was_patched,
     )
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.config_sources import by_every_name
     from automated_security_helper.config.runtime_patch import (
         config_document_denials,
     )
@@ -514,8 +524,9 @@ def client_file_denials(
     found: List[Tuple[Path, List[Any]]] = []
     exempt = exempt_paths(rules.policy)
     root = Path(scanned_root) if scanned_root is not None else Path.cwd()
+    delivered = by_every_name(config_is_client_supplied, names)
     for path, document in documents.items():
-        if not (all_delivered or config_is_client_supplied(path)):
+        if not (all_delivered or delivered(path)):
             continue
         denials = [
             denial
@@ -537,8 +548,14 @@ def client_file_denials(
             _widenings(_with_own_patch(document, rules.base), rules.base, root)
         )
         if denials:
-            found.append((path, denials))
+            found.append((_as_reached(path, names), denials))
     return found
+
+
+def _as_reached(path: Path, names: Optional[Mapping[Path, Sequence[Path]]]) -> Path:
+    """The path a chain file was first reached by, which a message names."""
+    reached = (names or {}).get(path)
+    return Path(reached[0]) if reached else path
 
 
 def _with_own_patch(document: Any, base: AshConfig) -> Any:
@@ -773,6 +790,7 @@ def apply_client_config_rules(
     scanned_root: Path | str | None = None,
     all_delivered: bool = False,
     client_overrides: bool = False,
+    names: Optional[Mapping[Path, Sequence[Path]]] = None,
 ) -> AshConfig:
     """``config``, checked for denied fields its client-delivered files set.
 
@@ -789,14 +807,19 @@ def apply_client_config_rules(
     of the chain the client did not deliver supplies is marked and moved even
     when no file was delivered. The overrides themselves were already checked
     against the same allowlist (``cli/mcp/workspace._gate_client_overrides``).
+    ``names`` gives the paths each file of ``documents`` was reached by
+    (``ResolvedConfigDocument.names``): a file is delivered when any of them is.
     """
     from automated_security_helper.config.client_scanner_exclusions import (
         strip_client_scanner_exclusions,
     )
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.config_sources import by_every_name
 
     is_delivered: Callable[[Path], bool] = (
-        (lambda _path: True) if all_delivered else config_is_client_supplied
+        (lambda _path: True)
+        if all_delivered
+        else by_every_name(config_is_client_supplied, names)
     )
     if not client_overrides and not any(is_delivered(path) for path in documents):
         return config
@@ -814,7 +837,7 @@ def apply_client_config_rules(
         )
     root = Path(scanned_root or source_dir or Path.cwd())
     found = client_file_denials(
-        documents, rules, scanned_root=root, all_delivered=all_delivered
+        documents, rules, scanned_root=root, all_delivered=all_delivered, names=names
     )
     if found and DENIED_FIELD_HANDLING == "refuse":
         from automated_security_helper.core.exceptions import (
@@ -1003,13 +1026,14 @@ def _trusted_config(
     An operator config a client delivered is not one, and falls back to the default.
     """
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.config_sources import by_every_name
     from automated_security_helper.config.resolve_config import _load_operator_config
 
     operator = _load_operator_config(trusted_config_path, source_dir, permit_base)
-    if operator is not None and not any(
-        config_is_client_supplied(path) for path in operator[1]
-    ):
-        return operator[0]
+    if operator is not None:
+        delivered = by_every_name(config_is_client_supplied, operator[2])
+        if not any(delivered(path) for path in operator[1]):
+            return operator[0]
     return trusted_default_config()
 
 
@@ -1022,14 +1046,19 @@ def trusted_default_config() -> AshConfig:
     the trusted config instead, and the policy is not read from it.
     """
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.config_sources import by_every_name
     from automated_security_helper.config.default_config import (
-        default_config_chain,
+        default_config_document,
         get_default_config,
     )
     from automated_security_helper.utils.log import ASH_LOGGER
 
-    chain = default_config_chain()
-    if any(config_is_client_supplied(path) for path in chain):
+    document = default_config_document()
+    chain = list(document.chain) if document is not None else []
+    delivered = by_every_name(
+        config_is_client_supplied, document.names if document is not None else None
+    )
+    if any(delivered(path) for path in chain):
         ASH_LOGGER.warning(
             "ASH_CONFIG names a file under the MCP workspace root, which an MCP "
             "client delivered, so ASH's built-in defaults are the trusted config "

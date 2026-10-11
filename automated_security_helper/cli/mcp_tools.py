@@ -226,24 +226,25 @@ def _client_config_denial(
             if selected is None:
                 return None
             path, confine = selected.path, source_dir
-        documents = resolve_config_document(
+        document = resolve_config_document(
             path,
             confine_to=confine,
             permit_base=permit_base,
             refuse_env=env_refused_for(caller_is_remote(session_id)),
-        ).documents
+        )
     except Exception as exc:  # noqa: BLE001 -- reported by the scan's own read
         _logger.debug(f"Config chain not read before the scan: {exc}")
         return None
     try:
         apply_client_config_rules(
             AshConfig(),
-            documents,
+            document.documents,
             rules=rules,
             trusted_config_path=None,
             source_dir=source_dir,
             permit_base=permit_base,
             all_delivered=named_by_client,
+            names=document.names,
         )
     except (ASHConfigFieldDeniedError, ASHConfigPolicyUnreadableError) as exc:
         return _denied_response(exc, operation)
@@ -1718,18 +1719,21 @@ def _validated_document_denials(
             path = Path(config_path)
             # Read as the validator reads it, so an `extends` whose value !ENV
             # would choose is refused rather than followed.
-            documents = resolve_config_document(
+            document = resolve_config_document(
                 path,
                 confine_to=default_confinement_root(path),
                 permit_base=config_base_gate(session_id),
                 refuse_env=env_refused_for(caller_is_remote(session_id)),
-            ).documents
+            )
             # A named path the client chose counts as delivered, every file of
             # its chain with it, as resolve_config(untrusted_config=True) does.
             found = [
                 (denial.key, f"{denial.reason}, in {file.name}")
                 for file, denials in client_file_denials(
-                    documents, rules, all_delivered=checked
+                    document.documents,
+                    rules,
+                    all_delivered=checked,
+                    names=document.names,
                 )
                 for denial in denials
             ]

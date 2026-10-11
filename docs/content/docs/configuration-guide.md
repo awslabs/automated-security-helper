@@ -508,16 +508,18 @@ on which:
 - **The operator**: ASH's defaults, a config file outside the scanned tree (named
   by `--config` or `ASH_CONFIG`), `--config-overrides`, `--ash-plugin-modules`, and, under the MCP
   server, the profiles the server registers. Everything applies.
-- **The repository being scanned**: a config file inside the scanned tree. The
-  table above applies.
+- **The repository being scanned**: a config file inside the scanned tree, or a
+  file a symlink inside the tree reaches, wherever that file is. The table above
+  applies.
 - **An MCP client**: a file the client delivered, such as an upload named as
   `config_path`, a delivered tree's own `.ash/.ash.yaml`, or a project config in
   a delivered workspace. So is any other config path a client names, unless it
   is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or in the session's own
   `config/` directory: a config in another checkout the server may scan is that
-  checkout's, not the operator's. A path is judged where it sits as well as by
-  the file it reaches, so a link a client delivered is the client's wherever it
-  points. A file under the MCP workspace root is a client's whoever names it: a
+  checkout's, not the operator's. A path is judged where it sits, at each
+  symlink on the way, and by the file it reaches, so a link a client delivered is
+  the client's wherever it points, and so is a file reached through a linked
+  directory such as `.ash`. A file under the MCP workspace root is a client's whoever names it: a
   `--config` or `ASH_CONFIG` naming one, on the CLI as well, gets the limits of a
   config inside the scanned tree, and the server's runtime-override policy is
   never read from it (the built-in defaults apply instead). A profile after the

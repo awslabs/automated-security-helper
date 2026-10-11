@@ -11,9 +11,11 @@ from automated_security_helper.config.client_config_policy import (
     clear_client_supplied_marks,
 )
 from automated_security_helper.config.config_sources import (
+    ChainNames,
     RefuseEnv,
     ResolvedConfigDocument,
     _resolve_dict_key,
+    by_every_name,
     deep_merge,
     default_confinement_root,
     describe_config_path,
@@ -23,8 +25,7 @@ from automated_security_helper.config.config_sources import (
     resolve_config_document,
 )
 from automated_security_helper.config.default_config import (
-    default_config_chain,
-    default_config_documents,
+    default_config_document,
     get_default_config,
 )
 from automated_security_helper.config.plugin_module_trust import (
@@ -292,17 +293,25 @@ def resolve_config(
     (``cli/mcp/sandbox.config_is_client_supplied``) is confined as a file inside
     the scanned tree is, wherever it is, and is never the trusted base: a
     session's client-patched profile is one. ``untrusted_config`` extends the
-    same to a file a client named anywhere else.
+    same to a file a client named anywhere else. Each file is judged by every
+    path it was reached by and every symlink on the way
+    (``ResolvedConfigDocument.names``), so a file a delivered or in-tree link
+    reaches is the client's or the repository's wherever it is. A validation
+    error for a client's file names the file and each problem, and quotes none
+    of the values it holds.
 
     Returns:
         The resolved AshConfig object
     """
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+
     if overlay_config_path is not None and untrusted_config:
         # untrusted_config treats every file of the chain as the caller's, which
         # would include the overlay, the operator's own file.
         raise ValueError("overlay_config_path cannot be combined with untrusted_config")
     chain: List[Path] = []
     documents: Dict[Path, Any] = {}
+    names: Dict[Path, Tuple[Path, ...]] = {}
     refuse_env = env_refused_for(remote_client)
     overlay = (
         _load_overlay(overlay_config_path, source_dir, permit_base, refuse_env)
@@ -319,21 +328,23 @@ def resolve_config(
         documents,
         refuse_env=refuse_env,
         overlay=overlay,
+        names=names,
+        untrusted_config=untrusted_config,
     )
     if config is None:
         return config
-    if not chain:
+    default_document = default_config_document()
+    default_chain = list(default_document.chain) if default_document else []
+    default_names = dict(default_document.names) if default_document else {}
+    if not chain and default_document is not None:
         # No file was read, so the config is get_default_config(): ASH_CONFIG's
         # file when that variable names one. A file of that chain under the MCP
         # workspace root is a client's, and is checked as one named with
         # --config is. The operator's own ASH_CONFIG is not checked.
-        from automated_security_helper.cli.mcp.sandbox import (
-            config_is_client_supplied,
-        )
-
-        default_documents = default_config_documents()
-        if any(config_is_client_supplied(path) for path in default_documents):
-            documents.update(default_documents)
+        delivered = by_every_name(config_is_client_supplied, default_names)
+        if any(delivered(path) for path in default_document.documents):
+            documents.update(default_document.documents)
+            names.update(default_names)
     # Under the MCP server the overrides come from the client, held to the
     # session's allowlist; see operator_overrides below.
     client_overrides = client_config_policy is not None and bool(config_overrides)
@@ -348,24 +359,27 @@ def resolve_config(
         scanned_root=scanned_root,
         all_delivered=untrusted_config,
         client_overrides=client_overrides,
+        names=names,
     )
     if scanned_root is None:
         scanned_root = source_dir if source_dir is not None else Path.cwd()
     trees = scanned_trees(Path(scanned_root))
+    default_in_tree = _not_the_operators(default_chain, trees, default_names)
     if chain:
-        in_tree = list(chain) if untrusted_config else _not_the_operators(chain, trees)
-        default_in_tree = _not_the_operators(default_config_chain(), trees)
+        in_tree = (
+            list(chain) if untrusted_config else _not_the_operators(chain, trees, names)
+        )
     else:
         # With no config file, the config is get_default_config(): ASH_CONFIG's
         # file when that variable names one, which can be inside the tree too.
-        in_tree = default_in_tree = _not_the_operators(default_config_chain(), trees)
+        in_tree = default_in_tree
     if client_overrides:
         # Named in the warnings as the source of what is confined.
         in_tree = [*in_tree, Path("config_overrides")]
     if not in_tree:
         return config
     operator = _load_operator_config(trusted_config_path, source_dir, permit_base)
-    if operator is not None and not _not_the_operators(operator[1], trees):
+    if operator is not None and not _not_the_operators(operator[1], trees, operator[2]):
         trusted = operator[0]
     else:
         trusted = AshConfig() if default_in_tree else get_default_config()
@@ -405,29 +419,103 @@ def resolve_config(
     return config
 
 
-def _not_the_operators(paths: Iterable[Path], trees: Iterable[Path]) -> List[Path]:
+def _is_a_client_file(path: Path | str) -> bool:
+    """Whether ``path`` is a file an MCP client delivered, by any name on its way."""
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+
+    return config_is_client_supplied(Path(path))
+
+
+def _has_a_client_file(document: Any) -> bool:
+    """Whether a file of ``document``'s chain is one an MCP client delivered."""
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+
+    delivered = by_every_name(config_is_client_supplied, document.names)
+    return any(delivered(path) for path in document.chain)
+
+
+#: Pydantic error types whose message may repeat the value being validated: a
+#: validator's own ``ValueError`` or assertion. Reported by type alone for a
+#: client's file.
+_MESSAGES_THAT_QUOTE = frozenset({"value_error", "assertion_error"})
+
+
+def _client_validation_error(
+    config_path: Path | str,
+    error: ValidationError,
+    layered_over: Optional[Path] = None,
+) -> ASHConfigValidationError:
+    """The validation error for a client's file: where each problem is, and what kind.
+
+    Pydantic's own text repeats each value it rejected, which for a file a
+    client delivered or named (or a file a link of theirs reaches) is text the
+    client may not have written. So the message gives each problem's location
+    and pydantic's message for it, without the value, and for a validator's own
+    error (``_MESSAGES_THAT_QUOTE``) only its type.
+    """
+    problems = []
+    for item in error.errors(include_url=False, include_input=False):
+        where = ".".join(str(part) for part in item.get("loc", ())) or "(top level)"
+        kind = item.get("type", "")
+        what = (
+            f"invalid value ({kind})" if kind in _MESSAGES_THAT_QUOTE else item["msg"]
+        )
+        problems.append(f"{where}: {what}")
+    layered = (
+        f" with '{describe_config_path(layered_over)}' layered over it"
+        if layered_over is not None
+        else ""
+    )
+    return ASHConfigValidationError(
+        f"Configuration validation failed for '{describe_config_path(Path(config_path))}'"
+        f"{layered}: {len(problems)} problem(s): {'; '.join(problems)}. The values are not "
+        "shown because an MCP client supplied the file. Run 'ash config lint' to "
+        "identify and fix issues."
+    )
+
+
+def _unquoted_load_error(config_path: Path | str, error: Exception) -> str:
+    """Why a client's config file could not be parsed, without quoting it."""
+    mark = getattr(error, "problem_mark", None)
+    where = (
+        f" at line {mark.line + 1}, column {mark.column + 1}"
+        if mark is not None
+        else ""
+    )
+    return (
+        f"{describe_config_path(Path(config_path))} could not be parsed "
+        f"({type(error).__name__}{where})"
+    )
+
+
+def _not_the_operators(
+    paths: Iterable[Path],
+    trees: Iterable[Path],
+    names: Optional[ChainNames] = None,
+) -> List[Path]:
     """The files of ``paths`` that are not the operator's.
 
     Those inside a scanned tree, which the repository wrote, and those an MCP
     client delivered (``cli/mcp/sandbox.config_is_client_supplied``), whoever
     names them: a ``--config`` or ``ASH_CONFIG`` under the MCP workspace root is
-    a client's file even on the CLI, scanning another directory.
+    a client's file even on the CLI, scanning another directory. Each file is
+    judged by its own path and by each path in ``names`` it was reached by, so a
+    file reached through a link the repository or a client wrote is theirs.
     """
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
 
     paths = list(paths)
-    inside = files_inside(paths, trees)
-    return inside + [
-        path for path in paths if path not in inside and config_is_client_supplied(path)
-    ]
+    inside = files_inside(paths, trees, names)
+    delivered = by_every_name(config_is_client_supplied, names)
+    return inside + [path for path in paths if path not in inside and delivered(path)]
 
 
 def _load_operator_config(
     trusted_config_path: Path | str | None,
     source_dir: Path | str | None,
     permit_base: Optional[Callable[[Path], bool]],
-) -> Optional[Tuple[AshConfig, List[Path]]]:
-    """The operator's config file and the files it was built from, or None.
+) -> Optional[Tuple[AshConfig, List[Path], Dict[Path, Tuple[Path, ...]]]]:
+    """The operator's config file, the files it was built from, and their names, or None.
 
     Loaded the way _resolve_config loads a config file, and refused the same way
     when it does not validate.
@@ -447,7 +535,7 @@ def _load_operator_config(
             f"Configuration validation failed for '{describe_config_path(path)}': "
             f"{str(e)}. Run 'ash config lint' to identify and fix issues."
         ) from e
-    return config, list(document.chain)
+    return config, list(document.chain), dict(document.names)
 
 
 def _load_overlay(
@@ -496,10 +584,13 @@ def _overlaid(
     overlay: ResolvedConfigDocument,
     chain: List[Path],
     documents: Dict[Path, Any],
+    names: Optional[Dict[Path, Tuple[Path, ...]]] = None,
 ) -> AshConfig:
     """The overlay file alone, in place of the default config."""
     chain.extend(overlay.chain)
     documents.update(overlay.documents)
+    if names is not None:
+        names.update(overlay.names)
     return AshConfig.model_validate(overlay.data, strict=True)
 
 
@@ -513,14 +604,19 @@ def _resolve_config(
     documents: Dict[Path, Any],
     refuse_env: Optional[RefuseEnv] = None,
     overlay: Optional[ResolvedConfigDocument] = None,
+    names: Optional[Dict[Path, Tuple[Path, ...]]] = None,
+    untrusted_config: bool = False,
 ) -> AshConfig:
     """resolve_config without the sandbox confinement.
 
-    Appends every file read to ``chain``, and each file's parsed document to
-    ``documents``. ``refuse_env`` decides which files of the chain resolve no
-    ``!ENV`` (``config_sources``). ``overlay`` is ``overlay_config_path``'s
-    document, merged over the selected file's, and used alone wherever the
-    default config would be returned.
+    Appends every file read to ``chain``, each file's parsed document to
+    ``documents``, and the paths each was reached by to ``names``.
+    ``refuse_env`` decides which files of the chain resolve no ``!ENV``
+    (``config_sources``). ``overlay`` is ``overlay_config_path``'s document,
+    merged over the selected file's, and used alone wherever the default config
+    would be returned. ``untrusted_config`` is resolve_config's: with it, or
+    when a file of the chain is a client's, an error quotes nothing the files
+    hold (``_client_validation_error``).
     """
 
     def fallback(default: Optional[AshConfig]) -> Optional[AshConfig]:
@@ -528,7 +624,7 @@ def _resolve_config(
         # the defaults would drop the fields the overlay makes final.
         if overlay is None or default is None:
             return default
-        return _overlaid(overlay, chain, documents)
+        return _overlaid(overlay, chain, documents, names)
 
     # The overlay's file, once it has been merged into the selected file's
     # document; named in a validation error.
@@ -633,12 +729,24 @@ def _resolve_config(
                 # overlay's content.
                 data = deep_merge(data, overlay.data)
                 layered_over = overlay.chain[-1]
-            config = AshConfig.model_validate(data, strict=True)
+            client_chain = untrusted_config or _has_a_client_file(document)
+            try:
+                config = AshConfig.model_validate(data, strict=True)
+            except ValidationError as e:
+                if not client_chain:
+                    raise
+                raise _client_validation_error(
+                    config_path, e, layered_over=layered_over
+                ) from None
             chain.extend(document.chain)
             documents.update(document.documents)
+            if names is not None:
+                names.update(document.names)
             if overlay is not None:
                 chain.extend(overlay.chain)
                 documents.update(overlay.documents)
+                if names is not None:
+                    names.update(overlay.names)
             ASH_LOGGER.debug(f"Loaded config from file: {config_path}")
 
             # Apply config overrides if provided
@@ -648,7 +756,14 @@ def _resolve_config(
             return config
 
         except (IOError, yaml.YAMLError, json.JSONDecodeError) as e:
-            ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
+            # A parser's message can quote the line it stopped at; for a
+            # client's file that is text the client may not have written.
+            problem = (
+                _unquoted_load_error(config_path, e)
+                if untrusted_config or _is_a_client_file(config_path)
+                else str(e)
+            )
+            ASH_LOGGER.error(f"Failed to load configuration file: {problem}")
             if fallback_to_default:
                 ASH_LOGGER.warning("Using default configuration due to file load error")
                 config = fallback(config)
@@ -656,7 +771,7 @@ def _resolve_config(
                 if config_overrides and config:
                     config = apply_config_overrides(config, config_overrides)
                 config._resolution_warnings.append(
-                    f"Failed to load configuration file: {str(e)}. "
+                    f"Failed to load configuration file: {problem}. "
                     + (
                         "Using default configuration — suppressions and custom "
                         "settings are NOT active."

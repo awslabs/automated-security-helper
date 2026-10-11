@@ -154,6 +154,20 @@
   `error_type: SourceDeliveryBusyError`. See
   [Config files in delivered source](docs/content/docs/mcp/streamable-http.md#config-files-in-delivered-source).
 
+- **A config file reached through a symlink is judged by the link as well as by
+  the file it reaches.** The file a delivered tree's `.ash/.ash.yaml` links to,
+  wherever it is, is checked against the session's runtime-override policy, its
+  suppressions and ignore paths are marked `client_supplied`, its scanner
+  exclusions are reported rather than applied, and it resolves no `!ENV`, as a
+  file written in the tree would be. The same holds for a link anywhere on the
+  way to a config file, such as a linked `.ash` directory. On the CLI, a
+  repository config that links to a file outside the scanned tree is held to the
+  limits of a config inside the tree. A refusal names the path the client used,
+  not the file the link reaches. A validation error for a config file an MCP
+  client delivered or named gives the file and each problem's location without
+  the values in the file, and a client's file that does not parse is reported by
+  line and column without quoting it.
+
 - **A value a client patched into its session profile is the client's.**
   `select_profile`'s `patch_ops` and `override_yaml` still change only the keys
   the profile's `runtime_overrides` allowlist permits, but a binding with either
