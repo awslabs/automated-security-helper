@@ -56,24 +56,25 @@ jobs:
       # queue entry is processed. The scan step's uvx install would win the race and
       # the later report step's would not, failing with "couldn't find remote ref".
       # The commit is unreachable once the branch is gone, so its SHA is not
-      # fetchable either - the only stable choice is the default branch.
+      # fetchable either - the stable choice is the branch the queue merges into,
+      # merge_group.base_ref (refs/heads/<target>). That is the default branch for
+      # this repository's queue, but a queue on another branch gets its own.
       # For non-PR runs (workflow_dispatch), use the current repo and ref.
-      ash-version: ${{ github.event.pull_request.base.sha || (github.event_name == 'merge_group' && github.event.repository.default_branch) || github.ref_name }}
+      ash-version: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_ref || github.ref_name }}
       ash-repo: ${{ github.repository }}
       # The config comes from the same place as the ASH: the pull request's base
-      # commit, or in the merge queue the default branch. So a pull request cannot
-      # add suppressions or ignore paths to its own required check; its config edits
-      # apply to this check once merged, and ash-repo-scan-pr-head.yml scans with
-      # them before that. workflow_dispatch reads the dispatched ref's config from
-      # the checkout.
+      # commit, or in the merge queue the branch it merges into. So a pull request
+      # cannot add suppressions or ignore paths to its own required check; its
+      # config edits apply to this check once merged, and ash-repo-scan-pr-head.yml
+      # scans with them before that. workflow_dispatch reads the dispatched ref's
+      # config from the checkout.
       #
       # Not merge_group.base_sha: for every entry behind the first, that is the
       # previous entry's temporary merge commit, which carries that entry's
       # unmerged config and sits on a queue branch GitHub deletes. The trailing
-      # `|| ''` keeps the `&&` from rendering `false` into the input on
-      # workflow_dispatch.
+      # `|| ''` keeps the input empty on workflow_dispatch.
       config: .ash/.ash.yaml
-      config-ref: ${{ github.event.pull_request.base.sha || (github.event_name == 'merge_group' && github.event.repository.default_branch) || '' }}
+      config-ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_ref || '' }}
       # Off because the sarif job below uploads instead. The upload step inside the
       # called workflow cannot hold security-events: write, so it fails on
       # workflow_dispatch; see upload-ash-sarif.yml for why.

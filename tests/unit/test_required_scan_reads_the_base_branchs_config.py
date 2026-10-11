@@ -224,9 +224,9 @@ def _pull_request(base_sha: str, *, fork: bool, base_ref: str = DEFAULT_BRANCH):
 PREVIOUS_ENTRY_SHA = "4444444444444444444444444444444444444444"
 
 
-def _merge_group(base_sha: str):
-    """A queue entry behind another; the default branch's tip is ``base_sha``."""
-    queue = f"gh-readonly-queue/{DEFAULT_BRANCH}/pr-{PR_NUMBER}-{MERGE_SHA}"
+def _merge_group(base_sha: str, target: str = DEFAULT_BRANCH):
+    """A queue entry behind another; the target branch's tip is ``base_sha``."""
+    queue = f"gh-readonly-queue/{target}/pr-{PR_NUMBER}-{MERGE_SHA}"
     return ga.base_context(
         event_name="merge_group",
         repository=BASE_REPO,
@@ -239,7 +239,7 @@ def _merge_group(base_sha: str):
         event={
             "repository": {"default_branch": DEFAULT_BRANCH, "full_name": BASE_REPO},
             "merge_group": {
-                "base_ref": f"refs/heads/{DEFAULT_BRANCH}",
+                "base_ref": f"refs/heads/{target}",
                 "base_sha": PREVIOUS_ENTRY_SHA,
                 "head_ref": f"refs/heads/{queue}",
                 "head_sha": MERGE_SHA,
@@ -833,3 +833,17 @@ class TestToolConfigFilesComeFromTheBaseCommit:
 
         resolved = resolve_config(config_path=config, source_dir=repo.sandbox.workspace)
         assert resolved.project_name == original["project_name"]
+
+
+class TestTheMergeQueueResolvesItsOwnTarget:
+    def test_a_queue_into_another_branch_installs_and_reads_from_that_branch(self):
+        """`merge_group.base_ref` names the queue's target; the default branch need not be it."""
+        context = _merge_group(PREVIOUS_ENTRY_SHA, target="release-3.7")
+        inputs = _required_inputs(context)
+        expected = {"release-3.7", "refs/heads/release-3.7"}
+        assert inputs.get("ash-version") in expected, (
+            f"a queue into release-3.7 installs ASH from {inputs.get('ash-version')!r}"
+        )
+        assert inputs.get("config-ref") in expected, (
+            f"a queue into release-3.7 reads its config from {inputs.get('config-ref')!r}"
+        )
