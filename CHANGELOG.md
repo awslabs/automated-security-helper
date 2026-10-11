@@ -520,8 +520,9 @@
   `converter_results.<name>.failed_inputs` in `ash_aggregated_results.json` with the
   reason. With `fail_on_incomplete_scanners` on (the default) the scan exits 1
   naming the converter and the files, as it does for a converter that crashed. A
-  `.gz` that is a single compressed file, such as `data.json.gz`, is not an archive
-  and is skipped. The progress line and the convert-complete event say how many
+  `.gz` that is a single compressed file, such as `data.json.gz`, is decompressed
+  and scanned, and is a failed input only when it cannot be decompressed. The
+  progress line and the convert-complete event say how many
   files could not be converted. `ash merge` combines every shard's converter row
   (failures, failed and refused inputs, missing tools), and workspace mode applies
   the same converter check to each project, which gains `incomplete_converters`.

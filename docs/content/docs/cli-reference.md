@@ -1304,8 +1304,9 @@ ERROR (1) Exiting because conversion was incomplete: 1 converter(s) did not proc
 
 Other errors are recorded too, as `<Type>: <message>`. A converter that crashed, and
 one whose tool is missing while it had inputs, also make the scan incomplete. A `.gz`
-that is one compressed file rather than a tarball, such as `data.json.gz`, is not an
-archive and is skipped. `ash merge` combines every shard's failed inputs, and
+that is one compressed file rather than a tarball, such as `data.json.gz`, is
+decompressed and scanned, and is a failed input only when it cannot be decompressed.
+`ash merge` combines every shard's failed inputs, and
 workspace mode reports them per project in `incomplete_converters`. When a scanner is
 incomplete as well, the message names the scanners only; the converter failures are
 then in `ash.log` and in the results file.

@@ -277,18 +277,21 @@ class TestAnArchiveThatCannotBeExtracted:
 
 
 class TestFilesNamedLikeArchives:
-    def test_a_plain_gzip_file_is_skipped_not_failed(
+    def test_a_plain_gzip_file_is_decompressed_and_scanned_not_failed(
         self, tree, test_plugin_context, monkeypatch
     ):
-        """data.json.gz is one compressed file, not an archive of files."""
+        """data.json.gz is one compressed file: decompressed to data.json and handed
+        to the scanners, and neither a failed nor a refused input."""
         import gzip
 
         data = tree / "data.json.gz"
         data.write_bytes(gzip.compress(b'{"a": 1}'))
         converter = archive_converter(test_plugin_context, monkeypatch, [data])
 
-        assert converter.convert() == []
+        (extracted,) = converter.convert()
+        assert (extracted / "data.json").read_bytes() == b'{"a": 1}'
         assert converter.failed_inputs == []
+        assert converter.refused_inputs == []
 
     @pytest.mark.parametrize("name", ["a.zip", "b.tar", "c.tar.gz", "d.gz"])
     def test_a_corrupt_archive_is_a_failed_input(

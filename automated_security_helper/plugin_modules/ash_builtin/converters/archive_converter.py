@@ -55,16 +55,6 @@ from automated_security_helper.utils.suppression_matcher import (
 )
 
 
-def _is_plain_gzip(name: str, head: bytes) -> bool:
-    """A ``.gz`` that is gzip but not named as a tarball: a single compressed file."""
-    lowered = name.lower()
-    return (
-        lowered.endswith(".gz")
-        and not lowered.endswith(".tar.gz")
-        and head == b"\x1f\x8b"
-    )
-
-
 #: The suffixes the converter selects archives in the tree on. Compared lowercased
 #: against the last one only, so ``.tar.gz`` is ``gz`` and ``.tgz`` is not selected.
 ARCHIVE_SUFFIXES = ("zip", "tar", "gz")

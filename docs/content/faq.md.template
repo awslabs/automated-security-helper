@@ -264,7 +264,7 @@ ASH does not start tools from inside the directory it scans, and `uv run` and `n
 Because it, a working directory or file ASH writes in it, or a directory inside the scanned tree on the way to it is a symlink. ASH clears and writes the output directory before a scan, so it refuses to do that through a link, whatever the sandbox mode. Pass `--output-dir` with a directory that is not a link. See [Troubleshooting](docs/troubleshooting.md#the-scan-stops-because-something-in-the-output-directory-is-a-symlink).
 
 ### Why does the scan fail when a notebook or archive could not be converted?
-Those files went unscanned in converted form, so the scan is incomplete and exits 1, as it does when a scanner did not run. The reason for each file is in `converter_results.<converter>.failed_inputs`. A single compressed file such as `data.json.gz` is not an archive and is skipped. See [Troubleshooting](docs/troubleshooting.md#the-scan-exits-1-because-conversion-was-incomplete).
+Those files went unscanned in converted form, so the scan is incomplete and exits 1, as it does when a scanner did not run. The reason for each file is in `converter_results.<converter>.failed_inputs`. A single compressed file such as `data.json.gz` is decompressed and scanned; it is a failed input only when it cannot be decompressed. See [Troubleshooting](docs/troubleshooting.md#the-scan-exits-1-because-conversion-was-incomplete).
 
 ### How do I debug ASH?
 ```bash
