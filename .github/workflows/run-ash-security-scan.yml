@@ -34,7 +34,10 @@ on:
           from, instead of the checkout. Requires `config`. Pass a pull request's
           base commit and the pull request cannot change the config of the scan that
           gates it; its config edits apply once merged. A commit without that file
-          fails the scan unless config-ref-missing is `defaults`. Empty (the default)
+          fails the scan unless config-ref-missing is `defaults`. The file is
+          passed as a --config outside the scanned tree, so ASH treats it as the
+          operator's config: its sandbox grants and plugin modules apply without the
+          limits ASH puts on a config read from the checkout. Empty (the default)
           reads the config from the checkout.
         required: false
         default: ""
