@@ -252,17 +252,14 @@ def _module_within(module: str, package: str) -> bool:
 
 
 def _is_builtin_plugin_module(module: str) -> bool:
-    """Whether *module* is ASH's own code that every scan uses.
+    """Whether *module* is in ``ash_builtin``, whose plugins every scan uses.
 
-    ``ash_builtin``, and ASH's modules outside ``plugin_modules``. The other
-    packages under ``plugin_modules`` ship with ASH but take part in a scan only
-    when that scan names them.
+    Only ``ash_builtin``. The other packages under ``plugin_modules`` ship with ASH
+    but take part in a scan only when that scan names them, and no ASH module outside
+    ``plugin_modules`` defines a plugin; admitting the rest of the
+    ``automated_security_helper`` package would admit any module installed into it.
     """
-    if _module_within(module, BUILTIN_PLUGIN_PACKAGE):
-        return True
-    return _module_within(module, "automated_security_helper") and not (
-        _module_within(module, _OPT_IN_PLUGIN_ROOT)
-    )
+    return _module_within(module, BUILTIN_PLUGIN_PACKAGE)
 
 
 def _holds_plugin_packages(name: str) -> bool:

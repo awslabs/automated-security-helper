@@ -143,3 +143,24 @@ class TestNameSpelling:
     )
     def test_a_plugin_module_path_is_accepted(self, name):
         refuse_plugin_modules_outside_namespace([name])
+
+
+class TestBuiltInPlugins:
+    def test_a_plugin_defined_in_ash_builtin_is_selected_without_being_named(self):
+        builtin = _plugin(
+            "automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner",
+            "BanditScanner",
+        )
+
+        assert scan_plugin_filter([])(builtin)
+
+    @pytest.mark.parametrize(
+        "module",
+        [
+            "automated_security_helper.core.zz_plugin",
+            "automated_security_helper.utils.zz_plugin",
+            "automated_security_helper.plugin_modules.ash_builtin_extra.zz_plugin",
+        ],
+    )
+    def test_a_plugin_elsewhere_in_the_package_is_not_built_in(self, module):
+        assert not scan_plugin_filter([])(_plugin(module))
