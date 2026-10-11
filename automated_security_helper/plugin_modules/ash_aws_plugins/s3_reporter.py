@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Annotated, Literal, Optional, TYPE_CHECKING, Tuple
 
 import boto3
-from pydantic import Field
+from pydantic import Field, model_validator
 import yaml
 
 from automated_security_helper.base.options import ReporterOptionsBase
@@ -21,6 +21,9 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
+    MAX_RETRIES,
+    MAX_RETRY_DELAY_SECONDS,
+    check_retry_delays,
     retry_with_backoff,
 )
 
@@ -69,21 +72,28 @@ class S3ReporterConfigOptions(ReporterOptionsBase):
     max_retries: Annotated[
         int,
         Field(
+            le=MAX_RETRIES,
             description="Maximum number of retry attempts for S3 operations",
         ),
     ] = 3
     base_delay: Annotated[
         float,
         Field(
+            le=MAX_RETRY_DELAY_SECONDS,
             description="Base delay in seconds between retry attempts",
         ),
     ] = 1.0
     max_delay: Annotated[
         float,
         Field(
+            le=MAX_RETRY_DELAY_SECONDS,
             description="Maximum delay in seconds between retry attempts",
         ),
     ] = 60.0
+
+    @model_validator(mode="after")
+    def _retry_delays_are_bounded(self):
+        return check_retry_delays(self)
 
 
 class S3ReporterConfig(ReporterPluginConfigBase):
@@ -147,7 +157,16 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
-    destination_options = ("aws_region", "aws_profile", "bucket_name", "key_prefix")
+    destination_options = (
+        "aws_region",
+        "aws_profile",
+        "bucket_name",
+        "key_prefix",
+        # How long it keeps calling S3 with the operator's credentials.
+        "max_retries",
+        "base_delay",
+        "max_delay",
+    )
 
     def model_post_init(self, context):
         if self.config is None:

@@ -49,22 +49,26 @@ profile with `select_profile` load it. A config an MCP client delivered cannot a
 ## Settings only the operator can set
 
 These reporter options choose where findings are sent or written, which
-credentials send them, which findings Security Hub imports and archives, and what
-the Bedrock reporter sends to the model with them:
+credentials send them, which findings Security Hub imports and archives, what the
+Bedrock reporter sends to the model with them, and how long a reporter keeps calling
+its service when it is refused:
 
 | Reporter section           | Options                                                                                                 |
 |----------------------------|---------------------------------------------------------------------------------------------------------|
 | `aws-security-hub`         | `aws_region`, `aws_profile`, `account_id`, `findings_scope`, `archive_resolved_findings`                |
-| `bedrock-summary-reporter` | `aws_region`, `aws_profile`, `model_id`, `output_file`, `output_executive_file`, `output_technical_file`, `include_code_snippets`, `custom_prompt` |
-| `cloudwatch-logs`          | `aws_region`, `log_group_name`, `log_stream_name`                                                       |
-| `s3`                       | `aws_region`, `aws_profile`, `bucket_name`, `key_prefix`                                                |
+| `bedrock-summary-reporter` | `aws_region`, `aws_profile`, `model_id`, `output_file`, `output_executive_file`, `output_technical_file`, `include_code_snippets`, `custom_prompt`, `max_retries`, `base_delay`, `max_delay` |
+| `cloudwatch-logs`          | `aws_region`, `log_group_name`, `log_stream_name`, `max_retries`, `base_delay`, `max_delay`             |
+| `s3`                       | `aws_region`, `aws_profile`, `bucket_name`, `key_prefix`, `max_retries`, `base_delay`, `max_delay`      |
 
 They take effect only from the defaults (including the environment variables each
 reporter's page lists), `--config-overrides`, or a config file outside the scanned
 tree. A config file inside the scanned tree cannot set them: each one it sets is
 ignored, with one warning naming them, and the operator's value applies. This holds
 for every spelling of the section ASH reads as that reporter's, such as
-`s3-reporter` or `BedrockSummary`.
+`s3-reporter` or `BedrockSummary`. Each reporter's options model also caps its
+retries, from every source: `max_retries` at most 10, `max_delay` at most 60 seconds,
+and `base_delay` at most `max_delay`. A larger value is a validation error naming the
+option and its limit, and the reporter is not built.
 
 Whether each reporter runs is the operator's too. A config file inside the scanned
 tree may set `enabled: false`. Where the operator's settings have a reporter off, the

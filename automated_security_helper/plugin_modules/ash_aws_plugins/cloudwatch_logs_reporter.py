@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import json
 import logging
 import os
-from pydantic import Field
+from pydantic import Field, model_validator
 import boto3
 import botocore.exceptions
 
@@ -12,6 +12,9 @@ from typing import Annotated, Literal, TYPE_CHECKING
 
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
+    MAX_RETRIES,
+    MAX_RETRY_DELAY_SECONDS,
+    check_retry_delays,
     retry_with_backoff,
 )
 
@@ -58,6 +61,7 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
     max_retries: Annotated[
         int,
         Field(
+            le=MAX_RETRIES,
             default=3,
             description="Maximum number of retry attempts for CloudWatch API calls",
         ),
@@ -65,6 +69,7 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
     base_delay: Annotated[
         float,
         Field(
+            le=MAX_RETRY_DELAY_SECONDS,
             default=1.0,
             description="Base delay in seconds between retry attempts",
         ),
@@ -72,10 +77,15 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
     max_delay: Annotated[
         float,
         Field(
+            le=MAX_RETRY_DELAY_SECONDS,
             default=60.0,
             description="Maximum delay in seconds between retry attempts",
         ),
     ] = 60.0
+
+    @model_validator(mode="after")
+    def _retry_delays_are_bounded(self):
+        return check_retry_delays(self)
 
 
 class CloudWatchLogsReporterConfig(ReporterPluginConfigBase):
@@ -140,7 +150,15 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
-    destination_options = ("aws_region", "log_group_name", "log_stream_name")
+    destination_options = (
+        "aws_region",
+        "log_group_name",
+        "log_stream_name",
+        # How long it keeps calling CloudWatch Logs with the operator's credentials.
+        "max_retries",
+        "base_delay",
+        "max_delay",
+    )
 
     def model_post_init(self, context):
         if self.config is None:

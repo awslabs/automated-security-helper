@@ -45,9 +45,9 @@ reporters:
       summary_style: "executive"  # executive, technical, or detailed
       custom_prompt: "Focus on business impact and compliance risks"
       # Retry and fallback configuration
-      max_retries: 5      # Default: 3
-      base_delay: 2.0     # Default: 1.0 seconds
-      max_delay: 120.0    # Default: 60.0 seconds
+      max_retries: 5      # Default: 3, at most 10
+      base_delay: 2.0     # Default: 1.0 seconds, at most max_delay
+      max_delay: 30.0     # Default: 60.0 seconds, at most 60
       enable_fallback_models: true
 ```
 
@@ -80,9 +80,11 @@ only when the resolved file is directly inside the reports directory.
 
 `aws_region`, `aws_profile`, `model_id`, `output_file`, `output_executive_file` and
 `output_technical_file` choose where findings are sent or written and which
-credentials send them, and `include_code_snippets` and `custom_prompt` choose what
-is sent to the model with them (source from the scanned tree, and instructions), so
-they are the operator's. They take effect only from the
+credentials send them, `include_code_snippets` and `custom_prompt` choose what is
+sent to the model with them (source from the scanned tree, and instructions), and
+`max_retries`, `base_delay` and `max_delay` how long the reporter keeps calling
+Bedrock when it is refused, so they are the operator's. `max_retries` is at most 10,
+`max_delay` at most 60 seconds, and `base_delay` at most `max_delay`. They take effect only from the
 defaults (`AWS_REGION`, `AWS_DEFAULT_REGION`, `AWS_PROFILE` and `ASH_BEDROCK_MODEL_ID`),
 `--config-overrides`, or a config file outside the scanned tree. A config file inside
 the scanned tree, or one an MCP client delivered, cannot set them: from the tree they
@@ -439,9 +441,9 @@ options:
 ```yaml
 # Configure retry behavior
 options:
-  max_retries: 5      # Default: 3
-  base_delay: 2.0     # Default: 1.0 seconds
-  max_delay: 120.0    # Default: 60.0 seconds
+  max_retries: 5      # Default: 3, at most 10
+  base_delay: 2.0     # Default: 1.0 seconds, at most max_delay
+  max_delay: 30.0     # Default: 60.0 seconds, at most 60
   enable_fallback_models: true  # Enable fallback models
 ```
 

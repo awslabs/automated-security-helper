@@ -1140,6 +1140,14 @@
     file inside the scanned tree that sets one is ignored with a warning, and a
     repository that set them in its own config sets them with `--config-overrides`
     or in a config file outside the tree instead.
+  - The retry options of the Bedrock summary, CloudWatch Logs and S3 reporters,
+    `max_retries`, `base_delay` and `max_delay`, are the operator's too: a config
+    file inside the scanned tree that sets one is ignored with a warning, so a
+    repository that tuned retries in its own config sets them with
+    `--config-overrides` or in a config file outside the tree instead. From every
+    source they are now capped: `max_retries` at most 10, `max_delay` at most 60
+    seconds, and `base_delay` at most `max_delay`; a larger value is a validation
+    error naming the option and its limit.
   - `enabled: false` for one of these reporters is accepted the same way through
     `select_profile`'s `patch_ops` and `override_yaml` and the MCP workspace tools'
     `config_overrides`, under the entries that cover it; `enabled: true`, and

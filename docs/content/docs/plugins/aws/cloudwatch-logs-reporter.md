@@ -54,7 +54,8 @@ reporters:
 ### Where these options can be set
 
 `aws_region`, `log_group_name` and `log_stream_name` choose where findings are sent,
-so they are the operator's. They take effect only from the defaults (`AWS_REGION`,
+and `max_retries`, `base_delay` and `max_delay` how long the reporter keeps calling
+CloudWatch Logs when it is refused, so they are the operator's. They take effect only from the defaults (`AWS_REGION`,
 `AWS_DEFAULT_REGION` and `ASH_CLOUDWATCH_LOG_GROUP_NAME`), `--config-overrides`, or a
 config file outside the scanned tree. A config file inside the scanned tree cannot set
 them; each one it sets is ignored with a warning. Under the MCP server every
@@ -278,7 +279,10 @@ ash /path/to/code --reporters cloudwatch-logs --log-level DEBUG
 
 ### Retry Configuration
 
-Configure retry behavior for API calls:
+The operator configures retry behavior for API calls, with `--config-overrides` or a
+config file outside the scanned tree (see
+[Where these options can be set](#where-these-options-can-be-set)). `max_retries` is
+at most 10, `max_delay` at most 60 seconds, and `base_delay` at most `max_delay`:
 
 ```yaml
 reporters:
@@ -289,9 +293,9 @@ reporters:
       log_group_name: "/aws/ash/scan-results"
       log_stream_name: "ASHScanResults"
       # Retry configuration
-      max_retries: 5      # Default: 3
-      base_delay: 2.0     # Default: 1.0 seconds
-      max_delay: 120.0    # Default: 60.0 seconds
+      max_retries: 5      # Default: 3, at most 10
+      base_delay: 2.0     # Default: 1.0 seconds, at most max_delay
+      max_delay: 30.0     # Default: 60.0 seconds, at most 60
 ``````
 
 ### Debug Mode

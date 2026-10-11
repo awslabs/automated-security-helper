@@ -162,6 +162,56 @@ def test_a_repository_config_repeating_the_operators_bedrock_content_applies(
     assert not any(name in message for message in _warnings(ash_log))
 
 
+#: The AWS reporters whose options model has retry options, and those options.
+_RETRYING = ("bedrock-summary-reporter", "cloudwatch-logs", "s3")
+_RETRY_OPTIONS = ("max_retries", "base_delay", "max_delay")
+_RETRY_CASES = [(r, n) for r in _RETRYING for n in _RETRY_OPTIONS]
+
+
+@pytest.mark.parametrize(
+    "reporter,name", _RETRY_CASES, ids=[f"{r}.{n}" for r, n in _RETRY_CASES]
+)
+def test_a_repository_config_does_not_tune_a_reporters_retries(
+    tmp_path, ash_log, reporter, name
+):
+    """How long a reporter keeps calling AWS with the operator's credentials."""
+    source = tmp_path / "repo"
+    _write_config(source / ".ash" / ".ash.yaml", {reporter: {"options": {name: 7}}})
+
+    config = resolve_config(source_dir=source)
+
+    assert name not in _options(config, reporter)
+    warnings = "\n".join(_warnings(ash_log))
+    assert f"reporters.{reporter}.options.{name}" in warnings, warnings
+
+
+_TABLE_CASES = [
+    (reporter, name)
+    for reporter, names in sorted(REPORTER_DESTINATION_OPTIONS.items())
+    for name in names
+]
+
+
+@pytest.mark.parametrize(
+    "reporter,name", _TABLE_CASES, ids=[f"{r}.{n}" for r, n in _TABLE_CASES]
+)
+def test_a_repository_config_repeating_the_operators_value_applies(
+    tmp_path, ash_log, reporter, name
+):
+    """The same value is no change: it applies, with no warning."""
+    section = {reporter: {"options": {name: REPO_VALUES[reporter][name]}}}
+    source = tmp_path / "repo"
+    project = _write_config(source / ".ash" / ".ash.yaml", section)
+    operator = _write_config(tmp_path / "operator" / "ash.yaml", section)
+
+    config = resolve_config(
+        config_path=project, source_dir=source, trusted_config_path=operator
+    )
+
+    assert _options(config, reporter)[name] == REPO_VALUES[reporter][name]
+    assert not any(name in message for message in _warnings(ash_log))
+
+
 @pytest.mark.parametrize(
     "spelling", ["BedrockSummary", "bedrocksummaryreporter", "Bedrock_Summary_Reporter"]
 )
@@ -803,6 +853,25 @@ def test_each_built_in_reporter_declares_the_options_listed_for_it(reporter_fiel
         for reporter in declared
     } == declared
     assert set(REPORTER_DESTINATION_OPTIONS) <= set(declared)
+
+
+def test_every_retry_option_of_an_off_host_reporter_is_listed(reporter_fields):
+    """A reporter that gains retry options has to list them as the operator's."""
+    unlisted = [
+        (reporter, field["path"])
+        for reporter in REPORTER_ENABLED_DEFAULTS
+        for field in reporter_fields[reporter]["options"]
+        if field["path"] in _RETRY_OPTIONS
+        and field["path"] not in REPORTER_DESTINATION_OPTIONS[reporter]
+    ]
+    assert not unlisted
+    assert {
+        reporter
+        for reporter in REPORTER_ENABLED_DEFAULTS
+        if any(
+            f["path"] in _RETRY_OPTIONS for f in reporter_fields[reporter]["options"]
+        )
+    } == set(_RETRYING)
 
 
 def test_each_off_host_reporters_enabled_default_is_listed(reporter_fields):

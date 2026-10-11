@@ -328,8 +328,10 @@ class ReporterPluginBase(PluginBase, Generic[T]):
 
     #: Options that choose where findings are sent or written, or which
     #: credentials send them: a region, an account, a bucket, an endpoint, a
-    #: profile, an output path. Named as the options model's fields; an alias of
-    #: one is covered too. When the config was built from a file inside the
+    #: profile, an output path. Also any other option that is the operator's for
+    #: the same reason: what is sent along with the findings, or how long the
+    #: reporter keeps calling its service. Named as the options model's fields;
+    #: an alias of one is covered too. When the config was built from a file inside the
     #: scanned tree, or from one an MCP client delivered, these options come from
     #: the trusted base instead: the defaults, an operator config outside the
     #: tree, and ``--config-overrides`` (config/reporter_trust.py). A ``ClassVar``

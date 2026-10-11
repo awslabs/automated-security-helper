@@ -43,9 +43,9 @@ reporters:
       file_format: json
       key_prefix: security-scans/
       # Retry configuration
-      max_retries: 5      # Default: 3
-      base_delay: 2.0     # Default: 1.0 seconds
-      max_delay: 120.0    # Default: 60.0 seconds
+      max_retries: 5      # Default: 3, at most 10
+      base_delay: 2.0     # Default: 1.0 seconds, at most max_delay
+      max_delay: 30.0     # Default: 60.0 seconds, at most 60
 ```
 
 ### Environment Variables
@@ -64,7 +64,9 @@ export AWS_PROFILE="my-profile"
 ### Where these options can be set
 
 `aws_region`, `aws_profile`, `bucket_name` and `key_prefix` choose where reports are
-uploaded and which credentials upload them, so they are the operator's. They take
+uploaded and which credentials upload them, and `max_retries`, `base_delay` and
+`max_delay` how long the reporter keeps calling S3 when it is refused, so they are the
+operator's. They take
 effect only from the defaults (the environment variables above, and `AWS_DEFAULT_REGION`),
 `--config-overrides`, or a config file outside the scanned tree, which is where the
 advanced configuration above belongs. A config file inside the scanned tree, or one an
@@ -321,7 +323,11 @@ ash /path/to/code --reporters s3 --log-level DEBUG
 
 ### Retry Configuration
 
-The reporter includes built-in retry logic. You can configure retry behavior:
+The reporter includes built-in retry logic. The operator configures it, with
+`--config-overrides` or a config file outside the scanned tree, like the options in
+[Where these options can be set](#where-these-options-can-be-set). `max_retries` is
+at most 10, `max_delay` at most 60 seconds, and `base_delay` at most `max_delay`; a
+larger value is a validation error naming the option and its limit.
 
 ```yaml
 reporters:
@@ -331,9 +337,9 @@ reporters:
       bucket_name: "my-security-reports"
       aws_region: "us-east-1"
       # Retry configuration
-      max_retries: 5      # Default: 3
-      base_delay: 2.0     # Default: 1.0 seconds
-      max_delay: 120.0    # Default: 60.0 seconds
+      max_retries: 5      # Default: 3, at most 10
+      base_delay: 2.0     # Default: 1.0 seconds, at most max_delay
+      max_delay: 30.0     # Default: 60.0 seconds, at most 60
 ```
 
 ## Best Practices

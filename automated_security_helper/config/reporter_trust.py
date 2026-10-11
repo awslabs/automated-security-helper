@@ -80,6 +80,11 @@ from automated_security_helper.utils.log import ASH_LOGGER
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
 
+#: How long a reporter keeps calling its service, with the operator's credentials,
+#: when the service refuses it: the operator's to set, as where it calls is. Their
+#: caps are in the reporters' options models (``ash_aws_plugins.aws_utils``).
+_RETRY_OPTIONS: Tuple[str, ...] = ("max_retries", "base_delay", "max_delay")
+
 #: The options of each built-in reporter that pick where findings go or which
 #: credentials send them: each reporter's ``destination_options``. Where each is
 #: used is listed in the PR that added this. The Bedrock reporter's
@@ -107,9 +112,15 @@ REPORTER_DESTINATION_OPTIONS: Dict[str, Tuple[str, ...]] = {
         "output_technical_file",
         "include_code_snippets",
         "custom_prompt",
+        *_RETRY_OPTIONS,
     ),
-    "cloudwatch-logs": ("aws_region", "log_group_name", "log_stream_name"),
-    "s3": ("aws_region", "aws_profile", "bucket_name", "key_prefix"),
+    "cloudwatch-logs": (
+        "aws_region",
+        "log_group_name",
+        "log_stream_name",
+        *_RETRY_OPTIONS,
+    ),
+    "s3": ("aws_region", "aws_profile", "bucket_name", "key_prefix", *_RETRY_OPTIONS),
 }
 
 #: Each built-in reporter's own default for ``enabled``, for the reporters whose
