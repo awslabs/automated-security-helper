@@ -19,6 +19,7 @@ from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import (
     SPAWN_FAILURE_RETURNCODE,
+    exit_status,
     find_executable,
     in_tree_refusal,
 )
@@ -501,7 +502,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         code = response.get("returncode") if isinstance(response, dict) else None
         if isinstance(code, int) and not isinstance(code, bool):
-            self.exit_code = abs(code)
+            self.exit_code = exit_status(code)
 
     def _refuse_rejected_exit_code(self, results_file: Optional["Path"] = None) -> None:
         """Raise ScannerError when the tool's exit code is outside its success set.

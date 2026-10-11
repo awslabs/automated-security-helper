@@ -92,6 +92,18 @@ class TimedOutProcess(subprocess.CompletedProcess):
 SPAWN_FAILURE_RETURNCODE = 127
 
 
+def exit_status(returncode: int) -> int:
+    """A process's exit code as a shell reports it: ``128 + N`` when signal N ended it.
+
+    ``subprocess`` reports a child a signal ended as ``-N``. Its absolute value is a
+    small number that success sets contain: a tool killed by SIGHUP would read as
+    exit 1, "findings found", for a scanner that accepts ``{0, 1}``. ``128 + N`` is
+    what bwrap and ``uv tool run`` already return for the same child, and no scanner
+    accepts it.
+    """
+    return 128 - returncode if returncode < 0 else returncode
+
+
 class SpawnFailedProcess(subprocess.CompletedProcess):
     """A CompletedProcess for a command the OS could not start.
 

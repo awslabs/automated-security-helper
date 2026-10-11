@@ -322,13 +322,13 @@ class PluginBase(UVToolMixin, BaseModel):
         if response.get("stderr"):
             self.errors.extend(response["stderr"].splitlines())
 
-        # Accumulate worst exit code across multiple subprocess calls.
-        # Use abs() so negative codes (e.g. -1 for timeout) aren't
-        # silently swallowed by max(0, -1).
+        # Accumulate worst exit code across multiple subprocess calls. A negative
+        # code (a signal, or -1 for a timeout) is recorded as 128 + N, so it is
+        # neither swallowed by max(0, -1) nor read as a small accepted code.
+        from automated_security_helper.utils.subprocess_utils import exit_status
+
         new_code = response.get("returncode", 1)
-        self.exit_code = max(
-            self.exit_code, abs(new_code) if new_code < 0 else new_code
-        )
+        self.exit_code = max(self.exit_code, exit_status(new_code))
 
     @property
     def scan_timed_out_after(self) -> float | None:

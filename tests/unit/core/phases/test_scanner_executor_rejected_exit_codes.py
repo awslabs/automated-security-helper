@@ -272,3 +272,59 @@ class TestAnAcceptedExitCodeIsGradedOnFindings:
 
         assert container.status == ScannerStatus.FAILED
         assert container.finding_count == 1
+
+
+#: Copies argv[1] to argv[2], then kills itself with signal argv[3].
+SIGNAL_TOOL_SOURCE = (
+    "import os, shutil, signal, sys\n"
+    "source, destination, signum = sys.argv[1:4]\n"
+    "shutil.copyfile(source, destination)\n"
+    "signal.signal(int(signum), signal.SIG_DFL)\n"
+    "os.kill(os.getpid(), int(signum))\n"
+)
+
+
+class TestAToolKilledByASignalIsAnError:
+    """A tool a signal ended has not completed, whatever number the signal has.
+
+    Python reports such a child as ``-N``. Taking the absolute value put signals 1,
+    2 and 3 inside common success sets: a tool killed by SIGHUP read as exit 1,
+    "findings found", for a ``{0, 1}`` scanner. It is recorded the way a shell
+    reports it, ``128 + N``, which no scanner accepts.
+    """
+
+    @pytest.mark.parametrize(
+        "success_codes, signum",
+        [
+            pytest.param({0, 1}, 1, id="SIGHUP-against-0-1"),
+            pytest.param({0, 2}, 2, id="SIGINT-against-0-2"),
+            pytest.param({0, 3}, 3, id="SIGQUIT-against-0-3"),
+        ],
+    )
+    def test_the_row_is_error(
+        self, plugin_context, tmp_path, monkeypatch, success_codes, signum
+    ):
+        monkeypatch.setattr(sys.modules[__name__], "TOOL_SOURCE", SIGNAL_TOOL_SOURCE)
+
+        container = _run(
+            plugin_context,
+            tmp_path,
+            success_codes=success_codes,
+            exit_code=signum,
+            results=json.dumps(_sarif([])),
+        )
+
+        assert container.status == ScannerStatus.ERROR, (
+            f"a tool killed by signal {signum} was graded {container.status.value} "
+            f"with exit code {container.exit_code}"
+        )
+        assert container.exit_code == 128 + signum
+
+    def test_an_accumulated_code_is_recorded_the_same_way(self, plugin_context):
+        """``_process_command_response``, which overriding scanners rely on, agrees."""
+        scanner = _scanner_class({0, 1})(config=_ToolConfig(), context=plugin_context)
+
+        scanner._process_command_response({"returncode": -1})
+
+        assert scanner.exit_code == 129
+        assert not scanner._exit_code_accepted()

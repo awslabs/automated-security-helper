@@ -143,7 +143,8 @@ can still leave a results file (semgrep exits 7 and writes SARIF holding only er
 notifications when it cannot read a rule configuration; grype exits 1 and writes a
 zero-byte report when it cannot load its database), so ASH does not read the file of
 a run with any other code: an empty or error-only file would otherwise be graded
-`PASSED` with no findings.
+`PASSED` with no findings. A tool ended by a signal shows as `128 + N` (129 for
+SIGHUP, 130 for SIGINT, 137 for SIGKILL).
 
 | Scanner | Accepted exit codes | What the tool uses other codes for |
 |---|---|---|
