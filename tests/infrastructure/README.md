@@ -40,7 +40,8 @@ cdk deploy \
 
 ## Parameters
 
-| Name | Default value | Description |
+<!-- doctest: options of=python.tests.infrastructure.offline_test_stack.OfflineTestStack -->
+| Name | Default | Description |
 |------|---------|-------------|
 | `vpc_cidr` | `10.0.0.0/16` | CIDR block for the isolated VPC |
 | `instance_type` | `t3.medium` | EC2 instance type for the test host |
