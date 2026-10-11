@@ -212,10 +212,10 @@ against the built image.
 Other Python packages in the image, such as the scanners' dependencies and nbconvert,
 keep their license files in their `.dist-info` directories, and Debian packages keep
 theirs in `/usr/share/doc/<package>/`. cfn-nag and the Ruby gems it depends on, and the
-yarn and pnpm that corepack prepares, have no entry in this directory. Apart from
-hadolint's `ThirdPartyNotices.txt`, the licenses of libraries built into the bundled
-programs, such as the modules statically linked into the Go and Rust programs, are not
-reproduced.
+yarn and pnpm that corepack prepares, have no entry in this directory. Apart from the
+pygit2 and yara-python libraries above and the list in hadolint's `ThirdPartyNotices.txt`,
+the licenses of libraries built into the bundled programs, such as the modules statically
+linked into the Go and Rust programs, are not reproduced.
 
 ## Windows and macOS {#platforms}
 

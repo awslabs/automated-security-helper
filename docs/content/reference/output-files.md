@@ -54,7 +54,7 @@ with every built-in scanner installed:
 | `ash-ignore-report.txt` | the scan set step | The ignore rules that shaped the scan set: the text of each `.gitignore` and `.ignore` ASH found, and ASH's built-in rules (`.git` and `**/cdk.out/asset.*` left out, `**/*.template.json` kept). |
 | `ash-scan-set-files-list.txt` | the scan set step | The files ASH selected, one absolute path per line. Scanners that walk the source directory themselves can read more; see [Coverage](coverage.md#what-decides-the-files). |
 | `analysis/` | `ash scan --inspect` | The SARIF field analysis. Empty otherwise. |
-| `converted/` | the converters | `archive/` holds a directory per `.zip`, `.tar`, or `.gz` file with the members ASH extracted; `jupyter/` holds each notebook converted to a script (`<name>-converted.py` for a Python notebook). Empty when there was nothing to convert. |
+| `converted/` | the converters | `archive/` holds a directory per `.zip`, `.tar`, or `.gz` file with the members ASH extracted; `jupyter/` holds each notebook converted to a script, named after the notebook's path and ending in `-converted.py` for a Python notebook (see [Converted files](coverage.md#converted-files)). Empty when there was nothing to convert. |
 | `reports/` | the reporters | One file per enabled reporter, named `ash.<extension>`. See [below](#reports). |
 | `scanners/<name>/<target>/` | each scanner | `ASH.ScanResults.json` and the tool's own output for one target: `source` for the source directory, `converted` for `converted/`. See [below](#per-scanner-results). |
 
@@ -209,7 +209,7 @@ Each `converter_results` row (`archive`, `jupyter`) has:
 |---|---|
 | `dependencies_satisfied` | `false` when the converter's tool was missing. |
 | `excluded` | `true` when the converter was turned off. |
-| `failure` | The error, as `<Type>: <message>`, when the converter itself crashed or could not be created. |
+| `failure` | The error, as `<Type>: <message>`, when the converter itself crashed or could not be created, or a note that it was dropped although its dependency check passed. |
 | `candidate_inputs` | How many inputs it set out to convert, when it counts them. |
 | `refused_inputs` | Inputs it declined to read, each with `path`, `member` (for an archive member) and `reason`, such as links, special files, and archive members with absolute names or names that would land outside the extraction directory. These never fail the scan. |
 | `failed_inputs` | Inputs it tried and could not convert, each with `path` and `reason`, such as a corrupt archive or a notebook nbconvert could not read. A reason that comes from an unexpected error is the error's type and message, such as `BadZipFile: Bad CRC-32 for file 'app.py'`. |
@@ -219,8 +219,8 @@ A converter with a `failure`, any `failed_inputs`, or a missing tool while it ha
 makes the conversion incomplete. Under the default `fail_on_incomplete_scanners` the scan
 then exits 1, because the scanners were given fewer files than the repository has. The
 console line for each such converter, and its entry in `incomplete_converters` in the MCP
-scan results, give its `failure`, or the number of failed inputs and up to five of their
-paths.
+scan results, give its `failure`, the number of failed inputs and up to five of their
+paths, or `dependencies unavailable, so it never ran`.
 
 <!-- doctest: config kind=ash-output -->
 ```json

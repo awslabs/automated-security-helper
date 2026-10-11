@@ -230,7 +230,8 @@ report to the job summary. The script compares:
 - each version pinned in `automated_security_helper/utils/tool_downloads.py` (the release
   binaries, the Python scanners the container image installs, the license-only entries,
   and the cfn-nag gem) with its upstream's latest release on GitHub, PyPI, or RubyGems.
-  Libraries that another pinned wheel bundles are listed as `held` and not looked up;
+  Libraries bundled inside another package's wheel, such as the libgit2 in pygit2's wheel,
+  are listed as `held` and not looked up;
 - each `package=version` pin on an `apt-get install` line in the `Dockerfile` with the
   Debian and NodeSource package indexes, for amd64 and arm64.
 
@@ -239,8 +240,9 @@ The script fetches only HTTPS URLs on `api.github.com`, `pypi.org`, `rubygems.or
 rule before it follows it. With `GITHUB_TOKEN` or `GH_TOKEN` set, it sends the token to
 the GitHub API only, carries it across a redirect only to the same scheme, host, and port,
 and retries a GitHub lookup that gets 403 once without the token. It exits 2 when a
-lookup fails, the pins cannot be read, or an `apt-get install` line names a package
-without a version, and 1 when no package index carries an apt pin's version. A pin that
+lookup fails, the pins cannot be read, an `apt-get install` line names a package without
+a version, or an `apt-get install` line pins a package to a different version than another
+stage does, and 1 when no package index carries an apt pin's version. A pin that
 is behind makes it exit 1 only with `check_pinned_tool_versions.py --fail-on-outdated`, as
 the workflow runs it; otherwise it exits 0. To run it locally, from a checkout:
 
