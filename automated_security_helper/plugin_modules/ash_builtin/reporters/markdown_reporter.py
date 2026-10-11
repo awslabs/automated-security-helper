@@ -278,8 +278,8 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 md_parts.append("### Inputs not scanned")
                 md_parts.append("")
                 md_parts.append(
-                    "These scanners found these inputs and did not scan them, so no "
-                    "finding about them means nothing:"
+                    "These scanners found these inputs and did not scan them. That "
+                    "no finding is reported for one says nothing about it:"
                 )
                 md_parts.append("")
                 for scanner_name, path, reason in not_scanned:
