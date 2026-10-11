@@ -71,7 +71,16 @@ def test_an_ash_config_under_the_mcp_root_is_not_the_policy(
     delivered = mcp_root / "session-1" / "source" / "ash.yaml"
     delivered.write_text(
         yaml.safe_dump(
-            {"global_settings": {"mcp": {"runtime_overrides": {"denied_paths": []}}}}
+            {
+                "global_settings": {
+                    "mcp": {
+                        "runtime_overrides": {
+                            "denied_paths": [],
+                            "replace_default_denied_paths": True,
+                        }
+                    }
+                }
+            }
         ),
         encoding="utf-8",
     )
@@ -123,3 +132,54 @@ def test_positive_control_an_operator_ash_config_still_grants(
     config = resolve_config(source_dir=repo)
 
     assert config.sandbox.extra_read_paths == ["/data"]
+
+
+@pytest.mark.parametrize("named_as", ["ASH_CONFIG", "--config"])
+def test_a_config_under_the_mcp_root_setting_a_denied_field_is_refused(
+    tmp_path: Path,
+    mcp_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    named_as: str,
+) -> None:
+    """Checked against the policy as a delivered file is, however it is named."""
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    delivered = mcp_root / "session-1" / "source" / "ash.yaml"
+    delivered.write_text(
+        yaml.safe_dump(
+            {
+                "fail_on_findings": False,
+                "global_settings": {
+                    "ignore_paths": [{"path": "src/**", "reason": "delivered"}]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    repo = _repo(tmp_path)
+    if named_as == "ASH_CONFIG":
+        monkeypatch.setenv("ASH_CONFIG", str(delivered))
+        call = {"source_dir": repo}
+    else:
+        call = {"config_path": delivered, "source_dir": repo}
+
+    with pytest.raises(ASHConfigFieldDeniedError) as excinfo:
+        resolve_config(**call)
+    assert "fail_on_findings" in str(excinfo.value)
+
+
+def test_positive_control_an_operator_ash_config_is_not_checked(
+    tmp_path: Path, mcp_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With nothing the client named read, the operator's own file is the config."""
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(yaml.safe_dump({"fail_on_findings": False}), "utf-8")
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    missing = mcp_root / "session-1" / "source" / "missing.yaml"
+
+    config = resolve_config(
+        config_path=missing, source_dir=_repo(tmp_path), untrusted_config=True
+    )
+
+    assert config.fail_on_findings is False

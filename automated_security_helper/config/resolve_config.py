@@ -20,6 +20,7 @@ from automated_security_helper.config.config_sources import (
 )
 from automated_security_helper.config.default_config import (
     default_config_chain,
+    default_config_documents,
     get_default_config,
 )
 from automated_security_helper.config.plugin_module_trust import (
@@ -273,6 +274,18 @@ def resolve_config(
     )
     if config is None:
         return config
+    if not chain:
+        # No file was read, so the config is get_default_config(): ASH_CONFIG's
+        # file when that variable names one. A file of that chain under the MCP
+        # workspace root is a client's, and is checked as one named with
+        # --config is. The operator's own ASH_CONFIG is not checked.
+        from automated_security_helper.cli.mcp.sandbox import (
+            config_is_client_supplied,
+        )
+
+        default_documents = default_config_documents()
+        if any(config_is_client_supplied(path) for path in default_documents):
+            documents.update(default_documents)
     # Under the MCP server the overrides come from the client, held to the
     # session's allowlist; see operator_overrides below.
     client_overrides = client_config_policy is not None and bool(config_overrides)

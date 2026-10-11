@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
 
 
 def get_default_config():
@@ -29,3 +29,15 @@ def default_config_chain() -> List[Path]:
     if not (config_env_var and Path(config_env_var).exists()):
         return []
     return list(resolve_config_document(Path(config_env_var)).chain)
+
+
+def default_config_documents() -> Dict[Path, Any]:
+    """Each file of default_config_chain() with its parsed document, or none."""
+    from automated_security_helper.config.config_sources import (
+        resolve_config_document,
+    )
+
+    config_env_var = os.environ.get("ASH_CONFIG", None)
+    if not (config_env_var and Path(config_env_var).exists()):
+        return {}
+    return dict(resolve_config_document(Path(config_env_var)).documents)
