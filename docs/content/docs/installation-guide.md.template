@@ -84,6 +84,11 @@ pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERS
 ash --help
 ```
 
+Install into an environment outside the repository you scan. A virtual environment
+inside it, such as the project's own `.venv`, is part of the scanned directory, so the
+scanners installed there are not run and are reported MISSING; see
+[Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory).
+
 #### 4. Clone the Repository
 
 For development or if you want to modify ASH:

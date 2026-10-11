@@ -17,6 +17,37 @@ ash --mode local
 - Fastest execution but limited scanner coverage
 - Ideal for quick checks during development
 
+### Tools inside the scanned directory
+
+ASH does not start a scanner or any other tool that it finds inside the directory it
+is scanning. `uv run ash scan .` puts the repository's `.venv/bin` first on `PATH`,
+and `npm run` does the same with `node_modules/.bin`, so under either a scanner
+installed in the project, such as a `bandit` or `semgrep` dependency, is part of the
+repository being scanned. ASH skips it and uses the next copy on `PATH`, or the one
+`uv tool` installs. If there is none, the scanner is reported as MISSING, with the
+in-tree path in its `missing_reason`, in the log, and in the message the incomplete
+scan exits with.
+
+ASH also never finds a tool through the working directory: not through an empty, `.`
+or relative `PATH` entry, and on Windows not through the working directory that
+`CreateProcess` and `shutil.which` search first. Tools on ordinary absolute `PATH`
+entries are found, including Homebrew, nix profiles, uv and pipx shims,
+asdf and mise shims, conda, Program Files, scoop and Chocolatey. Programs ASH and its
+scanners start are given a `PATH` without the scanned directory's entries, unless you
+allow in-tree tools.
+
+To run tools from inside the scanned directory, pass `--allow-in-tree-tools` (or set
+`"allow_in_tree_tools": true` in a `--cli-json-input` document), or set
+`ASH_ALLOW_IN_TREE_TOOLS` to `1`, `true`, `yes` or `on`. ASH then uses them and logs a
+warning naming each one.
+This also covers the scanner sandbox's own programs (`bwrap`, `firejail`, `readlink`
+and `true`). A
+repository's configuration file cannot turn this on, and `ash mcp` ignores both: an
+MCP client's scans never run a tool from inside a scanned or delivered directory, so
+for MCP use, install scanners outside the repository. See
+[Troubleshooting](troubleshooting.md#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree)
+for the message and the fixes.
+
 ### Container Mode
 
 ```bash

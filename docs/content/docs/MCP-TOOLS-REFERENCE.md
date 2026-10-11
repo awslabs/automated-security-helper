@@ -1,6 +1,22 @@
 # ASH MCP Server - Tools Reference
 
 ## Overview
+
+Scans started through the MCP server never run a scanner or other tool found inside
+the scanned or delivered directory, such as a project's `.venv/bin` or
+`node_modules/.bin`; `ASH_ALLOW_IN_TREE_TOOLS` and `--allow-in-tree-tools` are not
+honored by `ash mcp`. Install the scanners the server uses outside the repository. See
+[Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory).
+
+A scan also refuses an output directory reached through a symlink, as `ash scan` does
+(see [Output directory](concepts.md#output-directory)). This server writes a scan's
+output to `.ash/ash_output` in the scanned directory. A link at `.ash` or
+`.ash/ash_output` is refused before the scan starts, with `error_type`
+`output_dir_not_permitted`; a link at a directory or file ASH writes there fails the
+scan with `ASH exited with code 1:` and an error that asks for the link to be
+replaced with a directory. `run_ash_workspace_scan` takes `output_dir`, and its error
+asks for one that is not a link.
+
 The ASH MCP server provides multiple tools for accessing scan results with different levels of detail. The `get_scan_results` tool now includes a filter parameter for flexible response sizing, and two new specialized tools provide lightweight alternatives.
 
 ## Tool 1: `get_scan_results` (Enhanced with Filter Parameter)

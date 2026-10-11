@@ -215,14 +215,93 @@
 
 - **The Jupyter converter runs nbconvert outside the scanned tree, with an exporter
   ASH chooses.** nbconvert runs in a directory that holds only a copy of the
-  notebook, so files in the scanned tree are not on its import path and its
-  `jupyter_nbconvert_config` files are not read from there. The exporter is
+  notebook, so files in the scanned tree are not on its import path (nbconvert puts
+  its working directory first on `sys.path`). The exporter is
   `python` for a Python notebook (or one that names no language) and `script`
   otherwise, and `language_info.nbconvert_exporter` is removed from the copy, so the
   notebook's metadata does not choose the exporter class. A Python notebook whose
   metadata named no exporter used to go through nbconvert's generic script template;
   it now goes through the Python exporter, which adds `# In[ ]:` cell markers to the
-  converted file.
+  converted file. Running outside the tree also keeps nbconvert from using templates
+  found there (`extra_template_basedirs` defaults to its working directory). The copy
+  is named `notebook.ipynb`, because nbconvert expands its notebook argument as a glob
+  pattern and formats its output name with `str.format`, so notebooks named
+  `[x].ipynb` or `{a,b}.ipynb` convert. The converted file is named after the
+  original notebook, and a non-Python notebook's keeps the extension nbconvert gives
+  it, such as `.r`. `language_info.file_extension` is kept in the copy only when it
+  is a plain extension. When uv cannot run nbconvert, ASH runs `jupyter-nbconvert` by
+  the absolute path it found for it. uv reporting that it cannot resolve nbconvert,
+  as when offline with nbconvert not in its cache, counts as uv not running it.
+
+- **A notebook or archive a converter could not convert counts as incomplete
+  conversion.** A notebook nbconvert exits non-zero on, times out on or writes no
+  output for, and an archive that cannot be extracted, are each recorded under
+  `converter_results.<name>.failed_inputs` in `ash_aggregated_results.json` with the
+  reason. With `fail_on_incomplete_scanners` on (the default) the scan exits 1
+  naming the converter and the files, as it does for a converter that crashed. A
+  `.gz` that is a single compressed file, such as `data.json.gz`, is not an archive
+  and is skipped. The progress line and the convert-complete event say how many
+  files could not be converted. `ash merge` combines every shard's converter row
+  (failures, failed and refused inputs, missing tools), and workspace mode applies
+  the same converter check to each project, which gains `incomplete_converters`.
+
+- **cfn-nag is given its staged template copy under a fixed name**: `template.json`
+  for a `.json` template, `template.yml` for `.yml`, and `template.yaml` otherwise,
+  so the `cfn_nag_scan` command line is the same whatever the template is called,
+  including on Windows, where `cfn_nag_scan` is a `.bat` wrapper. Findings name the
+  template itself.
+
+- **ASH refuses an output directory reached through a symlink, whatever the sandbox
+  mode.** Before a scan, ASH clears the `analysis`, `reports`, `scanners` and
+  `converted` directories under the output directory, writes its logs and results
+  there, and a sandbox mounts it. The scan stops, before anything is written, when
+  any of these is a symlink or a directory junction (detected on every supported
+  Python version): the output directory itself; a directory inside the scanned tree
+  on the way to it, however either path is spelled, or an in-tree output directory
+  whose real path is outside the tree; one of those four directories; or a file ASH
+  writes there by a fixed name (`ash.log`, `ash.log.jsonl`,
+  `ash_aggregated_results.json`, `ash-ignore-report.txt`,
+  `ash-scan-set-files-list.txt`). In workspace mode a link at `projects/` or
+  `.workspace-spool` stops the whole run, and a link at a project's
+  `projects/<key>`, or in that project's own output tree, fails that project with
+  the reason. The error names the link and says to pass `--output-dir`. This holds
+  in local, container, nix, workspace and MCP scans, and `ash report` and
+  `ash merge` refuse the same links below the current directory. An MCP scan whose
+  `.ash` or `.ash/ash_output` is a link is refused up front with `error_type`
+  `output_dir_not_permitted`; a link at a working directory or a fixed-name file
+  fails the scan with `ASH exited with code 1:`, the reason and a remedy for the MCP
+  caller. ASH opens the logs, the scan-set lists, the workspace results and the
+  reports it writes in place without following a link at their names. Links above
+  an output directory outside the scanned tree, such as `/tmp` on macOS, are
+  allowed.
+
+- **ASH does not start tools from its working directory or from the directory it
+  scans.** Tool lookup searches anchored PATH entries (absolute, with a drive on
+  Windows) and ASH's own bin directories only, and a program the operating system
+  would start from the working directory, or a path like `./tool`, is refused and
+  reported as a command that could not start. While a scan runs, a tool inside the
+  scanned directory is refused too, however its path is spelled, and the next copy on
+  PATH is used: under `uv run ash scan .` (which puts the repository's `.venv/bin`
+  first on PATH) or `npm run` (`node_modules/.bin`), a project-installed scanner is
+  skipped. With no other copy the scanner is MISSING, and its row's new
+  `missing_reason` and the incomplete-scan message name the in-tree path. The YAML
+  reporter and `ash report --format yaml` print `missing_reason` on every scanner row,
+  `null` where it does not apply. Programs ASH and its scanners start get a PATH
+  without the scanned directory's entries, unless in-tree tools are allowed, so a
+  `#!/usr/bin/env node` or a binstub cannot reach them either; that includes the shell
+  nix mode starts, where the inner scan is the running ASH's own interpreter, started
+  by absolute path. To run in-tree tools, pass `--allow-in-tree-tools` (also the
+  `allow_in_tree_tools` key of `--cli-json-input`) or set `ASH_ALLOW_IN_TREE_TOOLS` to
+  `1`, `true`, `yes` or `on`; each one is then logged by path. That covers the
+  programs the scanner sandbox starts (`bwrap`, `firejail`, `readlink`, `true`) too. A
+  repository's config cannot set it, and `ash mcp` never honors it, so install
+  scanners outside the repository for MCP use. Tools on anchored PATH entries are
+  found by the path the entry gives: system package managers, Homebrew, nix profiles,
+  uv and pipx shims, asdf and mise shims, conda, and on Windows Program Files,
+  `%LOCALAPPDATA%`, scoop and Chocolatey, with `.exe`, `.cmd` and `.bat` names. git
+  (for `--changed-files-only` and MCP source delivery), the Jupyter converter's direct
+  `jupyter-nbconvert`, the `node` cdk-nag's jsii runtime starts, and the sandbox's own
+  programs are run by absolute path.
 
 - **`ash dependencies install --tool` selects the archive converter as `archive`.**
   Every plugin is now listed and selected by its config key. The archive converter

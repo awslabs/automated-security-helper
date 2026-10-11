@@ -325,6 +325,9 @@ scanning; `run_ash_workspace_scan` scans it and returns the per-project verdict,
 registering one scan per project so progress and results can still be fetched
 project by project.
 
+Each project's coverage lists the converters that did not process their inputs in
+`incomplete_converters`, next to the scanners in `incomplete_scanners`.
+
 They differ from the single-directory tools in ways worth reading before you use
 them: the allowed roots are checked per project and one project outside them
 refuses the whole workspace, the workspace file and the workspace policy file are
@@ -422,6 +425,21 @@ mcp-resource-management:
 - `task_count_warning_threshold`: Task count warning threshold
 - `max_message_size_bytes`: Maximum message size in bytes
 - `max_directory_size_mb`: Maximum directory size in MB
+
+### Tools and output inside the scanned directory
+
+The server never runs a scanner or other tool found inside the scanned or delivered
+directory, such as a project's `.venv/bin` or `node_modules/.bin`, whatever
+`ASH_ALLOW_IN_TREE_TOOLS` says; install the scanners it uses outside the repository.
+A scan whose `<target>/.ash` or `<target>/.ash/ash_output` is a symlink is refused
+before it starts, with `error_type` `output_dir_not_permitted`. A scan with a symlink
+at a working directory or a file ASH writes in that output tree, such as `reports` or
+`ash.log`, fails before it writes anything, with `ASH exited with code 1:` followed by
+the link and what to do. `run_ash_workspace_scan` refuses the whole call when its
+`output_dir`, a directory or file ASH writes there, `projects/` or a project's
+`projects/<key>` is a symlink. See
+[Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory)
+and [Output directory](concepts.md#output-directory).
 
 ### Restricting which directories can be scanned
 

@@ -99,6 +99,12 @@ scanners:
 
 **Dependencies**: `cfn-nag` Ruby gem
 
+**Template copy**: cfn-nag is given a copy of each template, staged in its results
+directory as `template.json`, `template.yaml` or `template.yml` by the template's
+extension, and as `template.yaml` for any other extension. The `cfn_nag_scan` command
+line is therefore the same whatever the template is called, including on Windows,
+where `cfn_nag_scan` is a batch file. Findings name the original template.
+
 ---
 
 ### Checkov

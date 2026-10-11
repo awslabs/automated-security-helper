@@ -59,10 +59,23 @@ converters:
 ```
 
 **How conversion runs**: nbconvert is given a copy of the notebook in a directory
-that holds nothing else, and runs there rather than in the scanned tree. ASH picks the
-exporter: `python` for a Python notebook or one that names no language, `script`
+that holds nothing else, and runs there rather than in the scanned tree, so neither a
+module nor a template directory in the tree is used. The copy is named
+`notebook.ipynb`, whatever the notebook is called, because nbconvert reads its notebook
+argument as a glob pattern; the converted file is named after the original. ASH picks
+the exporter: `python` for a Python notebook or one that names no language, `script`
 otherwise. The copy has `metadata.language_info.nbconvert_exporter` removed, so the
-notebook does not choose the exporter class.
+notebook does not choose the exporter class, and keeps
+`metadata.language_info.file_extension` only when it is a plain extension such as
+`.r`.
+
+nbconvert is run with `uv tool run`. When uv cannot start, or reports that it could
+not run nbconvert (offline with nbconvert not in its cache, for one), ASH runs an
+installed `jupyter-nbconvert` by the absolute path it found on PATH or in ASH's own bin
+directories (`$ASH_BIN_PATH`, by default `~/.ash/bin`, and off Windows `/usr/local/bin`). It does not look for one
+in the working directory or through a relative PATH entry, and one inside the scanned
+tree, such as in an activated `.venv/bin` in the repository, is not run unless you
+allow it; see [Tools inside the scanned directory](../../advanced-usage.md#tools-inside-the-scanned-directory).
 
 **Key Features**:
 - Code cell extraction
@@ -148,6 +161,33 @@ tree, the archive member's name where there is one, and the reason:
 
 To have a skipped file converted, replace the link with the file itself.
 
+## Inputs a converter could not convert
+
+A notebook nbconvert could not convert (it exited non-zero, timed out, or wrote no
+output) and an archive that could not be extracted are recorded under
+`converter_results.<converter>.failed_inputs`, with the reason:
+
+```json
+"failed_inputs": [
+  {"path": "notebooks/report.ipynb", "reason": "nbconvert exited with code 1"}
+]
+```
+
+Other errors are recorded the same way, as `<Type>: <message>`. The progress line and
+the convert-complete event say how many files could not be converted.
+
+The scanners never saw those files in converted form, so with
+`fail_on_incomplete_scanners` on (the default) the scan exits 1 and names the
+converter and the files, as it does for a converter whose tool is missing while it
+had inputs.
+`ash merge` combines every shard's failed inputs, and workspace mode reports them
+per project in `incomplete_converters`.
+
+The archive converter takes `.zip`, `.tar` and `.gz` files. One that neither zipfile
+nor tarfile can read is a failed input, except a `.gz` that is a single compressed
+file rather than a tarball, such as `data.json.gz`: that is not an archive, has
+nothing to extract, and is skipped.
+
 ## Integration with Scanners
 
 Converters automatically prepare files for scanner consumption:
@@ -168,7 +208,7 @@ ash analysis.ipynb --scanners bandit,detect-secrets
 ```yaml
 converters:
   archive:
-    enabled: true                # Extraction errors are logged and the scan continues
+    enabled: true                # An archive that fails to extract is a failed input
 ```
 
 **Large archives**:
@@ -184,7 +224,7 @@ converters:
 ```yaml
 converters:
   jupyter:
-    enabled: true                # A notebook that will not parse is reported, not skipped silently
+    enabled: true                # A notebook that will not parse is a failed input
 ```
 
 ## Next Steps

@@ -429,3 +429,79 @@ Landlock there.
 
 Install bubblewrap and use `--sandbox bwrap` (or `auto`, which tries it first), run
 on a kernel with Landlock ABI 3 or later, or use container mode.
+
+## A Scanner Is MISSING Because It Was Found Only Inside the Scanned Tree
+
+**Symptom**
+
+A scanner you have installed is reported `MISSING`, and the scan exits 1 with a line like:
+
+```
+Found only inside the scanned tree, so not run: bandit (/home/me/repo/.venv/bin/bandit). To use them, install it outside the scanned tree, or set ASH_ALLOW_IN_TREE_TOOLS=1 or pass --allow-in-tree-tools to allow tools from the tree.
+```
+
+The scanner's row in `ash_aggregated_results.json` carries the same reason in `missing_reason`.
+
+**Cause**
+
+ASH does not start tools from inside the directory it scans. `uv run ash scan .` puts the repository's `.venv/bin` first on `PATH`, and `npm run` puts `node_modules/.bin` there, so a scanner installed as a project dependency is a file in the repository being scanned. ASH skips it and uses the next copy on `PATH`; with no other copy the scanner is `MISSING`. The programs the scanner sandbox starts (`bwrap`, `firejail`, `readlink`, `true`) are found the same way.
+
+**Fix**
+
+Install the scanner outside the repository, for example with `uv tool install bandit`, a system package or Homebrew, and run ASH as usual.
+
+Or, if you trust the repository's tools, allow them for this run:
+
+```bash
+ash scan --allow-in-tree-tools
+# or
+ASH_ALLOW_IN_TREE_TOOLS=1 ash scan
+```
+
+ASH then logs a warning naming each in-tree tool it uses. A repository's `.ash/.ash.yaml` cannot turn this on, and `ash mcp` ignores both, so for MCP use install the scanners outside the repository. See [Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory).
+
+## The Scan Stops Because Something in the Output Directory Is a Symlink
+
+**Symptom**
+
+The scan exits 1 before any scanner runs, with a message like:
+
+```
+ERROR (1) The output directory /home/me/out is a symlink. ASH does not write to, clear or mount its output directory through a link, whatever the sandbox mode. Pass --output-dir with a directory that is not a link, or replace the link with a directory.
+```
+
+The first sentence names the link; it can be a directory on the way to the output directory, a working directory such as `.ash/ash_output/reports`, or a file such as `.ash/ash_output/ash.log`. Over MCP the message ends with a remedy for the MCP caller instead.
+
+**Cause**
+
+Before a scan ASH removes and recreates `analysis`, `reports`, `scanners` and `converted` under the output directory, writes its logs and results there, and a sandboxed scan mounts it, so each of these has to be a real directory or file. ASH checks this in every sandbox mode and in local, container, nix, workspace and MCP scans, and `ash report` and `ash merge` check the same links below the current directory. In workspace mode a link at `projects/` or `.workspace-spool` stops the whole run, and a link at `projects/<key>` fails that project with the same message; over MCP, `run_ash_workspace_scan` refuses the whole call for either. See [Output directory](concepts.md#output-directory) for the full list.
+
+**Fix**
+
+Point `--output-dir` at a real directory:
+
+```bash
+ash scan --output-dir "$HOME/ash-output"
+```
+
+or replace the link with a directory. A link above an output directory outside the scanned tree, such as `/tmp` on macOS, is your own spelling and is accepted.
+
+## The Scan Exits 1 Because Conversion Was Incomplete
+
+**Symptom**
+
+```
+ERROR (1) Exiting because conversion was incomplete: 1 converter(s) did not process the files they were given
+  jupyter: could not convert 1 input: notebooks/report.ipynb
+```
+
+**Cause**
+
+A converter could not convert some of its inputs, so the scanners never saw those files in converted form: nbconvert exited non-zero, timed out or wrote no output for a notebook, or a `.zip`, `.tar` or `.gz` file is not an archive Python can read. Each is recorded under `converter_results.<converter>.failed_inputs` in `ash_aggregated_results.json`, with the reason. A `.gz` that is one compressed file rather than a tarball, such as `data.json.gz`, is not an archive and is skipped, not counted. `ash merge` combines every shard's failed inputs, and workspace mode reports them per project in `incomplete_converters`.
+
+A notebook's name is not the cause: nbconvert reads its notebook argument as a glob pattern and its output name as a format string, so ASH converts a copy named `notebook.ipynb` and names the result after the original, and `[x].ipynb` or `{a,b}.ipynb` convert. cfn-nag likewise is given a copy of each template named `template.json`, `template.yaml` or `template.yml`, so a template's name does not change how it is scanned, on Windows too.
+
+**Fix**
+
+Read the reason in `failed_inputs`, or rerun with `--debug` to see nbconvert's own error output. Then fix or remove the notebook or archive, exclude it with `ignore_paths`, disable the converter if its inputs are not wanted, or accept the partial scan with `--no-fail-on-incomplete-scanners`.
+

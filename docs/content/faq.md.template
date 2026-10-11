@@ -254,6 +254,15 @@ The validation system will log specific reasons why scanners might be disabled (
 
 For detailed information about the scanner validation system, see the [Scanner Validation System](developer-guide/scanner-validation-system.md) developer guide.
 
+### Why is a scanner MISSING when I run ASH with `uv run` or `npm run`?
+ASH does not start tools from inside the directory it scans, and `uv run` and `npm run` put the project's `.venv/bin` or `node_modules/.bin` first on `PATH`. Install the scanner outside the repository (for example `uv tool install bandit`), or allow in-tree tools for one run with `ash scan --allow-in-tree-tools` or `ASH_ALLOW_IN_TREE_TOOLS=1`. `ash mcp` never runs in-tree tools. See [Troubleshooting](docs/troubleshooting.md#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree).
+
+### Why does ASH refuse my output directory?
+Because it, a working directory or file ASH writes in it, or a directory inside the scanned tree on the way to it is a symlink. ASH clears and writes the output directory before a scan, so it refuses to do that through a link, whatever the sandbox mode. Pass `--output-dir` with a directory that is not a link. See [Troubleshooting](docs/troubleshooting.md#the-scan-stops-because-something-in-the-output-directory-is-a-symlink).
+
+### Why does the scan fail when a notebook or archive could not be converted?
+Those files went unscanned in converted form, so the scan is incomplete and exits 1, as it does when a scanner did not run. The reason for each file is in `converter_results.<converter>.failed_inputs`. A single compressed file such as `data.json.gz` is not an archive and is skipped. See [Troubleshooting](docs/troubleshooting.md#the-scan-exits-1-because-conversion-was-incomplete).
+
 ### How do I debug ASH?
 ```bash
 # Enable debug logging

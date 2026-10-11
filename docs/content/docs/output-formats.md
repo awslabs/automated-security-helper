@@ -382,6 +382,20 @@ reporters:
 
 ---
 
+## Completeness fields
+
+`ash_aggregated_results.json` records why a scan is incomplete, and the exit code is
+decided from these fields:
+
+- `scanner_results.<name>.missing_reason`: why a `MISSING` scanner did not run when
+  that was its tool being found only inside the scanned directory; it names the path.
+  The YAML reporter and `ash report --format yaml` print it on every scanner row,
+  `null` where it does not apply.
+- `converter_results.<name>.failed_inputs`: each input the converter could not
+  convert, with `path` and `reason`.
+- In workspace mode, each project's `incomplete_converters` lists the converters that
+  did not process their inputs, next to `incomplete_scanners`.
+
 ## Relationship between formats
 
 ```

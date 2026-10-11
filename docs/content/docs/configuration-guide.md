@@ -137,6 +137,11 @@ It selects on status, so it covers a failure only once that failure has reached 
 status. A tool that exits non-zero but writes an empty report is graded `PASSED` from
 its zero findings, and this key does not change that in any position.
 
+It covers converters too: a converter that crashed, one that could not convert some of
+its inputs (`converter_results.<name>.failed_inputs`), and one whose tool is missing
+while it had inputs make the scan exit 1, as an incomplete scanner does, in `ash merge`
+and per project in workspace mode as well.
+
 `SKIPPED` scanners are ones you did not select and never trip it, which is what
 keeps a sharded scan working: each shard excludes the scanners its siblings own,
 and those are recorded as `SKIPPED`. Narrowing a run with `--scanners` or

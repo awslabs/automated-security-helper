@@ -36,6 +36,14 @@ Container mode (`--mode container`) ignores the setting: the container is the bo
 and the image does not need bubblewrap. Nix mode composes with it: the inner scan that
 runs inside `nix develop` applies the sandbox to each scanner.
 
+ASH finds `bwrap` and `firejail`, and the `readlink` and `true` its probes run, the way
+it finds scanners: on absolute `PATH` entries and in ASH's own bin directory, never
+through the working directory, and not inside the scanned directory unless you pass
+`--allow-in-tree-tools` or set `ASH_ALLOW_IN_TREE_TOOLS=1`. One found only inside the
+scanned directory counts as not installed: `auto` moves on to the next backend, and a
+mode that names that backend reports its scanners MISSING. See
+[Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory).
+
 ## What a sandboxed scanner can do
 
 Every scanner subprocess gets the same baseline policy, plus what that scanner declares
@@ -112,14 +120,15 @@ it needs.
   tree, so the scanned repository could otherwise plant one pointing anywhere.
 - So is an output directory that is a symlink, or that is reached through one below
   the source directory (a committed `build -> /some/host/dir` scanned with
-  `--output-dir build/ash`), or whose real path differs from where its path inside
-  the source directory reads. A sandboxed scan stops with an error before ASH writes
-  anything there. Whether the sandbox is on is resolved the way the scan resolves
-  it, so a config file in the scanned tree or one an MCP client supplied cannot
-  turn the check off where it cannot turn the sandbox off; in workspace mode the
-  check applies when any project's scan is sandboxed. Links at or above the source
-  directory are your own and are not examined, and with the sandbox off the output
-  goes where you send it, as before.
+  `--output-dir build/ash`), however either path is spelled, or that is inside the
+  source directory by its path but outside it by its real path, or whose
+  `analysis`, `reports`, `scanners` or `converted` directory, or a file ASH writes
+  there by a fixed name such as `ash.log`, is one. The scan stops with an error that names the link before ASH
+  writes anything there, whatever the sandbox mode, since ASH clears and writes
+  those itself; pass `--output-dir` with a directory that is not a link. See
+  [Output directory](concepts.md#output-directory) for the full list. Links above an
+  output directory outside the source tree (`/tmp` on macOS) are your own and are
+  not examined.
 - ASH writes into the results directory after the scanner exits, and ASH is not
   sandboxed. So after every sandboxed spawn, and again after the scan, ASH removes
   every symlink and special file the scanner left there, and ASH's own writes there
