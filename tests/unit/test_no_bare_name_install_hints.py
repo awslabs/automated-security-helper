@@ -619,6 +619,25 @@ def test_a_file_the_gate_cannot_read_fails_it(tmp_path):
         _offenders(tmp_path)
 
 
+def test_the_mcp_testing_guide_keeps_the_checkouts_extras():
+    """Every ``uv sync`` command line in the guide keeps the developer's extras.
+
+    A plain ``uv sync`` is exact: it removes every package the lockfile's
+    default set does not name, so the cdk and symbols extras a developer
+    installed are gone after it (measured on a toy project with uv 0.12, which
+    also showed ``uv run`` and ``uv sync --inexact`` keeping them). The guide's
+    server config uses ``uv run``, so its repair steps must not undo that.
+    """
+    guide = REPO_ROOT / "docs" / "content" / "docs" / "MCP-SERVER-TESTING-GUIDE.md"
+    syncs = [
+        line.strip()
+        for line in guide.read_text(encoding="utf-8").splitlines()
+        if re.match(r"\s*uv sync\b", line)
+    ]
+    assert syncs, "the guide no longer gives a uv sync step; update this test"
+    assert [line for line in syncs if "--inexact" not in line] == [], syncs
+
+
 def test_the_example_plugin_package_depends_on_ash_by_path():
     """The example's live dependency on ASH is a path dependency on this checkout."""
     text = EXAMPLE_PYPROJECT.read_text(encoding="utf-8")

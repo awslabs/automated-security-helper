@@ -47,7 +47,7 @@ Update your MCP configuration file to point to your local development directory 
 ```
 
 **Key Parameters:**
-- `run --project=/path/to/your/automated-security-helper` - Runs the `ash` entry point from your checkout's project environment (its `.venv`), where uv installs ASH in editable mode, so code changes take effect when the server restarts. `uv run` syncs that environment to `uv.lock` first.
+- `run --project=/path/to/your/automated-security-helper` - Runs the `ash` entry point from your checkout's project environment (its `.venv`), where uv installs ASH in editable mode, so code changes take effect when the server restarts. `uv run` syncs that environment to `uv.lock` first, and keeps any extras you installed there (for example with `uv sync --extra cdk --extra symbols`).
 - `FASTMCP_LOG_LEVEL: DEBUG` - Enables detailed logging for debugging
 
 Do not use `uvx ... ash mcp` without `--from` here. `uvx` installs the package named by its first argument from the package index (PyPI by default), and the PyPI project named `ash` is unrelated to ASH.
@@ -435,10 +435,10 @@ result = await mcp_ash_get_scan_results(output_dir="/non/existent/path")
 **Solutions:**
 1. Check that the configuration runs `uv run --project=<your checkout>`. A `uvx` command installs a copy of ASH, which does not change when you edit the checkout.
 
-2. Reinstall ASH into the checkout's environment (needed after `pyproject.toml` changes, for example a new entry point):
+2. Reinstall ASH into the checkout's environment (needed after `pyproject.toml` changes, for example a new entry point). `--inexact` keeps the extras you installed; a plain `uv sync` removes them:
    ```bash
    cd /path/to/ash
-   uv sync --reinstall-package automated-security-helper
+   uv sync --inexact --reinstall-package automated-security-helper
    ```
 
 3. Verify configuration path is correct
@@ -454,10 +454,10 @@ ModuleNotFoundError: No module named 'automated_security_helper'
 **Solutions:**
 1. Ensure you're in the correct directory
 2. Check the `--project` path in the config
-3. Install dependencies into the checkout's environment:
+3. Install dependencies into the checkout's environment, keeping any extras already there:
    ```bash
    cd /path/to/ash
-   uv sync
+   uv sync --inexact
    ```
 
 ### Issue: Tools Not Found
