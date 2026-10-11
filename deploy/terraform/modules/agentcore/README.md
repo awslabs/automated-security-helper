@@ -65,10 +65,11 @@ session identity unless the operator states that the platform in front issues an
 authenticates it (`--trust-upstream-session-id`); without that, source delivery and
 the scan registry tools refuse. AgentCore does issue it, so the module sets
 `ASH_MCP_TRUST_UPSTREAM_SESSION_ID=true` in stateless mode, which the launcher maps
-to that flag. The Host side keeps the launcher's AgentCore default,
-`ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=true`, which passes `--trust-upstream-host-check`
-when `mcp_allowed_host` is empty: Host is on AgentCore's restricted-header list, so
-the platform restricts what reaches the container and no allowlist can name it.
+to that flag. The module also sets `ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=true`, rather
+than relying on the launcher's default, so the launcher passes
+`--trust-upstream-host-check` when `mcp_allowed_host` is empty: Host is on
+AgentCore's restricted-header list, so the platform restricts what reaches the
+container and no allowlist can name it.
 
 ## Why the auth header is allowlisted automatically
 

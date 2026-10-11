@@ -59,9 +59,14 @@ locals {
   # issues and authenticates Mcp-Session-Id, which AgentCore does. In stateless
   # mode ASH otherwise ignores the header and every session tool (source delivery,
   # the scan registry) refuses; the flag it maps to is valid only in stateless
-  # mode, so it is set only there. The Host side keeps the launcher's AgentCore
-  # default (trust the upstream Host check when no allowlist is given), because
-  # Host is on AgentCore's restricted-header list and no allowlist can name it.
+  # mode, so it is set only there.
+  #
+  # ASH_MCP_TRUST_UPSTREAM_HOST_CHECK states that something in front of ASH checks
+  # Host, which is AgentCore's position: Host is on its restricted-header list, so
+  # no allowlist can name it. Set explicitly rather than left to the launcher's
+  # default, so a change of that default cannot leave ASH refusing to start on
+  # 0.0.0.0. The launcher passes --trust-upstream-host-check only when
+  # mcp_allowed_host is empty, so a caller who names hosts still gets the allowlist.
   mcp_environment = {
     ASH_MCP_TRANSPORT                 = "streamable-http"
     ASH_MCP_HOST                      = "0.0.0.0"
@@ -69,6 +74,7 @@ locals {
     ASH_MCP_MOUNT_PATH                = var.mcp_mount_path
     ASH_MCP_STATELESS_HTTP            = var.mcp_stateless_http ? "true" : "false"
     ASH_MCP_TRUST_UPSTREAM_SESSION_ID = var.mcp_stateless_http ? "true" : "false"
+    ASH_MCP_TRUST_UPSTREAM_HOST_CHECK = "true"
     ASH_OFFLINE                       = var.ash_offline_mode ? "YES" : "NO"
     ASH_MCP_ALLOWED_HOSTS             = join(",", var.mcp_allowed_host)
     ASH_MCP_AUTH_HEADER_NAME          = local.use_auth_header ? var.mcp_auth_header_name : ""

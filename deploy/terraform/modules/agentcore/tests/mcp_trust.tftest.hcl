@@ -8,10 +8,11 @@
 # to `--trust-upstream-session-id` and defaults it to false, so this module has to set
 # it, and only in stateless mode, where the flag is valid.
 #
-# The Host side is the other way round: AgentCore cannot forward Host, so the module
-# relies on the launcher's AgentCore default (trust the upstream Host check) unless the
-# caller names an allowlist. The guard run below keeps a well-meant copy of the
-# Fargate setting from switching that off here.
+# The Host side: AgentCore cannot forward Host, so no allowlist can name it and the
+# platform is what restricts what reaches the container. The module states that with
+# ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=true rather than leaning on the launcher's
+# default, which can change; the launcher passes the flag only when the allowlist is
+# empty. The run below fails when the variable is absent, not only when it is false.
 #
 # Run with `terraform test` from this module directory after `terraform init
 # -backend=false`. Every provider call is mocked.
@@ -73,12 +74,12 @@ run "stateful_runtime_does_not_trust_a_session_header" {
   }
 }
 
-# Guard: AgentCore cannot forward Host, so the upstream Host check stays on.
+# AgentCore cannot forward Host, so the module states the upstream Host check itself.
 run "runtime_keeps_the_upstream_host_check" {
   command = plan
 
   assert {
-    condition     = lookup(aws_bedrockagentcore_agent_runtime.this.environment_variables, "ASH_MCP_TRUST_UPSTREAM_HOST_CHECK", "true") == "true"
-    error_message = "The AgentCore runtime switched off the upstream Host check with no allowlist to replace it, so ASH would refuse to start on 0.0.0.0."
+    condition     = lookup(aws_bedrockagentcore_agent_runtime.this.environment_variables, "ASH_MCP_TRUST_UPSTREAM_HOST_CHECK", "unset") == "true"
+    error_message = "The AgentCore runtime must set ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=true; left to the launcher's default, a change of that default leaves ASH refusing to start on 0.0.0.0. Got ${lookup(aws_bedrockagentcore_agent_runtime.this.environment_variables, "ASH_MCP_TRUST_UPSTREAM_HOST_CHECK", "unset")}."
   }
 }
