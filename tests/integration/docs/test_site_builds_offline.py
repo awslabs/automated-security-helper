@@ -8,8 +8,9 @@ privacy plugin would download. This builds the site the way the docs job does, w
 every proxy variable pointing at a local proxy that records each request and answers
 502, and requires that it receives none.
 
-The build is not --strict here. Strictness is the static check's job, and a broken
-link elsewhere in the docs must not hide whether the build used the network.
+The build runs with --no-strict, overriding mkdocs.yml's strict: true. Strictness is
+the static check's job and the docs job's, and a broken link elsewhere in the docs must
+not hide whether the build used the network.
 
 The proxy only sees requests that honor the proxy variables. The planted site below
 proves the one that matters does: the privacy plugin's download of an external image
@@ -75,6 +76,9 @@ def _build(config: Path, workdir: Path, proxy: RecordingProxy):
             "-m",
             "mkdocs",
             "build",
+            # mkdocs.yml sets strict: true (mike's builds need it); a broken link must
+            # not hide whether the build used the network, so this build is not strict.
+            "--no-strict",
             "--config-file",
             str(config),
             "--site-dir",
