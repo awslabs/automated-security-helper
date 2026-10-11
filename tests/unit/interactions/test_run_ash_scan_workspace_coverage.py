@@ -34,6 +34,8 @@ does with each outcome.
 
 from __future__ import annotations
 
+import json
+
 import logging
 import os
 import re
@@ -303,6 +305,39 @@ class TestRunWorkspaceModeSettings:
 
         assert _run_workspace_mode(opts, logger) is expected
         assert recorded["plans"][0] is plan
+
+    @pytest.mark.parametrize("inner", [True, False], ids=["inner run", "own run"])
+    def test_the_inner_run_of_a_container_scan_marks_its_results_completed(
+        self, recorded_workspace_execution, logger, tmp_path, monkeypatch, inner
+    ):
+        """The outer process reads the unified file back only with this marker."""
+        expected = _run_result(tmp_path)
+        expected.results_path.parent.mkdir(parents=True)
+        expected.results_path.write_text(json.dumps({"name": "unified"}))
+        recorded_workspace_execution(result=expected)
+        run_id = "0123456789abcdef0123456789abcdef"
+        if inner:
+            monkeypatch.setenv("ASH_OUTER_RUN_ID", run_id)
+        else:
+            monkeypatch.delenv("ASH_OUTER_RUN_ID", raising=False)
+        opts = ScanOptions(
+            source_dir=tmp_path,
+            output_dir=tmp_path / "out",
+            workspace_plan=_plan(tmp_path, "api"),
+        )
+
+        _run_workspace_mode(opts, logger)
+
+        written = json.loads(expected.results_path.read_text())
+        markers = [
+            checkpoint
+            for checkpoint in written.get("validation_checkpoints", [])
+            if checkpoint.get("type") == "run_completed"
+        ]
+        if inner:
+            assert [m["metadata"]["run_id"] for m in markers] == [run_id]
+        else:
+            assert markers == []
 
     def test_the_root_configs_parallelism_bound_reaches_the_settings(
         self, recorded_workspace_execution, logger, tmp_path

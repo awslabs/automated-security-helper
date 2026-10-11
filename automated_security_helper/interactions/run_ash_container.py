@@ -39,6 +39,7 @@ from automated_security_helper.utils.subprocess_utils import (
     create_completed_process,
     raise_called_process_error,
 )
+from automated_security_helper.utils.inner_run_outcome import OUTER_RUN_ID_ENV
 from automated_security_helper.utils.log import ASH_LOGGER
 
 # Pattern for safe git revision values: alphanumeric, dots, hyphens, underscores, forward slashes
@@ -800,10 +801,13 @@ def _assemble_run_command(
     shard_index: int | None = None,
     shard_count: int | None = None,
     fail_on_incomplete_scanners: bool | None = None,
+    outer_run_id: str | None = None,
 ) -> List[str]:
     """Assemble the full `docker run` command list.
 
     Args:
+        outer_run_id: Handed to the in-container run, which writes it into its
+            results file when it completes (utils/inner_run_outcome.py).
         fail_on_incomplete_scanners: Whether the in-container scan should fail
             when a selected scanner did not complete, or None for unset. Defaults
             to None so that the many existing callers -- most of them tests
@@ -841,6 +845,8 @@ def _assemble_run_command(
             f"ASH_DEBUG={'YES' if debug else 'NO'}",
         ]
     )
+    if outer_run_id is not None:
+        cmd.extend(["-e", f"{OUTER_RUN_ID_ENV}={outer_run_id}"])
 
     # Source dir mount
     mount_source = f"type=bind,source={source_dir},destination=/src"
@@ -1076,6 +1082,7 @@ def run_ash_container(
     allow_missing_projects: bool = False,
     shard_index: int | None = None,
     shard_count: int | None = None,
+    outer_run_id: str | None = None,
 ):
     """Build and run the ASH container image.
 
@@ -1106,6 +1113,8 @@ def run_ash_container(
             have every shard scan the whole repository, and merging does not
             deduplicate -- see _run_container_mode's docstring.
         shard_count: Total shard count, forwarded alongside shard_index.
+        outer_run_id: Handed to the in-container run, which writes it into its
+            results file when it completes (utils/inner_run_outcome.py).
 
     Returns:
         CompletedProcess: The result of the container execution
@@ -1359,6 +1368,7 @@ def run_ash_container(
             allow_missing_projects=allow_missing_projects,
             shard_index=shard_index,
             shard_count=shard_count,
+            outer_run_id=outer_run_id,
         )
 
         return _execute_container(run_cmd, debug=debug)

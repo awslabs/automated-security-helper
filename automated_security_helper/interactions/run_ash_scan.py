@@ -89,6 +89,15 @@ from automated_security_helper.utils.report_path_links import (
     linked_report_path,
     refuse_a_linked_reports_dir,
 )
+from automated_security_helper.utils.inner_run_outcome import (
+    as_seen_from_the_host,
+    mark_results_file_completed,
+    mark_run_completed,
+    new_outer_run_id,
+    outer_run_id_from_environment,
+    read_back_outcome,
+    record_report_refusal,
+)
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
@@ -1152,10 +1161,13 @@ class ScanIncompleteExit(SystemExit):
 
 
 class ReportPathRefusedExit(SystemExit):
-    """``sys.exit(1)`` for a run refused because a report path is a link, with the reason.
+    """``sys.exit(1)`` for a run whose reports were refused, with the reason.
 
-    A ``SystemExit`` with code 1, so the CLI's exit code is that of any other error.
-    ``reason`` is the message printed to the console, which names the link; an
+    Raised when a report path is a link, when a file name a reporter would write is
+    not a file in the reports directory, and in container and nix mode when the
+    inner run recorded either refusal in its results file. A ``SystemExit`` with
+    code 1, so the CLI's exit code is that of any other error. ``reason`` is the
+    message printed to the console, which names the link or the file name; an
     in-process caller (the MCP scan runner) reports it rather than a bare "exited
     with code 1". See utils/report_path_links.py.
     """
@@ -1168,6 +1180,67 @@ class ReportPathRefusedExit(SystemExit):
 def _refuse_report_path_link(refusal: ReportPathRefused) -> NoReturn:
     print(f"[bold red]ERROR (1) {escape_markup(str(refusal))}[/bold red]")
     raise ReportPathRefusedExit(str(refusal)) from refusal
+
+
+def _record_inner_report_refusal(
+    opts: ScanOptions, refusal: ReportPathRefused, logger
+) -> None:
+    """As the inner run of a container or nix scan, record ``refusal`` for the outer process."""
+    run_id = outer_run_id_from_environment()
+    if run_id is None:
+        return
+    results_file = opts.output_dir / "ash_aggregated_results.json"
+    if not record_report_refusal(results_file, str(refusal), run_id, opts.output_dir):
+        logger.warning(
+            f"Could not record the refusal in {results_file}; the outer process "
+            "will report that this run did not complete."
+        )
+
+
+def _refuse_an_inner_run_that_did_not_complete(
+    results: AshAggregatedResults,
+    opts: ScanOptions,
+    run_id: str,
+    mode: str,
+    output_file: Path,
+    logger,
+) -> None:
+    """Refuse the read-back of an inner run that did not record its completion.
+
+    The inner run's status is a verdict this process re-derives, and 1 is also what
+    a refused or failed inner run exits with, so the results file has to say that
+    the run with this ID completed (utils/inner_run_outcome.py). A refusal the inner
+    run recorded is reported with its message, given with this process's view of
+    the output directory.
+    """
+    outcome = read_back_outcome(results, run_id)
+    if outcome.refusal is not None:
+        reason = as_seen_from_the_host(
+            outcome.refusal, outcome.inner_output_dir, opts.output_dir.as_posix()
+        )
+        print(f"[bold red]ERROR (1) {escape_markup(reason)}[/bold red]")
+        raise ReportPathRefusedExit(reason)
+    if outcome.completed:
+        return
+    if outcome.marked_by_another_run:
+        found = "holds only records an earlier run wrote"
+    else:
+        found = "holds no record that the run completed"
+    # The inner ASH is the image's in container mode, and the first `ash` on PATH
+    # inside the Nix shell in nix mode; either can be older than this one.
+    older = (
+        " An ASH older than this one does not write that record: rebuild the image "
+        "from this ASH."
+        if mode == "container"
+        else " An ASH older than this one does not write that record: make this ASH "
+        "the first `ash` on PATH."
+    )
+    logger.error(
+        f"The {mode} run did not complete, so its results are not read back: "
+        f"{output_file} {found}. The run's own output above says what stopped it."
+        f"{older}"
+    )
+    sys.exit(1)
 
 
 def _refuse_links_left_in_reports(opts: ScanOptions) -> None:
@@ -1674,7 +1747,12 @@ def _run_container_mode(
         # discarding a report from a run that did.
         _discard_prior_run_artifacts(opts, logger)
 
+    # Written into the results file by the in-container run when it completes, so a
+    # file it did not finish is not read back as a verdict. See
+    # utils/inner_run_outcome.py.
+    outer_run_id = new_outer_run_id()
     container_result = run_ash_container(
+        outer_run_id=outer_run_id,
         source_dir=opts.source_dir,
         output_dir=opts.output_dir,
         offline=opts.offline,
@@ -1834,10 +1912,14 @@ def _run_container_mode(
         with open(output_file, mode="r", encoding="utf-8") as f:
             content = f.read()
         try:
-            return AshAggregatedResults.model_validate_json(content)
+            results = AshAggregatedResults.model_validate_json(content)
         except Exception as e:
             logger.error(f"Failed to parse results file: {e}")
             sys.exit(1)
+        _refuse_an_inner_run_that_did_not_complete(
+            results, opts, outer_run_id, "container", output_file, logger
+        )
+        return results
     else:
         logger.error(f"Results file not found at {output_file}")
         sys.exit(1)
@@ -1862,8 +1944,11 @@ def _run_nix_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
     # that exists on PATH and fails is otherwise indistinguishable from a scan that ran.
     _discard_prior_run_artifacts(opts, logger)
 
+    # Written into the results file by the inner run when it completes, so a file it
+    # did not finish is not read back as a verdict. See utils/inner_run_outcome.py.
+    outer_run_id = new_outer_run_id()
     try:
-        nix_result = run_ash_nix(debug=opts.debug)
+        nix_result = run_ash_nix(debug=opts.debug, outer_run_id=outer_run_id)
     except NixModeRefused as e:
         # `nix` missing, or the recursion guard. A refusal, so a message and exit 1 like
         # the CLI's other refused invocations (cli/scan.py:_fail_usage), not a traceback.
@@ -1892,10 +1977,14 @@ def _run_nix_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
         with open(output_file, mode="r", encoding="utf-8") as f:
             content = f.read()
         try:
-            return AshAggregatedResults.model_validate_json(content)
+            results = AshAggregatedResults.model_validate_json(content)
         except Exception as e:
             logger.error(f"Failed to parse results file: {e}")
             sys.exit(1)
+        _refuse_an_inner_run_that_did_not_complete(
+            results, opts, outer_run_id, "nix", output_file, logger
+        )
+        return results
     else:
         # No results file means the inner scan never got far enough to write one, so the
         # shell's own exit code is the only diagnostic available. Reporting it here is the
@@ -2099,6 +2188,10 @@ def _run_local_mode(
                     results.sarif.model_dump_json(indent=2, by_alias=True),
                 )
 
+        # The run completed: as the inner run of a container or nix scan, say so for
+        # the outer process, replacing any record an earlier run left in a results
+        # file read back with --use-existing. See utils/inner_run_outcome.py.
+        mark_run_completed(results, outer_run_id_from_environment())
         if isinstance(results, BaseModel):
             content = results.model_dump_json(indent=2, by_alias=True)
         else:
@@ -2134,7 +2227,11 @@ def _run_local_mode(
     except ReportPathRefused as e:
         # The report phase refused before any reporter wrote: a link is at the
         # reports directory or at a report file, or a report file name is not a
-        # file in the reports directory. Not a fault, so no traceback.
+        # file in the reports directory. Not a fault, so no traceback. As the inner
+        # run of a container or nix scan, recorded in the results file the scan left
+        # for the outer process; if that fails, the outer process finds no record of
+        # this run's completion and exits 1 all the same.
+        _record_inner_report_refusal(opts, e, logger)
         _refuse_report_path_link(e)
     except Exception as e:
         logger.exception(e)
@@ -2364,7 +2461,13 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
         _offline_previous = apply_environ_overrides({"ASH_OFFLINE": "YES"})
 
     try:
-        return execute_workspace(opts.workspace_plan, settings)
+        result = execute_workspace(opts.workspace_plan, settings)
+        run_id = outer_run_id_from_environment()
+        if run_id is not None:
+            # The inner run of a container scan: say it completed, for the outer
+            # process. See utils/inner_run_outcome.py.
+            mark_results_file_completed(result.results_path, run_id)
+        return result
     except WorkspaceDefinitionError as exc:
         # A refusal, not a project failure: nothing was scanned, so there is no
         # results file and the exit-2 collision is unambiguous. See
@@ -2375,8 +2478,8 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
         print(f"[bold red]ERROR (3) Invalid configuration: {exc}[/bold red]")
         sys.exit(int(WorkspaceExitCode.INVALID_PROJECT_CONFIG))
     except ReportPathRefused as exc:
-        # Exit 1, as in a single-directory scan: a link at a report path is not a
-        # workspace definition error.
+        # Exit 1, as in a single-directory scan: a link at a report path, or a file
+        # name outside the reports directory, is not a workspace definition error.
         _refuse_report_path_link(exc)
     except Exception as exc:
         logger.exception(exc)

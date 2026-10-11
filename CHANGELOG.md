@@ -779,7 +779,9 @@
   when its report step starts if a link appeared in the meantime. In container and
   nix mode, where the outer process re-derives the verdict from the results file,
   it exits 1 too when a link is directly in `reports/` after the inner run, rather
-  than reading the results back. The exit code is never counted from a
+  than reading the results back, and when the inner run refused a report file name,
+  which leaves nothing in `reports/`; see the entry on container and nix read-back.
+  The exit code is never counted from a
   `reports/ash.sarif` that is a link. A fresh scan removes `reports/` and anything in
   it while setting up its directories, so a link left there by an earlier run is
   cleared rather than refused, as before. A regular file at a report path is still
@@ -794,6 +796,20 @@
   than failing with `FileExistsError`, each write checks again that `reports/` is
   not a link, and the exit code is not read through a `reports/ash.sarif` link
   even when `fail_on_findings` is off.
+
+- **Container and nix mode read the inner run's results back only when that run
+  completed.** The outer process gives the inner run an ID (`ASH_OUTER_RUN_ID`).
+  The inner run writes it into `ash_aggregated_results.json` as a `run_completed`
+  validation checkpoint when it completes, or with the refusal as a
+  `report_path_refused` checkpoint when its reports are refused. With the refusal
+  the outer process exits 1 with the inner run's message, giving paths as the host
+  sees them; without either record for its own ID it exits 1, saying the inner run
+  did not complete and naming the results file. That covers a refused report file
+  name, which leaves nothing in `reports/`, a refusal whose record could not be
+  written, and an inner run that failed after the scan phase had written the
+  results file, which used to be read back as a verdict. A record an earlier run
+  left in a file read back with `--use-existing` is ignored, and is dropped when
+  the file is loaded, so reports do not repeat it.
 
 ### Breaking changes
 
@@ -831,6 +847,15 @@
     `fail_on_incomplete_scanners` that the operator set.
   - A single-directory scan is unchanged: there `--config` replaces discovery, and
     the repository's own config is not read.
+
+- **Container mode needs an image built from this ASH.** Container and nix mode
+  read the inner run's results back only when the inner run recorded that it
+  completed, which an ASH older than this one does not do. An image built from an
+  older ASH, for example with `--ash-revision-to-install` naming an older release,
+  or a `--no-build` run of an older image, now exits 1 with an error that says the
+  inner run did not complete and names the results file. Build the image from this
+  ASH. In nix mode the inner run is the first `ash` on `PATH` inside the Nix shell,
+  normally this one.
 
 - **MCP scans can now end in a new terminal status, `incomplete`.** Clients
   should treat it as terminal with partial coverage: the run finished and its

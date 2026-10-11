@@ -21,7 +21,9 @@ the workspace report step before a project is scanned and again before it writes
 and by ``ash report`` for the files a reporter writes itself. run_ash_scan also
 uses it where ASH reads a report back: container and nix mode before reading the
 inner run's results, and ``_compute_exit_code`` before it counts
-``reports/ash.sarif``. A ``reports/`` that is itself a link, dangling or not, is
+``reports/ash.sarif``. In container and nix mode the inner run also records a
+refusal in its results file, since a refused file name leaves nothing in
+``reports/`` for the outer process to find; see utils/inner_run_outcome.py. A ``reports/`` that is itself a link, dangling or not, is
 refused before anything creates or clears it (``ensure_reports_dir``, the
 orchestrator's directory setup, and container and nix mode before they clear the
 output directory).

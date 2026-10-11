@@ -32,6 +32,7 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.inner_run_outcome import without_run_records
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_path_links import (
     ensure_reports_dir,
@@ -566,6 +567,12 @@ class ASHScanOrchestrator(BaseModel):
 
                     # Load the model from the existing results
                     asharp_model = AshAggregatedResults.from_json(model_data)
+                    # Without the records an earlier container or nix run left
+                    # about itself, before any reporter sees the model. See
+                    # utils/inner_run_outcome.py.
+                    asharp_model.validation_checkpoints = without_run_records(
+                        asharp_model.validation_checkpoints
+                    )
 
                     # Update the execution engine's model
                     if self.execution_engine is not None and hasattr(

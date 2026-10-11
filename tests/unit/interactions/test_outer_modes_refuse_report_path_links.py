@@ -29,6 +29,7 @@ from automated_security_helper.interactions.run_ash_scan import (
     _run_nix_mode,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.utils.inner_run_outcome import mark_run_completed
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
 pytestmark = pytest.mark.skipif(
@@ -155,9 +156,11 @@ def test_a_container_run_without_a_link_is_read_back(tmp_path):
         reports = opts.output_dir / "reports"
         reports.mkdir(parents=True, exist_ok=True)
         (reports / "ash.sarif").write_text("{}", encoding="utf-8")
+        results = AshAggregatedResults(name="read back")
+        # The marker the in-container run writes when it completes.
+        mark_run_completed(results, kwargs["outer_run_id"])
         (opts.output_dir / "ash_aggregated_results.json").write_text(
-            AshAggregatedResults(name="read back").model_dump_json(by_alias=True),
-            encoding="utf-8",
+            results.model_dump_json(by_alias=True), encoding="utf-8"
         )
         return create_completed_process(
             args=["run"], returncode=0, stdout="", stderr=""

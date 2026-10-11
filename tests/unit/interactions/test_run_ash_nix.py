@@ -224,6 +224,31 @@ class TestRunAshNix:
         assert "--mode" in captured["cmd"]
         assert captured["cmd"][captured["cmd"].index("--mode") + 1] == "local"
 
+    def test_child_environment_carries_the_outer_run_id(self, monkeypatch):
+        """The inner run writes it into its results file (utils/inner_run_outcome.py)."""
+        monkeypatch.delenv(ASH_IN_NIX_ENV_VAR, raising=False)
+        monkeypatch.setenv(ASH_NIX_FLAKE_REF_ENV_VAR, "path:/repo")
+        monkeypatch.setattr(
+            "automated_security_helper.interactions.run_ash_nix.find_executable",
+            lambda _: "/usr/bin/nix",
+        )
+        captured = {}
+
+        def fake_run(cmd, env=None, check=None, text=None):
+            captured["env"] = env
+            return subprocess.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(
+            "automated_security_helper.interactions.run_ash_nix.subprocess.run",
+            fake_run,
+        )
+
+        run_ash_nix(argv=["scan"], outer_run_id="0123456789abcdef0123456789abcdef")
+
+        assert captured["env"]["ASH_OUTER_RUN_ID"] == (
+            "0123456789abcdef0123456789abcdef"
+        )
+
     def test_nonzero_exit_is_returned_rather_than_raised(self, monkeypatch):
         # A scan that finds something exits non-zero by design. Raising here would turn a
         # working scan into an error.

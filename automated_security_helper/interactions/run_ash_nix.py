@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from automated_security_helper.core.constants import ASH_REPO_URL
+from automated_security_helper.utils.inner_run_outcome import OUTER_RUN_ID_ENV
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import find_executable
 
@@ -160,8 +161,12 @@ def run_ash_nix(
     argv: Optional[List[str]] = None,
     flake_ref: Optional[str] = None,
     debug: bool = False,
+    outer_run_id: Optional[str] = None,
 ) -> subprocess.CompletedProcess:
     """Re-execute this scan inside a Nix shell holding the pinned scanners.
+
+    ``outer_run_id`` is handed to the inner run, which writes it into its results
+    file when it completes (utils/inner_run_outcome.py).
 
     Raises:
         NixModeRefused: if `nix` is not installed, or if called from inside a Nix-mode run.
@@ -196,6 +201,8 @@ def run_ash_nix(
     # `uv tool install` from fetching their own copies and shadowing the pinned ones.
     # utils/uv_tool_runner.py takes its skip-installation path when this is set.
     env["ASH_OFFLINE"] = "YES"
+    if outer_run_id is not None:
+        env[OUTER_RUN_ID_ENV] = outer_run_id
 
     ASH_LOGGER.info(f"Entering Nix shell from flake: {resolved_ref}")
     ASH_LOGGER.debug(f"Nix command: {' '.join(cmd)}")

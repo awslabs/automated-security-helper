@@ -56,7 +56,13 @@ is scanned, and container and nix mode exit 1 when a link is left in `reports/` 
 the inner run. A regular file at one of those names is replaced as before. A
 reporter's report file name that is not a file in the reports directory (an
 `extension` with `/`, `\` or `..` that its config did not replace with the
-default) stops the run with exit 1 the same way.
+default), or such a name among the files a reporter writes beside its report, stops
+the run with exit 1 the same way, in container and nix mode too. There the inner run
+records the refusal in `ash_aggregated_results.json` as a `report_path_refused`
+validation checkpoint, and the outer process exits 1 with its message. The outer
+process reads the inner run's results back only when they carry a `run_completed`
+checkpoint with the ID it gave that run (`ASH_OUTER_RUN_ID`); otherwise it exits 1,
+saying the inner run did not complete.
 
 ---
 

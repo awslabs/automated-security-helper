@@ -204,6 +204,15 @@ def test_assemble_run_command_image_argument_position():
     assert img_idx < ash_idx
 
 
+def test_assemble_run_command_passes_the_outer_run_id():
+    """The in-container run writes it into its results file."""
+    run_id = "0123456789abcdef0123456789abcdef"
+    cmd = _assemble_run_command(**_base_assemble_kwargs(outer_run_id=run_id))
+    index = cmd.index(f"ASH_OUTER_RUN_ID={run_id}")
+    assert cmd[index - 1] == "-e"
+    assert index < cmd.index("automated-security-helper:non-root")
+
+
 def test_assemble_run_command_offline_uses_network_none():
     """--network=none is added when offline=True."""
     cmd = _assemble_run_command(**_base_assemble_kwargs(offline=True))

@@ -287,7 +287,12 @@ def container_result(monkeypatch):
     the call, because ``_run_container_mode`` now removes any results file that predates
     the invocation -- a pre-seeded file is exactly what a previous run leaves behind, and
     the whole point of the removal is that the two cannot be told apart afterwards.
+    The file then gets the completion marker the in-container run writes, as that run
+    would (utils/inner_run_outcome.py).
     """
+    from automated_security_helper.utils.inner_run_outcome import (
+        mark_results_file_completed,
+    )
 
     def install(returncode=0, stdout="", stderr="", results_content=None):
         result = create_completed_process(
@@ -301,9 +306,10 @@ def container_result(monkeypatch):
             if results_content is not None:
                 output_dir = Path(kwargs["output_dir"])
                 output_dir.mkdir(parents=True, exist_ok=True)
-                output_dir.joinpath("ash_aggregated_results.json").write_text(
-                    results_content, encoding="utf-8"
-                )
+                results_file = output_dir.joinpath("ash_aggregated_results.json")
+                results_file.write_text(results_content, encoding="utf-8")
+                # A file that does not parse stays as written.
+                mark_results_file_completed(results_file, kwargs["outer_run_id"])
             return result
 
         monkeypatch.setattr(ras, "run_ash_container", fake_run_ash_container)
