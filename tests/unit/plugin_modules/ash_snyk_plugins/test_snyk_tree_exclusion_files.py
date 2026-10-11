@@ -109,6 +109,7 @@ def _write(context: PluginContext, name: str, text: str) -> Path:
         ("policy.snyk", "exclude:\n  global:\n    - app.js\n"),
         ("tests.gitignore", "app.js\n"),
         (".snyk", "exclude: {global: [app.js\n"),
+        (".snyk", "exclude: " + "[" * 3000 + "\n"),
     ],
     ids=[
         "global",
@@ -119,6 +120,7 @@ def _write(context: PluginContext, name: str, text: str) -> Path:
         "suffixed-snyk",
         "suffixed-gitignore",
         "unparseable",
+        "nested-too-deep-to-parse",
     ],
 )
 def test_a_tree_exclusion_file_refuses_the_scan(

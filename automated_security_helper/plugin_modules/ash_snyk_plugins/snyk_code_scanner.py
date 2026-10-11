@@ -96,7 +96,9 @@ def _excludes(path: Path, root: Path) -> bool:
         )
     try:
         policy = yaml.safe_load(text)
-    except yaml.YAMLError:
+    except (yaml.YAMLError, RecursionError, ValueError):
+        # RecursionError: nesting deeper than the parser's stack. Unreadable as
+        # a policy, so it counts, like any file that cannot be parsed.
         return True
     exclude = policy.get("exclude") if isinstance(policy, dict) else None
     return isinstance(exclude, dict) and any(
