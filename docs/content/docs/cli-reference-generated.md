@@ -64,7 +64,7 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir.
 | `--run/--no-run`, `-r/-R` | bool | True |  | Whether to run the ASH container image |
 | `--force` | bool | False |  | Force rebuild of the ASH container image |
 | `--oci-runner`, `--oci`, `--runner`, `-o` | str |  | OCI_RUNNER | Use the specified OCI runner instead of docker to run the containerized tools |
-| `--build-target` | enum(non-root, ci) |  |  | The ASH image stage to build and run: 'non-root' (an unprivileged user, the default) or 'ci' (root). CI environment variables do not change it; --custom-containerfile builds on 'ci'. |
+| `--build-target` | enum(non-root, ci) |  |  | The ASH image stage to build and run: 'non-root' (an unprivileged user, the default) or 'ci' (root, the default on Windows). CI environment variables do not change it; --custom-containerfile builds on 'ci'. |
 | `--container-uid`, `-u` | str |  |  | UID to use for the container user |
 | `--container-gid`, `-g` | str |  |  | GID to use for the container user |
 | `--ash-revision-to-install` | str |  |  | ASH branch or tag to install in the container image for usage during containerized scans |
@@ -84,7 +84,7 @@ Builds the ASH container image then runs a scan with it.
 | `--force`, `-f` | bool | False |  | Force rebuild of the ASH container image |
 | `--oci-runner`, `--oci`, `--runner`, `-r` | str |  | OCI_RUNNER | Use the specified OCI runner instead of docker to run the containerized tools. To prefix every OCI command with a wrapper (e.g. sudo), set the OCI_RUNNER_WRAPPER environment variable instead of using this option (e.g. OCI_RUNNER_WRAPPER=sudo ash ...). |
 | `--container-network` | str | `bridge` |  | Docker network mode for the container run (e.g. 'bridge', 'none', 'host'). Pass 'none' to force offline/airgapped network isolation independently of --offline. |
-| `--build-target` | enum(non-root, ci) | `non-root` |  | The ASH image stage to build: 'non-root' (an unprivileged user) or 'ci' (root). Always 'ci' on Windows. CI environment variables do not change it. |
+| `--build-target` | enum(non-root, ci) |  |  | The ASH image stage to build: 'non-root' (an unprivileged user, the default) or 'ci' (root, the default on Windows). CI environment variables do not change it. |
 | `--offline-semgrep-rulesets` | str | `p/ci` |  | Specify Semgrep rulesets for use in ASH offline mode |
 | `--container-uid`, `-u` | str |  |  | UID to use for the container user |
 | `--container-gid`, `-g` | str |  |  | GID to use for the container user |

@@ -143,8 +143,10 @@
   empty value included), overriding an explicit `--build-target non-root`; `Invoke-ASH`
   defaulted to `ci` under `CI`, `IsCI` or `CODEBUILD_BUILD_ID` the same way. The stage
   is now the one `--build-target` (`-BuildTarget`) names, and `non-root` when none is
-  given. `ci` is still built on request, under `--custom-containerfile`, and by
-  `ash build-image` and `Invoke-ASH` on Windows. **What this changes for CI jobs:** a job
+  given (`ci` on Windows, for `ash build-image`, `ash --mode container` and
+  `Invoke-ASH` alike; `ash build-image` used to force `ci` there over an explicit
+  `--build-target`, and `ash --mode container` built `non-root`). `ci` is also built
+  on request and under `--custom-containerfile`. **What this changes for CI jobs:** a job
   that did not pass `--build-target` now gets the `non-root` image (and the
   `automated-security-helper:non-root` tag, and its own layer-cache scope on GitHub
   Actions). A job that runs as root (AWS CodeBuild, container-based GitLab or Jenkins

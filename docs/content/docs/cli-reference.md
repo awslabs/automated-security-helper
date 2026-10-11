@@ -169,7 +169,7 @@ ash [options]
 | `--offline-semgrep-rulesets`  | Semgrep rulesets for offline mode                       | `p/ci`                |                         |
 | `--build/--no-build`, `-b/-B` | Whether to build the ASH container image                | `True`                |                         |
 | `--run/--no-run`, `-r/-R`     | Whether to run the ASH container image                  | `True`                |                         |
-| `--build-target`              | Container build target: `non-root` or `ci` (runs as root). CI environment variables do not change it | `non-root`            |                         |
+| `--build-target`              | Container build target: `non-root` or `ci` (runs as root). CI environment variables do not change it | `non-root` (`ci` on Windows) |                  |
 | `--oci-runner`, `-o`          | OCI runner to use. Unset by default; ASH uses the first of `finch`, `docker`, `nerdctl`, `podman` found on `PATH`                                       | first found              | `OCI_RUNNER`            |
 | `--python-only/--full`        | Use only Python-based plugins                           | `False`               |                         |
 | `--cleanup`                   | Clean up temporary files after scan                     | `False`               |                         |
@@ -224,7 +224,8 @@ exit code. `--log-level` is passed too, so the log inside the container is kept 
 level asked for. `--min-severity` stays on the host, which applies it to the results it
 reads back.
 
-The image stage is the one `--build-target` names, `non-root` when it is not given. The
+The image stage is the one `--build-target` names; when it is not given, `non-root`, or
+`ci` on Windows, where the non-root user cannot write the bind-mounted output. The
 `CI`, `IsCI`, `ISCI` and `CODEBUILD_BUILD_ID` variables do not change it;
 `--custom-containerfile` builds on `ci`. A `non-root` build is refused when the
 container user's UID would be 0, which happens when ASH itself runs as root (common in CI

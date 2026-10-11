@@ -45,9 +45,10 @@ Two build targets exist:
 | `non-root` | An unprivileged user | The default. Prefer it. |
 | `ci` | Root | The runner's UID/GID mapping makes an unprivileged user impractical |
 
-`non-root` is the default everywhere except `ash build-image` on Windows, which builds `ci`
-because the non-root user cannot write the bind-mounted output directory there. Running
-in CI does not change the default: `CI`, `IsCI`, `ISCI` and `CODEBUILD_BUILD_ID` play no
+`non-root` is the default everywhere except Windows, where `ash build-image` and
+`ash --mode container` build `ci` when no stage is given, because the non-root user
+cannot write the bind-mounted output directory there. Running in CI does not change the
+default: `CI`, `IsCI`, `ISCI` and `CODEBUILD_BUILD_ID` play no
 part, and an explicit `--build-target` always wins. `--custom-containerfile` builds on
 `ci` (see [Extending the image](#extending-the-image)).
 

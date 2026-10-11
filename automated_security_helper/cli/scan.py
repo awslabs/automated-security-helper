@@ -552,7 +552,7 @@ def run_ash_scan_cli_command(
         BuildTarget | None,
         typer.Option(
             "--build-target",
-            help="The ASH image stage to build and run: 'non-root' (an unprivileged user, the default) or 'ci' (root). CI environment variables do not change it; --custom-containerfile builds on 'ci'.",
+            help="The ASH image stage to build and run: 'non-root' (an unprivileged user, the default) or 'ci' (root, the default on Windows). CI environment variables do not change it; --custom-containerfile builds on 'ci'.",
             case_sensitive=False,
         ),
     ] = None,

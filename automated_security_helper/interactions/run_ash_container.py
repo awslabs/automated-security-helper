@@ -439,10 +439,19 @@ def _find_dockerfile(resolved_revision: str | None) -> Path:
     return dockerfile_path
 
 
+def _host_is_windows() -> bool:
+    return platform.system().lower().startswith("win")
+
+
 def _resolve_build_target(
     build_target: BuildTarget | str | None, custom_containerfile: str | None
 ) -> str:
-    """The image stage to build and run: the one asked for, ``non-root`` by default.
+    """The image stage to build and run: the one asked for, else the host's default.
+
+    The default is ``non-root``, and ``ci`` on Windows, where the non-root user
+    cannot write the bind-mounted output directory, so reports and logs would not
+    be written. It is the same for ``ash --mode container`` and ``ash build-image``;
+    an explicit stage wins on every platform.
 
     Environment variables play no part. ``CI``, ``IsCI``, ``ISCI`` and
     ``CODEBUILD_BUILD_ID`` used to select the root ``ci`` stage whenever they were
@@ -454,7 +463,9 @@ def _resolve_build_target(
     if custom_containerfile is not None:
         return BuildTarget.CI.value
     if build_target is None:
-        return BuildTarget.NON_ROOT.value
+        return (
+            BuildTarget.CI.value if _host_is_windows() else BuildTarget.NON_ROOT.value
+        )
     return build_target.value if hasattr(build_target, "value") else str(build_target)
 
 

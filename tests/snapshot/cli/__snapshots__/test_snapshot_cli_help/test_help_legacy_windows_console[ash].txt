@@ -505,7 +505,8 @@
 │                                                                           'non-root' (an        │
 │                                                                           unprivileged user,    │
 │                                                                           the default) or 'ci'  │
-│                                                                           (root). CI            │
+│                                                                           (root, the default on │
+│                                                                           Windows). CI          │
 │                                                                           environment variables │
 │                                                                           do not change it;     │
 │                                                                           --custom-containerfi… │
