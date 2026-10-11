@@ -31,7 +31,8 @@ one fails.
 Two mechanisms keep the references current, and neither is this test's job:
 
 * `[tool.commitizen] version_files` -- `cz bump` rewrites the literal in place.
-  Used for `_base/`, `Formula/ash.rb`, and the three docs above.
+  Used for `_base/`, `Formula/ash.rb`, the docs above, and the files the comment
+  above that list in pyproject.toml names.
 * `scripts/version_template_manager.py` -- keeps a `.md.template` with a
   `{{VERSION}}` placeholder and regenerates the doc after a bump. A template
   holds no literal, so the walk has nothing to find and cannot go stale.
@@ -786,6 +787,33 @@ class TestCommitizenMaintainsTheReferences:
     release later, by which point the cause has left recent history. None of
     these read `_base/`, so none of them may skip on its absence.
     """
+
+    def test_the_comment_above_version_files_names_every_entry(self):
+        """The comment explaining the list names each file it covers.
+
+        It once said "the three docs/ entries" after more were added, so a
+        reader counting from it missed the new ones. Names cannot go stale the
+        way a count does; the ``_base/`` files are covered by name as a group.
+        """
+
+        def _named(path: str) -> str:
+            # A file name, or the full path when the name says nothing on its own.
+            return path if Path(path).name == "pyproject.toml" else Path(path).name
+
+        text = PYPROJECT_PATH.read_text(encoding="utf-8")
+        section = text.split("[tool.commitizen]", 1)[1]
+        comment = "\n".join(
+            line.lstrip("# ")
+            for line in section.split("version_files = [", 1)[0].splitlines()
+            if line.lstrip().startswith("#")
+        )
+        unnamed = [
+            path
+            for path, _ in map(_split_entry, _commitizen_settings()["version_files"])
+            if not path.startswith(("pyproject.toml", "ash-agent-plugins/"))
+            and _named(path) not in comment
+        ]
+        assert unnamed == [], unnamed
 
     def test_every_version_files_entry_rewrites_a_line(self):
         """A path that resolves is not the same as a pattern that matches.
