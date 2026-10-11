@@ -794,7 +794,9 @@ asks for it, and never in offline mode:
 
 - The filter counts when the operator's own configuration names it: a config file
   outside the scanned directory and every git checkout (`--config` or `ASH_CONFIG`),
-  `--config-overrides`, or for the MCP server the profile the session is bound to. It
+  `--config-overrides`, or for the MCP server the profile the session is bound to. An
+  MCP client's runtime overrides cannot set these detect-secrets settings: the shipped
+  `runtime_overrides.denied_paths` deny them, whatever `allowed_paths` says. It
   can be in `scan_settings.filters_used`, or in a `baseline_file` outside the scanned
   tree that such a config names. `scan_settings` replaces the baseline's own settings,
   so list the plugins and other filters you want there as well.

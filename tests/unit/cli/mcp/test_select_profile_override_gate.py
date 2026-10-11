@@ -261,6 +261,13 @@ _SUPPRESS_ALL = {"path": "**", "reason": "silence everything"}
 
 # Keyed by the shipped denied_paths entry each case is refused under. The value
 # is the patch op and the top-level keys the override changes.
+
+_VERIFICATION_FILTER = {
+    "path": "detect_secrets.filters.common.is_ignored_due_to_verification_policies",
+    "min_level": 2,
+}
+_PLUGIN_FROM_A_FILE = {"path": "file:///opt/any/module.py"}
+
 _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
     "/fail_on_findings": (
         {"op": "replace", "path": "/fail_on_findings", "value": False},
@@ -361,6 +368,84 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
             }
         },
     ),
+    "/scanners/detect-secrets/options/scan_settings/filters_used": (
+        {
+            "op": "replace",
+            "path": "/scanners/detect_secrets/options/scan_settings/filters_used",
+            "value": [_VERIFICATION_FILTER],
+        },
+        {
+            "scanners": {
+                "detect-secrets": {
+                    "options": {
+                        "scan_settings": {"filters_used": [_VERIFICATION_FILTER]}
+                    }
+                }
+            }
+        },
+    ),
+    "/scanners/detect-secrets/options/scan_settings/filters_used/**": (
+        {
+            "op": "add",
+            "path": "/scanners/detect_secrets/options/scan_settings/filters_used/-",
+            "value": _VERIFICATION_FILTER,
+        },
+        {
+            "scanners": {
+                "detect-secrets": {
+                    "options": {
+                        "scan_settings": {"filters_used": [_VERIFICATION_FILTER]}
+                    }
+                }
+            }
+        },
+    ),
+    "/scanners/detect-secrets/options/scan_settings/plugins_used": (
+        {
+            "op": "replace",
+            "path": "/scanners/detect_secrets/options/scan_settings/plugins_used",
+            "value": [_PLUGIN_FROM_A_FILE],
+        },
+        {
+            "scanners": {
+                "detect-secrets": {
+                    "options": {
+                        "scan_settings": {"plugins_used": [_PLUGIN_FROM_A_FILE]}
+                    }
+                }
+            }
+        },
+    ),
+    "/scanners/detect-secrets/options/scan_settings/plugins_used/**": (
+        {
+            "op": "add",
+            "path": "/scanners/detect_secrets/options/scan_settings/plugins_used/-",
+            "value": _PLUGIN_FROM_A_FILE,
+        },
+        {
+            "scanners": {
+                "detect-secrets": {
+                    "options": {
+                        "scan_settings": {"plugins_used": [_PLUGIN_FROM_A_FILE]}
+                    }
+                }
+            }
+        },
+    ),
+    "/scanners/detect-secrets/options/baseline_file": (
+        {
+            "op": "replace",
+            "path": "/scanners/detect_secrets/options/baseline_file",
+            "value": "/srv/shared/verifying.baseline",
+        },
+        {
+            "scanners": {
+                "detect-secrets": {
+                    "options": {"baseline_file": "/srv/shared/verifying.baseline"}
+                }
+            }
+        },
+    ),
 }
 
 
@@ -406,7 +491,12 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
     covering = next(
         (
             prefix
-            for prefix in ("/sandbox", "/ash_plugin_modules")
+            for prefix in (
+                "/sandbox",
+                "/ash_plugin_modules",
+                "/scanners/detect-secrets/options/scan_settings/filters_used",
+                "/scanners/detect-secrets/options/scan_settings/plugins_used",
+            )
             if entry.startswith(prefix)
         ),
         entry,

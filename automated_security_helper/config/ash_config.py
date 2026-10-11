@@ -683,6 +683,15 @@ class RuntimeOverridesConfig(BaseModel):
         # Plugin modules are imported into ASH's own process, unsandboxed.
         "/ash_plugin_modules",
         "/ash_plugin_modules/**",
+        # detect-secrets settings the trust checks count as the operator's: the
+        # verification filter sends each candidate secret to the service that issued
+        # it, plugins and filters named by file are imported, and a baseline file can
+        # carry both.
+        "/scanners/detect-secrets/options/scan_settings/filters_used",
+        "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+        "/scanners/detect-secrets/options/scan_settings/plugins_used",
+        "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+        "/scanners/detect-secrets/options/baseline_file",
         # Suppressions and ignore paths can hide findings outright.
         "/global_settings/ignore_paths",
         "/global_settings/suppressions",

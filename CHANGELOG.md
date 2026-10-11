@@ -189,7 +189,11 @@
   from any other source ASH removes it and logs a warning naming the source, and when
   verification is off the detect-secrets worker refuses every HTTP request. Candidates
   the issuer would have rejected are now reported, so a repository whose own baseline
-  verified can show more detect-secrets findings. To keep verifying, name the filter in
+  verified can show more detect-secrets findings. An MCP client's runtime overrides
+  (`select_profile` patches and override YAML, workspace `config_overrides`) cannot set
+  detect-secrets' `filters_used`, `plugins_used` or `baseline_file` either: the shipped
+  `runtime_overrides.denied_paths` deny them, as they deny the sandbox and
+  `ash_plugin_modules`. To keep verifying, name the filter in
   `scanners.detect-secrets.options.scan_settings.filters_used` of your own config. See
   [Secret verification](docs/content/docs/configuration-guide.md#secret-verification).
 
