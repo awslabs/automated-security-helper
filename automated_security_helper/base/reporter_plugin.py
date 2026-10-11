@@ -157,8 +157,15 @@ def confined_report_path(report_dir: Path, filename: str) -> Optional[Path]:
     """``report_dir / filename``, or None when that is not a file in ``report_dir``.
 
     Checked on the resolved path, so a ``..`` or a symlink that leads out of the
-    directory is refused, whatever produced the name.
+    directory is refused, whatever produced the name. So is any name while
+    ``report_dir`` itself is a symlink or a directory junction, which it can
+    become after the run's own check (utils/report_path_links.py), so each write
+    checks it again.
     """
+    from automated_security_helper.utils.report_path_links import link_kind
+
+    if link_kind(Path(report_dir)) is not None:
+        return None
     target = Path(report_dir) / filename
     try:
         if target.resolve().parent != Path(report_dir).resolve():

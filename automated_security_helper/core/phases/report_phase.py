@@ -17,6 +17,7 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_path_links import (
+    refuse_a_linked_reports_dir,
     refuse_linked_report_paths,
     refuse_report_names_outside,
 )
@@ -231,6 +232,8 @@ class ReportPhase(EnginePhase):
             **kwargs: Additional arguments
         """
         ASH_LOGGER.debug("Entering: ReportPhase._execute_phase()")
+        # Before mkdir, which fails on a dangling link at this name.
+        refuse_a_linked_reports_dir(report_dir)
         report_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize progress

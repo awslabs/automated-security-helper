@@ -2701,6 +2701,15 @@ def _compute_exit_code(
     else:
         final_fail_on_findings = True
 
+    # Not read through a link, which would let the file it points to decide the exit
+    # code. The report phase refuses one where the SARIF reporter writes; this covers
+    # a run in which that reporter did not write it. Ahead of the fail_on_findings
+    # return below, so a link left in reports/ refuses the run either way.
+    sarif_link = Path(opts.output_dir).joinpath("reports", "ash.sarif")
+    found = linked_report_path(sarif_link.parent, [sarif_link.name])
+    if found is not None:
+        _refuse_report_path_link(ReportPathLinkRefused(found))
+
     if not final_fail_on_findings:
         return 0
 
@@ -2730,12 +2739,6 @@ def _compute_exit_code(
     # Literal and ScannerOptionsBase.severity_threshold is Literal | None whose None
     # means "defer to global" -- so this is parity rather than a new behaviour.
     sarif_file = Path(opts.output_dir).joinpath("reports", "ash.sarif")
-    # Not read through a link, which would let the file it points to decide the exit
-    # code. The report phase refuses one where the SARIF reporter writes; this covers
-    # a run in which that reporter did not write it.
-    found = linked_report_path(sarif_file.parent, [sarif_file.name])
-    if found is not None:
-        _refuse_report_path_link(ReportPathLinkRefused(found))
     if sarif_file.exists():
         try:
             with open(sarif_file, encoding="utf-8") as f:

@@ -757,7 +757,10 @@
   report file name is not a file in the reports directory (an `extension` with a
   `/`, `\` or `..` that its config did not replace, as a third-party reporter's
   config may not) stops the run with exit 1 the same way, rather than leaving that
-  report unwritten.
+  report unwritten. A dangling link at `reports/` is refused the same way rather
+  than failing with `FileExistsError`, each write checks again that `reports/` is
+  not a link, and the exit code is not read through a `reports/ash.sarif` link
+  even when `fail_on_findings` is off.
 
 ### Breaking changes
 

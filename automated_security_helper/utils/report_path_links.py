@@ -102,6 +102,11 @@ def _is_junction(path: Path) -> bool:
     )
 
 
+def link_kind(path: Path) -> Optional[str]:
+    """ "a symlink" or "a directory junction" when ``path`` is one, else None."""
+    return _link_kind(path)
+
+
 def _link_kind(path: Path) -> Optional[str]:
     if path.is_symlink():
         return "a symlink"
@@ -151,6 +156,20 @@ def refuse_linked_report_paths(
     found = linked_report_path(report_dir, names)
     if found is not None:
         raise ReportPathLinkRefused(found, remedy)
+
+
+def refuse_a_linked_reports_dir(report_dir: PathLike) -> None:
+    """Raise ReportPathLinkRefused if the reports directory itself is a link.
+
+    Before the directory is created: ``mkdir`` on a dangling link fails with
+    ``FileExistsError``, which would report a crash instead of the refusal.
+    """
+    directory = Path(report_dir)
+    kind = _link_kind(directory)
+    if kind is not None:
+        raise ReportPathLinkRefused(
+            f"the reports directory {directory.as_posix()} is {kind}"
+        )
 
 
 def refuse_report_names_outside(report_dir: PathLike, names: Iterable[str]) -> None:
