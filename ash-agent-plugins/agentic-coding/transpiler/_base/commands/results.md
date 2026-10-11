@@ -1,27 +1,15 @@
 # Results
 
-Display findings from the most recent ASH scan in the current directory, or from a scan_id if provided.
+Show the findings of the most recent ASH scan of the current project, or of the scan whose `scan_id` the user gives.
 
-## Workflow
+## Steps
 
-1. **Locate the scan output** — default to `<cwd>/.ash/ash_output`. If the user provides a scan_id, use `list_active_scans` to find the matching output_dir.
+1. Find the output directory. By default it is `.ash/ash_output` inside the current working directory; use its absolute path. For a `scan_id`, call `list_active_scans` and take that scan's `output_directory`. The server forgets its scans when it restarts.
+2. Call `get_scan_summary` with `output_dir` set to that directory. It returns the counts by severity and by scanner.
+3. If there are findings, call `get_scan_result_paths` with the same `output_dir`, and read the findings from the `flat_json` report it names. Leave out the records with `is_suppressed` true unless the user asks for them.
+4. Group the findings by severity, CRITICAL first, then by scanner. For each one, show its severity, scanner, `rule_id`, `file_path` and `line_start`, and its title.
+5. Give the paths of the HTML, SARIF and CSV reports from `get_scan_result_paths`.
 
-2. **Get the summary first** — call `get_scan_summary(output_dir=...)`. This is cheap and tells you whether there are any findings worth fetching.
+If the user names a severity, such as `critical`, or a scanner, such as `bandit`, show only those findings.
 
-3. **Fetch full results if needed** — if the summary shows findings, call `get_scan_results` with `filter_level="full"` and any user-specified filters (severities, scanners).
-
-4. **Render** — group findings by severity (CRITICAL → HIGH → MEDIUM → LOW), then by scanner. For each finding show:
-   - Severity tag
-   - Scanner name and rule ID
-   - File path and line number
-   - One-line description
-
-5. **Offer report links** — call `get_scan_result_paths` and tell the user where the HTML, SARIF, and CSV reports live.
-
-## Argument shortcuts
-
-If the user passes a severity (e.g., `critical`), filter to that severity. If they pass a scanner name (e.g., `bandit`), filter to that scanner. Otherwise show everything actionable.
-
-## When no scan exists
-
-If there's no `.ash/ash_output` directory, tell the user no recent scan was found and suggest running a scan first. Do not silently start a new scan from this command.
+If there is no `.ash/ash_output` directory, say that no scan was found and offer to run one. Do not start a scan from this command.

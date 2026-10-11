@@ -4,103 +4,59 @@ Run ASH (Automated Security Helper) security scans via MCP — Bandit, Semgrep, 
 
 ---
 
-# ASH MCP — Security Scanning Workflow
+# ASH MCP security scanning workflow
 
-ASH (Automated Security Helper) wraps nine security scanners behind a single MCP interface. The server exposes scans as async tools — start a scan, poll for progress, fetch filtered results.
+ASH (Automated Security Helper) runs a set of security scanners over a project and combines their results. Its MCP server runs a scan in the background: you start it, poll it until it ends, then read the results. This skill assumes the server is connected; the plugin that ships this skill configures it.
 
-This skill assumes the ASH MCP server is configured (the plugin/power that ships this skill provides it).
+The server scans on the machine it runs on, always in local mode, with the scanner tools installed there. The project's ASH config, such as `.ash/.ash.yaml`, chooses the scanners and thresholds. No tool argument does.
 
-## The mandatory three-step workflow
+## Run a scan
 
-Every scan follows this exact pattern. Skipping the poll step means stale progress visibility — the scan keeps running server-side, but you lose real-time updates.
+1. Call `run_ash_scan` with `source_dir` set to the absolute path of the project. It returns at once with a `scan_id` and `status` `running`. Keep the `scan_id`.
+2. Call `get_scan_progress` with that `scan_id` about every 5 seconds until `status` is `completed`, `incomplete`, `failed` or `cancelled`. Decide on `status`, not on `is_complete`: `is_complete` stays false for a failed or cancelled scan that left no results, so a loop that waits for it may never end.
+3. Read the results from `output_directory`, the absolute path in the progress response. It is `.ash/ash_output` inside `source_dir`.
 
-### Step 1 — Start the scan
-
-Call `run_ash_scan` with the absolute path to the project. The call returns immediately with a `scan_id`.
-
-```
-run_ash_scan(
-    source_dir="/absolute/path/to/project",
-    severity_threshold="MEDIUM",   # CRITICAL | HIGH | MEDIUM | LOW | INFO
-    config_path=None,              # Optional path to .ash.yaml
-    clean_output=True
-)
+```text
+run_ash_scan(source_dir="/absolute/path/to/project")
+get_scan_progress(scan_id="<scan_id from run_ash_scan>")
 ```
 
-Returns a dict with `scan_id`, `status: "running"`, `directory_path` (the resolved absolute scan root), and an `important.next_steps` block. **Always store the `scan_id`** — every subsequent call needs it.
+| Final status | Meaning | What to do |
+|--------------|---------|------------|
+| `completed` | Every selected scanner ran. | Read the results. |
+| `incomplete` | The scan finished and its results are readable, but a selected scanner did not run or did not finish. | Read the results, name each scanner in `incomplete_scanners` and its `reason`, and say the coverage is partial. |
+| `failed` | The scan crashed or left no readable results. | Report `error_message`. |
+| `cancelled` | The scan was cancelled. | Do not treat any results as final. |
 
-For the output directory, prefer reading `output_directory` from any subsequent `get_scan_progress` response (it pre-computes the path). If you need the output dir before the first poll, derive it from this response's `directory_path` as `<directory_path>/.ash/ash_output/`.
+Never report a project as clean unless the status is `completed` and there are no actionable findings. In the final progress response, `scanner_statuses` and `skipped_scanners` tell a scanner that ran and found nothing from one that never ran.
 
-The server's `important.next_steps` block recommends polling `progress['is_complete']`. Ignore that — `is_complete` stays `False` for cancelled scans. Always check `status` independently, as described in Step 2.
+While the scan runs, tell the user its status. `completed_scanners` and `total_scanners` are not a percentage: `total_scanners` is 0 until the scanners start, and `completed_scanners` counts only scanners that passed.
 
-The MCP server always runs scans in local mode (Python-only, no Docker). For container or precommit modes, use the ASH CLI directly. Scanner selection lives in `.ash/.ash.yaml`, not in tool parameters.
+## Read the results
 
-### Step 2 — Poll progress every 5 seconds
+Pass `output_directory` as `output_dir` to these tools:
 
-Loop on `get_scan_progress` until the scan is complete. The 5-second cadence is what the ASH MCP server's own docstring requests for reliable progress streaming over long scans.
+- `get_scan_summary` returns the counts: `findings_summary` has the findings by severity, with `actionable` and `suppressed` totals, and `scanner_summary` has each scanner's status and counts.
+- `get_scan_result_paths` returns the absolute path of every report under `files`. Read the findings from the `flat_json` one, `reports/ash.flat.json`: its `findings` list has one record per finding, with `id`, `severity`, `scanner`, `rule_id`, `file_path`, `line_start` and `is_suppressed`. `reports/ash.summary.md` is a summary to show the user.
+- `get_scan_results` returns counts and per-scanner summaries, not findings. With `actionable_only` set, its `findings` list is always empty, whatever the scan found, so never take that list as a sign that the project is clean.
 
-```
-get_scan_progress(scan_id="<uuid>")
-```
+A finding that a scanner reports with no severity of its own, as detect-secrets does, counts as CRITICAL in the counts and shows as HIGH in `ash.flat.json`. Describe a finding with the severity in `ash.flat.json`, and decide whether the scan passes from the counts.
 
-Stop polling when `status` is one of `completed | failed | cancelled`. Do **not** rely on `is_complete` alone — it stays `False` for cancelled scans, so polling on `is_complete` will loop forever after a cancel. Typical scans take 30-120 seconds.
+## Limits
 
-For progress display, use `completed_scanners / total_scanners` — but check `total_scanners > 0` first (it's zero during pre-flight before any scanner registers; show "initializing" in that case). The response also includes `severity_counts` and per-scanner breakdown to surface in user-facing updates.
+- `run_ash_scan` takes no scanner list. To skip a scanner, the project's ASH config sets `scanners.<name>.enabled` to `false`. Its `severity_threshold` argument does not change what the scan reports; the config's thresholds decide which findings are actionable.
+- `cancel_scan` marks a scan cancelled, but the scan keeps running and can still write to the output directory.
+- The server keeps its list of scans in memory. After it restarts, `get_scan_progress` fails with `scan_not_found` for older scan ids; read their results from the output directory.
+- `check_installation` reports that ASH runs. It does not check the scanner tools. A scanner whose tool is missing ends as MISSING, listed in `incomplete_scanners`.
+- For a container scan, the user runs the ASH command line, `ash scan --mode container`, instead of the MCP server.
 
-The scan itself runs server-side regardless of polling cadence — polling is for progress visibility, not for keeping the scan alive.
+## Explain, suppress and compare
 
-### Step 3 — Fetch results with the right filter
+- `explain_finding` takes a finding's `id` from `ash.flat.json` and `results_path` set to the output directory. It returns the scanner's description, why the finding is or is not actionable, and the matched code. Two findings with the same rule and message share an `id`, so check that the location it returns is the one you meant.
+- `suggest_suppression` takes the `id`, `results_path` set to the `ash_aggregated_results.json` file in the output directory, and the user's reason as `justification`. It writes nothing and returns an entry for `global_settings.suppressions` in the project's ASH config. Leave out its `client_supplied` key. Fix a finding before you suppress it, and suppress only with a reason the user agrees with.
+- `diff_scan_results` compares two `ash_aggregated_results.json` files, `before_path` and `after_path`. Unless `run_ash_scan` gets `clean_output` false, a scan deletes the previous file in its output directory before it starts, so copy the file first.
 
-Once the scan is complete, call `get_scan_results`. Match the filter to the user's intent.
-
-| User goal | Filter combination |
-|-----------|-------------------|
-| "How bad is it?" | `filter_level="summary"` + `actionable_only=True` |
-| "Show me the critical issues" | `filter_level="full"` + `severities="critical,high"` |
-| "Audit Bandit only" | `scanners="bandit"` + `filter_level="full"` |
-| "Generate exec summary" | Use `get_scan_result_paths`, then read `ash.summary.md` |
-
-```
-get_scan_results(
-    output_dir="/absolute/path/to/project/.ash/ash_output",
-    filter_level="summary",
-    severities="critical,high",
-    actionable_only=True
-)
-```
-
-For HTML/SARIF/CSV reports, prefer `get_scan_result_paths` and read the files directly with native file tools — it avoids piping large payloads through MCP.
-
-## Tool inventory
-
-For full parameter details, see [tool-reference.md](references/tool-reference.md).
-
-- `run_ash_scan` — Start a scan asynchronously
-- `get_scan_progress` — Poll progress (call every 5s)
-- `get_scan_results` — Fetch filtered results
-- `get_scan_summary` — Counts only, no findings
-- `get_scan_result_paths` — File paths to all reports
-- `list_active_scans` — All current/recent scans
-- `cancel_scan` — Stop a running scan
-- `check_installation` — Verify ASH is installed
-
-## Choosing scanners
-
-ASH runs all nine scanners by default. To run only a subset, edit `.ash/.ash.yaml` at the project root before scanning — `run_ash_scan` does not accept a scanners argument. To filter results post-scan, use the `scanners` parameter on `get_scan_results`.
-
-For result-time filtering by scanner:
-
-- **Python issues** → `scanners="bandit,semgrep"`
-- **Secrets only** → `scanners="detect-secrets"`
-- **IaC review** → `scanners="checkov,cfn_nag,cdk-nag"`
-- **Dependencies** → `scanners="grype,npm-audit"`
-- **SBOM generation** → `scanners="syft"`
-
-## When something goes wrong
-
-See [troubleshooting.md](references/troubleshooting.md) for the common failures: connection timeouts, empty results, stuck scans, container/Docker issues, suppression rules not applying.
-
-The fast checks: scan never starts → run `check_installation` first. Scan returns no findings → drop `actionable_only` and widen `severities`. Stale progress visibility → you weren't polling every 5 seconds.
+The [tool reference](#ash-mcp-tool-reference) lists every tool and its parameters. [Troubleshooting](#ash-troubleshooting) covers the common failures.
 
 
 ---
@@ -433,68 +389,44 @@ Read these via the standard MCP resource read mechanism for context-free help.
 `actionable_only=True` on `get_scan_results` sets the `SUPPRESSED` counts (false positives, accepted risks) to zero; the `findings` list it adds is always empty.
 
 
-# ASH Troubleshooting
+# ASH troubleshooting
 
-## Stale progress visibility during scan
+## The agent has no ASH tools
 
-**Symptom:** `get_scan_progress` shows the same state for a long time, or the client appears to lose contact with the server.
+The MCP server did not start. The plugin starts it with `uvx`, which needs uv on the PATH the agent sees, and network access to GitHub the first time it runs. To see the error, the user can run the same command in a terminal:
 
-**Cause:** Not polling on the 5-second cadence the ASH server's docstring requests. The scan itself runs server-side regardless of polling — only the progress channel suffers.
-
-**Fix:** Poll `get_scan_progress(scan_id=...)` every 5 seconds while a scan is active. Even on small scans, this gives reliable per-scanner status. If the connection truly drops, reconnect and re-issue `get_scan_progress` with the stored `scan_id` — the server retains scan state.
-
-## Scan returns immediately with no findings
-
-**Symptom:** `get_scan_results` returns an empty `findings` list, but the project clearly has issues.
-
-**Causes & fixes:**
-1. `actionable_only=True` is dropping suppressed findings — set it to `false` to see everything.
-2. `severities` filter is too tight — try `severities=None` first.
-3. `severity_threshold` at scan time was too high — re-scan with `severity_threshold="LOW"`.
-4. Scanners didn't run — check `get_scan_summary` output for scanner-level failures.
-
-## "ASH not installed"
-
-**Symptom:** `check_installation` returns failure or `run_ash_scan` errors with "command not found."
-
-**Fix:** The MCP server needs ASH on its PATH. The standard install via `uvx`:
-```
+<!-- doctest: illustrative reason="installs ASH from GitHub, then starts the MCP server, which waits for a client on stdin" -->
+```bash
 uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp
 ```
-This always uses the pinned ASH version regardless of system installs.
 
-## Scan never completes
+When the server starts, it waits for a client; Ctrl+C stops it. If ASH is already installed, the server command can be `ash` with the argument `mcp` instead. Desktop apps often see a shorter PATH than a shell, so an absolute path to `uvx` or `ash` can fix a server that starts in a terminal and not in the agent.
 
-**Symptom:** `get_scan_progress` shows `status: running` indefinitely.
+## Scanners are MISSING
 
-**Causes:**
-1. Project too large — default scan timeout is 2400s (40 min). For larger codebases, set `scan_timeout_seconds` higher in `.ash/.ash.yaml` or scan a subdirectory.
-2. Stuck scanner — call `cancel_scan(scan_id)` and retry. To isolate which scanner is hanging, narrow the scanner set in `.ash/.ash.yaml` and re-scan.
-3. Server-side dependency stalled — restart the MCP server. The previous scan's state is lost, but the next scan will start clean.
+`check_installation` checks ASH, not the scanner tools. A scanner whose tool is not installed ends as MISSING, and the scan ends `incomplete`. With the user's agreement, `ash dependencies install` installs the tools for the user that runs the server; then scan again. A tool installed only inside the scanned project does not count.
 
-Note: container-mode hangs are not possible via the MCP server — it always runs in local mode. If you suspect a Docker issue, you're not using the MCP integration; check your CLI invocation.
+## The scan does not reach a final status
 
-## "Permission denied" reading output
+Poll `get_scan_progress` until `status` is `completed`, `incomplete`, `failed` or `cancelled`. `incomplete` is final. A loop that waits for `is_complete` alone does not end for a failed or cancelled scan that left no results.
 
-**Symptom:** `get_scan_result_paths` returns paths but the files can't be read.
+ASH stops a scanner's tool after its `scan_timeout` option, 1800 seconds unless the project's ASH config sets `scanners.<name>.options.scan_timeout`. For a large project, scan a subdirectory, or disable the scanners you do not need in the config. `cancel_scan` does not stop a running scan; restarting the MCP server does, and the server then forgets its scans.
 
-**Cause:** This typically only happens with CLI container-mode scans, which leave files owned by root. The MCP server runs in local mode, so this should not occur via MCP.
+## No findings, but the project has problems
 
-**Fix:** If you arrived here from MCP, check filesystem permissions on the project directory. If you're mixing CLI container scans with MCP reads, `chown` the output directory.
+- `get_scan_results` does not list findings, and with `actionable_only` set its `findings` list is always empty. Read `reports/ash.flat.json` in the output directory.
+- A scanner that did not run reports nothing. Check `incomplete_scanners` and `skipped_scanners` in the final progress response.
+- Check which config the scan read. Without `config_path`, `run_ash_scan` uses the ASH config it finds in the project.
 
-## Empty `scanners` map in progress
+## `scan_target_not_permitted`
 
-**Symptom:** `get_scan_progress` shows `scanners: {}` and `completed_scanners: 0`, `total_scanners: 0` for a long time.
+The server refuses to scan that directory. It always refuses system directories such as `/etc` and `/root`, and when `ASH_MCP_ALLOWED_ROOTS` is set in the server's environment it refuses everything outside the directories that variable names. Ask the user to scan another directory or to change the server's environment.
 
-**Cause:** The scan is still in the pre-flight phase (cloning, dependency analysis). This is normal for the first 5-15 seconds of a scan, longer for large projects.
+## `output_dir_not_permitted`
 
-**Fix:** Keep polling. If it's still empty after 60 seconds, cancel and check the ASH server logs.
+`.ash` or `.ash/ash_output` in the project is a symbolic link, and ASH does not write through one. Ask the user to replace it with a directory.
 
-## SUPPRESSED findings keep appearing
+## A suppression does not apply
 
-**Symptom:** Findings flagged as suppressed/false-positive show up in `actionable_only=True` results.
-
-**Cause:** Suppression rules are stored in `.ash/.ash.yaml` under `global_settings.ignore_paths` and per-scanner config blocks. If those aren't being read, suppressions don't apply.
-
-**Fix:** Confirm `.ash/.ash.yaml` exists at the project root and has the right syntax. Run with `actionable_only=False` to see ALL findings (including suppressed) and verify the suppression rules match.
+Suppressions go under `global_settings.suppressions` in the project's ASH config, and each entry needs `path` and `reason`. `path` is relative to the scanned directory, and a `path` that starts with `./` matches nothing. From its `expiration` date on, an entry no longer applies. `ash config get .ash/.ash.yaml` checks the config and exits with code 3, naming the field, when it is invalid. After the next scan, `reports/ash.unused-suppressions.json` lists the suppressions that matched no finding.
 

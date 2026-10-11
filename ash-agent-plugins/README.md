@@ -47,7 +47,7 @@ Only one of the two ever runs, because GitHub reads workflows solely from the re
 
 Each backend is a class that subclasses `BaseBackend` and declares its layout via class-level constants (`PLUGIN_MANIFEST`, `MCP`, `SKILL`, `COMMANDS`, `AGENTS`, `INSTRUCTION_FILE`, `RULES_DIR`, `CUSTOM_MODES`, `CONFIG_FILE`, `MARKETPLACE`, `EXTENSION_MANIFEST`, `MCPB_BUNDLE`). Build behavior comes from `BaseBackend.build()`'s section-emitter dispatch; backends with multi-step builds opt into the `PHASES` machinery (setup/build/release stages with topo-sorted `depends_on`). Backends can also expose backend-specific Click subcommands via a `CLI_GROUP` class var, and override `smoke_test()` to confirm the generated package loads under the platform's CLI.
 
-```
+```text
 agentic-coding/
 ├── transpiler/                         # The build tool
 │   ├── pyproject.toml                  # Deps + the agentic-plugins, refresh-schemas, generate-models entry points
@@ -104,6 +104,7 @@ The transpiler reads `_base/` content and each backend's class vars, then dispat
 
 ## Development workflow
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```bash
 # 1. Install pre-commit hooks (one-time)
 pip install pre-commit
@@ -126,7 +127,7 @@ git commit -am "feat: improve scan workflow"
 
 The Click CLI surfaces five lifecycle commands. Each takes an optional backend NAME; without one, the command runs across all 17 backends:
 
-```bash
+```text
 agentic-plugins build [NAME]       # build platform plugin packages
 agentic-plugins check              # drift detection + output validation (CI gate)
 agentic-plugins setup [NAME]       # phase stage="setup" (refresh-time work)
@@ -146,6 +147,7 @@ The transpiler validates every generated file against its platform's spec via th
 
 To refresh the cached external schemas after upstream changes:
 
+<!-- doctest: illustrative reason="downloads the upstream schemas from the network" -->
 ```bash
 uv run --project agentic-coding/transpiler refresh-schemas
 git diff agentic-coding/transpiler/schemas/   # review what changed
@@ -157,6 +159,7 @@ too: `uv run --project agentic-coding/transpiler --extra refresh generate-models
 
 You can run validation independently of drift detection:
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```bash
 uv run --project agentic-coding/transpiler agentic-plugins check                  # drift + validation (CI gate)
 uv run --project agentic-coding/transpiler agentic-plugins check --validate-only  # validation alone
