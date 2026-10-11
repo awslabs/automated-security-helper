@@ -132,9 +132,12 @@ MKDOCS = """site_name: Versions test
 site_url: https://example.github.io/project
 docs_dir: docs/content
 site_dir: public
+exclude_docs: |
+  *.template
 strict: true
 hooks:
   - docs/hooks/redirects.py
+  - docs/hooks/install_refs.py
 theme:
   name: material
   custom_dir: docs/overrides
@@ -151,12 +154,51 @@ extra:
   docs_version: !ENV [MIKE_DOCS_VERSION, ""]
 """
 
+#: The repository's URL, assembled so this file holds no install reference for the
+#: tree walk in test_agent_plugin_ash_version.py to read as a pin.
+REPO_URL = "https://github.com/awslabs/automated-security-" + "helper"
+
+#: A version-pinned page, as scripts/version_template_manager.py keeps one: a template
+#: at one of the manager's target paths, and the page rendered from it with the
+#: current version, COMMITTED_VERSION. The template uses every form of placeholder the
+#: real templates use.
+PINNED_PAGE = "docs/content/how-to/install.md"
+COMMITTED_VERSION = "9.9.9"
+INSTALL_TEMPLATE = f"""# Install
+
+## Install from main
+
+```bash
+uv tool install 'automated-security-helper @ git+{REPO_URL}.git@v{{{{VERSION}}}}'
+git clone --depth 1 --branch v{{{{VERSION}}}} {REPO_URL}
+git ls-remote {REPO_URL} refs/tags/v{{{{VERSION}}}}
+```
+
+```yaml
+repos:
+  - repo: {REPO_URL}
+    rev: v{{{{VERSION}}}}
+```
+
+The image is tagged `ash:{{{{VERSION}}}}`.
+"""
+
+#: A pin on a page without a template, which no build may change.
+UNTEMPLATED_PIN = "uses: example/other-project/.github/workflows/x.yml@v" + "1.0.0"
+
 PAGES = {
     "docs/content/index.md": "# Home\n\nSee the [guide](guide.md).\n",
-    "docs/content/guide.md": "# Guide\n\n## Section\n",
-    "docs/content/how-to/install.md": "# Install\n\n## Install from main\n",
+    "docs/content/guide.md": f"# Guide\n\n## Section\n\n`{UNTEMPLATED_PIN}`\n",
     "docs/redirects.yml": "redirects:\n  old/page.md: guide.md\n",
 }
+
+MANAGER_SCRIPT = REPO_ROOT / dv.TEMPLATE_MANAGER
+
+
+def _manager(path: Path = MANAGER_SCRIPT):
+    return dv._load_by_path(path, "_test_template_manager").VersionTemplateManager(
+        path.parent.parent
+    )
 
 
 def _git(repo: Path, *args: str, env=None) -> str:
@@ -165,15 +207,33 @@ def _git(repo: Path, *args: str, env=None) -> str:
     ).stdout
 
 
-def _site(tmp_path: Path, *, mkdocs: str = MKDOCS, template: str | None = None) -> Path:
+def _site(
+    tmp_path: Path,
+    *,
+    mkdocs: str = MKDOCS,
+    template: str | None = None,
+    manager: str | None = None,
+) -> Path:
     repo = tmp_path / "site"
-    for rel, text in {**PAGES, "mkdocs.yml": mkdocs}.items():
+    pinned = {
+        PINNED_PAGE + ".template": INSTALL_TEMPLATE,
+        PINNED_PAGE: _manager().render(INSTALL_TEMPLATE, COMMITTED_VERSION),
+    }
+    for rel, text in {**PAGES, **pinned, "mkdocs.yml": mkdocs}.items():
         path = repo / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
-    hook = repo / dv.REDIRECT_HOOK
-    hook.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy(REPO_ROOT / dv.REDIRECT_HOOK, hook)
+    for rel in (
+        dv.REDIRECT_HOOK,
+        "docs/hooks/install_refs.py",
+        "scripts/docs_versions.py",
+    ):
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(REPO_ROOT / rel, repo / rel)
+    (repo / dv.TEMPLATE_MANAGER).write_text(
+        MANAGER_SCRIPT.read_text(encoding="utf-8") if manager is None else manager,
+        encoding="utf-8",
+    )
     overrides = repo / "docs" / "overrides"
     overrides.mkdir(parents=True)
     main_html = (REPO_ROOT / "docs" / "overrides" / "main.html").read_text(
@@ -182,7 +242,7 @@ def _site(tmp_path: Path, *, mkdocs: str = MKDOCS, template: str | None = None) 
     (overrides / "main.html").write_text(
         main_html if template is None else template, encoding="utf-8"
     )
-    (repo / ".gitignore").write_text("/public\n", encoding="utf-8")
+    (repo / ".gitignore").write_text("/public\n__pycache__/\n", encoding="utf-8")
     with dv.offline_env() as env:
         _git(repo, "init", "--quiet", "--initial-branch=main", env=env)
         _git(repo, "add", "-A", env=env)
@@ -205,6 +265,7 @@ def test_check_passes_on_a_correct_site(tmp_path):
     redirects = int(summary.split(", ")[2].split()[0])
     assert pages >= 12, summary
     assert redirects == 4, summary
+    assert summary.endswith(", 1 version-pinned pages"), summary
     # The throwaway branch is gone; only the site's own branch is left, and the site
     # mike built is not left in the checkout.
     assert _branches(repo) == ["main"]
@@ -258,6 +319,36 @@ DEFECTS = [
             )
         },
         "do not carry the outdated notice and not the unreleased one",
+    ),
+    (
+        "the install refs hook is not registered",
+        {"mkdocs": _without(MKDOCS, "  - docs/hooks/install_refs.py\n")},
+        f"the version-pinned pages of main/ pin ['{COMMITTED_VERSION}'], not no release",
+    ),
+    (
+        "the branch renderer keeps the release",
+        {
+            "manager": MANAGER_SCRIPT.read_text(encoding="utf-8").replace(
+                "def render_for_branch(self, content: str, branch: str) -> str:",
+                "def render_for_branch(self, content: str, branch: str) -> str:\n"
+                f"        return self.render(content, {COMMITTED_VERSION!r})\n\n"
+                "    def _unused(self, content: str, branch: str) -> str:",
+            )
+        },
+        f"the version-pinned pages of main/ pin ['{COMMITTED_VERSION}'], not no release",
+    ),
+    (
+        "a release keeps the committed pin",
+        {
+            "manager": MANAGER_SCRIPT.read_text(encoding="utf-8").replace(
+                "def render(self, content: str, version: str) -> str:",
+                "def render(self, content: str, version: str) -> str:\n"
+                f"        version = {COMMITTED_VERSION!r}\n"
+                "        return content.replace(self.version_placeholder, version)\n\n"
+                "    def _unused(self, content: str, version: str) -> str:",
+            )
+        },
+        f"the version-pinned pages of 0.0.1/ pin ['{COMMITTED_VERSION}'], not ['0.0.1']",
     ),
     (
         "the template has no notices",
@@ -404,3 +495,80 @@ def test_a_deploy_that_loses_the_push_race_redoes_its_version(tmp_path, monkeypa
     assert raced
     assert _remote_versions(bare) == {"main": [], "1.2.3": ["latest"]}
     assert 'url=latest/"' in _git(bare, "show", "gh-pages:index.html")
+
+
+# ---------------------------------------------------------------------------
+# docs/hooks/install_refs.py, one mkdocs build at a time
+# ---------------------------------------------------------------------------
+
+
+def _build(repo: Path, tmp_path: Path, version: str | None) -> Path:
+    """Build the site as mike would for version (None: not a mike build)."""
+    out = tmp_path / f"built-{version or 'plain'}"
+    with dv.offline_env() as env:
+        env.pop("MIKE_DOCS_VERSION", None)
+        if version is not None:
+            env["MIKE_DOCS_VERSION"] = version
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "mkdocs",
+                "build",
+                "--quiet",
+                "--site-dir",
+                str(out),
+            ],
+            cwd=repo,
+            env=env,
+            check=True,
+        )
+    return out
+
+
+def _text(out: Path, page: str) -> str:
+    return dv._page_text((out / page / "index.html").read_bytes())
+
+
+def test_the_main_build_installs_main(tmp_path):
+    repo = _site(tmp_path)
+    text = _text(_build(repo, tmp_path, "main"), "how-to/install")
+    assert dv.release_pins(_manager(), text) == set(), text
+    assert f"git+{REPO_URL}.git@main" in text
+    assert f"--branch main {REPO_URL}" in text
+    assert "rev: main" in text
+    # A tag looked up by name becomes the branch's head, so the command still works.
+    assert f"git ls-remote {REPO_URL} refs/heads/main" in text
+    assert "ash:main" in text
+    notice = " ".join(text.split())
+    assert "The install commands in this version of the docs install main" in notice
+
+
+def test_a_release_build_pins_that_release(tmp_path):
+    repo = _site(tmp_path)
+    text = _text(_build(repo, tmp_path, "1.2.3"), "how-to/install")
+    assert dv.release_pins(_manager(), text) == {"1.2.3"}, text
+    assert f"git ls-remote {REPO_URL} refs/tags/v1.2.3" in text
+    assert "install commands in this version" not in text
+
+
+def test_any_other_build_uses_the_committed_page(tmp_path):
+    repo = _site(tmp_path)
+    text = _text(_build(repo, tmp_path, None), "how-to/install")
+    assert dv.release_pins(_manager(), text) == {COMMITTED_VERSION}, text
+    assert "install commands in this version" not in text
+
+
+def test_a_page_without_a_template_is_untouched(tmp_path):
+    repo = _site(tmp_path)
+    for version in ("main", "1.2.3"):
+        assert UNTEMPLATED_PIN in _text(_build(repo, tmp_path, version), "guide")
+    # No build writes to the committed pages: the docs checks read those.
+    assert _git(repo, "status", "--porcelain") == ""
+
+
+def test_a_pinned_page_without_its_template_stops_the_build(tmp_path):
+    repo = _site(tmp_path)
+    (repo / (PINNED_PAGE + ".template")).unlink()
+    with pytest.raises(subprocess.CalledProcessError):
+        _build(repo, tmp_path, "main")

@@ -94,6 +94,11 @@ PUSH_ATTEMPTS = 3
 REDIRECT_HOOK = "docs/hooks/redirects.py"
 REDIRECTS_FILE = "docs/redirects.yml"
 
+#: Renders the version-pinned pages from their templates. docs/hooks/install_refs.py
+#: uses it to make main's install commands install main; `check` uses its patterns to
+#: read which release a built page pins.
+TEMPLATE_MANAGER = "scripts/version_template_manager.py"
+
 #: What `check` publishes, in this order. Release-shaped numbers, because whether a
 #: page is a release decides its notice, and whether a release is the newest decides
 #: `latest`: the older one is deployed second and must not take it.
@@ -281,6 +286,7 @@ class SiteConfig:
     site_url: str
     site_name: str
     site_dir: Path
+    docs_dir: Path
 
 
 def load_site_config(repo: Path) -> SiteConfig:
@@ -297,17 +303,22 @@ def load_site_config(repo: Path) -> SiteConfig:
         site_url=config.site_url,
         site_name=config.site_name,
         site_dir=Path(config.site_dir),
+        docs_dir=Path(config.docs_dir),
     )
 
 
-def _redirect_hook(repo: Path) -> Any:
-    path = repo / REDIRECT_HOOK
-    spec = importlib.util.spec_from_file_location("_ash_docs_redirect_hook", path)
+def _load_by_path(path: Path, name: str) -> Any:
+    spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise DeployError(f"cannot load {path}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _redirect_hook(repo: Path) -> Any:
+    return _load_by_path(repo / REDIRECT_HOOK, "_ash_docs_redirect_hook")
 
 
 def not_found_page(site: SiteConfig, directory: str) -> str:
@@ -577,6 +588,46 @@ def _old_redirect_urls(repo: Path) -> list[str]:
     ]
 
 
+def pinned_pages(repo: Path, site: SiteConfig) -> tuple[Any, list[str]]:
+    """The template manager, and the URL of each version-pinned page on the site.
+
+    A page is version-pinned when the manager renders it from a template: one of its
+    target_files that is under docs_dir and has a template beside it.
+    """
+    from mkdocs.structure.files import File
+
+    path = repo / TEMPLATE_MANAGER
+    if not path.is_file():
+        return None, []
+    manager = _load_by_path(
+        path, "_ash_version_template_manager"
+    ).VersionTemplateManager(repo)
+    docs_dir = site.docs_dir.resolve()
+    urls = []
+    for target in manager.target_files:
+        page = (repo / target).resolve()
+        template = repo / (target + manager.template_suffix)
+        if page.is_relative_to(docs_dir) and template.is_file():
+            urls.append(File(page.relative_to(docs_dir).as_posix(), "d", "s", True).url)
+    return manager, urls
+
+
+def _page_text(content: bytes) -> str:
+    """A built page as a reader sees it: no tags, so a highlighted token is whole."""
+    import html
+
+    return html.unescape(re.sub(r"<[^>]+>", "", content.decode("utf-8", "replace")))
+
+
+def release_pins(manager: Any, text: str) -> set[str]:
+    """The release numbers that install references in text pin, by the manager's patterns."""
+    pins = set()
+    for pattern, _replacement in manager.find_version_references(text):
+        for match in re.finditer(pattern, text):
+            pins.add(match[0][len(match[1]) :])
+    return pins
+
+
 def _read_branch(repo: Path, branch: str) -> dict[str, tuple[str, bytes]]:
     """Every file on branch: path -> (mode, content)."""
     entries = [
@@ -690,6 +741,7 @@ def check_published(
     listed: list[dict[str, Any]],
     site: SiteConfig,
     stale_redirect: str | None,
+    pinned: tuple[Any, list[str]] = (None, []),
 ) -> tuple[list[str], str]:
     """What is wrong with a branch `check` published to, and a summary of what was seen."""
     problems: list[str] = []
@@ -781,9 +833,41 @@ def check_published(
     if urlsplit(urljoin(root_url, f"{LATEST}/")).path not in not_found:
         problems.append(f"the root 404.html does not link to /{LATEST}/")
 
+    # The version-pinned pages: a release pins itself, and main pins no release and
+    # installs main (docs/hooks/install_refs.py). The committed pages pin the current
+    # version, which is neither 0.0.1 nor 0.0.0, so a pass means the pages were
+    # rendered for the version being built.
+    manager, urls = pinned
+    for directory, wanted in (
+        (CHECK_NEWEST, {CHECK_NEWEST}),
+        (CHECK_OLDER, {CHECK_OLDER}),
+        (DEV_VERSION, set()),
+    ):
+        pins: set[str] = set()
+        installs_main = 0
+        for url in urls:
+            built = files.get(f"{directory}/{url}index.html")
+            if built is None:
+                problems.append(f"{directory}/ has no page {url}")
+                continue
+            text = _page_text(built[1])
+            pins |= release_pins(manager, text)
+            installs_main += text.count(f"@{DEV_VERSION}")
+        if urls and pins != wanted:
+            problems.append(
+                f"the version-pinned pages of {directory}/ pin "
+                f"{sorted(pins) or 'no release'}, not {sorted(wanted) or 'no release'} "
+                "(docs/hooks/install_refs.py renders them from their templates)"
+            )
+        if urls and directory == DEV_VERSION and not installs_main:
+            problems.append(
+                f"no version-pinned page of {DEV_VERSION}/ installs @{DEV_VERSION}"
+            )
+
     summary = (
         f"{len(listed)} versions, {page_count} pages checked, "
-        f"{redirected} root redirects to {LATEST}/"
+        f"{redirected} root redirects to {LATEST}/, "
+        f"{len(urls)} version-pinned pages"
     )
     return problems, summary
 
@@ -795,6 +879,7 @@ def check(repo: Path = REPO_ROOT) -> tuple[list[str], str]:
     ref = f"refs/heads/{branch}"
     old_urls = _old_redirect_urls(repo)
     stale_redirect = old_urls[0] if old_urls else None
+    pinned = pinned_pages(repo, site)
     # mike builds into site_dir. One this check created is removed again, so a later
     # scan of the checkout (the unit suite walks it) does not find a stray site.
     leave_site_dir = site.site_dir.exists()
@@ -829,7 +914,7 @@ def check(repo: Path = REPO_ROOT) -> tuple[list[str], str]:
                 repo.resolve()
             ):
                 shutil.rmtree(site.site_dir, ignore_errors=True)
-    return check_published(files, listed, site, stale_redirect)
+    return check_published(files, listed, site, stale_redirect, pinned)
 
 
 # ---------------------------------------------------------------------------

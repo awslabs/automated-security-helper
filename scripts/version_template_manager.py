@@ -15,8 +15,6 @@ import argparse
 # Add the project root to the path so we can import our version management
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from automated_security_helper.utils.version_management import get_version
-
 
 class VersionTemplateManager:
     """Manages version templating for documentation files."""
@@ -118,6 +116,28 @@ class VersionTemplateManager:
 
         return patterns
 
+    def render(self, content: str, version: str) -> str:
+        """A template rendered for a release: every placeholder becomes the version."""
+        return content.replace(self.version_placeholder, version)
+
+    def render_for_branch(self, content: str, branch: str) -> str:
+        """A template rendered for a branch, such as main, instead of a release.
+
+        The docs site's `main` version is built this way (docs/hooks/install_refs.py),
+        so its install commands install main. A placeholder written after a `v`, as in
+        `@v{{VERSION}}`, `--branch v{{VERSION}}` or `rev: v{{VERSION}}`, names a release
+        tag, and the whole tag becomes the branch: `@main`, not `@vmain`. A tag looked up
+        by its full name, `refs/tags/v{{VERSION}}`, becomes the branch's
+        `refs/heads/<branch>`, so the command still names a ref that exists. A bare
+        placeholder becomes the branch name too.
+        """
+        tag = "v" + self.version_placeholder
+        return (
+            content.replace("refs/tags/" + tag, "refs/heads/" + branch)
+            .replace(tag, branch)
+            .replace(self.version_placeholder, branch)
+        )
+
     def convert_to_template(self, file_path: Path) -> bool:
         """
         Convert a file to template format by replacing version numbers with placeholders.
@@ -183,9 +203,12 @@ class VersionTemplateManager:
             with open(template_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
+            # Imported here rather than at the top, so loading this module (as the
+            # mkdocs hook docs/hooks/install_refs.py does) does not import ASH.
+            from automated_security_helper.utils.version_management import get_version
+
             # Replace version placeholder with actual version
-            current_version = get_version()
-            content = content.replace(self.version_placeholder, current_version)
+            content = self.render(content, get_version())
 
             # Generate output file (remove .template suffix)
             output_path = template_path.with_suffix("")

@@ -13,7 +13,10 @@
   unreleased notice instead, and no outdated one: main is ahead of the latest release,
   not behind it.
 
-  Both notices link to the site root, which redirects to the latest release.
+  Both notices link to the site root, which redirects to the latest release. The
+  unreleased notice says the install commands install main only when
+  docs/hooks/install_refs.py rewrote them for this build, which it records in
+  config.extra.install_ref; in any other build they are the committed release pins.
   `scripts/docs_versions.py check` builds a release and main and fails when either
   page shows the wrong notice; the data-ash-notice attributes are what it looks for.
 -#}
@@ -23,9 +26,15 @@
     <span data-ash-notice="unreleased">
       These docs describe the main branch, which is not released yet, so a feature
       described here may not be in the latest release.
-      <a href="{{ '../' ~ base_url }}">Read the docs for the latest release</a>, or
-      <a href="{{ 'how-to/install/' | url }}#install-from-main">install from main</a>
+      {%- if config.extra.install_ref %}
+      The install commands in this version of the docs install
+      <code>{{ config.extra.install_ref }}</code>, not a release.
+      {%- else %}
+      <a href="{{ 'how-to/install/' | url }}#install-from-main">Install from main</a>
       to use it now.
+      {%- endif %}
+      <a href="{{ '../' ~ base_url }}">Read the docs for the latest release</a>
+      to install a release.
     </span>
   {%- endif -%}
 {% endblock %}

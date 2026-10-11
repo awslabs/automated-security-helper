@@ -27,9 +27,12 @@ site_dir: "public"
 strict: true
 
 # Moved pages keep their old URLs: docs/redirects.yml maps each old page to its new
-# one, and this hook writes a redirect page at every old URL.
+# one, and the redirects hook writes a redirect page at every old URL. The install_refs
+# hook builds the version-pinned pages from their templates when mike builds a version,
+# so the install commands of the main version install main.
 hooks:
   - docs/hooks/redirects.py
+  - docs/hooks/install_refs.py
 
 # Pages that are built but deliberately left out of the navigation, one gitignore-style
 # pattern per line, each with a comment saying why. A page that is in no .nav.yml and
