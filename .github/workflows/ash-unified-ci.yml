@@ -967,30 +967,32 @@ jobs:
         run: |
           pip install ".[cdk]"
           ash dependencies install
-          ash dependencies install --tool trivy-repo
-      # trivy-repo is a plugin scanner, enabled for these runs by the config written
-      # here. Its database and checks bundle are fetched first, into trivy's own
-      # default cache, so that the offline pair has them: offline, ASH updates
-      # nothing, and under sandbox-exec the cache is read-only, which an offline
-      # trivy-repo scan must survive.
-      - name: Seed trivy's cache and enable trivy-repo
+      # trivy-repo is a plugin scanner, so ASH knows its name only once its module is
+      # loaded: the config written here loads it, for its install and for the parity
+      # runs (`ash dependencies install --tool trivy-repo` without it exits 2,
+      # "Unknown tool(s)"). Its database and checks bundle are then fetched into
+      # trivy's own default cache, so that the offline pair has them: offline, ASH
+      # updates nothing, and under sandbox-exec the cache is read-only, which an
+      # offline trivy-repo scan must survive.
+      - name: Install trivy-repo, enable it, and seed trivy's cache
         env:
           TMPDIR: ${{ runner.temp }}
           PARITY_CONFIG: ${{ runner.temp }}/parity-ash.yaml
           EMPTY_TARGET: ${{ runner.temp }}/trivy-empty-target
         run: |
-          trivy="$(python -c 'from automated_security_helper.utils.subprocess_utils import find_executable; print(find_executable("trivy") or "")')"
-          test -n "$trivy" || { echo "::error::trivy was not installed"; exit 1; }
-          "$trivy" --version
-          "$trivy" image --download-db-only --no-progress
-          mkdir -p "$EMPTY_TARGET"
-          "$trivy" config --no-progress "$EMPTY_TARGET"
           printf '%s\n' \
             'ash_plugin_modules:' \
             '  - automated_security_helper.plugin_modules.ash_trivy_plugins' \
             'scanners:' \
             '  trivy-repo:' \
             '    enabled: true' > "$PARITY_CONFIG"
+          ash dependencies install --config "$PARITY_CONFIG" --tool trivy-repo
+          trivy="$(python -c 'from automated_security_helper.utils.subprocess_utils import find_executable; print(find_executable("trivy") or "")')"
+          test -n "$trivy" || { echo "::error::trivy was not installed"; exit 1; }
+          "$trivy" --version
+          "$trivy" image --download-db-only --no-progress
+          mkdir -p "$EMPTY_TARGET"
+          "$trivy" config "$EMPTY_TARGET"
       # Every scanner runs twice over one fixture, with --sandbox off and under the
       # backend, offline and online, and status plus findings must match per scanner.
       # --require names the scanners that must actually have run, so a scanner that
