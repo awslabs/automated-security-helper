@@ -34,7 +34,7 @@ ASH ships 16 built-in scanners, all enabled by default. For each scanner it know
 1. Is it enabled? `scanners.<name>.enabled: false` in the config turns a scanner off. `--scanners` cannot turn it back on; `ash scan --config-overrides scanners.<name>.enabled=true` can.
 2. Was it selected? `--scanners` is an allowlist and `--exclude-scanners` removes names from it. A scanner that is not selected is recorded SKIPPED.
 3. Does it support this platform? A scanner without a build for the operating system (semgrep and opengrep on Windows) is recorded SKIPPED.
-4. Are its dependencies there? A scanner whose tool cannot be found, or is found only inside the scanned directory, is recorded MISSING with the reason.
+4. Are its dependencies there? A scanner whose tool cannot be found, or is found only inside the scanned directory, is recorded MISSING.
 
 Scanners outside the built-in set, such as the [community scanners](../docs/plugins/community/index.md), are only considered when their plugin module is loaded. The [scanner reference](../reference/scanners.md) lists every scanner, its tool and its defaults; [Choose scanners](../how-to/choose-scanners.md) covers turning them on and off.
 
@@ -49,7 +49,7 @@ A scanner receives a directory, not a file list. Most scanners walk that directo
 The engine writes everything a scan produced to `ash_aggregated_results.json` at the root of the output directory. It holds:
 
 - the resolved configuration the scan used;
-- one row per scanner and target, with a status (PASSED, FAILED, ERROR, MISSING or SKIPPED), counts by severity, and the reason a scanner did not run;
+- one row per scanner and target, with a status (PASSED, FAILED, ERROR, MISSING or SKIPPED) and counts by severity, plus the reason when ASH refused a scanner's tool because it was found only inside the scanned directory;
 - one row per converter, with the inputs it could not convert;
 - the aggregated SARIF;
 - an SBOM in CycloneDX form when an SBOM scanner ran.

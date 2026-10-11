@@ -1,6 +1,6 @@
 # Scanner sandbox
 
-Every scanner reads files the scanned repository wrote, and a scanner is a large program with its own parsers and plugins. The scanner sandbox runs each scanner's processes under an operating-system confinement, so that a repository that makes a scanner misbehave reaches less of the host. The sandbox is off by default. To turn it on and set it up on each platform, see [Enable the scanner sandbox](../docs/scanner-sandbox.md).
+Every scanner reads files the scanned repository wrote, and a scanner is a large program with its own parsers and plugins. The scanner sandbox runs each scanner's processes under an operating-system confinement, so that a repository that makes a scanner misbehave reaches less of the host. The sandbox is off by default. To turn it on and set it up on each platform, see [Sandbox scanners](../docs/scanner-sandbox.md).
 
 ## What it wraps
 
@@ -61,10 +61,10 @@ A config file inside a git checkout or the scanned directory, or one an MCP clie
 
 ## What fails closed
 
-A scanner that cannot be sandboxed the way the configuration asks is never run unsandboxed. ASH records it as MISSING with the reason `Scanner sandbox unavailable: ...`, and the default `fail_on_incomplete_scanners` makes the scan exit 1. That covers:
+A scanner that cannot be sandboxed the way the configuration asks is never run unsandboxed. ASH records it as MISSING, and the default `fail_on_incomplete_scanners` makes the scan exit 1. The reason is in the scan output and `ash.log`, as a line such as `bandit not run: scanner sandbox unavailable: firejail is not installed`; the scanner's row in `ash_aggregated_results.json` does not carry it. That covers:
 
 - an explicit backend that is not installed or cannot start a sandbox on this host;
-- `auto` when no backend works, with the reason listing why each one failed;
+- `auto` when no backend works, with a reason that lists why each one failed;
 - turning the sandbox on at all on Windows;
 - a scanner that the config file names under a different name than its own, because grants follow a scanner's own name.
 
