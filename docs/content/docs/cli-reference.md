@@ -227,6 +227,18 @@ carriage return or a line feed: `--mount` reads its value as comma-separated fie
 such a path would be read as something else. The run is refused with exit 3 before
 anything is built.
 
+The scan inside the container sees the host only through these mounts, and receives only
+the environment variables ASH sets for it. So any other value that names a host file
+names a path that does not exist in the container: a scanner option such as
+`scanners.checkov.options.config_file` or `scanners.trivy-repo.options.ignore_file`, the
+same set through `--config-overrides`, or a variable such as `TRIVY_IGNOREFILE` or
+`SEMGREP_RULES_CACHE_DIR` in the host's environment. A file in the source directory is
+at `/src/<path>` there, but it is the repository's own file, which ASH does not hand to a
+tool as its configuration (see
+[Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)).
+To give the scan inside an operator file of that kind, build it into the image with
+`--custom-containerfile` and name its path in the image.
+
 `--ignore-suppressions` is passed to the scan inside the container, which is where
 suppressions are applied: the host reads that scan's `ash.sarif` back to compute the
 exit code. `--log-level` is passed too, so the log inside the container is kept at the
