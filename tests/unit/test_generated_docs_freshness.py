@@ -774,6 +774,33 @@ def test_check_compares_the_output_file(script: str, tmp_path: Path) -> None:
     assert stale.read_text(encoding="utf-8") == "stale\n"
 
 
+def test_install_text_shows_packages_not_uv_arguments() -> None:
+    """A ``uv tool install`` command's options are not shown as if they were packages.
+
+    GuardDog installs with ``uv tool install --python '>=3.10,<3.14' 'guarddog==3.2.0'``;
+    the page showed ``--python >=3.10,<3.14 guarddog==3.2.0`` as the package.
+    """
+    from types import SimpleNamespace
+
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import _plugin_reference
+    finally:
+        sys.path.remove(str(SCRIPTS))
+    instance = SimpleNamespace(
+        use_uv_tool=True,
+        uv_tool_install_commands=[
+            "uv tool install --python '>=3.10,<3.14' 'guarddog==3.2.0'",
+            "uv tool install bandit[toml]>=1.7",
+        ],
+    )
+    text = _plugin_reference.install_text(instance)
+    assert text == (
+        "`uv tool install` on first use (`guarddog==3.2.0` with Python "
+        "`>=3.10,<3.14`, `bandit[toml]>=1.7`)"
+    ), text
+
+
 def test_read_env_names_covers_this_tree() -> None:
     """On the real checkout the walk reaches the package and the entry scripts.
 

@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
+import shlex
 import tempfile
 import typing
 from dataclasses import dataclass, field
@@ -234,10 +235,10 @@ def install_text(instance: Any) -> str:
     parts = []
     if getattr(instance, "use_uv_tool", False):
         commands = list(getattr(instance, "uv_tool_install_commands", None) or [])
-        specs = [c.removeprefix("uv tool install ").strip() for c in commands]
+        specs = [_uv_tool_spec(c) for c in commands]
         parts.append(
             "`uv tool install` on first use"
-            + (f" ({', '.join(code(s) for s in specs)})" if specs else "")
+            + (f" ({', '.join(specs)})" if specs else "")
         )
     table = getattr(instance, "custom_install_commands", None) or {}
     platforms = []
@@ -274,6 +275,51 @@ def install_text(instance: Any) -> str:
             "declared packages " + ", ".join(code(p) for p in sorted(packages))
         )
     return "; ".join(parts) if parts else "none declared"
+
+
+#: ``uv tool install`` options that take a value, and the words the page puts
+#: before the value.
+_UV_VALUE_OPTIONS = {
+    "--python": "with Python",
+    "-p": "with Python",
+    "--with": "plus",
+    "--from": "from",
+    "--index-url": "from index",
+    "--extra-index-url": "also from index",
+}
+
+
+def _uv_tool_spec(command: str) -> str:
+    """One ``uv tool install`` command as its package, then what its options say.
+
+    ``uv tool install --python '>=3.10,<3.14' 'guarddog==3.2.0'`` is
+    "`guarddog==3.2.0` with Python `>=3.10,<3.14`": the command's own quoting and
+    options are not part of the package a reader looks for.
+    """
+    try:
+        args = shlex.split(command)
+    except ValueError:
+        return code(command)
+    if args[:3] == ["uv", "tool", "install"]:
+        args = args[3:]
+    packages: list[str] = []
+    notes: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        name, eq, value = arg.partition("=")
+        if name in _UV_VALUE_OPTIONS:
+            if not eq and i + 1 < len(args):
+                i += 1
+                value = args[i]
+            notes.append(f"{_UV_VALUE_OPTIONS[name]} {code(value)}")
+        elif arg.startswith("-"):
+            notes.append(code(arg))
+        else:
+            packages.append(code(arg))
+        i += 1
+    shown = ", ".join(packages) or "no package"
+    return " ".join([shown, *notes])
 
 
 def _describe_custom_command(args: list[str]) -> str:
