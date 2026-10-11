@@ -744,6 +744,136 @@ class TestOptionsOnlyTheOperatorMaySet:
         assert "Ignoring scanners.cfn-lint" not in caplog.text
 
 
+def _mandatory(args: list) -> list:
+    (value,) = [a.split("=", 1)[1] for a in args if a.startswith("--mandatory-checks=")]
+    return value.split(",")
+
+
+def _is_mandatory(rule_id: str, prefixes: list) -> bool:
+    """cfn-lint's test (rules/_rule.py, ``_rule_is_enabled``): a prefix match."""
+    return any(rule_id.startswith(prefix) for prefix in prefixes)
+
+
+#: Rule ids to check coverage against: the built-in shape (a letter and four
+#: digits), its neighbors around the ignored ones, and ids a custom rule could have.
+_SAMPLE_IDS = [
+    *(f"{letter}{n:04d}" for letter in "EWI" for n in range(0, 10000, 37)),
+    "E0000",
+    "E0003",
+    "E3002",
+    "E2533",
+    "W2001",
+    "W2000",
+    "W2002",
+    "W20010",
+    "W200",
+    "W3",
+    "W",
+    "I3011",
+    "X9999",
+    "e3002",
+    "Custom1",
+    "E9001",
+]
+
+
+class TestTemplateIgnoresAreOffByDefault:
+    """A template's ``Metadata: cfn-lint: config: ignore_checks``, at the template or
+    the resource level, drops findings before ASH sees them (measured with 1.57.2:
+    ``[E, W]`` at the template level turned the fixture's 3 findings into 0). cfn-lint
+    applies neither to a rule named in ``--mandatory-checks``, which also overrides
+    ``--ignore-checks``, so ASH passes every rule id outside the operator's own
+    ignores as mandatory."""
+
+    @staticmethod
+    def _args(scanner, repo: Path) -> list:
+        results = repo / "out"
+        results.mkdir(exist_ok=True)
+        return scanner._option_args(results)
+
+    def test_with_no_ignores_every_rule_is_mandatory(self, repo):
+        mandatory = _mandatory(self._args(_scanner(repo), repo))
+        assert all(_is_mandatory(rule, mandatory) for rule in _SAMPLE_IDS)
+
+    @pytest.mark.parametrize(
+        "ignores", [["W2001"], ["W"], ["W2001", "E30", "I"], ["W200", "W2001"]]
+    )
+    def test_exactly_the_operators_ignores_are_left_out(self, repo, ignores):
+        scanner = _scanner(repo, operator=True, ignore_checks=ignores)
+        args = self._args(scanner, repo)
+        mandatory = _mandatory(args)
+        for rule in _SAMPLE_IDS:
+            if any(prefix != rule and prefix.startswith(rule) for prefix in ignores):
+                # An id shorter than an ignored prefix it begins (W for an ignored
+                # W2001) cannot be mandatory: every prefix of it is a prefix of
+                # W2001 too. No built-in id is: they are all five characters.
+                continue
+            ignored = any(rule.startswith(prefix) for prefix in ignores)
+            assert _is_mandatory(rule, mandatory) is not ignored, rule
+        start = args.index("--ignore-checks") + 1
+        assert args[start : start + len(ignores)] == ignores
+
+    def test_the_operators_config_file_ignores_are_left_out_too(self, repo, tmp_path):
+        """And passed as --ignore-checks, which cfn-lint ranks above a template's
+        own ignore_checks, so they apply whatever the template says."""
+        rc = tmp_path / "operator" / ".cfnlintrc"
+        rc.parent.mkdir()
+        rc.write_text("ignore_checks:\n  - W2001\n  - --update-specs\n")
+        scanner = _scanner(repo, operator=True, config_file=str(rc))
+        args = self._args(scanner, repo)
+        mandatory = _mandatory(args)
+        assert not _is_mandatory("W2001", mandatory)
+        assert _is_mandatory("W2002", mandatory) and _is_mandatory("E3002", mandatory)
+        start = args.index("--ignore-checks") + 1
+        assert args[start] == "W2001"
+        # A value that could be read as an option never reaches argv.
+        assert "--update-specs" not in args
+
+    def test_the_operator_can_turn_template_ignores_back_on(self, repo):
+        scanner = _scanner(
+            repo, operator=True, honor_inline_ignores=True, ignore_checks=["W2001"]
+        )
+        args = self._args(scanner, repo)
+        assert not any(a.startswith("--mandatory-checks") for a in args)
+        assert args[args.index("--ignore-checks") + 1] == "W2001"
+
+    def test_the_scanned_tree_cannot_turn_them_back_on(self, repo, caplog):
+        scanner = _scanner(repo, honor_inline_ignores=True)
+        with caplog.at_level("WARNING"):
+            args = self._args(scanner, repo)
+            self._args(scanner, repo)
+        assert all(_is_mandatory(rule, _mandatory(args)) for rule in _SAMPLE_IDS)
+        assert caplog.text.count("scanners.cfn-lint.options.honor_inline_ignores") == 1
+
+    def test_an_ignore_list_too_long_to_pass_is_refused_not_truncated(self, repo):
+        """Prefixes that share nothing past their first letter grow the list most:
+        each adds about 244 entries. 26 of them need about 28000 characters."""
+        many = [
+            f"{chr(ord('A') + i)}{i % 10}{i * 3 % 10}{i * 7 % 10}{i * 9 % 10}"
+            for i in range(26)
+        ]
+        scanner = _scanner(repo, operator=True, ignore_checks=many)
+        with pytest.raises(Exception, match="ignore_checks names too many rule ids"):
+            self._args(scanner, repo)
+        # The same list with template ignores honored passes no mandatory list.
+        honored = _scanner(
+            repo, operator=True, ignore_checks=many, honor_inline_ignores=True
+        )
+        assert not any(
+            a.startswith("--mandatory-checks") for a in self._args(honored, repo)
+        )
+
+    def test_the_mandatory_list_shrinks_the_template_batches(self, repo):
+        """cfn-lint is given at most _ARGV_CHAR_BUDGET characters of options and
+        templates together, so a long ignore list means smaller batches."""
+        fake = FakeCfnLint({}, returncode=0)
+        many = [f"W{n}" for n in range(1000, 1012)]
+        scanner = _scanner(repo, operator=True, ignore_checks=many)
+        TestScan()._run(scanner, fake)
+        for argv in fake.calls:
+            assert sum(len(a) + 1 for a in argv[1:]) <= 24000
+
+
 class TestToolVersionIsOnlyAVersionConstraint:
     """tool_version is appended to the package name for uv; it must stay a constraint."""
 

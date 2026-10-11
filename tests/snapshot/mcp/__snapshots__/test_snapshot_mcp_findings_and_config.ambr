@@ -762,6 +762,7 @@
           'name': 'cfn-lint',
           'options': dict({
             'config_file': None,
+            'honor_inline_ignores': False,
             'ignore_checks': list([
             ]),
             'include_checks': list([
@@ -1237,6 +1238,7 @@
           'name': 'cfn-lint',
           'options': dict({
             'config_file': None,
+            'honor_inline_ignores': False,
             'ignore_checks': list([
             ]),
             'include_checks': list([
@@ -1712,6 +1714,7 @@
           'name': 'cfn-lint',
           'options': dict({
             'config_file': None,
+            'honor_inline_ignores': False,
             'ignore_checks': list([
             ]),
             'include_checks': list([

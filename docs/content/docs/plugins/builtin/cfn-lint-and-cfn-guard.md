@@ -42,6 +42,8 @@ scanners:
       # informational rules, which cfn-lint does not run by default).
       ignore_checks: [W3005]
       include_checks: [I]
+      # Let a template's own Metadata ignore_checks apply (see "Suppressions").
+      honor_inline_ignores: false
       # Version constraint for the installed tool.
       tool_version: ">=1.43.3,<2.0.0"
       # Seconds allowed for the uv install of cfn-lint.
@@ -95,7 +97,7 @@ global_settings:
       reason: The function is pinned to this runtime until it is retired.
 ```
 
-Package-scoped suppressions do not apply (cfn-lint reports on templates, not packages), and neither do symbol-scoped ones, which target functions and classes in source code. cfn-lint's own template-level controls also work, for example `Metadata: cfn-lint: config: ignore_checks: [W2001]` on a resource. ASH does not see findings that cfn-lint suppressed itself, so these do not appear in ASH's suppressed counts or its unused-suppressions report; treat them like inline `nosec` comments when reviewing changes.
+Package-scoped suppressions do not apply (cfn-lint reports on templates, not packages), and neither do symbol-scoped ones, which target functions and classes in source code. A template's own ignores, `Metadata: cfn-lint: config: ignore_checks` on the template or on a resource, do not apply by default. cfn-lint would drop what they name before ASH sees it, so those findings would appear neither as findings nor in ASH's suppressed counts and unused-suppressions report. ASH passes cfn-lint every rule outside your own `ignore_checks` (and the `ignore_checks` of the `config_file` you named) as mandatory, which cfn-lint applies whatever the template says. To let templates ignore their own findings, set `honor_inline_ignores: true` as the operator, with `--config-overrides` or an ASH config file outside the scanned tree; set by an ASH config inside the tree it is ignored with a warning.
 
 ### Offline use
 

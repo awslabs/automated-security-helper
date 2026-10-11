@@ -509,6 +509,75 @@ def test_the_scanned_trees_config_cannot_narrow_what_is_reported(tmp_path):
         assert f"Ignoring scanners.{option}" in ash_log, option
 
 
+def _template_that_ignores_its_findings(source: Path) -> Path:
+    """insecure.yaml, ignoring E and W for itself and each rule on its resource."""
+    text = (source / "templates" / "insecure.yaml").read_text(encoding="utf-8")
+    text = text.replace(
+        "Resources:",
+        "Metadata:\n  cfn-lint:\n    config:\n      ignore_checks: [E, W]\nResources:",
+        1,
+    )
+    for resource, rule in (("OpenBucket", "E3002"), ("LegacyFunction", "E2533")):
+        text = text.replace(
+            f"  {resource}:\n",
+            f"  {resource}:\n    Metadata:\n      cfn-lint:\n        config:\n"
+            f"          ignore_checks: [{rule}]\n",
+            1,
+        )
+    hiding = source / "templates" / "hides-its-findings.yaml"
+    hiding.write_text(text, encoding="utf-8")
+    return hiding
+
+
+@pytest.mark.parametrize(
+    "who, extra, expected",
+    [
+        # Off by default: the template's own ignores do not apply.
+        ("nobody", (), {"W2001", "E3002", "E2533"}),
+        # The tree's config cannot turn them on.
+        ("tree", (), {"W2001", "E3002", "E2533"}),
+        # The operator can; then the template-level [E, W] hides everything.
+        (
+            "operator",
+            (
+                "--config-overrides",
+                "scanners.cfn-lint.options.honor_inline_ignores=true",
+            ),
+            set(),
+        ),
+        # The operator's own ignores still apply.
+        (
+            "nobody",
+            ("--config-overrides", "scanners.cfn-lint.options.ignore_checks=[W2001]"),
+            {"E3002", "E2533"},
+        ),
+    ],
+)
+def test_a_template_cannot_ignore_its_own_findings(tmp_path, who, extra, expected):
+    """cfn-lint drops what a template's Metadata ignore_checks names, at the
+    template or the resource level, before ASH sees it."""
+    _require_cfn_lint()
+    source = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, source)
+    _template_that_ignores_its_findings(source)
+    tree = (
+        {"scanners": {"cfn-lint": {"options": {"honor_inline_ignores": True}}}}
+        if who == "tree"
+        else {}
+    )
+
+    proc, output = _scan_with_tree_config(tmp_path, tree, *extra)
+
+    log = proc.stdout[-3000:] + proc.stderr[-3000:]
+    lint = _results(output, "cfn-lint")
+    assert {
+        r["ruleId"] for r in lint if _where(r)[0] == "templates/hides-its-findings.yaml"
+    } == expected, log
+    if who == "tree":
+        ash_log = (output / "ash.log").read_text(encoding="utf-8", errors="replace")
+        assert "Ignoring scanners.cfn-lint.options.honor_inline_ignores" in ash_log
+
+
 def test_the_operator_can_name_a_cfnlintrc_outside_the_tree(tmp_path):
     """The control: the same kind of rules file is imported when the operator names it."""
     _require_cfn_lint()

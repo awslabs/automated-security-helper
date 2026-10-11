@@ -68,10 +68,12 @@ import json
 import logging
 import os
 import re
+import string
 from pathlib import Path
 import copy
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
+import yaml
 from pydantic import AnyUrl, Field, PrivateAttr, field_validator
 
 from automated_security_helper.base.options import (
@@ -158,6 +160,16 @@ _ARGV_CHAR_BUDGET = 24000
 _REGION_PATTERN = re.compile(r"^(ALL_REGIONS|[a-z]{2}(-[a-z]+)+-\d+)$")
 _CHECK_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
 
+#: The characters a rule id prefix is built from in ``mandatory_prefixes``: the ones
+#: ``_CHECK_PATTERN`` allows, which cover every built-in id (a letter and four
+#: digits) and the usual custom ones.
+_RULE_ID_ALPHABET = string.digits + string.ascii_uppercase + string.ascii_lowercase
+
+#: The most option text cfn-lint may be given; the rest of ``_ARGV_CHAR_BUDGET`` is
+#: left for templates. A ``--mandatory-checks`` list longer than this comes from an
+#: ignore list too long to express, and is refused rather than truncated.
+_OPTION_CHAR_BUDGET = 20000
+
 
 def severity_for_rule(rule_id: Optional[str]) -> Tuple[str, str]:
     """The (ASH severity, SARIF level) for a cfn-lint rule id.
@@ -167,6 +179,42 @@ def severity_for_rule(rule_id: Optional[str]) -> Tuple[str, str]:
     """
     letter = (rule_id or "E")[:1].upper()
     return SEVERITY_BY_RULE_LETTER.get(letter, SEVERITY_BY_RULE_LETTER["E"])
+
+
+def mandatory_prefixes(ignored: List[str]) -> List[str]:
+    """Rule-id prefixes that match exactly the ids no prefix in ``ignored`` matches.
+
+    cfn-lint matches ``--mandatory-checks`` and ``--ignore-checks`` entries as
+    prefixes of a rule id, and a mandatory match wins over every ignore. So the
+    complement of the ignored prefixes, over ``_RULE_ID_ALPHABET``, makes every
+    other rule mandatory and leaves the ignored ones to ``--ignore-checks``. With
+    nothing ignored it is each single character. For ``W2001`` it is every first
+    character but ``W``, then every ``W`` and a second character but ``2``, and so
+    on down to ``W200`` and a fifth character but ``1``.
+
+    One kind of id cannot be covered: one that is a proper prefix of an ignored
+    prefix (``W20`` when ``W2001`` is ignored), because every prefix of it is a
+    prefix of the ignored one too. Every built-in id is a letter and four digits,
+    and the ignored prefixes are validated as rule ids or prefixes, so only a
+    custom rule with a shorter id is affected.
+    """
+    distinct = sorted(set(ignored))
+    minimal = [
+        p for p in distinct if not any(p != q and p.startswith(q) for q in distinct)
+    ]
+    result: List[str] = []
+
+    def walk(prefix: str, below: List[str]) -> None:
+        following = {entry[len(prefix)] for entry in below}
+        for char in _RULE_ID_ALPHABET:
+            extended = prefix + char
+            if char not in following:
+                result.append(extended)
+            elif extended not in below:
+                walk(extended, [entry for entry in below if entry.startswith(extended)])
+
+    walk("", minimal)
+    return result
 
 
 def _successful_exit(code: object) -> bool:
@@ -225,6 +273,21 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
             ),
         ),
     ] = []
+    honor_inline_ignores: Annotated[
+        bool,
+        Field(
+            description=(
+                "Honor the ignore_checks a template sets for itself in "
+                "`Metadata: cfn-lint: config`, at the template or the resource level. "
+                "Off by default: every rule outside ignore_checks and the "
+                "config_file's ignore_checks is passed to cfn-lint as mandatory, so "
+                "a template cannot hide its own findings, which reach ASH, where "
+                "suppressions are reported and counted. Honored only when set by "
+                "--config-overrides or a config file outside the scanned tree; from "
+                "a config in the scanned tree it is ignored with a warning."
+            ),
+        ),
+    ] = False
     # The floor is 1.43.3, the cfn-lint the Nix flake's nixpkgs revision ships, so a
     # Nix run can use the flake's copy. Both ends were measured: 1.43.3 and 1.57.1
     # give identical SARIF on the fixture templates under
@@ -426,12 +489,95 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             )
         if options.regions:
             args.extend(["--regions", *options.regions])
-        ignore_checks = self._operator_option("ignore_checks")
+        ignore_checks = list(self._operator_option("ignore_checks"))
+        honor_inline_ignores = self._honor_inline_ignores()
+        if not honor_inline_ignores and config_file is not None:
+            for check in self._config_file_ignores(config_file):
+                if check not in ignore_checks:
+                    ignore_checks.append(check)
         if ignore_checks:
             args.extend(["--ignore-checks", *ignore_checks])
         if options.include_checks:
             args.extend(["--include-checks", *options.include_checks])
+        if not honor_inline_ignores:
+            # See _honor_inline_ignores. One token, so no entry is read as a flag.
+            args.append(
+                "--mandatory-checks=" + ",".join(mandatory_prefixes(ignore_checks))
+            )
+        option_chars = sum(len(arg) + 1 for arg in args)
+        if option_chars > _OPTION_CHAR_BUDGET:
+            raise ScannerError(
+                f"cfn-lint's options take {option_chars} characters, more than the "
+                f"{_OPTION_CHAR_BUDGET} a command line can spare: ignore_checks names "
+                "too many rule ids to pass the rest as mandatory. Use fewer, shorter "
+                "prefixes, or ASH suppressions."
+            )
         return args
+
+    def _honor_inline_ignores(self) -> bool:
+        """Whether a template's own ``ignore_checks`` may apply.
+
+        A template can set ``Metadata: cfn-lint: config: ignore_checks`` for the
+        whole template and for each resource, and cfn-lint drops what they name
+        before ASH sees it, so it is neither reported nor counted as suppressed
+        (measured with 1.57.2: ``[E, W]`` at the template level turned the
+        fixture's three findings into none, and so did one rule per resource).
+        cfn-lint applies neither to a rule ``--mandatory-checks`` names, so unless
+        the operator turned this on, ``_option_args`` passes every rule outside
+        the operator's own ignores as mandatory (``mandatory_prefixes``). Those
+        ignores, from ``ignore_checks`` and the operator's ``config_file``, are
+        passed as ``--ignore-checks``, which cfn-lint ranks above a template's.
+        """
+        if not self._options().honor_inline_ignores:
+            return False
+        if set_by_operator(
+            self.context.config if self.context is not None else None,
+            "scanners.cfn-lint.options.honor_inline_ignores",
+            True,
+        ):
+            return True
+        if "honor_inline_ignores" not in self._refused_options:
+            self._refused_options.add("honor_inline_ignores")
+            self._plugin_log(
+                "Ignoring scanners.cfn-lint.options.honor_inline_ignores: "
+                f"{NOT_THE_OPERATORS}. A template's own ignore_checks do not apply; "
+                "suppress findings with ASH suppressions.",
+                level=logging.WARNING,
+            )
+        return False
+
+    def _config_file_ignores(self, config_file: Path) -> List[str]:
+        """The ``ignore_checks`` the operator's ``.cfnlintrc`` sets, if any.
+
+        Read here so they can be left out of ``--mandatory-checks``. An entry that
+        is not a rule id or prefix is left out with a warning, so it can never be
+        read as an option; one the file cannot be parsed for is reported the same
+        way, and those checks then run.
+        """
+        try:
+            parsed = yaml.safe_load(Path(config_file).read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as exc:
+            self._plugin_log(
+                f"Could not read ignore_checks from {Path(config_file).as_posix()} "
+                f"({exc}); every check runs.",
+                level=logging.WARNING,
+            )
+            return []
+        raw = parsed.get("ignore_checks") if isinstance(parsed, dict) else None
+        if isinstance(raw, str):
+            raw = raw.split(",")
+        checks: List[str] = []
+        for item in raw if isinstance(raw, list) else []:
+            if isinstance(item, str) and _CHECK_PATTERN.match(item):
+                checks.append(item)
+            else:
+                self._plugin_log(
+                    f"Ignoring ignore_checks entry {item!r} in "
+                    f"{Path(config_file).as_posix()}: not a cfn-lint rule id or "
+                    "prefix (letters and digits).",
+                    level=logging.WARNING,
+                )
+        return checks
 
     @staticmethod
     def _child_env() -> Dict[str, str]:
@@ -719,7 +865,11 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             child_env = self._child_env()
             cwd = self._subprocess_cwd(results_dir)
 
-            for index, arguments in enumerate(self.batches(list(shown_by_argument))):
+            # _option_args keeps this under _OPTION_CHAR_BUDGET.
+            budget = _ARGV_CHAR_BUDGET - sum(len(arg) + 1 for arg in option_args)
+            for index, arguments in enumerate(
+                self.batches(list(shown_by_argument), budget)
+            ):
                 batch = [shown_by_argument[argument] for argument in arguments]
                 self.targets_attempted += len(batch)
                 batch_file = results_dir.joinpath(f"cfn-lint.{index}.sarif")

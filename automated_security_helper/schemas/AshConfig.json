@@ -521,6 +521,7 @@
               "name": "cfn-lint",
               "options": {
                 "config_file": null,
+                "honor_inline_ignores": false,
                 "ignore_checks": [],
                 "include_checks": [],
                 "install_timeout": 300,
@@ -1394,6 +1395,7 @@
           "$ref": "#/$defs/CfnLintScannerConfigOptions",
           "default": {
             "config_file": null,
+            "honor_inline_ignores": false,
             "ignore_checks": [],
             "include_checks": [],
             "install_timeout": 300,
@@ -1427,6 +1429,12 @@
           "default": null,
           "description": "Path to a cfn-lint configuration file (.cfnlintrc). When unset, ASH gives cfn-lint an empty configuration, so a .cfnlintrc in the scanned repository or the home directory is NOT read: such a file can load Python rules (append_rules) and switch checks off. Honored only when set by --config-overrides or a config file outside the scanned tree, and only for a file outside the scanned tree; otherwise it is ignored with a warning.",
           "title": "Config File"
+        },
+        "honor_inline_ignores": {
+          "default": false,
+          "description": "Honor the ignore_checks a template sets for itself in `Metadata: cfn-lint: config`, at the template or the resource level. Off by default: every rule outside ignore_checks and the config_file's ignore_checks is passed to cfn-lint as mandatory, so a template cannot hide its own findings, which reach ASH, where suppressions are reported and counted. Honored only when set by --config-overrides or a config file outside the scanned tree; from a config in the scanned tree it is ignored with a warning.",
+          "title": "Honor Inline Ignores",
+          "type": "boolean"
         },
         "ignore_checks": {
           "default": [],
@@ -3908,6 +3916,7 @@
             "name": "cfn-lint",
             "options": {
               "config_file": null,
+              "honor_inline_ignores": false,
               "ignore_checks": [],
               "include_checks": [],
               "install_timeout": 300,

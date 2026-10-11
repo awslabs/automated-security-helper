@@ -267,6 +267,7 @@ ash_config:
       name: cfn-lint
       options:
         config_file: null
+        honor_inline_ignores: false
         ignore_checks: []
         include_checks: []
         install_timeout: 300
