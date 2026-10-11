@@ -129,8 +129,10 @@ def mark_run_completed(results: object, run_id: Optional[str]) -> None:
     """Replace the run records in ``results`` with this run's completion marker.
 
     With no ``run_id`` (not an inner run), only removes the records an earlier run
-    left. Leaves ``results`` untouched when there is nothing to change.
+    left. Leaves ``results`` untouched when there is nothing to change, or none.
     """
+    if results is None:
+        return
     checkpoints = list(getattr(results, "validation_checkpoints", None) or [])
     kept = without_run_records(checkpoints)
     if run_id is None and len(kept) == len(checkpoints):
@@ -215,7 +217,11 @@ class InnerRunOutcome:
     completed: bool
     refusal: Optional[str] = None
     inner_output_dir: Optional[str] = None
+    #: A record carries another run's ID: an earlier run's, in a file read back with
+    #: ``--use-existing`` that this run did not finish rewriting.
     marked_by_another_run: bool = False
+    #: A record carries no run ID, which only an ASH older than this one writes.
+    written_by_an_older_ash: bool = False
 
 
 def read_back_outcome(results: object, run_id: str) -> InnerRunOutcome:
@@ -224,10 +230,15 @@ def read_back_outcome(results: object, run_id: str) -> InnerRunOutcome:
     refusal: Optional[str] = None
     inner_output_dir: Optional[str] = None
     another_run = False
+    older_ash = False
     for checkpoint in getattr(results, "validation_checkpoints", None) or []:
         if not _is_run_record(checkpoint):
             continue
-        if _run_id_of(checkpoint) != run_id:
+        recorded_id = _run_id_of(checkpoint)
+        if recorded_id is None:
+            older_ash = True
+            continue
+        if recorded_id != run_id:
             another_run = True
             continue
         if checkpoint.get("type") == RUN_COMPLETED_CHECKPOINT:
@@ -242,6 +253,7 @@ def read_back_outcome(results: object, run_id: str) -> InnerRunOutcome:
         refusal=refusal,
         inner_output_dir=inner_output_dir,
         marked_by_another_run=another_run,
+        written_by_an_older_ash=older_ash,
     )
 
 
@@ -253,4 +265,8 @@ def as_seen_from_the_host(message: str, inner_dir: Optional[str], host_dir: str)
     """
     if not inner_dir or inner_dir == host_dir:
         return message
-    return re.sub(re.escape(inner_dir) + r"(?=/|\b|$)", host_dir, message)
+    # Only where the inner directory starts a path: not inside another one, such as
+    # /src/out for an inner /out, and not as the start of a longer name. The host
+    # directory is inserted as written, not read as a replacement template.
+    pattern = r"(?<![^\s'\"(])" + re.escape(inner_dir) + r"(?=/|\b|$)"
+    return re.sub(pattern, lambda _match: host_dir, message)

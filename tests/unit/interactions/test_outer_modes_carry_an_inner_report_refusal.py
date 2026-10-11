@@ -145,6 +145,7 @@ def _inner_run(
     reporters: List[type],
     use_existing: bool = False,
     after_scan: Optional[Callable[[], None]] = None,
+    logger: Optional[MagicMock] = None,
 ) -> int:
     """Run the inner local scan in this process and return its exit status.
 
@@ -164,7 +165,7 @@ def _inner_run(
         ),
     ):
         try:
-            _run_local_mode(inner, MagicMock())
+            _run_local_mode(inner, logger or MagicMock())
         except SystemExit as exited:
             return int(exited.code or 0)
         except Exception:  # noqa: BLE001 - the inner process would exit 1
@@ -263,19 +264,87 @@ def test_an_inner_run_without_a_refusal_is_read_back(tmp_path, outer):
 def test_a_refusal_that_could_not_be_recorded_still_fails_the_outer_run(
     tmp_path, outer
 ):
-    """The record cannot be written (here a read-only output directory, as on ENOSPC)."""
+    """The record's write fails (as on ENOSPC); the outer process finds no completion."""
+    from automated_security_helper.utils import inner_run_outcome
+
     opts = _opts(tmp_path)
+    inner_logger, outer_logger = MagicMock(), MagicMock()
+    failing_write = MagicMock(side_effect=OSError("no space left on device"))
 
-    def lock_output_dir() -> None:
-        opts.output_dir.chmod(stat.S_IRUSR | stat.S_IXUSR)
-
-    try:
-        with pytest.raises(SystemExit) as refused:
-            outer(opts, _scan(opts, [_Escaping], after_scan=lock_output_dir))
-    finally:
-        opts.output_dir.chmod(stat.S_IRWXU)
+    with (
+        patch.object(inner_run_outcome, "write_text_atomically", failing_write),
+        pytest.raises(SystemExit) as refused,
+    ):
+        outer(
+            opts,
+            lambda run_id: _inner_run(
+                run_id, opts.output_dir, [_Escaping], logger=inner_logger
+            ),
+            outer_logger,
+        )
 
     assert refused.value.code == 1
+    assert failing_write.called
+    assert "did not complete" in _errors(outer_logger), _errors(outer_logger)
+    written = json.loads(
+        (opts.output_dir / "ash_aggregated_results.json").read_text(encoding="utf-8")
+    )
+    assert not any(
+        checkpoint.get("type") == "report_path_refused"
+        for checkpoint in written["validation_checkpoints"]
+    )
+    warnings = "\n".join(
+        str(call.args[0]) for call in inner_logger.warning.call_args_list
+    )
+    assert "Could not record the refusal" in warnings, warnings
+
+
+@OUTER
+def test_a_completion_record_that_could_not_be_written_fails_the_outer_run(
+    tmp_path, outer
+):
+    """The inner run's last write of its results fails, marker and all."""
+    from automated_security_helper.interactions import run_ash_scan
+
+    opts = _opts(tmp_path)
+    logger = MagicMock()
+    results_file = opts.output_dir / "ash_aggregated_results.json"
+    real_write = run_ash_scan.write_text_atomically
+
+    def failing_results_write(path, content, *args, **kwargs):
+        if Path(path) == results_file:
+            raise OSError("no space left on device")
+        return real_write(path, content, *args, **kwargs)
+
+    with (
+        patch.object(run_ash_scan, "write_text_atomically", failing_results_write),
+        pytest.raises(SystemExit) as refused,
+    ):
+        outer(opts, _scan(opts, []), logger)
+
+    assert refused.value.code == 1
+    assert "did not complete" in _errors(logger), _errors(logger)
+
+
+@OUTER
+def test_a_run_that_fails_after_reading_an_earlier_runs_results_says_so(
+    tmp_path, outer
+):
+    """--use-existing: the file holds the earlier run's marker, not this run's."""
+    opts = _opts(tmp_path)
+    outer(opts, _scan(opts, []))
+    opts.existing_results = (opts.output_dir / "ash_aggregated_results.json").as_posix()
+    logger = MagicMock()
+
+    def crash() -> None:
+        raise RuntimeError("failed after reading the existing results")
+
+    with pytest.raises(SystemExit) as refused:
+        outer(opts, _scan(opts, [], use_existing=True, after_scan=crash), logger)
+
+    assert refused.value.code == 1
+    errors = _errors(logger)
+    assert "did not complete" in errors and "earlier run" in errors, errors
 
 
 @OUTER
@@ -433,6 +502,30 @@ def test_a_results_file_without_a_completion_marker_is_not_read_back(tmp_path, o
     else:
         # The shell runs this ASH's own interpreter, which the message names.
         assert sys.executable in errors, errors
+
+
+@OUTER
+def test_a_refusal_recorded_without_a_run_id_is_attributed_to_an_older_ash(
+    tmp_path, outer
+):
+    opts = _opts(tmp_path)
+    logger = MagicMock()
+
+    def inner(run_id: str) -> int:
+        _write_results(
+            opts.output_dir,
+            {"type": "report_path_refused", "message": "a refusal with no run ID"},
+        )
+        return 1
+
+    with pytest.raises(SystemExit) as refused:
+        outer(opts, inner, logger)
+
+    assert refused.value.code == 1
+    errors = _errors(logger)
+    assert "did not complete" in errors, errors
+    assert "a record without a run ID, which an ASH older than this one" in errors
+    assert "a refusal with no run ID" not in str(getattr(refused.value, "reason", ""))
 
 
 @OUTER

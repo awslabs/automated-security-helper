@@ -1254,7 +1254,12 @@ def _refuse_an_inner_run_that_did_not_complete(
         raise ReportPathRefusedExit(reason)
     if outcome.completed:
         return
-    if outcome.marked_by_another_run:
+    if outcome.written_by_an_older_ash:
+        found = (
+            "holds a record without a run ID, which an ASH older than this one "
+            "writes, and no record that this run completed"
+        )
+    elif outcome.marked_by_another_run:
         found = "holds only records an earlier run wrote"
     else:
         found = "holds no record that the run completed"
