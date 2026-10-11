@@ -42,10 +42,12 @@ Failure modes and known limitations
 * A repository that relied on its own file now scans without it, and the scan's
   warnings name the option that was ignored. The CHANGELOG says how to keep it:
   name the file with ``--config-overrides`` or in an operator config.
-* Only these three scanners' ``config_file`` are covered here. checkov's and
-  ferret-scan's are refused inside the tree by ``config/path_trust.py`` whoever
-  names them. detect-secrets' baseline is not covered here; under the MCP
-  server it is a default ``denied_paths`` entry.
+* checkov's and ferret-scan's ``config_file``, detect-secrets' ``baseline_file``
+  and ``file://`` plugins and filters, and trivy-repo's ``ignore_file`` and
+  ``secret_config_file`` are covered here too, for a file outside the tree;
+  ``config/path_trust.py`` still refuses one inside the tree whoever names it.
+  A baseline or tool config the scanner finds by name in the tree is
+  ``path_trust``'s, not this module's.
 """
 
 from __future__ import annotations
@@ -68,7 +70,17 @@ SCANNER_CONFIG_FILE_OPTIONS: Dict[str, Tuple[str, ...]] = {
     "syft": ("config_file",),
     "opengrep": ("config", "metrics"),
     "semgrep": ("config", "metrics"),
+    # Files the tool reads that config/path_trust.py refuses inside the scanned
+    # tree. A file outside it is the operator's to name, not the repository's.
+    "checkov": ("config_file",),
+    "ferret-scan": ("config_file",),
+    "detect-secrets": ("baseline_file",),
+    "trivy-repo": ("ignore_file", "secret_config_file"),
 }
+
+#: detect-secrets ``scan_settings`` lists whose entries may name a file the
+#: worker loads code from (``file://<path>``).
+_SETTINGS_FILE_LISTS: Tuple[str, ...] = ("plugins_used", "filters_used")
 
 _MISSING = object()
 
@@ -143,11 +155,16 @@ def confine_scanner_config_files(
                 current = _get(options, name)
                 if current in (_MISSING, None) and wanted in (_MISSING, None):
                     continue
-                if current == wanted:
+                if current == wanted or (
+                    current not in (_MISSING, None)
+                    and wanted not in (_MISSING, None)
+                    and str(current) == str(wanted)
+                ):
                     continue
                 if current not in (_MISSING, None):
                     ignored.append(f"scanners.{key}.options.{name}")
                 _set(options, name, wanted)
+    ignored.extend(_confine_settings_files(config, trusted_config))
     if ignored:
         files = ", ".join(describe_config_path(path) for path in in_tree)
         ASH_LOGGER.warning(
@@ -157,6 +174,83 @@ def confine_scanner_config_files(
             "was delivered by an MCP client. Set them with --config-overrides or in "
             "a config file outside the tree."
         )
+
+
+def _entry_path(entry: Any) -> Any:
+    if isinstance(entry, dict):
+        return entry.get("path")
+    return getattr(entry, "path", None)
+
+
+def _entry_dump(entry: Any) -> Any:
+    if hasattr(entry, "model_dump"):
+        return entry.model_dump(mode="json", exclude_none=True)
+    return {k: v for k, v in dict(entry).items() if v is not None}
+
+
+def _confine_settings_files(
+    config: "AshConfig", trusted_config: "AshConfig"
+) -> List[str]:
+    """Drop the detect-secrets ``file://`` plugins and filters the trusted base lacks.
+
+    detect-secrets loads a plugin or filter named ``file://<path>`` from that
+    file. ``config/path_trust.py`` refuses such a file inside the scanned tree;
+    one outside it is the operator's to name, so an entry the trusted base
+    (``--config-overrides`` replayed) does not have is dropped. Entries that
+    name one of detect-secrets' own plugins are left alone.
+    """
+    from automated_security_helper.config.client_scanner_exclusions import (
+        _scanner_sections,
+    )
+
+    trusted_section = trusted_config.get_plugin_config("scanner", "detect-secrets")
+    trusted_settings = ((trusted_section or {}).get("options") or {}).get(
+        "scan_settings"
+    ) or {}
+    ignored: List[str] = []
+    for key, section in _scanner_sections(config, "detect-secrets"):
+        options = _options_of(section)
+        if options is None:
+            continue
+        settings = _get(options, "scan_settings")
+        if settings in (_MISSING, None):
+            continue
+        for list_name in _SETTINGS_FILE_LISTS:
+            entries = (
+                settings.get(list_name)
+                if isinstance(settings, dict)
+                else getattr(settings, list_name, None)
+            )
+            if not entries:
+                continue
+            trusted_entries = [
+                _entry_dump(entry)
+                for entry in (
+                    trusted_settings.get(list_name)
+                    if isinstance(trusted_settings, dict)
+                    else getattr(trusted_settings, list_name, None)
+                )
+                or []
+            ]
+            kept = []
+            for entry in entries:
+                path = _entry_path(entry)
+                if (
+                    isinstance(path, str)
+                    and path.startswith("file://")
+                    and _entry_dump(entry) not in trusted_entries
+                ):
+                    ignored.append(
+                        f"scanners.{key}.options.scan_settings.{list_name}[].path"
+                    )
+                    continue
+                kept.append(entry)
+            if len(kept) != len(entries):
+                if isinstance(settings, dict):
+                    settings[list_name] = kept
+                else:
+                    setattr(settings, list_name, kept)
+    return ignored
 
 
 def empty_tool_config(results_dir: Any, name: str, content: str) -> Path:

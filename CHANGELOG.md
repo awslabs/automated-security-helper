@@ -228,7 +228,12 @@
     from the registry, a URL or a path) and `metrics` are the operator's the same
     way: from such a file they are left at the default, `p/ci` and `auto`, with a
     warning naming the key, and under the MCP server `metrics` joins the default
-    `denied_paths` (`config` already is one).
+    `denied_paths` (`config` already is one). So are the files other scanners read
+    that ASH already refused inside the tree: checkov's and ferret-scan's
+    `config_file`, detect-secrets' `baseline_file` and `file://` plugins and
+    filters in `scan_settings`, and trivy-repo's `ignore_file` and
+    `secret_config_file`. Such a file outside the tree is now passed only when the
+    operator named it.
   - semgrep and opengrep no longer honor a `.semgrepignore` in the scanned tree.
     ASH passes `--x-ignore-semgrepignore-files` together with the tools' default
     exclusions, so the paths scanned are those scanned with no `.semgrepignore`.

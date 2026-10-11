@@ -322,3 +322,103 @@ def test_an_unhonored_semgrepignore_is_noted_in_the_results(tmp_path: Path) -> N
     (note,) = [w for w in context.config._resolution_warnings if ".semgrepignore" in w]
     assert "was not honored" in note
     assert "global_settings.ignore_paths" in note
+
+
+#: Options naming a file a tool reads, which config/path_trust.py refuses inside
+#: the tree; one outside it is the operator's to name.
+PATH_CHOICES = [
+    ("checkov", "config_file"),
+    ("ferret-scan", "config_file"),
+    ("detect-secrets", "baseline_file"),
+    ("trivy-repo", "ignore_file"),
+    ("trivy-repo", "secret_config_file"),
+]
+_PATH_IDS = [f"{scanner}.{option}" for scanner, option in PATH_CHOICES]
+
+
+def _outside(tmp_path: Path) -> str:
+    elsewhere = tmp_path / "elsewhere" / "tool-file"
+    elsewhere.parent.mkdir(exist_ok=True)
+    elsewhere.write_text("x\n", encoding="utf-8")
+    return elsewhere.as_posix()
+
+
+@pytest.mark.parametrize(("scanner", "option"), PATH_CHOICES, ids=_PATH_IDS)
+def test_a_repositorys_config_does_not_name_a_tool_file_outside_the_tree(
+    tmp_path: Path, scanner: str, option: str
+) -> None:
+    repo = _repo(tmp_path, {scanner: {"options": {option: _outside(tmp_path)}}})
+    config = resolve_config(source_dir=repo)
+    assert not _option(config, scanner, option)
+
+
+@pytest.mark.parametrize(("scanner", "option"), PATH_CHOICES, ids=_PATH_IDS)
+def test_an_override_names_a_tool_file_outside_the_tree(
+    tmp_path: Path, scanner: str, option: str
+) -> None:
+    outside = _outside(tmp_path)
+    repo = _repo(tmp_path, {scanner: {"options": {option: "in-tree-name"}}})
+    config = resolve_config(
+        source_dir=repo,
+        config_overrides=[f"scanners.{scanner}.options.{option}={outside}"],
+    )
+    assert str(_option(config, scanner, option)) == outside
+
+
+def _plugin_entry(path: str) -> dict:
+    return {"name": "LocalPlugin", "path": f"file://{path}"}
+
+
+def _settings_paths(config: Any) -> List[str]:
+    settings = config.scanners.detect_secrets.options.scan_settings
+    return [entry.path for entry in settings.plugins_used if entry.path]
+
+
+def test_a_repositorys_config_does_not_load_a_detect_secrets_plugin_file(
+    tmp_path: Path,
+) -> None:
+    outside = _outside(tmp_path)
+    repo = _repo(
+        tmp_path,
+        {
+            "detect-secrets": {
+                "options": {
+                    "scan_settings": {
+                        "plugins_used": [
+                            {"name": "AWSKeyDetector"},
+                            _plugin_entry(outside),
+                        ]
+                    }
+                }
+            }
+        },
+    )
+    config = resolve_config(source_dir=repo)
+    settings = config.scanners.detect_secrets.options.scan_settings
+    assert [entry.name for entry in settings.plugins_used] == ["AWSKeyDetector"]
+
+
+def test_an_operator_config_outside_the_tree_loads_its_plugin_file(
+    tmp_path: Path,
+) -> None:
+    outside = _outside(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        yaml.safe_dump(
+            {
+                "scanners": {
+                    "detect-secrets": {
+                        "options": {
+                            "scan_settings": {"plugins_used": [_plugin_entry(outside)]}
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = resolve_config(config_path=operator, source_dir=repo)
+    assert _settings_paths(config) == [f"file://{outside}"]
