@@ -77,7 +77,7 @@
           'package_path': None,
           'package_version': None,
           'properties': '{"tags": ["bandit"], "scanner_name": "bandit", "issue_severity": "MEDIUM"}',
-          'raw_data': '{"ruleId":"B105","ruleIndex":-1,"kind":"fail","level":"warning","message":{"text":"Possible hardcoded password: \'hunter2\'","arguments":[]},"locations":[{"id":-1,"physicalLocation":{"artifactLocation":{"uri":"src/settings.py","index":-1},"region":{"startLine":7,"endLine":7,"charOffset":-1,"byteOffset":-1}},"logicalLocations":[],"annotations":[],"relationships":[]}],"stacks":[],"codeFlows":[],"graphs":[],"graphTraversals":[],"relatedLocations":[],"rank":-1.0,"attachments":[],"fixes":[],"taxa":[],"properties":{"tags":["bandit"],"scanner_name":"bandit","issue_severity":"MEDIUM"}}',
+          'raw_data': '{"ruleId":"B105","ruleIndex":-1,"kind":"fail","level":"warning","message":{"text":"Possible hardcoded password: \'h******\'","arguments":[]},"locations":[{"id":-1,"physicalLocation":{"artifactLocation":{"uri":"src/settings.py","index":-1},"region":{"startLine":7,"endLine":7,"charOffset":-1,"byteOffset":-1}},"logicalLocations":[],"annotations":[],"relationships":[]}],"stacks":[],"codeFlows":[],"graphs":[],"graphTraversals":[],"relatedLocations":[],"rank":-1.0,"attachments":[],"fixes":[],"taxa":[],"properties":{"tags":["bandit"],"scanner_name":"bandit","issue_severity":"MEDIUM"}}',
           'references': None,
           'rule_id': 'B105',
           'scanner': 'bandit',

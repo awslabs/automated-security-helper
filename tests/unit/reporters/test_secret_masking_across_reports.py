@@ -29,6 +29,7 @@ fixture tree and why each value sits where it does.
 import json
 
 import pytest
+from typer.testing import CliRunner
 
 from tests.utils.secret_bearing_scan import (
     DEPLOY_PREFIX,
@@ -39,6 +40,7 @@ from tests.utils.secret_bearing_scan import (
     SYNC_PREFIX,
     find_result,
     isolate_from_aws,
+    results_without_masking,
     run_secret_bearing_scan,
     run_secret_bearing_workspace_scan,
     sarif_results,
@@ -338,3 +340,164 @@ class TestWorkspaceScan:
 
         assert "B105" in text, f"{relative} lists no B105 finding; this checks nothing"
         assert SECRETS.found_in(text) == [], f"{relative} holds a secret value"
+
+
+class TestStoredResultsRerendered:
+    """Reports rendered from an ``ash_aggregated_results.json`` written without masking.
+
+    Such a file comes from an ASH that predates masking, or from any producer that
+    skipped it. The reporters still run on what it holds, so the masking has to
+    happen on that path too.
+    """
+
+    @pytest.fixture
+    def stored_output_dir(self, tmp_path):
+        model = results_without_masking(tmp_path / "src", tmp_path / "scanner-output")
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+        results_file = output_dir / "ash_aggregated_results.json"
+        results_file.write_text(model.model_dump_json(by_alias=True), encoding="utf-8")
+        # Precondition: the stored file really holds the values.
+        assert SECRETS.found_in(results_file.read_text(encoding="utf-8")) == (
+            SECRETS.names()
+        )
+        return output_dir
+
+    @pytest.mark.parametrize("report_format", ["sarif", "csv"])
+    def test_report_command_output_holds_no_secret_value(
+        self, stored_output_dir, report_format
+    ):
+        from automated_security_helper.cli.main import app
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "report",
+                "--format",
+                report_format,
+                "--output-dir",
+                str(stored_output_dir),
+                "--log-level",
+                "ERROR",
+                "--no-color",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "B105" in result.output
+        assert SECRETS.found_in(_without_whitespace(result.output)) == []
+
+    def test_use_existing_rerender_writes_no_secret_value(self, stored_output_dir):
+        from automated_security_helper.interactions.run_ash_scan import run_ash_scan
+
+        run_ash_scan(
+            source_dir=str(stored_output_dir.parent / "src"),
+            output_dir=str(stored_output_dir),
+            existing_results=str(stored_output_dir / "ash_aggregated_results.json"),
+            output_formats=["sarif", "flat-json"],
+            offline=True,
+            progress=False,
+            quiet=True,
+            show_summary=False,
+            fail_on_findings=False,
+            # The stored file has no scanner statuses, which the completeness gate
+            # would read as scanners that did not finish.
+            fail_on_incomplete_scanners=False,
+            color=False,
+        )
+
+        for relative in ("reports/ash.sarif", "reports/ash.flat.json"):
+            text = _read(stored_output_dir, relative)
+            assert "B105" in text, relative
+            assert SECRETS.found_in(text) == [], relative
+
+    def test_mcp_explain_finding_on_stored_results_returns_no_secret_value(
+        self, stored_output_dir, monkeypatch
+    ):
+        from automated_security_helper.cli.mcp.scan_target import (
+            ASH_MCP_ALLOWED_ROOTS_ENV,
+        )
+        from automated_security_helper.cli.mcp_tools import (
+            _load_flat_vulns_for_explain,
+            mcp_explain_finding,
+        )
+
+        monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(stored_output_dir.parent))
+        # The ids as the tool itself derives them from the stored file, so the
+        # lookup does not depend on how masking rewrites a description.
+        finding_ids = [
+            vuln.id
+            for vuln in _load_flat_vulns_for_explain(str(stored_output_dir))
+            if vuln.rule_id in ("B105", "B106", "B107")
+        ]
+        assert len(finding_ids) == 4
+
+        for finding_id in finding_ids:
+            response = mcp_explain_finding(
+                finding_id, results_path=str(stored_output_dir)
+            )
+            assert response["success"] is True, response
+            assert SECRETS.found_in(json.dumps(response)) == [], finding_id
+
+    def test_merge_of_stored_shard_results_writes_no_secret_value(
+        self, stored_output_dir, tmp_path
+    ):
+        from automated_security_helper.cli.merge import (
+            merge_command,
+            stamp_shard_assignment,
+        )
+        from automated_security_helper.core.enums import ScannerStatus
+        from automated_security_helper.core.sharding import ShardAssignment
+        from automated_security_helper.models.asharp_model import (
+            ScannerTargetStatusInfo,
+        )
+
+        # The stored file, stamped as the one shard of a one-shard run, as
+        # `ash scan --shard-index 0 --shard-count 1` would have written it.
+        results_file = stored_output_dir / "ash_aggregated_results.json"
+        # Rebuilt the way the fixture built it, not read back: reading the file
+        # into a model masks it, and the stored shard must hold the values.
+        model = results_without_masking(tmp_path / "src", tmp_path / "scanner-output")
+        scanners = ["bandit", "detect-secrets"]
+        for name in scanners:
+            model.scanner_results[name] = ScannerTargetStatusInfo(
+                status=ScannerStatus.FAILED, excluded=False, dependencies_satisfied=True
+            )
+            model.additional_reports[name] = {
+                "source": {"scanner_name": name, "status": "FAILED", "duration": 1.0}
+            }
+        stamp_shard_assignment(
+            model,
+            ShardAssignment(
+                shard_index=0,
+                shard_count=1,
+                assigned_scanners=scanners,
+                candidate_scanners=scanners,
+            ),
+        )
+        results_file.write_text(model.model_dump_json(by_alias=True), encoding="utf-8")
+        assert SECRETS.found_in(results_file.read_text(encoding="utf-8")) == (
+            SECRETS.names()
+        )
+        merged_dir = tmp_path / "merged"
+
+        # Called as the `ash merge` command function rather than through
+        # CliRunner: after other in-process CLI runs, CliRunner's captured stream
+        # is closed under it here, which would fail the test for a reason unrelated
+        # to masking. Exit 0 returns; any other exit raises typer.Exit.
+        merge_command(
+            results=[str(stored_output_dir)],
+            output_dir=str(merged_dir),
+            output_formats=["sarif,flat-json"],
+            fail_on_findings=False,
+            fail_on_incomplete_scanners=False,
+        )
+
+        for relative in (
+            "ash_aggregated_results.json",
+            "reports/ash.sarif",
+            "reports/ash.flat.json",
+        ):
+            text = _read(merged_dir, relative)
+            assert "B105" in text, relative
+            assert SECRETS.found_in(text) == [], relative

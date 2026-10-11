@@ -415,3 +415,94 @@ class TestReportersReceiveMaskedResults:
         assert len(received) == 1
         assert VALUE not in received[0]
         assert VALUE not in (output_dir / "reports" / "ash.recording.json").read_text()
+
+
+class TestStoredResultsAreMaskedWhenRead:
+    """A results file written without masking is masked by every way of reading it.
+
+    ``ash report``, ``ash merge``, ``--use-existing``, the MCP tools, scan
+    tracking, the findings browser and a workspace's unified reports all build
+    an ``AshAggregatedResults`` from the stored file through one of these.
+    """
+
+    def _stored(self, tmp_path):
+        model = _results(
+            _result(
+                "B105",
+                "app.py",
+                1,
+                HARDCODED + "'" + VALUE + "'",
+                snippet=ASSIGN_LINE,
+                scanner="bandit",
+            ),
+            _result(
+                "B602",
+                "deploy.py",
+                5,
+                "subprocess call",
+                snippet=REUSE_LINE,
+                scanner="bandit",
+            ),
+        )
+        # Written as an ASH without masking wrote it: the model is masked as it
+        # is built, so the unmasked SARIF is put back into the dump.
+        import json
+
+        dumped = json.loads(model.model_dump_json(by_alias=True))
+        dumped["sarif"] = {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "test"}},
+                    "results": [
+                        _result(
+                            "B105",
+                            "app.py",
+                            1,
+                            HARDCODED + "'" + VALUE + "'",
+                            snippet=ASSIGN_LINE,
+                            scanner="bandit",
+                        ),
+                        _result(
+                            "B602",
+                            "deploy.py",
+                            5,
+                            "subprocess call",
+                            snippet=REUSE_LINE,
+                            scanner="bandit",
+                        ),
+                    ],
+                }
+            ],
+        }
+        path = tmp_path / "ash_aggregated_results.json"
+        path.write_text(json.dumps(dumped), encoding="utf-8")
+        assert VALUE in path.read_text(encoding="utf-8")
+        return path
+
+    def test_model_validate_json(self, tmp_path):
+        path = self._stored(tmp_path)
+
+        model = AshAggregatedResults.model_validate_json(path.read_text())
+
+        assert VALUE not in model.sarif.model_dump_json()
+
+    def test_from_json_and_load_model(self, tmp_path):
+        import json
+
+        path = self._stored(tmp_path)
+
+        for model in (
+            AshAggregatedResults.from_json(path.read_text()),
+            AshAggregatedResults.from_json(json.loads(path.read_text())),
+            AshAggregatedResults.load_model(path),
+        ):
+            assert VALUE not in model.sarif.model_dump_json()
+
+    def test_flat_findings_of_a_stored_file(self, tmp_path):
+        path = self._stored(tmp_path)
+
+        flat = AshAggregatedResults.load_model(path).to_flat_vulnerabilities()
+
+        assert flat
+        assert all(VALUE not in finding.model_dump_json() for finding in flat)

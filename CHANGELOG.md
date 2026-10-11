@@ -1643,6 +1643,13 @@
   flat model's `description`. See "Secret values in reports" in
   docs/content/docs/output-formats.md.
 
+- **Stored results are masked when they are read back.** `ash report`,
+  `ash scan --use-existing`, `ash merge`, the MCP tools that read an existing
+  `ash_aggregated_results.json`, the findings browser and a workspace's unified
+  reports now mask secret values as the file is loaded, so a results file written
+  without masking (by an earlier ASH or another producer) no longer passes its
+  values on to the reports and responses rendered from it.
+
 ### Configuration sources
 
 - **`pyproject.toml [tool.ash]` and `ashrc` files are config sources (#313).**

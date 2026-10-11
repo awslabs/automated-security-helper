@@ -432,6 +432,12 @@ B105, B106 or B107, a checkov `CKV_SECRET_*` rule, or a rule a tool's own rule
 metadata tags as a secret rule. Snippets with no secret in them are left as they
 were.
 
+Results that are read back from an existing `ash_aggregated_results.json` are
+masked the same way as they are loaded, whatever wrote the file (an older ASH, or
+another tool): `ash report`, `ash scan --use-existing`, `ash merge`, the MCP tools
+that read stored results (`explain_finding`, `diff_scan_results`, `get_scan_results`),
+the findings browser and a workspace's unified reports.
+
 The scanner's own output files under `scanners/<name>/` are what the tool wrote,
 and are not masked.
 

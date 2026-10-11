@@ -22,7 +22,7 @@
 
    Message
 
-   Possible hardcoded password: 'hunter2'
+   Possible hardcoded password: 'h******'
                                                                                                   ▂▂
 
    Code

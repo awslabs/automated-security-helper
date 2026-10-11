@@ -796,6 +796,11 @@ class AshAggregatedResults(BaseModel):
         """Initialize aggregator and trend analyzer with current findings."""
         if self.scanner_results is None:
             self.scanner_results = {}
+        # Results read back from a file (ash report, ash merge, --use-existing, the
+        # MCP tools, a workspace's per-project files) may have been written without
+        # masking, by an older ASH or another producer, so every model is masked as
+        # it is built; see utils/secret_masking.py.
+        mask_secrets_in_results(self)
         return super().model_post_init(context)
 
     def metadata_only(self) -> dict:
