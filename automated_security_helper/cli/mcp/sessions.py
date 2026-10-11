@@ -385,8 +385,9 @@ def finish_ended_session(session_id: Optional[str]) -> None:
 
 
 #: Directory under the workspace root holding one entry per live stdio server.
-#: Not a session workspace: its name is not a valid session id component that
-#: ASH ever issues, and it carries no session marker.
+#: Not a session workspace: it carries no session marker, and
+#: ``session_identity.is_reserved_session_id`` refuses it as a session id in any
+#: letter case.
 STDIO_SERVERS_DIR = ".stdio-servers"
 _STDIO_SERVERS_LOCK = ".lock"
 

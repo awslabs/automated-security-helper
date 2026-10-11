@@ -76,8 +76,7 @@ def git_env(tmp_path, monkeypatch) -> Dict[str, Any]:
 
 def test_ssh_offers_no_identity_and_checks_host_keys_strictly(git_env) -> None:
     ssh = shutil.which("ssh")
-    if ssh is None:
-        pytest.skip("ssh is not installed")
+    assert ssh, "ssh is required to read the settings ssh would use"
     command = shlex.split(git_env["env"]["GIT_SSH_COMMAND"])
     assert Path(command[0]).name == "ssh"
 
@@ -86,7 +85,7 @@ def test_ssh_offers_no_identity_and_checks_host_keys_strictly(git_env) -> None:
         capture_output=True,
         text=True,
         check=False,
-        env={"PATH": os.environ.get("PATH", "")},
+        env={k: v for k, v in os.environ.items() if k != "SSH_AUTH_SOCK"},
     ).stdout.splitlines()
     settings: Dict[str, List[str]] = {}
     for line in printed:

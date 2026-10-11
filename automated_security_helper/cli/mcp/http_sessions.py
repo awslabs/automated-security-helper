@@ -253,7 +253,8 @@ class SessionBoundary:
             # has to complete anyway.
             with anyio.CancelScope(shield=True):
                 await anyio.to_thread.run_sync(end_session, session_id)
-        except Exception as exc:  # noqa: BLE001 -- cleanup must not fail a response
+        except Exception as exc:
+            # Cleanup must not fail the response it follows.
             _logger().warning(f"MCP session {session_id}: could not remove: {exc}")
 
     async def _sweep_if_due(self) -> None:
@@ -278,7 +279,8 @@ class SessionBoundary:
                 await anyio.to_thread.run_sync(
                     sweep_stale_workspaces, self.session_workspace_ttl
                 )
-            except Exception as exc:  # noqa: BLE001 -- a sweep must not fail a request
+            except Exception as exc:
+                # A sweep must not fail the request that started it.
                 _logger().warning(f"MCP session workspace sweep failed: {exc}")
             self._next_sweep = time.monotonic() + min(
                 self.session_workspace_ttl, _SWEEP_INTERVAL_SECONDS

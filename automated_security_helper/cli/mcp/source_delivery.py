@@ -61,7 +61,7 @@ import shutil
 import subprocess  # nosec B404 - git is invoked as a subprocess; see _validate_clone_url
 import zipfile
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, Optional, TypeVar
+from typing import Any, Callable, Dict, Iterator, Optional, TypeVar, cast
 
 from automated_security_helper.cli.mcp.session_identity import (
     UNIDENTIFIED_SESSION_ID,
@@ -163,7 +163,7 @@ def _while_no_scan_runs(function: _F) -> _F:
         with _no_scan_running(session_id):
             return function(*args, **kwargs)
 
-    return wrapper  # type: ignore[return-value]
+    return cast(_F, wrapper)
 
 
 def get_session_source_dir(session_id: str) -> Optional[Path]:
