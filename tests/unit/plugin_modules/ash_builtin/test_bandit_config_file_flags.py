@@ -57,9 +57,14 @@ def _after(argv: List[str], flag: str) -> List[str]:
 
 
 def _is_the_empty_ini(value: str, results_dir: Path) -> bool:
+    """ASH's empty config: in its private directory, outside the results and the tree."""
+    from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
+
     path = Path(value)
     return (
-        path.parent == results_dir and path.read_text(encoding="utf-8") == "[bandit]\n"
+        path.parent.name.startswith(TOOL_CONFIG_DIR_PREFIX)
+        and results_dir not in path.parents
+        and path.read_text(encoding="utf-8") == "[bandit]\n"
     )
 
 
