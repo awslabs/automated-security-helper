@@ -54,9 +54,8 @@ What it does not cover
   commit, so a pull request that edits ``ash-repo-scan.yml`` or
   ``run-ash-security-scan.yml`` (called as ``./``) still changes its own gate. Review of
   workflow changes is the control for that; nothing in a workflow file can enforce it.
-* The scan reads the pull request's own ``.ash/.ash.yaml`` (it scans the checkout and
-  is passed no ``--config``). Whether the required check should scan with the base
-  branch's config is a separate decision and is not asserted here.
+* Which config the required check scans with. It reads the base branch's; tests/unit/test_required_scan_reads_the_base_branchs_config.py
+  asserts that.
 * The informational job is recognized by its install URL naming the head ref, head
   commit or merge ref. A design that installs the pull request's ASH another way (for
   example ``uvx --from .``) needs the locator in ``_pr_code_scans`` extended.

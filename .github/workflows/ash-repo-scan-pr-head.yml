@@ -26,6 +26,10 @@ name: Run ASH (pull request head, informational)
 #
 # A job that calls a reusable workflow cannot take `continue-on-error`, so a red run
 # here is red; it still blocks nothing because nothing requires it.
+#
+# It passes no config-ref, so it scans with the pull request's own ASH config. That
+# makes it the run that shows what a pull request's config changes do before they
+# reach the required check, which reads the base commit's config.
 on:
   pull_request:
     branches:

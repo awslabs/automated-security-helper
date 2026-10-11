@@ -1,0 +1,585 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The required ASH check scans a pull request with the base branch's ASH config.
+
+Why this file exists
+--------------------
+``ash / SAST, SCA, and IaC Scan`` installs ASH from the pull request's base commit
+(tests/unit/test_required_scan_installs_ash_from_the_base_branch.py). The config it
+scanned with still came from the checkout: ``--source-dir .`` with no ``--config``,
+so ASH discovered the pull request's own ``.ash/.ash.yaml``. A pull request could
+then add a suppression or an ignore path for its own finding and pass the check
+that gates it.
+
+The required check reads its config from the base
+commit and passes it as ``--config`` (which also stops ASH discovering one in the
+checkout), and the informational job keeps the pull request's own config. Config
+edits in a pull request reach the required check once merged.
+
+``run-ash-security-scan.yml`` does this behind a ``config-ref`` input, so external
+callers keep reading their checkout unless they opt in.
+
+What this asserts
+-----------------
+Each step's own shell is run (``tests/utils/github_actions.py``) against a real git
+repository: an ``origin`` holding a base commit, and a checkout whose working tree
+holds a different config, as a pull request's merge commit would.
+
+1. For a same-repository pull request, a fork pull request and a pull request into
+   a branch other than the default, the required check asks for its config from the
+   base commit (``config-ref``); for a merge-queue entry, from the default branch,
+   as it does for the ASH install (``merge_group.base_sha`` of an entry behind the
+   first is the previous entry's unmerged, temporary commit). Every step that runs
+   ASH (the scan and ``ash report``) then gets ``--config`` and ``ASH_CONFIG``
+   naming a file outside the checkout whose bytes are that commit's, never the
+   checkout's.
+2. A base commit without the file scans with ASH's defaults, written out as an
+   empty config so discovery cannot fall back to the checkout's, and says so.
+3. The step refuses, rather than reads as missing, a ``config-ref`` without
+   ``config``, a path that is absolute or has an empty, ``.`` or ``..`` segment,
+   and a base-commit entry that is a symlink.
+4. The informational job passes no ``config-ref``, so it scans with the pull
+   request's own config; and a caller that sets neither input gets no
+   ``--config`` at all (controls; both pass before the fix).
+
+What it does not cover
+----------------------
+* Tool config files the config names by a relative path
+  (``scanners.<name>.options.config_file``, such as ``.ash/.grype.yaml``) are still
+  read from the checkout, as are files each scanner discovers on its own and inline
+  suppression comments. ASH already refuses some in-tree tool config paths
+  (``config/path_trust.py``); the rest is not something a workflow input can change.
+* A config that ``extends`` another file fails to load with ``config-ref``, because
+  only the one file is fetched. This repository's config extends nothing.
+* Whether GitHub serves ``git fetch origin <sha>`` for the base commit is GitHub's
+  behavior; here ``origin`` is a local repository configured to allow it.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from tests.utils import github_actions as ga
+
+pytestmark = pytest.mark.skipif(
+    os.name == "nt" or shutil.which("bash") is None or shutil.which("git") is None,
+    reason="the steps under test are bash steps that run git on ubuntu-latest",
+)
+
+REQUIRED_SCAN_CHECK = "ash / SAST, SCA, and IaC Scan"
+SCAN_WORKFLOW = ga.WORKFLOWS_DIR / "run-ash-security-scan.yml"
+BASE_REPO = "awslabs/automated-security-helper"
+FORK_REPO = "contributor/automated-security-helper"
+DEFAULT_BRANCH = "main"
+PR_NUMBER = 812
+HEAD_SHA = "2222222222222222222222222222222222222222"
+MERGE_SHA = "3333333333333333333333333333333333333333"
+
+CONFIG_PATH = ".ash/.ash.yaml"
+BASE_CONFIG = "# the base commit's config\nproject_name: base\n"
+CHECKOUT_CONFIG = (
+    "# the checkout's config\nproject_name: checkout\nglobal_settings:\n"
+    "  ignore_paths:\n    - path: '**'\n      reason: added by the pull request\n"
+)
+
+
+# --------------------------------------------------------------------------- git
+
+
+def _git(*args: str, cwd: Path, home: Path) -> str:
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": str(home),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.invalid",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.invalid",
+    }
+    proc = subprocess.run(  # nosec B603 B607 — fixed git argv in a temp directory
+        ["git", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main", *args],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, f"git {' '.join(args)}: {proc.stderr}"
+    return proc.stdout.strip()
+
+
+class Repository:
+    """An origin with one base commit, and a checkout of a different tree."""
+
+    def __init__(self, root: Path, *, base_files: dict[str, str | None]):
+        self.sandbox = ga.StepSandbox(root / "runner")
+        home = self.sandbox.home
+        origin = root / "origin.git"
+        origin.mkdir()
+        _git("init", "-q", "--bare", ".", cwd=origin, home=home)
+        _git("config", "uploadpack.allowAnySHA1InWant", "true", cwd=origin, home=home)
+        seed = root / "seed"
+        seed.mkdir()
+        _git("init", "-q", ".", cwd=seed, home=home)
+        (seed / "README").write_text("base\n", encoding="utf-8")
+        for name, content in base_files.items():
+            path = seed / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if content is None:
+                path.symlink_to("/etc/hostname")
+            else:
+                path.write_text(content, encoding="utf-8")
+        _git("add", "-A", cwd=seed, home=home)
+        _git("commit", "-q", "-m", "base", cwd=seed, home=home)
+        _git(
+            "push",
+            "-q",
+            f"file://{origin}",
+            "HEAD:refs/heads/main",
+            cwd=seed,
+            home=home,
+        )
+        self.base_sha = _git("rev-parse", "HEAD", cwd=seed, home=home)
+
+        workspace = self.sandbox.workspace
+        _git("init", "-q", ".", cwd=workspace, home=home)
+        _git("remote", "add", "origin", f"file://{origin}", cwd=workspace, home=home)
+        checkout_config = workspace / CONFIG_PATH
+        checkout_config.parent.mkdir(parents=True)
+        checkout_config.write_text(CHECKOUT_CONFIG, encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- contexts
+
+
+def _pull_request(base_sha: str, *, fork: bool, base_ref: str = DEFAULT_BRANCH):
+    head_repo = FORK_REPO if fork else BASE_REPO
+    return ga.base_context(
+        event_name="pull_request",
+        repository=BASE_REPO,
+        repository_owner=BASE_REPO.split("/")[0],
+        ref=f"refs/pull/{PR_NUMBER}/merge",
+        ref_name=f"{PR_NUMBER}/merge",
+        sha=MERGE_SHA,
+        head_ref="feature-branch",
+        base_ref=base_ref,
+        event={
+            "repository": {"default_branch": DEFAULT_BRANCH, "full_name": BASE_REPO},
+            "pull_request": {
+                "number": PR_NUMBER,
+                "head": {
+                    "ref": "feature-branch",
+                    "sha": HEAD_SHA,
+                    "repo": {"full_name": head_repo},
+                },
+                "base": {
+                    "ref": base_ref,
+                    "sha": base_sha,
+                    "repo": {"full_name": BASE_REPO},
+                },
+            },
+        },
+    )
+
+
+# merge_group.base_sha of an entry behind the first in the queue: the previous
+# entry's temporary merge commit, which origin does not have.
+PREVIOUS_ENTRY_SHA = "4444444444444444444444444444444444444444"
+
+
+def _merge_group(base_sha: str):
+    """A queue entry behind another; the default branch's tip is ``base_sha``."""
+    queue = f"gh-readonly-queue/{DEFAULT_BRANCH}/pr-{PR_NUMBER}-{MERGE_SHA}"
+    return ga.base_context(
+        event_name="merge_group",
+        repository=BASE_REPO,
+        repository_owner=BASE_REPO.split("/")[0],
+        ref=f"refs/heads/{queue}",
+        ref_name=queue,
+        sha=MERGE_SHA,
+        head_ref="",
+        base_ref="",
+        event={
+            "repository": {"default_branch": DEFAULT_BRANCH, "full_name": BASE_REPO},
+            "merge_group": {
+                "base_ref": f"refs/heads/{DEFAULT_BRANCH}",
+                "base_sha": PREVIOUS_ENTRY_SHA,
+                "head_ref": f"refs/heads/{queue}",
+                "head_sha": MERGE_SHA,
+            },
+        },
+    )
+
+
+EVENTS = [
+    pytest.param(lambda sha: _pull_request(sha, fork=False), id="same-repository PR"),
+    pytest.param(lambda sha: _pull_request(sha, fork=True), id="fork PR"),
+    pytest.param(
+        lambda sha: _pull_request(sha, fork=False, base_ref="release-3.7"),
+        id="PR into a non-default branch",
+    ),
+    pytest.param(_merge_group, id="merge queue entry"),
+]
+
+
+def _scan_callers(context: dict[str, Any]):
+    """(check names, inputs) of every job the event starts that calls the scan workflow."""
+    for workflow in ga.all_workflows():
+        if not ga.triggers(workflow, context):
+            continue
+        scoped = dict(context)
+        scoped["needs"] = {
+            j: {"result": "success", "outputs": {}} for j in workflow.jobs
+        }
+        for job_id, job in workflow.jobs.items():
+            called = ga.local_reusable_workflow(job)
+            if called is None or called.path.resolve() != SCAN_WORKFLOW.resolve():
+                continue
+            if ga.job_runs(job, scoped):
+                yield ga.check_names(job_id, job), ga.call_inputs(job, called, scoped)
+
+
+def _required_inputs(context: dict[str, Any]) -> dict[str, Any]:
+    found = [
+        inputs
+        for names, inputs in _scan_callers(context)
+        if REQUIRED_SCAN_CHECK in names
+    ]
+    assert len(found) == 1, (
+        f"expected one {REQUIRED_SCAN_CHECK!r} job, found {len(found)}"
+    )
+    return found[0]
+
+
+def _informational_inputs(context: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        inputs
+        for names, inputs in _scan_callers(context)
+        if any("informational" in name.lower() for name in names)
+    ]
+
+
+# --------------------------------------------------------------------------- steps
+
+
+def _job() -> tuple[ga.Workflow, dict[str, Any]]:
+    workflow = ga.load_workflow(SCAN_WORKFLOW)
+    return workflow, workflow.jobs["ash"]
+
+
+def _config_ref_steps() -> list[dict[str, Any]]:
+    _, job = _job()
+    return [
+        s
+        for s in job.get("steps") or []
+        if "inputs.config-ref" in str(s.get("if") or "")
+    ]
+
+
+def _ash_steps() -> list[dict[str, Any]]:
+    """Steps that run ASH itself (the scan, the report), not a dependency install."""
+    _, job = _job()
+    return [
+        s
+        for s in job.get("steps") or []
+        if "uvx" in str(s.get("run") or "")
+        and " ash " in f" {s.get('run')} ".replace("\\\n", " ")
+        and "dependencies install" not in str(s.get("run"))
+    ]
+
+
+def _outputs(sandbox: ga.StepSandbox) -> dict[str, str]:
+    path = sandbox.runner_temp / "_runner_file_commands" / "output"
+    if not path.exists():
+        return {}
+    pairs = [
+        line.split("=", 1) for line in path.read_text().splitlines() if "=" in line
+    ]
+    return dict(pairs)
+
+
+def _run_config_ref_step(
+    repo: Repository, context: dict[str, Any], inputs: dict[str, Any]
+) -> tuple[ga.StepRun | None, dict[str, Any]]:
+    """Run the config-ref step if its `if:` holds; return it and the steps context."""
+    workflow, job = _job()
+    found = _config_ref_steps()
+    if not found:
+        return None, {}
+    (step,) = found
+    ctx = ga.with_inputs(context, inputs)
+    if not ga.condition_holds(step.get("if"), ctx):
+        return None, {}
+    run = ga.run_step(repo.sandbox, workflow, job, step, ctx)
+    outputs = _outputs(repo.sandbox) if run.proc.returncode == 0 else {}
+    return run, {step["id"]: {"outputs": outputs, "outcome": "success"}}
+
+
+def _ash_invocations(
+    repo: Repository, context: dict[str, Any], inputs: dict[str, Any], steps: dict
+) -> list[tuple[str, dict[str, Any]]]:
+    workflow, job = _job()
+    ctx = ga.with_inputs({**context, "steps": steps}, inputs)
+    found = []
+    for step in _ash_steps():
+        run = ga.run_step(repo.sandbox, workflow, job, step, ctx)
+        assert run.proc.returncode == 0, run.describe()
+        calls = [c for c in run.calls_to("uvx") if "ash" in c["argv"]]
+        assert calls, f"step {step.get('name')!r} ran no ASH:\n" + run.describe()
+        found += [(str(step.get("name")), call) for call in calls]
+    return found
+
+
+def _config_argument(argv: list[str]) -> str | None:
+    values = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a in ("--config", "-c")]
+    return values[-1] if values else None
+
+
+# --------------------------------------------------------------------------- 1 and 2
+
+
+class TestTheRequiredCheckScansWithTheBaseCommitsConfig:
+    def test_the_locators_find_the_steps(self):
+        assert len(_config_ref_steps()) == 1, "expected one step gated on config-ref"
+        names = {str(s.get("name")) for s in _ash_steps()}
+        assert len(names) >= 2, f"expected the scan and the report steps, found {names}"
+
+    @pytest.mark.parametrize("make_context", EVENTS)
+    def test_every_ash_step_gets_the_base_commits_config(self, tmp_path, make_context):
+        repo = Repository(tmp_path, base_files={CONFIG_PATH: BASE_CONFIG})
+        context = make_context(repo.base_sha)
+        inputs = _required_inputs(context)
+        if context["github"]["event_name"] == "merge_group":
+            # The default branch, as for the ASH install: merge_group.base_sha is the
+            # previous entry's unmerged commit here.
+            expected = {DEFAULT_BRANCH, f"refs/heads/{DEFAULT_BRANCH}"}
+        else:
+            expected = {repo.base_sha}
+        assert inputs.get("config-ref") in expected, (
+            f"the required check reads its config from {inputs.get('config-ref')!r}, "
+            f"not {sorted(expected)}"
+        )
+        run, steps = _run_config_ref_steps_or_fail(repo, context, inputs)
+        invocations = _ash_invocations(repo, context, inputs, steps)
+        for name, call in invocations:
+            config = _config_argument(call["argv"])
+            assert config, (
+                f"step {name!r} runs ASH without --config, so ASH discovers the "
+                f"checkout's config: {call['argv']}"
+            )
+            assert not repo.sandbox.is_inside_workspace(config), (
+                f"step {name!r} passes --config {config}, a file in the checkout"
+            )
+            assert Path(config).read_text(encoding="utf-8") == BASE_CONFIG, (
+                f"step {name!r} scans with {config}, which does not hold the base "
+                "commit's config"
+            )
+            assert call["env"]["ASH_CONFIG"] == config, (
+                f"step {name!r} passes --config {config} but ASH_CONFIG="
+                f"{call['env']['ASH_CONFIG']!r}; the parts of ASH that read the "
+                "variable would see another file"
+            )
+
+    @pytest.mark.parametrize(
+        "missing",
+        [
+            pytest.param(None, id="config-ref-missing not passed"),
+            pytest.param("refuse", id="config-ref-missing refuse"),
+            pytest.param("", id="config-ref-missing empty"),
+        ],
+    )
+    def test_a_base_commit_without_the_config_is_refused(self, tmp_path, missing):
+        """The caller named a config; scanning without it would drop what it asked for.
+
+        A case variant or a typo in `config` is the same as a missing file. For a
+        caller whose config enables scanners that are off by default, or lowers the
+        severity threshold, ASH's defaults are a weaker gate, so the step fails. Only
+        `defaults` opts out; an empty value refuses like the default does.
+        """
+        repo = Repository(tmp_path, base_files={})
+        context = _pull_request(repo.base_sha, fork=False)
+        inputs = _required_inputs(context)
+        if missing is not None:
+            inputs = {**inputs, "config-ref-missing": missing}
+        run, _ = _run_config_ref_step(repo, context, inputs)
+        assert run is not None, "no step reads the config from config-ref"
+        assert run.proc.returncode != 0, (
+            "a config missing at config-ref was not refused:\n" + run.describe()
+        )
+        assert "::error::" in run.proc.stdout and CONFIG_PATH in run.proc.stdout, (
+            run.describe()
+        )
+        assert "::warning::" not in run.proc.stdout, run.describe()
+
+    def test_the_bootstrap_opt_in_scans_with_ash_defaults(self, tmp_path):
+        """`config-ref-missing: defaults` is for the pull request adding a first config."""
+        repo = Repository(tmp_path, base_files={})
+        context = _pull_request(repo.base_sha, fork=False)
+        inputs = {**_required_inputs(context), "config-ref-missing": "defaults"}
+        run, steps = _run_config_ref_steps_or_fail(repo, context, inputs)
+        assert (
+            "::warning::" in run.proc.stdout and "default config" in run.proc.stdout
+        ), run.describe()
+        for name, call in _ash_invocations(repo, context, inputs, steps):
+            config = _config_argument(call["argv"])
+            assert config and not repo.sandbox.is_inside_workspace(config), call
+            assert Path(config).read_text(encoding="utf-8").strip() == "{}", (
+                f"step {name!r} does not scan with an empty (default) config"
+            )
+
+    @pytest.mark.parametrize("value", ["checkout", "Defaults", "true", "skip"])
+    def test_an_unknown_config_ref_missing_value_is_refused(self, tmp_path, value):
+        repo = Repository(tmp_path, base_files={CONFIG_PATH: BASE_CONFIG})
+        context = _pull_request(repo.base_sha, fork=False)
+        inputs = {**_required_inputs(context), "config-ref-missing": value}
+        run, _ = _run_config_ref_step(repo, context, inputs)
+        assert run is not None, "no step reads the config from config-ref"
+        assert run.proc.returncode != 0, (
+            f"config-ref-missing={value!r} was accepted:\n" + run.describe()
+        )
+        assert (
+            "::error::" in run.proc.stdout and "config-ref-missing" in run.proc.stdout
+        )
+
+
+def _run_config_ref_steps_or_fail(repo, context, inputs):
+    run, steps = _run_config_ref_step(repo, context, inputs)
+    assert run is not None, "the config-ref step did not run for the required check"
+    assert run.proc.returncode == 0, run.describe()
+    return run, steps
+
+
+# --------------------------------------------------------------------------- 3
+
+
+class TestTheConfigRefStepRefusesWhatItCannotReadExactly:
+    def _inputs(self, config: str, ref: str) -> dict[str, Any]:
+        workflow, _ = _job()
+        caller = {"with": {"config": config, "config-ref": ref}}
+        return ga.call_inputs(caller, workflow, ga.base_context())
+
+    def test_config_ref_without_config_is_refused(self, tmp_path):
+        repo = Repository(tmp_path, base_files={CONFIG_PATH: BASE_CONFIG})
+        context = _pull_request(repo.base_sha, fork=False)
+        run, steps = _run_config_ref_step(
+            repo, context, self._inputs("", repo.base_sha)
+        )
+        assert run is not None, "no step reads the config from config-ref"
+        assert run.proc.returncode != 0, run.describe()
+        assert "::error::" in run.proc.stdout
+        assert steps == {} or not steps["config-ref"]["outputs"]
+
+    @pytest.mark.parametrize(
+        "config",
+        [
+            "/etc/hostname",
+            "../outside.yaml",
+            ".ash/../.ash/.ash.yaml",
+            ".ash/./.ash.yaml",
+            ".ash//.ash.yaml",
+            ".ash/",
+        ],
+    )
+    def test_a_path_git_would_not_read_as_written_is_refused(self, tmp_path, config):
+        repo = Repository(tmp_path, base_files={CONFIG_PATH: BASE_CONFIG})
+        context = _pull_request(repo.base_sha, fork=False)
+        run, _ = _run_config_ref_step(
+            repo, context, self._inputs(config, repo.base_sha)
+        )
+        assert run is not None, "no step reads the config from config-ref"
+        assert run.proc.returncode != 0, (
+            f"config {config!r} was accepted:\n" + run.describe()
+        )
+        assert "::warning::" not in run.proc.stdout, (
+            "the path was read as a missing file and fell back to the defaults"
+        )
+
+    def test_no_step_runs_ash_after_the_config_ref_step_failed(self, tmp_path):
+        """With no path from the step, the fallback would be the checkout's config."""
+        repo = Repository(tmp_path, base_files={CONFIG_PATH: BASE_CONFIG})
+        context = _pull_request(repo.base_sha, fork=False)
+        inputs = _required_inputs(context)
+        assert inputs.get("config-ref"), "the required check sets no config-ref"
+        ctx = ga.with_inputs(
+            {
+                **context,
+                "__status__": "failure",
+                "steps": {"config-ref": {"outcome": "failure", "outputs": {}}},
+            },
+            inputs,
+        )
+        running = [
+            str(step.get("name"))
+            for step in _ash_steps()
+            if ga.condition_holds(step.get("if"), ctx)
+        ]
+        assert not running, (
+            f"after the config-ref step failed, {running} still run ASH, and with no "
+            "path from that step they would read the checkout's config"
+        )
+
+    def test_a_symlink_at_the_base_commit_is_refused(self, tmp_path):
+        repo = Repository(tmp_path, base_files={CONFIG_PATH: None})
+        context = _pull_request(repo.base_sha, fork=False)
+        run, _ = _run_config_ref_step(repo, context, _required_inputs(context))
+        assert run is not None, "no step reads the config from config-ref"
+        assert run.proc.returncode != 0, run.describe()
+        assert "not a regular file" in run.proc.stdout
+
+
+# --------------------------------------------------------------------------- 4
+
+
+class TestOtherScansKeepTheCheckoutsConfig:
+    """Controls: both pass before the fix."""
+
+    @pytest.mark.parametrize(
+        "fork", [False, True], ids=["same-repository PR", "fork PR"]
+    )
+    def test_the_informational_scan_reads_the_pull_requests_own_config(
+        self, tmp_path, fork
+    ):
+        repo = Repository(tmp_path, base_files={CONFIG_PATH: BASE_CONFIG})
+        context = _pull_request(repo.base_sha, fork=fork)
+        found = _informational_inputs(context)
+        assert found, "no informational scan job was found for a pull request"
+        for inputs in found:
+            assert not inputs.get("config-ref"), inputs
+            run, steps = _run_config_ref_step(repo, context, inputs)
+            assert run is None
+            for name, call in _ash_invocations(repo, context, inputs, steps):
+                config = _config_argument(call["argv"])
+                assert config is None or repo.sandbox.is_inside_workspace(
+                    repo.sandbox.workspace / config
+                ), f"step {name!r} scans the informational job with {config}"
+
+    def test_a_caller_that_sets_neither_input_gets_no_config_argument(self, tmp_path):
+        repo = Repository(tmp_path, base_files={CONFIG_PATH: BASE_CONFIG})
+        context = _pull_request(repo.base_sha, fork=False)
+        workflow, _ = _job()
+        inputs = ga.call_inputs({"with": {}}, workflow, context)
+        run, steps = _run_config_ref_step(repo, context, inputs)
+        assert run is None
+        for name, call in _ash_invocations(repo, context, inputs, steps):
+            assert _config_argument(call["argv"]) is None, (name, call["argv"])
+            assert call["env"]["ASH_CONFIG"] in (None, ""), (name, call["env"])
+
+    def test_workflow_dispatch_reads_the_dispatched_refs_config(self):
+        """No config-ref, and not the string `false` an `a && b` would render."""
+        context = ga.base_context(
+            event_name="workflow_dispatch",
+            repository=BASE_REPO,
+            repository_owner=BASE_REPO.split("/")[0],
+            ref=f"refs/heads/{DEFAULT_BRANCH}",
+            ref_name=DEFAULT_BRANCH,
+            event={"repository": {"default_branch": DEFAULT_BRANCH}},
+        )
+        inputs = _required_inputs(context)
+        assert ga.to_string(inputs.get("config-ref")) == "", inputs.get("config-ref")

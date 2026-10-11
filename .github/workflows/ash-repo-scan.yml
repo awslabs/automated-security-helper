@@ -60,6 +60,20 @@ jobs:
       # For non-PR runs (workflow_dispatch), use the current repo and ref.
       ash-version: ${{ github.event.pull_request.base.sha || (github.event_name == 'merge_group' && github.event.repository.default_branch) || github.ref_name }}
       ash-repo: ${{ github.repository }}
+      # The config comes from the same place as the ASH: the pull request's base
+      # commit, or in the merge queue the default branch. So a pull request cannot
+      # add suppressions or ignore paths to its own required check; its config edits
+      # apply to this check once merged, and ash-repo-scan-pr-head.yml scans with
+      # them before that. workflow_dispatch reads the dispatched ref's config from
+      # the checkout.
+      #
+      # Not merge_group.base_sha: for every entry behind the first, that is the
+      # previous entry's temporary merge commit, which carries that entry's
+      # unmerged config and sits on a queue branch GitHub deletes. The trailing
+      # `|| ''` keeps the `&&` from rendering `false` into the input on
+      # workflow_dispatch.
+      config: .ash/.ash.yaml
+      config-ref: ${{ github.event.pull_request.base.sha || (github.event_name == 'merge_group' && github.event.repository.default_branch) || '' }}
       # Off because the sarif job below uploads instead. The upload step inside the
       # called workflow cannot hold security-events: write, so it fails on
       # workflow_dispatch; see upload-ash-sarif.yml for why.

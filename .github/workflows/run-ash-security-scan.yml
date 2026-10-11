@@ -28,6 +28,27 @@ on:
         required: false
         default: ""
         type: string
+      config-ref:
+        description: >-
+          Commit, branch or tag of the scanned repository to read the `config` file
+          from, instead of the checkout. Requires `config`. Pass a pull request's
+          base commit and the pull request cannot change the config of the scan that
+          gates it; its config edits apply once merged. A commit without that file
+          fails the scan unless config-ref-missing is `defaults`. Empty (the default)
+          reads the config from the checkout.
+        required: false
+        default: ""
+        type: string
+      config-ref-missing:
+        description: >-
+          What config-ref does when that commit has no file at `config`: `refuse`
+          (the default) fails the scan, `defaults` scans with ASH's default config
+          and says so. `defaults` is for the pull request that adds a repository's
+          first config, which otherwise cannot pass a check that reads the config
+          from its base commit.
+        required: false
+        default: "refuse"
+        type: string
       output-dir:
         description: "Directory where ASH output will be stored"
         required: false
@@ -198,6 +219,85 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # THE CONFIG CAN COME FROM ANOTHER COMMIT THAN THE ONE SCANNED
+      #
+      # Without config-ref, ASH reads its config from the checkout: the file `config`
+      # names, or the one it discovers there. On a pull request that is the pull
+      # request's own config, so it could add suppressions or ignore paths to the
+      # scan that gates it. With config-ref, the file `config` names is read from that
+      # commit, written outside the checkout, and handed to the scan and report steps
+      # as --config, which also stops ASH from discovering one in the checkout.
+      # ash-repo-scan.yml passes the pull request's base commit.
+      #
+      # A commit without the file fails the step. The caller named a config, and
+      # ASH's defaults can be a weaker gate than the one asked for (a config that
+      # turns on scanners that are off by default, or lowers the severity
+      # threshold), so a typo or a case variant in `config` must not fall back to
+      # them. config-ref-missing: defaults is the explicit opt-in for the one case
+      # where defaults are right, the pull request that adds a repository's first
+      # config: the scan then uses an empty config, so discovery cannot fall back to
+      # the checkout's either.
+      #
+      # The file lands outside the scanned tree, so ASH treats it like any --config
+      # outside the tree: as the operator's. The caller chose that commit; the
+      # checkout did not.
+      #
+      # Only this one file comes from config-ref. Tool config files it names by a
+      # relative path (scanners.<name>.options.config_file) are still read from the
+      # checkout, and a config that `extends` another file fails to load here.
+      - name: Read the ASH config from config-ref
+        id: config-ref
+        if: inputs.config-ref != ''
+        env:
+          CONFIG_REF: ${{ inputs.config-ref }}
+          CONFIG_PATH: ${{ inputs.config }}
+          CONFIG_REF_MISSING: ${{ inputs.config-ref-missing }}
+        run: |
+          set -euo pipefail
+          case "${CONFIG_REF_MISSING}" in
+            refuse|defaults|"") ;;
+            *)
+              echo "::error::config-ref-missing must be 'refuse' or 'defaults', not '${CONFIG_REF_MISSING}'."
+              exit 1
+              ;;
+          esac
+          if [ -z "${CONFIG_PATH}" ]; then
+            echo "::error::config-ref is set but config is empty. Name the config file to read from ${CONFIG_REF}, for example 'config: .ash/.ash.yaml'."
+            exit 1
+          fi
+          RELATIVE="${CONFIG_PATH#./}"
+          # A path git would read differently from how it is written (absolute, with
+          # an empty, `.` or `..` segment) is refused rather than read as missing.
+          case "/${RELATIVE}/" in
+            *//*|*/./*|*/../*)
+              echo "::error::config must be a plain path inside the repository when config-ref is set, not '${CONFIG_PATH}'."
+              exit 1
+              ;;
+          esac
+          DEST_ROOT="${RUNNER_TEMP}/ash-config-ref"
+          DEST="${DEST_ROOT}/${RELATIVE}"
+          rm -rf "${DEST_ROOT}"
+          mkdir -p "$(dirname "${DEST}")"
+          git fetch --no-tags --no-recurse-submodules --depth=1 origin "${CONFIG_REF}"
+          ENTRY="$(git --literal-pathspecs ls-tree FETCH_HEAD -- "${RELATIVE}")"
+          if [ -z "${ENTRY}" ]; then
+            if [ "${CONFIG_REF_MISSING}" != "defaults" ]; then
+              echo "::error::${CONFIG_REF} has no ${RELATIVE}, so the config this scan was asked to use does not exist there; refusing to scan with ASH's defaults instead. Check the config input, or set config-ref-missing: defaults for the pull request that adds the first config."
+              exit 1
+            fi
+            printf '{}\n' > "${DEST}"
+            echo "::warning::${CONFIG_REF} has no ${RELATIVE}, and config-ref-missing is defaults, so this scan uses ASH's default config, not the checkout's."
+          else
+            read -r MODE TYPE OBJECT ENTRY_PATH <<< "${ENTRY}"
+            if [ "${TYPE}" != "blob" ] || [ "${MODE}" = "120000" ] || [ "${ENTRY_PATH}" != "${RELATIVE}" ]; then
+              echo "::error::${RELATIVE} at ${CONFIG_REF} is not a regular file (${ENTRY}); refusing to scan with it."
+              exit 1
+            fi
+            git cat-file blob "${OBJECT}" > "${DEST}"
+            echo "Scanning with ${RELATIVE} as of ${CONFIG_REF} (blob ${OBJECT}), not the checkout's copy"
+          fi
+          echo "path=${DEST}" >> "$GITHUB_OUTPUT"
 
       - name: Install uv
         id: setup-uv
@@ -642,6 +742,10 @@ jobs:
         id: ash
         shell: bash
         env:
+          # The config read from config-ref when the caller set one, else the
+          # `config` input as before. Set here as well as passed as --config, so
+          # every part of ASH that reads ASH_CONFIG sees the same file.
+          ASH_CONFIG: ${{ steps.config-ref.outputs.path || inputs.config }}
           ASH_MODE: ${{ inputs.ash-mode }}
           ASH_ARGS: ${{ inputs.ash-args }}
           # Bare `inputs.fail-on-findings`, not `== 'true'`. GitHub casts
@@ -697,6 +801,10 @@ jobs:
           # derived default is the intended precedence, but it does mean the two
           # inputs can disagree with no warning.
           #
+          # --config is passed when ASH_CONFIG is set (from config-ref or the
+          # `config` input; see the env above) and sits with the derived values, so
+          # `ash-args: --config <path>` still wins over it.
+          #
           # Quoting. Every single value is quoted; the two optional flags expand to
           # nothing when empty via ${VAR:+"$VAR"}, which an empty quoted "$VAR"
           # would not (it passes an empty argument). `ash-args` is a caller-supplied
@@ -706,7 +814,7 @@ jobs:
           # before ASH saw it, and a caller had no way to stop that.
           read -r -a ASH_ARGS_LIST <<< "${ASH_ARGS}"
           uvx --reinstall --from "${ASH_UVX_SOURCE}" ash \
-            --source-dir . --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} "${ASH_ARGS_LIST[@]}"
+            --source-dir . --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"} ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} "${ASH_ARGS_LIST[@]}"
 
       # Default branch only, after the scan, so what is saved is the database grype
       # actually scanned with. The save is refused unless that database is at most
@@ -746,11 +854,17 @@ jobs:
           path: ~/.cache/grype/db
           key: grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.grype-db }}
 
+      # Not after a failed config-ref step: with no path from it, the expression below
+      # would fall back to the checkout's config, the one config-ref exists to avoid.
       - name: Show ASH Summary Report
-        if: success() || failure()
+        if: (success() || failure()) && steps.config-ref.outcome != 'failure'
         shell: bash
         env:
           ASH_REPO_CLONE_URL: https://github.com/${{ github.repository }}.git
+          # The same config the scan used. `ash report` resolves a config too, and
+          # loads the plugin modules it names, so without this it would discover the
+          # checkout's.
+          ASH_CONFIG: ${{ steps.config-ref.outputs.path || inputs.config }}
         run: |-
           # No --reinstall here. The Run ASH step above already installed this exact
           # source, so re-forcing a download makes the report step do a second git
@@ -758,7 +872,7 @@ jobs:
           # (merge_group queue branches are deleted mid-run) that fetch is what
           # fails, after the scan itself has already succeeded.
           uvx --from "${ASH_UVX_SOURCE}" ash \
-            --output-dir "${ASH_OUTPUT_DIR}" report
+            --output-dir "${ASH_OUTPUT_DIR}" report ${ASH_CONFIG:+--config "${ASH_CONFIG}"}
 
       - name: Update step summary
         if: success() || failure()
