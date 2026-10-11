@@ -469,7 +469,9 @@ A file that one of the path settings below names is judged by who named it:
 
 When the operator's config file extends one inside the scanned tree, only the paths
 the operator's file writes itself count as the operator's. An MCP client's
-`config_overrides` count as the client's. Either way, a file is judged by the path as
+`config_overrides`, and a session profile its `select_profile` `patch_ops` or
+`override_yaml` changed, count as the client's. Either way, a file is judged by the
+path as
 written, relative to the source directory, by the file it resolves to, and by every
 symlink resolving it follows, so a symlink the scanned repository planted counts as
 inside the tree wherever it points, and so does a path of your own that leads

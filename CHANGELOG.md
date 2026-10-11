@@ -160,8 +160,9 @@
   an ops repository works. One a config inside the scanned tree names has to be
   outside every git checkout as well. When the operator's config file extends one
   inside the tree, only the paths the operator's file writes itself count as the
-  operator's. An MCP client's `config_overrides` are the client's, not the
-  operator's. A virtualenv inside a git checkout counts as
+  operator's. An MCP client's `config_overrides`, and a session profile its
+  `select_profile` patch changed, are the client's, not the operator's. A
+  virtualenv inside a git checkout counts as
   inside it for `ash_plugin_modules`, and the warning names the module's location
   and the checkout. A file a setting names is judged by the path as written, by the
   file it resolves to, and by every symlink resolving it follows, so a symlink the

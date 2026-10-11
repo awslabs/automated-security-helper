@@ -47,7 +47,8 @@ def reset_path_refusal_warnings() -> None:
 
 
 def _key_part(text: str) -> str:
-    return str(text).replace("-", "_").lower()
+    """A key as config merging compares it: ``-`` and ``_`` alike, case kept."""
+    return str(text).replace("-", "_")
 
 
 def _key_segments(key: str) -> List[Tuple[str, bool]]:
@@ -142,19 +143,17 @@ class OperatorPaths:
 
 
 def parse_overrides(config_overrides: Optional[List[str]]) -> List[Tuple[str, Any]]:
-    """``key=value`` and ``key+=value`` overrides as (key, parsed value)."""
-    import yaml
+    """``key=value`` and ``key+=value`` overrides as (key, parsed value), parsed
+    the way ``resolve_config.apply_config_overrides`` applies them."""
+    # Imported here: resolve_config imports this module.
+    from automated_security_helper.config.resolve_config import _parse_config_value
 
     parsed = []
     for override in config_overrides or []:
         key, separator, raw = override.partition("=")
         if not separator:
             continue
-        try:
-            value = yaml.safe_load(raw)
-        except yaml.YAMLError:
-            value = raw
-        parsed.append((key.removesuffix("+").strip(), value))
+        parsed.append((key.removesuffix("+"), _parse_config_value(raw)))
     return parsed
 
 
@@ -176,13 +175,20 @@ def named_by_operator(key: str, value: Union[str, Path], config: Any) -> bool:
 def operator_reason(
     path: Union[str, Path], scan_root: Union[str, Path]
 ) -> Optional[str]:
-    """Why a path the operator named is refused, or None: inside the scanned tree
-    itself (``sandbox_grants.in_tree_reason``), or delivered by an MCP client."""
+    """Why a path the operator named is refused, or why a config file is not the
+    operator's, or None: inside the scanned tree itself
+    (``sandbox_grants.in_tree_reason``), delivered by an MCP client, or a session
+    profile a client's patch changed."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        session_config_was_patched,
+    )
     from automated_security_helper.config.sandbox_grants import in_tree_reason
 
     reason = in_tree_reason(Path(path), Path(scan_root))
     if reason is not None:
         return reason
+    if session_config_was_patched(path):
+        return "it is a session profile an MCP client's patch changed"
     return _client_delivered_reason(path)
 
 

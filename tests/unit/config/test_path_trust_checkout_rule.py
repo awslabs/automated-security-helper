@@ -501,3 +501,60 @@ def test_a_module_in_the_homebrew_prefix_counts_as_inside_a_checkout(
         sys.modules.pop("acme_ash_plugin_brew", None)
     assert reason is not None
     assert f"the git checkout at {prefix.absolute().as_posix()}" in reason
+
+
+@pytest.mark.parametrize("patched", [False, True])
+def test_a_session_profile_a_client_patched_is_not_the_operators(tmp_path, patched):
+    # select_profile writes the operator's profile, plus any patch_ops or
+    # override_yaml the client sent, into the session's config/ directory. With
+    # a patch in it, a tool path it names is not the operator's.
+    from automated_security_helper.cli.mcp import profile_registry
+
+    rules = _ops_rules(tmp_path)
+    profile = tmp_path / "session" / "config" / "ash.yaml"
+    profile.parent.mkdir(parents=True)
+    profile.write_text(
+        f"project_name: profile\nscanners:\n  checkov:\n    options:\n"
+        f"      config_file: {rules.as_posix()}\n"
+    )
+    state = profile_registry.get_session_state("test-patched-profile")
+    state.config_path = profile.as_posix()
+    state.patch_ops = [{"op": "add", "path": "/x", "value": 1}] if patched else None
+    try:
+        target = _scanned_checkout(tmp_path)
+        config = resolve_config(config_path=profile, source_dir=target)
+        honored = _honored(rules, target, config)
+    finally:
+        with profile_registry._session_lock:
+            profile_registry._session_state.pop("test-patched-profile", None)
+    assert (honored is None) is patched
+
+
+def test_a_key_spelled_in_another_case_is_another_key(tmp_path):
+    from automated_security_helper.config.path_trust import OperatorPaths
+
+    record = OperatorPaths(
+        documents=[
+            {"scanners": {"Checkov": {"options": {"config_file": "/ops/c.yaml"}}}}
+        ]
+    )
+    assert not record.named(CHECKOV_KEY, "/ops/c.yaml")
+    record = OperatorPaths(
+        documents=[
+            {"scanners": {"checkov": {"options": {"config-file": "/ops/c.yaml"}}}}
+        ]
+    )
+    assert record.named(CHECKOV_KEY, "/ops/c.yaml")
+
+
+@pytest.mark.parametrize(
+    "raw", ["/ops/c.yaml", "'/ops/c.yaml'", "/ops/c.yaml # note", "[a, b]"]
+)
+def test_an_override_is_recorded_as_it_is_applied(raw):
+    from automated_security_helper.config.path_trust import parse_overrides
+    from automated_security_helper.config.resolve_config import _parse_config_value
+
+    assert parse_overrides([f"{CHECKOV_KEY}={raw}"]) == [
+        (CHECKOV_KEY, _parse_config_value(raw))
+    ]
+    assert parse_overrides([f"{CHECKOV_KEY}+={raw}"])[0][0] == CHECKOV_KEY

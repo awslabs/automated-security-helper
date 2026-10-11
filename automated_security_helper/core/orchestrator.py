@@ -100,6 +100,16 @@ class ASHScanOrchestrator(BaseModel):
             ),
         ),
     ] = False
+    client_overrides: Annotated[
+        bool,
+        Field(
+            description=(
+                "config_overrides came from an MCP client, not the operator, so a "
+                "tool config path they name is not the operator's. Passed to "
+                "resolve_config."
+            ),
+        ),
+    ] = False
     trusted_config_path: Annotated[
         Optional[Path | str],
         Field(
@@ -247,6 +257,7 @@ class ASHScanOrchestrator(BaseModel):
                 ("config_path", self.config_path),
                 ("config_overrides", self.config_overrides),
                 ("untrusted_config", self.untrusted_config),
+                ("client_overrides", self.client_overrides),
                 ("trusted_config_path", self.trusted_config_path),
             )
             if value
@@ -300,6 +311,7 @@ class ASHScanOrchestrator(BaseModel):
                 permit_base=self.config_base_gate,
                 trusted_config_path=self.trusted_config_path,
                 untrusted_config=self.untrusted_config,
+                client_overrides=self.client_overrides,
             )
 
         # Surface config resolution warnings prominently

@@ -1937,6 +1937,7 @@ def _run_local_mode(
             config_base_gate=opts.config_base_gate,
             untrusted_config=opts.untrusted_config,
             trusted_config_path=opts.trusted_config_path,
+            client_overrides=opts.client_overrides,
             verbose=opts.verbose or opts.debug,
             debug=opts.debug,
             strategy=(

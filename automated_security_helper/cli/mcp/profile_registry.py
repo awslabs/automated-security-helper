@@ -25,7 +25,7 @@ import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import yaml
 
@@ -364,6 +364,33 @@ def bind_session_config(
         )
         _session_state[sid] = state
         return state
+
+
+def session_config_was_patched(config_path: Union[str, Path]) -> bool:
+    """Whether ``config_path`` is a session's materialized profile that a client's
+    ``patch_ops`` or ``override_yaml`` changed.
+
+    The file sits in the session's ``config/`` directory, which only the server
+    writes, so it counts as the operator's for the sandbox. A client's patch is
+    still in it, though, so a tool config path it names is not the operator's
+    (``config/path_trust.py``), the same as a workspace tool's config_overrides.
+    """
+    try:
+        target = Path(config_path).resolve()
+    except OSError:
+        return False
+    with _session_lock:
+        states = list(_session_state.values())
+    for state in states:
+        if state.config_path is None:
+            continue
+        try:
+            if Path(state.config_path).resolve() != target:
+                continue
+        except OSError:
+            continue
+        return state.patch_ops is not None or state.override_yaml is not None
+    return False
 
 
 def resolve_session_config_path(session_id: Optional[str] = None) -> Optional[str]:
