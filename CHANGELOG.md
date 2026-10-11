@@ -1045,6 +1045,10 @@
     `error_type: config_field_denied`. `enabled: false`, and a value equal to the
     server's, are accepted. A profile that relied on a client turning one of these
     reporters on sets it in the profile instead.
+  - `enabled: false` for one of these reporters is accepted the same way through
+    `select_profile`'s `patch_ops` and `override_yaml` and the MCP workspace tools'
+    `config_overrides`, under the entries that cover it; `enabled: true`, and
+    removing `enabled`, are still refused there.
 
 ### Fixes
 

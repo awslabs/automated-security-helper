@@ -615,6 +615,139 @@ def test_a_client_cannot_turn_on_or_feed_a_reporter_the_profile_configures(
     _assert_unbound("override")
 
 
+_OFF_HOST_REPORTERS = (
+    "aws-security-hub",
+    "bedrock-summary-reporter",
+    "cloudwatch-logs",
+    "s3",
+)
+
+
+@pytest.fixture
+def _own_workspace_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The session configs these tests read back are written under this test's
+    own directory, not the MCP cache that concurrent runs share."""
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
+
+
+def _bound_reporter_enabled(session_id: str, reporter: str) -> Any:
+    from automated_security_helper.config.ash_config import AshConfig
+
+    bound = resolve_session_config_path(session_id)
+    assert bound is not None
+    section = AshConfig.from_file(config_path=Path(bound)).get_plugin_config(
+        "reporter", reporter
+    )
+    return (section or {}).get("enabled")
+
+
+@pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
+@pytest.mark.usefixtures("_own_workspace_root")
+def test_a_client_may_turn_off_a_reporter_the_profile_turns_on(
+    tmp_path: Path, reporter: str
+) -> None:
+    """``enabled: false`` sends less off the host, so it is accepted on both routes."""
+    document = _profile(allowed_paths=["/**"])
+    document["reporters"] = {reporter: {"enabled": True}}
+    _install(tmp_path, document)
+    restated = yaml.safe_load(yaml.safe_dump(document))
+    restated["reporters"][reporter]["enabled"] = False
+
+    patched, overridden = _both_routes(
+        {"op": "replace", "path": f"/reporters/{reporter}/enabled", "value": False},
+        yaml.safe_dump(restated),
+    )
+
+    for session, result in (("patch", patched), ("override", overridden)):
+        assert result["success"] is True, result
+        assert _bound_reporter_enabled(session, reporter) is False
+
+
+@pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
+@pytest.mark.usefixtures("_own_workspace_root")
+def test_a_client_may_add_a_section_that_only_turns_a_reporter_off(
+    tmp_path: Path, reporter: str
+) -> None:
+    """The profile has no section, so the change adds one holding only ``enabled``."""
+    document = _profile(allowed_paths=["/**"])
+    _install(tmp_path, document)
+
+    patched, overridden = _both_routes(
+        {"op": "add", "path": f"/reporters/{reporter}", "value": {"enabled": False}},
+        _restated(document, reporters={reporter: {"enabled": False}}),
+    )
+
+    for session, result in (("patch", patched), ("override", overridden)):
+        assert result["success"] is True, result
+        assert _bound_reporter_enabled(session, reporter) is False
+
+
+@pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
+@pytest.mark.parametrize("shape", ["leaf", "section"])
+def test_a_client_still_cannot_turn_a_reporter_on(
+    tmp_path: Path, reporter: str, shape: str
+) -> None:
+    document = _profile(allowed_paths=["/**"])
+    if shape == "leaf":
+        document["reporters"] = {reporter: {"enabled": False}}
+        patch_op = {
+            "op": "replace",
+            "path": f"/reporters/{reporter}/enabled",
+            "value": True,
+        }
+    else:
+        patch_op = {
+            "op": "add",
+            "path": f"/reporters/{reporter}",
+            "value": {"enabled": True},
+        }
+    _install(tmp_path, document)
+    restated = yaml.safe_load(yaml.safe_dump(document))
+    restated.setdefault("reporters", {})[reporter] = {"enabled": True}
+
+    patched, overridden = _both_routes(patch_op, yaml.safe_dump(restated))
+
+    for result in (patched, overridden):
+        assert result["success"] is False, result
+        assert "denied_paths entry" in result["error"], result["error"]
+    _assert_unbound("patch")
+    _assert_unbound("override")
+
+
+def test_a_section_turning_a_reporter_off_may_not_carry_anything_else(
+    tmp_path: Path,
+) -> None:
+    """Only ``enabled: false`` is exempt; a destination beside it is still refused."""
+    document = _profile(allowed_paths=["/**"])
+    _install(tmp_path, document)
+    section = {"enabled": False, "options": {"bucket_name": "other-bucket"}}
+
+    patched, overridden = _both_routes(
+        {"op": "add", "path": "/reporters/s3", "value": section},
+        _restated(document, reporters={"s3": section}),
+    )
+
+    for result in (patched, overridden):
+        assert result["success"] is False, result
+        assert "denied_paths entry" in result["error"], result["error"]
+
+
+def test_removing_a_reporters_off_is_still_refused(tmp_path: Path) -> None:
+    """Removing ``enabled`` returns the reporter to its own default."""
+    document = _profile(allowed_paths=["/**"])
+    document["reporters"] = {"s3": {"enabled": False}}
+    _install(tmp_path, document)
+
+    patched = mcp_select_profile(
+        "op",
+        patch_ops=[{"op": "remove", "path": "/reporters/s3/enabled"}],
+        session_id="patch",
+    )
+
+    assert patched["success"] is False, patched
+    assert "denied_paths entry" in patched["error"], patched["error"]
+
+
 def test_every_shipped_denied_path_has_a_case() -> None:
     """A new shipped entry without a case here would go untested on one route."""
     shipped = RuntimeOverridesConfig().denied_paths

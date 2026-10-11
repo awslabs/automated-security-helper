@@ -422,15 +422,64 @@ def _denied_path_reason(denied: str, path: str, plugin_keys: PluginKeys) -> str 
     return None
 
 
+def _turns_an_off_host_reporter_off(
+    op: Dict[str, Any], config: AshConfig | None
+) -> bool:
+    """Whether ``op`` only sets ``enabled: false`` on a reporter that sends findings off the host.
+
+    The reporters in ``reporter_trust.REPORTER_ENABLED_DEFAULTS``, under any
+    spelling the plugin lookup reads. Turning one off sends less off the host, so
+    a client may do it under a ``denied_paths`` entry that covers it, as a
+    delivered file may (``client_config_policy._writes_a_tightening``). Two
+    shapes: an ``add`` or ``replace`` of ``/reporters/<name>/enabled`` with
+    ``false``, and an ``add`` of ``/reporters/<name>`` whose value holds only
+    ``enabled: false`` where ``config`` has no section for that reporter, which
+    is how ``json_patch_between`` writes a section the base lacks. Anything else
+    (``remove``, ``true``, a section with other keys) is checked as before.
+    """
+    from automated_security_helper.config.reporter_trust import (
+        REPORTER_ENABLED_DEFAULTS,
+        _sections_of,
+        turns_a_reporter_off,
+    )
+
+    if op.get("op") not in {"add", "replace"} or "value" not in op:
+        return False
+    segments = _path_segments(op.get("path", ""))
+    if len(segments) not in (2, 3) or segments[0] != "reporters":
+        return False
+    names = plugin_key_lookup_names(segments[1])
+    reporter = next(
+        (r for r in REPORTER_ENABLED_DEFAULTS if reduced_plugin_name(r) in names),
+        None,
+    )
+    if reporter is None:
+        return False
+    value = op["value"]
+    if len(segments) == 3:
+        return segments[2] == "enabled" and turns_a_reporter_off(value)
+    return (
+        op.get("op") == "add"
+        and config is not None
+        and not _sections_of(config, reporter)
+        and isinstance(value, dict)
+        and list(value) == ["enabled"]
+        and turns_a_reporter_off(value["enabled"])
+    )
+
+
 def _check_op_paths(
     op: Dict[str, Any],
     *,
     allowlist: RuntimeOverridesConfig,
     plugin_keys: PluginKeys,
+    config: AshConfig | None = None,
 ) -> None:
     path = op.get("path", "")
     if not any(_path_matches(p, path) for p in allowlist.allowed_paths):
         raise RuntimePatchDeniedError(op, f"path {path!r} not in allowed_paths")
+    if _turns_an_off_host_reporter_off(op, config):
+        return
     for denied in allowlist.denied_paths:
         reason = _denied_path_reason(denied, path, plugin_keys)
         if reason is not None:
@@ -807,7 +856,7 @@ def check_runtime_ops(
                 "path '' is the root pointer: an op on the whole config is "
                 "refused unless allowed_paths names '' explicitly",
             )
-        _check_op_paths(op, allowlist=allowlist, plugin_keys=plugin_keys)
+        _check_op_paths(op, allowlist=allowlist, plugin_keys=plugin_keys, config=config)
         _check_value_pattern(op, allowlist=allowlist, plugin_keys=plugin_keys)
 
 

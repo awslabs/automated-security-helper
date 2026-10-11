@@ -340,3 +340,33 @@ async def test_a_policy_beside_a_symlinked_definitions_target_is_refused(
     )
     assert result["success"] is False, result
     assert "delivered by an MCP client" in result["error"]
+
+
+_OFF_HOST_REPORTERS = (
+    "aws-security-hub",
+    "bedrock-summary-reporter",
+    "cloudwatch-logs",
+    "s3",
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
+async def test_an_override_turning_an_off_host_reporter_off_is_accepted(
+    tmp_path, monkeypatch, reporter
+):
+    """It sends less off the host, under the default denied_paths."""
+    _with_profile(monkeypatch, tmp_path, ["/**"])
+    result = await _resolve(tmp_path, [f"reporters.{reporter}.enabled=false"])
+    assert result["success"] is True, result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
+async def test_an_override_turning_an_off_host_reporter_on_is_refused(
+    tmp_path, monkeypatch, reporter
+):
+    _with_profile(monkeypatch, tmp_path, ["/**"])
+    result = await _resolve(tmp_path, [f"reporters.{reporter}.enabled=true"])
+    assert result["success"] is False, result
+    assert "denied_paths entry" in json.dumps(result), result

@@ -51,8 +51,9 @@ what is sent, so it applies from any config (``turns_a_reporter_off``). A report
 writes only local files, and its ``enabled`` still applies from the tree. Under
 the MCP server the default ``denied_paths`` also refuse a client's file that turns
 a built-in AWS reporter on, and every other option of the Bedrock reporter, which
-chooses what is sent to the model; ``enabled: false`` is accepted there
-(``client_config_policy._writes_a_tightening``). The reporters' other options
+chooses what is sent to the model; ``enabled: false`` is accepted there, in a
+delivered file (``client_config_policy._writes_a_tightening``) and in a client's
+runtime overrides (``runtime_patch._turns_an_off_host_reporter_off``). The reporters' other options
 (formatting, model parameters) still apply from the tree.
 """
 

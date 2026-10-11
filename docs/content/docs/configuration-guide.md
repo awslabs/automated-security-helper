@@ -552,7 +552,8 @@ on which:
     `metrics` (their `config` is in the table below), the AWS reporters'
     destinations and credentials listed in the table above, whether
     `aws-security-hub`, `s3`, `cloudwatch-logs` and `bedrock-summary-reporter` run
-    (`enabled`; `false` is accepted, since it only sends less), every other
+    (`enabled`; `false` is accepted, here and in a client's runtime overrides,
+    since it only sends less), every other
     `bedrock-summary-reporter` option, which chooses what is sent to the model
     (`include_code_snippets`, `custom_prompt`) and how, and the GitLab SAST
     reporter's `exclude_suppressed`, which would leave the findings a client's
