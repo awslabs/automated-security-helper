@@ -189,7 +189,9 @@ a copy inside the repository through `PATH`. None of this applies to ASH itself:
 run ASH from a virtual environment inside the repository, ASH's own code comes from the
 repository, so install ASH outside it (see [Install ASH](../how-to/install.md)). It
 also does not stop a correctly installed tool from reading files in the repository,
-such as its own configuration file.
+such as detect-secrets' `.secrets.baseline` or a `.semgrepignore`
+([what the trust model does not protect](../concepts/trust-model.md#not-protected) lists
+the tool config files ASH keeps out).
 
 To let ASH use tools from inside the scanned directory for one scan, pass
 `--allow-in-tree-tools` to `ash` or `ash scan`, or set `ASH_ALLOW_IN_TREE_TOOLS=1` in

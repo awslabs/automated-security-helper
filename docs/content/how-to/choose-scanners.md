@@ -114,22 +114,25 @@ Some scanner options name a file, a rule directory, or a program for the scanner
 |---|---|---|
 | actionlint | `config_file` | yes |
 | actionlint | `shellcheck`, `pyflakes`: a repository may set only the plain names `shellcheck` and `pyflakes`, or leave them empty; a path is operator-only | no |
+| bandit | `config_file` | yes |
 | cfn-guard | `rules_paths` | yes |
 | cfn-lint | `config_file` | no |
 | gitleaks | `config_file`, `baseline_path` | yes |
+| grype | `config_file` | yes |
+| syft | `config_file` | yes |
 | trivy | `config_file`, `ignore_file`, `secret_config_file` | no |
 | zizmor | `config_file` | yes |
 | zizmor | `online_audits` | not a path |
 | trivy-repo (community) | `config_file`, `ignore_file`, `secret_config_file`, `module_dir` | no |
 | hadolint (community) | `config_file` | no |
 
-When a repository config sets one of these, ASH ignores the value, logs a warning that names the option, and runs the scanner with its default (for trivy's `ignore_file` and `secret_config_file`, with the file the matching `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG` environment variable names, if you set one). When an operator source names a path that does not exist, the scanner fails (ERROR; MISSING for actionlint's `shellcheck` and `pyflakes`), and the scan exits 1.
+When a repository config sets one of these, ASH ignores the value, logs a warning that names the option, and runs the scanner with its default (for trivy's `ignore_file` and `secret_config_file`, with the file the matching `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG` environment variable names, if you set one). When an operator source names a path that does not exist, the scanner fails (ERROR; MISSING for actionlint's `shellcheck` and `pyflakes`), and the scan exits 1. bandit, grype, and syft are the exception: they run with an empty config, and bandit logs a warning.
 
 <!-- doctest: illustrative reason="names a gitleaks config file that the sample project does not have" -->
 ```bash
 ash --source-dir . --config-overrides scanners.gitleaks.options.config_file=/etc/ash/gitleaks.toml
 ```
 
-These scanners do not read the repository's own config files for their tools, such as `.gitleaks.toml`, `.gitleaksignore`, `zizmor.yml`, `actionlint.yaml`, `trivy.yaml`, `.trivyignore`, `.cfnlintrc`, or `.hadolint.yaml`. To use one, point the option at it from an operator source.
+These scanners do not read the repository's own config files for their tools, such as `.gitleaks.toml`, `.gitleaksignore`, `zizmor.yml`, `actionlint.yaml`, `.bandit`, `bandit.yaml`, `bandit.toml`, `.grype.yaml`, `.syft.yaml`, `trivy.yaml`, `.trivyignore`, `.cfnlintrc`, or `.hadolint.yaml`. To use one, point the option at it from an operator source.
 
-The options in this table are the only scanner options ASH limits this way. Other scanners' options, including their config file options, apply from any config, and some scanners also read tool config files they find in the scanned directory. When you scan a repository you do not control, set scanner options from an operator source and pass your config with `--config`, so the repository config is not read; [Configuration trust model](../concepts/trust-model.md#not-protected) lists what that does not cover.
+The options in this table are the only scanner options ASH limits this way. Other scanners' options apply from any config, and some scanners still read tool files they find in the scanned directory, such as detect-secrets' `.secrets.baseline` and semgrep's and opengrep's `.semgrepignore`. When you scan a repository you do not control, set scanner options from an operator source and pass your config with `--config`, so the repository config is not read; [Configuration trust model](../concepts/trust-model.md#not-protected) lists what that does not cover.

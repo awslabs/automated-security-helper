@@ -201,25 +201,32 @@ also reports a missing `project_name`, which a scan does not require.
 Symptom: a warning such as:
 
 ```text
-Ignoring sandbox.network_scanners from .ash/.ash.yaml: ...
+Ignoring sandbox.network_scanners from the config built on /home/me/repo/.ash/.ash.yaml: the file is inside a git checkout or the scanned directory, so someone other than the operator may have written it, and it cannot grant sandbox access. ...
 ```
 
 Cause: some settings decide what ASH may run, read, or send: sandbox grants, plugin
 modules, reporter destinations and credentials, and options that name a scanner's own
 configuration or ignore file. A config file inside the scanned directory, or inside
 any git checkout, could have been written by someone other than you, so ASH ignores
-those settings from it. The warning names each setting and says why. For sandbox
-settings in a config file that an MCP client delivered to `ash mcp`, the reason reads
-`an MCP client supplied the file, not the operator`. For a plugin module, the warning
-also gives where Python found the module and the git checkout or scanned directory that
-location is in.
+those settings from it. The warning names each setting and says why. For a plugin
+module, it also gives where Python found the module and the git checkout or scanned
+directory that location is in.
+
+Under `ash mcp`, a config file an MCP client delivered is held to the server's policy.
+With the default policy, a delivered file that asks for more sandbox access or plugin
+modules than the server's own config is refused as a whole with `config_field_denied`,
+not ignored; see
+[What a delivered config cannot set](mcp-server.md#what-a-delivered-config-cannot-set).
+When a delivered file's sandbox settings are ignored instead, the reason in the warning
+reads `an MCP client supplied the file, not the operator`.
 
 Fix: pass the setting with `--config-overrides`, or put it in a config file outside the
 scanned directory and outside every git checkout and name that file with `--config`.
 Name a plugin module with `--ash-plugin-modules`, or install it outside every git
-checkout and the scanned directory.
-A scanner configuration or ignore file that such an option names must also be outside
-the scanned directory. See [Configuration trust model](../concepts/trust-model.md).
+checkout and the scanned directory. For some scanners, the file such an option names
+must also be outside the scanned directory;
+[Options only the operator can set](choose-scanners.md#operator-only) says which. See
+[Configuration trust model](../concepts/trust-model.md).
 
 ### The scan exits 4
 
