@@ -113,7 +113,8 @@ _INSTALL_REF = re.compile(
 # delimiter got encoded five separate times as though it were part of what a reference
 # IS.
 #
-# `docs/content/docs/installation-guide.md` documented an `ASH_NIX_FLAKE_REF` override
+# The old installation guide, `docs/content/docs/installation-guide.md` (since replaced
+# by `docs/content/how-to/install.md`), documented an `ASH_NIX_FLAKE_REF` override
 # using the flake form, under a heading reading "Override it with:", as a runnable
 # copy-paste. It sat at 3.5.9 while the repository shipped 3.7.0 -- two minor releases
 # behind -- and not one of those five mechanisms could see it, because all five asked
@@ -125,9 +126,10 @@ _INSTALL_REF = re.compile(
 #
 # The lesson generalizes past this one shape: a reference is a repository plus a ref,
 # and the delimiter between them is the incidental part. Anything added here that keys
-# on a delimiter needs a positive control of its own -- see `_MINIMUM_FLAKE_REFS`,
-# which exists because the two floors already in this file count `@v` references and
-# stay satisfied while a slash-shaped pattern matches nothing at all.
+# on a delimiter needs a positive control of its own -- see
+# `test_the_flake_shape_is_reached_by_the_walk`, which exists because the two floors
+# already in this file count `@v` references and stay satisfied while a slash-shaped
+# pattern matches nothing at all.
 _FLAKE_REF = re.compile(rf"github:[\w.-]+/{_REPO}/v(?P<version>\d+\.\d+\.\d+)")
 
 # The same reference, but reading whatever follows `@v` instead of only a
@@ -153,7 +155,7 @@ _INSTALL_REF_PIN = re.compile(
 # `_INSTALL_REF_PIN` does to `_INSTALL_REF`: a flake ref pinned to something that is not
 # a parseable version is a ref `nix develop` cannot resolve, and a pattern requiring
 # three numeric components cannot report what it cannot match. The character class is
-# identical, so `{{VERSION}}` in the `.md.template` reads as the placeholder it is and
+# identical, so `{{VERSION}}` in a `.md.template` reads as the placeholder it is and
 # stays exempt through `_pin_is_a_version_attempt`.
 _FLAKE_REF_PIN = re.compile(rf"""github:[\w.-]+/{_REPO}/v(?P<pin>[^\s`'"),;\]]*)""")
 
@@ -209,22 +211,9 @@ _PLACEHOLDER_PINS = (
     re.compile(r"^\$\w+$"),
 )
 
-# Floor for the positive control on the well-formedness walk. The tree carries over
-# a hundred `@v<version>` pins today; this sits far below that and far above zero.
+# Floor for the positive control on the well-formedness walk. The tree carries about
+# sixty `@v<version>` pins today; this sits well below that and far above zero.
 _MINIMUM_VERSION_PINS = 20
-
-# Floor for the flake shape's own positive control, and the reason it is separate.
-#
-# `_MINIMUM_FILES_WITH_REFS` and `_MINIMUM_VERSION_PINS` are both dominated by `@v`
-# references -- the generated plugin trees alone put them far past 20 -- so either stays
-# satisfied while `_FLAKE_REF` matches nothing whatsoever. A shared floor cannot control
-# a pattern whose contribution is rounding error against the total, and a pattern with no
-# control is the state this whole class of drift was found in.
-#
-# One rather than two: the `.md.template` carries `{{VERSION}}` and so is invisible to
-# the strict pattern by design, leaving the generated doc as the single literal. A floor
-# of one still discriminates the case that matters -- the pattern matching nothing.
-_MINIMUM_FLAKE_REFS = 1
 
 # Directories with no hand-maintained sources: virtualenvs, caches, build output
 # and scan artifacts. Anything installed under these can carry install refs for
@@ -312,6 +301,20 @@ def _candidate_files():
         yield path
 
 
+def _install_refs_in_text(text: str):
+    """Every (line number, version) install reference in one file's text.
+
+    The per-file half of `_install_refs`, separate so a positive control can put a line
+    it wrote through exactly the matching the walk applies to every file in the tree.
+    """
+    if "automated-security-helper" not in text:
+        return
+    for number, line in enumerate(text.splitlines(), 1):
+        for pattern in _REF_PATTERNS:
+            for match in pattern.finditer(line):
+                yield number, match.group("version")
+
+
 def _install_refs():
     """Every (relative path, line number, version) install reference in the tree.
 
@@ -325,13 +328,23 @@ def _install_refs():
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        if "automated-security-helper" not in text:
-            continue
         relative = path.relative_to(REPO_ROOT).as_posix()
-        for number, line in enumerate(text.splitlines(), 1):
-            for pattern in _REF_PATTERNS:
-                for match in pattern.finditer(line):
-                    yield relative, number, match.group("version")
+        for number, version in _install_refs_in_text(text):
+            yield relative, number, version
+
+
+def _version_pins_in_text(text: str):
+    """Every (line number, pin, line) reference in one file's text, read loosely.
+
+    The per-file half of `_version_pins`, separate for the same reason as
+    `_install_refs_in_text`.
+    """
+    if "automated-security-helper" not in text:
+        return
+    for number, line in enumerate(text.splitlines(), 1):
+        for pattern in _REF_PIN_PATTERNS:
+            for match in pattern.finditer(line):
+                yield number, match.group("pin"), line.strip()
 
 
 def _version_pins():
@@ -345,35 +358,9 @@ def _version_pins():
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        if "automated-security-helper" not in text:
-            continue
         relative = path.relative_to(REPO_ROOT).as_posix()
-        for number, line in enumerate(text.splitlines(), 1):
-            for pattern in _REF_PIN_PATTERNS:
-                for match in pattern.finditer(line):
-                    yield relative, number, match.group("pin"), line.strip()
-
-
-def _refs_matching(pattern: "re.Pattern[str]"):
-    """Every (relative path, line number) in the tree matched by one `pattern`.
-
-    Exists so a single reference shape can have a positive control of its own. The floors
-    on `_install_refs` and `_version_pins` are aggregates, and an aggregate cannot tell
-    you that one contributor to it has stopped contributing.
-    """
-    found = []
-    for path in _candidate_files():
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue
-        if _REPO not in text:
-            continue
-        relative = path.relative_to(REPO_ROOT).as_posix()
-        for number, line in enumerate(text.splitlines(), 1):
-            if pattern.search(line):
-                found.append((relative, number))
-    return found
+        for number, pin, line in _version_pins_in_text(text):
+            yield relative, number, pin, line
 
 
 def _pin_is_a_version_attempt(pin: str) -> bool:
@@ -504,22 +491,64 @@ class TestInstallRefsTrackPackagedVersion:
             "the tree: check _SKIP_DIRS, the UTF-8 guard, and _INSTALL_REF."
         )
 
-    def test_the_flake_shape_is_reached_by_the_walk(self):
-        """A positive control for `_FLAKE_REF` specifically, not for the walk at large.
+    def test_the_flake_shape_is_reached_by_the_walk(self, monkeypatch):
+        """A positive control for the flake patterns, not for the walk at large.
 
         The floor above counts FILES and is met many times over by `@v` references, so it
         would stay green with the flake pattern matching nothing -- which is precisely the
-        state this file was in while the installation guide pinned a two-release-old flake
-        ref. Controlling a newly added pattern with a total dominated by the old ones is
-        how a blind spot gets a green check written over it.
-        """
-        found = _refs_matching(_FLAKE_REF)
+        state this file was in while the old installation guide pinned a two-release-old
+        flake ref. Controlling a newly added pattern with a total dominated by the old ones
+        is how a blind spot gets a green check written over it. `_MINIMUM_VERSION_PINS`
+        has the same problem for `_FLAKE_REF_PIN`, so this controls both walks.
 
-        assert len(found) >= _MINIMUM_FLAKE_REFS, (
-            f"The walk found {len(found)} flake reference(s), below the floor of "
-            f"{_MINIMUM_FLAKE_REFS}. docs/content/docs/installation-guide.md documents an "
-            "ASH_NIX_FLAKE_REF override as a runnable copy-paste, so zero means _FLAKE_REF "
-            "stopped matching -- not that the tree stopped carrying one."
+        This used to count flake refs in the tree, with a floor of one. The tree no longer
+        carries one, and correctly: `docs/content/how-to/install.md` gives `/main` as the
+        ASH_NIX_FLAKE_REF example because no release up to 3.7.x contains flake.nix, so a
+        flake ref pinned to a release names a tree Nix cannot use. A count of the tree
+        would now need a floor of zero, which controls nothing, and any later doc edit
+        could move it for reasons that have nothing to do with the pattern. So the control
+        puts lines through the same per-file matching the walks apply to every file:
+
+        * the ref `resolve_flake_ref()` builds when it falls back to the published
+          repository. That is where the shape comes from, so it is the form a doc that
+          pins a release copies. Both walks must read it, and read the version it embeds.
+        * the `/main` form the install page uses, which names a branch rather than a
+          release. Neither walk may read it as a pin, or the install page fails here.
+
+        The walk itself is unchanged: `_REF_PATTERNS` still carries `_FLAKE_REF`, so a
+        flake ref pinned to a release anywhere in the tree is held to the packaged version
+        by `test_every_install_ref_names_the_packaged_version`.
+        """
+        import automated_security_helper
+        from automated_security_helper.interactions import run_ash_nix
+
+        # A version no release has, so the one read back can only have come from the line,
+        # and fixed, so the result does not depend on which ASH the environment installed.
+        monkeypatch.setattr(automated_security_helper, "__version__", "9.8.7")
+        monkeypatch.delenv(run_ash_nix.ASH_NIX_FLAKE_REF_ENV_VAR, raising=False)
+        monkeypatch.setattr(run_ash_nix, "_repo_flake_dir", lambda: None)
+        published = run_ash_nix.resolve_flake_ref()
+        line = f'export {run_ash_nix.ASH_NIX_FLAKE_REF_ENV_VAR}="{published}"'
+
+        assert list(_install_refs_in_text(line)) == [(1, "9.8.7")], (
+            f"The staleness walk does not read {line!r} as a reference at version 9.8.7. "
+            "That is the ref resolve_flake_ref() builds for the published repository, so "
+            "_FLAKE_REF no longer matches the flake shape ASH produces, and a doc that "
+            "pins one would never be checked against the packaged version."
+        )
+        assert [pin for _, pin, _ in _version_pins_in_text(line)] == ["9.8.7"], (
+            f"The well-formedness walk does not read the pin in {line!r}; check "
+            "_FLAKE_REF_PIN against the ref resolve_flake_ref() builds."
+        )
+
+        branch = (
+            f"or a branch or commit that has it, such as `github:awslabs/{_REPO}/main`."
+        )
+        assert list(_install_refs_in_text(branch)) == [], (
+            f"The staleness walk reads a pin from {branch!r}, which names a branch."
+        )
+        assert list(_version_pins_in_text(branch)) == [], (
+            f"The well-formedness walk reads a pin from {branch!r}, which names a branch."
         )
 
     def test_the_allowlist_still_describes_real_files(self):
@@ -720,9 +749,9 @@ class TestInstallRefsParseAsVersions:
         # why the repository name is anchored even though the owner is not.
         assert _FLAKE_REF.search("github:nixos/nixpkgs/v1.2.3") is None
 
-        # The placeholder the `.md.template` now carries: invisible to the strict pattern,
-        # and exempt from the well-formedness one. Without both halves the template file
-        # itself would be reported as a defect.
+        # The placeholder a `.md.template` carries for a pinned flake ref: invisible to the
+        # strict pattern, and exempt from the well-formedness one. Without both halves the
+        # template file itself would be reported as a defect.
         templated = shipped.replace("3.5.9", "{{VERSION}}")
         assert _FLAKE_REF.search(templated) is None
         assert not _pin_is_a_version_attempt(
