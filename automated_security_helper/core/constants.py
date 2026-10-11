@@ -184,6 +184,10 @@ ASH_CONFIG_EXTENDS_MAX_FILES = 50
 # ``tests/unit/config/test_config_env_interpolation.py`` asserts that, so an
 # entry ending in KEY, TOKEN, SECRET, PASSWORD or CREDENTIAL fails the suite.
 # An operator needing another name renames it with the ``ASH_`` prefix.
+#
+# A config file an MCP client delivered is outside this bound altogether: it may
+# not use ``!ENV`` at all, and is refused if it does. See "Environment
+# variables" in ``config/config_sources.py``.
 ASH_CONFIG_ENV_VAR_PREFIX = "ASH_"
 
 ASH_CONFIG_ENV_VAR_ALLOWLIST = [

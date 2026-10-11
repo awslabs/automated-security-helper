@@ -103,6 +103,26 @@ constructor calls), and JSON with no interpolation, as before. The
 ``ASH_CONFIG_ENV_VAR_PREFIX`` / ``ASH_CONFIG_ENV_VAR_ALLOWLIST`` bound therefore
 holds for every value in the merged result, whichever file it came from.
 
+A file an MCP client delivered resolves no environment variable at all, and one
+that uses ``!ENV`` (tagged, a plain ``${VAR:default}`` scalar, or a TOML string
+starting with one) is refused with ``ASHConfigEnvNotResolvedError`` naming the
+file and the line or key. Delivered means ``cli/mcp/sandbox
+.config_is_client_supplied``: a delivered tree, an upload or its staging, in any
+session, judged on the path as named and on the file it resolves to. A caller
+that holds client content written somewhere else (``validate_config``'s
+``config_content``) says so with ``client_delivered``. Each file in a chain is
+judged on its own location, so an operator's file keeps its ``!ENV`` whoever
+extends it.
+
+The bound above cannot cover this case. There the variables are the operator's
+own, set wherever ASH runs; here they are the MCP server's, and the client that
+wrote the file reads the result back (``get_config`` returns the resolved
+config). Refused rather than left as written, because a value that silently
+stays a literal is a config that is not what either side meant, and the other
+refusals for delivered configs work the same way. Operator and repository
+configs, including one inside a tree the operator scans with the CLI, keep
+``!ENV`` exactly as before.
+
 Failure
 -------
 Every failure here raises ``ASHConfigSourceError``, which ``resolve_config``
@@ -128,6 +148,7 @@ import yaml
 
 from automated_security_helper.config.ash_config import (
     ENV_REFERENCE_PATTERN,
+    EnvReferenceNotResolved,
     load_yaml_config,
     resolve_env_references,
 )
@@ -139,6 +160,7 @@ from automated_security_helper.core.constants import (
     ASH_RC_FILE_NAMES,
 )
 from automated_security_helper.core.exceptions import (
+    ASHConfigEnvNotResolvedError,
     ASHConfigInputNotPermittedError,
     ASHConfigSourceError,
 )
@@ -405,17 +427,58 @@ def _resolve_toml_env(value: Any) -> Any:
     return value
 
 
-def read_config_file(path: Path) -> Any:
+def _toml_env_reference(value: Any, key: str = "") -> Optional[str]:
+    """The key of the first value `_resolve_toml_env` would resolve, or None."""
+    if isinstance(value, dict):
+        items = ((f"{key}.{k}" if key else str(k), v) for k, v in value.items())
+    elif isinstance(value, list):
+        items = ((f"{key}[{i}]", v) for i, v in enumerate(value))
+    else:
+        if isinstance(value, str) and ENV_REFERENCE_PATTERN.match(value):
+            return key
+        return None
+    for child_key, child in items:
+        found = _toml_env_reference(child, child_key)
+        if found is not None:
+            return found
+    return None
+
+
+def config_is_client_delivered(path: Path) -> bool:
+    """Whether an MCP client delivered `path`; see "Environment variables".
+
+    ``cli.mcp.sandbox.config_is_client_supplied``, imported when called.
+    """
+    # Imported here, as config/path_trust.py does: importing cli.mcp runs its
+    # __init__, which imports profile_registry and through it ash_config.
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+
+    return config_is_client_supplied(path)
+
+
+def _env_not_resolved(path: Path, where: str) -> ASHConfigEnvNotResolvedError:
+    return ASHConfigEnvNotResolvedError(
+        f"{describe_config_path(path)} uses !ENV ({where}). !ENV is not resolved "
+        "in a config an MCP client delivered, so the file is refused. Write the "
+        "value itself in the file (in YAML, quote a value that only looks like a "
+        "${VAR} reference), or leave the setting to the server's config."
+    )
+
+
+def read_config_file(path: Path, client_delivered: bool = False) -> Any:
     """Parse one config file, without resolving its `extends`.
 
     A ``pyproject.toml`` yields its ``[tool.ash]`` table; any other ``.toml``
     file is a config at its top level. YAML and JSON are read exactly as
-    ``AshConfig.from_file`` always read them.
+    ``AshConfig.from_file`` always read them, except that a YAML or TOML file
+    an MCP client delivered (by location, or ``client_delivered``) is refused if
+    it uses ``!ENV``; see "Environment variables". JSON has no ``!ENV``.
     """
     path = Path(path)
     if path.name.endswith(".json"):
         with open(path, mode="r", encoding="utf-8") as f:
             return json.load(f)
+    delivered = client_delivered or config_is_client_delivered(path)
     if path.name.endswith(".toml"):
         try:
             text = _read_toml_text(path)
@@ -444,9 +507,17 @@ def read_config_file(path: Path) -> Any:
                     f"{type(table).__name__}"
                 )
             document = table
+        if delivered:
+            key = _toml_env_reference(document)
+            if key is not None:
+                raise _env_not_resolved(path, f"key {key}")
+            return document
         return _resolve_toml_env(document)
     with open(path, mode="r", encoding="utf-8") as f:
-        return load_yaml_config(f)
+        try:
+            return load_yaml_config(f, resolve_env=not delivered)
+        except EnvReferenceNotResolved as exc:
+            raise _env_not_resolved(path, f"line {exc.line}") from exc
 
 
 def default_confinement_root(
@@ -492,6 +563,7 @@ class ResolvedConfigDocument:
 class _ChainState:
     root: Path
     permit_base: Optional[PermitBase] = None
+    root_client_delivered: bool = False
     files_read: int = 0
     order: List[Path] = field(default_factory=list)
     documents: Dict[Path, Any] = field(default_factory=dict)
@@ -692,7 +764,9 @@ def _resolve(
 
     if not stack:
         # The root config: parse errors behave exactly as they always have.
-        data = read_config_file(path)
+        # Read as named rather than as `real`, so a refusal names the path the
+        # caller gave and not the target of a symlink.
+        data = read_config_file(path, client_delivered=state.root_client_delivered)
     else:
         extending = stack[-1]
         if not real.is_file():
@@ -758,12 +832,16 @@ def resolve_config_document(
     config_path: Path,
     confine_to: Optional[Path] = None,
     permit_base: Optional[PermitBase] = None,
+    client_delivered: bool = False,
 ) -> ResolvedConfigDocument:
     """Read `config_path` and every base it extends into one merged document.
 
     `permit_base` is checked for every base, in addition to `confine_to`; see
     "Base paths" in the module docstring. It is not checked for `config_path`
     itself, which the caller chose and is responsible for having checked.
+    `client_delivered` marks `config_path` as content an MCP client sent,
+    wherever it was written; each base is still judged on its own location (see
+    "Environment variables").
     """
     config_path = Path(config_path)
     root = (
@@ -771,7 +849,9 @@ def resolve_config_document(
         if confine_to is not None
         else default_confinement_root(config_path)
     )
-    state = _ChainState(root=root, permit_base=permit_base)
+    state = _ChainState(
+        root=root, permit_base=permit_base, root_client_delivered=client_delivered
+    )
     data = _resolve(config_path, (), state)
     return ResolvedConfigDocument(
         data=data, chain=state.order, root=root, documents=state.documents

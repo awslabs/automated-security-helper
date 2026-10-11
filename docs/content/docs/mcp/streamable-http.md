@@ -185,7 +185,9 @@ Its sandbox settings and plugin modules may restrict the server's but never wide
 
 Its reporter destinations and credentials, each scanner's own config file, and which version of a tool runs are default `denied_paths` entries, so a file that sets one is refused, where a config file inside the scanned tree is scanned without it. See [Configs an MCP client delivered](../configuration-guide.md#configs-an-mcp-client-delivered).
 
-Everything else in the file applies as usual. The config the server materializes for `select_profile`, under the session's `config/` directory, is the operator's and keeps its grants, as does a file under `ASH_MCP_ALLOWED_CONFIG_ROOTS`.
+Such a file also resolves no environment variables, since the environment `!ENV` would read is the server's. A file the client delivered or named that uses `!ENV`, tagged or as a plain `${VAR:default}` value, is refused with a config error naming the file and the line or key: `run_ash_scan` returns `error_type` `config_env_not_resolved` instead of starting the scan, and `get_config` and `validate_config` report the same `error_type`. The same applies to `validate_config`'s `config_content`. A symlink in a delivered tree counts as delivered wherever it points. A base the file `extends` is judged on its own location, so an operator's base keeps its `!ENV`.
+
+Everything else in the file applies as usual. The config the server materializes for `select_profile`, under the session's `config/` directory, is the operator's and keeps its grants, as does a file under `ASH_MCP_ALLOWED_CONFIG_ROOTS`, which also resolves `!ENV` as usual.
 
 `get_config` shows the sandbox section the same way, as a scan of the session's delivered source (or, with none delivered, the working directory) would apply it.
 

@@ -57,6 +57,18 @@ class ASHConfigPolicyUnreadableError(ASHConfigValidationError):
     """
 
 
+class ASHConfigEnvNotResolvedError(ASHConfigSourceError):
+    """A config file an MCP client delivered uses ``!ENV``.
+
+    Such a file does not resolve environment variables at all, and one that
+    uses ``!ENV`` is refused rather than read with the reference dropped; see
+    "Environment variables" in ``config/config_sources.py``. A subclass of
+    ``ASHConfigSourceError`` so every path that refuses a config that did not
+    load refuses this one, and distinct so ``ConfigValidator`` and the MCP tools
+    can report it as its own error type.
+    """
+
+
 class WorkspacePatternError(ASHValidationError):
     """Exception raised when a glob pattern cannot be rebased between the
     project and workspace path spaces.

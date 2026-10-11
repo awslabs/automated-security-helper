@@ -261,6 +261,7 @@ def resolve_config(
         permit_base,
         chain,
         documents,
+        client_delivered=untrusted_config,
     )
     if config is None:
         return config
@@ -366,11 +367,13 @@ def _resolve_config(
     permit_base: Optional[Callable[[Path], bool]],
     chain: List[Path],
     documents: Dict[Path, Any],
+    client_delivered: bool = False,
 ) -> AshConfig:
     """resolve_config without the sandbox confinement.
 
     Appends every file read to ``chain``, and each file's parsed document to
-    ``documents``.
+    ``documents``. ``client_delivered`` reads ``config_path`` as an MCP client's
+    wherever it is, so it resolves no ``!ENV`` (``config_sources``).
     """
     try:
         # Start with default config
@@ -457,7 +460,10 @@ def _resolve_config(
                 )
             # AshConfig.from_file, keeping the list of files the config came from.
             document = resolve_config_document(
-                Path(config_path), confine_to=confine_to, permit_base=permit_base
+                Path(config_path),
+                confine_to=confine_to,
+                permit_base=permit_base,
+                client_delivered=client_delivered,
             )
             config = AshConfig.model_validate(document.data, strict=True)
             chain.extend(document.chain)

@@ -824,6 +824,13 @@
 
 ### Fixes
 
+- Under the MCP server, a config file an MCP client delivered (a file in a delivered
+  tree, an upload named as `config_path`, or `validate_config`'s `config_content`), or
+  one it names outside the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, no
+  longer resolves `!ENV` from the server's environment; one that uses `!ENV` is refused
+  with a config error naming the file (`error_type: config_env_not_resolved`). The session config `select_profile` writes keeps
+  a value shaped like `${VAR:default}` as written instead of resolving it when read.
+
 - `ash dependencies install --tool ArchiveConverter` works again. Building each plugin
   from its own config section renamed the archive converter's selector to `archive`,
   so the old spelling exited 2 as an unknown tool. It is now accepted as a deprecated

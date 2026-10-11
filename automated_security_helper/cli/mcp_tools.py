@@ -55,6 +55,10 @@ CONFIG_FIELD_DENIED = "config_field_denied"
 #: ``error_type`` for a client-delivered config whose policy cannot be established.
 CONFIG_POLICY_UNREADABLE = "config_policy_unreadable"
 
+#: ``error_type`` of the refusal of a config an MCP client delivered that uses
+#: ``!ENV``, which such a file may not (``ASHConfigEnvNotResolvedError``).
+CONFIG_ENV_NOT_RESOLVED = "config_env_not_resolved"
+
 
 def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
     """The response for a config input outside the permitted roots.
@@ -70,6 +74,72 @@ def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
         "error_type": CONFIG_INPUT_NOT_PERMITTED,
         "error_category": error.context["error_category"],
     }
+
+
+def _config_env_refusal(error: Exception, operation: str) -> Dict[str, Any]:
+    """The response for a config an MCP client delivered that uses ``!ENV``.
+
+    The error names the file and the line or key, never a value: the refusal is
+    raised before anything is read from the environment.
+    """
+    return {
+        "success": False,
+        "operation": operation,
+        "error": str(error),
+        "error_type": CONFIG_ENV_NOT_RESOLVED,
+        "error_category": ErrorCategory.INVALID_FORMAT.value,
+    }
+
+
+def _delivered_config_env_error(
+    config_path: Optional[str], target: Path, session_id: Optional[str]
+) -> Optional[Exception]:
+    """The ``!ENV`` refusal a scan of ``target`` would meet, or None.
+
+    Resolves the config the scan would read (``config_path``, or the one
+    discovery selects in ``target``) with the scan's confinement, so that a
+    delivered config using ``!ENV`` is refused before the scan starts and in
+    the words the scan would use, rather than by a scan that ends with exit
+    code 3. Any other problem with the config is left to the scan, which
+    reports it as it always has. The scan still refuses on its own if the file
+    changes after this check.
+    """
+    from automated_security_helper.cli.mcp.sandbox import (
+        client_named_config_is_untrusted,
+        config_base_gate,
+    )
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+        discover_config_source,
+        resolve_config_document,
+    )
+    from automated_security_helper.core.exceptions import (
+        ASHConfigEnvNotResolvedError,
+    )
+
+    try:
+        if config_path is None:
+            selected = discover_config_source(target).selected
+            if selected is None:
+                return None
+            path, confine_to = selected.path, target
+        else:
+            path = Path(config_path)
+            confine_to = default_confinement_root(path, target)
+        if not path.is_file():
+            return None
+        resolve_config_document(
+            path,
+            confine_to=confine_to,
+            permit_base=config_base_gate(session_id),
+            client_delivered=config_path is not None
+            and client_named_config_is_untrusted(config_path),
+        )
+    except ASHConfigEnvNotResolvedError as exc:
+        return exc
+    except Exception as exc:  # noqa: BLE001 -- reported by the scan's own read
+        _logger.debug(f"Config not resolved before the scan ({exc})")
+    return None
 
 
 def _session_client_rules(session_id: Optional[str]) -> Any:
@@ -120,7 +190,10 @@ def _client_config_denial(
     as it always has. The scan's own check is the one that decides; this one
     only reports early.
     """
-    from automated_security_helper.cli.mcp.sandbox import config_base_gate
+    from automated_security_helper.cli.mcp.sandbox import (
+        client_named_config_is_untrusted,
+        config_base_gate,
+    )
     from automated_security_helper.config.client_config_policy import (
         apply_client_config_rules,
     )
@@ -137,6 +210,11 @@ def _client_config_denial(
 
     rules = _session_client_rules(session_id)
     permit_base = config_base_gate(session_id)
+    # A named path the client chose is the client's wherever it is, as the scan
+    # reads it (resolve_config's untrusted_config).
+    named_by_client = config_path is not None and client_named_config_is_untrusted(
+        config_path
+    )
     try:
         if config_path is not None:
             path = Path(config_path)
@@ -147,7 +225,10 @@ def _client_config_denial(
                 return None
             path, confine = selected.path, source_dir
         documents = resolve_config_document(
-            path, confine_to=confine, permit_base=permit_base
+            path,
+            confine_to=confine,
+            permit_base=permit_base,
+            client_delivered=named_by_client,
         ).documents
     except Exception as exc:  # noqa: BLE001 -- reported by the scan's own read
         _logger.debug(f"Config chain not read before the scan: {exc}")
@@ -160,6 +241,7 @@ def _client_config_denial(
             trusted_config_path=None,
             source_dir=source_dir,
             permit_base=permit_base,
+            all_delivered=named_by_client,
         )
     except (ASHConfigFieldDeniedError, ASHConfigPolicyUnreadableError) as exc:
         return _denied_response(exc, operation)
@@ -293,6 +375,9 @@ async def mcp_scan_directory(
                 ],
             )
 
+    env_error = _delivered_config_env_error(config_path, resolved_target, session_id)
+    if env_error is not None:
+        return _config_env_refusal(env_error, "scan_directory")
     denial = _client_config_denial(
         config_path, resolved_target, session_id, "scan_directory"
     )
@@ -1270,7 +1355,8 @@ def mcp_get_config(
         Its ``sandbox`` section is the one a scan of this session's default
         target would apply, so a file the client delivered shows no grants of
         its own. A refused path returns ``success`` False with ``error_type``
-        ``config_input_not_permitted``.
+        ``config_input_not_permitted``, and a file the client delivered that
+        uses ``!ENV`` the same with ``config_env_not_resolved``.
     """
     import yaml as _yaml
     from automated_security_helper.cli.mcp.profile_registry import (
@@ -1299,6 +1385,7 @@ def mcp_get_config(
     from automated_security_helper.config.default_config import get_default_config
     from automated_security_helper.core.exceptions import (
         ASHConfigFieldDeniedError,
+        ASHConfigEnvNotResolvedError,
         ASHConfigInputNotPermittedError,
         ASHConfigPolicyUnreadableError,
     )
@@ -1335,9 +1422,22 @@ def mcp_get_config(
         return get_default_config().model_dump()
 
     if raw:
-        if path.name.endswith(".toml"):
-            # pyproject.toml yields its [tool.ash] table, as when it is loaded.
-            return read_config_file(path) or {}
+        # pyproject.toml yields its [tool.ash] table, as when it is loaded. A
+        # file the client delivered is read by the loader too, which returns
+        # what safe_load would unless the file uses !ENV, and refuses it then
+        # as a scan of it would.
+        named_by_client = config_path is not None and client_named_config_is_untrusted(
+            path
+        )
+        if (
+            path.name.endswith(".toml")
+            or named_by_client
+            or config_is_client_supplied(path)
+        ):
+            try:
+                return read_config_file(path, client_delivered=named_by_client) or {}
+            except ASHConfigEnvNotResolvedError as exc:
+                return _config_env_refusal(exc, "get_config")
         return _yaml.safe_load(path.read_text()) or {}
 
     # resolve_config short-circuits to default when source_dir is None, so
@@ -1385,6 +1485,8 @@ def mcp_get_config(
         return _config_refusal(config_chain_refusal(path, exc), "get_config")
     except (ASHConfigFieldDeniedError, ASHConfigPolicyUnreadableError) as exc:
         return _denied_response(exc, "get_config")
+    except ASHConfigEnvNotResolvedError as exc:
+        return _config_env_refusal(exc, "get_config")
     return resolved.model_dump()
 
 
@@ -1410,6 +1512,7 @@ def mcp_validate_config(
     import tempfile
 
     from automated_security_helper.cli.mcp.sandbox import (
+        client_named_config_is_untrusted,
         config_base_gate,
         validate_config_input,
     )
@@ -1422,6 +1525,8 @@ def mcp_validate_config(
         # "base.yaml" would otherwise match the YAML branch below.
         if raw.startswith(ConfigValidator.NOT_PERMITTED_ERROR_PREFIX):
             return {"field": "", "message": raw, "type": CONFIG_INPUT_NOT_PERMITTED}
+        if raw.startswith(ConfigValidator.ENV_NOT_RESOLVED_ERROR_PREFIX):
+            return {"field": "", "message": raw, "type": CONFIG_ENV_NOT_RESOLVED}
         if "YAML parsing error" in raw or "yaml" in raw.lower():
             return {"field": "", "message": raw, "type": "yaml_parse_error"}
         if "JSON parsing error" in raw:
@@ -1452,11 +1557,13 @@ def mcp_validate_config(
         # A private, otherwise empty directory rather than the shared temp dir:
         # the file's directory is where an `extends` in the content may look
         # for bases, and nothing a client did not send should be found there.
+        # The client sent the content, so it is held to the rules for a
+        # delivered config wherever the file is written.
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir) / "config.yaml"
             tmp_path.write_text(config_content, encoding="utf-8")
             valid, raw_errors = ConfigValidator.validate_config_file(
-                tmp_path, permit_base=permit_base
+                tmp_path, permit_base=permit_base, client_delivered=True
             )
     elif config_path is not None:
         # Before the existence check, so a refused path is reported as refused
@@ -1486,7 +1593,9 @@ def mcp_validate_config(
                 ],
             }
         valid, raw_errors = ConfigValidator.validate_config_file(
-            path, permit_base=permit_base
+            path,
+            permit_base=permit_base,
+            client_delivered=client_named_config_is_untrusted(path),
         )
     else:
         return {

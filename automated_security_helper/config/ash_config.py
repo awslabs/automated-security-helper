@@ -206,8 +206,25 @@ def resolve_env_references(value: str) -> Optional[str]:
     return value
 
 
-def load_yaml_config(stream: Any) -> Any:
-    """Parse an ASH YAML config, resolving ``!ENV`` references as it goes."""
+class EnvReferenceNotResolved(Exception):
+    """``load_yaml_config(..., resolve_env=False)`` met an ``!ENV`` value.
+
+    ``line`` is 1-based. ``config_sources.read_config_file`` turns this into the
+    ``ASHConfigEnvNotResolvedError`` that names the file.
+    """
+
+    def __init__(self, line: int) -> None:
+        super().__init__(f"!ENV at line {line}")
+        self.line = line
+
+
+def load_yaml_config(stream: Any, resolve_env: bool = True) -> Any:
+    """Parse an ASH YAML config, resolving ``!ENV`` references as it goes.
+
+    With ``resolve_env`` False, the first ``!ENV`` value, tagged or matched by
+    the implicit resolver, raises ``EnvReferenceNotResolved`` before anything is
+    read from the environment.
+    """
 
     # Use a local subclass to avoid mutating the global SafeLoader
     class _AshConfigLoader(yaml.SafeLoader):
@@ -216,10 +233,25 @@ def load_yaml_config(stream: Any) -> Any:
     _AshConfigLoader.add_implicit_resolver("!ENV", ENV_REFERENCE_PATTERN, None)
 
     def constructor_env_variables(loader, node):
+        if not resolve_env:
+            raise EnvReferenceNotResolved(node.start_mark.line + 1)
         return resolve_env_references(loader.construct_scalar(node))
 
     _AshConfigLoader.add_constructor("!ENV", constructor_env_variables)
     return yaml.load(stream, Loader=_AshConfigLoader)  # nosec B506 - This is using a custom SafeLoader to enable support of !ENV tag evaluation, bounded to ASH_CONFIG_ENV_VAR_PREFIX/ASH_CONFIG_ENV_VAR_ALLOWLIST by resolve_env_references above
+
+
+class _ConfigDumper(yaml.SafeDumper):
+    """``yaml.safe_dump``, except that a string ``load_yaml_config`` would read as
+    ``!ENV`` is written quoted, which the implicit resolver does not match."""
+
+
+def _represent_config_str(dumper: yaml.SafeDumper, value: str) -> yaml.ScalarNode:
+    style = "'" if ENV_REFERENCE_PATTERN.match(value) else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", value, style=style)
+
+
+_ConfigDumper.add_representer(str, _represent_config_str)
 
 
 # Define BuildConfig class
@@ -1368,9 +1400,17 @@ class AshConfig(BaseModel):
         return cls.model_validate(config_data, strict=True)
 
     def save(self, config_path: Path):
-        """Save configuration to a file."""
+        """Save configuration to a file.
+
+        The file loads back as the values saved. A string that reads as an
+        ``!ENV`` reference is written quoted, so loading the file does not
+        resolve it against the loader's environment. The MCP server saves a
+        session's config with this (``profile_registry
+        .materialize_session_config``), and ``select_profile``'s ``patch_ops``
+        and ``override_yaml`` put values from the client into it.
+        """
         with open(config_path, mode="w", encoding="utf-8") as f:
-            yaml.safe_dump(self.model_dump(by_alias=True), f, indent=2)
+            yaml.dump(self.model_dump(by_alias=True), f, Dumper=_ConfigDumper, indent=2)
 
     def get_plugin_config(
         self,

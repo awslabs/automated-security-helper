@@ -312,12 +312,14 @@ def config_is_client_supplied(config_path: str | Path) -> bool:
 
     A scan whose selected config is client-supplied resolves it with
     ``resolve_config(untrusted_config=True)``, which keeps its sandbox settings
-    restrict-only. The path is judged both as named and as resolved, so a
-    symlink counts by where it sits as well as by the file it reaches: a link a
-    client delivered is the client's even when it points at a file elsewhere.
-    Ancestry is also checked by file identity (``os.path.samefile``), so on a
-    case-insensitive volume a spelling of the root that differs only in case is
-    still the root.
+    restrict-only, and ``config_sources.read_config_file`` refuses it if it uses
+    ``!ENV``. The path is judged both as named and as resolved, so a symlink
+    counts by where it sits as well as by the file it reaches: a link a client
+    delivered is the client's even when it points at a file elsewhere, and a
+    link elsewhere that reaches into a sandbox reaches a file a client wrote.
+    Ancestry is also checked by file identity (``os.path.samefile``), so a
+    spelling of the root through a link, or one that differs only in case on a
+    case-insensitive volume, is still the root.
     """
 
     shared = shared_workspace_root()

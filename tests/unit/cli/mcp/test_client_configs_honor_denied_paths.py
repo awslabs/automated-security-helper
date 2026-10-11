@@ -412,6 +412,31 @@ def test_validate_config_checks_a_config_in_another_checkout(_server) -> None:
     assert any(e["type"] == "denied_by_runtime_policy" for e in result["errors"])
 
 
+@pytest.mark.parametrize("raw", [False, True])
+def test_a_config_named_in_another_checkout_resolves_no_env(
+    _server, monkeypatch, raw
+) -> None:
+    """The environment !ENV would read is the server's, and the client reads the result."""
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+    monkeypatch.setenv("ASH_TEST_SERVER_VALUE", "server-only-value")
+    other = _server["target"].parent / "other-checkout" / "ash.yaml"
+    other.parent.mkdir()
+    other.write_text(
+        "project_name: !ENV ${ASH_TEST_SERVER_VALUE:unset}\n", encoding="utf-8"
+    )
+
+    refused = mcp_get_config(config_path=str(other), raw=raw, session_id=SESSION)
+    assert refused.get("error_type") == "config_env_not_resolved", refused
+    assert "server-only-value" not in json.dumps(refused)
+
+    # Positive control: in a directory the operator set aside, the file is the
+    # operator's and resolves !ENV as before.
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(other.parent))
+    resolved = mcp_get_config(config_path=str(other), session_id=SESSION)
+    assert resolved.get("project_name") == "server-only-value", resolved
+
+
 def test_a_link_a_client_delivered_is_the_clients_wherever_it_points(
     _server, monkeypatch
 ) -> None:

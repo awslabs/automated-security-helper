@@ -18,6 +18,7 @@ from pathlib import Path
 from mcp.server.mcpserver import MCPServer, Context
 
 from automated_security_helper.cli.mcp_tools import (
+    CONFIG_ENV_NOT_RESOLVED,
     CONFIG_FIELD_DENIED,
     CONFIG_INPUT_NOT_PERMITTED,
     CONFIG_POLICY_UNREADABLE,
@@ -399,6 +400,16 @@ async def run_ash_scan(
             session_id=session_id,
         )
 
+        if result.get("error_type") == CONFIG_ENV_NOT_RESOLVED:
+            # A refusal of the config, reported as itself like the
+            # config_input_not_permitted refusal above, not as a failure to start.
+            await ctx.error(str(result["error"]))
+            return {
+                "success": False,
+                "error": result["error"],
+                "error_type": CONFIG_ENV_NOT_RESOLVED,
+                "error_category": result["error_category"],
+            }
         if not result.get("success", False) or "scan_id" not in result:
             await ctx.error(
                 f"Failed to start scan: {result.get('error', 'Unknown error')}"

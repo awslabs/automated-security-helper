@@ -291,9 +291,10 @@ class TestValidateConfig:
     def test_inline_content_is_validated_through_a_temporary_file(self):
         seen = {}
 
-        def _capture(path, source_dir=None, permit_base=None):
+        def _capture(path, source_dir=None, permit_base=None, client_delivered=False):
             seen["suffix"] = path.suffix
             seen["text"] = path.read_text()
+            seen["client_delivered"] = client_delivered
             return (True, [])
 
         with patch(
@@ -306,6 +307,8 @@ class TestValidateConfig:
         assert result["valid"] is True
         assert seen["suffix"] == ".yaml"
         assert seen["text"] == "project_name: inline\n"
+        # The client sent the content, wherever the temporary file is written.
+        assert seen["client_delivered"] is True
 
 
 class TestSuggestSuppression:
