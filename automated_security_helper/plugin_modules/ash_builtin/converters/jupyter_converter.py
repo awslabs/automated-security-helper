@@ -618,18 +618,15 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
     def _refuse_unconfinable(self, ipynb_file: str, reason: str) -> None:
         """Record a notebook nbconvert was not run on because it could not be confined.
 
-        Kept with the other refused inputs on the converter's row, and the converter
-        counts as not having run, as a scanner that cannot be sandboxed is recorded
-        MISSING: the completeness gate then fails the scan for the lost coverage.
+        The sandbox refused it: no backend could be used, or the backend could not
+        plan this one spawn. Kept with the other refused inputs on the converter's
+        row, and as a failed input, which the completeness gate counts as lost
+        coverage, as it counts a scanner that cannot be sandboxed.
         """
-        self.record_refused_input(
-            TreeInputRefused(
-                relative_display(ipynb_file, self.context.source_dir),
-                "nbconvert was not run on it, because the scanner sandbox is "
-                f"unavailable: {reason}",
-            )
-        )
-        self.dependencies_satisfied = False
+        display = relative_display(ipynb_file, self.context.source_dir)
+        why = f"nbconvert was not run on it, the scanner sandbox refused it: {reason}"
+        self.record_refused_input(TreeInputRefused(display, why))
+        self.record_failed_input(ipynb_file, why)
 
     def convert(self) -> List[Path]:
         """Converts Jupyter notebooks (.ipynb files) in the source_dir to Python files using CLI.
@@ -711,11 +708,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                         prefix=".ash-nbconvert-out-", dir=self.results_dir
                     ) as nbconvert_out,
                 ):
-                    try:
-                        confinement = self._conversion_scope(Path(staging_dir))
-                    except SandboxUnavailable as refusal:
-                        self._refuse_unconfinable(ipynb_file, str(refusal))
-                        continue
+                    confinement = self._conversion_scope(Path(staging_dir))
                     run_dir = Path(staging_dir).joinpath("run")
                     run_dir.mkdir()
                     output_dir = Path(nbconvert_out)
@@ -737,6 +730,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 results.append(converted)
                 ASH_LOGGER.debug(f"Successfully converted {ipynb_file} to {converted}")
 
+            # The scope could not be built, or the backend refused the spawn.
+            except SandboxUnavailable as refusal:
+                self._refuse_unconfinable(ipynb_file, str(refusal))
             # Every failure is recorded, not only logged: the completeness gate reads
             # failed_inputs, and a notebook that was not converted is coverage lost.
             except subprocess.TimeoutExpired as e:

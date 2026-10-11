@@ -64,6 +64,10 @@ class SandboxScope:
     network_limit: Optional[List[str]] = None
     read_path_scanners: List[str] = field(default_factory=list)
     env_scanners: List[str] = field(default_factory=list)
+    #: Spawns this scope refused (the backend could not plan them), and why the last
+    #: one was. A converter's row reads them: a refused spawn converted nothing.
+    refused_spawns: int = 0
+    last_refusal: Optional[str] = None
 
 
 @dataclass
@@ -76,6 +80,9 @@ class RefusingScope:
 
     scanner_name: str
     reason: str
+    #: Spawns refused under this scope; see ``SandboxScope.refused_spawns``.
+    refused_spawns: int = 0
+    last_refusal: Optional[str] = None
 
 
 _ACTIVE: contextvars.ContextVar["SandboxScope | RefusingScope | None"] = (
@@ -322,16 +329,19 @@ def sandbox_requested(context: Any) -> bool:
 
 
 @contextmanager
-def converter_run_scope(converter: Any, context: Any) -> Iterator[None]:
+def converter_run_scope(
+    converter: Any, context: Any
+) -> "Iterator[SandboxScope | RefusingScope | None]":
     """Sandbox what a converter's ``convert()`` runs, as a scanner's ``scan()`` is.
 
     A converter's tool reads the scanned tree like a scanner's, so under a sandbox its
     spawns get a scanner's policy, with the converter's results directory as the one
     writable place. When the sandbox cannot be provided the scope refuses every spawn,
-    so a tool never runs unsandboxed; the converter records what it could not convert.
+    so a tool never runs unsandboxed. Yields the scope, None with the sandbox off: its
+    ``refused_spawns`` says whether the converter lost inputs to a refusal.
     """
     if not sandbox_requested(context):
-        yield
+        yield None
         return
     scope: "SandboxScope | RefusingScope"
     try:
@@ -342,7 +352,7 @@ def converter_run_scope(converter: Any, context: Any) -> Iterator[None]:
         scope = RefusingScope(_plugin_name(converter), str(refusal))
     scope_reset = _ACTIVE.set(scope)
     try:
-        yield
+        yield scope
     finally:
         _ACTIVE.reset(scope_reset)
 
@@ -431,10 +441,25 @@ def prepare_spawn(
     scope = _ACTIVE.get()
     if scope is None:
         return None
-    if isinstance(scope, RefusingScope):
-        raise SandboxUnavailable(
-            f"{scope.scanner_name} cannot be sandboxed as requested: {scope.reason}"
-        )
+    try:
+        if isinstance(scope, RefusingScope):
+            raise SandboxUnavailable(
+                f"{scope.scanner_name} cannot be sandboxed as requested: {scope.reason}"
+            )
+        return _plan_spawn(scope, argv, env, cwd)
+    except SandboxUnavailable as refusal:
+        scope.refused_spawns += 1
+        scope.last_refusal = str(refusal)
+        raise
+
+
+def _plan_spawn(
+    scope: SandboxScope,
+    argv: Sequence[str],
+    env: Optional[Mapping[str, str]],
+    cwd: "str | Path | None",
+) -> SpawnPlan:
+    """``prepare_spawn`` for an active scope: the policy, then the backend's plan."""
     # A snapshot rather than os.environ: scanner threads mutate the environment while
     # others spawn (see utils/process_env.py).
     base_env = dict(env) if env is not None else snapshot_environ()

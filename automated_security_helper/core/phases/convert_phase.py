@@ -30,6 +30,27 @@ def _converter_display_name(plugin_instance: Any) -> str:
     return name or plugin_instance.__class__.__name__
 
 
+def _conversion_failure(run_scope: Any) -> str | None:
+    """Why a converter that returned normally still lost coverage, or None.
+
+    The spawns the scanner sandbox refused while its ``convert()`` ran, which
+    converted nothing. The inputs a converter itself could not convert are its
+    ``failed_inputs`` (``_input_record_fields``).
+    """
+    refused = getattr(run_scope, "refused_spawns", 0) or 0
+    if not refused:
+        return None
+    return (
+        f"could not convert: the scanner sandbox refused {refused} process(es) it "
+        f"started ({getattr(run_scope, 'last_refusal', None) or 'no reason given'})"
+    )
+
+
+def _failure_field(failure: str | None) -> Dict[str, Any]:
+    """The ``failure`` keyword for a converter's row, or nothing when there is none."""
+    return {"failure": failure} if failure else {}
+
+
 def _input_record_fields(plugin_instance: Any) -> Dict[str, Any]:
     """The ``refused_inputs`` and ``failed_inputs`` keywords for a converter's row.
 
@@ -377,7 +398,9 @@ class ConvertPhase(EnginePhase):
 
                 # Pass the source directory as the target. Under a sandbox, the
                 # converter's tool runs confined like a scanner's.
-                with converter_run_scope(plugin_instance, self.plugin_context):
+                with converter_run_scope(
+                    plugin_instance, self.plugin_context
+                ) as run_scope:
                     convert_result_initial = plugin_instance.convert()
                 # Ensure all convert_result are strings in case some are Paths
                 convert_result = []
@@ -481,6 +504,8 @@ class ConvertPhase(EnginePhase):
                         excluded=not plugin_instance.config.enabled or False,
                         converted_paths=plugin_converted_paths,
                         **_input_record_fields(plugin_instance),
+                        # Omitted when nothing was lost, like refused_inputs.
+                        **_failure_field(_conversion_failure(run_scope)),
                     )
                 )
 

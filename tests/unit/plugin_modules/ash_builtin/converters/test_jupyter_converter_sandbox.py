@@ -552,3 +552,85 @@ class TestASandboxedConversionRunsNbconvertItself:
 
         assert len(converted) == 1
         assert [c[:3] for c in tools.conversions()] == [["uv", "tool", "run"]]
+
+
+class TestAFailedSandboxedConversionIsLostCoverage:
+    """A notebook that was not converted under the sandbox makes the scan incomplete.
+
+    Two ways it happens after the scope was built: the backend refuses the one spawn
+    (a path sandbox-exec cannot express, a link found at spawn time), or nbconvert
+    itself exits non-zero inside the sandbox (as ``uv tool run`` did, exit 2, before
+    the converter ran nbconvert's own entry point there). Either way the notebook is
+    recorded on the converter and the completeness gate lists the converter.
+    """
+
+    @staticmethod
+    def _incomplete(results):
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_converters,
+        )
+
+        return incomplete_converters(results)
+
+    def test_a_spawn_the_backend_refuses_records_the_notebook(
+        self, tmp_path, tree, backend, monkeypatch
+    ):
+        from automated_security_helper.utils.sandbox.policy import SandboxUnavailable
+
+        tools = _Tools(tmp_path, installed=True)
+        _isolate_tool_lookup(monkeypatch, tools, tree[2], online=True)
+
+        def refuse(self, argv, env, policy):
+            if "--to" in argv:
+                raise SandboxUnavailable("cannot mount the staged notebook")
+            return SpawnPlan(argv=list(argv), env=dict(env))
+
+        monkeypatch.setattr(backend, "plan", refuse)
+
+        results = _run_convert_phase(_context(tree, "bwrap"))
+
+        assert tools.conversions() == []
+        listed = self._incomplete(results)
+        assert [name for name, _ in listed] == ["jupyter"], listed
+        dumped = json.dumps(
+            results.converter_results["jupyter"].model_dump(mode="json")
+        )
+        assert "analysis.ipynb" in dumped and "cannot mount" in dumped
+
+    def test_nbconvert_failing_inside_the_sandbox_records_the_notebook(
+        self, tmp_path, tree, backend, monkeypatch
+    ):
+        tools = _Tools(tmp_path, installed=True)
+        _isolate_tool_lookup(monkeypatch, tools, tree[2], online=True)
+
+        def failing(self, argv, env, policy):
+            if "--to" in argv:
+                return SpawnPlan(
+                    argv=[sys.executable, "-c", "raise SystemExit(2)"], env=dict(env)
+                )
+            return SpawnPlan(argv=list(argv), env=dict(env))
+
+        monkeypatch.setattr(backend, "plan", failing)
+
+        results = _run_convert_phase(_context(tree, "bwrap"))
+
+        listed = self._incomplete(results)
+        assert [name for name, _ in listed] == ["jupyter"], listed
+        assert "analysis.ipynb" in listed[0][1], listed
+        # The reason is kept on the row's failed input.
+        assert [
+            (record.path, record.reason)
+            for record in results.converter_results["jupyter"].failed_inputs
+        ] == [("analysis.ipynb", "nbconvert exited with code 2")]
+
+    def test_a_sandboxed_conversion_that_succeeds_is_complete(
+        self, tmp_path, tree, backend, monkeypatch
+    ):
+        """Control: the same phase with every spawn planned and successful."""
+        tools = _Tools(tmp_path, installed=True)
+        _isolate_tool_lookup(monkeypatch, tools, tree[2], online=True)
+
+        results = _run_convert_phase(_context(tree, "bwrap"))
+
+        assert tools.conversions()
+        assert self._incomplete(results) == []

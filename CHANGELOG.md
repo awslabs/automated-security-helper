@@ -110,10 +110,12 @@
   confinement: a staged copy of the notebook readable, only
   `<output>/converted/jupyter/` writable, no network unless
   `sandbox.network_scanners` names `jupyter`. The convert phase applies the same
-  scope to every converter. When no sandbox backend can be used, no notebook is
-  converted: each is listed in the converter's `refused_inputs` with the reason, the
-  converter counts as not having run, and the scan exits 1 while
-  `fail_on_incomplete_scanners` is on. A scanner's own version probe at construction,
+  scope to every converter. A notebook the sandbox refused (no backend can be used,
+  or the backend cannot plan its run) is listed in the converter's `refused_inputs`;
+  that notebook and one nbconvert failed on inside the sandbox are listed in its
+  `failed_inputs`, and any converter process the sandbox refused is named in the
+  converter row's `failure`, so the scan exits 1 while `fail_on_incomplete_scanners`
+  is on. A scanner's own version probe at construction,
   which a sandboxed scan refused with a misleading "renamed by a config file" reason,
   now runs sandboxed as documented.
 

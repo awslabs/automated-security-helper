@@ -167,3 +167,61 @@ def test_without_a_sandbox_nothing_is_planned(tmp_path, backend):
 
     assert backend.spawns == []
     assert _ran() == ["construct", "convert", "validate"]
+
+
+class TestRefusedSpawnsAreLostCoverage:
+    """A converter whose spawns the sandbox refused converted nothing it was asked to.
+
+    A scanner in the same position is recorded MISSING and the scan exits 1; the
+    converter's row has to say the same, so the completeness gate lists it.
+    """
+
+    def test_an_unavailable_sandbox_makes_the_converter_incomplete(
+        self, tmp_path, backend
+    ):
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_converters,
+        )
+
+        backend.unavailable_reason = "bwrap: cannot create a user namespace"
+
+        results = _run(_context(tmp_path, "bwrap"))
+
+        assert _ran() == []
+        assert [name for name, _ in incomplete_converters(results)] == ["spawning"], (
+            results.converter_results["spawning"].model_dump(mode="json")
+        )
+
+    def test_a_spawn_the_backend_refuses_makes_the_converter_incomplete(
+        self, tmp_path, backend, monkeypatch
+    ):
+        """The scope builds, but the backend cannot express this one spawn."""
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_converters,
+        )
+        from automated_security_helper.utils.sandbox.policy import SandboxUnavailable
+
+        def refuse_conversion(self, argv, env, policy):
+            if Path(argv[-1]).name == "convert":
+                raise SandboxUnavailable("cannot express a path in the profile")
+            return SpawnPlan(argv=list(argv), env=dict(env))
+
+        monkeypatch.setattr(backend, "plan", refuse_conversion)
+
+        results = _run(_context(tmp_path, "bwrap"))
+
+        assert "convert" not in _ran()
+        listed = incomplete_converters(results)
+        assert [name for name, _ in listed] == ["spawning"], listed
+        assert "refused" in listed[0][1]
+
+    def test_a_converter_whose_spawns_ran_is_complete(self, tmp_path, backend):
+        """Control: every spawn planned and run, nothing lost."""
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_converters,
+        )
+
+        results = _run(_context(tmp_path, "bwrap"))
+
+        assert _ran() == ["construct", "convert", "validate"]
+        assert incomplete_converters(results) == []
