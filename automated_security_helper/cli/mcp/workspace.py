@@ -683,26 +683,39 @@ def _resolve_session_config(
 
     * ``profile``, naming a registered profile for this one call. Materialized
       into the session's sandbox the same way ``select_profile`` does, so one code
-      path produces the file and one boundary covers it, under its own name
-      (``CALL_PROFILE_FILENAME``) so the session's own binding is left as it was.
-      It is the operator's profile, so it is its own trusted base.
+      path produces the file and one boundary covers it, under a name of its own
+      per profile (``call_profile_filename``), so the session's own binding is
+      left as it was and two calls naming different profiles do not rewrite each
+      other's file. It is the operator's profile, so it is its own trusted base.
     * the config this session already bound with ``select_profile``, and the
       registered profile it is resolved against. They differ when the client
       patched the profile: the config is then the client's copy in
       ``client-config/``, and the trusted base the profile in ``config/``.
+    * for a session that bound none, the server's own config, the file
+      ``ASH_CONFIG`` names, as both: it is the operator's config, layered over
+      each project's own as ``--config`` is on the CLI. Not when it, or a base
+      it extends, is a file an MCP client delivered: that is never layered, and
+      ``(None, None)`` is returned as for a server with no ``ASH_CONFIG``.
 
-    None means neither applies, and then nothing is passed -- each project's own
-    ``.ash.yaml`` discovery runs as it always has. Inventing a path here would
-    scan every project under configuration nobody chose.
+    None means none of these applies, and then nothing is passed -- each
+    project's own ``.ash.yaml`` discovery runs as it always has. Inventing a path
+    here would scan every project under configuration nobody chose.
 
     An unknown ``profile`` raises rather than falling back. A workspace scan is N
     repository scans; running them all under the default config because a profile
     name was misspelled, and reporting success, is the class of outcome this
-    module's confinement refusal exists to prevent.
+    module's confinement refusal exists to prevent. So does a bound session whose
+    registered copy is gone while its client copy is not: the client's copy is
+    never the operator's config, so there is nothing to layer over a project's
+    own config and nothing to resolve it against.
+
+    Raises:
+        ProfileNotRegisteredError: ``profile`` is not registered.
+        RuntimeError: The session's registered copy is missing; exit 3.
     """
 
     from automated_security_helper.cli.mcp.profile_registry import (
-        CALL_PROFILE_FILENAME,
+        call_profile_filename,
         get_profile_registry,
         materialize_session_config,
         resolve_session_config_path,
@@ -718,14 +731,43 @@ def _resolve_session_config(
                 f"unknown profile {profile!r}; known: {known}"
             )
         path = materialize_session_config(
-            session_id, entry.config, filename=CALL_PROFILE_FILENAME
+            session_id, entry.config, filename=call_profile_filename(profile)
         )
         return path, path
 
-    return (
-        resolve_session_config_path(session_id),
-        resolve_session_trusted_config_path(session_id),
+    config_path = resolve_session_config_path(session_id)
+    trusted_config_path = resolve_session_trusted_config_path(session_id)
+    if config_path is not None and trusted_config_path is None:
+        raise RuntimeError(
+            "This session's bound profile can no longer be read as the operator "
+            "registered it: its copy in the session's config/ directory is gone. "
+            "Bind the profile again with select_profile."
+        )
+    if config_path is None and trusted_config_path is None:
+        server_config = _server_config_path()
+        return server_config, server_config
+    return config_path, trusted_config_path
+
+
+def _server_config_path() -> Optional[str]:
+    """The file ``ASH_CONFIG`` names, unless a file of its chain is a client's."""
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.config_sources import by_every_name
+    from automated_security_helper.config.default_config import (
+        default_config_document,
     )
+
+    document = default_config_document()
+    if document is None:
+        return None
+    delivered = by_every_name(config_is_client_supplied, document.names)
+    if any(delivered(path) for path in document.chain):
+        _logger.warning(
+            "ASH_CONFIG names a file under the MCP workspace root, which an MCP "
+            "client delivered, so it is not layered over the workspace's projects."
+        )
+        return None
+    return document.chain[-1].as_posix()
 
 
 def _scan_options(

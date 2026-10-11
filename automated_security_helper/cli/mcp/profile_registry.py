@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
@@ -287,8 +288,21 @@ SESSION_CONFIG_FILENAME = "ash.yaml"
 #: Filename, in the session's ``config/`` directory, of a profile a workspace tool
 #: was given for one call (``profile``). Not ``SESSION_CONFIG_FILENAME``: that file
 #: is the profile the session bound, and the trusted base of a patched binding, so
-#: a call that names another profile must not replace it.
+#: a call that names another profile must not replace it. The prefix of
+#: ``call_profile_filename``'s names.
 CALL_PROFILE_FILENAME = "call-profile.yaml"
+
+
+def call_profile_filename(profile_name: str) -> str:
+    """The file a workspace tool's ``profile`` is materialized under, one per profile.
+
+    Named by a digest of the profile name, not the name itself, which the
+    operator chose and would otherwise become a path component. One file per
+    profile, so two calls in one session that name different profiles do not
+    replace the file the other's plan recorded and its scan reads.
+    """
+    digest = hashlib.sha256(profile_name.encode("utf-8")).hexdigest()[:16]
+    return CALL_PROFILE_FILENAME.replace(".yaml", f"-{digest}.yaml")
 
 
 def materialize_session_config(
@@ -374,7 +388,14 @@ def materialize_session_config(
     config_dir.mkdir(parents=True, exist_ok=True)
     target = config_dir / filename
     # Written to the native path; only the recorded spelling is normalized.
-    config.save(target, exclude_unset=not client_patched)
+    # Through a temporary file and a rename, so a scan reading the file while
+    # another call writes it reads the old content or the new, never part of one.
+    partial = config_dir / f".{filename}.{os.getpid()}.{threading.get_ident()}.tmp"
+    try:
+        config.save(partial, exclude_unset=not client_patched)
+        os.replace(partial, target)
+    finally:
+        partial.unlink(missing_ok=True)
     return target.as_posix()
 
 
