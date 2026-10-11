@@ -134,9 +134,10 @@ TOOL_NOTES: dict[str, dict] = {
         "params": {
             "source_dir": {
                 "notes": (
-                    "Absolute path to scan. When not set: the source delivered to this "
-                    "session with `set_source_git` or `set_source_zip_finalize`, or, for "
-                    "a client with no session, the server's working directory"
+                    "Absolute path to scan. When not set: the tree this session delivered "
+                    "with `set_source_git` or `set_source_zip_finalize`. With none "
+                    "delivered, a call with no session id (stdio) scans the server's "
+                    "working directory, and a call with a session id is refused"
                 )
             },
             "severity_threshold": {
@@ -147,12 +148,17 @@ TOOL_NOTES: dict[str, dict] = {
             },
             "config_path": {
                 "notes": (
-                    "Custom config path. When not set: the config this session bound "
-                    "with `select_profile`, or else ASH's own discovery in the source "
-                    "directory"
+                    "Custom config path. When not set: the config of the profile this "
+                    "session chose with `select_profile`, or else ASH's config discovery "
+                    "in the source directory"
                 ),
             },
-            "clean_output": {"notes": "Wipe stale reports before starting"},
+            "clean_output": {
+                "notes": (
+                    "Delete the previous `ash_aggregated_results.json` in the output "
+                    "directory before the scan starts"
+                )
+            },
         },
         "pre_returns": (
             "Output reports are written to `<source_dir>/.ash/ash_output/` — there is no "
@@ -386,7 +392,12 @@ TOOL_NOTES: dict[str, dict] = {
                     "Operator-registered key id for private repos; not set means no key"
                 ),
             },
-            "depth": {"notes": "Clone depth; `0` for a full clone"},
+            "depth": {
+                "notes": (
+                    "Shallow-clone depth, a positive number: it is passed to "
+                    "`git clone --depth`, which refuses `0`"
+                )
+            },
         },
     },
     "list_scanners": {

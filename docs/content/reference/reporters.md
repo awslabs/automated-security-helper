@@ -190,7 +190,7 @@ Options, under `reporters.markdown.options`. A key not listed here is accepted a
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="reporters.markdown.options.include_summary"></a>`include_summary` | boolean | `true` | No description in the code. |
-| <a id="reporters.markdown.options.include_findings_table"></a>`include_findings_table` | boolean | `false` | No description in the code. |
+| <a id="reporters.markdown.options.include_findings_table"></a>`include_findings_table` | boolean | `false` | No description in the code. The comment on its line in the code: This can be lengthy, default to False. |
 | <a id="reporters.markdown.options.include_detailed_findings"></a>`include_detailed_findings` | boolean | `true` | No description in the code. |
 | <a id="reporters.markdown.options.max_detailed_findings"></a>`max_detailed_findings` | integer | `20` | No description in the code. |
 | <a id="reporters.markdown.options.top_hotspots_limit"></a>`top_hotspots_limit` | integer | `10` | No description in the code. |
@@ -249,7 +249,7 @@ Options, under `reporters.text.options`. A key not listed here is accepted and k
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="reporters.text.options.include_summary"></a>`include_summary` | boolean | `true` | No description in the code. |
-| <a id="reporters.text.options.include_findings_table"></a>`include_findings_table` | boolean | `false` | No description in the code. |
+| <a id="reporters.text.options.include_findings_table"></a>`include_findings_table` | boolean | `false` | No description in the code. The comment on its line in the code: This can be lengthy, default to False. |
 | <a id="reporters.text.options.include_detailed_findings"></a>`include_detailed_findings` | boolean | `false` | No description in the code. |
 | <a id="reporters.text.options.max_detailed_findings"></a>`max_detailed_findings` | integer | `20` | No description in the code. |
 | <a id="reporters.text.options.top_hotspots_limit"></a>`top_hotspots_limit` | integer | `20` | No description in the code. |
@@ -263,13 +263,14 @@ Identifies and reports suppressions that were not applied to any findings.
 - Enabled by default: yes
 - File extension: `.unused-suppressions.json`
 - Runs with `--python-only`: yes
+- Also writes, with the default options: `reports/ash.unused-suppressions.md`
 
 Options, under `reporters.unused-suppressions.options`. A key not listed here is accepted and kept, without validation.
 
 <!-- doctest: options of=reporters.unused-suppressions -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| <a id="reporters.unused-suppressions.options.output_format"></a>`output_format` | string | `both` | No description in the code. |
+| <a id="reporters.unused-suppressions.options.output_format"></a>`output_format` | string | `both` | No description in the code. The comment on its line in the code: "json", "markdown", or "both". |
 
 ## `yaml`
 

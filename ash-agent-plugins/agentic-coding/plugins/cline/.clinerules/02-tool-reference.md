@@ -14,10 +14,10 @@ Starts a scan in the server process and returns a `scan_id` at once. The scan st
 <!-- doctest: options of=mcp.run_ash_scan -->
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
-| `source_dir` | string \| null | not set | Absolute path to scan. When not set: the source delivered to this session with `set_source_git` or `set_source_zip_finalize`, or, for a client with no session, the server's working directory |
+| `source_dir` | string \| null | not set | Absolute path to scan. When not set: the tree this session delivered with `set_source_git` or `set_source_zip_finalize`. With none delivered, a call with no session id (stdio) scans the server's working directory, and a call with a session id is refused |
 | `severity_threshold` | string | `"MEDIUM"` | Recorded with the scan and returned by `get_scan_progress`; it does not change which findings the scan reports |
-| `config_path` | string \| null | not set | Custom config path. When not set: the config this session bound with `select_profile`, or else ASH's own discovery in the source directory |
-| `clean_output` | boolean | `true` | Wipe stale reports before starting |
+| `config_path` | string \| null | not set | Custom config path. When not set: the config of the profile this session chose with `select_profile`, or else ASH's config discovery in the source directory |
+| `clean_output` | boolean | `true` | Delete the previous `ash_aggregated_results.json` in the output directory before the scan starts |
 
 Output reports are written to `<source_dir>/.ash/ash_output/` — there is no parameter to override this. Scanner selection, mode, and other tuning live in `.ash/.ash.yaml`, not in tool arguments.
 
@@ -259,7 +259,7 @@ Clone a repository into this session's workspace and make it the scan target.
 | `url` | string | *required* | Repository URL |
 | `ref` | string \| null | not set | Branch, tag, or commit; not set means the remote's default branch |
 | `ssh_key_id` | string \| null | not set | Operator-registered key id for private repos; not set means no key |
-| `depth` | integer | `1` | Clone depth; `0` for a full clone |
+| `depth` | integer | `1` | Shallow-clone depth, a positive number: it is passed to `git clone --depth`, which refuses `0` |
 
 ## set_source_zip_chunk
 

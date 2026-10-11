@@ -64,11 +64,11 @@ A key not listed here is ignored, without an error, when the configuration is lo
 | <a id="content_db_staleness_overrides"></a>`content_db_staleness_overrides` | list of [section](#section-content_db_staleness_overrides) | `[]` | Per-database exceptions to content_db_staleness, each with a required expiration date and reason. An entry holds one named database to its own policy until 00:00 UTC on its expiration date, and every database not named keeps content_db_staleness. An expired entry is ignored with a warning. Empty by default. Either form of --allow-stale-content-db clears this list for that scan, so the flag still decides for every database. |
 | <a id="ash_plugin_modules"></a>`ash_plugin_modules` | list of string | `[]` | List of Python modules to import containing ASH plugins and/or event subscribers. These are loaded in addition to the default modules. |
 | <a id="external_reports_to_include"></a>`external_reports_to_include` | list of string | `[]` | List of external reports to include in the final report. These can be paths to SARIF or CycloneDX reports produced by other tools. |
-| <a id="build"></a>`build` | [section](#section-build) or null | `null` | Build-time configuration settings |
+| <a id="build"></a>`build` | [section](#section-build) or null | `null` | Build-time configuration settings. `ash config validate` rejects this key as an internal field, although a scan accepts it. |
 | <a id="converters"></a>`converters` | [section](#section-converters) | see the section | Converter configurations by name. |
 | <a id="scanners"></a>`scanners` | [section](#section-scanners) | see the section | Scanner configurations by name. |
 | <a id="reporters"></a>`reporters` | [section](#section-reporters) | see the section | Reporter configurations by name. |
-| <a id="mcp-resource-management"></a>`mcp-resource-management` | [section](#section-mcp-resource-management) | see the section | Configuration for MCP server resource management and limits. Also accepted as `mcp_resource_management`. |
+| <a id="mcp-resource-management"></a>`mcp-resource-management` | [section](#section-mcp-resource-management) | see the section | Configuration for MCP server resource management and limits. A scan also accepts it as `mcp_resource_management`, which `ash config validate` reports as an unknown top-level field. |
 | <a id="workspace"></a>`workspace` | [section](#section-workspace) | see the section | Workspace-mode execution settings. Read from the config resolved for the workspace root; a project's own copy of this block is ignored, because how many projects run at once is not a project's decision. |
 | <a id="extends"></a>`extends` | string or list of string or null | `null` | Base config file(s) this config extends: a path, or a list of paths applied in order, relative to this file. Mappings merge key by key; lists and scalars from this file replace the base's. Paths must stay inside the repository being scanned; URLs are refused. Read when the file is loaded and not written back when a config is saved. |
 | <a id="patch"></a>`patch` | list of mapping of string to any or null | `null` | RFC 6902 JSON-Patch operations (add, remove, replace, test) applied after this file is merged over its bases. Use 'add' at '/global_settings/suppressions/-' to append to a base's list. Read when the file is loaded and not written back when a config is saved. |
@@ -189,7 +189,7 @@ A key not listed here is an error when the configuration is loaded.
 |-----|------|---------|-------------|
 | <a id="build.build_mode"></a>`build_mode` | one of `ONLINE`, `OFFLINE` | `ONLINE` | Build mode for the container image build. If enabled, also enables offline mode during the scan phase without any explicit directive when scanning. |
 | <a id="build.tool_install_scripts"></a>`tool_install_scripts` | mapping of string to list of string | `{}` | Map of tool names to their installation scripts |
-| <a id="build.custom_scanners"></a>`custom_scanners` | list of `ScannerPluginBase` | `[]` | Scanner configurations by type |
+| <a id="build.custom_scanners"></a>`custom_scanners` | list of mapping | `[]` | Scanner configurations by type |
 
 ### <a id="section-mcp-resource-management"></a>`mcp-resource-management`
 
@@ -236,9 +236,9 @@ A key not listed here is an error when the configuration is loaded.
 <!-- doctest: options of=scanners.* -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `name` | string, length at least 1, matches `^[a-zA-Z][\w-]+$` | the plugin's own name | Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter. |
+| `name` | string, length at least 1, matches `^[a-zA-Z][\w-]+$` | the plugin's own name | Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter. `ash config validate` rejects it in a scanner, reporter or converter entry as internal-only, although a scan accepts it. |
 | `enabled` | boolean | `true` | Whether the component is enabled |
-| `options` | `PluginOptionsBase` | the plugin's defaults | Scanner options |
+| `options` | mapping | the plugin's defaults | The plugin's options. Each plugin's are listed on its reference page: [scanners](scanners.md), [reporters](reporters.md), [converters](converters.md). |
 
 ### <a id="section-scanners"></a>`scanners`
 

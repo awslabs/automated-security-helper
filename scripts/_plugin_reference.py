@@ -48,10 +48,15 @@ keeps to the forms listed in ``generate_config_reference.py`` ("Default cells").
 
 from __future__ import annotations
 
+import ast
 import importlib
+import inspect
+import io
 import pkgutil
 import shlex
 import tempfile
+import textwrap
+import tokenize
 import typing
 from dataclasses import dataclass, field
 from unittest import mock
@@ -340,6 +345,36 @@ def _describe_custom_command(args: list[str]) -> str:
     return code(" ".join(shown)) if shown else "custom command"
 
 
+def field_line_comments(model: type) -> dict[str, str]:
+    """Field name -> the comment on the line that declares it, for an options model.
+
+    ``output_format: str = "both"  # "json", "markdown", or "both"`` has no
+    ``description``, and that comment is the only statement in the code of what the
+    field takes. A comment on the field's own line can only be about that field,
+    unlike one above it, which may head a group of fields.
+    """
+    found: dict[str, str] = {}
+    for cls in model.__mro__:
+        if cls is object or "model_fields" not in dir(cls):
+            continue
+        try:
+            source = textwrap.dedent(inspect.getsource(cls))
+            tree = ast.parse(source)
+            comments = {
+                tok.start[0]: tok.string.lstrip("#").strip()
+                for tok in tokenize.generate_tokens(io.StringIO(source).readline)
+                if tok.type == tokenize.COMMENT
+            }
+        except (OSError, TypeError, SyntaxError, tokenize.TokenError):
+            continue
+        for stmt in getattr(tree.body[0], "body", []):
+            if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+                text = comments.get(stmt.end_lineno or stmt.lineno)
+                if text and stmt.target.id not in found:
+                    found[stmt.target.id] = text
+    return found
+
+
 def options_table(plugin: Plugin, config_prefix: str, missing: list[str]) -> list[str]:
     """The table of a plugin's ``options`` keys, or a sentence saying it has none."""
     model = plugin.options_cls
@@ -348,6 +383,7 @@ def options_table(plugin: Plugin, config_prefix: str, missing: list[str]) -> lis
     rows = []
     by_platform = platform_defaults(model)
     from_env = env_defaults(model)
+    line_comments = field_line_comments(model)
     for name, info in model.model_fields.items():
         key = info.alias or name
         full = f"{config_prefix}.{plugin.name}.options.{key}"
@@ -358,6 +394,12 @@ def options_table(plugin: Plugin, config_prefix: str, missing: list[str]) -> lis
         description = md_prose(info.description) if info.description else NO_DESCRIPTION
         if not info.description:
             missing.append(f"{full}  ({model.__module__}.{model.__name__}.{name})")
+            if name in line_comments:
+                description += (
+                    " The comment on its line in the code: "
+                    + md_prose(line_comments[name])
+                    + "."
+                )
         if name != key:
             description = f"{description} Also accepted as {code(name)}."
         rows.append(

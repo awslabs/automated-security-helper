@@ -818,3 +818,276 @@ def test_read_env_names_covers_this_tree() -> None:
     ):
         assert name in names, f"{name} not found; dynamic sites: {dynamic}"
     assert all(isinstance(site, str) and ":" in site for site in dynamic)
+
+
+# ---------------------------------------------------------------------------
+# What the pages say, checked against the code that decides it
+#
+# Each of these pins a statement the reference review found wrong or missing,
+# against the code the statement is about, so the page cannot drift back.
+# ---------------------------------------------------------------------------
+
+
+def _page(name: str) -> str:
+    return (REFERENCE_DIR / name).read_text(encoding="utf-8")
+
+
+def _row(text: str, anchor: str) -> str:
+    """The table row whose first cell carries ``<a id="anchor">``."""
+    marker = f'<a id="{anchor}"></a>'
+    rows = [line for line in text.splitlines() if marker in line]
+    assert len(rows) == 1, f"{anchor}: {len(rows)} rows"
+    return rows[0]
+
+
+def _section(text: str, heading_code: str) -> str:
+    """The body of the ``##``/``###`` section whose heading holds ``heading_code``."""
+    lines = text.splitlines()
+    start = next(
+        i
+        for i, line in enumerate(lines)
+        if line.startswith("#") and heading_code in line
+    )
+    end = next(
+        (
+            i
+            for i in range(start + 1, len(lines))
+            if lines[i].startswith("## ") or lines[i].startswith("### ")
+        ),
+        len(lines),
+    )
+    return "\n".join(lines[start:end])
+
+
+def _builtin_reporter_names() -> set[str]:
+    """The built-in reporters, from the reporters page's own built-in table."""
+    table = (
+        _page("reporters.md").split("## Built-in reporters", 1)[1].split("\n## ", 1)[0]
+    )
+    return set(re.findall(r"^\| \[[^\]]+\]\(#([a-z-]+)\)", table, re.MULTILINE))
+
+
+def test_output_formats_say_which_values_write_a_report() -> None:
+    """``--output-formats`` is checked against ExportFormat, and only reporter names write.
+
+    A value that names no reporter is accepted and writes nothing; a reporter whose
+    name is not an ExportFormat value is refused (cli/scan.py's parse loop).
+    """
+    from automated_security_helper.core.enums import ExportFormat
+
+    formats = {f.value for f in ExportFormat}
+    reporters = _builtin_reporter_names()
+    assert reporters, "no built-in reporters read from reporters.md"
+    row = _row(_page("cli.md"), "scan--output-formats")
+    writes, nothing, refused = (
+        re.search(pattern, row).group(1)
+        for pattern in (
+            r"Values that write a report: ([^.]*)\.",
+            r"name no reporter and write no report: ([^.]*)\.",
+            r"reporters that are refused: ([^;.]*)[;.]",
+        )
+    )
+    assert set(re.findall(r"`([^`]+)`", writes)) == formats & reporters
+    assert set(re.findall(r"`([^`]+)`", nothing)) == formats - reporters
+    assert set(re.findall(r"`([^`]+)`", refused)) == reporters - formats
+
+
+def test_report_format_lists_the_reporters() -> None:
+    """``ash report --format`` takes a loaded reporter's name, not an ExportFormat value."""
+    row = _row(_page("cli.md"), "report--format")
+    accepted = re.search(r"Accepted values: ([^.]*)\.", row).group(1)
+    assert _builtin_reporter_names() <= set(re.findall(r"`([^`]+)`", accepted))
+
+
+def test_cli_page_says_which_commands_ignore_unknown_options() -> None:
+    """A command whose click settings ignore unknown options says so; no other does."""
+    import typer.main
+
+    from automated_security_helper.cli.main import app
+
+    root = typer.main.get_command(app)
+    text = _page("cli.md")
+    sentence = "does not reject an option it does not define"
+    for name, cmd in sorted(root.commands.items()):
+        body = _section(text, f"`ash {name}`")
+        ignores = bool(cmd.context_settings.get("ignore_unknown_options"))
+        assert (sentence in body) == ignores, f"ash {name}"
+    assert sentence in _section(text, "`ash scan`")
+
+
+def test_cli_page_does_not_claim_every_variable() -> None:
+    """The env column is the variable click reads, and the page says other variables exist."""
+    intro = _page("cli.md").split("## Commands", 1)[0]
+    assert "where one exists" not in intro
+    assert "names the variable click reads" in intro
+    assert "(environment-variables.md)" in intro
+
+
+def test_flags_without_a_default_read_as_off() -> None:
+    """``--install-completion`` defaults to None, which for a flag means off, as for the rest."""
+    for anchor in ("ash--install-completion", "ash--show-completion"):
+        assert _cells(_row(_page("cli.md"), anchor))[2] == "off"
+
+
+def test_configuration_marks_keys_ash_config_validate_rejects() -> None:
+    """Keys a scan accepts but ``ash config validate`` rejects say so (ConfigValidator's sets)."""
+    from automated_security_helper.config.config_validator import ConfigValidator
+
+    text = _page("configuration.md")
+    note = "`ash config validate`"
+    for key in sorted(ConfigValidator.INVALID_TOP_LEVEL_FIELDS):
+        assert note in _row(text, key), key
+    # A top-level key the validator does not list, under any of its spellings.
+    alias_row = _row(text, "mcp-resource-management")
+    assert note in alias_row and "`mcp_resource_management`" in alias_row
+    common = _section(text, "## Plugin sections").split("### ", 1)[0]
+    name_row = next(r for r in common.splitlines() if r.startswith("| `name` |"))
+    assert note in name_row
+
+
+def test_configuration_types_name_no_classes() -> None:
+    """A Type cell describes values (string, mapping, list of ...), never a Python class."""
+    for page in ("configuration.md", "scanners.md", "reporters.md", "converters.md"):
+        for _index, _above, rows in _tables(_page(page)):
+            if _cells(rows[0])[1:2] != ["Type"]:
+                continue
+            for row in rows[1:]:
+                kind = _cells(row)[1]
+                assert not re.search(r"`[A-Z][a-z]+[A-Z]\w*`", kind), f"{page}: {row}"
+    common = _section(_page("configuration.md"), "## Plugin sections")
+    assert "| Scanner options |" not in common
+
+
+def test_reporter_page_names_every_file_a_reporter_writes() -> None:
+    """unused-suppressions also writes ash.unused-suppressions.md with its default options."""
+    body = _section(_page("reporters.md"), "## `unused-suppressions`")
+    assert "`reports/ash.unused-suppressions.md`" in body
+    row = _row(
+        _page("reporters.md"), "reporters.unused-suppressions.options.output_format"
+    )
+    assert '"json", "markdown", or "both"' in row
+
+
+def test_scanner_page_says_network_scanners_replaces_the_default() -> None:
+    """Each scanner's network line is its default, which sandbox.network_scanners replaces."""
+    text = _page("scanners.md")
+    assert "yes, when the scan is online" not in text
+    assert "replaces every scanner's declared need" in _section(
+        text, "## Environment in the sandbox"
+    )
+    assert "- Network in the sandbox, by default: " in _section(text, "## `bandit`")
+
+
+def test_environment_page_purposes_and_defaults() -> None:
+    """No purpose scraped from an unrelated comment, and config-backed defaults shown."""
+    text = _page("environment-variables.md")
+
+    def row(name: str) -> list[str]:
+        hits = [r for r in text.splitlines() if r.startswith(f"| `{name}` |")]
+        assert len(hits) == 1, name
+        return _cells(hits[0])
+
+    assert "Project information" not in row("ASH_PROJECT_NAME")[4]
+    assert "global_settings.severity_threshold" in row("ASH_DEFAULT_SEVERITY_LEVEL")[4]
+    assert "`MEDIUM`" in row("ASH_DEFAULT_SEVERITY_LEVEL")[1]
+    assert "width constraint" not in row("ASH_IN_CONTAINER")[4]
+
+
+def test_read_site_comments_must_name_the_variable(tmp_path: Path) -> None:
+    """A comment above a read is its purpose when it names it or is a sentence.
+
+    A section label above a read ("# Project information") is about the code
+    around it. A comment on the constant that holds the name, or above a shell
+    line that assigns the variable itself, is about the variable.
+    """
+    tree = _plant(
+        tmp_path,
+        {
+            "automated_security_helper/__init__.py": "",
+            "automated_security_helper/reads.py": """
+                import os
+
+                #: PLANT_NAMED is read here, and this says so.
+                A = os.environ.get("PLANT_NAMED")
+
+                # Project information
+                B = os.environ.get("PLANT_UNNAMED")
+
+                # Overrides which flake supplies the toolchain.
+                C = os.environ.get("PLANT_SENTENCE")
+
+                #: Where the cache lives.
+                HELD_ENV = "PLANT_HELD"
+
+
+                def cache():
+                    return os.environ.get(HELD_ENV)
+            """,
+            "ash": """
+                #!/bin/bash
+                # How many times to retry.
+                PLANT_SH_SELF="${PLANT_SH_SELF:-3}"
+                # Unrelated heading
+                echo "${PLANT_SH_OTHER:-x}"
+            """,
+        },
+    )
+    purposes = {r.name: r.comment for r in _env_module().collect_env_reads(tree).reads}
+    assert purposes["PLANT_NAMED"].startswith("PLANT_NAMED is read here")
+    assert purposes["PLANT_UNNAMED"] is None
+    assert purposes["PLANT_SENTENCE"] == "Overrides which flake supplies the toolchain."
+    assert purposes["PLANT_HELD"] == "Where the cache lives."
+    assert purposes["PLANT_SH_SELF"] == "How many times to retry."
+    assert purposes["PLANT_SH_OTHER"] is None
+
+
+def test_reads_through_a_constant_inside_a_function(tmp_path: Path) -> None:
+    """``os.environ.get(CONST)`` in a function, the shape ASH_ALLOW_IN_TREE_TOOLS uses."""
+    tree = _plant(
+        tmp_path,
+        {
+            "automated_security_helper/__init__.py": "",
+            "automated_security_helper/utils.py": """
+                import os
+
+                ALLOW_ENV = "PLANT_ALLOW"
+
+
+                def parse(value):
+                    return value == "1"
+
+
+                def allowed():
+                    return parse(os.environ.get(ALLOW_ENV))
+            """,
+        },
+    )
+    names, dynamic = _env_module().read_env_names(tree)
+    assert "PLANT_ALLOW" in names, dynamic
+
+
+def test_build_args_are_not_environment_variables() -> None:
+    """ASH_BASE_IMAGE is a container build argument; no code reads it from the environment."""
+    names, _dynamic = _env_module().read_env_names()
+    assert "ASH_BASE_IMAGE" not in names
+    assert "| `ASH_BASE_IMAGE` |" not in _page("environment-variables.md")
+
+
+def test_mcp_notes_match_the_server() -> None:
+    """The MCP notes the reference review found wrong, held to what the server does."""
+    text = _page("mcp-tools.md")
+    scan = _section(text, "## run_ash_scan")
+    source_dir = next(r for r in scan.splitlines() if r.startswith("| `source_dir` |"))
+    assert "refused" in source_dir and "working directory" in source_dir
+    config = next(r for r in scan.splitlines() if r.startswith("| `config_path` |"))
+    assert "`select_profile`" in config
+    clean = next(r for r in scan.splitlines() if r.startswith("| `clean_output` |"))
+    assert "`ash_aggregated_results.json`" in clean and "reports" not in clean.lower()
+    git = _section(text, "## set_source_git")
+    depth = next(r for r in git.splitlines() if r.startswith("| `depth` |"))
+    assert "full clone" not in depth and "positive" in depth
+    threshold = next(
+        r for r in scan.splitlines() if r.startswith("| `severity_threshold` |")
+    )
+    assert "does not change which findings" in threshold
+    assert "does not stop the scan" in _section(text, "## cancel_scan")

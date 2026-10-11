@@ -36,6 +36,8 @@ Tool type is the scanner's own `ScannerToolType`. `--python-only` keeps a scanne
 
 When `sandbox.mode` confines scanners, a scanner process receives only an allowlist of the environment ASH was started with. Every sandboxed scanner gets these names: `COLUMNS`, `CURL_CA_BUNDLE`, `FORCE_COLOR`, `GEM_HOME`, `GEM_PATH`, `JAVA_HOME`, `LANG`, `LANGUAGE`, `NODE_EXTRA_CA_CERTS`, `NO_COLOR`, `PATH`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_DIR`, `SSL_CERT_FILE`, `SYSTEMROOT`, `TERM`, `TZ`, `VIRTUAL_ENV`; and names starting with `LC_`, `ASH_`, `UV_`, `PYTHON`. A scanner's own prefixes and names, listed with each scanner below, are added to that. A name containing `TOKEN`, `PASSWORD`, `PASSWD`, `SECRET`, `CREDENTIAL`, `AUTH`, `APIKEY`, `API_KEY`, `PRIVATE_KEY`, `SESSION` is dropped even under an allowed prefix, unless the scanner names it exactly. The proxy variables `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `http_proxy`, `https_proxy`, `no_proxy` are passed only to a scanner that has a network. The lists are in `automated_security_helper/utils/sandbox/policy.py`.
 
+The network entry of each scanner below is its default. `sandbox.network_scanners`, when it is set, replaces every scanner's declared need: only the scanners it names get a network. A config file in the scanned tree can only take network away, and an offline scan gives no scanner a network.
+
 ## `bandit`
 
 Bandit is a Python source code security analyzer.
@@ -47,7 +49,7 @@ Bandit is a Python source code security analyzer.
 - Command: `bandit`
 - Install: `uv tool install` on first use (`bandit[sarif,toml]>=1.7.0,<2.0.0`)
 - Offline strategy: `bundled`
-- Network in the sandbox: no
+- Network in the sandbox, by default: no
 - Environment passed into the sandbox: `BANDIT_*`
 - Environment set under sandbox-exec: none
 
@@ -61,7 +63,7 @@ Options, under `scanners.bandit.options`. A key not listed here is accepted and 
 | <a id="scanners.bandit.options.config_file"></a>`config_file` | path or string or null | `null` | Path to Bandit configuration file, relative to current source directory. Defaults to searching for `.bandit` (ini format), `bandit.yaml`, and `bandit.toml` in the root of the source directory if this is left empty. |
 | <a id="scanners.bandit.options.confidence_level"></a>`confidence_level` | one of `all`, `low`, `medium`, `high` | `all` | Confidence level for Bandit findings |
 | <a id="scanners.bandit.options.ignore_nosec"></a>`ignore_nosec` | boolean | `false` | If True, do not skip lines with # nosec comments. Defaults to False. |
-| <a id="scanners.bandit.options.excluded_paths"></a>`excluded_paths` | list of `IgnorePathWithReason` | `[]` | List of excluded paths and their corresponding reason to exclude from scanning |
+| <a id="scanners.bandit.options.excluded_paths"></a>`excluded_paths` | list of mapping | `[]` | List of excluded paths and their corresponding reason to exclude from scanning |
 | <a id="scanners.bandit.options.additional_formats"></a>`additional_formats` | list of one of `csv`, `custom`, `html`, `json`, `sarif`, `txt`, `xml`, `yaml` | `[]` | List of additional formats to output |
 | <a id="scanners.bandit.options.tool_version"></a>`tool_version` | string or null | `">=1.7.0,<2.0.0"` | Version constraint for bandit installation, in pip requirement syntax. The default below is the constraint the scanner enforces. |
 | <a id="scanners.bandit.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation |
@@ -77,7 +79,7 @@ CDK Nag is a security scanner for AWS CloudFormation templates that applies indu
 - Command: `python`
 - Install: none declared
 - Offline strategy: `bundled`
-- Network in the sandbox: no
+- Network in the sandbox, by default: no
 - Environment passed into the sandbox: `JSII_*`
 - Environment set under sandbox-exec: `JSII_RUNTIME_PACKAGE_CACHE=disabled`
 
@@ -88,7 +90,7 @@ Options, under `scanners.cdk-nag.options`. A key not listed here is accepted and
 |--------|------|---------|-------------|
 | <a id="scanners.cdk-nag.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.cdk-nag.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
-| <a id="scanners.cdk-nag.options.nag_packs"></a>`nag_packs` | `CdkNagPacks` | see the section | CDK Nag packs to enable |
+| <a id="scanners.cdk-nag.options.nag_packs"></a>`nag_packs` | mapping | see the section | CDK Nag packs to enable |
 | <a id="scanners.cdk-nag.options.include_compliant_checks"></a>`include_compliant_checks` | boolean | `false` | Include INFO-level findings for compliant resources in the report. |
 
 ## `cfn-nag`
@@ -100,7 +102,7 @@ Options, under `scanners.cdk-nag.options`. A key not listed here is accepted and
 - Command: `cfn_nag_scan`
 - Install: `gem install cfn-nag -v 0.8.10` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
 - Offline strategy: `bundled`
-- Network in the sandbox: no
+- Network in the sandbox, by default: no
 - Environment passed into the sandbox: none beyond the baseline
 - Environment set under sandbox-exec: none
 
@@ -121,7 +123,7 @@ Options, under `scanners.cfn-nag.options`. A key not listed here is accepted and
 - Command: `checkov`
 - Install: `uv tool install` on first use (`checkov>=3.2.0,<4.0.0`)
 - Offline strategy: `cache_flags`
-- Network in the sandbox: no
+- Network in the sandbox, by default: no
 - Environment passed into the sandbox: `CHECKOV_*`
 - Environment set under sandbox-exec: none
 
@@ -133,7 +135,7 @@ Options, under `scanners.checkov.options`. A key not listed here is accepted and
 | <a id="scanners.checkov.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.checkov.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
 | <a id="scanners.checkov.options.config_file"></a>`config_file` | path or string or null | `null` | Path to Checkov configuration file, relative to current source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory. |
-| <a id="scanners.checkov.options.skip_path"></a>`skip_path` | list of `IgnorePathWithReason` | `[]` | Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying "dir1" will skip any directory or subdirectory named "dir1". Ignored with -f. Can be specified multiple times. |
+| <a id="scanners.checkov.options.skip_path"></a>`skip_path` | list of mapping | `[]` | Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying "dir1" will skip any directory or subdirectory named "dir1". Ignored with -f. Can be specified multiple times. |
 | <a id="scanners.checkov.options.additional_formats"></a>`additional_formats` | list of one of `cli`, `csv`, `cyclonedx`, `cyclonedx_json`, `json`, `junitxml`, `github_failed_only`, `gitlab_sast`, `sarif`, `spdx` | `["cyclonedx_json"]` | List of additional formats to output. Defaults to including CycloneDX JSON |
 | <a id="scanners.checkov.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, disabling policy downloads. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 | <a id="scanners.checkov.options.frameworks"></a>`frameworks` | list of one of `all`, `ansible`, `argo_workflows`, `arm`, `azure_pipelines`, `bicep`, `bitbucket_pipelines`, `cdk`, `circleci_pipelines`, `cloudformation`, `dockerfile`, `github_configuration`, `github_actions`, `gitlab_configuration`, `gitlab_ci`, `bitbucket_configuration`, `helm`, `json`, `yaml`, `kubernetes`, `kustomize`, `openapi`, `sca_package`, `sca_image`, `secrets`, `serverless`, `terraform`, `terraform_json`, `terraform_plan`, `sast`, `sast_python`, `sast_java`, `sast_javascript`, `sast_typescript`, `sast_golang`, `3d_policy` | `["all"]` | Specific frameworks to include with Checkov. Defaults to `all`. |
@@ -151,7 +153,7 @@ Options, under `scanners.checkov.options`. A key not listed here is accepted and
 - Command: `detect-secrets`
 - Install: none declared
 - Offline strategy: `bundled`
-- Network in the sandbox: no; only when `sandbox.network_scanners` names this scanner
+- Network in the sandbox, by default: no
 - Environment passed into the sandbox: none beyond the baseline
 - Environment set under sandbox-exec: none
 
@@ -163,7 +165,7 @@ Options, under `scanners.detect-secrets.options`. A key not listed here is accep
 | <a id="scanners.detect-secrets.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.detect-secrets.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
 | <a id="scanners.detect-secrets.options.baseline_file"></a>`baseline_file` | path or string or null | `null` | Path to detect-secrets baseline file, relative to current source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided. |
-| <a id="scanners.detect-secrets.options.scan_settings"></a>`scan_settings` | `DetectSecretsScanSettings` | see the section | Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file |
+| <a id="scanners.detect-secrets.options.scan_settings"></a>`scan_settings` | mapping | see the section | Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file |
 | <a id="scanners.detect-secrets.options.skip_generated_lockfiles"></a>`skip_generated_lockfiles` | boolean | `true` | Skip machine-generated dependency lockfiles (package-lock.json, yarn.lock, poetry.lock, and similar) before scanning. These are dense with integrity hashes and are regenerated rather than hand-edited, so findings in them are usually noise. Hand-authored dependency declarations such as requirements.txt, Pipfile and environment.yml are always scanned and are not affected by this option. Set to false to scan generated lockfiles as well. |
 
 ## `grype`
@@ -175,7 +177,7 @@ Options, under `scanners.detect-secrets.options`. A key not listed here is accep
 - Command: `grype`
 - Install: pinned, checksum-verified release of `grype` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
 - Offline strategy: `cache_flags`
-- Network in the sandbox: yes, when the scan is online
+- Network in the sandbox, by default: yes, unless the scan is offline
 - Environment passed into the sandbox: `GRYPE_*`
 - Environment set under sandbox-exec: none
 
@@ -198,7 +200,7 @@ Options, under `scanners.grype.options`. A key not listed here is accepted and k
 - Command: `npm`
 - Install: none declared
 - Offline strategy: `cache_flags`
-- Network in the sandbox: yes, when the scan is online
+- Network in the sandbox, by default: yes, unless the scan is offline
 - Environment passed into the sandbox: `npm_config_*`, `NPM_CONFIG_*`
 - Environment set under sandbox-exec: none
 
@@ -220,7 +222,7 @@ Options, under `scanners.npm-audit.options`. A key not listed here is accepted a
 - Command: `opengrep`
 - Install: pinned, checksum-verified release of `opengrep` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
 - Offline strategy: `cache_flags`
-- Network in the sandbox: yes, when the scan is online
+- Network in the sandbox, by default: yes, unless the scan is offline
 - Environment passed into the sandbox: `OPENGREP_*`, `SEMGREP_*`
 - Environment set under sandbox-exec: none
 
@@ -250,7 +252,7 @@ Options, under `scanners.opengrep.options`. A key not listed here is accepted an
 - Command: `semgrep`
 - Install: `uv tool install` on first use (`semgrep>=1.125.0,<2.0.0`)
 - Offline strategy: `cache_flags`
-- Network in the sandbox: yes, when the scan is online
+- Network in the sandbox, by default: yes, unless the scan is offline
 - Environment passed into the sandbox: `SEMGREP_*`
 - Environment set under sandbox-exec: none
 
@@ -279,7 +281,7 @@ Options, under `scanners.semgrep.options`. A key not listed here is accepted and
 - Command: `syft`
 - Install: pinned, checksum-verified release of `syft` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
 - Offline strategy: `cache_flags`
-- Network in the sandbox: no
+- Network in the sandbox, by default: no
 - Environment passed into the sandbox: `SYFT_*`
 - Environment set under sandbox-exec: none
 
@@ -291,7 +293,7 @@ Options, under `scanners.syft.options`. A key not listed here is accepted and ke
 | <a id="scanners.syft.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.syft.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
 | <a id="scanners.syft.options.config_file"></a>`config_file` | path or null | `null` | Path to Syft configuration file, relative to current source directory. Defaults to searching for `.syft.yaml` and `.syft.yml` in the root of the source directory. |
-| <a id="scanners.syft.options.exclude"></a>`exclude` | list of `IgnorePathWithReason` | `[]` | Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying "dir1" will skip any directory or subdirectory named "dir1". Ignored with -f. Can be specified multiple times. |
+| <a id="scanners.syft.options.exclude"></a>`exclude` | list of mapping | `[]` | Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying "dir1" will skip any directory or subdirectory named "dir1". Ignored with -f. Can be specified multiple times. |
 | <a id="scanners.syft.options.additional_outputs"></a>`additional_outputs` | list of one of `cyclonedx-json`, `cyclonedx-xml`, `github-json`, `spdx-json`, `spdx-tag-value`, `syft-json`, `syft-table`, `syft-text` | `["syft-table"]` | List of additional formats to output. Defaults to syft-table. |
 | <a id="scanners.syft.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, disabling update checks. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 
@@ -307,7 +309,7 @@ Ferret Scan is a sensitive data detection tool that scans files for potential se
 - Command: `ferret-scan`
 - Install: none declared
 - Offline strategy: `bundled`
-- Network in the sandbox: no
+- Network in the sandbox, by default: no
 - Environment passed into the sandbox: `FERRET_*`
 - Environment set under sandbox-exec: none
 
@@ -349,7 +351,7 @@ Options, under `scanners.ferret-scan.options`. A key not listed here is accepted
 - Command: `snyk`
 - Install: none declared
 - Offline strategy: `skip_offline`
-- Network in the sandbox: yes, when the scan is online
+- Network in the sandbox, by default: yes, unless the scan is offline
 - Environment passed into the sandbox: `SNYK_*`, `SNYK_TOKEN`
 - Environment set under sandbox-exec: none
 
@@ -371,7 +373,7 @@ Options, under `scanners.snyk-code.options`. A key not listed here is accepted a
 - Command: `trivy`
 - Install: pinned, checksum-verified release of `trivy` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
 - Offline strategy: `cache_flags`
-- Network in the sandbox: yes, when the scan is online
+- Network in the sandbox, by default: yes, unless the scan is offline
 - Environment passed into the sandbox: `TRIVY_*`
 - Environment set under sandbox-exec: none
 

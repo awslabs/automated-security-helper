@@ -14,7 +14,7 @@
 
 This page is generated from the command definitions in the ASH source code by `scripts/generate_cli_docs.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-Every option is listed with the environment variable that sets it, where one exists. An option given on the command line takes precedence over its environment variable.
+The Environment variable column names the variable click reads for the option; an option given on the command line takes precedence over it. Some behavior is also controlled by variables read elsewhere in the code; see [Environment variables](environment-variables.md).
 
 ## Commands
 
@@ -58,8 +58,8 @@ Options that only `ash` itself accepts:
 <!-- doctest: options of=cli -->
 | Option | Type | Default | Environment variable | Description |
 |--------|------|---------|----------------------|-------------|
-| <a id="ash--install-completion"></a>`--install-completion` | flag | not set |  | Install completion for the current shell. |
-| <a id="ash--show-completion"></a>`--show-completion` | flag | not set |  | Show completion for the current shell, to copy it or customize the installation. |
+| <a id="ash--install-completion"></a>`--install-completion` | flag | off |  | Install completion for the current shell. |
+| <a id="ash--show-completion"></a>`--show-completion` | flag | off |  | Show completion for the current shell, to copy it or customize the installation. |
 
 Subcommands: [`ash build-image`](#build-image), [`ash config`](#config), [`ash dependencies`](#dependencies), [`ash get-genai-guide`](#get-genai-guide), [`ash inspect`](#inspect), [`ash mcp`](#mcp), [`ash merge`](#merge), [`ash plugin`](#plugin), [`ash report`](#report), [`ash scan`](#scan).
 
@@ -72,6 +72,8 @@ Any additional arguments passed will be forwarded to ASH inside the container im
 ```text
 ash build-image [OPTIONS]
 ```
+
+This command does not reject an option it does not define: an unknown or misspelled option is ignored, with no error.
 
 <!-- doctest: options of=cli.build-image -->
 | Option | Type | Default | Environment variable | Description |
@@ -516,7 +518,7 @@ ash report [OPTIONS]
 <!-- doctest: options of=cli.report -->
 | Option | Type | Default | Environment variable | Description |
 |--------|------|---------|----------------------|-------------|
-| <a id="report--format"></a>`--format` | text | `markdown` |  | Report format to generate (reporter plugin name). Defaults to 'markdown'. Examples values: aggregated, text, flat-json, yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom |
+| <a id="report--format"></a>`--format` | text | `markdown` |  | Report format to generate (reporter plugin name). Defaults to 'markdown'. Examples values: aggregated, text, flat-json, yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom Accepted values: the name of a reporter that is loaded: `csv`, `cyclonedx`, `flat-json`, `github-ghas`, `gitlab-cyclonedx`, `gitlab-sast`, `html`, `junitxml`, `markdown`, `ocsf`, `sarif`, `spdx`, `text`, `unused-suppressions`, `yaml`, and the reporters of any plugin module the configuration loads. Any other value exits with code 1. |
 | <a id="report--output-dir"></a>`--output-dir` | text | not set | `ASH_OUTPUT_DIR` | The directory to output results to |
 | <a id="report--log-level"></a>`--log-level` | one of `QUIET`, `SIMPLE`, `ERROR`, `INFO`, `VERBOSE`, `DEBUG`, `TRACE` | `INFO` |  | Set the log level. |
 | <a id="report--config"></a>`--config`, `-c` | text | not set | `ASH_CONFIG` | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
@@ -535,6 +537,8 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir. T
 ash scan [OPTIONS]
 ```
 
+This command does not reject an option it does not define: an unknown or misspelled option is ignored, with no error.
+
 <!-- doctest: options of=cli.scan -->
 | Option | Type | Default | Environment variable | Description |
 |--------|------|---------|----------------------|-------------|
@@ -549,7 +553,7 @@ ash scan [OPTIONS]
 | <a id="scan--offline-semgrep-rulesets"></a>`--offline-semgrep-rulesets` | text | `p/ci` |  | Specify Semgrep rulesets for use in ASH offline mode |
 | <a id="scan--strategy"></a>`--strategy` | one of `sequential`, `parallel` | `parallel` |  | Whether to run scanners in parallel or sequential |
 | <a id="scan--progress"></a>`--progress`, `-p` / `--no-progress`, `-P` | flag | on |  | Show progress of each job live in the console. Defaults to True. |
-| <a id="scan--output-formats"></a>`--output-formats`, `--output-format`, `--formats`, `--format`, `-f` | text, repeatable | not set |  | The output formats to use (comma-separated). Available formats: aggregated, text, flat-json, yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom |
+| <a id="scan--output-formats"></a>`--output-formats`, `--output-format`, `--formats`, `--format`, `-f` | text, repeatable | not set |  | The output formats to use (comma-separated). Available formats: aggregated, text, flat-json, yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom Values that write a report: `text`, `flat-json`, `yaml`, `csv`, `html`, `junitxml`, `markdown`, `sarif`, `ocsf`, `cyclonedx`, `spdx`. Values that name no reporter and write no report: `aggregated`, `dict`, `asff`, `custom`. Built-in reporters that are refused: `github-ghas`, `gitlab-cyclonedx`, `gitlab-sast`, `unused-suppressions`; so are the reporters in plugin modules. |
 | <a id="scan--cleanup"></a>`--cleanup` / `--no-cleanup` | flag | off |  | Clean up 'converted' directory and other temporary files after scan completes. Defaults to False. Note: Scans will always clean up existing files in the output directory before a new scan starts. This parameter only affects the cleanup of the temporary work directory after a scan has completed, typically for inspection of temporary artifacts. |
 | <a id="scan--phases"></a>`--phases` | one of `convert`, `scan`, `report`, `inspect`, repeatable | not set |  | The phases to run. Defaults to all phases except inspect. |
 | <a id="scan--inspect"></a>`--inspect` / `--no-inspect` | flag | off |  | Enable inspection of SARIF fields after running. This adds the inspect phase to the execution. |

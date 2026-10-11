@@ -100,9 +100,12 @@ def _sandbox(plugin) -> tuple[str, str, str]:
         requirements = plugin.cls.__dict__.get("sandbox_requirements")
     if requirements is None or isinstance(requirements, property):
         return "not declared", "not declared", "none"
-    network = "yes, when the scan is online" if requirements.network else "no"
-    if getattr(requirements, "network_requires_grant", False):
-        network += "; only when `sandbox.network_scanners` names this scanner"
+    if not requirements.network:
+        network = "no"
+    elif getattr(requirements, "network_requires_grant", False):
+        network = "no; yes when `sandbox.network_scanners` names this scanner"
+    else:
+        network = "yes, unless the scan is offline"
     passed = [f"{p}*" for p in requirements.env_prefixes] + list(requirements.env_names)
     set_under = [
         f"{k}={v}" for k, v in getattr(requirements, "sandbox_exec_env", ()) or ()
@@ -139,6 +142,14 @@ def _baseline_environment() -> list[str]:
         + ", ".join(code(n) for n in proxies)
         + " are passed only to a scanner that has a network. The lists are in "
         "`automated_security_helper/utils/sandbox/policy.py`.",
+        "",
+        (
+            "The network entry of each scanner below is its default. "
+            "`sandbox.network_scanners`, when it is set, replaces every scanner's "
+            "declared need: only the scanners it names get a network. A config file "
+            "in the scanned tree can only take network away, and an offline scan "
+            "gives no scanner a network."
+        ),
         "",
     ]
 
@@ -244,7 +255,7 @@ def generate(docs_root: Path) -> tuple[str, dict]:
                 if _value(p.cls, "offline_strategy")
                 else "not declared",
             ),
-            ("Network in the sandbox", network),
+            ("Network in the sandbox, by default", network),
             ("Environment passed into the sandbox", env),
             ("Environment set under sandbox-exec", env_set),
         ]

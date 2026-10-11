@@ -156,7 +156,10 @@ def format_default(param: Any) -> str:
         return "computed at run time"
     if getattr(param, "is_flag", False) and getattr(param, "is_bool_flag", True):
         if default is None:
-            return "not set"
+            # An action flag (typer's --install-completion) never reaches the
+            # command, so not passing it is simply off. A --x/--no-x flag whose
+            # default is None is three-way: unset leaves the decision to the config.
+            return "off" if not getattr(param, "expose_value", True) else "not set"
         return "on" if default else "off"
     if default is None:
         return "not set"
@@ -317,6 +320,68 @@ def render_param_table(path: list[str], params: list[Any], seen: set[str]) -> li
     return out[:-1]
 
 
+def _builtin_reporters() -> list[str]:
+    """The built-in reporters' config names, which is what selects a reporter."""
+    from _plugin_reference import discover
+
+    return sorted(p.name for p in discover("reporter") if p.builtin)
+
+
+def _output_formats_note(_param: Any) -> str:
+    """``ash scan --output-formats``: accepted values, and which of them write a report.
+
+    cli/scan.py checks each value with ``ExportFormat(value)`` and refuses anything
+    else, and the report phase selects a reporter whose config name equals a value
+    (``reporter_format_name``). So an ExportFormat value that names no reporter is
+    accepted and writes nothing, and a reporter whose name is not one is refused.
+    """
+    from automated_security_helper.core.enums import ExportFormat
+
+    accepted = [f.value for f in ExportFormat]
+    reporters = _builtin_reporters()
+    writes = [v for v in accepted if v in reporters]
+    nothing = [v for v in accepted if v not in reporters]
+    refused = [r for r in reporters if r not in accepted]
+    sentences = [
+        "Values that write a report: " + ", ".join(code(v) for v in writes) + ".",
+        "Values that name no reporter and write no report: "
+        + ", ".join(code(v) for v in nothing)
+        + ".",
+    ]
+    if refused:
+        sentences.append(
+            "Built-in reporters that are refused: "
+            + ", ".join(code(r) for r in refused)
+            + "; so are the reporters in plugin modules."
+        )
+    return " ".join(sentences)
+
+
+def _report_format_note(_param: Any) -> str:
+    """``ash report --format``: cli/report.py looks the value up among loaded reporters."""
+    return (
+        "Accepted values: the name of a reporter that is loaded: "
+        + ", ".join(code(r) for r in _builtin_reporters())
+        + ", and the reporters of any plugin module the configuration loads. "
+        "Any other value exits with code 1."
+    )
+
+
+#: Options whose values the command checks in its own code, after click has parsed
+#: them, keyed by (command path, first long name). Their help text alone does not
+#: say what is accepted; the note is computed from the code that decides it.
+VALUE_NOTES = {
+    (("scan",), "--output-formats"): _output_formats_note,
+    (("report",), "--format"): _report_format_note,
+}
+
+
+def _value_note(path: list[str], param: Any) -> str:
+    longs = [o for o in getattr(param, "opts", []) if o.startswith("--")]
+    note = VALUE_NOTES.get((tuple(path), longs[0] if longs else ""))
+    return note(param) if note else ""
+
+
 def _param_row(path: list[str], param: Any, seen: set[str]) -> str:
     anchor = param_anchor(path, param)
     if anchor in seen:
@@ -328,6 +393,9 @@ def _param_row(path: list[str], param: Any, seen: set[str]) -> str:
     seen.add(anchor)
     help_text = getattr(param, "help", None) or ""
     description = md_prose(normalize_paths(help_text)) if help_text else NO_DESCRIPTION
+    note = _value_note(path, param)
+    if note:
+        description = f"{description} {note}"
     return (
         f'| <a id="{anchor}"></a>{format_flags(param)} | {format_type(param)} | '
         f"{format_default(param)} | {format_envvar(param)} | {description} |"
@@ -364,9 +432,10 @@ def generate(root: Any) -> tuple[str, dict]:
         generated_note(GENERATOR, "the command definitions in the ASH source code"),
         "",
         (
-            "Every option is listed with the environment variable that sets it, where one "
-            "exists. An option given on the command line takes precedence over its "
-            "environment variable."
+            "The Environment variable column names the variable click reads for the "
+            "option; an option given on the command line takes precedence over it. Some "
+            "behavior is also controlled by variables read elsewhere in the code; see "
+            "[Environment variables](environment-variables.md)."
         ),
         "",
         "## Commands",
@@ -410,6 +479,14 @@ def generate(root: Any) -> tuple[str, dict]:
         usage = re.sub(r"^Usage:\s*", "", usage)
         lines += ["```text", usage, "```", ""]
 
+        if (getattr(cmd, "context_settings", None) or {}).get("ignore_unknown_options"):
+            lines += [
+                (
+                    "This command does not reject an option it does not define: an "
+                    "unknown or misspelled option is ignored, with no error."
+                ),
+                "",
+            ]
         if getattr(cmd, "hidden", False):
             lines += ["This command is hidden from `--help` output.", ""]
         if getattr(cmd, "deprecated", False):

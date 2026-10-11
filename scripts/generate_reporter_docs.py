@@ -222,6 +222,42 @@ def defaults_sentence(rows: list[dict]) -> str:
     return sentence
 
 
+def extra_files(plugin) -> list[str] | None:
+    """Files a built-in reporter writes itself, besides the report the phase writes.
+
+    Measured: the reporter is built in a scratch output directory with its default
+    options and given an empty results model, and whatever appears under that
+    directory is reported. ``report()`` returns the main report and the report phase
+    writes it to ``reports/ash.<extension>``, so anything on disk afterwards is a
+    file the reporter wrote on its own. Only built-in reporters are run: the
+    plugin-module ones talk to AWS. None when the reporter could not be run.
+    """
+    import tempfile
+    from unittest import mock
+
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    with tempfile.TemporaryDirectory(prefix="ash-reporter-files-") as tmp:
+        source, output = Path(tmp, "source"), Path(tmp, "output")
+        source.mkdir()
+        output.mkdir()
+        try:
+            with mock.patch("platform.system", return_value="Linux"):
+                reporter = plugin.cls(
+                    context=PluginContext(
+                        source_dir=source, output_dir=output, config=AshConfig()
+                    )
+                )
+                reporter.report(AshAggregatedResults())
+        except Exception:
+            return None
+        return sorted(
+            p.relative_to(output).as_posix() for p in output.rglob("*") if p.is_file()
+        )
+
+
 def _reference_table(rows: list[dict]) -> list[str]:
     """The built-in table, each row linked to the reporter's own section."""
     lines = [
@@ -345,6 +381,15 @@ def render_reference_page(rows: list[dict]) -> tuple[str, list[str]]:
             ("File extension", code("." + extension) if extension else "none"),
             ("Runs with `--python-only`", yes_no(python_only)),
         ]
+        if p.builtin:
+            written = extra_files(p)
+            if written:
+                facts.append(
+                    (
+                        "Also writes, with the default options",
+                        ", ".join(code(f) for f in written),
+                    )
+                )
         if p.instance_error:
             facts.append(
                 ("Could not be built for inspection", md_prose(p.instance_error))

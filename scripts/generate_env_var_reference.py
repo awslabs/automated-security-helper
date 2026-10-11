@@ -820,6 +820,13 @@ def _docstring_mention(
     return None
 
 
+#: A reStructuredText section title and its underline ("License and notice files"
+#: over a row of dashes), which a docstring paragraph can open with.
+_RST_TITLE = re.compile(
+    r"^[^\n]*\n[ \t]*([-=~^\"'`#*+])\1{2,}[ \t]*(?:\n|$)", re.MULTILINE
+)
+
+
 def _mentioning_text(text: str, pattern: re.Pattern) -> Optional[str]:
     """The sentence of ``text`` that names the variable, or its paragraph if that is a fragment.
 
@@ -829,6 +836,7 @@ def _mentioning_text(text: str, pattern: re.Pattern) -> Optional[str]:
     for paragraph in re.split(r"\n\s*\n", text):
         if not pattern.search(paragraph):
             continue
+        paragraph = _RST_TITLE.sub("", paragraph)
         flat = " ".join(paragraph.split())
         sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z`])", flat)
         for index, sentence in enumerate(sentences):
@@ -989,6 +997,11 @@ def _python_reads(repo_root: Path, scan: EnvScan) -> None:
                     if not name:
                         continue
                     comment = mod.comment_for(lineno, getattr(stmt, "lineno", lineno))
+                    if comment is not None and not _describes(comment[0], name):
+                        # A label for the code around the read ("# Project
+                        # information") is not the variable's purpose, and no
+                        # purpose is better than a wrong one.
+                        comment = None
                     comment_at = mod.rel if comment else None
                     comment_scope = mod.scope_at(comment[1]) if comment else ""
                     if comment is None and definition is not None:
@@ -998,6 +1011,8 @@ def _python_reads(repo_root: Path, scan: EnvScan) -> None:
                         )
                         if def_mod is not None:
                             found = def_mod.comment_for(definition[1], definition[1])
+                            if found and not _documents(def_mod.lines, found, name):
+                                found = None
                             if found:
                                 comment = found
                                 comment_at = def_mod.rel
@@ -1145,6 +1160,16 @@ def _shell_reads(repo_root: Path, scan: EnvScan) -> None:
                     ):
                         default = default[1:-1]
                 comment = _shell_comment_above(raw, number)
+                if comment is not None and not (
+                    _describes(comment[0], name)
+                    or re.match(
+                        rf"^\s*(?:export\s+|readonly\s+|local\s+)?{re.escape(name)}=",
+                        raw[number - 1],
+                    )
+                ):
+                    # As for Python, and also taken when the line it heads assigns
+                    # the variable itself.
+                    comment = None
                 scan.reads.append(
                     EnvRead(
                         name=name,
@@ -1198,6 +1223,29 @@ def _script_scopes(lines: list[str], definition: re.Pattern) -> list[str]:
         if stack and line.strip() == "}" and indent == stack[-1][1]:
             stack.pop()
     return scopes
+
+
+def _describes(text: str, name: str) -> bool:
+    """Whether a comment next to a read can be quoted as the variable's purpose.
+
+    It names the variable, or it is written as a sentence. What it must not be is
+    a label for the code around it, which is how the wrong purposes looked:
+    "Project information", "Resolve build target", "Check for npm cache
+    directory", none of them a sentence and none naming the variable.
+    """
+    words = text.split()
+    return name in text or (len(words) >= 4 and text.rstrip().endswith((".", "!", "?")))
+
+
+def _documents(lines: list[str], comment: tuple[str, int], name: str) -> bool:
+    """Whether a comment above the constant that holds ``name`` documents it.
+
+    A ``#:`` comment documents the assignment under it, by the Sphinx convention
+    this package follows; a plain one only as :func:`_describes` allows, because
+    it may head a group of constants.
+    """
+    first = lines[comment[1] - 1].lstrip() if comment[1] - 1 < len(lines) else ""
+    return first.startswith("#:") or _describes(comment[0], name)
 
 
 def _shell_comment_above(raw: list[str], number: int) -> Optional[tuple[str, int]]:
@@ -1392,7 +1440,54 @@ def _defaults(reads: list[EnvRead]) -> str:
     return "<br>".join(code(v) for v in values)
 
 
-def _purpose(name: str, reads: list[EnvRead], cli: list) -> tuple[str, bool]:
+def _config_env_sources() -> dict[str, list[tuple[str, str, str]]]:
+    """Variable -> [(config key, its page and anchor, its default)] it is the source of.
+
+    A default such as ``global_settings.severity_threshold`` that the model reads
+    from ``ASH_DEFAULT_SEVERITY_LEVEL`` is found by the configuration generator in
+    the model source (``env_defaults``), for the AshConfig tree and every plugin's
+    options. The default shown is the key's own with nothing set, which is what
+    the variable falls back to: the read itself (a call into a resolver, for the
+    severity level) need not say.
+    """
+    from _plugin_reference import discover
+    from generate_config_reference import default_text, env_defaults, walk_config
+
+    from automated_security_helper.config.ash_config import AshConfig
+
+    found: dict[str, list[tuple[str, str, str]]] = {}
+    sections, _missing = walk_config(AshConfig)
+    for section in sections:
+        for row in section.rows:
+            for name in row["env_default"] or []:
+                full = row["full"].replace("[]", "")
+                found.setdefault(name, []).append(
+                    (full, f"configuration.md#{full}", default_text(row["field"]))
+                )
+    for kind, page in (
+        ("scanner", "scanners.md"),
+        ("reporter", "reporters.md"),
+        ("converter", "converters.md"),
+    ):
+        for plugin in discover(kind):
+            model = plugin.options_cls
+            if model is None:
+                continue
+            for field_name, names in env_defaults(model).items():
+                info = model.model_fields.get(field_name)
+                if info is None:
+                    continue
+                key = f"{kind}s.{plugin.name}.options.{info.alias or field_name}"
+                for name in names:
+                    found.setdefault(name, []).append(
+                        (key, f"{page}#{key}", default_text(info))
+                    )
+    return {name: sorted(set(rows)) for name, rows in found.items()}
+
+
+def _purpose(
+    name: str, reads: list[EnvRead], cli: list, config: list | None = None
+) -> tuple[str, bool]:
     if cli:
         parts = []
         for label, opt, anchor, _default, help_text in cli:
@@ -1409,6 +1504,11 @@ def _purpose(name: str, reads: list[EnvRead], cli: list) -> tuple[str, bool]:
             text = next(iter(unique_help))
             return f"Sets {links}." + (f" {md_prose(text)}" if text else ""), True
         return "<br>".join(parts), True
+    if config:
+        # Taken from the model ahead of any comment: it says what the variable is
+        # for in the terms a configuration file uses.
+        keys = ", ".join(f"[{code(key)}]({link})" for key, link, _default in config)
+        return f"Sets the default of {keys}.", True
     for r in reads:
         if r.comment:
             where = code(r.comment_at)
@@ -1424,6 +1524,7 @@ def generate(
     root = Path(repo_root or REPO_ROOT).resolve()
     scan = collect_env_reads(root)
     cli = _cli_envvars() if with_cli else {}
+    config_sources = _config_env_sources() if with_cli else {}
 
     by_name: dict[str, list[EnvRead]] = {}
     for r in scan.reads:
@@ -1445,13 +1546,23 @@ def generate(
         for name in names:
             reads = by_name[name]
             options = cli.get(name, [])
-            purpose, documented = _purpose(name, reads, options)
+            config = config_sources.get(name, [])
+            purpose, documented = _purpose(name, reads, options, config)
             if not documented:
                 stats["undocumented"].append(name)
             default = _defaults(reads)
             if options:
                 cli_defaults = sorted({c[3] for c in options})
                 default = "<br>".join(cli_defaults) if not default else default
+            if not default and config:
+                default = "<br>".join(
+                    sorted(
+                        {
+                            f"{value} (the default of {code(key)})"
+                            for key, _l, value in config
+                        }
+                    )
+                )
             image = "<br>".join(
                 f"{code(value)} ({stage or 'all stages'})"
                 for stage, value, _line in scan.image_env.get(name, [])

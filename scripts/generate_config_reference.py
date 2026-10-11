@@ -171,7 +171,10 @@ def type_text(annotation: Any, link=None) -> str:
         return "mapping"
     if _is_model(annotation):
         anchor = link(annotation) if link else None
-        return f"[section](#{anchor})" if anchor else code(annotation.__name__)
+        # A model with no section on the page (a plugin class, an options model
+        # documented elsewhere) is written in YAML as a mapping; its Python class
+        # name means nothing to someone writing a config file.
+        return f"[section](#{anchor})" if anchor else "mapping"
     return {
         str: "string",
         int: "integer",
@@ -770,7 +773,56 @@ def explicit_config_option() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _row(row: dict, link) -> str:
+def top_level_validator_note(key: str, name: str) -> str:
+    """What ``ash config validate`` says about a top-level key a scan accepts.
+
+    ``ConfigValidator`` keeps its own lists of top-level keys, separate from the
+    model, so a key can load in a scan and still fail validation. Read from those
+    lists, so the page changes when they do.
+    """
+    from automated_security_helper.config.config_validator import ConfigValidator
+
+    if key in ConfigValidator.INVALID_TOP_LEVEL_FIELDS:
+        return (
+            "`ash config validate` rejects this key as an internal field, although a "
+            "scan accepts it."
+        )
+    if key not in ConfigValidator.VALID_TOP_LEVEL_FIELDS:
+        return (
+            "`ash config validate` reports this key as an unknown top-level field, "
+            "although a scan accepts it."
+        )
+    if name != key and name not in ConfigValidator.VALID_TOP_LEVEL_FIELDS:
+        return (
+            f"A scan also accepts it as {code(name)}, which `ash config validate` "
+            "reports as an unknown top-level field."
+        )
+    return ""
+
+
+def plugin_entry_validator_note(key: str) -> str:
+    """What ``ash config validate`` says about a key directly under a plugin's entry."""
+    from automated_security_helper.config.config_validator import ConfigValidator
+
+    kinds = [
+        kind
+        for kind, fields in (
+            ("scanner", ConfigValidator.INTERNAL_SCANNER_FIELDS),
+            ("reporter", ConfigValidator.INTERNAL_REPORTER_FIELDS),
+            ("converter", ConfigValidator.INTERNAL_CONVERTER_FIELDS),
+        )
+        if key in fields
+    ]
+    if not kinds:
+        return ""
+    where = kinds[0] if len(kinds) == 1 else ", ".join(kinds[:-1]) + " or " + kinds[-1]
+    return (
+        f"`ash config validate` rejects it in a {where} entry as internal-only, "
+        "although a scan accepts it."
+    )
+
+
+def _row(row: dict, link, validator_note: str = "") -> str:
     field = row["field"]
     kind = type_text(field.annotation, link)
     bounds = constraints_text(field)
@@ -778,8 +830,10 @@ def _row(row: dict, link) -> str:
         kind = f"{kind}, {bounds}"
     description = md_prose(row["description"]) if row["description"] else NO_DESCRIPTION
     notes = []
-    if row["name"] != row["key"]:
+    if row["name"] != row["key"] and code(row["name"]) not in validator_note:
         notes.append(f"Also accepted as {code(row['name'])}.")
+    if validator_note:
+        notes.append(validator_note)
     if row["excluded_on_dump"]:
         notes.append(
             "Read when the file is loaded and not written back when a config is saved."
@@ -955,7 +1009,12 @@ def generate() -> tuple[str, dict]:
             "|-----|------|---------|-------------|",
         ]
         for row in section.rows:
-            lines.append(_row(row, lambda m: anchors.get(m)))
+            note = (
+                top_level_validator_note(row["key"], row["name"])
+                if not section.path
+                else ""
+            )
+            lines.append(_row(row, lambda m: anchors.get(m), note))
         lines.append("")
 
     top = sections[0]
@@ -983,8 +1042,21 @@ def generate() -> tuple[str, dict]:
     ]
     for name, field in common.items():
         desc = md_prose(field.description) if field.description else NO_DESCRIPTION
-        if not field.description:
+        if name == "options":
+            # The model's own description says "Scanner options", but this table
+            # covers reporters and converters too.
+            desc = (
+                "The plugin's options. Each plugin's are listed on its reference page: "
+                "[scanners](scanners.md), [reporters](reporters.md), "
+                "[converters](converters.md)."
+            )
+        elif not field.description:
             missing.append(f"<plugin>.{name}  (PluginConfigBase.{name})")
+        note = plugin_entry_validator_note(name)
+        if note:
+            if desc and desc[-1] not in ".!?:":
+                desc += "."
+            desc = f"{desc} {note}"
         kind = type_text(field.annotation)
         bounds = constraints_text(field)
         if bounds:
