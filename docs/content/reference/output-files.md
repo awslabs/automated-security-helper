@@ -88,7 +88,12 @@ these:
   directory (the default `.ash/ash_output` is below it, so a repository can commit such
   a link);
 - `analysis`, `reports`, `scanners`, or `converted` in the output directory;
-- the files ASH writes there by a fixed name.
+- the files ASH writes there by a fixed name;
+- in workspace mode, `projects` and `.workspace-spool` in the workspace's output
+  directory, and each project's `projects/<project>` directory.
+
+It also refuses an output directory below the source directory whose real path, with
+every link resolved, is outside the source directory.
 
 The check runs before anything is written or deleted, in every run mode and whatever
 the sandbox mode, and also in `ash report` and `ash merge`. The command exits 1:
@@ -98,6 +103,9 @@ ERROR (1) The output directory /work/out-link is a symlink. ASH does not write t
 mount its output directory through a link, whatever the sandbox mode. Pass --output-dir with
 a directory that is not a link, or replace the link with a directory.
 ```
+
+In workspace mode, a link at `projects` or `.workspace-spool` stops the whole scan this
+way, and a link at `projects/<project>` fails only that project, with the same message.
 
 Directories above an output directory that is outside the source directory are not
 examined, so `--output-dir /tmp/ash` works on a system where `/tmp` is a link.

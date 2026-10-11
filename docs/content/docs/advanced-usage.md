@@ -171,13 +171,22 @@ Not running grype from inside the scanned tree /home/me/repo: /home/me/repo/.ven
 ```
 
 The scanner's `missing_reason` field in `ash_aggregated_results.json` records it too,
-as "grype was found only inside the scanned tree, at ...". The message at the end of
-the scan lists the scanner as MISSING without saying why. The fix is to install the
-tool outside the repository, for example with `ash dependencies install` or
-`uv tool install`.
+as "grype was found only inside the scanned tree, at ...". When the scan exits as
+incomplete, the message after the list of incomplete scanners names each tool ASH
+found only inside the tree:
 
-This applies to the programs ASH starts. It does not apply to ASH itself: if you run
-ASH from a virtual environment inside the repository, ASH's own code comes from the
+```text
+Found only inside the scanned tree, so not run: grype (/home/me/repo/.venv/bin/grype). To use them, install it outside the scanned tree, or set ASH_ALLOW_IN_TREE_TOOLS=1 or pass --allow-in-tree-tools to allow tools from the tree.
+```
+
+The fix is to install the tool outside the repository, for example with
+`ash dependencies install` or `uv tool install`.
+
+This applies to the programs ASH starts. ASH also removes the scanned directory's
+entries, and any empty or relative entries, from the `PATH` it gives those programs, so
+a scanner that starts another program by name, such as `git` or `node`, does not find
+a copy inside the repository through `PATH`. None of this applies to ASH itself: if you
+run ASH from a virtual environment inside the repository, ASH's own code comes from the
 repository, so install ASH outside it (see [Install ASH](../how-to/install.md)). It
 also does not stop a correctly installed tool from reading files in the repository,
 such as its own configuration file.

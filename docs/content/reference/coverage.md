@@ -102,6 +102,12 @@ cfn-nag and cfn-guard run once per template; cfn-lint checks them all in one run
 cdk-nag applies its AWS Solutions rule pack. With no templates, all four report
 `SKIPPED`.
 
+cfn-nag reads a copy of each template that ASH writes in the scanner's results
+directory, named `template.json`, `template.yaml`, or `template.yml` after the
+template's extension, and removes it after the run. Findings name the original
+template. On Windows, where `cfn_nag_scan` is a batch file, a template whose name
+contains `&` or `|` is scanned too.
+
 ### Dependencies {#dependencies}
 
 npm-audit finds each `package.json` and audits the first lockfile beside it of
@@ -186,8 +192,18 @@ output in `converted/` as a second target:
   members with a file extension ASH knows how to scan, compared case-sensitively, so
   files such as `Dockerfile` or `go.mod` inside an archive, and archives inside
   archives, are not extracted. `.tgz`, `.bz2`, `.xz`, `.jar`, and `.whl` files are not
-  opened.
-- `jupyter` converts each `.ipynb` notebook to a script with nbconvert.
+  opened. A `.gz` file that holds one compressed file rather than a tar archive, such as
+  `data.json.gz`, is skipped and does not count as a failed input. Any other file with
+  one of the three extensions that Python cannot read as a zip or tar archive is a
+  failed input.
+- `jupyter` converts each `.ipynb` notebook to a script with nbconvert. ASH runs
+  nbconvert on a copy of the notebook named `notebook.ipynb`, in a temporary directory
+  that holds nothing else, so nbconvert does not pick up a Python module or template
+  directory from the repository through its working directory, and a notebook whose
+  name contains characters such as `[` or `{` still converts. The copy drops
+  `language_info.nbconvert_exporter`, and keeps `language_info.file_extension` only when
+  it is a plain extension such as `.r`. The converted file is named after the original
+  notebook.
 
 semgrep and opengrep exclude `*-converted.py`, so they do not scan converted notebooks.
 Findings in converted files point into the output directory, not into the original

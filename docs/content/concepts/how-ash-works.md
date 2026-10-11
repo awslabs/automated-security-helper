@@ -19,7 +19,7 @@ flowchart LR
     report --> code[Exit code]
 ```
 
-In the convert phase, converters turn files that scanners cannot read into files they can. The archive converter extracts the scannable members of zip and tar archives (`.zip`, `.tar`, `.tar.gz`), and the jupyter converter turns notebooks into scripts with nbconvert. Their output goes to `converted/` in the output directory and becomes a second scan target, `converted`, next to the `source` target. A converter that crashes, or that cannot convert one of its inputs, makes the scan incomplete.
+In the convert phase, converters turn files that scanners cannot read into files they can. The archive converter extracts the scannable members of zip and tar archives (`.zip`, `.tar`, and `.gz`), and the jupyter converter turns notebooks into scripts with nbconvert. Their output goes to `converted/` in the output directory and becomes a second scan target, `converted`, next to the `source` target. A converter that crashes, or that cannot convert one of its inputs, makes the scan incomplete.
 
 In the scan phase, each selected scanner runs its tool against each target and produces SARIF. ASH rewrites the paths in that SARIF relative to the source directory, maps each result to a severity, applies suppressions and ignore paths, and merges the result into the aggregated SARIF.
 

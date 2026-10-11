@@ -114,14 +114,16 @@ configuration enables, including `ash.ghas.sarif` and `ash.gl-sast-report.json`,
 `--output-formats` narrows them. It reads the fail-on-findings setting, the incomplete-scan
 setting, the severity thresholds, and the suppressions from the configuration recorded in
 the lowest-numbered shard, and has no `--config` option; `--fail-on-findings` and
-`--fail-on-incomplete-scanners` on the command line override the first two.
+`--fail-on-incomplete-scanners` on the command line override the first two. It combines
+each converter's results across the shards, failed inputs included, so a notebook or
+archive that one shard could not convert makes the merged scan incomplete.
 
 Its exit codes:
 
 | Exit code | When |
 |---|---|
 | 0 | Every shard is present and nothing actionable was found. |
-| 1 | It refused to merge, or a scanner in some shard was MISSING or failed. |
+| 1 | It refused to merge, a scanner in some shard was MISSING or failed, or a converter in some shard failed. |
 | 2 | Actionable findings, or a usage error such as a missing `--results`. |
 
 It refuses to merge, and exits 1, when a shard index is missing or repeated, the shards
@@ -280,7 +282,10 @@ The output directory, `.ash/ash_output` next to the workspace file by default, h
 - combined reports for the workspace in `reports/`;
 - each project's full output, as from a single scan, in `projects/<project>/`. GitHub code
   scanning, GitLab SAST, and CycloneDX reports exist only there, one per project, because
-  each describes one repository.
+  each describes one repository;
+- the combined `ash_aggregated_results.json`, whose `workspace` member lists each project
+  with its status, its finding counts, `incomplete_scanners`, and `incomplete_converters`,
+  which names each converter that lost coverage and why.
 
 A workspace policy file applies to every project: a severity threshold that projects can
 tighten but not relax, suppressions and ignore paths for every project, and extra scanners.

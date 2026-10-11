@@ -14,7 +14,7 @@ On every command, a command-line usage error exits 2: an unknown option or subco
 | 1 | The scan is incomplete: a selected scanner ended ERROR or MISSING or lost some of its targets, no scanner ran, or a converter failed (with `fail_on_incomplete_scanners` on, the default) |
 | 1 | A rule could not be evaluated |
 | 1 | A content database is past its age bound, with `content_db_staleness: fail` (the default) |
-| 1 | Refused before scanning: the source directory does not exist; `--use-existing` finds no results; the shard options are invalid or combined with `--workspace`; the output directory, or a directory on the way to it, is a symbolic link; no name in `--scanners` matches a scanner; every scanner `--scanners` names is also excluded |
+| 1 | Refused before scanning: the source directory does not exist; `--use-existing` finds no results; the shard options are invalid or combined with `--workspace`; the output directory, a directory on the way to it, or a directory or file ASH writes in it is a link ([Output files](output-files.md#links)); no name in `--scanners` matches a scanner; every scanner `--scanners` names is also excluded |
 | 1 | Any other error during the scan |
 | 2 | Actionable findings: an unsuppressed finding at or above its scanner's severity threshold, with `fail_on_findings` on and `--min-severity` met |
 | 2 | A usage error, including an invalid `--output-formats` value |
@@ -73,7 +73,7 @@ Because the combination puts 2 above 1, a project with findings and a MISSING sc
 | Code | Condition |
 |---|---|
 | 0, 1, 2 | The verdict over all shards, by the same rules as `ash scan`, including incompleteness, stale databases, and `--min-severity` |
-| 1 | Refused: no shard index; results from a scan that was not sharded; a `--results` path that does not exist; a duplicated or mismatched shard; a results file that does not parse; a shard that completed none of its scanners; a symbolic link as the output directory |
+| 1 | Refused: no shard index; results from a scan that was not sharded; a `--results` path that does not exist; a duplicated or mismatched shard; a results file that does not parse; a shard that completed none of its scanners; a link at or in the output directory ([Output files](output-files.md#links)) |
 | 2 | A usage error, including a missing `--results` and an invalid `--output-formats` value |
 
 ## `ash report` {#report}
@@ -83,7 +83,7 @@ Because the combination puts 2 above 1, a project with findings and a MISSING sc
 | Code | Condition |
 |---|---|
 | 0 | The report was printed |
-| 1 | No results to report on; an unknown `--format`; the reporter failed; a symbolic link as the output directory |
+| 1 | No results to report on; an unknown `--format`; the reporter failed; a link at or in the output directory ([Output files](output-files.md#links)) |
 | 3 | The `--config` file is invalid |
 
 ## `ash mcp` {#mcp}

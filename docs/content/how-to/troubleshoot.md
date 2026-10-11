@@ -40,16 +40,23 @@ it as SKIPPED.
 
 ### A tool inside the scanned directory is not run {#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree}
 
-Symptom: a scanner shows MISSING although its tool is installed, and `ash.log` has a
-warning like this one (the console shows it too when the progress display is off):
+Symptom: a scanner shows MISSING although its tool is installed, and after the list of
+incomplete scanners the scan names each tool it found only inside the scanned
+directory:
+
+```text
+Found only inside the scanned tree, so not run: grype (/home/me/repo/.venv/bin/grype). To use them, install it outside the scanned tree, or set ASH_ALLOW_IN_TREE_TOOLS=1 or pass --allow-in-tree-tools to allow tools from the tree.
+```
+
+`ash.log` has a warning for each one (the console shows it too when the progress display
+is off):
 
 ```text
 Not running grype from inside the scanned tree /home/me/repo: /home/me/repo/.venv/bin/grype. To use it, install it outside the scanned tree, or set ASH_ALLOW_IN_TREE_TOOLS=1 or pass --allow-in-tree-tools to allow tools from the tree.
 ```
 
 The scanner's `missing_reason` in `ash_aggregated_results.json` records the reason, as
-"grype was found only inside the scanned tree, at ...". The message at the end of the
-scan gives only the general advice to install the missing tools.
+"grype was found only inside the scanned tree, at ...".
 
 Cause: during a scan, ASH does not run programs found inside the directory it scans.
 The usual case is a scanner installed in the project's virtual environment or
@@ -120,10 +127,13 @@ ERROR (1) Exiting because conversion was incomplete: 1 converter(s) did not proc
 Cause: ASH converts Jupyter notebooks to Python, and extracts `.zip`, `.tar`, and `.gz`
 archives, before it scans them. A notebook that `nbconvert` could not convert, or an
 archive that cannot be read, fails the scan so that its content is not silently left
-unscanned. The lines after the message name each file and the reason.
+unscanned. The lines after the message name each file and the reason. For a notebook,
+the reason says that nbconvert exited with a non-zero code, did not finish within 60
+seconds, or wrote no output.
 
 Fix: for notebooks, make sure `uv` is on your `PATH` so ASH can run `nbconvert`, or
-install it ahead of time with `ash dependencies install --tool jupyter`. For a corrupt
+install it ahead of time with `ash dependencies install --tool jupyter`. To see
+nbconvert's own error output, run the scan again with `--debug`. For a corrupt
 archive, fix or remove the file. To skip a file, add it to `global_settings.ignore_paths`
 with a reason; see [Suppress findings](suppress-findings.md).
 
