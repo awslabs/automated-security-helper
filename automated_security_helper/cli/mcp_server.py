@@ -661,6 +661,9 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
                 break
             time.sleep(5)  # Wait 5 seconds before next check
 
+    Only a scan this session started is visible: another session's scan id
+    answers exactly like an id that was never issued.
+
     Args:
         scan_id: The scan ID returned from run_ash_scan
 
@@ -708,9 +711,19 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
           count alone cannot distinguish the two.
     """
     try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        await ctx.error(str(e))
+        return _session_error(e)
+
+    try:
         await ctx.info(f"Getting progress for scan: {scan_id}")
 
-        progress_info = await mcp_get_scan_progress(scan_id=scan_id)
+        # Scoped to this session: another session's scan id answers exactly like
+        # one that was never issued.
+        progress_info = await mcp_get_scan_progress(
+            scan_id=scan_id, session_id=session_id
+        )
 
         # Discriminates rather than tests presence. `not
         # progress_info.get("success")` was true on both branches, because the
@@ -723,7 +736,7 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
             return progress_info
 
         registry = get_scan_registry()
-        entry = registry.get_scan(scan_id)
+        entry = registry.get_scan(scan_id, session_id=session_id)
 
         if not entry:
             await ctx.error(f"Scan {scan_id} not found in registry")
@@ -1108,11 +1121,20 @@ async def get_scan_result_paths(
 @mcp.tool()
 async def list_active_scans(ctx: Context) -> Dict[str, Any]:
     """
-    List all active and recent scans with their current status.
+    List this session's active and recent scans with their current status.
+
+    Only scans this session started are listed; another session's scans are not
+    visible, and the statistics count only this session's.
     """
     try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        await ctx.error(str(e))
+        return _session_error(e)
+
+    try:
         await ctx.info("Listing active scans")
-        return await mcp_list_active_scans()
+        return await mcp_list_active_scans(session_id=session_id)
     except Exception as e:
         logger.exception(f"Error in list_active_scans: {str(e)}")
         await ctx.error(f"Error listing active scans: {str(e)}")
@@ -1128,12 +1150,21 @@ async def cancel_scan(ctx: Context, scan_id: str) -> Dict[str, Any]:
     """
     Cancel a running scan and clean up its resources.
 
+    Only a scan this session started can be cancelled; another session's scan id
+    answers like an unknown one.
+
     Args:
         scan_id: The scan ID to cancel
     """
     try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        await ctx.error(str(e))
+        return _session_error(e)
+
+    try:
         await ctx.info(f"Cancelling scan: {scan_id}")
-        return await mcp_cancel_scan(scan_id=scan_id)
+        return await mcp_cancel_scan(scan_id=scan_id, session_id=session_id)
     except Exception as e:
         logger.exception(f"Error in cancel_scan: {str(e)}")
         await ctx.error(f"Error cancelling scan: {str(e)}")

@@ -298,6 +298,8 @@ Concurrency:
 - Scans **within** a single session are serialized; one client cannot launch parallel scans against itself.
 - Scans **across** sessions run in parallel under the existing `scan_registry` semantics — a noisy session can't block another tenant's scan.
 
+Scans are visible per session. `list_active_scans`, `get_scan_progress` and `cancel_scan` see and act on the calling session's own scans only, including the per-project scans `run_ash_workspace_scan` registers. Another session's scan id gets exactly the answer an id that was never issued gets, and a listing's `stats` count only the caller's scans. Two sessions cannot scan the same directory at once, because both would write its `.ash/ash_output`; the second is refused with "already has an active scan", and the refusal names the running scan's id only to the session that started it.
+
 ## Auth
 
 The streamable-HTTP transport ships with one built-in gate: a static header check via `--auth-header-name` / `--auth-header-value`. Connections without the configured header (or with the wrong value) are rejected before any tool dispatches.

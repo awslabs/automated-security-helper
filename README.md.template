@@ -288,8 +288,8 @@ The ASH MCP server provides these tools:
 |------|-------------|----------|
 | `get_scan_progress` | Get current progress of a running scan | Monitor scan status and partial results |
 | `get_scan_results` | Get final results of a completed scan | Retrieve complete scan results |
-| `list_active_scans` | List all active and recent scans | Manage multiple concurrent scans |
-| `cancel_scan` | Cancel a running scan | Stop unnecessary or problematic scans |
+| `list_active_scans` | List this session's active and recent scans | Manage multiple concurrent scans |
+| `cancel_scan` | Cancel a running scan this session started | Stop unnecessary or problematic scans |
 | `check_installation` | Verify ASH installation and dependencies | Troubleshoot setup issues |
 | `run_ash_scan` | Run a scan synchronously and return results | Simple blocking scans |
 | `get_scan_summary` | Get a lightweight summary of a completed scan | Cheap status/severity overview without full results |

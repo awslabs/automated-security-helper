@@ -727,9 +727,14 @@ def _prepare_project_outputs(
 
 
 def _register_projects(
-    plan: WorkspacePlan, project_outputs: Dict[str, Path]
+    plan: WorkspacePlan,
+    project_outputs: Dict[str, Path],
+    session_id: Optional[str] = None,
 ) -> Dict[str, str]:
     """Register one scan per active project and return ``{project key: scan id}``.
+
+    Each entry is recorded under ``session_id``, the session that asked for the
+    workspace scan, so the registry tools show it to that session only.
 
     N entries rather than one for the batch, because a client that wants to poll
     progress or fetch results needs a handle per project -- and because the
@@ -756,6 +761,7 @@ def _register_projects(
                     project.gate_threshold or _UNSTATED_SEVERITY_THRESHOLD
                 ),
                 config_path=project.config_source,
+                session_id=session_id,
             )
     except Exception:
         for scan_id in registered.values():
@@ -1283,7 +1289,7 @@ async def mcp_scan_workspace(
         project_outputs = _prepare_project_outputs(
             plan, settings, clean_output=clean_output
         )
-        registered = _register_projects(plan, project_outputs)
+        registered = _register_projects(plan, project_outputs, session_id)
         result = await _execute(plan, settings, project_outputs, progress_reporter)
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         _close_registrations(registered, None, error=str(exc))

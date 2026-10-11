@@ -100,7 +100,9 @@ result = await mcp_scan_directory(
 
 ### get_scan_progress
 
-Gets the current progress of a running scan using file-based tracking.
+Gets the current progress of a running scan using file-based tracking. Only a
+scan the calling session started is visible; another session's scan id gets the
+same response as an id that was never issued.
 
 **Parameters:**
 - `scan_id` (required): The scan ID returned from scan_directory
@@ -208,7 +210,9 @@ results = await mcp_get_scan_results(scan_id="550e8400-e29b-41d4-a716-4466554400
 
 ### list_active_scans
 
-Lists all active and recent scans with their current status.
+Lists the calling session's active and recent scans with their current status.
+Another session's scans are not listed, and `stats` counts only this session's.
+On stdio there is one client, so it sees every scan it started.
 
 **Parameters:**
 None
@@ -264,7 +268,9 @@ scans = await mcp_list_active_scans()
 
 ### cancel_scan
 
-Cancels a running scan and cleans up its resources.
+Cancels a running scan and cleans up its resources. Only a scan the calling
+session started can be cancelled; another session's scan id gets the same
+response as an id that was never issued.
 
 **Parameters:**
 - `scan_id` (required): The scan ID to cancel

@@ -78,6 +78,16 @@ def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
     }
 
 
+def _scan_owner(session_id: Optional[str]) -> str:
+    """The session whose scans a registry tool acts on.
+
+    A caller that names no session is the default session -- stdio's single
+    client, or an in-process caller -- and sees the scans registered the same
+    way, never every session's.
+    """
+    return session_id or _default_session_id()
+
+
 async def mcp_scan_directory(
     directory_path: str,
     severity_threshold: str = "MEDIUM",
@@ -224,6 +234,7 @@ async def mcp_scan_directory(
             severity_threshold=severity_threshold,
             config_path=config_path,
             scan_id=scan_id,
+            session_id=session_id,
         )
 
         # Start the scan process asynchronously
@@ -509,7 +520,9 @@ async def _run_scan_async(
         raise
 
 
-async def mcp_get_scan_progress(scan_id: str) -> Dict[str, Any]:
+async def mcp_get_scan_progress(
+    scan_id: str, session_id: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Get current progress and partial results for a running scan using file-based tracking.
 
@@ -518,6 +531,9 @@ async def mcp_get_scan_progress(scan_id: str) -> Dict[str, Any]:
 
     Args:
         scan_id: The scan ID returned from scan_directory
+        session_id: The calling session. Another session's scan id answers
+            exactly like one that was never issued. None is the default
+            session, which is stdio's and an in-process caller's.
 
     Returns:
         Dictionary with scan progress information
@@ -541,7 +557,9 @@ async def mcp_get_scan_progress(scan_id: str) -> Dict[str, Any]:
             )
 
         # Check scan progress using the scan management function
-        progress_info = await check_scan_progress(scan_id)
+        progress_info = await check_scan_progress(
+            scan_id, session_id=_scan_owner(session_id)
+        )
 
         # Add timestamp and operation to the response for consistency
         progress_info["timestamp"] = datetime.now().isoformat()
@@ -698,29 +716,35 @@ async def mcp_get_scan_results(
         )
 
 
-async def mcp_list_active_scans() -> Dict[str, Any]:
+async def mcp_list_active_scans(session_id: Optional[str] = None) -> Dict[str, Any]:
     """
-    List all active and recent scans with their current status using file-based tracking.
+    List the calling session's active and recent scans with their current status.
 
     This tool uses the scan registry to list all active and recent scans,
     providing more reliable information than event-based tracking.
 
+    Args:
+        session_id: The calling session. Only its own scans are listed, and the
+            statistics count only those, so nothing in the response shows that
+            another session exists. None is the default session.
+
     Returns:
-        Dictionary with information about all scans in the registry
+        Dictionary with information about the session's scans in the registry
     """
+    owner = _scan_owner(session_id)
     try:
         # Get active scans from the scan management function
-        active_scans = await list_active_scans()
+        active_scans = await list_active_scans(session_id=owner)
 
         # Get all scans (including completed ones)
         registry = get_scan_registry()
-        all_scans = registry.list_scans()
+        all_scans = registry.list_scans(session_id=owner)
 
         # Get scan statistics
         stats = {
-            "total_scans": registry.get_scan_count(),
-            "active_scans": registry.get_active_scan_count(),
-            "status_counts": registry.get_scan_status_counts(),
+            "total_scans": registry.get_scan_count(session_id=owner),
+            "active_scans": registry.get_active_scan_count(session_id=owner),
+            "status_counts": registry.get_scan_status_counts(session_id=owner),
         }
 
         # Return standardized successful response
@@ -749,7 +773,9 @@ async def mcp_list_active_scans() -> Dict[str, Any]:
         )
 
 
-async def mcp_cancel_scan(scan_id: str) -> Dict[str, Any]:
+async def mcp_cancel_scan(
+    scan_id: str, session_id: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Cancel a running scan and clean up its resources using file-based tracking.
 
@@ -758,6 +784,8 @@ async def mcp_cancel_scan(scan_id: str) -> Dict[str, Any]:
 
     Args:
         scan_id: The scan ID to cancel
+        session_id: The calling session. Another session's scan id answers
+            exactly like one that was never issued, and nothing is cancelled.
 
     Returns:
         Dictionary with cancellation result information
@@ -781,7 +809,7 @@ async def mcp_cancel_scan(scan_id: str) -> Dict[str, Any]:
             )
 
         # Cancel the scan using the scan management function
-        result = await cancel_scan(scan_id)
+        result = await cancel_scan(scan_id, session_id=_scan_owner(session_id))
 
         # Add timestamp and operation to the response for consistency
         if isinstance(result, dict):
