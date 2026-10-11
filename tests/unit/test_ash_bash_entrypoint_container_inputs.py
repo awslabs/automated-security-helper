@@ -309,3 +309,51 @@ class TestTheConfigIsReadableInsideTheContainer:
 
         assert rc == 0, err
         assert [call[0] for call in calls] == ["build"]
+
+
+class TestAPathTheMountCannotCarryIsRefused:
+    """A comma, a double quote or a line break in a mounted path refuses the run.
+
+    ``--mount`` is read as comma-separated fields, so a comma in a host path starts a
+    field of its own (``x,readonly=false``), a double quote starts CSV quoting, and a
+    line break ends the argument. The wrapper refuses with exit 3 before it builds or
+    runs anything.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        ["x,readonly=false", 'x"y', "x\ny", "x\ry"],
+        ids=["comma", "double-quote", "line-feed", "carriage-return"],
+    )
+    @pytest.mark.parametrize("which", ["source", "output", "config"])
+    def test_it_is_refused_before_anything_runs(
+        self, name, which, fake_runner, project, tmp_path
+    ):
+        odd = tmp_path / name
+        odd.mkdir()
+        args = ["--source-dir", str(project), "--output-dir", str(tmp_path / "out")]
+        if which == "source":
+            args[1] = str(odd)
+        elif which == "output":
+            args[3] = str(odd)
+        else:
+            (odd / "ash.yaml").write_text("project_name: p\n")
+            args += ["--config", str(odd / "ash.yaml")]
+
+        rc, output, calls = _run_ash_status(fake_runner, project, args)
+
+        assert rc == 3, output
+        assert calls == [], f"the runner was called: {calls}"
+        assert "--mount" in output
+
+    def test_ordinary_punctuation_still_runs(self, fake_runner, tmp_path):
+        """Control."""
+        source = tmp_path / "with space; and (parens)"
+        source.mkdir()
+
+        rc, output, calls = _run_ash_status(
+            fake_runner, source, ["--no-build", "--output-dir", str(tmp_path / "out")]
+        )
+
+        assert rc == 0, output
+        assert [call[0] for call in calls] == ["run"]

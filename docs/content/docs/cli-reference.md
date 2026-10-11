@@ -212,6 +212,12 @@ root) is handed to the container the same way. The `./ash` wrapper and `Invoke-A
 mount a config from outside the source directory on its own, so an `extends` base next
 to it is not reachable there; use `ash --mode container` for such a chain.
 
+A path that would be mounted (the source and output directories, the config file and
+the files it extends, the workspace policy) may not contain a comma, a double quote, a
+carriage return or a line feed: `--mount` reads its value as comma-separated fields, so
+such a path would be read as something else. The run is refused with exit 3 before
+anything is built.
+
 `--ignore-suppressions` is passed to the scan inside the container, which is where
 suppressions are applied: the host reads that scan's `ash.sarif` back to compute the
 exit code. `--log-level` is passed too, so the log inside the container is kept at the

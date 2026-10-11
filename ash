@@ -125,6 +125,23 @@ SOURCE_DIR="$(cd "$SOURCE_DIR"; pwd)"
 mkdir -p "${OUTPUT_DIR}"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR"; pwd)"
 
+# --mount reads its value as comma-separated fields, so a comma in a host path starts
+# a field of its own (x,readonly=false), a double quote starts CSV quoting, and a line
+# break ends the argument. A path holding one is refused before anything is built or
+# run, with exit 3.
+require_mountable() {
+  case "$2" in
+    *,* | *\"* | *$'\n'* | *$'\r'*)
+      echo "ERROR: The $1 '$2' cannot be handed to the container runner: --mount reads its value as comma-separated fields, so a path holding a comma, a double quote or a line break would be read as something else. Rename it, or choose another path." >&2
+      exit 3
+      ;;
+  esac
+}
+if [[ "${NO_RUN}" = "NO" ]]; then
+  require_mountable "source directory" "${SOURCE_DIR}"
+  require_mountable "output directory" "${OUTPUT_DIR}"
+fi
+
 # The file's path with every symlink followed: the link's target is what is read.
 resolve_file() {
   local path="$1" target dir
@@ -156,6 +173,7 @@ if [[ "${NO_RUN}" = "NO" && ( "${CONFIG_GIVEN}" = "YES" || -n "${CONFIG_PATH}" )
     exit 3
   fi
   CONFIG_REAL="$(resolve_file "${CONFIG_PATH}")"
+  require_mountable "config file" "${CONFIG_REAL}"
   SOURCE_REAL="$(cd "${SOURCE_DIR}" && pwd -P)"
   case "${CONFIG_REAL}" in
     "${SOURCE_REAL%/}"/*)

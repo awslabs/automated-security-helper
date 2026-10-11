@@ -866,6 +866,53 @@ CONTAINER_CONFIG_ROOT = "/ash-config"
 CONTAINER_WORKSPACE_CONFIG_ROOT = "/ash-workspace-config"
 
 
+#: Characters the runner's ``--mount`` syntax cannot carry in a path. Its value is
+#: read as comma-separated ``key=value`` fields (CSV), so a comma starts a field of
+#: its own (``x,readonly=false``), a double quote starts CSV quoting, and a line
+#: break ends the argument for a runner that reads it a line at a time.
+_UNMOUNTABLE_CHARACTERS = (",", '"', "\n", "\r")
+
+
+class UnmountablePathError(ValueError):
+    """A host path that would be mounted holds a character ``--mount`` cannot carry."""
+
+
+def _require_mountable(label: str, path: Path | str) -> None:
+    """Refuse a path the runner would read as something other than that path."""
+    text = str(path)
+    if any(character in text for character in _UNMOUNTABLE_CHARACTERS):
+        raise UnmountablePathError(
+            f"The {label} {text!r} cannot be handed to the container runner: --mount "
+            "reads its value as comma-separated fields, so a path holding a comma, a "
+            "double quote or a line break would be read as something else. Rename it, "
+            "or choose another path."
+        )
+
+
+def _require_mountable_inputs(
+    source_dir: Path | str,
+    output_dir: Path | str,
+    config: str | None,
+    workspace_config: str | None,
+    workspace_relative_file: str | None,
+) -> None:
+    """Check every host path a run would mount, before anything is built or run."""
+    source = Path(source_dir).resolve()
+    _require_mountable("source directory", source)
+    _require_mountable("output directory", Path(output_dir).resolve())
+    if config:
+        _host_file_in_container(
+            config, source, CONTAINER_CONFIG_ROOT, follow_extends=True
+        )
+    if workspace_config and workspace_relative_file is not None:
+        _host_file_in_container(
+            workspace_config,
+            source,
+            CONTAINER_WORKSPACE_CONFIG_ROOT,
+            follow_extends=False,
+        )
+
+
 def _unreadable_config(config: str | None) -> str | None:
     """Why ``--config`` cannot be handed to the scan in the container, or None.
 
@@ -928,6 +975,7 @@ def _host_file_in_container(
 
     mounts: List[str] = []
     for file in files:
+        _require_mountable("config file", file)
         destination = f"{mount_root}/{file.relative_to(root).as_posix()}"
         mounts.extend(
             ["--mount", f"type=bind,source={file},destination={destination},readonly"]
@@ -1016,6 +1064,9 @@ def _assemble_run_command(
     Returns:
         A list of strings representing the complete run command.
     """
+    _require_mountable("source directory", source_dir)
+    _require_mountable("output directory", output_dir)
+
     cmd: List[str] = [*oci_command_prefix, resolved_oci_runner, "run", "--rm"]
 
     # Environment variables
@@ -1356,8 +1407,20 @@ def run_ash_container(
     if ash_plugin_modules is None:
         ash_plugin_modules = []
 
-    # Before any build: a scan that cannot be given its config is not worth one.
+    # Before any build: a scan that cannot be given its config, or whose paths the
+    # runner cannot mount, is not worth one.
     config_refusal = _unreadable_config(config) if run else None
+    if config_refusal is None and run:
+        try:
+            _require_mountable_inputs(
+                source_dir,
+                output_dir,
+                config,
+                workspace_config,
+                workspace_relative_file,
+            )
+        except UnmountablePathError as e:
+            config_refusal = str(e)
     if config_refusal is not None:
         typer.secho(config_refusal, fg=typer.colors.RED)
         return _not_started(
@@ -1550,43 +1613,53 @@ def run_ash_container(
             output_dir.mkdir(parents=True, exist_ok=True)
             ASH_LOGGER.info(f"Using default output directory: {output_dir}")
 
-        run_cmd = _assemble_run_command(
-            oci_command_prefix=oci_command_prefix,
-            resolved_oci_runner=resolved_oci_runner,
-            image_name=ash_base_image_name,
-            source_dir=source_dir,
-            output_dir=output_dir,
-            offline=offline,
-            debug=debug,
-            color=color,
-            quiet=quiet,
-            progress=progress,
-            verbose=verbose,
-            simple=simple,
-            python_based_plugins_only=python_based_plugins_only,
-            cleanup=cleanup,
-            inspect=inspect,
-            fail_on_findings=fail_on_findings,
-            fail_on_incomplete_scanners=fail_on_incomplete_scanners,
-            phases=phases,
-            scanners=scanners,
-            exclude_scanners=exclude_scanners,
-            output_formats=output_formats,
-            config=config,
-            config_overrides=config_overrides,
-            existing_results=existing_results,
-            ash_plugin_modules=ash_plugin_modules,
-            strategy=strategy,
-            ctx=ctx,
-            container_network=container_network,
-            workspace_relative_file=workspace_relative_file,
-            allow_missing_projects=allow_missing_projects,
-            shard_index=shard_index,
-            shard_count=shard_count,
-            workspace_config=workspace_config,
-            ignore_suppressions=ignore_suppressions,
-            log_level=log_level,
-        )
+        try:
+            run_cmd = _assemble_run_command(
+                oci_command_prefix=oci_command_prefix,
+                resolved_oci_runner=resolved_oci_runner,
+                image_name=ash_base_image_name,
+                source_dir=source_dir,
+                output_dir=output_dir,
+                offline=offline,
+                debug=debug,
+                color=color,
+                quiet=quiet,
+                progress=progress,
+                verbose=verbose,
+                simple=simple,
+                python_based_plugins_only=python_based_plugins_only,
+                cleanup=cleanup,
+                inspect=inspect,
+                fail_on_findings=fail_on_findings,
+                fail_on_incomplete_scanners=fail_on_incomplete_scanners,
+                phases=phases,
+                scanners=scanners,
+                exclude_scanners=exclude_scanners,
+                output_formats=output_formats,
+                config=config,
+                config_overrides=config_overrides,
+                existing_results=existing_results,
+                ash_plugin_modules=ash_plugin_modules,
+                strategy=strategy,
+                ctx=ctx,
+                container_network=container_network,
+                workspace_relative_file=workspace_relative_file,
+                allow_missing_projects=allow_missing_projects,
+                shard_index=shard_index,
+                shard_count=shard_count,
+                workspace_config=workspace_config,
+                ignore_suppressions=ignore_suppressions,
+                log_level=log_level,
+            )
+        except UnmountablePathError as e:
+            # Checked before the build already; this catches a path that only
+            # became unmountable once resolved here.
+            typer.secho(str(e), fg=typer.colors.RED)
+            return _not_started(
+                create_completed_process(
+                    args=[], returncode=3, stdout="", stderr=str(e)
+                )
+            )
 
         return _execute_container(run_cmd, debug=debug)
 

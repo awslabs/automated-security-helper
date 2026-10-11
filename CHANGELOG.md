@@ -164,6 +164,12 @@
   `config_base_gate` passed to `run_ash_scan` with container or nix mode is refused,
   because the ASH those modes run would read the config without it. See
   [Running a scan in a container](docs/content/docs/cli-reference.md#running-a-scan-in-a-container).
+- **Container mode refuses a mounted path that `--mount` cannot carry.** A comma, a
+  double quote, a carriage return or a line feed in the source or output directory, the
+  config file or a file it extends, or the workspace policy now refuses the run with
+  exit 3 before anything is built. `--mount` reads its value as comma-separated
+  fields, so a directory named `x,readonly=false` used to add a mount option of its own.
+  The same holds for `./ash` and `Invoke-ASH`.
 - **`--ignore-suppressions` works in container mode.** It was not passed to the scan
   inside the container, which applies the suppressions, so suppressed findings stayed
   out of the reports and out of the exit code the host computes from them.

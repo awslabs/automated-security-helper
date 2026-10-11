@@ -233,6 +233,21 @@ function Invoke-ASH {
         }
         $outputDirFull = Get-Item $OutputDir | Select-Object -ExpandProperty FullName
 
+        # --mount reads its value as comma-separated fields, so a comma in a host path
+        # starts a field of its own (x,readonly=false), a double quote starts CSV
+        # quoting, and a line break ends the argument. A path holding one is refused
+        # before anything is built or run, with exit 3.
+        function Assert-Mountable([string]$Label, [string]$Path) {
+            if ($Path -match '[,"\r\n]') {
+                Write-Error "The $Label '$Path' cannot be handed to the container runner: --mount reads its value as comma-separated fields, so a path holding a comma, a double quote or a line break would be read as something else. Rename it, or choose another path."
+                exit 3
+            }
+        }
+        if (-not $NoRun) {
+            Assert-Mountable 'source directory' $sourceDirFull
+            Assert-Mountable 'output directory' $outputDirFull
+        }
+
         # The config file, -Config or else ASH_CONFIG, is read by the scan inside the
         # container, which sees the host only through its mounts: the host path names
         # nothing there. A config inside SourceDir is read through the read-only /src
@@ -247,6 +262,7 @@ function Invoke-ASH {
                 exit 3
             }
             $configFull = (Get-Item -LiteralPath $Config).FullName
+            Assert-Mountable 'config file' $configFull
             $separators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
             $sourcePrefix = $sourceDirFull.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
             $pathComparison = if ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
