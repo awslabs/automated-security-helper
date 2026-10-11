@@ -136,3 +136,11 @@ def test_a_written_out_default_list_plus_one_decides_every_entry() -> None:
         denied_paths=[*RuntimeOverridesConfig().denied_paths, "/project_name"]
     )
     assert ccp.exempt_paths(policy) == ()
+
+
+def test_an_entry_inside_a_field_decides_the_whole_field() -> None:
+    """Listing ``/sandbox/mode`` takes the sandbox out of the restrict-only rule."""
+    policy = _policy(denied_paths=["/sandbox/mode"])
+    exempt = ccp.exempt_paths(policy)
+    assert "/sandbox" not in exempt and "/sandbox/**" not in exempt
+    assert "/ash_plugin_modules" in exempt

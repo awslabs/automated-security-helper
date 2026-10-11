@@ -423,8 +423,9 @@ def exempt_paths(policy: RuntimeOverridesConfig) -> Tuple[str, ...]:
     base instead (``_widenings``), and, with ``HONOR_DELIVERED_SUPPRESSIONS``, the
     suppressions and ignore paths, which apply marked. Under a default
     ``denied_paths`` all of them. Under the operator's own list, each that the
-    list itself names (the pointer, or an entry above it) is decided there
-    instead. Value patterns apply to them either way.
+    list itself names (the pointer, an entry above it, or one inside it, such as
+    ``/sandbox/mode``) is decided there instead, for the whole field. Value
+    patterns apply to them either way.
     """
     candidates = RESTRICT_ONLY_PATHS + (
         SUPPRESSION_PATHS if HONOR_DELIVERED_SUPPRESSIONS else ()
@@ -437,7 +438,10 @@ def exempt_paths(policy: RuntimeOverridesConfig) -> Tuple[str, ...]:
     return tuple(
         candidate
         for candidate in candidates
-        if not any(_names(entry, candidate.removesuffix("/**")) for entry in listed)
+        if not any(
+            _names(entry, candidate.removesuffix("/**")) or _names(candidate, entry)
+            for entry in listed
+        )
     )
 
 
