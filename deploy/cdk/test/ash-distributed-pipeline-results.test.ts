@@ -3,12 +3,9 @@
  *
  * WHY THE WRITE SCOPE MATTERS
  * ---------------------------
- * The merge action owns the pipeline's verdict, and it forms it from whatever sits
- * under `executions/<execution id>/` in the results bucket. Every shard project's
- * role could write anywhere in that bucket (`grantWrite` on `<bucket>/*`), and a
- * shard runs scanners over the repository being scanned. So one shard could replace
- * another shard's `ash_aggregated_results.json`, or the merged output, and the merge
- * would report a verdict about results nobody produced. Each shard needs to write
+ * The merge action owns the pipeline's verdict, and it forms it from what sits under
+ * `executions/<execution id>/` in the results bucket, so each result set has to be
+ * written only by the project that produces it. Each shard writes
  * `executions/*\/shard-<its index>/*` and nothing else.
  *
  * The check is semantic: it asks whether any write grant on a shard's role COVERS a
@@ -19,9 +16,9 @@
  * WHY THE CONFIG PATH MATTERS
  * ---------------------------
  * The shard projects set `ASH_CONFIG` as a project environment variable and write the
- * file only when a base config was supplied. With none, ASH used to treat a missing
- * `ASH_CONFIG` file as "use defaults". An ASH that refuses an explicit config path
- * that does not exist, with exit 3 as a config error, would fail every shard of a
+ * file only when a base config was supplied. Some ASH versions read a missing
+ * `ASH_CONFIG` file as "use defaults"; others refuse an explicit config path that
+ * does not exist, with exit 3 as a config error, which would fail every shard of a
  * pipeline deployed without `AshBaseConfigYaml`. Whatever reaches `ash` has to be
  * a config file that exists, or no `ASH_CONFIG` at all. The phases are run in
  * separate shells, as the stack's own comment warns an `export` does not reliably

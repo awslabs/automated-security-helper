@@ -10,8 +10,8 @@ Why this file exists
 scanner was MISSING or ERROR exits 1, outcome "error", rather than 0, outcome "pass",
 which is the one outcome that APPROVEs. ASH releases up to v3.7.1 have no such option,
 and their ``ash scan`` collects unknown options instead of refusing them, so the flag
-was accepted and dropped: measured on v3.7.0, bandit and grype both MISSING still
-exited 0 with the flag passed. The handler therefore asks ``ash scan --help`` once
+has no effect there: measured on v3.7.0, bandit and grype both MISSING exit 0 with the
+flag passed. The handler therefore asks ``ash scan --help`` once
 whether the option exists, and refuses to scan when it does not, which the handler
 reports as outcome "error" with a REVOKE.
 

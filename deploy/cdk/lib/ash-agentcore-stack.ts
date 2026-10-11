@@ -382,8 +382,8 @@ export class AshAgentCoreStack extends Stack {
      * A custom auth header only reaches the container if it is on the runtime's
      * allowlist, so the allowlist must appear exactly when auth is configured.
      *
-     * The object keys are CloudFormation-cased on purpose. `Fn::If` bypasses the
-     * L1's camelCase-to-PascalCase property mapper, so writing
+     * The object keys are CloudFormation-cased on purpose. `Fn::If` is not passed
+     * through the L1's camelCase-to-PascalCase property mapper, so writing
      * `requestHeaderAllowlist` here would emit a property AgentCore does not
      * recognize — and it would emit silently.
      */

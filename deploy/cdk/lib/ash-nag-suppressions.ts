@@ -97,10 +97,10 @@
  * each shipped `rules_to_suppress` entry to the verdicts that consulted it:
  * 129 entries -> 89, of which 99 unconsulted -> 17, and 53 base64-encoded reasons
  * -> 0. Intermediate states of this branch went higher than 129 before coming down;
- * those numbers are not the ones to quote. Five of the 17 went later, with the grants
- * they sat on: the shard and merge roles stopped receiving `GetSecretValue` on the
- * auth secret nothing in that stack reads, so their `SecretsmanagerAccess` policies
- * no longer exist. 12 remain.
+ * those numbers are not the ones to quote. Five of the 17 sat on grants the shard and
+ * merge roles do not have: neither receives `GetSecretValue` on the auth secret, which
+ * nothing in that stack reads, so neither has a `SecretsmanagerAccess` policy. 12
+ * remain.
  *
  * THE 12 THAT REMAIN ARE ALL IN AshDistributedPipeline, AND THEY STAY DELIBERATELY.
  * test/ash-template-size.test.ts pins the number and enumerates them, so a new
@@ -451,12 +451,12 @@ const SCAN_PROJECT_SSM_REASON =
  * the entries no rule consults, pinned and enumerated by test/ash-template-size.test.ts;
  * the header says why removing it would be a claim about aws-cdk-lib's grant
  * implementations rather than about this app. What it must not do is carry a reason
- * describing wildcards it does not have, which is what the shared reason did --
- * `Shard0Project/Role/SsmAccess` grants four `ssm:*Parameter*` reads on one parameter ARN
- * and was shipping a sentence about log streams and S3 object keys.
+ * describing wildcards it does not have, as a reason shared with the other groups
+ * would: `Shard0Project/Role/SsmAccess` grants four `ssm:*Parameter*` reads on one
+ * parameter ARN, and the shared sentence is about log streams and S3 object keys.
  *
- * There was a `SecretsmanagerAccess` group here too, on the same terms. It went with its
- * grant: these roles never read the auth secret, so they no longer receive one.
+ * There is no `SecretsmanagerAccess` group: these roles never read the auth secret, so
+ * they are not granted it.
  */
 export function suppressScanProjectRoleWildcards(scope: IConstruct): void {
   suppressPolicyWildcardsByGroup(scope, {

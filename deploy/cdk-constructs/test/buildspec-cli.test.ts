@@ -104,13 +104,13 @@ describe('check', () => {
     const streams = captureStreams();
     try {
       write(root);
-      const victim = generatedBuildspecs()[0].filename;
-      fs.rmSync(path.join(root, victim));
+      const removed = generatedBuildspecs()[0].filename;
+      fs.rmSync(path.join(root, removed));
 
       const rc = check(root);
       expect(rc).toBe(1);
       const err = streams.err.join('');
-      expect(err).toContain(`${victim}: missing`);
+      expect(err).toContain(`${removed}: missing`);
       expect(err).toContain('Generated buildspecs are out of date');
       // The message has to say how to fix it, or the gate is a dead end.
       expect(err).toContain('npm run generate:buildspec');
@@ -125,8 +125,8 @@ describe('check', () => {
     const streams = captureStreams();
     try {
       write(root);
-      const victim = generatedBuildspecs()[0];
-      const target = path.join(root, victim.filename);
+      const spec = generatedBuildspecs()[0];
+      const target = path.join(root, spec.filename);
       // One appended byte. A parsed-YAML comparison would very likely still
       // pass here, which is precisely why the implementation compares bytes.
       fs.appendFileSync(target, '\n');
@@ -134,8 +134,8 @@ describe('check', () => {
       const rc = check(root);
       expect(rc).toBe(1);
       const err = streams.err.join('');
-      expect(err).toContain(`${victim.filename}: differs from generated output`);
-      const expectedLen = Buffer.from(victim.contents, 'utf8').length;
+      expect(err).toContain(`${spec.filename}: differs from generated output`);
+      const expectedLen = Buffer.from(spec.contents, 'utf8').length;
       expect(err).toContain(`on disk ${expectedLen + 1} bytes`);
       expect(err).toContain(`generated ${expectedLen} bytes`);
     } finally {
@@ -149,8 +149,8 @@ describe('check', () => {
     const streams = captureStreams();
     try {
       write(root);
-      const victim = generatedBuildspecs()[0];
-      const target = path.join(root, victim.filename);
+      const spec = generatedBuildspecs()[0];
+      const target = path.join(root, spec.filename);
       fs.appendFileSync(target, '\n');
       const before = fs.readFileSync(target);
 

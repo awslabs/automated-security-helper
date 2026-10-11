@@ -137,8 +137,7 @@ data "aws_iam_policy_document" "build" {
 
   # Pull covers the shared base image. Scoped to this account's repositories
   # because the base image ARN is not known here, which is why it is read-only:
-  # the build runs privileged Docker, and a push grant this wide could replace the
-  # images every other workload in the account pulls.
+  # the build runs privileged Docker, and push stays on this module's repository.
   statement {
     sid    = "PullBaseImage"
     effect = "Allow"

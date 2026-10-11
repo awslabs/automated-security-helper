@@ -186,8 +186,7 @@
  * empty population from the other side.
  *
  * WHAT THE FIVE TEMPLATES MEASURED when the per-policy reasons landed, against a
- * 51,200-byte cap, with the `main` of that time beside each for the diff a reviewer
- * read then:
+ * 51,200-byte cap, with the `main` of that time beside each:
  *
  *                            bytes    margin        on main    margin on main
  *   AshAgentCore            48,809    under 2,391    50,934     under     266
@@ -918,8 +917,8 @@ describe('every shipped reason is true of the policy it lands on', () => {
     // fewer actions. It is the count of claims made, so a reason that named no action at
     // all would be caught only by the assertion above. 98 measured: the five
     // `SecretsmanagerAccess` reasons named two actions each and went with their grants, and
-    // the four shard `S3Access` reasons no longer name s3:DeleteObject*, which a shard is no
-    // longer granted.
+    // the four shard `S3Access` reasons name no s3:DeleteObject*, which a shard is not
+    // granted.
     expect(checked).toBeGreaterThanOrEqual(98);
   });
 

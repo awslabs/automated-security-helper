@@ -20,9 +20,9 @@
  *   `--trust-upstream-session-id`, which states that a platform in front of ASH
  *   issues and authenticates that header. AgentCore does; a load balancer does not.
  *
- * The entrypoint used to pass neither, and when a Host allowlist was requested from
- * an ASH whose `ash mcp` lacked `--allowed-host` it warned and started anyway, so
- * the Fargate service accepted every Host header while its stack said otherwise.
+ * When a Host allowlist is requested from an ASH whose `ash mcp` lacks
+ * `--allowed-host`, the entrypoint refuses to start, so a stack that asks for an
+ * allowlist runs with one or does not run.
  *
  * HOW THE ENTRYPOINT IS TOLD, AND WHY THESE NAMES
  * -----------------------------------------------

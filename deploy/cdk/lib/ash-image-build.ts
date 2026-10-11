@@ -584,17 +584,14 @@ export class AshImageBuild extends Construct {
     /*
      * CLOUDFORMATION'S RESPONSE URL REACHES THE BUILD THROUGH A SECURESTRING PARAMETER.
      *
-     * The starter used to pass it to StartBuild as a PLAINTEXT environment override. A
-     * PLAINTEXT override is stored with the build and returned by
-     * `codebuild:BatchGetBuilds` and the console to anyone who can read builds in the
-     * account, for as long as the build record exists, and whoever holds the URL can
-     * answer CloudFormation for this resource: report SUCCESS before the image exists,
-     * or FAILED to roll the stack back. The starter now writes the URL to one
-     * SecureString parameter per project, encrypted with this stack's own key, and
-     * passes the parameter's NAME as a PARAMETER_STORE override, which CodeBuild
-     * resolves with the project's role. The build record holds the name only, and
-     * reading the value takes `kms:Decrypt` on that key, which read-only access does
-     * not carry. Each Create or Update overwrites the parameter; a Delete removes it.
+     * The URL is what answers CloudFormation for this resource, so it stays out of the
+     * build record. A PLAINTEXT override is stored with the build and returned by
+     * `codebuild:BatchGetBuilds` and the console for as long as the record exists.
+     * The starter writes the URL to one SecureString parameter per project, encrypted
+     * with this stack's own key, and passes the parameter's NAME as a PARAMETER_STORE
+     * override, which CodeBuild resolves with the project's role. The build record
+     * holds the name only, and reading the value takes `kms:Decrypt` on that key,
+     * which read-only access does not carry. Each Create or Update overwrites the parameter; a Delete removes it.
      *
      * The name is derived from the project name in the handler and in the ARNs below,
      * from the one constant, so the two cannot drift. The project's role already holds
@@ -708,8 +705,8 @@ export class AshImageBuild extends Construct {
             // INSTALL_ASH_REVISION=LOCAL builds the tree fetched above. Any other
             // value makes the Dockerfile clone again with `git clone --branch`,
             // which cannot take a commit SHA and whose failure the Dockerfile
-            // swallows with `|| echo` (Dockerfile:99-103), so a SHA pin would not
-            // have built the commit it names.
+            // swallows with `|| echo` (Dockerfile:99-103), so with it a SHA pin
+            // would not build the commit it names.
             ...targetsNeeded.map(
               (target) =>
                 'docker build ' +

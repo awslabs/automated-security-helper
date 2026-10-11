@@ -4,14 +4,11 @@
  * WHY THIS FILE EXISTS
  * --------------------
  * The gate clones the pull request and runs `ash scan` over it. With no `--config`
- * and no `ASH_CONFIG`, ASH looks for a config INSIDE the scanned tree
- * (`_discovered_config_path`, interactions/run_ash_scan.py), so the pull request
- * under judgment chose the rules it was judged by: a committed
- * `fail_on_findings: false` turned a failing scan (exit 2) into exit 0, which the
- * handler reads as "passed" and, with `ApprovalGate=true`, APPROVEs. Measured
- * against main.
- * `AshBaseConfigYaml`, the parameter that looks like the operator's control, was
- * stored in SSM and handed to the function by name, and nothing read it.
+ * and no `ASH_CONFIG`, ASH looks for a config inside the scanned tree
+ * (`_discovered_config_path`, interactions/run_ash_scan.py), which here is the pull
+ * request. The gate's verdict follows the operator's settings instead, including
+ * `AshBaseConfigYaml`, which the stack stores in SSM and hands to the function by
+ * name.
  *
  * What these tests require, observed at the boundary that matters -- what the real
  * handler hands to `ash`:
@@ -22,9 +19,8 @@
  * - With `AshBaseConfigYaml` supplied, that file holds exactly the operator's
  *   document. With none supplied, it is still the operator's (a default), never a
  *   file from the pull request.
- * - The scan runs without the function's AWS credentials. Scanners run over code the
- *   pull request controls, and the function's role can comment on and approve pull
- *   requests; the scan needs neither.
+ * - The scan runs without the function's AWS credentials. The function's role
+ *   comments on and votes on pull requests, and the scan needs neither.
  *
  * The handler is read per invocation, so the configuration is read per invocation
  * too: the Lambda image's ENTRYPOINT is the runtime interface client and runs no

@@ -5,12 +5,10 @@
  * --------------------
  * The bootstrap custom resource answers CloudFormation from inside the image build
  * (see ash-image-build.ts), so the build has to learn the pre-signed response URL
- * CloudFormation handed the starter Lambda. The starter passed it to StartBuild as
- * a PLAINTEXT environment-variable override. A PLAINTEXT override is stored with the
- * build and returned by `codebuild:BatchGetBuilds` and the console to anyone who can
- * read builds in the account, and whoever holds the URL can answer CloudFormation
- * for this resource: report SUCCESS before the image exists, or FAILED to roll the
- * stack back.
+ * CloudFormation handed the starter Lambda. The URL is what answers CloudFormation
+ * for this resource, so it stays out of the build record: a PLAINTEXT environment
+ * override is stored with the build and returned by `codebuild:BatchGetBuilds` and
+ * the console, while a PARAMETER_STORE override stores only a parameter name.
  *
  * The property asserted: the URL appears nowhere in the StartBuild request and
  * nowhere in the starter's output, and the build can still answer CloudFormation.
@@ -42,8 +40,8 @@ const STACKS: Array<[string, CfnTemplate]> = [
   ['AshCodeCommitGate', synth((app) => new AshCodeCommitGateStack(app, 'AshCodeCommitGate'))],
 ];
 
-/** A response URL shaped like CloudFormation's: pre-signed, with a signature to leak. */
-const SIGNATURE = 'response-url-signature-must-not-leak';
+/** A response URL shaped like CloudFormation's: pre-signed, with a signature the checks look for. */
+const SIGNATURE = 'response-url-signature-marker';
 function responseUrl(base = 'https://cloudformation-custom-resource-response-useast1.s3.amazonaws.com'): string {
   return (
     `${base}/arn%3Aaws%3Acloudformation%3Aus-east-1%3A000000000000%3Astack/AshTestStack/test` +

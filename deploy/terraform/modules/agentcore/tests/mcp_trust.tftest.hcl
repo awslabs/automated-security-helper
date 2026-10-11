@@ -1,7 +1,7 @@
 # The AgentCore runtime tells ASH that the platform issues the session header.
 #
-# Why this file exists: ASH's MCP server, in stateless streamable-http mode, no longer
-# treats a client-supplied Mcp-Session-Id as a session identity. The tools that need
+# Why this file exists: ASH's MCP server, in stateless streamable-http mode, does not
+# treat a client-supplied Mcp-Session-Id as a session identity. The tools that need
 # one (source delivery, the scan registry, profiles) refuse unless the operator states
 # that a platform in front of ASH issues and authenticates that header, which is what
 # Bedrock AgentCore Runtime does. ash-mcp-serve maps ASH_MCP_TRUST_UPSTREAM_SESSION_ID

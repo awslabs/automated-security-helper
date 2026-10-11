@@ -39,8 +39,8 @@ onto the shared image:
 
 The image build's role can pull from any repository in the account and Region,
 because the shared base image's ARN is not known to this module, and can push only
-to this module's own repository. The build runs privileged Docker, and a push grant
-on `repository/*` could replace the images every other workload pulls.
+to this module's own repository. The build runs privileged Docker, so the push grant
+names no other repository.
 
 Keeping this separate from `ash-image-pipeline` is deliberate. Neither addition is
 useful to the other three targets, and `pip install` needs a reachable index at
@@ -55,8 +55,7 @@ schedule exists to prevent.
 ## The scan runs with the operator's configuration
 
 Without `--config` or `ASH_CONFIG`, ASH looks for a config inside the scanned tree,
-which here is the pull request, so a pull request could choose the ASH config it is
-judged by. The handler always passes `--config`: the base config
+which here is the pull request. The handler always passes `--config`: the base config
 from `base_config_ssm_parameter_name`, read again for every scan, or, with none set,
 a `{}` document beside the clone, which is ASH's defaults. A pull request's own
 `.ash/.ash.yaml` is never read. That is ASH's configuration only: ASH still passes

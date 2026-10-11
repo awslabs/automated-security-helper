@@ -155,10 +155,9 @@ export const SSM_STANDARD_TIER_MAX_BYTES = 4096;
  * WHAT IT DOES NOT DO: restrict the network. It decides where scanner data comes
  * from, not where the workload can connect. The Fargate tasks keep TCP 443 egress
  * through a NAT gateway, AgentCore runs in `PUBLIC` network mode, the CodeBuild
- * projects have no VPC, and the gate has none unless `VpcId` is set. This
- * description used to say offline scans "need no network egress", which an
- * operator scanning untrusted code could read as an egress control. Making offline
- * mode impose one instead was rejected: it needs VPC endpoints (an hourly charge
+ * projects have no VPC, and the gate has none unless `VpcId` is set. The
+ * description says so and points at VPC placement. Making offline mode restrict
+ * egress itself was rejected: it needs VPC endpoints (an hourly charge
  * per endpoint per Availability Zone) and a network layout these templates cannot
  * choose for an adopter, and the gate's opt-in VPC placement already exists for
  * operators who want egress confined.
@@ -190,12 +189,12 @@ export function ashOfflineMode(scope: Stack): CfnParameter {
  * parameter's name only when this value was non-empty at deploy time (see
  * `configParameterNameOrEmpty`), so a parameter edited after an empty deploy is
  * read by nothing. The description therefore says to deploy a short document such
- * as `{}` first; it used to say "deploy empty", which could not work.
+ * as `{}` first.
  *
- * WHERE IT LANDS. The description names no file: it used to say
- * `.ash/.ash.yaml`, which nothing writes. The MCP entrypoint and the pipeline
- * builds write `ASH_MATERIALIZED_CONFIG_PATH` and point `ASH_CONFIG` at it; the
- * gate writes a file per invocation and passes it with `--config`.
+ * WHERE IT LANDS. The description names no file, because the targets differ: the
+ * MCP entrypoint and the pipeline builds write `ASH_MATERIALIZED_CONFIG_PATH` and
+ * point `ASH_CONFIG` at it; the gate writes a file per invocation and passes it
+ * with `--config`.
  *
  * TWO ALTERNATIVES WERE REJECTED. Splitting the YAML across a
  * `CommaDelimitedList` corrupts any document containing a comma, which is most

@@ -11,13 +11,13 @@ Dockerfile's ``OFFLINE=YES`` and sets ``ASH_OFFLINE``, so scanner databases and 
 are baked in and ASH does not fetch them at scan time. It changes nothing about where
 the workload can connect. The CDK Fargate task keeps TCP 443 egress to any address
 through a NAT gateway, AgentCore runs in PUBLIC network mode, the CodeBuild projects
-have no VPC, and the Terraform Fargate module allows all egress. Yet the CDK parameter
-description said offline scans "need no network egress", and deploy/README.md said an
-offline scan "cannot reach out from inside your account". An operator who relies on
-that to scan untrusted code has no egress control at all.
+have no VPC, and the Terraform Fargate module allows all egress. So the descriptions
+call offline mode an image setting and point at VPC placement for egress; phrases such
+as "need no network egress" and "cannot reach out from inside your account" are
+rejected.
 
-The fix chosen is that the descriptions stop claiming a network restriction, rather
-than offline mode starting to impose one: restricting egress per target needs VPC
+The descriptions state the limit rather than offline mode imposing one: restricting
+egress per target needs VPC
 endpoints (an hourly charge per endpoint per Availability Zone) and a network layout
 these templates cannot choose for an adopter, and the gate's opt-in VPC placement
 already exists for operators who want it.

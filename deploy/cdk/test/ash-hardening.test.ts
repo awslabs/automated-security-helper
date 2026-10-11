@@ -202,7 +202,7 @@ describe('the Fargate VPC does not auto-assign public IPv4 addresses', () => {
 
   test('the NAT the template deploys is the one the layout was built for', () => {
     // Binds the constant to the artifact. Without this the guard below could be
-    // bypassed by leaving NAT_GATEWAYS at 1 and writing a different literal into
+    // defeated by leaving NAT_GATEWAYS at 1 and writing a different literal into
     // the VPC's own `natGateways`, which is precisely the drift the guard exists to
     // catch.
     template.resourceCountIs('AWS::EC2::NatGateway', NAT_GATEWAYS);

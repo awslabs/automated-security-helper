@@ -6,10 +6,9 @@
  * With `--changed-files-only --base-ref <destination>`, ASH keeps only the findings
  * whose file appears in `git diff --name-only`. git prints a name with a non-ASCII
  * byte, a quote, a backslash or a control character C-quoted (`"\303\251.py"`),
- * which matches no scanned path, so every finding in such a file is dropped without
- * a warning and the scan exits 0: "passed", and with ApprovalGate an APPROVE.
- * Findings in files the pull request did not touch stop counting as well. The gate
- * now scans the whole tree unless an operator turns the narrowing on.
+ * which matches no scanned path, so findings in such a file are not counted, and
+ * neither are findings in files the pull request did not touch. The gate scans the
+ * whole tree unless an operator turns the narrowing on.
  */
 
 import { AshCodeCommitGateStack } from '../lib/ash-codecommit-gate-stack';

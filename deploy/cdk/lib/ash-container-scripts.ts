@@ -169,7 +169,7 @@ def download(bucket: str, prefix: str, local_dir: str) -> int:
             destination = root / relative
 
             # Refuse a key that would escape the destination directory. S3 keys
-            # are attacker-influenced in the general case, and a key containing
+            # are written by whoever can write the bucket, and a key containing
             # ".." would otherwise write outside local_dir.
             resolved = destination.resolve()
             if not resolved.is_relative_to(root.resolve()):
@@ -338,10 +338,9 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * An ASH whose `ash mcp` has these options refuses to bind a non-loopback host
  * without `--allowed-host` unless the operator passes `--trust-upstream-host-check`,
  * the statement that a proxy or platform in front of ASH checks Host and Origin. In
- * stateless mode it no
- * longer treats a client-supplied `Mcp-Session-Id` as a session identity unless the
- * operator passes `--trust-upstream-session-id`, the statement that the platform in
- * front issues and authenticates that header. The entrypoint maps two environment
+ * stateless mode it treats a client-supplied `Mcp-Session-Id` as a session identity
+ * only when the operator passes `--trust-upstream-session-id`, the statement that
+ * the platform in front issues and authenticates that header. The entrypoint maps two environment
  * variables onto them, the names the Terraform launcher reads
  * (ash-image-pipeline/files/ash-mcp-serve):
  *
@@ -360,18 +359,16 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  *
  * With neither an allowlist nor the host-check statement, the entrypoint refuses
  * (exit 65), whatever ASH version is inside. A release ASH has no Host check of its
- * own, so starting it there would serve every Host; on a hardened ASH it is the same
- * refusal ASH makes, said before ASH starts.
+ * own, so the entrypoint is where the decision is enforced for it; an ASH that has
+ * the check makes the same refusal itself, and the entrypoint says it first.
  *
  * AND A REQUESTED ALLOWLIST IS ENFORCED OR NOTHING STARTS. When `ASH_MCP_ALLOWED_HOST`
  * is set and this ASH has no `--allowed-host`, the entrypoint refuses (exit 65), and
  * so it does when the value names no host at all (`,`), which would otherwise pass
- * no `--allowed-host` and leave an ASH without its own check serving every Host. It
- * used to warn and start, reasoning that the Fargate stack always substitutes the
- * load balancer's name, so no parameter value could satisfy a refusal. That is what
- * made the Fargate endpoint accept every Host header while its stack said DNS
- * rebinding protection was on. The value that satisfies the refusal is an
- * `AshVersion` whose `ash mcp` accepts `--allowed-host`.
+ * no `--allowed-host`. A stack that asks for an allowlist therefore runs with one
+ * or does not start. The Fargate stack always supplies its load balancer's name, so
+ * the value that satisfies the refusal there is an `AshVersion` whose `ash mcp`
+ * accepts `--allowed-host`.
  *
  * WHERE TO PUT AN EXPLANATION, AND WHY IT MATTERS HERE
  * ---------------------------------------------------
@@ -604,15 +601,11 @@ exec "$@"
  *
  * THE SCAN ALWAYS RUNS WITH THE OPERATOR'S CONFIG
  * -----------------------------------------------
- * Without `--config` or `ASH_CONFIG`, ASH looks for a config INSIDE the scanned
- * tree, which here is the pull request. So the pull request under judgment chose
- * the ASH config it was judged by: measured, a committed `fail_on_findings: false`
- * turned exit 2 into exit 0, "passed" and, with ApprovalGate on, an APPROVE. And
- * `AshBaseConfigYaml` reached this function only as a parameter name nothing read.
- *
- * `_scan_config` now writes the config the scan is given into the invocation's
- * workdir, beside the clone and never inside it, and the argv names it with
- * `--config`, which makes ASH skip discovery. With `AshBaseConfigYaml` set, the
+ * Without `--config` or `ASH_CONFIG`, ASH looks for a config inside the scanned
+ * tree, which here is the pull request. The gate's verdict follows the operator's
+ * settings instead: `_scan_config` writes the config the scan is given into the
+ * invocation's workdir, beside the clone and never inside it, and the argv names it
+ * with `--config`, which makes ASH skip discovery. With `AshBaseConfigYaml` set, the
  * parameter is read on every invocation, so an edit to it applies to the next
  * pull request without an image rebuild; this image's ENTRYPOINT is the runtime
  * interface client, which runs no script of ours at start. Without it the file is
@@ -627,9 +620,9 @@ exec "$@"
  * scanner was MISSING or ERROR exits 1 ("errored") rather than 0 ("passed"), whatever
  * an operator's base config says about `fail_on_incomplete_scanners`. Releases up to
  * v3.7.1, including the default `AshVersion`, have no such option, and their
- * `ash scan` collects unknown options instead of refusing them: the flag would be
- * accepted and dropped, and a scan with every scanner MISSING would still pass and,
- * with ApprovalGate on, APPROVE. So `_check_completeness_flag` asks `ash scan --help`
+ * `ash scan` collects unknown options instead of refusing them, so there the flag
+ * has no effect and a scan with every scanner MISSING exits 0. So
+ * `_check_completeness_flag` asks `ash scan --help`
  * once per execution environment whether the option exists, and when it does not
  * the scan is refused through the same comment-and-REVOKE path as the offline
  * refusal below. The probe runs with colour off and a wide terminal, and ANSI codes
@@ -642,12 +635,11 @@ exec "$@"
  * THE SCAN RUNS WITHOUT THE FUNCTION ROLE'S CREDENTIALS
  * -----------------------------------------------------
  * On Lambda the execution role's credentials are in the function's environment
- * (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN), and `_scan_env`
- * used to copy that environment whole. The scanners run over code the pull request
- * controls, and this role can comment on and APPROVE pull requests, so a scanner a
- * pull request could steer held the vote that judges it. The scan needs no AWS
- * call, so `SCAN_ENV_DROPPED` removes every variable an SDK or CLI reads
- * credentials or a profile from, and IMDS is switched off so nothing waits on it.
+ * (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN). That role comments
+ * on pull requests and votes on them, and the scan itself needs no AWS call, so
+ * `SCAN_ENV_DROPPED` removes every variable an SDK or CLI reads credentials or a
+ * profile from, and IMDS is switched off so nothing waits on it. The scanners run
+ * with no AWS identity.
  * The clone keeps the role: git-remote-codecommit signs with it, and `_run` is
  * called there with the handler's own environment.
  *
@@ -657,7 +649,7 @@ exec "$@"
  * rejected: the scanners would then hold that role's credentials too.
  *
  * KNOWN LIMIT: the variables are dropped from the child's environment, not from
- * the sandbox. A scanner running as the same user could still read the handler
+ * the sandbox. A scanner running as the same user can still read the handler
  * process's own environment through /proc. Closing that needs the handler to run
  * the scan as another user, which Lambda does not offer.
  *

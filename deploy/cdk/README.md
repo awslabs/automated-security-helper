@@ -109,7 +109,7 @@ change for adopters and desynchronizes the two implementations.
 | `CodeCommitRepositoryArn` | required | An **existing** repository. The gate stack never creates or deletes one. |
 | `VpcId` | empty | Gate only. The VPC for the scan function, set together with `VpcSubnetIds`; setting only one is refused at launch. The stack creates a security group there whose only egress is TCP 443 to `ScanEgressCidr`, exported as `ScanSecurityGroupId` so you can widen it. Empty keeps the function outside any VPC, with open egress. See below. |
 | `VpcSubnetIds` | empty | Gate only. Comma-separated subnets for the scan function, in `VpcId`. Your routes there must reach what `ScanEgressCidr` names (NAT or interface endpoints). |
-| `ScanEgressCidr` | empty | Gate only, and required with `VpcId`; setting one without the other is refused at launch. The IPv4 CIDR the scan function may reach on TCP 443. The function itself calls CodeCommit (the API and `git-codecommit`), and, when `AshBaseConfigYaml` is set, Systems Manager for its config parameter on every invocation; the Lambda service, not the function's network interfaces, pulls the image and delivers its logs. With `AshOfflineMode=NO` the scanners also download rules and vulnerability databases from public hosts outside AWS. So: your VPC CIDR if the image is offline and you have interface endpoints for those services, or `0.0.0.0/0` behind a NAT gateway with an online image. There is no default because the right value depends on your network. |
+| `ScanEgressCidr` | empty | Gate only, and required with `VpcId`; setting one without the other is refused at launch. The IPv4 CIDR the scan function may reach on TCP 443. The function itself calls CodeCommit (the API and `git-codecommit`), and, when `AshBaseConfigYaml` is set, Systems Manager for its config parameter on every invocation; the Lambda service, not the function's network interfaces, pulls the image and delivers its logs. With `AshOfflineMode=NO` the scanners also download rules and scanner databases from public hosts outside AWS. So: your VPC CIDR if the image is offline and you have interface endpoints for those services, or `0.0.0.0/0` behind a NAT gateway with an online image. There is no default because the right value depends on your network. |
 
 **VPC attachment for the gate has not been deploy-tested.** The network-interface grant it adds keeps `Resource: "*"`, as Lambda documents, and pins the calls to the stack's Region with `aws:RequestedRegion`. AWS does not document whether Lambda's service-side network-interface calls carry that key. It is a global key present on signed requests, so this is expected to work. If attaching the function fails with a permissions error on `ec2:CreateNetworkInterface`, please report it: the condition is the first suspect. The Terraform module carries the same condition.
 
@@ -447,8 +447,7 @@ so an artifact per shard cannot express a six-way split at all.
 Each shard's role may put objects only under `executions/*/shard-<its index>/` in
 that bucket, and delete nothing. The merge forms the verdict from what is under an
 execution's prefix, and every shard runs scanners over the repository being scanned,
-so a shard that could write anywhere there could replace another shard's results or
-the merged output.
+so no shard writes another shard's results or the merged output.
 
 Those transfers use `boto3`, not `aws s3 cp`, and that is not a style preference.
 The shard and merge actions run with the ASH image as their CodeBuild environment
@@ -590,8 +589,8 @@ here rather than to a variant.
   two-hour project timeout, may never run `post_build`, and the stack then sits in
   `CREATE_IN_PROGRESS` on `BootstrapBuild` until CloudFormation's own timeout.
   Cancel the stack operation if you see that.
-- **The build learns CloudFormation's response URL from a parameter.** Whoever holds
-  that URL can answer CloudFormation for the bootstrap, so the starter writes it to a
+- **The build learns CloudFormation's response URL from a parameter.** That URL is
+  what answers CloudFormation for the bootstrap, so the starter writes it to a
   SecureString parameter, `/ash-bootstrap/<image build project name>`, encrypted with
   the stack's own KMS key, and hands the build only the parameter's name. It is not a
   build environment value, so `codebuild:BatchGetBuilds` and the console do not show

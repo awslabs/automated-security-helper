@@ -680,11 +680,9 @@ exit 1
   });
 
   test('refuses to start when a Host allowlist was asked for and this ASH cannot enforce it', () => {
-    // This used to warn and start, on the reasoning that the Fargate stack always
-    // substitutes the load balancer DNS name, so no parameter value could satisfy
-    // a refusal. That reasoning is what made the endpoint accept every Host header
-    // while its stack said DNS-rebinding protection was on. Fail closed: the way
-    // to satisfy it is an AshVersion whose `ash mcp` accepts --allowed-host.
+    // A stack that asks for an allowlist runs with one or does not start. The
+    // Fargate stack always supplies its load balancer's name, so the way to satisfy
+    // this there is an AshVersion whose `ash mcp` accepts --allowed-host.
     const { status, stderr, argv } = runEntrypoint({
       ASH_MCP_STATELESS: 'false',
       ASH_MCP_ALLOWED_HOST: 'alb.example.com',

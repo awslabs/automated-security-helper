@@ -292,14 +292,11 @@ export class AshDistributedPipelineStack extends Stack {
     /*
      * Each shard may write only its own results key of an execution.
      *
-     * The merge forms the pipeline's verdict from whatever sits under
-     * `executions/<execution id>/`, and every shard runs scanners over the repository
-     * being scanned. `grantWrite(project)` put Put and Delete on `<bucket>/*` for
-     * every shard, so one shard could replace another shard's
-     * ash_aggregated_results.json, or the merged output, and the merge would report a
-     * verdict about results no shard produced. `grantPut` with the shard's own key
-     * pattern leaves each role the one prefix its post_build uploads to, and no
-     * Delete: the upload never deletes.
+     * The merge forms the pipeline's verdict from what sits under
+     * `executions/<execution id>/`, so each shard's results and the merged output are
+     * written only by the project that produces them. `grantPut` with the shard's own
+     * key pattern leaves each shard role the one prefix its post_build uploads to,
+     * and no Delete: the upload never deletes.
      *
      * KNOWN LIMIT: IAM's `*` crosses `/`, so shard N can still write a key such as
      * `executions/<id>/merged/shard-N/x`. Nothing reads one: the merge asks for

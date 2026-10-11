@@ -3,15 +3,13 @@
  *
  * WHY THIS FILE EXISTS
  * --------------------
- * The parameter description says "ASH git ref (tag, branch, or commit)", and the
- * image build fetched it with `git clone --depth 1 --branch "${ASH_VERSION}"`, which
- * takes a tag or a branch and refuses a commit SHA. It then passed the same value to
- * the Dockerfile as `INSTALL_ASH_REVISION`, whose own `git clone --branch` cannot
- * take a SHA either (Dockerfile:99-103, and it swallows that failure with
- * `|| echo`). So the one value that pins an exact build was the one that could not
- * work. The Terraform image pipeline already does this right: `git fetch --depth 1
- * origin "$ASH_VERSION"` accepts all three, and it builds the fetched tree with
- * `INSTALL_ASH_REVISION=LOCAL` so the Dockerfile does not clone again
+ * The parameter description says "ASH git ref (tag, branch, or full commit SHA)".
+ * `git clone --branch` takes a tag or a branch and refuses a commit SHA, and so does
+ * the Dockerfile's own clone when `INSTALL_ASH_REVISION` names a ref
+ * (Dockerfile:99-103). So the image build fetches the one ref with `git fetch
+ * --depth 1`, which accepts all three, and builds the fetched tree with
+ * `INSTALL_ASH_REVISION=LOCAL` so the Dockerfile does not clone again, as the
+ * Terraform image pipeline does
  * (deploy/terraform/modules/ash-image-pipeline/buildspec.yml.tftpl:31-51).
  *
  * Pinning a commit is not a corner case here: no released ASH has the CLI and MCP

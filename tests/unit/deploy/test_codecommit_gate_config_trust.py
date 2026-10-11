@@ -10,22 +10,17 @@ The gate clones a pull request and runs ``ash scan`` over it. ASH reads its conf
 ``--config``, else from ``ASH_CONFIG`` (the option's envvar, cli/scan.py), else from a
 file it discovers inside the scanned tree (``_discovered_config_path``,
 interactions/run_ash_scan.py). The Terraform image's entrypoint sets ``ASH_CONFIG`` only
-when a base config was supplied, so a gate deployed without one let the pull request's
-own ``.ash/.ash.yaml`` decide what was scanned and what counted: measured, a pull
-request adding ``global_settings.ignore_paths`` turned a failing scan into exit 0,
-"pass", and an APPROVE. The verdict has to come from a config file the
-operator controls, outside the cloned tree, whether or not a base config was supplied.
+when a base config was supplied, so the handler always passes ``--config`` naming a file
+outside the clone. A pull request whose own ``.ash/.ash.yaml`` adds
+``global_settings.ignore_paths`` over a failing file still gets the failing verdict,
+whether or not a base config was supplied.
 
-The scan also inherited the function's environment, which on Lambda carries the
-execution role's credentials. That role can comment on and approve pull requests, and
-the scanners run over code the pull request controls. The scan needs neither.
+The scan runs without the function's AWS credentials. The execution role comments on
+and votes on pull requests, and the scan needs no AWS call.
 
-The example module and the module README recommended
-``ash_scan_extra_args = "--changed-files-only --base-ref origin/main"``. The handler
-refuses both tokens (GATE_OWNED_SCAN_OPTIONS, with tests in
-test_codecommit_gate_fails_closed.py that pin that refusal on purpose), so every pull
-request under the example ended in outcome "error" and REVOKE. The example and the docs
-are what is wrong; the refusal stays. ``origin/main`` would not even resolve in the
+The example module and the module README pass no narrowing options. The handler
+refuses ``--changed-files-only`` and ``--base-ref`` (GATE_OWNED_SCAN_OPTIONS, pinned in
+test_codecommit_gate_fails_closed.py), and ``origin/main`` does not resolve in the
 gate's single-branch clone.
 
 The gate is loaded by path, as test_codecommit_gate_fails_closed.py explains.

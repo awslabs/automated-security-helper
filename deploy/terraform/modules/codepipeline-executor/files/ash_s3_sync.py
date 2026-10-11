@@ -71,7 +71,7 @@ def download(bucket: str, prefix: str, local_dir: str) -> int:
             destination = root / relative
 
             # Refuse a key that would escape the destination directory. S3 keys
-            # are attacker-influenced in the general case, and a key containing
+            # are written by whoever can write the bucket, and a key containing
             # ".." would otherwise write outside local_dir.
             resolved = destination.resolve()
             if not resolved.is_relative_to(root.resolve()):

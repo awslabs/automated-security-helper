@@ -1,13 +1,11 @@
 # Each shard can write only its own results.
 #
-# Why this file exists: the merge action forms the pipeline's verdict from whatever
-# sits under <results_prefix>/<execution id>/ in the artifact bucket. The shard role
-# could write s3:PutObject anywhere under <results_prefix>/*, and every shard action
-# runs as that one role while scanners run over the repository being scanned. So one
-# shard could replace another shard's ash_aggregated_results.json, or the merged
-# output, and the merge would report a verdict about results no shard produced. Each
-# shard has to be able to write <results_prefix>/*/shard-<its index>/* and nothing
-# else, which means a role per shard: IAM cannot tell two actions of one role apart.
+# Why this file exists: the merge action forms the pipeline's verdict from what is
+# under <results_prefix>/<execution id>/ in the artifact bucket, and every shard runs
+# scanners over the repository being scanned. Each shard writes
+# <results_prefix>/*/shard-<its index>/* and nothing else, so no shard writes another
+# shard's ash_aggregated_results.json or the merged output. That takes a role per
+# shard: IAM cannot tell two actions of one role apart.
 #
 # The check is semantic. For every shard index it asks whether any write grant that
 # applies to that shard COVERS a concrete key, using IAM's `*` wildcard, rather than

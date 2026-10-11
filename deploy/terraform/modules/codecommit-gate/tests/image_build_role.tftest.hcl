@@ -1,12 +1,10 @@
 # The gate image build role pushes only to the gate's own ECR repository.
 #
-# Why this file exists: the role's policy granted the ECR push actions (PutImage and
-# the three layer-upload actions) on `repository/*`, every repository in the account
-# and Region, while the comment beside it said the role was scoped to this module's
-# repository. The build runs privileged Docker over a base image, so a role that can
-# overwrite any repository can replace the images every other workload in the account
-# pulls. Pulling the shared base image still needs a read grant that reaches another
-# repository; only the push half has to narrow.
+# Why this file exists: the ECR push actions (PutImage and the three layer-upload
+# actions) are granted on this module's repository only. The build runs privileged
+# Docker over a base image, and the push grant decides which repositories' images it
+# can replace. Pulling the shared base image still needs a read grant that reaches
+# another repository; only the push half is narrowed.
 #
 # Run with `terraform test` from this module directory after `terraform init
 # -backend=false`. Every provider call is mocked: nothing is planned against, or

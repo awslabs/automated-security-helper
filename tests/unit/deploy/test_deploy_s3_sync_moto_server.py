@@ -373,7 +373,7 @@ class TestPathContainment:
 
         Written through put_object rather than the helper's own upload, because
         the upload side derives keys from local paths and cannot produce this one.
-        The escaping key is what an attacker-influenced bucket supplies.
+        The escaping key stands for one any other writer of the bucket puts there.
         """
         s3.put_object(Bucket=bucket, Key="run/../escaped.txt", Body=b"escaped")
         s3.put_object(Bucket=bucket, Key="run/legitimate.txt", Body=b"fine")

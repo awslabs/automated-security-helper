@@ -190,14 +190,11 @@ resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
 # results prefix differs in direction: shards write their own shard, merge reads
 # every shard and writes the merged output.
 #
-# And one role per shard. The merge forms the pipeline's verdict from whatever
-# sits under <results_prefix>/<execution id>/, and every shard runs scanners over
-# the repository being scanned. A role shared by all shard actions could write
-# any shard's results, so one shard could replace another's
-# ash_aggregated_results.json, or the merged output, and the merge would report a
-# verdict about results no shard produced. IAM cannot tell two actions of one
-# role apart, so each shard gets a role that can write only under its own
-# shard-<index>/ key.
+# And one role per shard. The merge forms the pipeline's verdict from what is
+# under <results_prefix>/<execution id>/, and every shard runs scanners over the
+# repository being scanned. IAM cannot tell two actions of one role apart, so
+# each shard gets a role that writes only under its own shard-<index>/ key, and
+# no shard writes another's ash_aggregated_results.json or the merged output.
 #
 
 data "aws_iam_policy_document" "build_assume_role" {

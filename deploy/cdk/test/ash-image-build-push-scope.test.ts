@@ -2,10 +2,9 @@
  * Control for the Terraform gate's image-build role scoping: the CDK image builds
  * already push only to the repository their own stack creates.
  *
- * The Terraform codecommit-gate module granted its image-build role the ECR push
- * actions on `repository/*`, every repository in the account and Region, while its
- * comment said the role was scoped to the module's repository. That module is tested
- * under deploy/terraform/modules/codecommit-gate/tests. This file pins the CDK side,
+ * The Terraform codecommit-gate module's image-build role may push only to the
+ * module's own repository, which deploy/terraform/modules/codecommit-gate/tests
+ * checks. This file pins the CDK side,
  * which grants push through `repository.grantPullPush`, so the two trees cannot drift
  * apart on this unnoticed.
  */

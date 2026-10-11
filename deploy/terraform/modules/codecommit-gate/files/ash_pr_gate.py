@@ -604,9 +604,9 @@ def check_completeness_flag(env: dict[str, str]) -> None:
     ``run_scan`` passes COMPLETENESS_FLAG, and the gate's fail-closed property rests
     on it: without it a run where no scanner completed exits 0, which is outcome
     "pass", which APPROVEs. ASH releases up to v3.7.1 have no such option, and their
-    ``ash scan`` collects unknown options rather than refusing them, so the flag was
-    accepted and dropped there. Measured on v3.7.0: bandit and grype both MISSING,
-    the flag passed, exit 0.
+    ``ash scan`` collects unknown options rather than refusing them, so the flag has
+    no effect there. Measured on v3.7.0: bandit and grype both MISSING, the flag
+    passed, exit 0.
 
     So ``ash scan --help`` is asked once whether the option exists. The probe runs
     with colour off and a wide terminal, and ANSI codes are stripped before the
@@ -650,9 +650,9 @@ def scan_config(source_dir: pathlib.Path) -> pathlib.Path:
     *   With ``ASH_BASE_CONFIG_SSM_PARAMETER`` set, the parameter is read again for
         every scan and written beside the clone. The copy ash-container-init wrote
         is not used: it is written once per execution environment, to a path the
-        scan's own user can write, so an earlier scan in a warm sandbox could have
-        rewritten it for every later pull request. Reading per scan also means an
-        edit to the parameter reaches the next pull request without a cold start.
+        scan's own user can write, so its content after the first scan is whatever
+        that scan left there. Reading per scan also means an edit to the parameter
+        reaches the next pull request without a cold start.
     *   Otherwise a path in ``ASH_CONFIG`` the operator set is used as is.
     *   Otherwise ``{}`` is written beside the clone, which is ASH's defaults; ``{}``
         and not an empty file, which ASH refuses as a config.

@@ -3,9 +3,9 @@
  *
  * The gate passes `--fail-on-incomplete-scanners`, so a scan whose scanners never ran
  * is an error rather than a pass. An ASH whose `ash scan` has no such option (every
- * release up to v3.7.1) collects and drops unknown options, so it would accept the
- * flag and then exit 0 for a scan that ran nothing, which this gate reports as
- * "passed" and, with ApprovalGate on, APPROVEs. So the handler asks `ash scan --help`
+ * release up to v3.7.1) collects unknown options without using them, so there the
+ * flag has no effect and a scan that ran nothing exits 0. So the handler asks
+ * `ash scan --help`
  * once whether the option exists and refuses, with a comment and a REVOKE, when it
  * does not.
  */
