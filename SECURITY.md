@@ -13,10 +13,7 @@ If you discover a security vulnerability in this project, please report it respo
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Instead, use one of the following channels:
-
-- Email: aws-security@amazon.com
-- GitHub Security Advisories: use the "Report a vulnerability" button on the [Security tab](../../security/advisories/new)
+Instead, email aws-security@amazon.com.
 
 ### What to include
 
