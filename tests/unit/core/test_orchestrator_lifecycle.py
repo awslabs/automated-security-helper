@@ -378,6 +378,45 @@ class TestExecuteScan:
         assert checkpoints[0]["severity"] == "warning"
         assert checkpoints[0]["metadata"]["source"] == "config_resolution"
 
+    def test_config_warning_impact_does_not_claim_suppressions_are_off(self, tmp_path):
+        """The impact text holds for every resolution warning.
+
+        It said "Suppressions and custom settings may not be active", which is
+        true of a config file that failed to load and false of most other
+        warnings: a client's scanner exclusion that is applied as a suppression,
+        a denied field replaced by the server's value, a .semgrepignore that was
+        not honored. The message carries the specifics.
+        """
+        src = tmp_path / "src"
+        src.mkdir()
+        out = tmp_path / "out"
+        cfg = AshConfig(project_name="test")
+        cfg._resolution_warnings = [
+            (
+                "scanners.bandit.options.excluded_paths: 'tests' came from a config "
+                "an MCP client delivered and is not applied as an exclusion."
+            )
+        ]
+
+        results = AshAggregatedResults()
+        engine = _EngineStub(phases_result=results)
+        orch = _initialized(src, out, engine, config=cfg)
+
+        with patch(
+            "automated_security_helper.core.orchestrator.scan_set", return_value=[]
+        ):
+            returned = orch.execute_scan(phases=["scan"])
+
+        (checkpoint,) = [
+            c
+            for c in returned.validation_checkpoints
+            if c.get("type") == "config_warning"
+        ]
+        assert checkpoint["metadata"]["impact"] == (
+            "A configuration input was not applied as written; the message says "
+            "which and how."
+        )
+
     def test_work_dir_is_removed_when_cleanup_enabled(self, tmp_path):
         """With no_cleanup False, an existing work_dir is deleted after the scan."""
         src = tmp_path / "src"

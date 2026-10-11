@@ -618,7 +618,10 @@ class ASHScanOrchestrator(BaseModel):
                             "message": warning,
                             "metadata": {
                                 "source": "config_resolution",
-                                "impact": "Suppressions and custom settings may not be active",
+                                "impact": (
+                                    "A configuration input was not applied as "
+                                    "written; the message says which and how."
+                                ),
                             },
                         }
                     )
