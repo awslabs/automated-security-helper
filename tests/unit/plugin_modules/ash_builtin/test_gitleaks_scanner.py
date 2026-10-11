@@ -24,6 +24,8 @@ import json
 import os
 import stat
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -1396,6 +1398,14 @@ def test_within_the_limit_nothing_is_reported_as_not_evaluated(tmp_path, monkeyp
     assert [call["files"] for call in calls] == [names]
 
 
+def _another_thread_reads_the_clock() -> None:
+    """Read ``time.monotonic`` from another thread, as a thread an earlier test
+    left running in this worker can while the clock is replaced."""
+    thread = threading.Thread(target=lambda: [time.monotonic() for _ in range(4)])
+    thread.start()
+    thread.join()
+
+
 def test_the_re_scan_runs_share_one_deadline(tmp_path, monkeypatch):
     """Each run is given what is left of one scan_timeout, not a fresh one."""
     from automated_security_helper.plugin_modules.ash_builtin.scanners import (
@@ -1403,7 +1413,8 @@ def test_the_re_scan_runs_share_one_deadline(tmp_path, monkeypatch):
     )
 
     clock = iter([100.0, 100.0, 130.0, 130.0])
-    monkeypatch.setattr(module.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(module, "_monotonic", lambda: next(clock))
+    _another_thread_reads_the_clock()
     scanner, calls = _rescan_harness(tmp_path, monkeypatch, {}, scan_timeout=50)
     timeouts = []
     fake = scanner._run_subprocess
@@ -1428,7 +1439,8 @@ def test_a_re_scan_with_no_time_left_fails_the_scan(tmp_path, monkeypatch):
     )
 
     clock = iter([100.0, 100.0, 160.0, 160.0])
-    monkeypatch.setattr(module.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(module, "_monotonic", lambda: next(clock))
+    _another_thread_reads_the_clock()
     scanner, calls = _rescan_harness(tmp_path, monkeypatch, {}, scan_timeout=50)
     source = Path(scanner.context.source_dir)
     _write(source, "app/x.py")

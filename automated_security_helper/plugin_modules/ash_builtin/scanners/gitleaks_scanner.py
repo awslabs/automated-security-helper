@@ -181,6 +181,10 @@ REDACTED = "REDACTED"
 #: Exit code gitleaks is told to use when it finds leaks. See the module docstring.
 LEAKS_EXIT_CODE = 2
 
+#: The clock the re-scan deadline reads. A test replaces this name, not
+#: ``time.monotonic``, which every thread in the process reads.
+_monotonic = time.monotonic
+
 #: gitleaks config names a repository commits. ASH does not read them from the
 #: scanned tree; they are named only in the note logged when one is present.
 TREE_CONFIG_NAMES = (".gitleaks.toml", ".ash/.gitleaks.toml")
@@ -898,7 +902,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         added = 0
         # One deadline for every re-scan run, scan_timeout long.
         timeout = self._effective_scan_timeout()
-        deadline = None if timeout is None else time.monotonic() + timeout
+        deadline = None if timeout is None else _monotonic() + timeout
         try:
             batches, copied, skipped = self._copy_for_rescan(
                 target, relatives, rescan_dir, final_args
@@ -914,7 +918,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             for cwd, scan_arg, report in batches:
                 remaining = None
                 if deadline is not None:
-                    remaining = deadline - time.monotonic()
+                    remaining = deadline - _monotonic()
                     if remaining <= 0:
                         raise ScannerError(
                             "gitleaks timed out re-scanning the files the scanned "
