@@ -979,10 +979,13 @@
   or a `--no-build` run of an older image, now exits 1 (ASH's scan-error status,
   whatever the container's own status was) with an error that says the inner run
   did not complete and names the results file. Rebuild the image from this ASH (run
-  without `--no-build`, with `--force` if the image is cached), or pass
-  `--ash-revision-to-install v<version>` with this ASH's version; the error names
-  both. Nix mode now starts the inner run with this ASH's own interpreter rather than
-  the first `ash` on `PATH` inside the Nix shell, so the two are the same ASH.
+  without `--no-build`, with `--force` if the image is cached); the error says so
+  first and names the revision the build installs. It offers
+  `--ash-revision-to-install v<version>` only when this ASH is a release that
+  records completion: v3.7.1 and earlier do not, so naming one of them would build
+  an image that fails the same way. Nix mode now starts the inner run with this
+  ASH's own interpreter rather than the first `ash` on `PATH` inside the Nix shell,
+  so the two are the same ASH.
 
 - **A `reports/` directory that is a symlink is refused.** `ash merge`,
   `ash scan --use-existing` and workspace runs used to write their reports through a

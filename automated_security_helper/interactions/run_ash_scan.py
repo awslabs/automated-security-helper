@@ -99,6 +99,7 @@ from automated_security_helper.utils.inner_run_outcome import (
     take_outer_run_id,
     read_back_outcome,
     record_report_refusal,
+    release_records_completion,
     report_written_this_run,
     refusal_record,
     write_refusal_results,
@@ -1230,6 +1231,39 @@ def _record_inner_report_refusal(
         )
 
 
+def _image_rebuild_hint() -> str:
+    """How to replace a container image whose ASH records no completion.
+
+    A rebuild from this ASH always works, so it comes first. A release is offered
+    by version only when that release records completion (v3.7.1 and earlier do
+    not, so naming one would build an image that fails the same way); otherwise
+    the hint names the revision a rebuild installs.
+    """
+    from automated_security_helper.interactions.run_ash_container import (
+        get_ash_revision,
+    )
+    from automated_security_helper.utils.get_ash_version import get_ash_version
+
+    rebuild = (
+        "rebuild the image from this ASH (run without --no-build, with --force if "
+        "the image is cached)"
+    )
+    version = get_ash_version()
+    if release_records_completion(version):
+        return (
+            f"{rebuild}, or pass --ash-revision-to-install v{version} to install "
+            f"ASH {version} in it."
+        )
+    revision = get_ash_revision(quiet=True)
+    if revision == "LOCAL":
+        source = "this ASH's own source tree"
+    elif revision:
+        source = f"ASH revision {revision}"
+    else:
+        source = "the revision this ASH was installed from"
+    return f"{rebuild}. Without --ash-revision-to-install, the build installs {source}."
+
+
 def _refuse_an_inner_run_that_did_not_complete(
     results: AshAggregatedResults,
     opts: ScanOptions,
@@ -1268,14 +1302,9 @@ def _refuse_an_inner_run_that_did_not_complete(
     # one. In nix mode it is started with this ASH's own interpreter
     # (run_ash_nix.inner_ash_command), so the message names that instead.
     if mode == "container":
-        from automated_security_helper.utils.get_ash_version import get_ash_version
-
-        version = get_ash_version()
         older = (
-            " An ASH older than this one does not write that record: rebuild the "
-            "image from this ASH (run without --no-build, with --force if the image "
-            f"is cached), or pass --ash-revision-to-install v{version} to install "
-            f"ASH {version} in it."
+            " An ASH older than this one does not write that record: "
+            f"{_image_rebuild_hint()}"
         )
     else:
         older = (

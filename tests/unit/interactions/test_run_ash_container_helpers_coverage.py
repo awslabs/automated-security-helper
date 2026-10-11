@@ -42,6 +42,7 @@ from pathlib import Path
 from subprocess import CalledProcessError
 from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, List
+from unittest.mock import patch
 
 import pytest
 
@@ -212,6 +213,35 @@ class TestGetAshRevisionFromDirectUrl:
         """A plain `pip install ash` from an index has no direct_url.json."""
         assert not pip_installed_ash.exists()
         assert get_ash_revision() == ASH_REPO_LATEST_REVISION
+
+    @pytest.mark.parametrize(
+        "direct_url",
+        [
+            {
+                "url": "git+https://example.invalid/ash.git",
+                "vcs_info": {"vcs": "git", "requested_revision": "v9.8.7"},
+            },
+            {"url": "https://example.invalid/ash-1.0.0.tar.gz"},
+            "{ this is not json",
+        ],
+        ids=["revision", "no vcs_info", "unparseable"],
+    )
+    def test_quiet_resolves_the_same_revision_without_logging(
+        self, pip_installed_ash, direct_url, capsys
+    ):
+        """For the read-back error, which names the revision after the build logged it."""
+        pip_installed_ash.write_text(
+            direct_url if isinstance(direct_url, str) else json.dumps(direct_url),
+            encoding="utf-8",
+        )
+        expected = get_ash_revision()
+        capsys.readouterr()
+
+        with patch.object(rac, "ASH_LOGGER") as logger:
+            assert get_ash_revision(quiet=True) == expected
+
+        assert logger.method_calls == []
+        assert capsys.readouterr().out == ""
 
 
 # ---------------------------------------------------------------------------

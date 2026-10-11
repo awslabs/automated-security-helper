@@ -490,8 +490,6 @@ def test_a_results_file_without_a_completion_marker_is_not_read_back(
     Exit 1, ASH's scan-error status, whatever the inner run's status: 2 would claim
     findings this process never read.
     """
-    from automated_security_helper.utils.get_ash_version import get_ash_version
-
     opts = _opts(tmp_path)
     logger = MagicMock()
 
@@ -506,12 +504,67 @@ def test_a_results_file_without_a_completion_marker_is_not_read_back(
     errors = _errors(logger)
     assert "did not complete" in errors, errors
     if outer is _container:
-        # The image can hold an older ASH; both ways to replace it are named.
+        # The image can hold an older ASH, which a rebuild replaces.
         assert "rebuild the image from this ASH" in errors, errors
-        assert f"--ash-revision-to-install v{get_ash_version()}" in errors, errors
     else:
         # The shell runs this ASH's own interpreter, which the message names.
         assert sys.executable in errors, errors
+
+
+@pytest.mark.parametrize(
+    ("version", "revision", "named"),
+    [
+        # This checkout's own version: no v3.7.0 tag records completion.
+        ("3.7.0", "LOCAL", "this ASH's own source tree"),
+        ("3.7.1", "v3.7.1", "ASH revision v3.7.1"),
+        # Not a release, so there is no tag to name.
+        ("3.8.0.dev1", "main", "ASH revision main"),
+        ("3.8.0rc1", None, "the revision this ASH was installed from"),
+        # A release of this ASH, whose tag records completion.
+        ("3.8.0", "v3.8.0", None),
+    ],
+)
+def test_the_container_hint_names_a_release_only_when_it_records_completion(
+    tmp_path, monkeypatch, version, revision, named
+):
+    """``--ash-revision-to-install v<version>`` is offered only for a release that works.
+
+    v3.7.1 and earlier do not record completion, so naming one of them would build
+    an image that fails the same way. Otherwise the message names the revision a
+    rebuild installs.
+    """
+    from automated_security_helper.interactions import run_ash_container
+    from automated_security_helper.utils import get_ash_version
+
+    monkeypatch.setattr(get_ash_version, "get_ash_version", lambda: version)
+    monkeypatch.setattr(
+        run_ash_container, "get_ash_revision", lambda quiet=False: revision
+    )
+    opts = _opts(tmp_path)
+    logger = MagicMock()
+
+    def inner(run_id: str) -> int:
+        _write_results(opts.output_dir)
+        return 0
+
+    with pytest.raises(SystemExit) as refused:
+        _container(opts, inner, logger)
+
+    assert refused.value.code == 1
+    errors = _errors(logger)
+    hint = errors[errors.index("An ASH older than this one") :]
+    # The rebuild comes first: it is the fix for every image.
+    assert hint.startswith(
+        "An ASH older than this one does not write that record: rebuild the image "
+        "from this ASH"
+    ), hint
+    offered = f"--ash-revision-to-install v{version}"
+    if named is None:
+        assert offered in hint, hint
+        assert f"to install ASH {version} in it" in hint, hint
+    else:
+        assert offered not in hint, hint
+        assert f"the build installs {named}" in hint, hint
 
 
 @OUTER

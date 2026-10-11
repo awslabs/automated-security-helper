@@ -79,6 +79,31 @@ _OUTCOME_TYPES = (RUN_COMPLETED_CHECKPOINT, REPORT_PATH_REFUSED_CHECKPOINT)
 _RUN_RECORD_TYPES = (*_OUTCOME_TYPES, REPORTS_WRITTEN_CHECKPOINT)
 _RUN_ID = re.compile(r"[0-9a-f]{32}")
 
+#: The last ASH release whose inner run does not record its completion. v3.7.1 and
+#: every release before it write no marker, so an image built from one of them is
+#: never read back.
+LAST_RELEASE_WITHOUT_THE_MARKER = "3.7.1"
+
+
+def release_records_completion(version: str) -> bool:
+    """Whether ``version`` is an ASH release whose inner run records its completion.
+
+    A release after ``LAST_RELEASE_WITHOUT_THE_MARKER``: the code reading this is
+    in that release, so its tag builds an image that writes the marker. A
+    development, pre-release or local version is not a release, and names no tag.
+    """
+    from packaging.version import InvalidVersion, Version
+
+    try:
+        parsed = Version(version)
+    except InvalidVersion:
+        return False
+    return (
+        not parsed.is_prerelease
+        and parsed.local is None
+        and parsed > Version(LAST_RELEASE_WITHOUT_THE_MARKER)
+    )
+
 
 def new_outer_run_id() -> str:
     """An ID for one container or nix run, to hand to its inner run."""
