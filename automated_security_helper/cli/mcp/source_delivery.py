@@ -125,17 +125,19 @@ SOURCE_DELIVERY_BUSY = "source_delivery_busy"
 def _no_scan_running(session_id: str) -> Iterator[None]:
     """Hold the session's scan lock for a change to its tree, or refuse.
 
-    Not blocking: a delivery is called on the server's event loop, and waiting
-    there for a scan to finish would stall every other session. A session that
-    ended while the change held the lock is removed once it is released.
+    Refused too for a scan that has started and not yet taken the lock
+    (``MCPSession.try_claim_scan``). Not blocking: a delivery is called on the
+    server's event loop, and waiting there for a scan to finish would stall
+    every other session. A session that ended while the change held the lock is
+    removed once it is released.
     """
     from automated_security_helper.cli.mcp.sessions import (
         finish_ended_session,
         get_default_registry,
     )
 
-    lock = get_default_registry().get_or_create(session_id).lock
-    if not lock.acquire(blocking=False):
+    session = get_default_registry().get_or_create(session_id)
+    if not session.try_begin_change():
         raise SourceDeliveryBusyError(
             "a scan of this session is running; change the delivered source after "
             "it finishes"
@@ -143,7 +145,7 @@ def _no_scan_running(session_id: str) -> Iterator[None]:
     try:
         yield
     finally:
-        lock.release()
+        session.end_change()
         finish_ended_session(session_id)
 
 

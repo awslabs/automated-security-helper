@@ -218,6 +218,32 @@ async def mcp_scan_directory(
                 ],
             )
 
+    # Claimed before the scan id is returned: the scan takes the session's lock
+    # only later, on a worker thread, and a change to the delivered tree or the
+    # session ending in between would otherwise go through. Refused while such a
+    # change is in progress. See MCPSession.try_claim_scan.
+    claimed_session = None
+    if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
+        from automated_security_helper.cli.mcp.sessions import (
+            get_default_registry as _get_session_registry,
+        )
+        from automated_security_helper.cli.mcp.source_delivery import (
+            SOURCE_DELIVERY_BUSY,
+        )
+
+        claimed_session = _get_session_registry().get_or_create(session_id)
+        if not claimed_session.try_claim_scan():
+            return {
+                "success": False,
+                "operation": "scan_directory",
+                "error_type": SOURCE_DELIVERY_BUSY,
+                "error": (
+                    "the delivered source of this session is being changed; start "
+                    "the scan after the change finishes"
+                ),
+            }
+    scan_task_started = False
+
     try:
         # Create a unique scan ID
         scan_id = str(uuid.uuid4())
@@ -249,8 +275,10 @@ async def mcp_scan_directory(
                 severity_threshold=severity_threshold,
                 config_path=config_path,
                 session_id=session_id,
+                scan_claim=claimed_session,
             )
         )
+        scan_task_started = True
 
         # Return scan ID and initial status with standardized format
         return {
@@ -292,9 +320,51 @@ async def mcp_scan_directory(
             ),
             operation="scan_directory",
         )
+    finally:
+        # The task releases the claim once it has started; a scan that never
+        # started releases it here.
+        if claimed_session is not None and not scan_task_started:
+            claimed_session.release_scan()
 
 
 async def _run_scan_async(
+    scan_id: str,
+    directory_path: str,
+    output_dir: str,
+    severity_threshold: str,
+    config_path: Optional[str] = None,
+    session_id: Optional[str] = None,
+    scan_claim: Optional[Any] = None,
+) -> None:
+    """Run an ASH scan asynchronously, then release what it held of its session.
+
+    Arguments as :func:`_run_scan`, plus ``scan_claim``: the ``MCPSession``
+    whose scan claim :func:`mcp_scan_directory` took, released when the scan
+    returns, before a session that ended meanwhile is removed.
+    """
+    try:
+        await _run_scan(
+            scan_id=scan_id,
+            directory_path=directory_path,
+            output_dir=output_dir,
+            severity_threshold=severity_threshold,
+            config_path=config_path,
+            session_id=session_id,
+        )
+    finally:
+        if scan_claim is not None:
+            scan_claim.release_scan()
+        if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
+            # A session that ended while this scan held or claimed it has its
+            # workspace removed now that the scan no longer reads it.
+            from automated_security_helper.cli.mcp.sessions import (
+                finish_ended_session,
+            )
+
+            finish_ended_session(session_id)
+
+
+async def _run_scan(
     scan_id: str,
     directory_path: str,
     output_dir: str,
@@ -522,16 +592,6 @@ async def _run_scan_async(
         registry.finish_scan(scan_id, MCScanStatus.FAILED, error_message)
         _logger.error(f"Scan {scan_id} failed: {error_message}")
         raise
-
-    finally:
-        if session_lock is not None:
-            # A session that ended while this scan held its lock has its
-            # workspace removed now that the scan no longer reads it.
-            from automated_security_helper.cli.mcp.sessions import (
-                finish_ended_session,
-            )
-
-            finish_ended_session(session_id)
 
 
 async def mcp_get_scan_progress(

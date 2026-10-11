@@ -117,6 +117,11 @@ class MCPSession(BaseModel):
     # Per-session scan serialization. PrivateAttr keeps it off the schema and
     # off any serialization path — locks must never leave the process.
     _lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
+    # Scans started and not yet returned, and whether a change to the delivered
+    # tree holds the session; both guarded by _state_lock. See try_claim_scan.
+    _state_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
+    _claimed_scans: int = PrivateAttr(default=0)
+    _changing: bool = PrivateAttr(default=False)
 
     @property
     def lock(self) -> threading.Lock:
@@ -126,6 +131,51 @@ class MCPSession(BaseModel):
         scan so that the same session never runs two scans concurrently.
         """
         return self._lock
+
+    def try_claim_scan(self) -> bool:
+        """Claim the session's tree for a scan that is about to start.
+
+        A scan takes :attr:`lock` on a worker thread, after its scan id has been
+        returned; the claim covers that gap, from before the id is returned until
+        :meth:`release_scan`. While any claim is held,
+        :meth:`try_begin_change` refuses.
+
+        Returns:
+            False, claiming nothing, while a change to the tree is in progress.
+        """
+        with self._state_lock:
+            if self._changing:
+                return False
+            self._claimed_scans += 1
+            return True
+
+    def release_scan(self) -> None:
+        """Release a claim :meth:`try_claim_scan` took, once its scan returned."""
+        with self._state_lock:
+            self._claimed_scans = max(0, self._claimed_scans - 1)
+
+    def try_begin_change(self) -> bool:
+        """Take the session for a change to its delivered tree, without waiting.
+
+        Returns:
+            False while a scan of the session holds :attr:`lock` or is claimed
+            and not yet returned; otherwise True, holding :attr:`lock` until
+            :meth:`end_change`.
+        """
+        if not self._lock.acquire(blocking=False):
+            return False
+        with self._state_lock:
+            if self._claimed_scans:
+                self._lock.release()
+                return False
+            self._changing = True
+        return True
+
+    def end_change(self) -> None:
+        """End a change :meth:`try_begin_change` began."""
+        with self._state_lock:
+            self._changing = False
+        self._lock.release()
 
 
 # Resolve the ``AshConfig`` forward reference. Pydantic v2 refuses to
@@ -310,7 +360,7 @@ def end_session(session_id: str) -> bool:
         True when everything was removed now, False when it waits for a scan.
     """
     session = get_default_registry().get(session_id)
-    if session is not None and not session.lock.acquire(blocking=False):
+    if session is not None and not session.try_begin_change():
         with _ended_lock:
             _ended_while_scanning.add(session_id)
         return False
@@ -318,7 +368,7 @@ def end_session(session_id: str) -> bool:
         _remove_session_state(session_id)
     finally:
         if session is not None:
-            session.lock.release()
+            session.end_change()
     with _ended_lock:
         _ended_while_scanning.discard(session_id)
     return True

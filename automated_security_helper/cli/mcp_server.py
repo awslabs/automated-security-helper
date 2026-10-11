@@ -68,6 +68,7 @@ from automated_security_helper.cli.mcp.session_identity import (
     session_identity_refusal,
 )
 from automated_security_helper.cli.mcp.source_delivery import (
+    SOURCE_DELIVERY_BUSY,
     delivered_session_count,
     get_session_source_dir,
 )
@@ -278,6 +279,10 @@ async def run_ash_scan(
         config_path: Optional path to ASH configuration file
         clean_output: Whether to clean up existing output files before starting the scan
 
+    Refused (error_type source_delivery_busy) while clear_source, set_source_git
+    or set_source_zip_finalize is changing this session's delivered source;
+    call it again once that call has returned.
+
     Returns:
         Dict with scan_id, status, and connection management guidance
     """
@@ -409,10 +414,13 @@ async def run_ash_scan(
             await ctx.error(
                 f"Failed to start scan: {result.get('error', 'Unknown error')}"
             )
+            # A change to the session's delivered source in progress keeps its
+            # own type, so a client can tell it from a scan that cannot start.
+            busy = result.get("error_type") == SOURCE_DELIVERY_BUSY
             return {
                 "success": False,
                 "error": f"Failed to start scan: {result.get('error', 'Unknown error')}",
-                "error_type": "scan_start_failure",
+                "error_type": SOURCE_DELIVERY_BUSY if busy else "scan_start_failure",
             }
 
         scan_id = result["scan_id"]
