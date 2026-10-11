@@ -1769,9 +1769,9 @@ class TestRequireScannerCompletionResolution:
         """The literal, reached only when no shard carries a config at all.
 
         Agrees with ``AshConfig.fail_on_incomplete_scanners`` rather than being
-        independently lenient. This is the least trustworthy input ``ash merge``
-        accepts -- results it cannot attribute to any configuration -- so defaulting
-        to permissive here would give it the most trusting treatment.
+        independently lenient. ``merge_shard_results`` refuses these shards right
+        after this runs (``TestShardsWithoutAStoredConfigAreRefused``), so the
+        value never decides a merge; it still must not be the permissive one.
         """
         from automated_security_helper.cli.merge import (
             _resolve_require_scanner_completion,
@@ -2524,3 +2524,49 @@ class TestConfigWarningsAreMergedOnce:
             for c in merged.validation_checkpoints
             if c.get("type") == "config_warning"
         ] == ["first", "second"]
+
+
+class TestShardsWithoutAStoredConfigAreRefused:
+    """Every shard must record the configuration it scanned under.
+
+    The merged verdict, the aggregated suppression pass and the report settings
+    come from that configuration. A shard whose results record none
+    (``"ash_config": null``) cannot be merged under ASH's defaults in its place,
+    so the merge is refused and names the shard.
+    """
+
+    @pytest.mark.parametrize("missing", [0, 2], ids=["lowest_index", "later_shard"])
+    def test_a_shard_with_no_stored_config_is_refused(self, missing):
+        shards = build_shards(3)
+        shards[missing].ash_config = None
+
+        with pytest.raises(ShardCoverageError, match=f"shard-{missing}\\.json"):
+            merge_shard_results(as_loaded(shards))
+
+    def test_the_refusal_says_the_configuration_is_missing(self):
+        shards = build_shards(2)
+        shards[1].ash_config = None
+
+        with pytest.raises(ShardCoverageError, match="no scan configuration"):
+            merge_shard_results(as_loaded(shards))
+
+    def test_through_the_command_it_exits_one_and_writes_nothing(self, tmp_path):
+        shards = build_shards(3)
+        shards[1].ash_config = None
+        shard_paths = write_shards(tmp_path / "artifacts", shards)
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(tmp_path / "merged")]
+
+        result = TestMergeCli()._invoke(args)
+
+        assert result.exit_code == 1, result.output
+        assert "Refusing to merge" in result.output
+        assert "no scan configuration" in " ".join(result.output.split())
+        assert not (tmp_path / "merged" / RESULTS_FILE_NAME).exists()
+
+    def test_control_shards_that_all_record_a_config_merge(self):
+        merged = merge_shard_results(as_loaded(build_shards(3)))
+
+        assert merged.ash_config is not None

@@ -538,6 +538,7 @@ Coverage is verified before anything is merged, so a bad set of shards fails wit
 - two shards claim the same scanner, which would count its findings once per shard
 - a scanner appears in some shard's results but no shard was assigned it — the executors resolved different scanner sets, so no shard ran it and the union has a hole
 - the shard that owned a scanner recorded no result for it, leaving another shard's skip marker as the only trace
+- a shard's results record no scan configuration (`"ash_config": null`): the merged verdict, the suppressions applied after merging and the report settings come from the configuration the shards scanned under, so the merge is not run under ASH's defaults instead
 
 With the completeness gate on, which is the default, one more:
 

@@ -842,6 +842,33 @@ def _merge_timing(
         base.metadata.summary_stats.duration = max(durations)
 
 
+def _refuse_shards_without_a_config(
+    loaded: Sequence[Tuple[Path, AshAggregatedResults]],
+) -> None:
+    """Refuse a shard whose results record no scan configuration.
+
+    The merged verdict, the aggregated suppression pass and the report settings
+    are read from the configuration the shards scanned under. A shard with none
+    is not merged under ASH's defaults in its place.
+
+    Raises:
+        ShardCoverageError: Naming each shard that records no configuration.
+    """
+    missing = [
+        Path(path).as_posix()
+        for path, results in loaded
+        if not isinstance(results.ash_config, AshConfig)
+    ]
+    if missing:
+        raise ShardCoverageError(
+            f'Shard results record no scan configuration ("ash_config" is null): '
+            f"{', '.join(missing)}. The merged verdict, suppressions and report "
+            "settings come from the configuration the shards scanned under, so a "
+            "shard without one cannot be merged. Merge the results files the "
+            "shards wrote, unedited."
+        )
+
+
 def merge_shard_results(
     loaded: Sequence[Tuple[Path, AshAggregatedResults]],
     require_scanner_completion: bool = False,
@@ -873,6 +900,7 @@ def merge_shard_results(
         ShardCoverageError: If the shards do not reconstruct exactly one whole
             scan.
     """
+    _refuse_shards_without_a_config(loaded)
     shards = _collect_assignments(loaded)
     verify_shard_coverage([assignment for _, _, assignment in shards])
 
@@ -1379,7 +1407,7 @@ def merge_command(
         source_dir=Path.cwd(),
         output_dir=output_dir_path,
         work_dir=output_dir_path.joinpath("work"),
-        config=merged.ash_config or AshConfig(),
+        config=merged.ash_config,
         ignore_suppressions=ignore_suppressions,
     )
 

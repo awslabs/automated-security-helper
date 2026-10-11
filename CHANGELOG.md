@@ -1032,7 +1032,9 @@
   instead of with the defaults or the file `ASH_CONFIG` names in the process
   re-rendering it; the CloudWatch Logs and S3 payloads then carry
   `"ash_config": null`, and a recorded configuration with no settings set is sent
-  as `{}`, never as the defaults.
+  as `{}`, never as the defaults. `ash merge` refuses a shard whose results record
+  no configuration (exit 1), since the merged verdict and suppressions are read
+  from it.
 
 - **A `**` at either end of a multi-segment `ignore_paths` or `suppressions` pattern
   now takes effect.** The matcher anchored the first and last segments of a pattern
