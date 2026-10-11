@@ -75,6 +75,11 @@ jobs:
       # `|| ''` keeps the input empty on workflow_dispatch.
       config: .ash/.ash.yaml
       config-ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_ref || '' }}
+      # The install steps come from the pull request's workflow files and the ASH
+      # from its base commit, so a pull request that adds a scanner asks the base
+      # ASH for a tool it has no plugin for. That ASH names and skips it rather than
+      # failing the check; the informational check installs and runs it.
+      skip-unknown-tools: true
       # Off because the sarif job below uploads instead. The upload step inside the
       # called workflow cannot hold security-events: write, so it fails on
       # workflow_dispatch; see upload-ash-sarif.yml for why.

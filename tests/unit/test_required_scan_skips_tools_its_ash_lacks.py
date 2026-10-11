@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""With config-ref, the scan job lets the installed ASH skip tools it does not have.
+"""ASH's own required check lets the installed ASH skip tools it does not have.
 
 Why this file exists
 --------------------
@@ -14,10 +14,11 @@ not know has no scanner in it either, and the base config cannot enable one, so 
 check needs nothing from that tool.
 
 run-ash-security-scan.yml therefore sets ``ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip`` for the
-whole scan job when ``config-ref`` is set (the cases where the ASH is an older commit's
-than the workflow), and ASH then names and skips each tool it does not know. Set at job
-level, it reaches an install step added later without that step saying so. Without
-``config-ref`` it is not set, and an unknown tool name is still refused.
+whole scan job when its caller passes ``skip-unknown-tools: true`` together with
+``config-ref``, and ASH then names and skips each tool it does not know. Set at job
+level, it reaches an install step added later without that step saying so. Only
+ash-repo-scan.yml passes it. Any other caller, ``config-ref`` or not, keeps the refusal,
+so a typo in a tool name it asks for still fails its install.
 
 What this asserts
 -----------------
@@ -25,8 +26,10 @@ What this asserts
    merge-queue entry, every ``ash dependencies install`` the job runs (Grype, Syft,
    OpenGrep, and a step of the same shape that no current file has) runs with the
    setting.
-2. For a caller without ``config-ref`` (an external caller, and the informational job,
-   which installs the pull request's own ASH), it runs without it.
+2. It runs without it for an external caller with or without ``config-ref``, for the
+   informational job (which installs the pull request's own ASH), and for the required
+   caller on workflow_dispatch, where the ASH and the workflow are the same commit.
+3. ``skip-unknown-tools`` is a boolean input that defaults to false.
 """
 
 from __future__ import annotations
@@ -153,17 +156,51 @@ def test_the_required_check_lets_its_ash_skip_unknown_tools(tmp_path, context):
     )
 
 
-def test_without_config_ref_an_unknown_tool_is_still_refused(tmp_path):
+def test_any_other_caller_still_has_an_unknown_tool_refused(tmp_path):
     called = ga.load_workflow(SCAN_WORKFLOW)
     context = _event("pull_request")
-    for label, inputs in (
-        ("external caller", ga.call_inputs({"with": {}}, called, context)),
-        ("informational job", _caller_inputs(context, informational=True)),
+    dispatch = ga.base_context(
+        event_name="workflow_dispatch",
+        repository=REPO,
+        repository_owner="awslabs",
+        ref="refs/heads/main",
+        event={"repository": {"default_branch": "main", "full_name": REPO}},
+    )
+    for label, ctx, inputs in (
+        ("external caller", context, ga.call_inputs({"with": {}}, called, context)),
+        (
+            # An external caller that reads its config from a commit, without asking
+            # for the skip, gets nothing that relaxes its own installs: only the
+            # required check's older ASH skips a tool it does not know.
+            "external caller with config-ref",
+            context,
+            ga.call_inputs(
+                {"with": {"config": ".ash/.ash.yaml", "config-ref": "1" * 40}},
+                called,
+                context,
+            ),
+        ),
+        (
+            "informational job",
+            context,
+            _caller_inputs(context, informational=True),
+        ),
+        (
+            "required check on workflow_dispatch",
+            dispatch,
+            _caller_inputs(dispatch, informational=False),
+        ),
     ):
-        assert not inputs.get("config-ref"), label
         wrong = [
             (n, v)
-            for n, v in _settings(tmp_path / label.replace(" ", "-"), context, inputs)
+            for n, v in _settings(tmp_path / label.replace(" ", "-"), ctx, inputs)
             if v
         ]
         assert not wrong, f"{label}: installs run with {SETTING} set: {wrong}"
+
+
+def test_the_switch_is_a_boolean_input_that_defaults_to_off():
+    called = ga.load_workflow(SCAN_WORKFLOW)
+    spec = (called.on["workflow_call"] or {})["inputs"].get("skip-unknown-tools")
+    assert spec is not None, "run-ash-security-scan.yml declares no skip-unknown-tools"
+    assert spec.get("type") == "boolean" and spec.get("default") is False, spec

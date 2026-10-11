@@ -60,6 +60,17 @@ on:
         required: false
         default: "refuse"
         type: string
+      skip-unknown-tools:
+        description: >-
+          With config-ref, let `ash dependencies install` name and skip a requested
+          tool that the installed ASH has no plugin for, instead of failing. For a
+          caller whose workflow files can be newer than the ASH it installs, such as
+          ASH's own required check, which runs a pull request's workflow files with
+          the ASH of its base commit. Off, the default, a tool name the installed ASH
+          does not know fails the install, so a typo cannot pass unnoticed.
+        required: false
+        default: false
+        type: boolean
       output-dir:
         description: "Directory where ASH output will be stored"
         required: false
@@ -264,18 +275,21 @@ jobs:
       # only on other events. On these two each is downloaded and verified as on a
       # miss; the saves are unchanged (push to the default branch only).
       RESTORE_CACHES: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
-      # WITH CONFIG-REF, THE INSTALLED ASH SKIPS TOOLS IT DOES NOT HAVE
+      # FOR ASH'S OWN REQUIRED CHECK, THE INSTALLED ASH SKIPS TOOLS IT DOES NOT HAVE
       #
-      # config-ref is set when the ASH installed here comes from an older commit than
-      # the workflow files (ASH's own required check installs the pull request's base
-      # commit). A pull request that adds support for a tool and asks this job to
-      # install it then runs `ash dependencies install --tool <new tool>` against an
-      # ASH that refuses the name. That ASH has no scanner for the tool, and the base
-      # config cannot enable one, so the scan needs nothing from it: with this set,
+      # ash-repo-scan.yml installs the pull request's base commit while GitHub runs
+      # the pull request's workflow files. A pull request that adds support for a
+      # tool and asks this job to install it then runs
+      # `ash dependencies install --tool <new tool>` against an ASH that refuses the
+      # name. That ASH has no plugin for the tool, and the base config cannot enable
+      # one, so the scan needs nothing from it: with this set,
       # `ash dependencies install` names each such tool, skips it and installs the
       # rest. Job level, so an install step added later gets it without saying so.
-      # Without config-ref it stays unset and an unknown name is refused as before.
-      ASH_DEPENDENCIES_UNKNOWN_TOOLS: ${{ inputs.config-ref != '' && 'skip' || '' }}
+      #
+      # Only when the caller asks (skip-unknown-tools) and reads its config from a
+      # commit (config-ref). Every other caller keeps the refusal, so a tool name it
+      # mistypes fails its install instead of resolving MISSING later.
+      ASH_DEPENDENCIES_UNKNOWN_TOOLS: ${{ (inputs.skip-unknown-tools && inputs.config-ref != '') && 'skip' || '' }}
     steps:
       # THE ASH REF IS RESOLVED TO ONE COMMIT, ONCE, BEFORE ANYTHING INSTALLS ASH
       #
