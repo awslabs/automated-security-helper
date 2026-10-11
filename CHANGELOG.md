@@ -360,7 +360,9 @@
   container is not the same file, a config named inside the scanned tree whose real
   path is outside it, a config file ASH cannot read, and a config outside
   `--source-dir` that extends a file inside it, or whose chain has a file of the
-  scanned checkout extending a file outside it.
+  scanned checkout extending a file outside it. `./ash` and `Invoke-ASH`, which mount
+  a config from outside the source directory without the files it extends, refuse one
+  with an `extends` entry with exit 3.
   A config inside a git checkout (the scanned one or another) but outside
   `--source-dir` keeps the limits a local scan gives a repository-written config: the
   host decides with the local scan's rule, and passes the scan inside

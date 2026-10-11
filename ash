@@ -220,6 +220,13 @@ if [[ "${NO_RUN}" = "NO" && ( "${CONFIG_GIVEN}" = "YES" || -n "${CONFIG_PATH}" )
       CONFIG_ASH_ARGS=(--config "/src/${CONFIG_REAL#"${SOURCE_REAL%/}"/}")
       ;;
     *)
+      # Mounted on its own, without the files it extends, so a config with an
+      # extends entry would not resolve inside the container. Refused, as is every
+      # chain `ash --mode container` cannot mount whole.
+      if grep -Eq '(^|[{,])[[:space:]]*["'"'"']?extends["'"'"']?[[:space:]]*:' -- "${CONFIG_REAL}"; then
+        echo "ERROR: The config file '${CONFIG_PATH}' is outside the source directory and has an extends entry. ./ash mounts such a config on its own, without the files it extends. Run ash --mode container, which mounts the chain, or put the config inside the source directory." >&2
+        exit 3
+      fi
       CONFIG_RUN_ARGS=(--mount "type=bind,source=${CONFIG_REAL},destination=/ash-config/$(basename -- "${CONFIG_REAL}"),readonly")
       CONFIG_ASH_ARGS=(--config "/ash-config/$(basename -- "${CONFIG_REAL}")")
       # A config elsewhere in the scanned tree, or inside any other git checkout

@@ -651,3 +651,82 @@ class TestANonRootBuildAsUid0IsRefused:
         [build] = calls
         assert _flag(build, "--target") == "non-root"
         assert "UID=1000" in build and "GID=1000" in build
+
+
+class TestAnOutsideConfigThatExtendsIsRefused:
+    """``./ash`` mounts a config from outside the source directory on its own, so the
+    files it extends are not in the container. A config there with an ``extends``
+    entry is refused with exit 3 before anything is built or run, wherever its bases
+    are; ``ash --mode container`` mounts such a chain. A config inside the source
+    directory is read through ``/src`` with its chain, as before."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "extends: base.yaml\n",
+            "project_name: p\nextends:\n  - base.yaml\n",
+            '{"extends": "base.yaml"}\n',
+        ],
+        ids=["yaml", "yaml-list", "json"],
+    )
+    def test_it_is_refused(self, text, fake_runner, project, tmp_path):
+        (tmp_path / "base.yaml").write_text("project_name: p\n")
+        config = tmp_path / "ash.yaml"
+        config.write_text(text)
+
+        rc, output, calls = _run_ash_status(
+            fake_runner, project, ["--no-build", "--config", str(config)]
+        )
+
+        assert rc == 3, output
+        assert calls == []
+        assert "extends" in output
+
+    def test_a_config_elsewhere_in_the_checkout_that_extends_is_refused(
+        self, fake_runner, tmp_path
+    ):
+        root = tmp_path / "repo"
+        (root / ".git").mkdir(parents=True)
+        (root / "src").mkdir()
+        (root / "ci").mkdir()
+        (root / "ci" / "base.yaml").write_text("project_name: p\n")
+        (root / "ci" / "ash.yaml").write_text("extends: base.yaml\n")
+
+        rc, output, calls = _run_ash_status(
+            fake_runner,
+            root,
+            ["--no-build", "--source-dir", "src", "--config", "ci/ash.yaml"],
+        )
+
+        assert rc == 3, output
+        assert calls == []
+
+    def test_an_outside_config_without_extends_still_runs(
+        self, fake_runner, project, tmp_path
+    ):
+        """Control."""
+        config = tmp_path / "ash.yaml"
+        config.write_text("project_name: p\nscanners:\n  bandit:\n    enabled: true\n")
+
+        calls = run_ash(fake_runner, project, ["--no-build", "--config", str(config)])
+
+        assert (
+            _flag(_inner_args(_only(calls, "run")), "--config")
+            == "/ash-config/ash.yaml"
+        )
+
+    def test_a_config_inside_the_source_that_extends_still_runs(
+        self, fake_runner, project
+    ):
+        """Control: the chain is read through /src."""
+        (project / ".ash").mkdir()
+        (project / ".ash" / "base.yaml").write_text("project_name: p\n")
+        (project / ".ash" / "ash.yaml").write_text("extends: base.yaml\n")
+
+        calls = run_ash(
+            fake_runner, project, ["--no-build", "--config", ".ash/ash.yaml"]
+        )
+
+        assert (
+            _flag(_inner_args(_only(calls, "run")), "--config") == "/src/.ash/ash.yaml"
+        )
