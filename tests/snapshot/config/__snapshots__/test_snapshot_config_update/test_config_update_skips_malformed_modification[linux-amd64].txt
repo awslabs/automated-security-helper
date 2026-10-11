@@ -20,6 +20,11 @@ global_settings:
       - /sandbox/**
       - /ash_plugin_modules
       - /ash_plugin_modules/**
+      - /scanners/detect-secrets/options/scan_settings/filters_used
+      - /scanners/detect-secrets/options/scan_settings/filters_used/**
+      - /scanners/detect-secrets/options/scan_settings/plugins_used
+      - /scanners/detect-secrets/options/scan_settings/plugins_used/**
+      - /scanners/detect-secrets/options/baseline_file
       - /global_settings/ignore_paths
       - /global_settings/suppressions
       - /reporters/bedrock-summary-reporter/options/aws_*
