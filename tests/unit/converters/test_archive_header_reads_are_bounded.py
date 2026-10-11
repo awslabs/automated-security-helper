@@ -40,15 +40,15 @@ HEADER_PER_MEMBER = 1024
 
 @pytest.fixture
 def lowered_caps(monkeypatch):
-    """The caps lowered for the test. raising=False, so a tree without them runs."""
-    monkeypatch.setattr(f"{ARCHIVE_MODULE}._TAR_READ_CAP", READ_CAP, raising=False)
+    """The caps lowered for the test. A cap that is renamed fails the setup."""
+    monkeypatch.setattr(f"{ARCHIVE_MODULE}._TAR_READ_CAP", READ_CAP, raising=True)
     monkeypatch.setattr(
-        f"{ARCHIVE_MODULE}._TAR_HEADER_BYTES_BASE", HEADER_BASE, raising=False
+        f"{ARCHIVE_MODULE}._TAR_HEADER_BYTES_BASE", HEADER_BASE, raising=True
     )
     monkeypatch.setattr(
         f"{ARCHIVE_MODULE}._TAR_HEADER_BYTES_PER_MEMBER",
         HEADER_PER_MEMBER,
-        raising=False,
+        raising=True,
     )
 
 
