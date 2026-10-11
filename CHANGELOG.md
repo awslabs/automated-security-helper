@@ -111,6 +111,8 @@
     HIGH, always-true `if:` conditions, invalid `permissions:` and
     `set-env`/`add-path` MEDIUM, other lint findings LOW. Its shellcheck and pyflakes
     integrations are off unless configured, so results do not depend on the host.
+    A workflow whose local `uses: ./...` resolves outside the scanned repository is
+    skipped with a warning, since actionlint would read that file into its findings.
   - cfn-lint (`>=1.43.3,<2.0.0`, uv tool; E to MEDIUM, W to LOW,
     I to INFO) and cfn-guard 3.2.1 against the AWS Guard Rules Registry 1.0.2,
     default rule set `wa-Security-Pillar`, every violation HIGH. Both read the

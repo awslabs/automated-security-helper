@@ -294,3 +294,54 @@ def test_the_operator_can_name_a_program_outside_the_tree(repo, tmp_path):
     )
 
     assert marker.exists(), "the operator's shellcheck never ran"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_local_reference_out_of_the_tree_is_never_read(repo, tmp_path):
+    """actionlint reads the action a ``uses: ./...`` names and lists its inputs in the
+    finding. One linked out of the tree is not linted; one in the tree still is, which
+    shows the real binary does resolve local references in this layout."""
+    _require_actionlint()
+    (repo / ".git").mkdir()
+    outside = tmp_path / "outside" / "action"
+    outside.mkdir(parents=True)
+    metadata = (
+        "name: {name}\ndescription: x\ninputs:\n  {name}_input:\n    description: x\n"
+        "runs:\n  using: composite\n  steps: []\n"
+    )
+    (outside / "action.yml").write_text(metadata.format(name="outside"))
+    actions = repo / ".github" / "actions"
+    (actions / "inside").mkdir(parents=True)
+    (actions / "inside" / "action.yml").write_text(metadata.format(name="inside"))
+    (actions / "linked").symlink_to(outside)
+    workflows = repo / ".github" / "workflows"
+    for name, spec in (
+        ("out.yml", "./.github/actions/linked"),
+        ("in.yml", "./.github/actions/inside"),
+    ):
+        (workflows / name).write_text(
+            "on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n"
+            f"      - uses: {spec}\n        with:\n          bogus: x\n"
+        )
+    scanner = ActionlintScanner(
+        context=PluginContext(
+            source_dir=repo, output_dir=tmp_path / "out", config=get_default_config()
+        ),
+        config=ActionlintScannerConfig(enabled=True),
+    )
+
+    report = scanner.scan(target=repo, target_type="source")
+
+    messages = {
+        (
+            r.locations[0].physicalLocation.root.artifactLocation.uri,
+            r.message.root.text,
+        )
+        for r in report.runs[0].results
+    }
+    assert any(
+        uri == ".github/workflows/in.yml" and "inside_input" in text
+        for uri, text in messages
+    ), messages
+    assert not any("outside" in text for _, text in messages), messages
+    assert not any(uri == ".github/workflows/out.yml" for uri, _ in messages)

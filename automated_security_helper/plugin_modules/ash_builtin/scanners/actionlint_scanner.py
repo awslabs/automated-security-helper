@@ -31,7 +31,11 @@ Decisions, and why
    A workflow that is a symlink resolving outside the scan root is skipped with a
    warning, because actionlint follows it and copies its lines into the report, and
    so is one that resolves to no file (a missing target, or a loop), on which
-   actionlint exits 3 and lints nothing.
+   actionlint exits 3 and lints nothing. A workflow with a ``uses: ./...``
+   reference that resolves outside the scanned tree is skipped with a warning too:
+   actionlint reads the action metadata or reusable workflow a local reference
+   names, from its project root, and quotes it (the action's name, its input names)
+   in findings. See ``_reference_outside_the_tree``.
    ``--`` ends the flags, so a path that begins with ``-`` is read as a file. A
    scan root with no workflow files does not run actionlint at all and reports
    SKIPPED ("evaluated nothing"), not PASSED.
@@ -145,6 +149,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
@@ -178,6 +183,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.subprocess_utils import path_independent_dirs
+from automated_security_helper.utils.suppression_matcher import file_path_matches
 from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 
 #: The version the severity mapping below was written against.
@@ -278,6 +284,55 @@ def is_workflow_file(relative_path: str, scan_root: Optional[Path] = None) -> bo
         and parts[-2] == "workflows"
         and parts[-1].lower().endswith(_WORKFLOW_SUFFIXES)
     )
+
+
+#: A ``uses:`` whose value starts with ``./``, on one line, plain or quoted, in
+#: block or flow style. Backs up the YAML walk in ``local_uses_references``.
+_LOCAL_USES_LINE = re.compile(
+    r"""(?:^|[\s{,])["']?uses["']?[ \t]*:[ \t]*["']?(\./[^\s"',}\]#]*)""",
+    re.MULTILINE,
+)
+
+
+def local_uses_references(text: str) -> Set[str]:
+    """The ``uses:`` values in a workflow that name a local action or workflow.
+
+    actionlint reads what a ``uses: ./...`` names (an action's ``action.yml``, a
+    reusable workflow) to check inputs, and quotes what it read in its findings.
+    Every mapping key named ``uses`` counts, wherever it sits, so this is a superset
+    of what actionlint resolves. Taken from PyYAML's node graph (aliases and merge
+    keys included, each node visited once) and from a line scan, so a file PyYAML
+    reads differently from actionlint's parser, or cannot read, is still covered.
+    A value holding an expression is left out: actionlint does not resolve it.
+    """
+    found: Set[str] = {match.group(1) for match in _LOCAL_USES_LINE.finditer(text)}
+    try:
+        stack: List[Any] = [
+            node
+            for node in yaml.compose_all(text, Loader=yaml.SafeLoader)
+            if node is not None
+        ]
+    except (yaml.YAMLError, RecursionError):
+        stack = []
+    visited: Set[int] = set()
+    while stack:
+        node = stack.pop()
+        if id(node) in visited:
+            continue
+        visited.add(id(node))
+        if isinstance(node, yaml.MappingNode):
+            for key, value in node.value:
+                if (
+                    isinstance(key, yaml.ScalarNode)
+                    and key.value == "uses"
+                    and isinstance(value, yaml.ScalarNode)
+                    and str(value.value).startswith("./")
+                ):
+                    found.add(str(value.value))
+                stack.extend((key, value))
+        elif isinstance(node, yaml.SequenceNode):
+            stack.extend(node.value)
+    return {spec for spec in found if "${{" not in spec}
 
 
 def find_absolute_executable(name: str) -> Optional[str]:
@@ -702,6 +757,11 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             # Vendored dependencies and virtualenvs, which zizmor skips too.
             if _KNOWN_IGNORED_DIRS.intersection(PurePosixPath(rel).parts[:-1]):
                 continue
+            # Before the checks below, which warn and read the file.
+            if any(
+                file_path_matches(rel, ignore.path) for ignore in global_ignore_paths
+            ):
+                continue
             # A link whose target is missing, or that loops, is a file actionlint
             # cannot open: it exits 3 and no workflow in the run is linted. Checked
             # before resolve(), which raises on a loop before Python 3.13.
@@ -721,22 +781,61 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                     level=logging.WARNING,
                 )
                 continue
-            relative.append(rel)
-
-        if global_ignore_paths:
-            from automated_security_helper.utils.suppression_matcher import (
-                file_path_matches,
-            )
-
-            relative = [
-                rel
-                for rel in relative
-                if not any(
-                    file_path_matches(rel, ignore.path)
-                    for ignore in global_ignore_paths
+            spec = self._reference_outside_the_tree(path, target_real)
+            if spec is not None:
+                self._plugin_log(
+                    f"Not linting {rel}: its local reference 'uses: {spec}' "
+                    "resolves outside the scanned tree, and actionlint would read "
+                    "that file and quote it in its findings.",
+                    level=logging.WARNING,
                 )
-            ]
+                continue
+            relative.append(rel)
         return sorted(set(relative))
+
+    def _reference_outside_the_tree(
+        self, workflow: Path, target_real: Path
+    ) -> Optional[str]:
+        """A ``uses: ./...`` in *workflow* that would make actionlint read a file
+        outside the scanned tree, or None.
+
+        actionlint resolves ``./`` against its project root: in 1.7.12, the nearest
+        ancestor holding ``.github/workflows`` that is also a git root. Every
+        ancestor holding ``.github/workflows`` is checked here, so a different
+        project rule cannot widen what is read. For each, the path the reference
+        names and the ``action.yml``/``action.yaml`` inside it are followed through
+        symlinks and ``..``; one that lands outside both the scanned tree and the
+        scan target is reported. An unreadable workflow is left to actionlint, which
+        reports it.
+        """
+        try:
+            text = workflow.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+        specs = sorted(local_uses_references(text))
+        if not specs:
+            return None
+        context_config = self.context.config if self.context is not None else None
+        root = scan_root(context_config, self._source_dir())
+        bases = [
+            directory
+            for directory in workflow.parents
+            if (directory / ".github" / "workflows").is_dir()
+        ]
+        for base in bases:
+            for spec in specs:
+                named = base / spec
+                for candidate in (named, named / "action.yml", named / "action.yaml"):
+                    if candidate is not named and not (
+                        candidate.is_symlink() or candidate.exists()
+                    ):
+                        continue
+                    real = Path(os.path.realpath(candidate))
+                    if not (
+                        real.is_relative_to(target_real) or in_scanned_tree(real, root)
+                    ):
+                        return spec
+        return None
 
     def _resolve_config_file(self, target: Path, results_dir: Path) -> Path:
         """The config file actionlint is given, always explicitly. See decision 3."""

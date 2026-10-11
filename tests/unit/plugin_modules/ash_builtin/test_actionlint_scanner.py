@@ -1378,3 +1378,158 @@ def test_actionlint_lints_exactly_the_workflows_zizmor_audits(
 
     assert linted == expected
     assert sorted(audited) == linted
+
+
+# --------------------------------------------------------------------------- #
+# Local ``uses: ./...`` references: actionlint reads the action metadata or the
+# reusable workflow they name, from the project root, and puts what it read (the
+# action's name, its input names) into its findings.
+# --------------------------------------------------------------------------- #
+
+_OUTSIDE_ACTION = (
+    "name: outside\ndescription: x\ninputs:\n  leaked:\n    description: x\n"
+    "runs:\n  using: composite\n  steps: []\n"
+)
+_OUTSIDE_REUSABLE = (
+    "on:\n  workflow_call:\n    inputs:\n      leaked:\n        type: string\n"
+    "jobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n"
+)
+
+
+def _step_uses(spec: str) -> str:
+    return (
+        "on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n"
+        f"      - uses: {spec}\n"
+    )
+
+
+def _job_uses(spec: str) -> str:
+    return f"on: push\njobs:\n  a:\n    uses: {spec}\n"
+
+
+def _local_reference_layout(repo: Path, outside: Path, case: str) -> None:
+    """``.github/workflows/refs.yml`` naming a file outside the tree, by ``case``."""
+    (repo / ".git").mkdir()
+    (outside / "action").mkdir(parents=True)
+    (outside / "action" / "action.yml").write_text(_OUTSIDE_ACTION)
+    (outside / "reusable.yml").write_text(_OUTSIDE_REUSABLE)
+    actions = repo / ".github" / "actions"
+    actions.mkdir()
+    workflows = repo / ".github" / "workflows"
+    if case == "linked-action-dir":
+        (actions / "linked").symlink_to(outside / "action")
+        body = _step_uses("./.github/actions/linked")
+    elif case == "linked-action-file":
+        (actions / "linked").mkdir()
+        (actions / "linked" / "action.yml").symlink_to(
+            outside / "action" / "action.yml"
+        )
+        body = _step_uses("./.github/actions/linked")
+    elif case == "dot-dot-action":
+        body = _step_uses("./../outside/action")
+    elif case == "linked-reusable":
+        (workflows / "linked.yml").symlink_to(outside / "reusable.yml")
+        body = _job_uses("./.github/workflows/linked.yml")
+    elif case == "dot-dot-reusable":
+        body = _job_uses("./../outside/reusable.yml")
+    elif case == "flow-mapping":
+        body = (
+            "on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n"
+            '    steps: [{"uses": "./../outside/action"}]\n'
+        )
+    else:
+        raise AssertionError(case)
+    (workflows / "refs.yml").write_text(body)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+@pytest.mark.parametrize(
+    "case",
+    [
+        "linked-action-dir",
+        "linked-action-file",
+        "dot-dot-action",
+        "linked-reusable",
+        "dot-dot-reusable",
+        "flow-mapping",
+    ],
+)
+def test_a_workflow_whose_local_reference_leaves_the_tree_is_not_linted(
+    repo, tmp_path, monkeypatch, on_path, caplog, case
+):
+    _local_reference_layout(repo, tmp_path / "outside", case)
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    assert argv[argv.index("--") + 1 :] == [
+        ".github/workflows/clean.yml",
+        ".github/workflows/vulnerable.yml",
+    ]
+    assert "Not linting .github/workflows/refs.yml" in caplog.text
+    assert "outside the scanned tree" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        _step_uses("./.github/actions/inside"),
+        _step_uses("./"),
+        _job_uses("./.github/workflows/clean.yml"),
+        _step_uses("actions/checkout@v4"),
+        _step_uses("./${{ matrix.dir }}"),
+    ],
+    ids=["in-tree-action", "root-action", "in-tree-reusable", "remote", "expression"],
+)
+def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
+    repo, monkeypatch, on_path, body
+):
+    (repo / ".git").mkdir()
+    inside = repo / ".github" / "actions" / "inside"
+    inside.mkdir(parents=True)
+    (inside / "action.yml").write_text(_OUTSIDE_ACTION)
+    (repo / ".github" / "workflows" / "refs.yml").write_text(body)
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    assert ".github/workflows/refs.yml" in argv[argv.index("--") + 1 :]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("jobs:\n  a:\n    steps:\n      - uses: ./a\n", {"./a"}),
+        ('steps:\n  - "uses": "./b"\n', {"./b"}),
+        ('steps: [{uses: ./c}, {"uses": "./d"}]\n', {"./c", "./d"}),
+        ("steps:\n  - uses: >-\n      ./e\n", {"./e"}),
+        ("x: &A ./f\nsteps:\n  - uses: *A\n", {"./f"}),
+        ("base: &B {uses: ./g}\nsteps:\n  - <<: *B\n", {"./g"}),
+        ("steps:\n  - uses: ./h\n  bad: [\n", {"./h"}),
+        ("steps:\n  - uses: ./i # a comment\n", {"./i"}),
+        ("steps:\n  - uses: actions/checkout@v4\n", set()),
+        ("steps:\n  - uses: ./${{ matrix.dir }}\n", set()),
+        ("steps:\n  - run: ./build.sh\n", set()),
+    ],
+    ids=[
+        "block",
+        "quoted-key",
+        "flow",
+        "folded",
+        "alias",
+        "merge-key",
+        "invalid-yaml",
+        "comment",
+        "remote",
+        "expression",
+        "not-uses",
+    ],
+)
+def test_local_uses_references(text, expected):
+    """Every form actionlint's parser could read a local ``uses`` from."""
+    assert module.local_uses_references(text) == expected
