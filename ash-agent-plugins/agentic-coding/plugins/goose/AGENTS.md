@@ -369,6 +369,8 @@ Validate an ASH configuration file or content string.
 | `config_content` | string \| null | not set | YAML/JSON string to validate. |
 | `config_path` | string \| null | not set | Path to the config file to validate. |
 
+`config_content`, and a `config_path` outside the directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, count as the client's config. Each field such a config may not set under the server's runtime-override policy is an error of type `denied_by_runtime_policy`, and a policy the server cannot read is one error of type `config_policy_unreadable`; for `config_content`, both only when a remote client calls. A `${VAR:default}` reference or `!ENV` tag in such a config is an error of type `config_env_not_resolved`.
+
 ## Resources
 
 - `ash://exit-codes` — Return the meaning of each ASH exit code as JSON

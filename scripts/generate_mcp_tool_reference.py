@@ -417,6 +417,21 @@ TOOL_NOTES: dict[str, dict] = {
             "No parameters. Deletes this session's delivered source tree and workspace."
         ),
     },
+    "validate_config": {
+        "caveats": [
+            (
+                "`config_content`, and a `config_path` outside the directories "
+                "`ASH_MCP_ALLOWED_CONFIG_ROOTS` names, count as the client's config. "
+                "Each field such a config may not set under the server's "
+                "runtime-override policy is an error of type "
+                "`denied_by_runtime_policy`, and a policy the server cannot read is one "
+                "error of type `config_policy_unreadable`; for `config_content`, both "
+                "only when a remote client calls. A `${VAR:default}` reference or "
+                "`!ENV` tag in such a config is an error of type "
+                "`config_env_not_resolved`."
+            ),
+        ],
+    },
 }
 
 
