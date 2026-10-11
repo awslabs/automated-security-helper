@@ -119,8 +119,11 @@
     templates cfn-nag reads, and neither needs the network. cfn-lint checks
     against us-east-1 unless `regions`, the template or the operator's
     `.cfnlintrc` names other regions; it does not read `AWS_REGION`. A
-    template's own `Metadata` `ignore_checks` do not apply unless the operator
-    sets `scanners.cfn-lint.options.honor_inline_ignores`. A cfn-guard rule in
+    template's own `Metadata` `ignore_checks` and `configure_rules` do not
+    apply unless the operator sets
+    `scanners.cfn-lint.options.honor_inline_ignores`; until then the
+    operator's `.cfnlintrc` `configure_rules` are passed on the command line,
+    and one that sets `merge_configs` fails the scan. A cfn-guard rule in
     two selected rule sets is reported once.
   - gitleaks 8.30.1 (`gitleaks dir`, working tree only),
     CRITICAL findings with values redacted (`--redact=100`), beside detect-secrets,

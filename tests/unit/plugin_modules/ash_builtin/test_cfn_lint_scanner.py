@@ -874,6 +874,146 @@ class TestTemplateIgnoresAreOffByDefault:
             assert sum(len(a) + 1 for a in argv[1:]) <= 24000
 
 
+def _configured(args: list) -> list:
+    return [a.split("=", 1)[1] for a in args if a.startswith("--configure-rule=")]
+
+
+class TestTemplateRuleConfigurationIsOffByDefault:
+    """A template's ``Metadata: cfn-lint: config: configure_rules`` changes what
+    cfn-lint reports: E3031 ``exceptions`` and E1029 ``custom_excludes`` turned a
+    template's E3031, E1029 and E1161 into E1161 alone (measured with 1.57.2 and,
+    without E1161, 1.43.3). --mandatory-checks does not stop it. cfn-lint takes
+    configure_rules from the first of the command line, the template and the config
+    file that sets any, whole: one ``--configure-rule`` replaces both the template's
+    and the config file's. So unless the operator turns template ignores on, ASH
+    passes the operator's own configure_rules on the command line, or a value that
+    changes nothing when there are none."""
+
+    @staticmethod
+    def _args(scanner, repo: Path) -> list:
+        results = repo / "out"
+        results.mkdir(exist_ok=True)
+        return scanner._option_args(results)
+
+    @staticmethod
+    def _rc(tmp_path: Path, text: str) -> Path:
+        rc = tmp_path / "operator" / ".cfnlintrc"
+        rc.parent.mkdir(exist_ok=True)
+        rc.write_text(text, encoding="utf-8")
+        return rc
+
+    def test_without_operator_configure_rules_a_no_op_is_passed(self, repo):
+        """E3012 ``strict`` is false by default; setting it to false changes no
+        finding (measured on the fixture templates with 1.57.2) and keeps the
+        template's configure_rules from applying."""
+        assert _configured(self._args(_scanner(repo), repo)) == ["E3012:strict=false"]
+
+    def test_an_operator_config_file_without_configure_rules_gets_the_no_op(
+        self, repo, tmp_path
+    ):
+        rc = self._rc(tmp_path, "ignore_checks: [W2001]\n")
+        scanner = _scanner(repo, operator=True, config_file=str(rc))
+        assert _configured(self._args(scanner, repo)) == ["E3012:strict=false"]
+
+    def test_the_operators_configure_rules_are_passed_on_the_command_line(
+        self, repo, tmp_path
+    ):
+        rc = self._rc(
+            tmp_path,
+            "configure_rules:\n"
+            "  E3031:\n    exceptions: ['Bad_.*']\n"
+            "  E1029:\n    custom_excludes: '^Stage$'\n"
+            "  I3042:\n    partition: false\n    region: true\n"
+            "  E9001:\n    limit: 3\n",
+        )
+        scanner = _scanner(repo, operator=True, config_file=str(rc))
+        assert _configured(self._args(scanner, repo)) == [
+            "E3031:exceptions=Bad_.*",
+            "E1029:custom_excludes=^Stage$",
+            "I3042:partition=false",
+            "I3042:region=true",
+            "E9001:limit=3",
+        ]
+
+    @pytest.mark.parametrize(
+        "rule, value",
+        [
+            # --configure-rule takes one value per key and splits on these.
+            ("E3031:\n    exceptions: ['^a$', '^b$']", "two items"),
+            ("E3031:\n    exceptions: ['^arn:aws:.*']", "a colon"),
+            ("E1029:\n    custom_excludes: 'a{1,3}'", "a comma"),
+            ("E1029:\n    custom_excludes: 'a=b'", "an equals sign"),
+            ("E3031:\n    exceptions: []", "no items"),
+            ("E3031:\n    exceptions: [{a: 1}]", "a mapping"),
+            ("'--x':\n    exceptions: a", "a rule id that is not one"),
+            ("E3031:\n    'a,b': c", "a key that is not one"),
+        ],
+    )
+    def test_a_value_the_command_line_cannot_carry_is_left_out_with_a_warning(
+        self, repo, tmp_path, caplog, rule, value
+    ):
+        """The rule then uses its default, which for every built-in rule reports
+        at least as much. Nothing is passed that cfn-lint would read differently
+        from the file."""
+        rc = self._rc(
+            tmp_path,
+            f"configure_rules:\n  {rule}\n  I3042:\n    partition: false\n",
+        )
+        scanner = _scanner(repo, operator=True, config_file=str(rc))
+        with caplog.at_level("WARNING"):
+            configured = _configured(self._args(scanner, repo))
+            self._args(scanner, repo)
+        assert configured == ["I3042:partition=false"], value
+        assert caplog.text.count("Not passing configure_rules") == 1, caplog.text
+
+    def test_with_nothing_left_the_no_op_is_passed(self, repo, tmp_path):
+        rc = self._rc(
+            tmp_path, "configure_rules:\n  E3031:\n    exceptions: ['^a:b$']\n"
+        )
+        scanner = _scanner(repo, operator=True, config_file=str(rc))
+        assert _configured(self._args(scanner, repo)) == ["E3012:strict=false"]
+
+    def test_merge_configs_in_the_operators_file_is_refused(self, repo, tmp_path):
+        """Under merge_configs cfn-lint merges the template's configure_rules into
+        the command line's, rule by rule (measured: the template's E3031 and E1029
+        settings applied again), so no command-line value can keep them out."""
+        rc = self._rc(tmp_path, "merge_configs: true\n")
+        scanner = _scanner(repo, operator=True, config_file=str(rc))
+        with pytest.raises(Exception, match="merge_configs"):
+            self._args(scanner, repo)
+        # With template configuration honored, the file is used as written.
+        honored = _scanner(
+            repo, operator=True, config_file=str(rc), honor_inline_ignores=True
+        )
+        assert _configured(self._args(honored, repo)) == []
+
+    def test_the_operator_can_let_templates_configure_rules(self, repo, tmp_path):
+        rc = self._rc(
+            tmp_path, "configure_rules:\n  E3031:\n    exceptions: ['Bad_.*']\n"
+        )
+        scanner = _scanner(
+            repo, operator=True, config_file=str(rc), honor_inline_ignores=True
+        )
+        # cfn-lint reads the config file as written, the template's settings first.
+        assert _configured(self._args(scanner, repo)) == []
+
+    def test_the_scanned_tree_cannot_let_them(self, repo):
+        scanner = _scanner(repo, honor_inline_ignores=True)
+        assert _configured(self._args(scanner, repo)) == ["E3012:strict=false"]
+
+    def test_each_value_reaches_argv_as_one_token(self, repo, tmp_path):
+        rc = self._rc(
+            tmp_path, "configure_rules:\n  E1029:\n    custom_excludes: ' -x --y'\n"
+        )
+        fake = FakeCfnLint({}, returncode=0)
+        TestScan()._run(_scanner(repo, operator=True, config_file=str(rc)), fake)
+        argv = fake.calls[0]
+        assert "--configure-rule=E1029:custom_excludes= -x --y" in argv
+        assert argv.index("--configure-rule=E1029:custom_excludes= -x --y") < (
+            argv.index("--")
+        )
+
+
 class TestToolVersionIsOnlyAVersionConstraint:
     """tool_version is appended to the package name for uv; it must stay a constraint."""
 

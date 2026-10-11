@@ -3006,7 +3006,7 @@
         },
         "honor_inline_ignores": {
           "default": false,
-          "description": "Honor the ignore_checks a template sets for itself in `Metadata: cfn-lint: config`, at the template or the resource level. Off by default: every rule outside ignore_checks and the config_file's ignore_checks is passed to cfn-lint as mandatory, so a template cannot hide its own findings, which reach ASH, where suppressions are reported and counted. Honored only when set by --config-overrides or a config file outside the scanned tree; from a config in the scanned tree it is ignored with a warning.",
+          "description": "Honor the ignore_checks and configure_rules a template sets for itself in `Metadata: cfn-lint: config` (ignore_checks also at the resource level). Off by default: every rule outside ignore_checks and the config_file's ignore_checks is passed to cfn-lint as mandatory, and the config_file's configure_rules are passed on the command line, which cfn-lint takes instead of a template's, so a template cannot hide its own findings, which reach ASH, where suppressions are reported and counted. A config_file that sets merge_configs then fails the scan. Honored only when set by --config-overrides or a config file outside the scanned tree; from a config in the scanned tree it is ignored with a warning.",
           "title": "Honor Inline Ignores",
           "type": "boolean"
         },

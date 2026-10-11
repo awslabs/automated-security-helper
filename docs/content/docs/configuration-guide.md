@@ -766,6 +766,7 @@ scanners:
       regions: []            # e.g. [us-east-1, eu-west-1] or [ALL_REGIONS]
       ignore_checks: []      # rule ids or prefixes to skip
       include_checks: []     # e.g. [I] for informational rules
+      honor_inline_ignores: false # a template's own Metadata ignore_checks and configure_rules; operator-only
       tool_version: ">=1.43.3,<2.0.0"
       install_timeout: 300
 ```

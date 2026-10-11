@@ -578,6 +578,72 @@ def test_a_template_cannot_ignore_its_own_findings(tmp_path, who, extra, expecte
         assert "Ignoring scanners.cfn-lint.options.honor_inline_ignores" in ash_log
 
 
+#: A bucket name cfn-lint reports as E3031 (and, from 1.5x, E1161), and a
+#: ``${AWS::Region}`` outside Fn::Sub, which it reports as E1029. The metadata
+#: configures E3031 and E1029 so that neither reports anything.
+_CONFIGURES_ITS_RULES = """AWSTemplateFormatVersion: "2010-09-09"
+Metadata:
+  cfn-lint:
+    config:
+      configure_rules:
+        E3031:
+          exceptions: ['.*']
+        E1029:
+          custom_excludes: '.*'
+Resources:
+  NamedBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: Bad_Name
+  Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: "arn:aws:sns:${AWS::Region}:x"
+"""
+
+
+def test_a_template_cannot_configure_its_findings_away(tmp_path):
+    """cfn-lint applies a template's ``Metadata: cfn-lint: config:
+    configure_rules`` ahead of the config file, and --mandatory-checks does not
+    stop it. Unless the operator opts in, ASH passes configure_rules on the
+    command line, which cfn-lint takes instead of the template's. The operator's
+    own configure_rules still apply."""
+    _require_cfn_lint()
+    source = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, source)
+    (source / "templates" / "configures-its-rules.yaml").write_text(
+        _CONFIGURES_ITS_RULES, encoding="utf-8"
+    )
+    rc = tmp_path / "operator" / ".cfnlintrc"
+    rc.parent.mkdir()
+    rc.write_text("configure_rules:\n  E3031:\n    exceptions: ['Bad_.*']\n")
+
+    def found(*extra: str) -> set:
+        proc, output = _scan_with_tree_config(tmp_path, {}, *extra)
+        assert _scanner_results(output)["cfn-lint"]["status"] == "FAILED", (
+            proc.stdout[-3000:] + proc.stderr[-3000:]
+        )
+        return {
+            r["ruleId"]
+            for r in _results(output, "cfn-lint")
+            if _where(r)[0] == "templates/configures-its-rules.yaml"
+        }
+
+    by_default = found()
+    honored = found(
+        "--config-overrides", "scanners.cfn-lint.options.honor_inline_ignores=true"
+    )
+    with_operator_rules = found(
+        "--config-overrides", f"scanners.cfn-lint.options.config_file={rc.as_posix()}"
+    )
+
+    assert {"E3031", "E1029"} <= by_default, by_default
+    # Opted in, the template's settings apply and both are gone.
+    assert honored == by_default - {"E3031", "E1029"}, honored
+    # The operator's E3031 exception applies; the template's E1029 setting does not.
+    assert with_operator_rules == by_default - {"E3031"}, with_operator_rules
+
+
 def test_the_operator_can_name_a_cfnlintrc_outside_the_tree(tmp_path):
     """The control: the same kind of rules file is imported when the operator names it."""
     _require_cfn_lint()

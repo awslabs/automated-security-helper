@@ -35,6 +35,9 @@ repository-relative path ASH reports.
   ``g[1].yaml`` yields one E0003 and no lint results; escaped, it yields the three
   findings the same template produces under a plain name.
 * ``--`` ends option parsing, so a template whose name starts with ``-`` is a file.
+* ``--mandatory-checks`` and ``--configure-rule`` keep a template's own
+  ``Metadata: cfn-lint: config`` from changing what is reported, unless the operator
+  sets ``honor_inline_ignores`` (``CfnLintScanner._honor_inline_ignores``).
 * Templates are batched under ``_ARGV_CHAR_BUDGET`` characters per invocation, so a
   repository with thousands of templates stays inside Windows' 32767-character
   command-line limit.
@@ -170,6 +173,20 @@ _RULE_ID_ALPHABET = string.digits + string.ascii_uppercase + string.ascii_lowerc
 #: ignore list too long to express, and is refused rather than truncated.
 _OPTION_CHAR_BUDGET = 20000
 
+#: The ``--configure-rule`` value passed when the operator configures no rule, so
+#: that a template's own configure_rules never apply (``_configure_rule_args``).
+#: E3012's ``strict`` is false by default, so this sets it to what it already is;
+#: measured with 1.43.3 and 1.57.2, it changes no finding on the fixture templates.
+_NO_OP_CONFIGURE_RULE = "E3012:strict=false"
+
+#: What a configure_rules key may be when it is passed on the command line.
+_CONFIG_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+#: Characters cfn-lint's ``--configure-rule`` parser splits a value on
+#: (cfnlint/config.py, ``RuleConfigurationAction``), so a value holding one cannot
+#: be passed whole.
+_CONFIGURE_RULE_SEPARATORS = frozenset(",:=")
+
 
 def severity_for_rule(rule_id: Optional[str]) -> Tuple[str, str]:
     """The (ASH severity, SARIF level) for a cfn-lint rule id.
@@ -215,6 +232,29 @@ def mandatory_prefixes(ignored: List[str]) -> List[str]:
 
     walk("", minimal)
     return result
+
+
+def _command_line_value(value: Any) -> Optional[str]:
+    """A configure_rules value as ``--configure-rule`` would read it back, or None.
+
+    cfn-lint splits a ``--configure-rule`` value on commas, then takes the text
+    between the first and second colon and after the first equals sign, and keeps
+    one value per key. So a value is passed only when it survives that whole: a
+    boolean, an integer, a string without ``,``, ``:`` or ``=``, or a list of
+    exactly one of those (cfn-lint makes a list of a single value for a list
+    option). Anything else returns None.
+    """
+    if isinstance(value, list):
+        if len(value) != 1:
+            return None
+        value = value[0]
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str) and not _CONFIGURE_RULE_SEPARATORS & set(value):
+        return value
+    return None
 
 
 def _successful_exit(code: object) -> bool:
@@ -277,12 +317,15 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
         bool,
         Field(
             description=(
-                "Honor the ignore_checks a template sets for itself in "
-                "`Metadata: cfn-lint: config`, at the template or the resource level. "
-                "Off by default: every rule outside ignore_checks and the "
-                "config_file's ignore_checks is passed to cfn-lint as mandatory, so "
-                "a template cannot hide its own findings, which reach ASH, where "
-                "suppressions are reported and counted. Honored only when set by "
+                "Honor the ignore_checks and configure_rules a template sets for "
+                "itself in `Metadata: cfn-lint: config` (ignore_checks also at the "
+                "resource level). Off by default: every rule outside ignore_checks "
+                "and the config_file's ignore_checks is passed to cfn-lint as "
+                "mandatory, and the config_file's configure_rules are passed on the "
+                "command line, which cfn-lint takes instead of a template's, so a "
+                "template cannot hide its own findings, which reach ASH, where "
+                "suppressions are reported and counted. A config_file that sets "
+                "merge_configs then fails the scan. Honored only when set by "
                 "--config-overrides or a config file outside the scanned tree; from "
                 "a config in the scanned tree it is ignored with a warning."
             ),
@@ -491,8 +534,19 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             args.extend(["--regions", *options.regions])
         ignore_checks = list(self._operator_option("ignore_checks"))
         honor_inline_ignores = self._honor_inline_ignores()
+        settings: Dict[str, Any] = {}
         if not honor_inline_ignores and config_file is not None:
-            for check in self._config_file_ignores(config_file):
+            settings = self._config_file_settings(config_file)
+            if settings.get("merge_configs"):
+                raise ScannerError(
+                    f"{Path(config_file).as_posix()} sets merge_configs, under which "
+                    "cfn-lint merges a template's own Metadata configure_rules into "
+                    "the ones ASH passes, so a template could change what is "
+                    "reported. Remove merge_configs from it, or set "
+                    "scanners.cfn-lint.options.honor_inline_ignores to let "
+                    "templates configure rules."
+                )
+            for check in self._config_file_ignores(settings, config_file):
                 if check not in ignore_checks:
                     ignore_checks.append(check)
         if ignore_checks:
@@ -500,22 +554,29 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         if options.include_checks:
             args.extend(["--include-checks", *options.include_checks])
         if not honor_inline_ignores:
-            # See _honor_inline_ignores. One token, so no entry is read as a flag.
+            # See _honor_inline_ignores. One token each, so no value is read as a flag.
             args.append(
                 "--mandatory-checks=" + ",".join(mandatory_prefixes(ignore_checks))
+            )
+            args.extend(
+                f"--configure-rule={entry}"
+                for entry in self._configure_rule_args(
+                    settings.get("configure_rules"), config_file
+                )
             )
         option_chars = sum(len(arg) + 1 for arg in args)
         if option_chars > _OPTION_CHAR_BUDGET:
             raise ScannerError(
                 f"cfn-lint's options take {option_chars} characters, more than the "
                 f"{_OPTION_CHAR_BUDGET} a command line can spare: ignore_checks names "
-                "too many rule ids to pass the rest as mandatory. Use fewer, shorter "
+                "too many rule ids to pass the rest as mandatory, or the config "
+                "file's configure_rules are too long to pass. Use fewer, shorter "
                 "prefixes, or ASH suppressions."
             )
         return args
 
     def _honor_inline_ignores(self) -> bool:
-        """Whether a template's own ``ignore_checks`` may apply.
+        """Whether a template's own ``ignore_checks`` and ``configure_rules`` may apply.
 
         A template can set ``Metadata: cfn-lint: config: ignore_checks`` for the
         whole template and for each resource, and cfn-lint drops what they name
@@ -527,6 +588,15 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         the operator's own ignores as mandatory (``mandatory_prefixes``). Those
         ignores, from ``ignore_checks`` and the operator's ``config_file``, are
         passed as ``--ignore-checks``, which cfn-lint ranks above a template's.
+
+        A template's ``configure_rules`` change what a rule reports, and
+        --mandatory-checks does not stop them (measured with 1.57.2: E3031
+        ``exceptions`` and E1029 ``custom_excludes`` turned a template's E3031,
+        E1029 and E1161 into E1161 alone). cfn-lint takes configure_rules from the
+        first of the command line, the template and the config file that sets
+        any, whole, not rule by rule (cfnlint/config.py ``_get_argument_value``),
+        so ``_option_args`` passes them on the command line too
+        (``_configure_rule_args``).
         """
         if not self._options().honor_inline_ignores:
             return False
@@ -546,24 +616,89 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             )
         return False
 
-    def _config_file_ignores(self, config_file: Path) -> List[str]:
-        """The ``ignore_checks`` the operator's ``.cfnlintrc`` sets, if any.
+    def _config_file_settings(self, config_file: Path) -> Dict[str, Any]:
+        """The operator's ``.cfnlintrc`` as a mapping, or {} when it cannot be read.
 
-        Read here so they can be left out of ``--mandatory-checks``. An entry that
-        is not a rule id or prefix is left out with a warning, so it can never be
-        read as an option; one the file cannot be parsed for is reported the same
-        way, and those checks then run.
+        Read so that its ``ignore_checks`` can be left out of ``--mandatory-checks``
+        and its ``configure_rules`` passed on the command line. A file that cannot
+        be parsed is reported with a warning; every check then runs and its
+        configure_rules do not apply.
         """
         try:
             parsed = yaml.safe_load(Path(config_file).read_text(encoding="utf-8"))
         except (OSError, yaml.YAMLError) as exc:
             self._plugin_log(
-                f"Could not read ignore_checks from {Path(config_file).as_posix()} "
-                f"({exc}); every check runs.",
+                f"Could not read {Path(config_file).as_posix()} ({exc}); every "
+                "check runs and its configure_rules do not apply.",
                 level=logging.WARNING,
             )
-            return []
-        raw = parsed.get("ignore_checks") if isinstance(parsed, dict) else None
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _configure_rule_args(
+        self, configured: Any, config_file: Optional[Path]
+    ) -> List[str]:
+        """The ``--configure-rule`` values to pass while template config is off.
+
+        The operator's own configure_rules, from the ``config_file`` they named,
+        as ``RULE:key=value``, one per key. A command-line value replaces both
+        the template's and the file's, so the file's must be passed here to apply
+        at all. With none, ``_NO_OP_CONFIGURE_RULE`` keeps the template's out.
+
+        An entry that ``--configure-rule`` cannot carry (``_command_line_value``),
+        or whose rule id or key could be read as something else, is left out with
+        a warning, once per scanner. Its rule then uses the default, which for
+        every built-in rule reports at least as much as any setting.
+        """
+        entries: List[str] = []
+        shown = Path(config_file).as_posix() if config_file is not None else ""
+
+        def refuse(what: str, value: Any) -> None:
+            if f"configure_rules {what}" in self._refused_options:
+                return
+            self._refused_options.add(f"configure_rules {what}")
+            self._plugin_log(
+                f"Not passing configure_rules {what} ({value!r}) from {shown}: "
+                "cfn-lint's --configure-rule takes one value per key, without "
+                "commas, colons or equals signs, under a rule id and key of "
+                "letters, digits and underscores. The rule uses its default. To "
+                "have cfn-lint read the file as written, set "
+                "scanners.cfn-lint.options.honor_inline_ignores, which also lets "
+                "templates configure their own rules.",
+                level=logging.WARNING,
+            )
+
+        if configured is not None and not isinstance(configured, dict):
+            refuse("as a whole", configured)
+            configured = None
+        for rule_id, keys in (configured or {}).items():
+            if not isinstance(keys, dict):
+                refuse(repr(rule_id), keys)
+                continue
+            for key, value in keys.items():
+                text = _command_line_value(value)
+                if (
+                    isinstance(rule_id, str)
+                    and _CHECK_PATTERN.match(rule_id)
+                    and isinstance(key, str)
+                    and _CONFIG_KEY_PATTERN.match(key)
+                    and text is not None
+                ):
+                    entries.append(f"{rule_id}:{key}={text}")
+                else:
+                    refuse(f"{rule_id!r} {key!r}", value)
+        return entries or [_NO_OP_CONFIGURE_RULE]
+
+    def _config_file_ignores(
+        self, settings: Dict[str, Any], config_file: Path
+    ) -> List[str]:
+        """The ``ignore_checks`` the operator's ``.cfnlintrc`` sets, if any.
+
+        Read here so they can be left out of ``--mandatory-checks``. An entry that
+        is not a rule id or prefix is left out with a warning, so it can never be
+        read as an option, and that check then runs.
+        """
+        raw = settings.get("ignore_checks")
         if isinstance(raw, str):
             raw = raw.split(",")
         checks: List[str] = []
