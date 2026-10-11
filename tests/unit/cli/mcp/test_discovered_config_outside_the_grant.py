@@ -182,6 +182,45 @@ class TestDiscoveryChecksEachCandidateBeforeOpeningIt:
         assert discovery.selected.path == tree.scan / "pyproject.toml"
 
 
+class TestResolutionDiscoversUnderTheGate:
+    """resolve_config's own discovery, for a caller that passes permit_base directly."""
+
+    @pytest.mark.parametrize("target", TARGETS)
+    def test_discovery_with_no_config_named_is_refused_unopened(
+        self, tree, monkeypatch, target
+    ):
+        from automated_security_helper.config.resolve_config import resolve_config
+
+        link = tree.link(target)
+        opened = _record_opens(monkeypatch)
+
+        with pytest.raises(ASHConfigInputNotPermittedError) as excinfo:
+            resolve_config(source_dir=tree.scan, permit_base=_gate())
+
+        assert link not in opened
+        assert _MARKER not in str(excinfo.value)
+
+    def test_the_ignored_sources_of_a_named_config_are_found_under_the_gate(
+        self, tree, monkeypatch
+    ):
+        """A named config at a discovery location gets the sources discovery would
+        ignore reported; finding them must not open one outside the grant."""
+        from automated_security_helper.config.resolve_config import resolve_config
+
+        named = tree.scan / ".ash.yaml"
+        named.write_text("project_name: in-tree\n", encoding="utf-8")
+        link = tree.link("readable")
+        opened = _record_opens(monkeypatch)
+
+        config = resolve_config(
+            config_path=named, source_dir=tree.scan, permit_base=_gate()
+        )
+
+        assert config.project_name == "in-tree"
+        assert link not in opened
+        assert not any("pyproject" in str(w) for w in config._resolution_warnings)
+
+
 class TestScanDirectoryRefusesBeforeTheScanStarts:
     def _scan(self, tree) -> Dict[str, Any]:
         from automated_security_helper.cli.mcp_tools import mcp_scan_directory

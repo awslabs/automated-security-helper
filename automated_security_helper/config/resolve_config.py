@@ -174,7 +174,9 @@ def read_config_document(
         ) from e
 
 
-def _warnings_when_discovered(config_path: Path, source_dir: Path) -> List[str]:
+def _warnings_when_discovered(
+    config_path: Path, source_dir: Path, permit_base=None
+) -> List[str]:
     """Discovery's warnings for ``source_dir`` when ``config_path`` is the source it selects.
 
     ``ash scan`` and workspace mode run discovery themselves and pass the file it
@@ -190,7 +192,7 @@ def _warnings_when_discovered(config_path: Path, source_dir: Path) -> List[str]:
     if config_path.parent.resolve() not in (root, root / ".ash"):
         return []
     try:
-        discovery = discover_config_source(source_dir)
+        discovery = discover_config_source(source_dir, permit=permit_base)
     except ASHConfigValidationError:
         return []
     selected = discovery.selected
@@ -778,7 +780,7 @@ def _resolve_config(
             ASH_LOGGER.verbose(
                 "No configuration file provided, checking for default paths"
             )
-            discovery = discover_config_source(source_dir)
+            discovery = discover_config_source(source_dir, permit=permit_base)
             ignored_sources = [
                 LoggedResolutionWarning(message)
                 for message in log_config_discovery(discovery)
@@ -821,7 +823,9 @@ def _resolve_config(
                     config_path, confinement_source_dir
                 )
                 if confinement_source_dir is not None:
-                    ignored_sources = _warnings_when_discovered(config_path, source_dir)
+                    ignored_sources = _warnings_when_discovered(
+                        config_path, source_dir, permit_base
+                    )
             # AshConfig.from_file, keeping the list of files the config came from.
             document = read_config_document(
                 Path(config_path), confine_to=confine_to, permit_base=permit_base
