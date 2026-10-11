@@ -69,6 +69,16 @@ _TERMINAL_SCANNER_STATUSES = frozenset(
     }
 )
 
+# The ``status`` values of a returned dict that say its tool completed, compared
+# case-insensitively. Any other status means it did not: ``failed`` is the one the
+# template and the scan phase write, and a dict graded on its zero findings would
+# read as a clean scan.
+_COMPLETED_RESULT_STATUSES = frozenset({"passed", "completed", "success", "ok"})
+
+
+def _completed_result_status(status: Any) -> bool:
+    return isinstance(status, str) and status.lower() in _COMPLETED_RESULT_STATUSES
+
 
 # How often a running scanner announces that it is still running. Long enough that
 # a normal scan logs nothing extra (most scanners finish inside a minute), short
@@ -587,11 +597,19 @@ class ScannerExecutor:
                         container.severity_counts = severity_counts
                         container.finding_count = finding_count
                     elif isinstance(raw_results, dict):
-                        if (
-                            "status" in raw_results
-                            and raw_results["status"] == "failed"
+                        if "status" in raw_results and not _completed_result_status(
+                            raw_results["status"]
                         ):
                             container.status = ScannerStatus.ERROR
+                            # "failed" dicts carry their own errors: the template's
+                            # and the scan phase's failure responses.
+                            if raw_results["status"] != "failed":
+                                container.add_error(
+                                    f"{scanner_config_name} returned a result on "
+                                    f"{target_type} with status "
+                                    f"{raw_results['status']!r}, which does not say "
+                                    "its tool completed, so it was not graded"
+                                )
                         elif not (
                             "status" in raw_results
                             or "severity_counts" in raw_results

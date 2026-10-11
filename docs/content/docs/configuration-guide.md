@@ -186,9 +186,9 @@ that file is not read. The accepted codes per scanner are in
 [Scanner exit codes](troubleshooting.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
 A results file ASH cannot read as SARIF is `ERROR` too, whatever the exit code, as is
 an empty results file, SARIF with no run, and a scanner result that carries nothing
-to grade (a dict with no `status`, `severity_counts` or `findings`, or a list or
-string from a scanner's own `scan()`); none of them can show that the target is
-clean. The scanners ASH ships
+to grade (a dict with no `status`, `severity_counts` or `findings`, a dict whose
+`status` does not say its tool completed, or a list or string from a scanner's own
+`scan()`); none of them can show that the target is clean. The scanners ASH ships
 write SARIF with one run even when there is nothing for them to scan. So is a scanner whose tool reports that its content database does not exist;
 see [Failing on a stale content database](#failing-on-a-stale-content-database).
 

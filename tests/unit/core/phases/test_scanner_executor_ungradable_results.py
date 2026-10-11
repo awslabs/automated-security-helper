@@ -386,3 +386,40 @@ class TestGrypeWithNoRunIsAnError:
         row = self._grype_row(grype_context, monkeypatch, json.dumps(sarif))
 
         assert row.status == ScannerStatus.PASSED, row.errors
+
+
+class TestOnlyACompletedStatusIsGraded:
+    """A returned dict's ``status`` says whether its tool completed.
+
+    ``failed`` in any case, ``error``, and any status the executor does not know
+    mean the tool did not complete, so the row is ERROR; a dict graded on its zero
+    findings would read as clean. ``passed``, ``completed``, ``success`` and ``ok``
+    are graded on the findings the dict carries.
+    """
+
+    @pytest.mark.parametrize(
+        "status", ["error", "FAILED", "Failed", "timeout", "", None, 1]
+    )
+    def test_any_other_status_is_an_error(self, plugin_context, status):
+        row = _override_row(plugin_context, {"status": status, "findings": []})
+
+        assert row.status == ScannerStatus.ERROR, (
+            f"status {status!r} was graded {row.status.value} with "
+            f"{row.finding_count} findings"
+        )
+        assert any(f"status {status!r}" in str(e) for e in row.errors), row.errors
+
+    @pytest.mark.parametrize(
+        "status", ["passed", "completed", "success", "ok", "PASSED"]
+    )
+    def test_a_completed_status_is_graded_on_its_findings(self, plugin_context, status):
+        clean = _override_row(plugin_context, {"status": status, "findings": []})
+        assert clean.status == ScannerStatus.PASSED, clean.errors
+
+    def test_a_completed_status_with_a_finding_is_failed(self, plugin_context):
+        row = _override_row(
+            plugin_context,
+            {"status": "completed", "findings": [{"severity": "high", "id": "x"}]},
+        )
+
+        assert (row.status, row.finding_count) == (ScannerStatus.FAILED, 1)
