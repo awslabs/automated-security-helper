@@ -416,3 +416,43 @@ class TestSastSecretFindingsAreCountedNotSent:
         assert "AWS Access Key ID Value detected" not in sent
         assert "Secret findings: 2" in sent
         assert BANDIT_MESSAGE in sent
+
+
+class TestHardCodedPasswordFindingsAreSentMasked:
+    """Bandit's B105-B107 are sent, with the value their message quotes masked.
+
+    They are SAST findings about a name, not detections of a credential, so the
+    secret exclusion leaves them in (``is_secret_detection``); the engine has
+    already masked the value in their messages and snippets
+    (``utils/secret_masking.py``).
+    """
+
+    OPTIONS = {
+        "include_code_snippets": True,
+        "actionable_only": False,
+        "max_findings_to_analyze": 50,
+        "output_markdown": True,
+    }
+
+    @pytest.mark.parametrize(
+        "name", ["keyword_value", "long_key", "default_arg_value", "call_arg_value"]
+    )
+    def test_masked_message_is_sent_and_written_without_the_value(
+        self, scan_output, runtime, tmp_path, name
+    ):
+        from automated_security_helper.utils.secret_masking import _mask_secret_value
+
+        value = getattr(SECRETS, name)
+        masked_message = HARDCODED_VALUE_MESSAGE + _mask_secret_value(value) + "'"
+        reporter = make_reporter(tmp_path, **self.OPTIONS)
+
+        reporter.report(load_results(scan_output))
+
+        sent = runtime.sent()
+        summary = (tmp_path / "reports" / "ash.bedrock.summary.md").read_text(
+            encoding="utf-8"
+        )
+        assert masked_message in sent
+        assert masked_message in summary
+        assert value not in sent
+        assert value not in summary
