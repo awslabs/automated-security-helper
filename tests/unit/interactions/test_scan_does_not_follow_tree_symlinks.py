@@ -36,16 +36,20 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import importing_this_checkout
+
 MARKER = "HOST-ONLY-CONTENT-e8a7"
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
 
-# Run in the child. Only `jupyter nbconvert` is replaced; every other subprocess.run
-# call goes to the real function.
-DRIVER = textwrap.dedent(
-    """
+# Run in the child, with ASH imported from this checkout (see importing_this_checkout).
+# Only `jupyter nbconvert` is replaced; every other subprocess.run call goes to the
+# real function.
+DRIVER = importing_this_checkout(
+    textwrap.dedent(
+        """
     import json
     import subprocess
     import sys
@@ -83,6 +87,7 @@ DRIVER = textwrap.dedent(
     sys.argv = ["ash", "scan", *sys.argv[1:]]
     app()
     """
+    )
 )
 
 
@@ -162,8 +167,8 @@ def scan(tmp_path_factory):
     env = dict(os.environ)
     # Keep the child off the network and away from the caller's terminal settings.
     env.update({"ASH_OFFLINE": "YES", "NO_COLOR": "1", "COLUMNS": "200"})
-    # `-I` keeps the child's imports to the interpreter's own site-packages, which is
-    # the ASH under test when the suite runs from an installed checkout, as CI does.
+    # `-I` keeps the caller's PYTHONPATH and working directory out of the child;
+    # DRIVER puts this checkout first on its path.
     completed = subprocess.run(  # nosec B603 - fixed argv, the test's own interpreter
         [
             sys.executable,

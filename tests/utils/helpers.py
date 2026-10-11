@@ -15,6 +15,34 @@ from pathlib import Path
 #: teardown while other xdist workers are mid-sweep.
 ASH_TEST_TEMP_ROOT = Path(__file__).parent.parent / "pytest-temp"
 
+#: The checkout these tests belong to.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def importing_this_checkout(driver: str) -> str:
+    """``driver``, preceded by code that has it import ASH from this checkout.
+
+    For a child started with ``python -I``. ``-I`` leaves the current directory and
+    ``PYTHONPATH`` off ``sys.path``, so such a child imports ASH from wherever the
+    interpreter's installed copy points, which is not necessarily the checkout under
+    test: an editable install points at the tree it was installed from. This puts the
+    checkout first on ``sys.path``, and the child exits 86 before running ``driver``
+    if ``automated_security_helper`` still comes from somewhere else.
+    """
+    root = str(REPO_ROOT)
+    return (
+        "import sys\n"
+        f"sys.path.insert(0, {root!r})\n"
+        "import automated_security_helper as _ash\n"
+        "from pathlib import Path as _Path\n"
+        f"if not _Path(_ash.__file__).resolve().is_relative_to({root!r}):\n"
+        "    sys.stderr.write(\n"
+        f"        'imported ASH from ' + _ash.__file__ + ', not from ' + {root!r}\n"
+        "    )\n"
+        "    raise SystemExit(86)\n"
+        "del _ash, _Path\n"
+    ) + driver
+
 
 def is_under_test_scratch(path: Path) -> bool:
     """Whether ``path`` is one of the tests' own throwaway files.

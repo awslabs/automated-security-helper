@@ -21,13 +21,14 @@ from pathlib import Path
 import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from tests.utils.helpers import importing_this_checkout
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
 
-DRIVER = (
-    "import sys\n"
+# From this checkout, which `-I` alone would not import; see importing_this_checkout.
+DRIVER = importing_this_checkout(
     "from automated_security_helper.cli.main import app\n"
     "sys.argv = ['ash', 'report', *sys.argv[1:]]\n"
     "app()\n"
