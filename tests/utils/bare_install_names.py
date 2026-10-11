@@ -20,24 +20,45 @@ What is reported
 ----------------
 1. An install or run command whose target is a bare name. The commands are
    ``pip install`` (any ``pip``/``pip3``, ``python -m pip``, ``uv pip``),
-   ``pipx install``, ``pipx run``, ``uv add``, ``uv tool install``,
-   ``uv tool run`` and ``uvx``, plus the value of any ``--with``/``-w``,
-   ``--from`` or ``--spec`` option on a uv, uvx, pipx or pip command line. For
-   ``uvx``, ``uv tool run`` and ``pipx run`` the first positional word is the
-   package unless ``--from``/``--spec`` names one, so ``uvx --with=. ash mcp``
-   runs the ``ash`` package and ``uvx --from=git+... ash mcp`` does not.
+   ``pipx install``, ``pipx run``, ``pipx inject``, ``uv add``,
+   ``uv tool install``, ``uv tool run``, ``uvx``, ``poetry add`` and
+   ``pdm add``, plus the value of any ``--with``/``-w``, ``--from`` or
+   ``--spec`` option on a uv, uvx, pipx or pip command line. For ``uvx``,
+   ``uv tool run`` and ``pipx run`` the first positional word is the package
+   unless ``--from``/``--spec`` names one, so ``uvx --with=. ash mcp`` runs the
+   ``ash`` package and ``uvx --from=git+... ash mcp`` does not; every option uv
+   documents as taking a value (``uv tool run --help``) has its value skipped
+   when looking for that word. ``pipx inject <venv> <packages>`` installs its
+   packages, not its venv name. A command is found inside code spans, HTML
+   ``<code>``/``<pre>`` (entities decoded), ``$(...)``, and a JSON array of
+   strings such as a Dockerfile's exec form ``RUN ["pip", "install", ...]``.
 2. A requirement spelling of ASH's distribution name anywhere in the text:
    ``automated-security-helper[extra]`` or ``automated-security-helper==1.2``.
    Those only ever mean "resolve this name from an index", with or without an
    installer in front of them; this is what catches a prose hint such as
-   ``Install automated-security-helper[symbols]``. In a Python string literal
-   the spelling counts only when the same literal contains the word "install":
-   a literal can be a fragment, such as ``f"automated-security-helper[{extra}]"``
-   in a helper that appends the git reference next, and the fragment alone tells
-   a user nothing.
-3. MCP client entries written as JSON, ``"command": "uvx", "args": [...]``,
-   rebuilt into one command line and checked as in 1. The arguments sit on
-   separate lines there, so a line-based check cannot see them.
+   ``Install automated-security-helper[symbols]`` or "Add
+   automated-security-helper[symbols] to your environment". A Python literal
+   that is only such a spelling is reported too, even when a later literal adds
+   a direct reference to it: build the requirement in one expression instead.
+3. MCP client entries, ``"command": "uvx", "args": [...]`` in any key order and
+   with any keys between them, rebuilt into one command line and checked as in
+   1. Every ``{...}`` object in the text is parsed with ``json.loads``; one that
+   is not JSON (JSONC, a JavaScript object, a Python dict) is read with a
+   pattern over its own top-level keys.
+4. Outside Python source: a line that is only a requirement on ASH's name (a
+   requirements file line, with an optional extra, version, marker, hash or
+   comment), a quoted array element that is one (a pyproject ``dependencies``
+   entry), and a poetry dependency given as a version string
+   (``automated-security-helper = "^3.7"``).
+
+In Python files every string expression is read whole: adjacent literals, an
+f-string, ``+`` concatenation, ``%`` and ``str.format`` with constant arguments,
+and module-level names assigned once to a string are folded into one text, with
+anything not constant read as ``{}``. Every list and tuple with a string in it
+is rebuilt into one command line, so an argv list such as
+``[sys.executable, "-m", "pip", "install", "automated-security-helper[cdk]"]``
+is read as the command it runs. A requirement followed by ``@ {}`` there is a
+direct reference whose URL is computed, and is not reported.
 
 A name counts as bare when it is, after PEP 503 normalization (case, ``-``,
 ``_`` and ``.`` are equivalent), ``automated-security-helper`` or ``ash``, and
@@ -49,21 +70,28 @@ index like any other name.
 What is not reported
 --------------------
 ``pipx upgrade``, which reuses the requirement recorded at install time, and
-``uv run``'s command word, which names a script in the current project. Prose
-that follows an install command on the same line without a code span or a
-``;``/``&&``/``|`` between them is read as more install targets, so
-"pip install -e . then run ash" is reported; put the commands in separate code
-spans. Commands built at runtime from pieces that never appear together in one
-string literal are invisible here; the runtime-hint tests check those messages
-as users see them.
+``uv run``'s command word, which names a script in the current project. The
+name alone in a Python literal (``"automated-security-helper"``), which is how
+code refers to the distribution without installing it; it is reported once it
+becomes a command or a requirement spelling. Prose that follows an install
+command on the same line without a code span or a ``;``/``&&``/``|`` between
+them is read as more install targets, so "pip install -e . then run ash" is
+reported; put the commands in separate code spans. Commands built at runtime
+from values that are not module-level constants are invisible here; the
+runtime-hint tests check those messages as users see them. ``setup.py``
+``install_requires`` lists and MCP client configs in YAML or TOML are not read
+as dependency lists.
 """
 
 from __future__ import annotations
 
 import ast
+import html
+import json
 import re
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Optional
 
 #: PEP 503-normalized names that do not resolve to ASH on a package index.
 BARE_NAMES = frozenset({"automated-security-helper", "ash"})
@@ -87,6 +115,7 @@ BINARY_SUFFIXES = frozenset(
         ".woff",
         ".woff2",
         ".ttf",
+        ".mcpb",
     }
 )
 
@@ -95,40 +124,76 @@ _EXTRAS = re.compile(r"\s*\[[^\]]*\]")
 _DIRECT_REFERENCE = re.compile(
     r"\s*@\s*(?:git\+|hg\+|svn\+|bzr\+|https?://|file:)", re.IGNORECASE
 )
+#: In a folded Python expression, ``name[extra] @ {}`` is a direct reference
+#: whose URL is computed at runtime.
+_DIRECT_REFERENCE_IN_PYTHON = re.compile(
+    r"\s*@\s*(?:git\+|hg\+|svn\+|bzr\+|https?://|file:|\{\})", re.IGNORECASE
+)
 _PIP = re.compile(r"pip(?:3(?:\.\d+)?)?")
 _WORD = re.compile(r'"[^"]*"|\'[^\']*\'|\S+')
-_SEPARATORS = re.compile(r"&&|\|\||[;|]")
+_SEPARATORS = re.compile(r"&&|\|\||\$\(|[;|()]")
 _RICH_TAG = re.compile(r"^\[[^\]]*\]")
-_INSTALL_WORD = re.compile(r"install", re.IGNORECASE)
+_HTML_TAG = re.compile(r"</?[A-Za-z][^<>]*>")
 
 #: Options of uvx / uv tool run / pipx run whose value is a separate word. The
-#: value is skipped when looking for the command word.
+#: value is skipped when looking for the command word. The uv list is every
+#: option ``uv tool run --help`` (uv 0.12) shows with a value; the pipx ones are
+#: from ``pipx run --help``.
 _RUN_VALUE_OPTIONS = frozenset(
     {
+        # uv tool run / uvx
         "--from",
-        "--spec",
-        "--with",
         "-w",
+        "--with",
         "--with-editable",
         "--with-requirements",
-        "--python",
-        "-p",
-        "--directory",
-        "--project",
-        "--index",
-        "--index-url",
-        "-i",
-        "--default-index",
-        "--extra-index-url",
-        "--find-links",
-        "-f",
-        "--constraints",
         "-c",
+        "--constraints",
+        "-b",
+        "--build-constraints",
         "--overrides",
         "--env-file",
-        "--pip-args",
+        "--python-platform",
+        "--torch-backend",
+        "--index",
+        "--default-index",
+        "-i",
+        "--index-url",
+        "--extra-index-url",
+        "-f",
+        "--find-links",
+        "--index-strategy",
+        "--keyring-provider",
+        "-P",
+        "--upgrade-package",
+        "--upgrade-group",
+        "--resolution",
+        "--prerelease",
+        "--fork-strategy",
+        "--exclude-newer",
+        "--exclude-newer-package",
+        "--no-sources-package",
+        "--reinstall-package",
+        "--link-mode",
+        "-C",
+        "--config-setting",
+        "--config-settings-package",
+        "--no-build-isolation-package",
+        "--no-build-package",
+        "--no-binary-package",
         "--cache-dir",
+        "--refresh-package",
+        "-p",
+        "--python",
+        "--color",
+        "--allow-insecure-host",
+        "--directory",
+        "--project",
         "--config-file",
+        # pipx run
+        "--spec",
+        "--pip-args",
+        "--backend",
     }
 )
 
@@ -136,21 +201,59 @@ _RUN_VALUE_OPTIONS = frozenset(
 _REQUIREMENT_OPTIONS = frozenset({"--with", "-w", "--from", "--spec"})
 #: Of those, the ones that name the package a runner runs.
 _SOURCE_OPTIONS = frozenset({"--from", "--spec"})
+#: Executables whose presence makes a segment worth parsing as a command.
+_INSTALLERS = frozenset({"uv", "uvx", "pipx", "poetry", "pdm"})
 
+_ASH = r"automated[-_.]security[-_.]helper"
 _ASH_REQUIREMENT_SPELLING = re.compile(
-    r"(?<![\w/\\.@:-])automated[-_.]security[-_.]helper(?![\w-])"
+    rf"(?<![\w/\\.@:-]){_ASH}(?![\w-])"
     r"(?P<extras>\s*\[[^\]\n]*\])?"
     r"(?P<spec>\s*(?:===|==|~=|!=|>=|<=|<|>)\s*[\w.*+!{}-]+)?",
     re.IGNORECASE,
 )
-
-_JSON_STRING = r'"(?:[^"\\]|\\.)*"'
-_JSON_ARGS = rf"\[(?P<args>(?:\s*{_JSON_STRING}\s*,?)*)\s*\]"
-_JSON_COMMAND = rf'"command"\s*:\s*(?P<command>{_JSON_STRING})'
-_JSON_ENTRIES = (
-    re.compile(rf'{_JSON_COMMAND}\s*,\s*"args"\s*:\s*{_JSON_ARGS}'),
-    re.compile(rf'"args"\s*:\s*{_JSON_ARGS}\s*,\s*{_JSON_COMMAND}'),
+_SPECIFIER = r"(?:===|==|~=|!=|>=|<=|<|>)\s*[\w.*+!-]+"
+#: A requirement on ASH's name with nothing after it but an optional extra,
+#: version specifiers and a marker: what pip resolves from an index. Spelled
+#: with hyphens only: ``automated_security_helper`` alone on a line or in an
+#: array is the import name, as in a build ``include`` list or a coverage
+#: ``source``, and is read as that.
+_BARE_REQUIREMENT = (
+    r"automated-security-helper(?![\w-])(?:\s*\[[^\]\n]*\])?"
+    rf"(?:\s*{_SPECIFIER}(?:\s*,\s*{_SPECIFIER})*)?"
+    r"(?:\s*;[^#\n\"']*)?"
 )
+#: Rule 4: a requirements-file line.
+_REQUIREMENT_LINE = re.compile(
+    rf"^\s*{_BARE_REQUIREMENT}(?:\s+--hash[=\s]\S+)*\s*(?:#.*)?$", re.IGNORECASE
+)
+#: Rule 4: a quoted array element, as in a pyproject dependencies list: after a
+#: ``[`` or ``,`` in an inline array, or alone at the start of a line with a
+#: ``,`` or ``]`` after it in a multi-line one. A quoted name anywhere else is a
+#: value of some other kind (a JSON ``"id"``, a default image name, an argument).
+_REQUIREMENT_ELEMENTS = (
+    re.compile(
+        rf"[\[,]\s*([\"'])(?P<requirement>{_BARE_REQUIREMENT})\s*\1", re.IGNORECASE
+    ),
+    re.compile(
+        rf"^\s*([\"'])(?P<requirement>{_BARE_REQUIREMENT})\s*\1\s*[,\]]",
+        re.IGNORECASE,
+    ),
+)
+#: Rule 4: a poetry dependency on ASH's name given as a version string. The value
+#: has to look like a version constraint, so an entry point
+#: (``automated-security-helper = "pkg.module:main"``) is not one.
+_POETRY_VERSION_DEPENDENCY = re.compile(
+    r"""^\s*["']?automated-security-helper["']?\s*=\s*["'][\^~*<>=!\d]""",
+    re.IGNORECASE,
+)
+
+_JSON_STRING = r'"(?:[^"\\\n]|\\.)*"'
+_STRING_ARRAY = re.compile(rf"\[\s*{_JSON_STRING}(?:\s*,\s*{_JSON_STRING})*\s*,?\s*\]")
+_ANY_STRING = rf"{_JSON_STRING}|'[^'\n]*'"
+_COMMAND_KEY = re.compile(
+    rf"""(?:"command"|'command'|\bcommand)\s*:\s*({_ANY_STRING})"""
+)
+_ARGS_KEY = re.compile(r"""(?:"args"|'args'|\bargs)\s*:\s*\[([^\]]*)\]""")
 
 
 def normalize(name: str) -> str:
@@ -191,7 +294,7 @@ def _commands(words: list[str]) -> Iterator[tuple[str, int]]:
         nxt, nxt2 = exes[i + 1], exes[i + 2]
         if _PIP.fullmatch(exe) and nxt == "install":
             yield "install", i + 2
-        elif exe == "uv" and nxt == "add":
+        elif exe in ("uv", "poetry", "pdm") and nxt == "add":
             yield "install", i + 2
         elif exe == "uv" and nxt == "tool" and nxt2 == "install":
             yield "install", i + 3
@@ -199,6 +302,8 @@ def _commands(words: list[str]) -> Iterator[tuple[str, int]]:
             yield "run", i + 3
         elif exe == "pipx" and nxt == "install":
             yield "install", i + 2
+        elif exe == "pipx" and nxt == "inject":
+            yield "inject", i + 2
         elif exe == "pipx" and nxt == "run":
             yield "run", i + 2
         elif exe == "uvx":
@@ -244,6 +349,19 @@ def _bare_option_values(words: list[str]) -> bool:
     return False
 
 
+def _positionals(words: list[str], start: int) -> Iterator[int]:
+    """Indexes of the words from ``start`` on that are not options or values."""
+    i = start
+    while i < len(words):
+        word = words[i].strip("\"'")
+        option, eq, _ = word.partition("=")
+        if word.startswith("-"):
+            i += 2 if (not eq and option in _RUN_VALUE_OPTIONS) else 1
+            continue
+        yield i
+        i += 1
+
+
 def _run_command_is_bare(words: list[str], start: int) -> bool:
     i = start
     while i < len(words):
@@ -264,7 +382,7 @@ def command_is_bare_install(segment: str) -> bool:
     """Whether one shell command installs or runs a bare name (rule 1)."""
     words = _WORD.findall(segment)
     exes = {_executable(w) for w in words}
-    if not exes & {"uv", "uvx", "pipx"} and not any(_PIP.fullmatch(e) for e in exes):
+    if not exes & _INSTALLERS and not any(_PIP.fullmatch(e) for e in exes):
         return False
     if _bare_option_values(words):
         return True
@@ -273,9 +391,18 @@ def command_is_bare_install(segment: str) -> bool:
             if _run_command_is_bare(words, start):
                 return True
             continue
-        for i in range(start, len(words)):
-            word = words[i].strip("\"'")
-            if not word.startswith("-") and is_bare_requirement(word, _rest(words, i)):
+        if kind == "inject":
+            # pipx inject <venv> <packages>: the first word names a venv, which
+            # may well be ASH's own; the packages are what gets installed.
+            targets = list(_positionals(words, start))[1:]
+        else:
+            targets = [
+                i
+                for i in range(start, len(words))
+                if not words[i].strip("\"'").startswith("-")
+            ]
+        for i in targets:
+            if is_bare_requirement(words[i], _rest(words, i)):
                 return True
     return False
 
@@ -297,54 +424,148 @@ def _logical_lines(text: str) -> Iterator[tuple[int, str]]:
 
 def _segments(line: str) -> Iterator[str]:
     # A code span ends a command: "run `pip install -e .` then `ash scan`" is
-    # two commands, not a pip install of ``then`` and ``ash``.
-    for part in line.split("`"):
+    # two commands, not a pip install of ``then`` and ``ash``. An HTML tag ends
+    # one the same way.
+    for part in _HTML_TAG.sub("`", line).split("`"):
         for segment in _SEPARATORS.split(part):
             if segment.strip():
                 yield segment.strip()
 
 
-def _requirement_spellings(line: str, *, literal: str | None = None) -> Iterator[str]:
-    """Rule 2: ``automated-security-helper[extra]`` or ``...==ver`` with no URL.
+def _quoted_line(words: list[str]) -> str:
+    return " ".join(f'"{w}"' if re.search(r"\s", w) else w for w in words)
 
-    ``literal`` is the whole Python string literal ``line`` came from; when it is
-    given, a spelling counts only if that literal contains the word "install".
-    """
-    if literal is not None and not _INSTALL_WORD.search(literal):
-        return
+
+def _string_arrays(line: str) -> Iterator[str]:
+    """Each JSON array of strings in ``line``, rebuilt as one command line."""
+    for match in _STRING_ARRAY.finditer(line):
+        try:
+            items = json.loads(re.sub(r",\s*\]$", "]", match.group(0)))
+        except ValueError:
+            continue
+        yield _quoted_line([str(item) for item in items])
+
+
+def _requirement_spellings(line: str, *, python_literal: bool) -> Iterator[str]:
+    """Rule 2: ``automated-security-helper[extra]`` or ``...==ver`` with no URL."""
+    direct_reference = (
+        _DIRECT_REFERENCE_IN_PYTHON if python_literal else _DIRECT_REFERENCE
+    )
     for match in _ASH_REQUIREMENT_SPELLING.finditer(line):
         if not (match.group("extras") or match.group("spec")):
             continue
-        if _DIRECT_REFERENCE.match(line, match.end()):
+        if direct_reference.match(line, match.end()):
             continue
         yield match.group(0).strip()
 
 
-def _json_entries(text: str) -> Iterator[tuple[int, str]]:
+def _requirement_lines(line: str) -> Iterator[str]:
+    """Rule 4: requirements lines, dependency array elements, poetry versions."""
+    if _REQUIREMENT_LINE.match(line):
+        yield line.strip()
+    for pattern in _REQUIREMENT_ELEMENTS:
+        for match in pattern.finditer(line):
+            yield match.group("requirement").strip()
+    if _POETRY_VERSION_DEPENDENCY.match(line):
+        yield line.strip()
+
+
+def _objects(text: str) -> Iterator[tuple[int, int]]:
+    """``(start, end)`` of every balanced ``{...}`` in ``text``.
+
+    Braces inside double-quoted strings do not count, and a newline ends a
+    string, since a JSON string cannot hold one; a stray quote in prose then
+    cannot swallow the rest of the file.
+    """
+    stack: list[int] = []
+    in_string = escaped = False
+    for i, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char in ('"', "\n"):
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            stack.append(i)
+        elif char == "}" and stack:
+            yield stack.pop(), i + 1
+
+
+def _top_level(obj: str) -> str:
+    """``obj`` with every nested object blanked out, offsets preserved."""
+    out, depth = [], 0
+    for char in obj:
+        if char == "{":
+            depth += 1
+        if depth > 1:
+            out.append("\n" if char == "\n" else " ")
+        else:
+            out.append(char)
+        if char == "}":
+            depth -= 1
+    return "".join(out)
+
+
+def _unquote(value: str) -> str:
+    if value.startswith('"'):
+        try:
+            return json.loads(value)
+        except ValueError:
+            return value[1:-1]
+    return value[1:-1]
+
+
+def _mcp_entries(text: str) -> Iterator[tuple[int, str]]:
     """Rule 3: ``"command": ..., "args": [...]`` rebuilt as one command line."""
-    for pattern in _JSON_ENTRIES:
-        for match in pattern.finditer(text):
-            command = match.group("command")[1:-1]
-            args = [a[1:-1] for a in re.findall(_JSON_STRING, match.group("args"))]
-            quoted = [f'"{a}"' if re.search(r"\s", a) else a for a in args]
-            line = text.count("\n", 0, match.start()) + 1
-            yield line, " ".join([command, *quoted])
+    for start, end in _objects(text):
+        obj = text[start:end]
+        if "command" not in obj or "args" not in obj:
+            continue
+        top = _top_level(obj)
+        command_key = _COMMAND_KEY.search(top)
+        if command_key is None:
+            continue
+        line = text.count("\n", 0, start + command_key.start()) + 1
+        try:
+            parsed = json.loads(obj)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict):
+            command, args = parsed.get("command"), parsed.get("args")
+            if isinstance(command, str) and isinstance(args, list):
+                yield line, _quoted_line([command, *(str(a) for a in args)])
+            continue
+        args_key = _ARGS_KEY.search(top)
+        if args_key is None:
+            continue
+        args = [_unquote(a) for a in re.findall(_ANY_STRING, args_key.group(1))]
+        yield line, _quoted_line([_unquote(command_key.group(1)), *args])
 
 
 def find_in_text(text: str, *, python_literal: bool = False) -> list[tuple[int, str]]:
     """Every bare-name install in ``text``, as ``(1-based line, snippet)``.
 
-    ``python_literal`` marks ``text`` as one Python string literal, which may be
-    a fragment of a message (see rule 2 in the module docstring).
+    ``python_literal`` marks ``text`` as one folded Python string expression:
+    rule 4 does not apply to it, and ``@ {}`` counts as a direct reference.
     """
     found: list[tuple[int, str]] = []
-    literal = text if python_literal else None
-    for number, line in _logical_lines(text):
-        for segment in _segments(line):
-            if command_is_bare_install(segment):
-                found.append((number, segment))
-        found.extend((number, s) for s in _requirement_spellings(line, literal=literal))
-    for number, command_line in _json_entries(text):
+    for number, raw_line in _logical_lines(text):
+        line = html.unescape(raw_line)
+        for command_line in [*_segments(line), *_string_arrays(line)]:
+            if command_is_bare_install(command_line):
+                found.append((number, command_line))
+        found.extend(
+            (number, s)
+            for s in _requirement_spellings(line, python_literal=python_literal)
+        )
+        if not python_literal:
+            found.extend((number, s) for s in _requirement_lines(line))
+    for number, command_line in _mcp_entries(text):
         if command_is_bare_install(command_line):
             found.append((number, command_line))
     return sorted(set(found))
@@ -355,32 +576,117 @@ def find_bare_installs(text: str) -> list[str]:
     return [snippet for _, snippet in find_in_text(text)]
 
 
+_FOLD_UNKNOWN = "{}"
+
+
+def _fold(node: ast.AST, constants: dict[str, str]) -> Optional[str]:
+    """The text of a string expression, or None if ``node`` is not one.
+
+    Anything inside the expression that is not a constant reads as ``{}``.
+    """
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else None
+    if isinstance(node, ast.Name):
+        return constants.get(node.id)
+    if isinstance(node, ast.JoinedStr):
+        parts = []
+        for value in node.values:
+            if isinstance(value, ast.Constant):
+                parts.append(str(value.value))
+            elif isinstance(value, ast.FormattedValue) and value.format_spec is None:
+                parts.append(_fold(value.value, constants) or _FOLD_UNKNOWN)
+            else:
+                parts.append(_FOLD_UNKNOWN)
+        return "".join(parts)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _fold(node.left, constants), _fold(node.right, constants)
+        if left is None and right is None:
+            return None
+        return (left or _FOLD_UNKNOWN) + (right or _FOLD_UNKNOWN)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+        template = _fold(node.left, constants)
+        if template is None:
+            return None
+        if isinstance(node.right, ast.Tuple):
+            values = tuple(
+                _fold(e, constants) or _FOLD_UNKNOWN for e in node.right.elts
+            )
+        else:
+            values = (_fold(node.right, constants) or _FOLD_UNKNOWN,)
+        try:
+            return template % values
+        except (TypeError, ValueError):
+            return template
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "format"
+    ):
+        template = _fold(node.func.value, constants)
+        if template is None:
+            return None
+        args = [_fold(a, constants) or _FOLD_UNKNOWN for a in node.args]
+        kwargs = {
+            k.arg: _fold(k.value, constants) or _FOLD_UNKNOWN
+            for k in node.keywords
+            if k.arg is not None
+        }
+        try:
+            return template.format(*args, **kwargs)
+        except (IndexError, KeyError, ValueError):
+            return template
+    return None
+
+
+def _module_constants(tree: ast.Module) -> dict[str, str]:
+    """Module-level names assigned exactly once to a string expression."""
+    constants: dict[str, str] = {}
+    assigned: dict[str, int] = {}
+    for statement in tree.body:
+        if isinstance(statement, ast.Assign):
+            targets, value = statement.targets, statement.value
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            targets, value = [statement.target], statement.value
+        else:
+            continue
+        for target in targets:
+            if not isinstance(target, ast.Name):
+                continue
+            assigned[target.id] = assigned.get(target.id, 0) + 1
+            text = _fold(value, constants)
+            if text is not None:
+                constants[target.id] = text
+    return {name: text for name, text in constants.items() if assigned[name] == 1}
+
+
 def _python_strings(source: str, path: Path) -> Iterator[tuple[int, str]]:
-    """Every string literal in a Python file, docstrings included.
+    """Every string expression in a Python file, folded, docstrings included.
 
     Docstrings are included because mkdocstrings renders some of them into the
     docs site. Comments are not: no user reads them, and they are where the
-    history of a changed hint belongs. Adjacent literals are one node, so a hint
-    split over two source lines is checked whole; an f-string's replacement
-    fields read as ``{}``.
+    history of a changed hint belongs. Only the outermost string expression is
+    read, so ``"name[extra]" + " @ git+..."`` is one direct reference and not a
+    bare requirement plus a URL. Lists and tuples are also rebuilt into one
+    command line each.
     """
     tree = ast.parse(source, filename=str(path))
-    inside_fstrings: set[int] = set()
+    constants = _module_constants(tree)
+    composite = (ast.JoinedStr, ast.BinOp, ast.Call)
+    inner: set[int] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.JoinedStr):
-            inside_fstrings.update(id(v) for v in ast.walk(node) if v is not node)
+        if isinstance(node, composite) and _fold(node, constants) is not None:
+            inner.update(id(child) for child in ast.walk(node) if child is not node)
     for node in ast.walk(tree):
-        if isinstance(node, ast.JoinedStr) and id(node) not in inside_fstrings:
-            text = "".join(
-                v.value if isinstance(v, ast.Constant) else "{}" for v in node.values
-            )
-            yield node.lineno, text
-        elif (
-            isinstance(node, ast.Constant)
-            and isinstance(node.value, str)
-            and id(node) not in inside_fstrings
-        ):
-            yield node.lineno, node.value
+        if isinstance(node, (ast.List, ast.Tuple)):
+            words = [_fold(e, constants) for e in node.elts]
+            if any(w is not None for w in words):
+                yield node.lineno, _quoted_line([w or _FOLD_UNKNOWN for w in words])
+        if id(node) in inner or isinstance(node, ast.Name):
+            continue
+        if isinstance(node, (ast.Constant, *composite)):
+            text = _fold(node, constants)
+            if text is not None:
+                yield node.lineno, text
 
 
 def find_in_file(path: Path) -> list[tuple[int, str]]:
@@ -393,8 +699,7 @@ def find_in_file(path: Path) -> list[tuple[int, str]]:
     text = path.read_text(encoding="utf-8")
     if path.suffix != ".py":
         return find_in_text(text)
-    found = [(line, snippet) for line, snippet in _json_entries(text)]
-    found = [(line, s) for line, s in found if command_is_bare_install(s)]
+    found = [(line, s) for line, s in _mcp_entries(text) if command_is_bare_install(s)]
     for line, value in _python_strings(text, path):
         found.extend(
             (line, snippet) for _, snippet in find_in_text(value, python_literal=True)

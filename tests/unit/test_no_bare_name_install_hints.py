@@ -166,6 +166,57 @@ BARE_NAME_INSTALLS = {
     "uvx-from-bare-name": "uvx --from automated-security-helper ash",
     "pipx-run-spec-bare-name": "pipx run --spec automated-security-helper ash",
     "requirements-line": "automated-security-helper==3.7.0",
+    "prose-without-install": "Add automated-security-helper[symbols] to your environment",
+    "html-code": "<code>pip install automated-security-helper</code>",
+    "html-pre": "<pre>pip install automated-security-helper</pre>",
+    "html-entity-quotes": "pip install &quot;automated-security-helper[symbols]&quot;",
+    "command-substitution": "echo $(pip install automated-security-helper)",
+    "pipx-inject": "pipx inject ash-env automated-security-helper",
+    "poetry-add": "poetry add automated-security-helper",
+    "pdm-add": "pdm add automated-security-helper",
+    "dockerfile-exec-form": 'RUN ["pip", "install", "automated-security-helper"]',
+    "uvx-link-mode": "uvx --link-mode copy ash mcp",
+    "uvx-prerelease": "uvx --prerelease allow automated-security-helper",
+    "uvx-color": "uvx --color never ash",
+    "uvx-exclude-newer": "uvx --exclude-newer 2026-01-01 ash",
+    "uvx-resolution": "uvx --resolution lowest ash",
+    "uvx-refresh-package": "uvx --refresh-package ash ash",
+    "uvx-env-file": "uvx --env-file .env ash mcp",
+    "uvx-config-setting": "uvx -C key=value ash",
+    "uv-tool-run-python": "uv tool run --python 3.12 ash",
+    "pipx-run-python": "pipx run --python python3.12 ash",
+    "pipx-run-pip-args": "pipx run --pip-args='--pre' ash",
+    "requirements-bare-name": "automated-security-helper",
+    "requirements-compatible-release": "automated-security-helper ~= 3.7",
+    "requirements-hash": "automated-security-helper==3.7.0 --hash=sha256:abc",
+    "requirements-comment": "automated-security-helper  # ASH",
+    "pyproject-dependency": 'dependencies = ["automated-security-helper"]',
+    "pyproject-optional-dependency": 'ash = ["automated-security-helper>=3"]',
+    "pyproject-array-item": '    "automated-security-helper",',
+    "poetry-caret": 'automated-security-helper = "^3.7"',
+    "poetry-star": 'automated-security-helper = "*"',
+    "mcp-json-env-between": '{"command": "uvx", "env": {"FASTMCP_LOG_LEVEL": "ERROR"}, "args": ["--with=.", "ash", "mcp"]}',
+    "mcp-json-type-between": '{"command": "uvx", "type": "stdio", "args": ["ash", "mcp"]}',
+    "mcp-json-args-first": '{"args": ["ash", "mcp"], "env": {}, "command": "uvx"}',
+    "mcp-json-command-path": '{"command": "/home/u/.local/bin/uvx", "args": ["ash", "mcp"]}',
+    "mcp-json-uv-tool-run": '{"command": "uv", "args": ["tool", "run", "ash", "mcp"]}',
+    "mcp-json-pipx-run": '{"command": "pipx", "args": ["run", "ash", "mcp"]}',
+    "mcp-js-object": "{command: 'uvx', args: ['ash', 'mcp']}",
+    "mcp-json-fenced-in-markdown": textwrap.dedent(
+        """\
+        ```json
+        {
+          "mcpServers": {
+            "ash": {
+              "command": "uvx",
+              "env": {"FASTMCP_LOG_LEVEL": "ERROR"},
+              "args": ["--with=.", "ash", "mcp"]
+            }
+          }
+        }
+        ```
+        """
+    ),
     "mcp-json-with-dot": textwrap.dedent(
         """\
         {
@@ -220,6 +271,26 @@ RESOLVING_OR_UNRELATED = {
         "ASH_UVX_SOURCE: automated-security-helper[cdk] @ "
         "git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}"
     ),
+    "requirements-direct-reference": f"automated-security-helper[cdk] @ git+{GIT_URL}@v3.7.0",
+    "poetry-git-table": f'automated-security-helper = {{git = "{GIT_URL}", tag = "v3.7.0"}}',
+    "poetry-path-table": 'automated-security-helper = {path = "../../", develop = true}',
+    "json-name-value": '{"name": "automated-security-helper", "versionInfo": "3.7.0"}',
+    "json-analyzer-id": '    "id": "automated-security-helper",',
+    "entry-point": 'automated-security-helper = "automated_security_helper.cli.entrypoint:main"',
+    "build-include-list": 'include = [ "automated_security_helper", "/Dockerfile",]',
+    "default-image-name": '                "automated-security-helper"',
+    "ruby-assertion-argument": '    assert_match "automated-security-helper", shell_output("ash --version")',
+    "prose-naming-the-project": "automated-security-helper is a security scanner",
+    "pipx-inject-into-ash": "pipx inject automated-security-helper tree-sitter-python",
+    "pdm-add-direct-reference": f"pdm add 'automated-security-helper @ git+{GIT_URL}@v3.7.0'",
+    "dockerfile-exec-form-git": f'RUN ["pip", "install", "git+{GIT_URL}@v3.7.0"]',
+    "html-code-git": f"<code>pip install git+{GIT_URL}@v3.7.0</code>",
+    "uvx-link-mode-from-git": f"uvx --link-mode copy --from git+{GIT_URL}@v3.7.0 ash mcp",
+    "mcp-json-env-between-from-git": (
+        '{"command": "uvx", "env": {}, "args": '
+        '["--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0", "ash", "mcp"]}'
+    ),
+    "mcp-json-uv-run-project": '{"command": "uv", "args": ["run", "--project=/src/ash", "ash", "mcp"]}',
     "mcp-json-from-git": textwrap.dedent(
         """\
         {
@@ -251,6 +322,106 @@ def test_bare_name_installs_are_reported(text):
 )
 def test_installs_that_resolve_to_ash_are_not_reported(text):
     assert find_bare_installs(text) == []
+
+
+# Python source shapes. Each is checked through find_in_file, the gate's own
+# reader, so a shape it reports here is one the gate reports in the tree.
+PYTHON_BARE_NAME_INSTALLS = {
+    # The shape of the cdk-nag scanner's install command before it was fixed.
+    "argv-list-with-extra": """
+        import sys
+
+        def get_installation_commands():
+            return [
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "automated-security-helper[cdk]",
+                ]
+            ]
+        """,
+    "argv-list-reinstall": """
+        import sys
+        CMD = [sys.executable, "-m", "pip", "install", "--force-reinstall", "automated-security-helper"]
+        """,
+    "argv-uv-tool-install": """
+        CMD = ["uv", "tool", "install", "automated-security-helper[symbols]"]
+        """,
+    "argv-tuple-uvx-with-dot": """
+        CMD = ("uvx", "--with=.", "ash", "mcp")
+        """,
+    "concatenated-name": """
+        NAME = "automated-security-helper"
+        HINT = "pip install " + NAME
+        """,
+    "fstring-name": """
+        NAME = "automated-security-helper"
+        HINT = f"pip install {NAME}[symbols]"
+        """,
+    "prose-without-install": """
+        HINT = "Add automated-security-helper[symbols] to your environment"
+        """,
+    "percent-format": """
+        HINT = "pip install %s" % "automated-security-helper"
+        """,
+    "str-format": """
+        HINT = "{} install automated-security-helper".format("pip")
+        """,
+    "requirement-literal-alone": """
+        REQUIREMENT = "automated-security-helper[cdk]"
+        """,
+}
+
+PYTHON_RESOLVING_OR_UNRELATED = {
+    "distribution-name-constant": """
+        ASH_DISTRIBUTION_NAME = "automated-security-helper"
+        """,
+    "direct-reference-built-from-pieces": """
+        ASH_DISTRIBUTION_NAME = "automated-security-helper"
+
+        def requirement(extra, source):
+            return f"{ASH_DISTRIBUTION_NAME}[{extra}] @ {source}"
+        """,
+    "direct-reference-concatenated": f"""
+        REQ = "automated-security-helper[symbols]" + " @ git+{GIT_URL}@v3.7.0"
+        """,
+    "argv-from-metadata": """
+        import sys
+
+        def command(requirements):
+            return [sys.executable, "-m", "pip", "install", *requirements]
+        """,
+    "report-analyzer-id": """
+        ANALYZER = {"id": "automated-security-helper", "name": "ASH"}
+        """,
+    "image-name": """
+        IMAGE = "automated-security-helper:custom"
+        """,
+}
+
+
+@pytest.mark.parametrize(
+    "source",
+    PYTHON_BARE_NAME_INSTALLS.values(),
+    ids=PYTHON_BARE_NAME_INSTALLS.keys(),
+)
+def test_python_shapes_are_reported(tmp_path, source):
+    path = tmp_path / "shape.py"
+    path.write_text(textwrap.dedent(source), encoding="utf-8")
+    assert find_in_file(path), source
+
+
+@pytest.mark.parametrize(
+    "source",
+    PYTHON_RESOLVING_OR_UNRELATED.values(),
+    ids=PYTHON_RESOLVING_OR_UNRELATED.keys(),
+)
+def test_python_shapes_that_resolve_or_are_unrelated_are_not_reported(tmp_path, source):
+    path = tmp_path / "shape.py"
+    path.write_text(textwrap.dedent(source), encoding="utf-8")
+    assert find_in_file(path) == []
 
 
 def test_a_planted_tree_is_reported_line_by_line(tmp_path):
@@ -295,7 +466,7 @@ def test_a_planted_tree_is_reported_line_by_line(tmp_path):
                 f"automated-security-helper[{{EXTRA}}]"
             )
             FIXED = "automated-security-helper[symbols] @ git+{GIT_URL}@v3.7.0"
-            # A fragment that a later literal completes is not a hint by itself.
+            # A bare requirement literal is reported even though HINT completes it.
             REQUIREMENT = f"automated-security-helper[{{EXTRA}}]"
             HINT = f"Install it with: pip install '{{REQUIREMENT}} @ git+{GIT_URL}@v3.7.0'"
             '''
@@ -310,11 +481,13 @@ def test_a_planted_tree_is_reported_line_by_line(tmp_path):
     reported = {entry.split(": ", 1)[0] for entry in _offenders(tmp_path)}
 
     # Line 6 is the first line of MESSAGE's literal; line 10 is the JSON entry's
-    # "command". The comment on line 3, the git requirements and the REQUIREMENT
-    # fragment are not reported.
+    # "command"; line 11 is REQUIREMENT, a bare requirement on its own. The
+    # comment on line 3, the git requirements and HINT, which folds REQUIREMENT
+    # into a direct reference, are not reported.
     assert reported == {
         "README.md:1",
         "automated_security_helper/hint.py:6",
+        "automated_security_helper/hint.py:11",
         "docs/content/docs/guide.md:4",
         "docs/content/docs/guide.md:10",
     }
