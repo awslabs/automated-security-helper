@@ -719,8 +719,8 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 hard link, or is larger than ``MAX_IGNORE_FILE_BYTES``. gitleaks
                 opens the name itself, follows a symlink, blocks on a FIFO, and
                 logs every line it cannot parse, so a link to a file outside the
-                tree (``/proc/self/environ``) would put that file into its log.
-                gitleaks is not run. Read with ``open_in_scanned_tree``, which
+                tree would put that file's lines into its log. gitleaks is not
+                run. Read with ``open_in_scanned_tree``, which
                 follows no link, and nothing read is quoted.
         """
         path = Path(target) / IGNORE_FILE_NAME

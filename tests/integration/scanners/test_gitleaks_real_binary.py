@@ -436,7 +436,7 @@ def test_a_secret_in_the_gitleaksignore_it_hides_is_added_back(
     assert _findings(report) == {("github-pat", ".gitleaksignore", 2)}
 
 
-CANARY = "ash-canary-5d1e9a"
+MARKER = "ash-marker-5d1e9a"
 
 
 def test_gitleaks_log_does_not_keep_the_lines_it_quotes_from_gitleaksignore(
@@ -445,12 +445,12 @@ def test_gitleaks_log_does_not_keep_the_lines_it_quotes_from_gitleaksignore(
     """gitleaks logs each line it cannot parse; the tree's file is not ASH's log's."""
     source = _copy_fixture(tmp_path)
     with (source / ".gitleaksignore").open("a", encoding="utf-8") as handle:
-        handle.write(f"not a fingerprint {CANARY}\n")
+        handle.write(f"not a fingerprint {MARKER}\n")
     scanner, report = _scan_direct(source, tmp_path / "out")
     log = scanner.results_dir / "source" / "GitleaksScanner.stderr.log"
     text = log.read_text(encoding="utf-8")
     assert "Invalid .gitleaksignore entry" in text  # the control: gitleaks said so
-    quoted = CANARY in text
+    quoted = MARKER in text
     assert not quoted, "gitleaks' log still quotes the .gitleaksignore line"
     assert "INF" in text  # the rest of the log is kept
     assert _findings(report) == REPORTED
@@ -536,13 +536,13 @@ def test_an_operator_path_in_the_tree_that_links_out_is_not_read(
     source = _copy_fixture(tmp_path)
     outside = tmp_path / "outside"
     outside.mkdir()
-    (outside / "creds").write_text(f"[default]\nkey = {CANARY}\n", encoding="utf-8")
+    (outside / "notes.txt").write_text(f"line one {MARKER}\n", encoding="utf-8")
     if shape == "file":
-        (source / "named").symlink_to(outside / "creds")
+        (source / "named").symlink_to(outside / "notes.txt")
         value = "named"
     else:
         (source / "linked").symlink_to(outside, target_is_directory=True)
-        value = "linked/creds"
+        value = "linked/notes.txt"
     output = tmp_path / "out"
     with pytest.raises(ScannerError, match="through a symbolic link"):
         _scan_direct(source, output, **{option: value})
@@ -552,7 +552,7 @@ def test_an_operator_path_in_the_tree_that_links_out_is_not_read(
         if path.is_file()
         and (
             outside.as_posix() in path.read_text(encoding="utf-8", errors="replace")
-            or CANARY in path.read_text(encoding="utf-8", errors="replace")
+            or MARKER in path.read_text(encoding="utf-8", errors="replace")
         )
     ]
     assert touched == []
@@ -776,45 +776,56 @@ def test_ash_scan_reports_a_secret_in_an_archive_once(tmp_path, gitleaks_bin_dir
     assert _gitleaks_row(output).get("severity_counts", {}).get("critical") == 1, log
 
 
-@pytest.mark.parametrize("pointed_at", ["outside file", "/proc/self/environ"])
+#: A field name in every Linux ``/proc/<pid>/status``, and in no file of the fixture.
+STATUS_FIELD = "TracerPid:"
+
+
+@pytest.mark.parametrize("pointed_at", ["regular-file-outside-tree", "special-file"])
 def test_ash_scan_refuses_a_symlinked_gitleaksignore_and_quotes_nothing(
     tmp_path, gitleaks_bin_dir, pointed_at
 ):
-    """gitleaks would read whatever the link names and log its lines, and the
-    failure used to copy that log into ASH's results."""
-    if pointed_at.startswith("/proc") and not Path("/proc/self/environ").exists():
-        pytest.skip("no /proc on this platform")
+    """A .gitleaksignore that is a link is refused whatever it points at.
+
+    gitleaks would read whatever the link names and log its lines, and the
+    failure used to copy that log into ASH's results. The special file is
+    ``/proc/self/status``: stat calls it an empty regular file, and its content
+    is made for each process that reads it, so what ASH could read there is not
+    what gitleaks would.
+    """
+    if pointed_at == "special-file":
+        target = Path("/proc/self/status")
+        if not target.exists():
+            pytest.skip("no /proc on this platform")
+        marker = STATUS_FIELD
+    else:
+        target = tmp_path / "outside.txt"
+        target.write_text(f"{MARKER}\nline two {MARKER}\n", encoding="utf-8")
+        marker = MARKER
+    # The control: a reader of the link's target gets the marker.
+    assert marker in target.read_text(encoding="utf-8")
     source = _copy_fixture(tmp_path)
-    outside = tmp_path / "outside.txt"
-    outside.write_text(f"{CANARY}\nline two {CANARY}\n", encoding="utf-8")
     (source / ".gitleaksignore").unlink()
     try:
-        (source / ".gitleaksignore").symlink_to(
-            outside if pointed_at == "outside file" else Path(pointed_at)
-        )
+        (source / ".gitleaksignore").symlink_to(target)
     except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
         pytest.skip(f"symlink creation unavailable on this platform: {exc}")
-    env = _env(gitleaks_bin_dir)
-    env["ASH_TEST_CANARY"] = CANARY
     output = tmp_path / "out"
-    proc, _ = _run_ash(
+    proc, log = _run_ash(
         source,
         output,
         {"project_name": "gitleaks-link", "fail_on_findings": False},
-        env,
+        _env(gitleaks_bin_dir),
     )
-    # No assertion here prints ASH's output: on a regression it would hold the
-    # file the link names, which for /proc/self/environ is this environment.
-    assert proc.returncode == 1  # gitleaks did not run: incomplete
+    assert proc.returncode == 1, log  # gitleaks did not run: incomplete
     row = _gitleaks_row(output)
     assert row.get("status") == "ERROR", row
-    in_console = CANARY in proc.stdout + proc.stderr
+    in_console = marker in proc.stdout + proc.stderr
     assert not in_console, "the linked file's content reached ASH's console output"
     leaked = [
         str(path.relative_to(output))
         for path in output.rglob("*")
         if path.is_file()
-        and CANARY in path.read_text(encoding="utf-8", errors="replace")
+        and marker in path.read_text(encoding="utf-8", errors="replace")
     ]
     assert leaked == []
     said_why = "is refused: it is a symbolic link" in (output / "ash.log").read_text(

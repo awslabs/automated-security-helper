@@ -254,18 +254,18 @@ def test_every_option_is_one_token_so_no_value_can_become_a_flag(tmp_path):
     scanner = _scanner(
         tmp_path,
         operator=True,
-        config_file="-c-evil.toml",
+        config_file="-c-dash.toml",
         baseline_path="--baseline.json",
         max_target_megabytes=5,
     )
     source = scanner.context.source_dir
-    (source / "-c-evil.toml").write_text("[extend]\nuseDefault = true\n")
+    (source / "-c-dash.toml").write_text("[extend]\nuseDefault = true\n")
     (source / "--baseline.json").write_text("[]")
     args = scanner._build_arguments(source, tmp_path / "out.sarif")
     flags = args[2 : args.index("--")]
     assert all(a.startswith("--") for a in flags), flags
     assert args[args.index("--") + 1 :] == ["."]
-    assert f"--config={(source / '-c-evil.toml').resolve().as_posix()}" in flags
+    assert f"--config={(source / '-c-dash.toml').resolve().as_posix()}" in flags
     assert (
         f"--baseline-path={(source / '--baseline.json').resolve().as_posix()}" in flags
     )
@@ -1109,7 +1109,7 @@ def test_a_relative_gitleaks_config_variable_is_resolved_from_the_source(
 # The tree's .gitleaksignore is read as a regular file, and never quoted
 # --------------------------------------------------------------------------- #
 
-CANARY = "ash-canary-0b7f3c"
+MARKER = "ash-marker-0b7f3c"
 
 
 def _refused_ignore_file(tmp_path: Path, kind: str) -> GitleaksScanner:
@@ -1118,12 +1118,12 @@ def _refused_ignore_file(tmp_path: Path, kind: str) -> GitleaksScanner:
     source = Path(scanner.context.source_dir)
     _write(source, "app/x.py")
     outside = tmp_path / "outside.txt"
-    outside.write_text(f"{CANARY}\n")
+    outside.write_text(f"{MARKER}\n")
     ignore = source / ".gitleaksignore"
     if kind == "symlink out of the tree":
         ignore.symlink_to(outside)
     elif kind == "symlink in the tree":
-        _write(source, "docs/ignore.txt", f"{CANARY}\n")
+        _write(source, "docs/ignore.txt", f"{MARKER}\n")
         ignore.symlink_to(source / "docs" / "ignore.txt")
     elif kind == "fifo":
         os.mkfifo(ignore)
@@ -1162,7 +1162,7 @@ def test_a_gitleaksignore_that_is_not_a_regular_file_stops_the_scan(tmp_path, ki
         scanner._execute_scan(source, "source", [])
     message = str(excinfo.value)
     assert ".gitleaksignore" in message and "gitleaks is not run" in message
-    assert CANARY not in message
+    assert MARKER not in message
 
 
 @pytest.mark.parametrize("kind", IGNORE_FILE_KINDS)
@@ -1180,7 +1180,7 @@ def test_the_re_scan_reads_no_gitleaksignore_that_is_not_a_regular_file(
     args = scanner._build_arguments(source, results_file)
     with pytest.raises(ScannerError) as excinfo:
         scanner._add_back_gitleaksignore_drops(_report(), source, args, results_file)
-    assert CANARY not in str(excinfo.value)
+    assert MARKER not in str(excinfo.value)
 
 
 def test_a_regular_gitleaksignore_lets_the_scan_run(tmp_path):
@@ -1197,12 +1197,12 @@ def test_a_failure_names_gitleaks_log_but_does_not_quote_it(tmp_path):
     results_file = scanner.results_dir / "source" / "gitleaks.sarif"
     results_file.parent.mkdir(parents=True)
     log = results_file.parent / "GitleaksScanner.stderr.log"
-    log.write_text(f"6:52PM WRN Invalid .gitleaksignore entry fingerprint={CANARY}\n")
+    log.write_text(f"6:52PM WRN Invalid .gitleaksignore entry fingerprint={MARKER}\n")
     scanner.exit_code = 1
     message = scanner._describe_scan_failure(
         ScannerError("gitleaks exited 1"), results_file
     )
-    assert CANARY not in message
+    assert MARKER not in message
     assert log.as_posix() in message
     assert "gitleaks exited 1" in message
 
@@ -1212,7 +1212,7 @@ def test_gitleaks_stderr_is_not_kept_as_the_scanners_errors(tmp_path):
     scan's results."""
     scanner = _scanner(tmp_path)
     scanner._process_command_response(
-        {"returncode": 124, "timed_out": True, "stderr": f"fingerprint={CANARY}"}
+        {"returncode": 124, "timed_out": True, "stderr": f"fingerprint={MARKER}"}
     )
     assert scanner.errors == []
     assert scanner.exit_code == 124
@@ -1519,16 +1519,16 @@ def _linked_out(tmp_path: Path, shape: str) -> str:
     source.mkdir(exist_ok=True)
     outside = tmp_path / "outside"
     outside.mkdir()
-    (outside / "creds").write_text(f"{CANARY}\n")
+    (outside / "notes.txt").write_text(f"{MARKER}\n")
     if shape == "file":
-        (source / "named.toml").symlink_to(outside / "creds")
+        (source / "named.toml").symlink_to(outside / "notes.txt")
         return "named.toml"
     if shape == "directory":
         (source / "linked").symlink_to(outside, target_is_directory=True)
-        return "linked/creds"
+        return "linked/notes.txt"
     (source / "deep").mkdir()
     (source / "deep" / "up").symlink_to(outside, target_is_directory=True)
-    return "deep/up/creds"
+    return "deep/up/notes.txt"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
@@ -1543,7 +1543,7 @@ def test_an_operator_path_in_the_tree_cannot_link_out_of_it(tmp_path, option, sh
         scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
     message = str(excinfo.value)
     assert f"scanners.gitleaks.options.{option}" in message
-    assert "symbolic link" in message and CANARY not in message
+    assert "symbolic link" in message and MARKER not in message
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
