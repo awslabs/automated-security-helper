@@ -361,6 +361,19 @@ export class AshAgentCoreStack extends Stack {
          * it does, rather than carrying both.
          */
         ASH_MCP_STATELESS_FALLBACK: 'warn',
+        /*
+         * The two statements only this target can make; see "HOST CHECKING IS AN
+         * EXPLICIT DECISION" on MCP_ENTRYPOINT_SCRIPT. Host is on AgentCore's
+         * restricted-header list, so no allowlist can name it and the platform is
+         * what restricts what reaches the container: without an allowlist the
+         * entrypoint passes --trust-upstream-host-check. And AgentCore issues the
+         * Mcp-Session-Id it routes on, so in stateless mode the entrypoint passes
+         * --trust-upstream-session-id; without it ASH ignores the header and every
+         * session tool (source delivery, the scan registry) refuses. Both are
+         * passed only when the image's `ash mcp` has the flag.
+         */
+        ASH_MCP_TRUST_UPSTREAM_HOST_CHECK: 'true',
+        ASH_MCP_TRUST_UPSTREAM_SESSION_ID: 'true',
       },
       description: 'ASH security scanner exposed over MCP.',
     });

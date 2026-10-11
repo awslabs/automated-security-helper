@@ -423,6 +423,14 @@ done
 exit 0
 `;
 
+  /**
+   * The two explicit Host decisions a 0.0.0.0 bind now needs; one of them is required.
+   * Tests about something else supply one so that the Host refusal does not decide
+   * their outcome. See ash-mcp-entrypoint-trust.test.ts for the decisions themselves.
+   */
+  const HOST_ALLOWLIST = { ASH_MCP_ALLOWED_HOST: 'alb.example.com' };
+  const HOST_CHECK_UPSTREAM = { ASH_MCP_TRUST_UPSTREAM_HOST_CHECK: 'true' };
+
   /** Broken-install variant: `mcp --help` itself fails. */
   const FAKE_ASH_BROKEN_HELP = `#!/bin/sh
 echo "ImportError: cannot import name 'mcp'" >&2
@@ -458,7 +466,9 @@ exit 1
   }
 
   test('passes --stateless-http when the ASH in the image supports it', () => {
-    const { status, argv } = runEntrypoint({ FAKE_ASH_MODERN: '1' });
+    // A Host allowlist, because a 0.0.0.0 bind with neither an allowlist nor an
+    // explicit opt-out now refuses; see ash-mcp-entrypoint-trust.test.ts.
+    const { status, argv } = runEntrypoint({ FAKE_ASH_MODERN: '1', ...HOST_ALLOWLIST });
     expect(status).toBe(0);
     expect(argv).toContain('--stateless-http');
     expect(argv).not.toContain('--no-stateless-http');
@@ -473,7 +483,8 @@ exit 1
     // The refusal stays the default when no deployment says otherwise, which is
     // what keeps every target that has NOT measured stateful -- Fargate, behind a
     // load balancer that may route to different replicas -- failing closed.
-    const { status, stderr, argv } = runEntrypoint({});
+    // The Host opt-out is supplied so the stateless refusal is the only one in play.
+    const { status, stderr, argv } = runEntrypoint({ ...HOST_CHECK_UPSTREAM });
     expect(status).toBe(65);
     expect(stderr).toContain('--stateless-http');
     expect(argv).toEqual([]);
@@ -492,6 +503,7 @@ exit 1
      */
     const { status, stderr, argv } = runEntrypoint({
       ASH_MCP_STATELESS_FALLBACK: 'warn',
+      ...HOST_CHECK_UPSTREAM,
     });
     expect(status).toBe(0);
     expect(argv).toContain('mcp');
@@ -504,7 +516,7 @@ exit 1
   test('an unrecognized fallback value refuses rather than guessing', () => {
     // Fail closed on a value this does not understand. A typo in a deployment
     // parameter must not be read as permission to downgrade.
-    const { status, argv } = runEntrypoint({ ASH_MCP_STATELESS_FALLBACK: 'yes' });
+    const { status, argv } = runEntrypoint({ ASH_MCP_STATELESS_FALLBACK: 'yes', ...HOST_CHECK_UPSTREAM });
     expect(status).toBe(65);
     expect(argv).toEqual([]);
   });
@@ -517,6 +529,7 @@ exit 1
     const { status, stderr, argv } = runEntrypoint({
       FAKE_ASH_MODERN: '1',
       ASH_MCP_STATELESS_FALLBACK: 'warn',
+      ...HOST_ALLOWLIST,
     });
     expect(status).toBe(0);
     expect(argv).toContain('--stateless-http');
@@ -609,7 +622,7 @@ exit 1
   test('runs without either stateless flag when stateful was asked for explicitly', () => {
     // An ASH with no stateless mode is already stateful, so this is the one
     // combination that is genuinely satisfiable on an older release.
-    const { status, argv } = runEntrypoint({ ASH_MCP_STATELESS: 'false' });
+    const { status, argv } = runEntrypoint({ ASH_MCP_STATELESS: 'false', ...HOST_CHECK_UPSTREAM });
     expect(status).toBe(0);
     expect(argv).not.toContain('--stateless-http');
     expect(argv).not.toContain('--no-stateless-http');
@@ -620,6 +633,7 @@ exit 1
     const { status, argv } = runEntrypoint({
       FAKE_ASH_MODERN: '1',
       ASH_MCP_STATELESS: 'false',
+      ...HOST_ALLOWLIST,
     });
     expect(status).toBe(0);
     expect(argv).toContain('--no-stateless-http');
@@ -665,24 +679,53 @@ exit 1
     }
   });
 
-  test('warns but still starts when a Host allowlist cannot be enforced', () => {
-    // Deliberately NOT a refusal: the Fargate stack substitutes the load
-    // balancer DNS name whenever McpAllowedHost is empty, so refusing here would
-    // leave no parameter value that lets that target deploy.
+  test('refuses to start when a Host allowlist was asked for and this ASH cannot enforce it', () => {
+    // This used to warn and start, on the reasoning that the Fargate stack always
+    // substitutes the load balancer DNS name, so no parameter value could satisfy
+    // a refusal. That reasoning is what made the endpoint accept every Host header
+    // while its stack said DNS-rebinding protection was on. Fail closed: the way
+    // to satisfy it is an AshVersion whose `ash mcp` accepts --allowed-host.
     const { status, stderr, argv } = runEntrypoint({
       ASH_MCP_STATELESS: 'false',
       ASH_MCP_ALLOWED_HOST: 'alb.example.com',
     });
+    expect(status).not.toBe(0);
+    expect(stderr).toContain('--allowed-host');
+    expect(argv).toEqual([]);
+  });
+
+  test('refuses with neither Host decision even on an ASH that has no Host check of its own', () => {
+    // An older ASH would start and serve every Host here, so the absence of a check
+    // to opt out of is not a reason to start. Stateful, so the stateless refusal is
+    // not what stops it.
+    const { status, stderr, argv } = runEntrypoint({ ASH_MCP_STATELESS: 'false' });
+    expect(status).toBe(65);
+    expect(stderr).toContain('ASH_MCP_TRUST_UPSTREAM_HOST_CHECK');
+    expect(argv).toEqual([]);
+  });
+
+  test('the host-check statement is not passed to an ASH that does not list it', () => {
+    // A flag the image's `ash mcp` does not accept would stop the server binding.
+    const { status, argv } = runEntrypoint({ ASH_MCP_STATELESS: 'false', ...HOST_CHECK_UPSTREAM });
     expect(status).toBe(0);
-    expect(stderr).toContain('WARNING');
-    expect(stderr).toContain('EVERY Host header will be accepted');
-    expect(argv).not.toContain('--allowed-host');
+    expect(argv).toContain('mcp');
+    expect(argv).not.toContain('--trust-upstream-host-check');
+  });
+
+  test('an unrecognized trust value is not read as a statement', () => {
+    // Only the exact word `true` states that something upstream checks Host.
+    const { status, argv } = runEntrypoint({
+      FAKE_ASH_MODERN: '1',
+      ASH_MCP_TRUST_UPSTREAM_HOST_CHECK: 'yes',
+    });
+    expect(status).toBe(65);
+    expect(argv).toEqual([]);
   });
 
   test('distinguishes a broken ASH install from a missing option', () => {
     // Reading a failed `ash mcp --help` as "the flag is absent" would report the
     // wrong cause and, worse, would let the stateful path look satisfiable.
-    const { status, stderr } = runEntrypoint({}, FAKE_ASH_BROKEN_HELP);
+    const { status, stderr } = runEntrypoint({ ...HOST_CHECK_UPSTREAM }, FAKE_ASH_BROKEN_HELP);
     expect(status).toBe(69);
     expect(stderr).toContain('cannot serve MCP at all');
   });

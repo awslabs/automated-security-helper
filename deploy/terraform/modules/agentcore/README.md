@@ -60,6 +60,16 @@ So on this target, stateful mode fails every request. AgentCore does support
 stateful servers for elicitation and sampling, but ASH's MCP server uses neither,
 so there is nothing to gain by turning it off.
 
+In stateless mode ASH does not treat a client-supplied `Mcp-Session-Id` as a
+session identity unless the operator states that the platform in front issues and
+authenticates it (`--trust-upstream-session-id`); without that, source delivery and
+the scan registry tools refuse. AgentCore does issue it, so the module sets
+`ASH_MCP_TRUST_UPSTREAM_SESSION_ID=true` in stateless mode, which the launcher maps
+to that flag. The Host side keeps the launcher's AgentCore default,
+`ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=true`, which passes `--trust-upstream-host-check`
+when `mcp_allowed_host` is empty: Host is on AgentCore's restricted-header list, so
+the platform restricts what reaches the container and no allowlist can name it.
+
 ## Why the auth header is allowlisted automatically
 
 AgentCore forwards only headers named in `requestHeaderAllowlist`; everything
@@ -117,8 +127,10 @@ caller sends. Behind an ALB that is the load balancer's DNS name, which Terrafor
 knows. AgentCore's container contract does not state what Host header its front
 end sends, and I did not find it documented. Setting the variable to a guess
 rejects every request. Read the `log_group_name` output, observe the Host header,
-then set it. Until then the server binds `0.0.0.0` with protection off, which is
-the MCP SDK's own default for a non-loopback bind.
+then set it. Until then the server binds `0.0.0.0` with the launcher passing
+`--trust-upstream-host-check`, the statement that the platform in front checks what
+reaches the container; an ASH without that flag binds with the protection off,
+which is the MCP SDK's own default for a non-loopback bind.
 
 **The image architecture is not checked by Terraform.** Passing an x86_64
 `container_image_uri` plans and applies cleanly and then fails at runtime.

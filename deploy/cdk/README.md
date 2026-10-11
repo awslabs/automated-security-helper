@@ -377,6 +377,27 @@ admitted.
   accepted posture is that the runtime is reachable only through
   `bedrock-agentcore:InvokeAgentRuntime`, which is IAM-authorized.
 
+The entrypoint makes that an explicit decision rather than a side effect of the
+bind address. It starts only with one of two things: a Host allowlist
+(`McpAllowedHost`, which on Fargate defaults to the ALB's name), or
+`ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=true`, the statement that something in front of
+ASH checks Host. AgentCore sets the statement; Fargate does not. With neither, the
+container exits 65 rather than serve every `Host`. When an allowlist was requested
+and the image's `ash mcp` has no `--allowed-host`, it also exits 65 instead of
+starting without the allowlist, so a Fargate stack on such an `AshVersion` does not
+come up: deploy an `AshVersion` whose `ash mcp` accepts `--allowed-host`.
+
+On an ASH whose `ash mcp` lists them, the statements become flags:
+`--trust-upstream-host-check` when there is no allowlist (ASH refuses it together
+with `--allowed-host`), and, from `ASH_MCP_TRUST_UPSTREAM_SESSION_ID=true`,
+`--trust-upstream-session-id` in stateless mode. The second says the platform in
+front issues and authenticates `Mcp-Session-Id`; without it a stateless ASH treats
+the header as no identity, and its session tools (source delivery, the scan
+registry) refuse. AgentCore sets it, because the platform issues that header.
+Fargate does not: a load balancer issues none, so a stateless Fargate service has
+no session identity and those tools refuse there. Both stacks set
+`ASH_MCP_TRANSPORT=streamable-http`, so ASH treats every caller as remote.
+
 The same restricted-header list is why `McpAuthHeaderName` has to be a header
 AgentCore will forward. The stack adds it to the runtime's `RequestHeaderAllowlist`
 when both auth parameters are set, but a restricted name (anything `x-amz-`,

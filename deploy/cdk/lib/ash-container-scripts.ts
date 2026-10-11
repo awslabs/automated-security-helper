@@ -331,6 +331,43 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * ASH's CLI — at every container start. That is well inside the five-minute
  * health-check grace period the Fargate target allows.
  *
+ * HOST CHECKING IS AN EXPLICIT DECISION, AND SO IS SESSION TRUST
+ * --------------------------------------------------------------
+ * ASH's MCP hardening refuses to bind a non-loopback host without `--allowed-host`
+ * unless the operator passes `--trust-upstream-host-check`, the statement that a
+ * proxy or platform in front of ASH checks Host and Origin. In stateless mode it no
+ * longer treats a client-supplied `Mcp-Session-Id` as a session identity unless the
+ * operator passes `--trust-upstream-session-id`, the statement that the platform in
+ * front issues and authenticates that header. The entrypoint maps two environment
+ * variables onto them, the names the Terraform launcher reads
+ * (ash-image-pipeline/files/ash-mcp-serve):
+ *
+ * - `ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=true` passes `--trust-upstream-host-check`,
+ *   and only when no allowlist was given: ASH refuses the two together.
+ * - `ASH_MCP_TRUST_UPSTREAM_SESSION_ID=true` passes `--trust-upstream-session-id`,
+ *   and only with `--stateless-http`, the one mode ASH accepts it in.
+ *
+ * Each flag is passed only when this image's `ash mcp --help` lists it; an older ASH
+ * has no such check to opt out of. Unlike the Terraform launcher, whose defaults are
+ * AgentCore's, both default to `false` here: every CDK stack sets what it needs, so
+ * an unset value means nobody decided. AgentCore sets both (Host is on its
+ * restricted-header list, so no allowlist can be known, and the platform issues the
+ * session header); Fargate sets neither (its allowlist is the load balancer's name,
+ * and a load balancer issues no session header).
+ *
+ * With neither an allowlist nor the host-check statement, the entrypoint refuses
+ * (exit 65), whatever ASH version is inside. A release ASH has no Host check of its
+ * own, so starting it there would serve every Host; on a hardened ASH it is the same
+ * refusal ASH makes, said before ASH starts.
+ *
+ * AND A REQUESTED ALLOWLIST IS ENFORCED OR NOTHING STARTS. When `ASH_MCP_ALLOWED_HOST`
+ * is set and this ASH has no `--allowed-host`, the entrypoint refuses (exit 65). It
+ * used to warn and start, reasoning that the Fargate stack always substitutes the
+ * load balancer's name, so no parameter value could satisfy a refusal. That is what
+ * made the Fargate endpoint accept every Host header while its stack said DNS
+ * rebinding protection was on. The value that satisfies the refusal is an
+ * `AshVersion` whose `ash mcp` accepts `--allowed-host`.
+ *
  * WHERE TO PUT AN EXPLANATION, AND WHY IT MATTERS HERE
  * ---------------------------------------------------
  * Comments inside the script below are not free. The script is inlined into the
@@ -348,39 +385,30 @@ export const MCP_ENTRYPOINT_SCRIPT = `#!/bin/sh
 # targets; see deploy/cdk/lib/ash-container-scripts.ts.
 set -eu
 
-# Materialize the deployment-wide ASH config, when one was supplied. Written to
-# a fixed path and exported through ASH_CONFIG so it applies to every scan this
-# process runs, not just scans of one directory.
+# Materialize the deployment-wide ASH config, when one was supplied.
 if [ -n "\${ASH_BASE_CONFIG_SSM_PARAMETER:-}" ]; then
   mkdir -p "$(dirname "\${ASH_CONFIG:-/tmp/ash-config/.ash.yaml}")"
   python3 -c "import os, sys, boto3; sys.stdout.write(boto3.client('ssm').get_parameter(Name=os.environ['ASH_BASE_CONFIG_SSM_PARAMETER'], WithDecryption=True)['Parameter']['Value'])" \\
     > "\${ASH_CONFIG:-/tmp/ash-config/.ash.yaml}"
 else
-  # No config supplied. Unset ASH_CONFIG so ASH does not log a missing-file
-  # notice on every scan and falls through to its built-in defaults.
+  # ASH refuses an ASH_CONFIG that names no file.
   unset ASH_CONFIG || true
 fi
 
-# Resolve the shared secret from its ARN. The ARN travels in the environment;
-# the value never does, so it stays out of the template, the task definition and
-# the runtime's environment-variable map.
+# The secret's ARN travels in the environment; its value never does.
 ASH_AUTH_VALUE=""
 if [ -n "\${ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN:-}" ]; then
   ASH_AUTH_VALUE=$(python3 -c "import os, sys, boto3; sys.stdout.write(boto3.client('secretsmanager').get_secret_value(SecretId=os.environ['ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN'])['SecretString'])")
 fi
 
-# Ask this image's ASH which MCP options it accepts, once. AshVersion decides
-# which ASH is in here at deploy time, and older releases have neither
-# --stateless-http nor --allowed-host; passing an unknown option would leave the
-# server unable to bind. COLUMNS is wide so rich cannot wrap a flag name across
-# lines and make a supported option measure as missing.
+# Ask this image's ASH which MCP options it accepts, once; AshVersion decides
+# which ASH is in here. COLUMNS keeps rich from wrapping a flag name.
 if ! ASH_MCP_HELP="$(COLUMNS=200 ash mcp --help 2>&1)"; then
   echo "ash-mcp-entrypoint: 'ash mcp --help' exited non-zero, so this image cannot serve MCP at all. This is not a missing option; it is a broken ASH install. Its output was:" >&2
   printf '%s\\n' "\${ASH_MCP_HELP}" >&2
   exit 69
 fi
 
-# Fixed-string match, so a flag name is never interpreted as a regex.
 ash_mcp_supports() {
   printf '%s' "\${ASH_MCP_HELP}" | grep -qF -- "$1"
 }
@@ -390,13 +418,13 @@ set -- ash mcp --transport streamable-http \\
   --port "\${ASH_MCP_PORT:-8000}" \\
   --mount-path "\${ASH_MCP_MOUNT_PATH:-/mcp}"
 
-# --stateless-http is a paired flag, so state the intent rather than inheriting
-# ASH's default. Refuses to start if stateless was asked for and this ASH has no
-# such option: running stateful instead would answer 404 to every session id the
-# platform injects while still passing the health check.
 if [ "\${ASH_MCP_STATELESS:-true}" = "true" ]; then
   if ash_mcp_supports '--stateless-http'; then
     set -- "$@" --stateless-http
+    # Only where the platform in front issues and authenticates Mcp-Session-Id.
+    if [ "\${ASH_MCP_TRUST_UPSTREAM_SESSION_ID:-false}" = "true" ] && ash_mcp_supports '--trust-upstream-session-id'; then
+      set -- "$@" --trust-upstream-session-id
+    fi
   elif [ "\${ASH_MCP_STATELESS_FALLBACK:-refuse}" = "warn" ]; then
     echo "ash-mcp-entrypoint: WARNING: stateless was asked for, but the ASH in this image has no --stateless-http option, so this server runs STATEFUL. It honors only the session id it issued at initialize, so a client that adopts the id returned on each response is refused on its third call. Deploy an AshVersion whose 'ash mcp' accepts --stateless-http to remove this." >&2
   else
@@ -406,30 +434,31 @@ if [ "\${ASH_MCP_STATELESS:-true}" = "true" ]; then
 elif ash_mcp_supports '--no-stateless-http'; then
   set -- "$@" --no-stateless-http
 fi
-# The remaining case needs no flag and is not a degradation: stateful was asked
-# for, and an ASH without the option is already stateful.
 
-# --allowed-host is repeatable, so split the comma-separated value and pass one
-# flag per hostname; a comma-joined single value would match nothing. Warns
-# rather than refusing when the option is absent: the Fargate stack always
-# substitutes its load balancer DNS name here, so there is no parameter value an
-# operator could set to satisfy a refusal.
+# Host checking: a Host allowlist, or the operator's statement that something in
+# front of ASH checks Host. One of the two, never both, never neither.
 if [ -n "\${ASH_MCP_ALLOWED_HOST:-}" ]; then
-  if ash_mcp_supports '--allowed-host'; then
-    ASH_SAVED_IFS=$IFS
-    IFS=,
-    for ash_host in \${ASH_MCP_ALLOWED_HOST}; do
-      if [ -n "$ash_host" ]; then
-        # Lower-cased because a load balancer lowercases Host while the MCP SDK
-        # matches case-sensitively; mixed case yields 421 on every request.
-        ash_host=$(printf '%s' "$ash_host" | tr 'A-Z' 'a-z')
-        set -- "$@" --allowed-host "$ash_host"
-      fi
-    done
-    IFS=$ASH_SAVED_IFS
-  else
-    echo "ash-mcp-entrypoint: WARNING: a Host allowlist of '\${ASH_MCP_ALLOWED_HOST}' was requested, but the ASH in this image has no --allowed-host option, so EVERY Host header will be accepted. Deploy an AshVersion whose 'ash mcp' accepts --allowed-host to enforce the allowlist." >&2
+  if ! ash_mcp_supports '--allowed-host'; then
+    echo "ash-mcp-entrypoint: a Host allowlist of '\${ASH_MCP_ALLOWED_HOST}' was requested, but the ASH in this image has no --allowed-host option and would accept every Host header. Deploy an AshVersion whose 'ash mcp' accepts --allowed-host." >&2
+    exit 65
   fi
+  ASH_SAVED_IFS=$IFS
+  IFS=,
+  for ash_host in \${ASH_MCP_ALLOWED_HOST}; do
+    if [ -n "$ash_host" ]; then
+      # Lower-cased: a load balancer lowercases Host, the MCP SDK matches exactly.
+      ash_host=$(printf '%s' "$ash_host" | tr 'A-Z' 'a-z')
+      set -- "$@" --allowed-host "$ash_host"
+    fi
+  done
+  IFS=$ASH_SAVED_IFS
+elif [ "\${ASH_MCP_TRUST_UPSTREAM_HOST_CHECK:-false}" = "true" ]; then
+  if ash_mcp_supports '--trust-upstream-host-check'; then
+    set -- "$@" --trust-upstream-host-check
+  fi
+else
+  echo "ash-mcp-entrypoint: refusing to serve every Host header on \${ASH_MCP_HOST:-0.0.0.0}: set ASH_MCP_ALLOWED_HOST (McpAllowedHost) to the names clients use, or ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=true if a proxy in front of ASH checks Host." >&2
+  exit 65
 fi
 
 # Both halves are required: a header name with no value would make ASH compare

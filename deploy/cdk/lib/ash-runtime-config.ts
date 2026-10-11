@@ -209,7 +209,13 @@ export class AshRuntimeConfig extends Construct {
    * `ASH_MCP_HOST` is pinned to `0.0.0.0` because AgentCore requires it and
    * because a container that bound loopback would be unreachable from any load
    * balancer. The DNS-rebinding consequence of that is handled by
-   * `McpAllowedHost`, not by the bind address.
+   * `McpAllowedHost`, not by the bind address, or on AgentCore by the
+   * `ASH_MCP_TRUST_UPSTREAM_HOST_CHECK` statement that stack adds.
+   *
+   * `ASH_MCP_TRANSPORT` names the transport the entrypoint starts. ASH reads it as
+   * the operator's statement of how it is served, so every caller is treated as
+   * remote even on code paths that read the transport from the environment rather
+   * than from the running server. The Terraform modules set the same variable.
    */
   public mcpEnvironment(): Record<string, string> {
     if (!this.statelessHttp || !this.mountPath || !this.allowedHost || !this.authHeaderName || !this.headerAuthCondition) {
@@ -218,6 +224,7 @@ export class AshRuntimeConfig extends Construct {
     return {
       ASH_CONFIG: ASH_MATERIALIZED_CONFIG_PATH,
       ASH_BASE_CONFIG_SSM_PARAMETER: this.configParameterNameOrEmpty(),
+      ASH_MCP_TRANSPORT: 'streamable-http',
       ASH_MCP_HOST: '0.0.0.0',
       ASH_MCP_PORT: '8000',
       ASH_MCP_MOUNT_PATH: this.mountPath.valueAsString,

@@ -54,17 +54,26 @@ locals {
   # Environment-driven rather than baked into the image: AgentCore has no
   # container command override, so the image's CMD is a launcher that reads these.
   # That keeps every MCP setting a deploy-time decision on this target too.
+  #
+  # ASH_MCP_TRUST_UPSTREAM_SESSION_ID states that the platform in front of ASH
+  # issues and authenticates Mcp-Session-Id, which AgentCore does. In stateless
+  # mode ASH otherwise ignores the header and every session tool (source delivery,
+  # the scan registry) refuses; the flag it maps to is valid only in stateless
+  # mode, so it is set only there. The Host side keeps the launcher's AgentCore
+  # default (trust the upstream Host check when no allowlist is given), because
+  # Host is on AgentCore's restricted-header list and no allowlist can name it.
   mcp_environment = {
-    ASH_MCP_TRANSPORT             = "streamable-http"
-    ASH_MCP_HOST                  = "0.0.0.0"
-    ASH_MCP_PORT                  = "8000"
-    ASH_MCP_MOUNT_PATH            = var.mcp_mount_path
-    ASH_MCP_STATELESS_HTTP        = var.mcp_stateless_http ? "true" : "false"
-    ASH_OFFLINE                   = var.ash_offline_mode ? "YES" : "NO"
-    ASH_MCP_ALLOWED_HOSTS         = join(",", var.mcp_allowed_host)
-    ASH_MCP_AUTH_HEADER_NAME      = local.use_auth_header ? var.mcp_auth_header_name : ""
-    ASH_BASE_CONFIG_SSM_PARAMETER = local.use_base_config ? var.base_config_ssm_parameter_name : ""
-    ASH_MCP_AUTH_SECRET_ARN       = local.manage_auth_secret ? aws_secretsmanager_secret.auth_header[0].arn : ""
+    ASH_MCP_TRANSPORT                 = "streamable-http"
+    ASH_MCP_HOST                      = "0.0.0.0"
+    ASH_MCP_PORT                      = "8000"
+    ASH_MCP_MOUNT_PATH                = var.mcp_mount_path
+    ASH_MCP_STATELESS_HTTP            = var.mcp_stateless_http ? "true" : "false"
+    ASH_MCP_TRUST_UPSTREAM_SESSION_ID = var.mcp_stateless_http ? "true" : "false"
+    ASH_OFFLINE                       = var.ash_offline_mode ? "YES" : "NO"
+    ASH_MCP_ALLOWED_HOSTS             = join(",", var.mcp_allowed_host)
+    ASH_MCP_AUTH_HEADER_NAME          = local.use_auth_header ? var.mcp_auth_header_name : ""
+    ASH_BASE_CONFIG_SSM_PARAMETER     = local.use_base_config ? var.base_config_ssm_parameter_name : ""
+    ASH_MCP_AUTH_SECRET_ARN           = local.manage_auth_secret ? aws_secretsmanager_secret.auth_header[0].arn : ""
   }
 
   # Caller-supplied values go first so local.mcp_environment wins on a key

@@ -29,6 +29,13 @@ Anything else that fronts the load balancer — a Route 53 alias, a CloudFront
 distribution, a custom domain on the certificate — has to be added through
 `mcp_allowed_host`. The effective list is the `allowed_hosts` output.
 
+The module also sets `ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=false`. The launcher's
+default is AgentCore's (`true`), which passes `--trust-upstream-host-check` whenever
+the allowlist is empty and lets ASH serve any Host. Behind a load balancer, an
+empty allowlist has to make ASH refuse to start on `0.0.0.0` instead. It does not
+set `ASH_MCP_TRUST_UPSTREAM_SESSION_ID`: a load balancer issues no `Mcp-Session-Id`,
+so a stateless service has no session identity, and the tools that need one refuse.
+
 ## Health checks, and an honest limitation
 
 ASH's MCP server exposes **no** health endpoint. It builds a Starlette app that
