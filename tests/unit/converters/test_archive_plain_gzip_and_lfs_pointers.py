@@ -36,7 +36,11 @@ from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ConverterStatusInfo,
 )
+from automated_security_helper.plugin_modules.ash_builtin.converters import (
+    archive_converter,
+)
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
+    RATIO_FLOOR_BYTES,
     ArchiveConverter,
     ArchiveConverterConfig,
     ArchiveConverterConfigOptions,
@@ -99,6 +103,20 @@ def zip_that_also_reads_as_a_pointer() -> bytes:
         if max(data) < 0x80 and b"\n" not in inner and b"\r" not in inner:
             return data
     raise AssertionError("no content gave a CRC without CR, LF or high bytes")
+
+
+@pytest.fixture
+def copy_limits(monkeypatch) -> List[int]:
+    """The byte limit of every _copy_at_most call, in order."""
+    limits: List[int] = []
+    real = archive_converter._copy_at_most
+
+    def spy(source, out, limit):
+        limits.append(limit)
+        return real(source, out, limit)
+
+    monkeypatch.setattr(f"{ARCHIVE_MODULE}._copy_at_most", spy, raising=True)
+    return limits
 
 
 def convert(context, monkeypatch, files: Dict[str, bytes], limits=None):
@@ -174,6 +192,75 @@ class TestPlainGzip:
             ("blob.json.gz", "max_member_bytes")
         ]
         assert gate(converter) == ["archive"]
+
+    # A plain gzip's size is known only by reading it, so room() bounds the copy and
+    # admit() then judges what was copied. The two must agree on every limit: a
+    # bound below admit's cuts the file short and still admits it, one above writes
+    # more before the refusal, or names a different limit. Zeros compress far past
+    # any ratio, so each limit below is the one that binds.
+
+    def test_a_gzip_under_the_ratio_floor_is_decompressed_whole(
+        self, test_plugin_context, monkeypatch, copy_limits
+    ):
+        content = b"\x00" * (300 * 1024)
+        converter, results = convert(
+            test_plugin_context,
+            monkeypatch,
+            {"zeros.json.gz": gzip.compress(content, mtime=0)},
+            limits={"max_compression_ratio": 100},
+        )
+
+        (extracted,) = results
+        assert (extracted / "zeros.json").stat().st_size == len(content)
+        assert converter.refused_inputs == []
+        assert copy_limits == [RATIO_FLOOR_BYTES + 1]
+
+    def test_a_gzip_over_the_ratio_copies_at_most_the_floor_and_names_the_ratio(
+        self, test_plugin_context, monkeypatch, copy_limits
+    ):
+        converter, results = convert(
+            test_plugin_context,
+            monkeypatch,
+            {"zeros.json.gz": gzip.compress(b"\x00" * (1 << 20), mtime=0)},
+            limits={"max_member_bytes": 600 * 1024, "max_compression_ratio": 100},
+        )
+
+        assert results == []
+        assert written(converter) == {}
+        assert [r.limit for r in converter.refused_inputs] == ["max_compression_ratio"]
+        assert copy_limits == [RATIO_FLOOR_BYTES + 1]
+
+    def test_a_gzip_over_max_total_bytes_copies_at_most_that_plus_one(
+        self, test_plugin_context, monkeypatch, copy_limits
+    ):
+        converter, results = convert(
+            test_plugin_context,
+            monkeypatch,
+            {"zeros.json.gz": gzip.compress(b"\x00" * 300_000, mtime=0)},
+            limits={"max_total_bytes": 1000},
+        )
+
+        assert results == []
+        assert [r.limit for r in converter.refused_inputs] == ["max_total_bytes"]
+        assert copy_limits == [1001]
+
+    def test_a_gzip_copies_at_most_what_is_left_of_the_scan_budget(
+        self, test_plugin_context, monkeypatch, copy_limits
+    ):
+        total = 100_000
+        files = {
+            f"z{i}.json.gz": gzip.compress(b"\x00" * 90_000, mtime=0) for i in range(5)
+        }
+        converter, results = convert(
+            test_plugin_context, monkeypatch, files, limits={"max_total_bytes": total}
+        )
+
+        assert len(results) == 4
+        assert [(r.path, r.limit) for r in converter.refused_inputs] == [
+            ("z4.json.gz", "max_total_bytes")
+        ]
+        left = archive_converter.SCAN_BUDGET_ARCHIVES * total - 4 * 90_000
+        assert copy_limits == [total + 1] * 4 + [left + 1]
 
     def test_a_plain_gzip_counts_toward_the_scan_budget(
         self, test_plugin_context, monkeypatch
