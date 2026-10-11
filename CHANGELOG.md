@@ -186,6 +186,12 @@
   exit 3 before anything is built. `--mount` reads its value as comma-separated
   fields, so a directory named `x,readonly=false` used to add a mount option of its own.
   The same holds for `./ash` and `Invoke-ASH`.
+- **`./ash` mounts the directory you named, or stops.** A `--source-dir` it could not
+  enter (one that does not exist) left the working directory in its place, and that
+  was mounted and scanned; it now exits 1, as `ash --source-dir` does, and so does an
+  `--output-dir` it cannot create. A config, source or output path starting with `-` is
+  no longer read as options by `dirname`, `basename`, `readlink`, `cd` or `mkdir`, which
+  resolved it to the wrong file or to none.
 - **`--ignore-suppressions` works in container mode.** It was not passed to the scan
   inside the container, which applies the suppressions, so suppressed findings stayed
   out of the reports and out of the exit code the host computes from them.

@@ -476,3 +476,66 @@ class TestAConfigLinkedOutOfTheTreeIsRefused:
 
         assert rc == 3, output
         assert calls == []
+
+
+class TestAPathStartingWithADashIsAPath:
+    """``dirname``, ``basename``, ``readlink``, ``cd`` and ``mkdir`` read a word
+    starting with ``-`` as options unless ``--`` comes first. A config, source or
+    output directory named that way then resolved to the wrong path, or to none."""
+
+    def test_a_config_named_with_a_leading_dash(self, fake_runner, project):
+        (project / "-strict.yaml").write_text("project_name: p\n")
+
+        rc, output, calls = _run_ash_status(
+            fake_runner, project, ["--no-build", "--config", "-strict.yaml"]
+        )
+
+        assert rc == 0, output
+        run = _only(calls, "run")
+        assert _flag(_inner_args(run), "--config") == "/src/-strict.yaml"
+        assert run.count("--mount") == 2
+
+    def test_a_link_named_with_a_leading_dash(self, fake_runner, project):
+        (project / "real.yaml").write_text("project_name: p\n")
+        (project / "-link.yaml").symlink_to("real.yaml")
+
+        rc, output, calls = _run_ash_status(
+            fake_runner, project, ["--no-build", "--config", "-link.yaml"]
+        )
+
+        assert rc == 0, output
+        run = _only(calls, "run")
+        assert _flag(_inner_args(run), "--config") == "/src/real.yaml"
+
+    def test_source_and_output_directories_named_with_a_leading_dash(
+        self, fake_runner, project
+    ):
+        (project / "-src").mkdir()
+
+        rc, output, calls = _run_ash_status(
+            fake_runner,
+            project,
+            ["--no-build", "--source-dir", "-src", "--output-dir", "-out"],
+        )
+
+        assert rc == 0, output
+        run = _only(calls, "run")
+        assert _mount(run, "/src")["source"] == str((project / "-src").resolve())
+        assert _mount(run, "/out")["source"] == str((project / "-out").resolve())
+
+
+class TestADirectoryThatCannotBeEnteredEndsTheRun:
+    """``$(cd dir; pwd)`` printed the working directory when ``cd`` failed, so the
+    wrapper mounted that in place of the directory named. It now exits 1, as the
+    Python CLI does for a source directory that does not exist."""
+
+    def test_a_source_directory_that_does_not_exist_ends_the_run(
+        self, fake_runner, project
+    ):
+        rc, output, calls = _run_ash_status(
+            fake_runner, project, ["--no-build", "--source-dir", "missing"]
+        )
+
+        assert rc == 1, output
+        assert calls == []
+        assert "missing" in output

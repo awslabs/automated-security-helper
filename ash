@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Resolve the absolute path of the parent of the script directory (ASH repo root)
-export ASH_ROOT_DIR="$(cd "$(dirname "$0")"; pwd)"
+export ASH_ROOT_DIR="$(cd -- "$(dirname -- "$0")"; pwd)"
 export ASH_UTILS_DIR="${ASH_ROOT_DIR}/utils"
 
 # Set local variables
@@ -120,10 +120,19 @@ if [ "${SOURCE_DIR}" = "" ]; then
   SOURCE_DIR="$(pwd)"
 fi
 
-# Resolve the absolute paths
-SOURCE_DIR="$(cd "$SOURCE_DIR"; pwd)"
-mkdir -p "${OUTPUT_DIR}"
-OUTPUT_DIR="$(cd "$OUTPUT_DIR"; pwd)"
+# Resolve the absolute paths. `--` before each path, so one starting with `-` is not
+# read as options; and a directory that cannot be entered ends the run, as the
+# Python CLI does, rather than leaving the working directory in its place.
+if ! resolved="$(cd -- "${SOURCE_DIR}" && pwd)"; then
+  echo "ERROR: Source directory does not exist: '${SOURCE_DIR}'. Check --source-dir." >&2
+  exit 1
+fi
+SOURCE_DIR="${resolved}"
+if ! resolved="$(mkdir -p -- "${OUTPUT_DIR}" && cd -- "${OUTPUT_DIR}" && pwd)"; then
+  echo "ERROR: Output directory cannot be created: '${OUTPUT_DIR}'. Check --output-dir." >&2
+  exit 1
+fi
+OUTPUT_DIR="${resolved}"
 
 # --mount reads its value as comma-separated fields, so a comma in a host path starts
 # a field of its own (x,readonly=false), a double quote starts CSV quoting, and a line
@@ -146,14 +155,14 @@ fi
 resolve_file() {
   local path="$1" target dir
   while [ -L "${path}" ]; do
-    target="$(readlink "${path}")"
+    target="$(readlink -- "${path}")"
     case "${target}" in
       /*) path="${target}" ;;
-      *) path="$(dirname "${path}")/${target}" ;;
+      *) path="$(dirname -- "${path}")/${target}" ;;
     esac
   done
-  dir="$(cd "$(dirname "${path}")" && pwd -P)" || return 1
-  printf '%s/%s\n' "${dir}" "$(basename "${path}")"
+  dir="$(cd -- "$(dirname -- "${path}")" && pwd -P)" || return 1
+  printf '%s/%s\n' "${dir}" "$(basename -- "${path}")"
 }
 
 # The config file, --config or else ASH_CONFIG, is read by the scan inside the
@@ -178,9 +187,9 @@ if [[ "${NO_RUN}" = "NO" && ( "${CONFIG_GIVEN}" = "YES" || -n "${CONFIG_PATH}" )
     exit 3
   fi
   CONFIG_REAL="$(resolve_file "${CONFIG_PATH}")"
-  CONFIG_NAMED="$(cd "$(dirname "${CONFIG_PATH}")" && pwd -L)/$(basename "${CONFIG_PATH}")"
+  CONFIG_NAMED="$(cd -- "$(dirname -- "${CONFIG_PATH}")" && pwd -L)/$(basename -- "${CONFIG_PATH}")"
   require_mountable "config file" "${CONFIG_REAL}"
-  SOURCE_REAL="$(cd "${SOURCE_DIR}" && pwd -P)"
+  SOURCE_REAL="$(cd -- "${SOURCE_DIR}" && pwd -P)"
   # The scanned tree, as a local scan defines it: the outermost directory at or
   # above the source dir holding a .git entry, under its logical and physical names.
   TREES=()
@@ -190,9 +199,9 @@ if [[ "${NO_RUN}" = "NO" && ( "${CONFIG_GIVEN}" = "YES" || -n "${CONFIG_PATH}" )
     while :; do
       if [ -e "${dir}/.git" ]; then checkout="${dir}"; fi
       if [ "${dir}" = "/" ] || [ -z "${dir}" ]; then break; fi
-      dir="$(dirname "${dir}")"
+      dir="$(dirname -- "${dir}")"
     done
-    TREES+=("${checkout}" "$(cd "${checkout}" && pwd -P)")
+    TREES+=("${checkout}" "$(cd -- "${checkout}" && pwd -P)")
   done
   named_in_tree="NO"
   real_in_tree="NO"
@@ -212,8 +221,8 @@ if [[ "${NO_RUN}" = "NO" && ( "${CONFIG_GIVEN}" = "YES" || -n "${CONFIG_PATH}" )
       CONFIG_ASH_ARGS=(--config "/src/${CONFIG_REAL#"${SOURCE_REAL%/}"/}")
       ;;
     *)
-      CONFIG_RUN_ARGS=(--mount "type=bind,source=${CONFIG_REAL},destination=/ash-config/$(basename "${CONFIG_REAL}"),readonly")
-      CONFIG_ASH_ARGS=(--config "/ash-config/$(basename "${CONFIG_REAL}")")
+      CONFIG_RUN_ARGS=(--mount "type=bind,source=${CONFIG_REAL},destination=/ash-config/$(basename -- "${CONFIG_REAL}"),readonly")
+      CONFIG_ASH_ARGS=(--config "/ash-config/$(basename -- "${CONFIG_REAL}")")
       # A config elsewhere in the scanned tree was written by the repository being
       # scanned. The scan inside sees it only at /ash-config, outside its own tree,
       # so it is told.
@@ -239,7 +248,7 @@ fi
 RESOLVED_OCI_RUNNER=${OCI_RUNNER:-$(command -v finch || command -v docker || command -v nerdctl || command -v podman)}
 # The runtime's own name, before any wrapper is prefixed, for the few decisions that differ by
 # runtime.
-OCI_RUNNER_NAME="$(basename "${RESOLVED_OCI_RUNNER:-none}")"
+OCI_RUNNER_NAME="$(basename -- "${RESOLVED_OCI_RUNNER:-none}")"
 # OCI_RUNNER_WRAPPER prefixes all OCI commands (like RUSTC_WRAPPER for cargo)
 # Example: OCI_RUNNER_WRAPPER=sudo makes all finch/docker calls use sudo
 if [[ -n "${OCI_RUNNER_WRAPPER:-}" ]]; then
