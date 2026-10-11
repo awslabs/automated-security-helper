@@ -104,11 +104,11 @@ and desynchronizes the two implementations.
 
 | Parameter | Default value | Notes |
 | --- | --- | --- |
-| `AshVersion` | `v3.7.0` | Git ref cloned and built. Not a PyPI version. v3.7.0 has no `ash mcp --stateless-http`, `ash mcp --allowed-host <host>`, `ash merge` or `ash scan --shard-index <i> --shard-count <n>`; the sections below say what each target needs. |
+| `AshVersion` | `v3.7.0` | Git ref cloned and built: a tag or a branch, because the build runs `git clone --branch`, which rejects a commit SHA. Not a PyPI version. v3.7.0 has no `ash mcp --stateless-http`, `ash mcp --allowed-host <host>`, `ash merge` or `ash scan --shard-index <i> --shard-count <n>`; the sections below say what each target needs. |
 | `AshImageTag` | empty | ECR tag the **workload** pulls. Empty tracks the moving tag. Not offered by `AshImagePipeline`, which runs no workload. See below. |
 | `AshOfflineMode` | `NO` | `YES`/`NO`, forwarded to the ASH Dockerfile's `OFFLINE` build argument. The spelling is the Dockerfile's; a boolean would build an image that stayed online. |
 | `AshBaseConfigYaml` | empty | An ASH configuration document. See the size note below. |
-| `McpStatelessHttp` | `true` | Keep `true` on AgentCore, and behind any load balancer with more than one replica. See below for what is measured and what is inferred. With the default `AshVersion`, which has no `ash mcp --stateless-http`, AgentCore starts stateful and logs a warning, and the Fargate container exits at startup. Set `AshVersion` to a tag or commit whose ASH has that option, or set this to `false` on Fargate, which runs one task. |
+| `McpStatelessHttp` | `true` | Keep `true` on AgentCore, and behind any load balancer with more than one replica. See below for what is measured and what is inferred. With the default `AshVersion`, which has no `ash mcp --stateless-http`, AgentCore starts stateful and logs a warning, and the Fargate container exits at startup. Set `AshVersion` to a tag or branch whose ASH has that option, or set this to `false` on Fargate, which runs one task. |
 | `McpMountPath` | `/mcp` | AgentCore routes only `/mcp`, so change this only for Fargate. |
 | `McpAllowedHost` | empty | Comma-separated `Host` values, passed as repeated `--allowed-host`, lower-cased because load balancers lower-case the `Host` they forward. On Fargate, empty means the ALB DNS name. |
 | `McpIngressCidr` | empty | Fargate only. CIDR allowed to reach the load balancer on port 80. Empty creates **no** ingress rule, so the endpoint is reachable from nowhere. See below. |
@@ -499,7 +499,7 @@ Both exist in ASH built from a later commit. The `AshDistributedPipeline` templa
 uses them as ASH defines them: zero-based index, both shard flags always passed
 together, `--results` repeatable and accepting a file or a directory. With an
 `AshVersion` that lacks them, every shard fails at pipeline run time and the merge
-never runs. Set `AshVersion` to a tag or commit whose ASH has both. Nothing else
+never runs. Set `AshVersion` to a tag or branch whose ASH has both. Nothing else
 here depends on them.
 
 ## What is NOT verified

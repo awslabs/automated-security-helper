@@ -101,7 +101,7 @@ one structural one, both of which will cost you a failed plan if you guess:
 | --- | --- | --- |
 | `AshOfflineMode` | all | Build the image in offline mode (`YES` or `NO`). Scanner vulnerability databases and rulesets are built into the image, and ASH runs offline, so a scan does not download them. Trades image size and rebuild frequency for a scan that does not depend on reaching those sources. It does not block network egress; each target's network configuration decides that. |
 | `AshBaseConfigYaml` | each target template in CDK; the `ash-image-pipeline` module in Terraform | An ASH config file's contents, as a string, so the deployed configuration is part of the stack rather than something baked into the image. ASH uses one config file per scan and never merges two. On AgentCore and Fargate, a scan uses the scanned directory's own config file, or the file the client names, when there is one, and this one only when there is none. The CDK distributed pipeline uses this one and never reads the scanned repository's own config file; with this parameter empty, it scans with ASH's built-in defaults. The CDK CodeCommit gate does not apply it. The Terraform READMEs describe the Terraform modules. |
-| `AshVersion` | image build | The ASH version the image is built from. Pin it, so a rebuild reproduces the same scanner set rather than silently moving to whatever is newest. |
+| `AshVersion` | image build | The ASH version the image is built from. Pin it, so a rebuild reproduces the same scanner set rather than silently moving to whatever is newest. The CDK templates clone it with `git clone --branch`, so there it must be a tag or a branch; the Terraform `ash-image-pipeline` module also accepts a full commit SHA. |
 | `RebuildSchedule` | image build | How often the image is rebuilt. An image built once and never rebuilt ages, and the scanners inside it age with it — the tradeoff called out in the trust note below. Offline deployments need this most, because their vulnerability databases are only as fresh as the last build. |
 | `McpStatelessHttp` | MCP-serving targets | Whether the MCP server runs stateless. Defaults to true, and that default is not cosmetic. See [Why `McpStatelessHttp` defaults to true](#why-mcpstatelesshttp-defaults-to-true). |
 | `McpAuthHeaderName` | MCP-serving targets | The header the MCP server requires on every request. Names the header only; the value is separate so the two can be rotated independently. |
@@ -146,7 +146,7 @@ discover from a 404.
 What differs between the targets is what happens when the ASH in the image has no
 `ash mcp --stateless-http` option, which is the case for v3.7.0, the default
 `AshVersion`: AgentCore starts a stateful server and logs a warning, and Fargate's
-container refuses to start. Set `AshVersion` to a tag or commit whose ASH has the
+container refuses to start. Set `AshVersion` to a tag or branch whose ASH has the
 option. A deployment where every client completes ASH's own session handshake and
 keeps the id it issued can run stateful; stateless mode gives up per-session
 server-side state.
