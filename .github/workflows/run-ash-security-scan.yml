@@ -390,12 +390,14 @@ jobs:
       # to the pull request: an `exclude_dirs` in .ash/bandit.yaml or an `ignore:`
       # rule in .ash/.grype.yaml would still change its own required check.
       #
-      # So every relative `config_file` the fetched config names is read from the
-      # same commit, written beside the config under RUNNER_TEMP, and the config is
-      # rewritten to point at the copies. A file the commit does not have, a symlink,
-      # or a path outside the repository fails the step; nothing falls back to the
-      # checkout's copy. An absolute path is the operator's and is left as it is.
-      # A config that names no relative `config_file` is passed on byte for byte.
+      # So every relative `config_file` the fetched config names, and every relative
+      # opengrep or semgrep `config` (a rules file or a directory of them; a URL,
+      # `auto` or a registry name is not a path), is read from the same commit,
+      # written beside the config under RUNNER_TEMP, and the config is rewritten to
+      # point at the copies. A path the commit does not have, a symlink anywhere in
+      # it, or a path outside the repository fails the step; nothing falls back to
+      # the checkout's copy. An absolute path is the operator's and is left as it
+      # is. A config that names none of these is passed on byte for byte.
       #
       # The config is parsed with the PyYAML that the installed ASH brings, by code
       # that does not import ASH, so it works with any ASH revision. The rewritten
@@ -445,27 +447,75 @@ jobs:
               return relative
 
 
-          def read_blob(relative):
+          def ls_tree(relative, *flags):
               listing = subprocess.run(
-                  ["git", "--literal-pathspecs", "ls-tree", "-z", commit, "--", relative],
+                  ["git", "--literal-pathspecs", "ls-tree", "-z", *flags, commit, "--", relative],
                   check=True,
                   capture_output=True,
               ).stdout
-              records = [record for record in listing.split(b"\0") if record]
+              records = []
+              for record in listing.split(b"\0"):
+                  if record:
+                      meta, _, path = record.partition(b"\t")
+                      mode, kind, oid = meta.decode().split()
+                      records.append((mode, kind, oid, path.decode("utf-8", "surrogateescape")))
+              return records
+
+
+          def regular_file(mode, kind, path):
+              if kind != "blob" or mode == "120000":
+                  fail(f"{path} at {ref} is not a regular file ({mode} {kind}); refusing to scan with it.")
+
+
+          def copy_blob(oid, path):
+              target = dest_root / path
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(
+                  subprocess.run(["git", "cat-file", "blob", oid], check=True, capture_output=True).stdout
+              )
+              return target
+
+
+          def fetch(relative, directories):
+              """Copy `relative` from the commit to dest_root; None if the commit lacks it."""
+              records = ls_tree(relative)
               if not records:
                   return None
-              meta, _, path = records[0].partition(b"\t")
-              mode, kind, oid = meta.decode().split()
-              if (
-                  len(records) != 1
-                  or kind != "blob"
-                  or mode in ("120000", "160000")
-                  or path != relative.encode()
-              ):
-                  fail(f"{relative} at {ref} is not a regular file ({mode} {kind}); refusing to scan with it.")
-              return subprocess.run(
-                  ["git", "cat-file", "blob", oid], check=True, capture_output=True
-              ).stdout
+              mode, kind, oid, path = records[0]
+              if len(records) != 1 or path != relative:
+                  fail(f"{relative} at {ref} is not a single path ({len(records)} entries); refusing to scan with it.")
+              if kind == "tree" and directories:
+                  entries = ls_tree(relative, "-r")
+                  for mode, kind, oid, path in entries:
+                      regular_file(mode, kind, path)
+                      if not path.startswith(relative + "/"):
+                          fail(f"{path} at {ref} is not inside {relative}; refusing to scan with it.")
+                      copy_blob(oid, path)
+                  target = dest_root / relative
+                  target.mkdir(parents=True, exist_ok=True)
+                  return target
+              regular_file(mode, kind, path)
+              return copy_blob(oid, path)
+
+
+          # opengrep's and semgrep's `config` is a rules file or directory, or one of
+          # these, none of which is a path: a URL, `auto`, a registry keyword, or a
+          # registry name (p/, r/, s/).
+          def is_rules_path(value):
+              return not (
+                  value in ("auto", "policy", "supply-chain")
+                  or value.startswith(("p/", "r/", "s/"))
+                  or "://" in value
+              )
+
+
+          # (scanner, option, is a path, may be a directory). `config_file` names a
+          # file the scanner's tool reads for every scanner that has the option.
+          OPTIONS = [
+              (None, "config_file", lambda value: True, False),
+              ("opengrep", "config", is_rules_path, True),
+              ("semgrep", "config", is_rules_path, True),
+          ]
 
 
           # ASH's YAML loader (load_yaml_config) treats a PLAIN scalar that starts with
@@ -521,20 +571,23 @@ jobs:
           scanners = document.get("scanners") if isinstance(document, dict) else None
           for name, section in (scanners.items() if isinstance(scanners, dict) else []):
               options = section.get("options") if isinstance(section, dict) else None
-              value = options.get("config_file") if isinstance(options, dict) else None
-              if not isinstance(value, str) or not value or value.startswith("/"):
+              if not isinstance(options, dict):
                   continue
-              relative = plain(value)
-              if relative is None:
-                  fail(f"scanners.{name}.options.config_file is '{value}', which is not a plain path inside the repository; refusing to scan with it.")
-              blob = read_blob(relative)
-              if blob is None:
-                  fail(f"scanners.{name}.options.config_file names {relative}, which {ref} does not have; refusing to scan with the checkout's copy instead.")
-              target = dest_root / relative
-              target.parent.mkdir(parents=True, exist_ok=True)
-              target.write_bytes(blob)
-              options["config_file"] = str(target)
-              rewritten.append(f"scanners.{name}.options.config_file: {relative} as of {ref}")
+              for scanner, option, is_path, directories in OPTIONS:
+                  if scanner not in (None, name):
+                      continue
+                  value = options.get(option)
+                  if not isinstance(value, str) or not value or value.startswith("/") or not is_path(value):
+                      continue
+                  where = f"scanners.{name}.options.{option}"
+                  relative = plain(value)
+                  if relative is None:
+                      fail(f"{where} is '{value}', which is not a plain path inside the repository; refusing to scan with it.")
+                  target = fetch(relative, directories)
+                  if target is None:
+                      fail(f"{where} names {relative}, which {ref} does not have; refusing to scan with the checkout's copy instead.")
+                  options[option] = str(target)
+                  rewritten.append(f"{where}: {relative} as of {ref}")
 
           path = config_file
           if rewritten:

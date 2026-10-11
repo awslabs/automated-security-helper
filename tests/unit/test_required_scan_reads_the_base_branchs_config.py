@@ -917,3 +917,155 @@ class TestTheMergeQueueResolvesItsOwnTarget:
         assert inputs.get("config-ref") in expected, (
             f"a queue into release-3.7 reads its config from {inputs.get('config-ref')!r}"
         )
+
+
+# --------------------------------------------------------------------------- 6
+
+RULES_CONFIG = (
+    "project_name: base\n"
+    "scanners:\n"
+    "  semgrep:\n"
+    "    options:\n"
+    "      config: rules/semgrep.yaml\n"
+    "  opengrep:\n"
+    "    options:\n"
+    "      config: ./rules/opengrep\n"
+)
+BASE_SEMGREP_RULES = "rules:\n  - id: base-semgrep-rule\n"
+BASE_OPENGREP_A = "rules:\n  - id: base-opengrep-a\n"
+BASE_OPENGREP_B = "rules:\n  - id: base-opengrep-b\n"
+CHECKOUT_RULES = "rules: []  # the pull request's copy\n"
+
+
+def _rule_option(config: Path, scanner: str) -> Any:
+    from automated_security_helper.config.ash_config import load_yaml_config
+
+    document = load_yaml_config(config.read_text(encoding="utf-8"))
+    return document["scanners"][scanner]["options"]["config"]
+
+
+class TestRuleFilesComeFromTheBaseCommit:
+    """opengrep's and semgrep's `config` option names rules by a path in the checkout.
+
+    The option takes a rules file, a directory of them, a URL or a registry name. A
+    relative path resolves in the checkout, so it is read from config-ref like
+    `config_file`; the other forms are not paths and are left alone.
+    """
+
+    def _repo(self, tmp_path, base_files):
+        return Repository(
+            tmp_path,
+            base_files=base_files,
+            checkout_files={
+                "rules/semgrep.yaml": CHECKOUT_RULES,
+                "rules/opengrep/a.yaml": CHECKOUT_RULES,
+                "rules/opengrep/only-in-the-pull-request.yaml": CHECKOUT_RULES,
+            },
+        )
+
+    def test_a_relative_rules_file_and_directory_come_from_the_base_commit(
+        self, tmp_path
+    ):
+        repo = self._repo(
+            tmp_path,
+            {
+                CONFIG_PATH: RULES_CONFIG,
+                "rules/semgrep.yaml": BASE_SEMGREP_RULES,
+                "rules/opengrep/a.yaml": BASE_OPENGREP_A,
+                "rules/opengrep/sub/b.yml": BASE_OPENGREP_B,
+            },
+        )
+        context = _pull_request(repo.base_sha, fork=False)
+        config = _scan_config(repo, context, _required_inputs(context))
+
+        semgrep = Path(_rule_option(config, "semgrep"))
+        assert semgrep.is_absolute() and not repo.sandbox.is_inside_workspace(
+            semgrep
+        ), f"semgrep's rules come from {semgrep}, which resolves in the checkout"
+        assert semgrep.read_text(encoding="utf-8") == BASE_SEMGREP_RULES
+
+        opengrep = Path(_rule_option(config, "opengrep"))
+        assert opengrep.is_absolute() and not repo.sandbox.is_inside_workspace(opengrep)
+        # The step copies the rules under RUNNER_TEMP, which this test's sandbox puts
+        # inside tmp_path. relative_to() fails the test if the copy is anywhere else,
+        # and walking it as tmp_path / ... is a walk the repo-walk guard can see stays
+        # in this test's own directory.
+        rules_copy = tmp_path / opengrep.relative_to(tmp_path)
+        files = {
+            str(path.relative_to(rules_copy)): path.read_text(encoding="utf-8")
+            for path in rules_copy.rglob("*")
+            if path.is_file()
+        }
+        assert files == {"a.yaml": BASE_OPENGREP_A, "sub/b.yml": BASE_OPENGREP_B}, (
+            f"the opengrep rules directory holds {sorted(files)}, not the base "
+            "commit's two files"
+        )
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "p/ci",
+            "auto",
+            "r/python.lang.security.audit",
+            "s/example",
+            "policy",
+            "supply-chain",
+            "https://example.invalid/rules.yaml",
+            "/opt/operator-rules",
+        ],
+    )
+    def test_a_value_that_is_not_a_relative_path_is_left_alone(self, tmp_path, value):
+        config_text = (
+            "project_name: base\n"
+            "scanners:\n"
+            "  semgrep:\n"
+            "    options:\n"
+            f"      config: {value}\n"
+            "  bandit:\n"
+            "    options:\n"
+            "      config_file: .ash/bandit.yaml\n"
+        )
+        repo = self._repo(
+            tmp_path, {CONFIG_PATH: config_text, ".ash/bandit.yaml": BASE_BANDIT}
+        )
+        context = _pull_request(repo.base_sha, fork=False)
+        config = _scan_config(repo, context, _required_inputs(context))
+        assert _rule_option(config, "semgrep") == value
+
+    def test_a_rules_path_missing_at_the_base_commit_is_refused(self, tmp_path):
+        repo = self._repo(
+            tmp_path,
+            {CONFIG_PATH: RULES_CONFIG, "rules/opengrep/a.yaml": BASE_OPENGREP_A},
+        )
+        context = _pull_request(repo.base_sha, fork=False)
+        run, steps = _run_config_ref_step(repo, context, _required_inputs(context))
+        assert run is not None and run.proc.returncode != 0, run and run.describe()
+        assert "::error::" in run.proc.stdout, run.describe()
+        assert "scanners.semgrep.options.config" in run.proc.stdout, run.describe()
+        assert steps.get("config-ref-files", {}).get("outcome") == "failure", steps
+
+    def test_a_symlink_inside_a_rules_directory_is_refused(self, tmp_path):
+        repo = self._repo(
+            tmp_path,
+            {
+                CONFIG_PATH: RULES_CONFIG,
+                "rules/semgrep.yaml": BASE_SEMGREP_RULES,
+                "rules/opengrep/a.yaml": BASE_OPENGREP_A,
+                "rules/opengrep/link.yaml": None,
+            },
+        )
+        context = _pull_request(repo.base_sha, fork=False)
+        run, _ = _run_config_ref_step(repo, context, _required_inputs(context))
+        assert run is not None and run.proc.returncode != 0, run and run.describe()
+        assert "not a regular file" in run.proc.stdout, run.describe()
+
+    def test_a_rules_path_outside_the_repository_is_refused(self, tmp_path):
+        config_text = RULES_CONFIG.replace("rules/semgrep.yaml", "../rules.yaml")
+        repo = self._repo(
+            tmp_path,
+            {CONFIG_PATH: config_text, "rules/opengrep/a.yaml": BASE_OPENGREP_A},
+        )
+        context = _pull_request(repo.base_sha, fork=False)
+        run, _ = _run_config_ref_step(repo, context, _required_inputs(context))
+        assert run is not None and run.proc.returncode != 0, run and run.describe()
+        assert "scanners.semgrep.options.config" in run.proc.stdout, run.describe()
