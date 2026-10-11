@@ -164,7 +164,7 @@ class TestAScanChecksOnlyTheReportersItUses:
 
 
 class TestReportCommand:
-    def _report(self, output_dir, *extra):
+    def _report(self, output_dir, *extra, report_format="aws-security-hub"):
         from automated_security_helper.cli.main import app
 
         return CliRunner().invoke(
@@ -172,7 +172,7 @@ class TestReportCommand:
             [
                 "report",
                 "--format",
-                "aws-security-hub",
+                report_format,
                 "--output-dir",
                 str(output_dir),
                 "--log-level",
@@ -214,6 +214,77 @@ class TestReportCommand:
         assert result.exit_code == 0, result.output
         assert security_hub_runs == ["SecurityHubReporter"]
         assert json.loads(result.output)["findings_count"] == 0
+
+    def _s3_operator_config(self, root, enabled_line=""):
+        """An operator config with every option S3 needs to upload, and ``enabled_line``."""
+        path = root / "operator" / "ash-s3.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "ash_plugin_modules:\n"
+            f"  - {AWS_PLUGIN_MODULE}\n"
+            "reporters:\n"
+            "  s3:\n"
+            f"{enabled_line}"
+            "    options:\n"
+            "      bucket_name: b\n"
+            "      aws_region: us-east-1\n"
+            "      max_retries: 0\n",
+            encoding="utf-8",
+        )
+        return path
+
+    @pytest.mark.parametrize(
+        "enabled_line",
+        ["", "    enabled: false\n"],
+        ids=["no-enabled-key", "enabled-false"],
+    )
+    def test_an_s3_section_that_does_not_enable_it_is_refused(
+        self, tmp_path, requests, sessions, enabled_line
+    ):
+        """Complete options are not enough: only ``enabled: true`` lets it upload."""
+        output_dir = tmp_path / "out"
+        _stored_results(output_dir)
+        config = self._s3_operator_config(tmp_path, enabled_line)
+
+        result = self._report(output_dir, "--config", str(config), report_format="s3")
+
+        assert result.exit_code == 1, result.output
+        assert "not enabled" in " ".join(result.output.split())
+        assert requests == []
+        assert sessions == []
+
+    def test_an_s3_section_that_enables_it_reaches_put_object(self, tmp_path, requests):
+        """Control: the same options with ``enabled: true`` get as far as PutObject.
+
+        Called directly rather than through CliRunner: the refused upload logs an
+        error, and a record pytest's live logging writes during an invoke swaps
+        sys.stdout under CliRunner, which then fails reading its own closed
+        output stream.
+        """
+        import typer
+
+        from automated_security_helper.cli.report import report_command
+        from automated_security_helper.core.enums import AshLogLevel
+
+        output_dir = tmp_path / "out"
+        _stored_results(output_dir)
+        config = self._s3_operator_config(tmp_path, "    enabled: true\n")
+
+        # The refused upload leaves the reporter with no receipt, so the
+        # command exits 1 after the attempt.
+        with pytest.raises(typer.Exit):
+            report_command(
+                report_format="s3",
+                output_dir=str(output_dir),
+                log_level=AshLogLevel.ERROR,
+                config=str(config),
+                config_overrides=None,
+                verbose=False,
+                debug=False,
+                color=False,
+            )
+
+        assert ("s3", "PutObject") in requests
 
 
 class TestWorkspaceReporting:
