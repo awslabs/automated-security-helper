@@ -110,6 +110,7 @@ import {
   suppressPipelineRoleWildcards,
   suppressScanProjectRoleWildcards,
   suppressSecretRotation,
+  suppressShardProjectRoleWildcards,
   suppressUnevaluableRules,
   suppressBucketTlsLiteral,
 } from './ash-nag-suppressions';
@@ -288,7 +289,26 @@ export class AshDistributedPipelineStack extends Stack {
     );
 
     resultsBucket.grantReadWrite(mergeProject);
-    shardProjects.forEach((project) => resultsBucket.grantWrite(project));
+    /*
+     * Each shard may write only its own results key of an execution.
+     *
+     * The merge forms the pipeline's verdict from whatever sits under
+     * `executions/<execution id>/`, and every shard runs scanners over the repository
+     * being scanned. `grantWrite(project)` put Put and Delete on `<bucket>/*` for
+     * every shard, so one shard could replace another shard's
+     * ash_aggregated_results.json, or the merged output, and the merge would report a
+     * verdict about results no shard produced. `grantPut` with the shard's own key
+     * pattern leaves each role the one prefix its post_build uploads to, and no
+     * Delete: the upload never deletes.
+     *
+     * KNOWN LIMIT: IAM's `*` crosses `/`, so shard N can still write a key such as
+     * `executions/<id>/merged/shard-N/x`. Nothing reads one: the merge asks for
+     * `shard-<i>/ash_aggregated_results.json` of each shard by name and fails when
+     * one is missing.
+     */
+    shardProjects.forEach((project, index) =>
+      resultsBucket.grantPut(project, `executions/*/shard-${index}/*`),
+    );
     shardProjects.forEach((project) => config.grantRead(project));
     config.grantRead(mergeProject);
 
@@ -400,7 +420,7 @@ export class AshDistributedPipelineStack extends Stack {
      * project, five of which no rule could ever consult.
      */
     shardProjects.forEach((project) => {
-      suppressScanProjectRoleWildcards(ashRoleSplitScopeOf(project));
+      suppressShardProjectRoleWildcards(ashRoleSplitScopeOf(project));
       suppressUnevaluableRules(project, ['AwsSolutions-CB5']);
     });
     suppressScanProjectRoleWildcards(ashRoleSplitScopeOf(mergeProject));
@@ -465,7 +485,7 @@ export class AshDistributedPipelineStack extends Stack {
       this,
       `Shard${index}Project`,
       'codebuild.amazonaws.com',
-      suppressScanProjectRoleWildcards,
+      suppressShardProjectRoleWildcards,
     );
 
     return new codebuild.Project(scope, GENERATED_CONSTRUCT_ID, {

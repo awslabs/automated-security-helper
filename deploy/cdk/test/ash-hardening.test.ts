@@ -331,7 +331,7 @@ describe('no IAM policy grants the same thing twice', () => {
   );
 
   test('there are policies to check in every stack', () => {
-    // 90 across the five stacks, in the order STACKS declares them. Exact and
+    // 86 across the five stacks, in the order STACKS declares them. Exact and
     // per-stack, so one stack losing its policies to a rename cannot leave the loop
     // for that stack iterating over nothing while the others carry the assertion.
     //
@@ -348,8 +348,12 @@ describe('no IAM policy grants the same thing twice', () => {
     //
     // AshCodeCommitGate's eighth is `ScanFunctionRoleEc2Access`, authored directly for
     // the same reason: it exists only under the ScanFunctionInVpc condition.
+    //
+    // AshDistributedPipeline was 50 until its four shard roles and the merge role stopped
+    // receiving `GetSecretValue` on the auth secret, which nothing in that stack reads; the
+    // split had filed each of those grants as its own `SecretsmanagerAccess` policy.
     expect(policiesPerStack.map(([, policies]) => policies.length)).toEqual([
-      10, 13, 10, 8, 50,
+      10, 13, 10, 8, 45,
     ]);
   });
 
@@ -363,7 +367,7 @@ describe('no IAM policy grants the same thing twice', () => {
       // Compared as objects carrying the logical id, so the failure output NAMES
       // the policy. `expect(size).toBe(length)` reports "Expected: 4, Received: 3"
       // and the test.each title carries only the stack name -- for
-      // AshDistributedPipeline that leaves a reader 50 policies to search.
+      // AshDistributedPipeline that leaves a reader 45 policies to search.
       // A separate `expect(logicalId).toBeTruthy()` cannot do this job: an
       // Object.entries key is always a non-empty string, so it never fails and
       // never prints anything.

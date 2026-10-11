@@ -555,6 +555,28 @@ exec "$@"
  * An ONLINE scan whose caches are empty is logged and allowed: grype can still
  * fetch a database, so the scan is slow rather than blind.
  *
+ * THE SCAN RUNS WITHOUT THE FUNCTION ROLE'S CREDENTIALS
+ * -----------------------------------------------------
+ * On Lambda the execution role's credentials are in the function's environment
+ * (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN), and `_scan_env`
+ * used to copy that environment whole. The scanners run over code the pull request
+ * controls, and this role can comment on and APPROVE pull requests, so a scanner a
+ * pull request could steer held the vote that judges it. The scan needs no AWS
+ * call, so `SCAN_ENV_DROPPED` removes every variable an SDK or CLI reads
+ * credentials or a profile from, and IMDS is switched off so nothing waits on it.
+ * The clone keeps the role: git-remote-codecommit signs with it, and `_run` is
+ * called there with the handler's own environment.
+ *
+ * WHAT THIS COSTS: a base config that enables a reporter which calls AWS (S3,
+ * Security Hub, CloudWatch Logs, Bedrock) gets no credentials in this gate, and
+ * that reporter fails. Giving it a separate role the scan could assume was
+ * rejected: the scanners would then hold that role's credentials too.
+ *
+ * KNOWN LIMIT: the variables are dropped from the child's environment, not from
+ * the sandbox. A scanner running as the same user could still read the handler
+ * process's own environment through /proc. Closing that needs the handler to run
+ * the scan as another user, which Lambda does not offer.
+ *
  * WHERE THE REFUSAL GOES, AND WHY IT IS NOT JUST A RAISE
  * -----------------------------------------------------
  * `_scan_env` is called BEFORE the clone, and a `RuntimeError` from it is caught,
@@ -602,6 +624,17 @@ BAKED_SCANNER_DATA = (
 # What is_offline_mode() in core/constants.py reads as offline.
 OFFLINE_VALUES = ("YES", "TRUE", "1")
 
+# The function role's credentials stay with the handler; the scan gets none.
+# See ash-container-scripts.ts.
+SCAN_ENV_DROPPED = (
+    "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+    "AWS_SECURITY_TOKEN", "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE", "AWS_WEB_IDENTITY_TOKEN_FILE",
+    "AWS_ROLE_ARN", "AWS_ROLE_SESSION_NAME", "AWS_PROFILE", "AWS_DEFAULT_PROFILE",
+    "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE",
+)
+
 
 def _run(argv, **kwargs):
     return subprocess.run(argv, capture_output=True, text=True, **kwargs)
@@ -624,7 +657,8 @@ def _seed_from_baked(baked, writable, directories_only):
 
 def _scan_env(workdir):
     """Redirect scanner writes into /tmp. See the note in ash-container-scripts.ts."""
-    env = dict(os.environ)
+    env = {k: v for k, v in os.environ.items() if k not in SCAN_ENV_DROPPED}
+    env["AWS_EC2_METADATA_DISABLED"] = "true"
     cache = os.path.join(workdir, "cache")
     tool_dir = os.path.join(workdir, "uv-tools")
 

@@ -37,6 +37,11 @@ onto the shared image:
   or the AWS CLI credential helper, and the ASH image ships neither the CLI nor a
   reason to hold static credentials.
 
+The image build's role can pull from any repository in the account and Region,
+because the shared base image's ARN is not known to this module, and can push only
+to this module's own repository. The build runs privileged Docker, and a push grant
+on `repository/*` could replace the images every other workload pulls.
+
 Keeping this separate from `ash-image-pipeline` is deliberate. Neither addition is
 useful to the other three targets, and `pip install` needs a reachable index at
 build time, which would break an otherwise offline image build for all of them.
@@ -46,6 +51,19 @@ the shared image's successful builds through an EventBridge rule on
 `CodeBuild Build State Change`. Without that, a daily base rebuild would leave the
 Lambda on an image whose base has been replaced — which is the staleness the
 schedule exists to prevent.
+
+## The scan runs without the function's credentials
+
+The function's role can comment on and approve pull requests, and on Lambda its
+credentials are in the function's environment. The scanners run over code the pull
+request controls, so the handler starts `ash scan` with every credential and profile
+variable removed (`SCAN_ENV_DROPPED_VARIABLES` in `files/ash_pr_gate.py`) and IMDS
+switched off. Only the clone keeps the role, because git-remote-codecommit signs with
+it. A base config that enables a reporter which calls AWS (S3, Security Hub,
+CloudWatch Logs, Bedrock) therefore has no credentials in this gate, and that
+reporter fails. The variables leave the scan's environment, not the sandbox: a
+scanner running as the same user could still read the handler process's own
+environment through `/proc`.
 
 ## Three outcomes, and why the exit code is not enough
 

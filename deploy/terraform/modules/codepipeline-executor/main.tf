@@ -188,6 +188,15 @@ resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
 # results prefix differs in direction: shards write their own shard, merge reads
 # every shard and writes the merged output.
 #
+# And one role per shard. The merge forms the pipeline's verdict from whatever
+# sits under <results_prefix>/<execution id>/, and every shard runs scanners over
+# the repository being scanned. A role shared by all shard actions could write
+# any shard's results, so one shard could replace another's
+# ash_aggregated_results.json, or the merged output, and the merge would report a
+# verdict about results no shard produced. IAM cannot tell two actions of one
+# role apart, so each shard gets a role that can write only under its own
+# shard-<index>/ key.
+#
 
 data "aws_iam_policy_document" "build_assume_role" {
   statement {
@@ -220,7 +229,9 @@ resource "aws_cloudwatch_log_group" "merge" {
 }
 
 resource "aws_iam_role" "shard" {
-  name               = "${var.name_prefix}-shard"
+  count = var.shard_count
+
+  name               = "${var.name_prefix}-shard-${count.index}"
   assume_role_policy = data.aws_iam_policy_document.build_assume_role.json
 
   tags = var.tags
@@ -306,6 +317,8 @@ data "aws_iam_policy_document" "build_common" {
 }
 
 data "aws_iam_policy_document" "shard" {
+  count = var.shard_count
+
   source_policy_documents = [data.aws_iam_policy_document.build_common.json]
 
   statement {
@@ -320,13 +333,13 @@ data "aws_iam_policy_document" "shard" {
     resources = ["${aws_cloudwatch_log_group.shard.arn}:*"]
   }
 
-  # Write only, and only under the results prefix. A shard has no reason to read
-  # another shard's output.
+  # Write only, and only under this shard's own key of an execution. A shard has
+  # no reason to read another shard's output, and must not be able to write it.
   statement {
     sid       = "WriteShardResults"
     effect    = "Allow"
     actions   = ["s3:PutObject"]
-    resources = ["${local.results_arn_prefix}/*"]
+    resources = ["${local.results_arn_prefix}/*/shard-${count.index}/*"]
   }
 }
 
@@ -375,9 +388,11 @@ data "aws_iam_policy_document" "merge" {
 }
 
 resource "aws_iam_role_policy" "shard" {
-  name   = "${var.name_prefix}-shard"
-  role   = aws_iam_role.shard.id
-  policy = data.aws_iam_policy_document.shard.json
+  count = var.shard_count
+
+  name   = "${var.name_prefix}-shard-${count.index}"
+  role   = aws_iam_role.shard[count.index].id
+  policy = data.aws_iam_policy_document.shard[count.index].json
 }
 
 resource "aws_iam_role_policy" "merge" {
@@ -389,15 +404,19 @@ resource "aws_iam_role_policy" "merge" {
 #
 # Build projects
 #
-# One shard project serving N actions, rather than N identical projects. The
-# per-shard index arrives as an action-level environment variable override, so
-# adding a shard is one more action rather than one more project.
+# One shard project per shard, because a CodeBuild action runs as its project's
+# service role and the role is what confines a shard to its own results (see
+# "Build roles" above). The index is a project variable rather than an action
+# override, so the index a shard scans and the key its role may write cannot
+# disagree.
 #
 
 resource "aws_codebuild_project" "shard" {
-  name          = "${var.name_prefix}-shard"
-  description   = "Runs one shard of a sharded ASH scan."
-  service_role  = aws_iam_role.shard.arn
+  count = var.shard_count
+
+  name          = "${var.name_prefix}-shard-${count.index}"
+  description   = "Runs shard ${count.index} of ${var.shard_count} of a sharded ASH scan."
+  service_role  = aws_iam_role.shard[count.index].arn
   build_timeout = var.shard_build_timeout_minutes
 
   # The same key the artifact bucket uses. Without this the module would honour
@@ -433,6 +452,11 @@ resource "aws_codebuild_project" "shard" {
         name  = environment_variable.value.name
         value = environment_variable.value.value
       }
+    }
+
+    environment_variable {
+      name  = "SHARD_INDEX"
+      value = tostring(count.index)
     }
   }
 
@@ -571,10 +595,10 @@ data "aws_iam_policy_document" "pipeline" {
       "codebuild:StopBuild",
     ]
 
-    resources = [
-      aws_codebuild_project.shard.arn,
-      aws_codebuild_project.merge.arn,
-    ]
+    resources = concat(
+      aws_codebuild_project.shard[*].arn,
+      [aws_codebuild_project.merge.arn],
+    )
   }
 
   dynamic "statement" {
@@ -665,13 +689,8 @@ resource "aws_codepipeline" "this" {
         input_artifacts = ["source"]
 
         configuration = {
-          ProjectName = aws_codebuild_project.shard.name
+          ProjectName = aws_codebuild_project.shard[action.value].name
           EnvironmentVariables = jsonencode([
-            {
-              name  = "SHARD_INDEX"
-              value = tostring(action.value)
-              type  = "PLAINTEXT"
-            },
             {
               name  = "PIPELINE_EXECUTION_ID"
               value = local.execution_id_ref

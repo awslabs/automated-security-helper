@@ -343,6 +343,48 @@ def test_the_path_is_left_alone_when_the_image_recorded_none(flavor, monkeypatch
     assert env["PATH"] == "/only/this", flavor.name
 
 
+#: Every variable an SDK or CLI could take credentials or a profile from, in a
+#: Lambda function and in the other runtimes the same image may land in (a
+#: container credentials endpoint, a web identity token, a profile).
+CREDENTIAL_VARIABLES = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_SECURITY_TOKEN",
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+    "AWS_ROLE_ARN",
+    "AWS_ROLE_SESSION_NAME",
+    "AWS_PROFILE",
+    "AWS_DEFAULT_PROFILE",
+    "AWS_SHARED_CREDENTIALS_FILE",
+    "AWS_CONFIG_FILE",
+)
+
+
+def test_the_scan_gets_none_of_the_function_role_credentials(flavor, monkeypatch):
+    """The function role can approve pull requests; the scanners run over one.
+
+    Both copies, every credential source, and the controls that the rest of the
+    environment survives: the scan still needs its region and ASH's own settings.
+    """
+    for name in CREDENTIAL_VARIABLES:
+        monkeypatch.setenv(name, f"function-role-{name.lower()}")
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", "--offline")
+
+    env = flavor.scan_env()
+
+    leaked = sorted(name for name in CREDENTIAL_VARIABLES if name in env)
+    assert leaked == [], f"{flavor.name}: the scan inherited {leaked}"
+    assert env["AWS_EC2_METADATA_DISABLED"] == "true", flavor.name
+    assert env["AWS_REGION"] == "us-east-1", flavor.name
+    assert env["ASH_SCAN_EXTRA_ARGS"] == "--offline", flavor.name
+
+
 # ---------------------------------------------------------------------------
 # 3. The uv tool directory: directories linked, files deliberately skipped
 # ---------------------------------------------------------------------------

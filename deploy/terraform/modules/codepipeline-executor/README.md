@@ -171,11 +171,11 @@ work it does is idempotent.
 
 ## Outputs
 
-`pipeline_name`, `pipeline_arn`, `shard_count`, `shard_project_name`,
+`pipeline_name`, `pipeline_arn`, `shard_count`, `shard_project_names`,
 `merge_project_name`, `artifact_bucket_name`, `results_prefix`,
 `merged_results_location_template`, `min_severity`, `fail_on_findings`,
 `shard_log_group_name`, `merge_log_group_name`, `pipeline_role_arn`,
-`shard_role_arn`, `merge_role_arn`.
+`shard_role_arns`, `merge_role_arn`. The two shard outputs are lists indexed by shard.
 
 ## Constraints and known limitations
 
@@ -189,11 +189,14 @@ shards with nothing to do. They still cost a CodeBuild start and still upload an
 empty result set, so nothing breaks — they are simply wasted. Size `shard_count`
 against the number of scanners your configuration enables.
 
-**One shard project, N actions.** Adding a shard adds an action, not a project.
-The index arrives as a per-action `EnvironmentVariables` override. Note that
-CodePipeline enforces a 1000-character limit on an action configuration value, so
-a very large override set would be rejected — not reachable with what this module
-passes.
+**One project and one role per shard.** Each shard can write only
+`<results_prefix>/<execution id>/shard-<index>/`, so no shard can replace another
+shard's results or the merged output the verdict is formed from. IAM cannot tell
+two actions of one role apart, and a CodeBuild action runs as its project's role,
+so this takes a project per shard. The index is a project environment variable;
+the execution id arrives as a per-action `EnvironmentVariables` override.
+CodePipeline enforces a 1000-character limit on an action configuration value,
+which that override does not approach.
 
 **The results bucket also holds pipeline artifacts.** One bucket with two
 prefixes, versioning on because CodePipeline requires it on its artifact bucket.

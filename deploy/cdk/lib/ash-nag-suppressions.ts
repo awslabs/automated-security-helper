@@ -97,9 +97,12 @@
  * each shipped `rules_to_suppress` entry to the verdicts that consulted it:
  * 129 entries -> 89, of which 99 unconsulted -> 17, and 53 base64-encoded reasons
  * -> 0. Intermediate states of this branch went higher than 129 before coming down;
- * those numbers are not the ones to quote.
+ * those numbers are not the ones to quote. Five of the 17 went later, with the grants
+ * they sat on: the shard and merge roles stopped receiving `GetSecretValue` on the
+ * auth secret nothing in that stack reads, so their `SecretsmanagerAccess` policies
+ * no longer exist. 12 remain.
  *
- * THE 17 THAT REMAIN ARE ALL IN AshDistributedPipeline, AND THEY STAY DELIBERATELY.
+ * THE 12 THAT REMAIN ARE ALL IN AshDistributedPipeline, AND THEY STAY DELIBERATELY.
  * test/ash-template-size.test.ts pins the number and enumerates them, so a new
  * unconsulted entry is a test failure rather than something a reader has to tell
  * apart from the known ones. Why they are not removed: every one of them hangs off a
@@ -112,7 +115,7 @@
  *
  * WHAT DID CHANGE ABOUT THEM IS THE TEXT. Retaining an inert entry is a byte cost;
  * retaining one whose reason describes wildcards its policy does not have is a false
- * statement in a public template, and all 17 carried one. `Shard0Project/Role/SsmAccess`
+ * statement in a public template, and all 17 then carried one. `Shard0Project/Role/SsmAccess`
  * grants four `ssm:*Parameter*` reads on a single parameter ARN and was shipping a reason
  * about log streams and S3 object keys. Each of the four now says the thing that is
  * actually true of it -- IAM5 evaluates this policy as COMPLIANT, it holds no wildcard,
@@ -324,7 +327,6 @@ function holdsWildcard(policy: CfnResource): boolean {
  *   KmsAccess             Action    kms:GenerateDataKey*, kms:ReEncrypt*   -- no resource
  *   LogsAccess            Resource  log-group:/aws/codebuild/<Project>:*
  *   SsmAccess             (none, COMPLIANT)
- *   SecretsmanagerAccess  (none, COMPLIANT)
  *
  * IAM5 RAISES A FINDING PER WILDCARD ACTION AS WELL AS PER WILDCARD RESOURCE, which is
  * why `KmsAccess` appears here at all and why a resource-only reading of these policies
@@ -434,18 +436,27 @@ export function suppressImageBuildRoleWildcards(scope: IConstruct): void {
   });
 }
 
+const SCAN_PROJECT_SSM_REASON =
+  'This policy holds no wildcard: ssm:GetParameter and its three read siblings are ' +
+  'scoped to the one Parameter Store parameter this stack creates, and no action is ' +
+  'wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an aws-cdk-lib ' +
+  'grant helper writes these statements, so which of this role\'s service groups holds ' +
+  'a wildcard is aws-cdk-lib\'s choice rather than this app\'s.';
+
 /**
- * The scan-shard and merge project roles, one policy at a time. Same two call shapes as
+ * The merge project role, one policy at a time. Same two call shapes as
  * `suppressImageBuildRoleWildcards` and for the same reasons.
  *
- * TWO GROUPS HERE HOLD NO WILDCARD AT ALL, AND THEIR ENTRIES STAY. `SsmAccess` and
- * `SecretsmanagerAccess` are ten of the seventeen entries no rule consults, pinned and
- * enumerated by test/ash-template-size.test.ts; the header says why removing them would
- * be a claim about aws-cdk-lib's grant implementations rather than about this app. What
- * they must not do is carry a reason describing wildcards they do not have, which is what
- * the shared reason did to them -- `Shard0Project/Role/SsmAccess` grants four
- * `ssm:*Parameter*` reads on one parameter ARN and was shipping a sentence about log
- * streams and S3 object keys.
+ * ONE GROUP HERE HOLDS NO WILDCARD AT ALL, AND ITS ENTRY STAYS. `SsmAccess` is one of
+ * the entries no rule consults, pinned and enumerated by test/ash-template-size.test.ts;
+ * the header says why removing it would be a claim about aws-cdk-lib's grant
+ * implementations rather than about this app. What it must not do is carry a reason
+ * describing wildcards it does not have, which is what the shared reason did --
+ * `Shard0Project/Role/SsmAccess` grants four `ssm:*Parameter*` reads on one parameter ARN
+ * and was shipping a sentence about log streams and S3 object keys.
+ *
+ * There was a `SecretsmanagerAccess` group here too, on the same terms. It went with its
+ * grant: these roles never read the auth secret, so they no longer receive one.
  */
 export function suppressScanProjectRoleWildcards(scope: IConstruct): void {
   suppressPolicyWildcardsByGroup(scope, {
@@ -457,18 +468,28 @@ export function suppressScanProjectRoleWildcards(scope: IConstruct): void {
       'prefix per execution. ACTION: s3:Abort*, s3:DeleteObject*, s3:GetBucket*, ' +
       's3:GetObject* and s3:List*, API-family suffixes on those same two buckets rather ' +
       'than extra reach.',
-    SsmAccess:
-      'This policy holds no wildcard: ssm:GetParameter and its three read siblings are ' +
-      'scoped to the one Parameter Store parameter this stack creates, and no action is ' +
-      'wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an aws-cdk-lib ' +
-      'grant helper writes these statements, so which of this role\'s service groups holds ' +
-      'a wildcard is aws-cdk-lib\'s choice rather than this app\'s.',
-    SecretsmanagerAccess:
-      'This policy holds no wildcard: secretsmanager:GetSecretValue and ' +
-      'secretsmanager:DescribeSecret are scoped to the one secret this stack creates, and ' +
-      'no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an ' +
-      'aws-cdk-lib grant helper writes these statements, so which of this role\'s service ' +
-      'groups holds a wildcard is aws-cdk-lib\'s choice rather than this app\'s.',
+    SsmAccess: SCAN_PROJECT_SSM_REASON,
+  });
+}
+
+/**
+ * The scan-shard project roles. The merge role's reasons except `S3Access`: a shard may
+ * put objects only under its own results key, never delete, so its S3 policy holds a
+ * different shape and needs a sentence written for it.
+ */
+export function suppressShardProjectRoleWildcards(scope: IConstruct): void {
+  suppressPolicyWildcardsByGroup(scope, {
+    ...CODEBUILD_SHARED_REASONS,
+    S3Access:
+      'Object access inside two buckets this stack creates: read on the pipeline artifact ' +
+      'bucket, and put on this shard\'s own key of the results bucket. RESOURCE: the "/*" ' +
+      'object-key suffix on the artifact bucket, because CodePipeline names artifact objects ' +
+      'per execution, and "/executions/*/shard-<index>/*" on the results bucket, because ASH ' +
+      'writes one results prefix per execution and this shard writes only its own key in it. ' +
+      'ACTION: s3:Abort*, ' +
+      's3:GetBucket*, s3:GetObject* and s3:List*, API-family suffixes on those same two ' +
+      'buckets rather than extra reach.',
+    SsmAccess: SCAN_PROJECT_SSM_REASON,
   });
 }
 

@@ -406,6 +406,12 @@ through pipeline artifacts. A CodeBuild pipeline action accepts
 [1 to 5 input artifacts](https://docs.aws.amazon.com/codepipeline/latest/userguide/reference-action-artifacts.html),
 so an artifact per shard cannot express a six-way split at all.
 
+Each shard's role may put objects only under `executions/*/shard-<its index>/` in
+that bucket, and delete nothing. The merge forms the verdict from what is under an
+execution's prefix, and every shard runs scanners over the repository being scanned,
+so a shard that could write anywhere there could replace another shard's results or
+the merged output.
+
 Those transfers use `boto3`, not `aws s3 cp`, and that is not a style preference.
 The shard and merge actions run with the ASH image as their CodeBuild environment
 image — which is what puts `ash` directly on `PATH` with no Docker-in-Docker — and
@@ -454,6 +460,13 @@ aws codecommit create-approval-rule-template --approval-rule-template-name ash-g
 aws codecommit associate-approval-rule-template-with-repository \
   --approval-rule-template-name ash-gate --repository-name <GatedRepositoryName>
 ```
+
+The scan runs without the function role's credentials. That role can comment on and
+approve pull requests, and the scanners run over code the pull request controls, so
+the handler removes every credential and profile variable from the scan's environment
+and keeps the role only for the clone. A base config that enables a reporter which
+calls AWS has no credentials in the gate, and that reporter fails. The role holds no
+Secrets Manager grant: the gate reads no secret.
 
 ## Requires CLI surface from sibling changes
 

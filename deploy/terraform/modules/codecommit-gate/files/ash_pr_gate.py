@@ -104,6 +104,40 @@ BAKED_SCANNER_DATA = (
 #: about whether the run has network access.
 OFFLINE_VALUES = {"YES", "TRUE", "1"}
 
+#: Variables ``_scan_env`` removes, so the scan runs without the function role.
+#:
+#: On Lambda the execution role's credentials are in the function's environment,
+#: and this role can comment on and approve pull requests. The scanners run over
+#: code the pull request controls and make no AWS call of their own, so they get
+#: none of it: every variable an SDK or CLI reads credentials or a profile from.
+#: The clone keeps the role, because git-remote-codecommit signs with it; see
+#: ``clone_source``, which runs git with the handler's own environment.
+#:
+#: The cost: a base config that enables a reporter which calls AWS (S3, Security
+#: Hub, CloudWatch Logs, Bedrock) has no credentials in this gate, and that
+#: reporter fails. The limit: the variables leave the child's environment, not
+#: the sandbox, so a scanner running as the same user could still read this
+#: process's environment through /proc.
+SCAN_ENV_DROPPED_VARIABLES = frozenset(
+    {
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_SECURITY_TOKEN",
+        "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+        "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+        "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "AWS_ROLE_ARN",
+        "AWS_ROLE_SESSION_NAME",
+        "AWS_PROFILE",
+        "AWS_DEFAULT_PROFILE",
+        "AWS_SHARED_CREDENTIALS_FILE",
+        "AWS_CONFIG_FILE",
+    }
+)
+
 #: Scan options an operator may not set through ASH_SCAN_EXTRA_ARGS. Each one can
 #: change this gate's verdict, so the gate decides them and the environment does not.
 #:
@@ -339,8 +373,16 @@ def _scan_env() -> dict[str, str]:
     PATH is restored from ASH_IMAGE_PATH when the image recorded one, and left
     alone when it did not, so running this handler outside the image behaves
     normally.
+
+    The function role's credentials are not passed on; see
+    SCAN_ENV_DROPPED_VARIABLES. IMDS is switched off so no SDK waits on it.
     """
-    env = dict(os.environ)
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in SCAN_ENV_DROPPED_VARIABLES
+    }
+    env["AWS_EC2_METADATA_DISABLED"] = "true"
     home = WORK_ROOT / "home"
     cache = home / "cache"
     tool_dir = home / "uv-tools"
