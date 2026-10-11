@@ -53,7 +53,7 @@ gitleaks' options are described by the JSON schema (`automated_security_helper/s
 
 ## Severity
 
-gitleaks reports no severity of its own. ASH rates every gitleaks finding CRITICAL (SARIF `level: error`), the same rating it gives detect-secrets findings, so a credential reads the same whichever scanner found it. gitleaks has no per-rule confidence to grade on: each rule says "a credential of this kind is present".
+gitleaks reports no severity of its own. ASH rates every gitleaks finding CRITICAL, in the summaries and in every report: the SARIF result has `level: error` and the finding carries CRITICAL as its own severity, which `ash.flat.json` and the CSV report read. A detect-secrets finding carries only `level: error`, so the summaries rate it CRITICAL too, while `ash.flat.json` and the CSV report read HIGH for it; the same credential found by both scanners can therefore read differently in those two reports. gitleaks has no per-rule confidence to grade on: each rule says "a credential of this kind is present".
 
 ## Secret values never reach ASH's output
 

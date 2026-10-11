@@ -318,10 +318,11 @@ def resolve_offline_image_default(
 ) -> bool:
     """Whether ``OFFLINE_IMAGE_POLICIES`` applies to this scan.
 
-    Only in an image built with ``OFFLINE=YES``, which ``environ`` (the process's own
-    environment by default) says, and only while the config's
-    ``content_db_staleness_offline_image_default`` is left true. So a config can turn it
-    off, never on: outside such an image it is off whatever the config says.
+    Only where ``environ`` (the process's own environment by default) has
+    ``OFFLINE_IMAGE_ENV`` set to YES, which an image built with ``OFFLINE=YES`` does,
+    and only while the config's ``content_db_staleness_offline_image_default`` is left
+    true. So a config can turn it off, never on: without the variable it is off
+    whatever the config says.
     """
     if not built_offline(os.environ if environ is None else environ):
         return False

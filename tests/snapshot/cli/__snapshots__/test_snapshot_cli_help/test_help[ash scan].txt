@@ -307,14 +307,20 @@
 │                                                                            120h after the        │
 │                                                                            database was built.   │
 │                                                                            Without it such a     │
-│                                                                            scan exits 1. With it │
-│                                                                            the scan proceeds and │
-│                                                                            the warning is        │
-│                                                                            recorded in the log   │
-│                                                                            and in the reports.   │
+│                                                                            scan exits 1, except  │
+│                                                                            for trivy's database  │
+│                                                                            in an image built     │
+│                                                                            with OFFLINE=YES,     │
+│                                                                            which warns by        │
+│                                                                            default. With it the  │
+│                                                                            scan proceeds and the │
+│                                                                            warning is recorded   │
+│                                                                            in the log and in the │
+│                                                                            reports.              │
 │                                                                            --no-allow-stale-con… │
-│                                                                            forces the default    │
-│                                                                            failure. Defaults to  │
+│                                                                            forces the failure,   │
+│                                                                            for that database     │
+│                                                                            too. Defaults to      │
 │                                                                            unset, which prefers  │
 │                                                                            the                   │
 │                                                                            `content_db_stalenes… │

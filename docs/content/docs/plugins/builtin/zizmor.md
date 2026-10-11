@@ -89,8 +89,10 @@ scanned tree; set by a config in the scanned tree, or by an MCP client, it is
 ignored with a warning and zizmor runs offline without the tokens. ASH never
 reads, copies or logs the token and never puts it on zizmor's command line.
 ASH's own offline mode (`ASH_OFFLINE=true` or `ash scan --offline`) overrides
-`online_audits`. Under `--sandbox`, online audits currently get neither network
-access nor the token.
+`online_audits`. Under `--sandbox`, zizmor never gets the token: the sandbox
+passes no `GH_TOKEN`, `GITHUB_TOKEN` or `ZIZMOR_GITHUB_TOKEN`, so online audits
+cannot authenticate. It gets a network only when the operator lists `zizmor` in
+`sandbox.network_scanners`, and never when the scan is offline.
 
 `ZIZMOR_CONFIG`, `ZIZMOR_OFFLINE` and `ZIZMOR_NO_ONLINE_AUDITS` are always
 removed from zizmor's environment, so a scan's result depends on the repository

@@ -455,9 +455,10 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         super().model_post_init(context)
 
     # The strict default. zizmor runs with --offline unless online_audits is true,
-    # and the network and GitHub token those audits need are option-derived grants,
-    # which wait for the sandbox's grant gates: under --sandbox, online audits get
-    # neither.
+    # and the GitHub token those audits need is an option-derived grant, which waits
+    # for the sandbox's grant gates: under --sandbox no token reaches zizmor, and it
+    # gets a network only when sandbox.network_scanners lists it (utils/sandbox/
+    # policy.py).
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
 
     @property

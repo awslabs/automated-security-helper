@@ -139,7 +139,12 @@
     `content_db_staleness_offline_image_default: false`, or either form of
     `--allow-stale-content-db`, turns that off (see
     `docs/content/docs/building-your-own-image.md`). The nix shell updates the
-    database on every entry.
+    database on every entry. Online, trivy and trivy-repo keep the database in
+    `TRIVY_CACHE_DIR` when it is set, and otherwise in `~/.cache/trivy`
+    (`~/Library/Caches/trivy` on macOS) on every platform. trivy-repo outside
+    `--sandbox` used trivy's own default before, which is `%LocalAppData%\trivy` on
+    Windows and `$XDG_CACHE_HOME/trivy` when that is set, so there the first online
+    scan downloads the database again; set `TRIVY_CACHE_DIR` to keep one location.
 
   Options that name something a tool executes or loads are not taken from a config
   file inside the scanned tree: actionlint's `shellcheck` and `pyflakes` accept only
@@ -846,6 +851,11 @@
   states coverage it does not have.
 
 ### Fixes
+
+- **The nix shell's database downloads run from an empty temporary directory.**
+  grype's and trivy's databases are downloaded with an empty config file from a
+  fresh temporary directory, so a grype or trivy config in the directory the
+  shell is entered in no longer applies to the download.
 
 - `ash dependencies install --tool ArchiveConverter` works again. Building each plugin
   from its own config section renamed the archive converter's selector to `archive`,

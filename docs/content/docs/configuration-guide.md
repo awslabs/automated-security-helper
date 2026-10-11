@@ -220,10 +220,11 @@ database it was built with, and the 24h bound would otherwise fail every scan in
 from a day after the build. So those scans pass, and each report records the stale
 database as it does under `warn`, with a message saying the offline image's default
 let the scan pass. Only `trivy-db` is relaxed: `grype-db` and the offline rulesets
-still fail the scan once they are past their bounds. What turns this on is the
-image's own `ASH_OFFLINE_AT_BUILD_TIME=YES`, so it never applies outside such an
-image, whatever the config says. To hold `trivy-db` to `content_db_staleness` in the
-image as well:
+still fail the scan once they are past their bounds. What turns this on is
+`ASH_OFFLINE_AT_BUILD_TIME=YES` in ASH's environment, which the image sets from its
+`OFFLINE` build argument and nothing else in ASH sets; the config cannot turn it on,
+and a process given that variable some other way gets the same default. To hold
+`trivy-db` to `content_db_staleness` in the image as well:
 
 ```yaml
 content_db_staleness_offline_image_default: false  # default true

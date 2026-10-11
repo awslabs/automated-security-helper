@@ -128,9 +128,10 @@ STALENESS_OVERRIDES_CONFIG_FIELD = "content_db_staleness_overrides"
 STALENESS_OFFLINE_IMAGE_CONFIG_FIELD = "content_db_staleness_offline_image_default"
 
 #: Set by the Dockerfile from its ``OFFLINE`` build argument (``ENV
-#: ASH_OFFLINE_AT_BUILD_TIME="${OFFLINE}"``), so it is ``YES`` only in an image built with
-#: ``OFFLINE=YES``. It describes the image, not the scan: ``ASH_OFFLINE`` says whether a scan
-#: runs offline, and is also set by ``--offline`` and the nix shell.
+#: ASH_OFFLINE_AT_BUILD_TIME="${OFFLINE}"``), so it is ``YES`` in an image built with
+#: ``OFFLINE=YES``; nothing else in ASH sets it, and ASH reads it wherever it is set. It
+#: describes the image, not the scan: ``ASH_OFFLINE`` says whether a scan runs offline,
+#: and is also set by ``--offline`` and the nix shell.
 OFFLINE_IMAGE_ENV = "ASH_OFFLINE_AT_BUILD_TIME"
 
 #: The policy a database is held to by default in an image built with ``OFFLINE=YES``, in
