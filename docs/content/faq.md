@@ -7,8 +7,10 @@ file without it they report an error and exit 1, although a scan accepts the fil
 
 ## Why does my first scan exit 1?
 
-At least one scanner is MISSING: its tool is not installed. A scan with a MISSING scanner
-is incomplete, and an incomplete scan exits 1 even when it also found something. Run
+At least one scanner is MISSING: its tool is not installed. MISSING can also mean ASH found
+the tool only inside the scanned directory, such as in the project's `.venv`, and did not
+run it; see [Tools inside the scanned directory](docs/advanced-usage.md#tools-inside-the-scanned-directory).
+A scan with a MISSING scanner is incomplete, and an incomplete scan exits 1 even when it also found something. Run
 `ash dependencies install` to install the tools it can install. npm-audit and cdk-nag also
 need Node.js, and cfn-nag needs Ruby with a C compiler. To scan without a tool you cannot
 install, leave its scanner out with `ash --exclude-scanners cdk-nag,npm-audit`. See
