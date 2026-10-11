@@ -1249,6 +1249,13 @@ scanners:
 > built-in defaults plus the explicit ASH options above, rather than loading the bundled
 > validator/profile patterns. (It is **not** needed for excludes — CLI `--exclude` and
 > `--recursive` win over the config's defaults regardless; see gotcha §10.)
+>
+> `.ash/.ash_community_plugins.yaml` is inside the scanned tree, and from such a file
+> `use_default_config` and `profile` are ignored with a warning, because they choose
+> which part of ferret-scan's config is used (`config/tool_config_trust.py`). The CI
+> scans therefore also pass
+> `--config-overrides scanners.ferret-scan.options.use_default_config=false`, and the
+> line in the file only records the intent.
 
 > **Why simple directory names in `exclude_patterns`**: Ferret-scan's `--exclude`
 > matches with `filepath.Match` glob plus a substring fallback; the `**` globstar is
