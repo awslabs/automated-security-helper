@@ -287,8 +287,9 @@ objects holds in place of each LFS-tracked `.zip` or `.tar.gz`, is recorded as a
 refused input naming the file, with the remedy: fetch the LFS objects (`git lfs
 pull`, or `lfs: true` on the CI checkout step) before the scan. It does not fail the
 completeness gate, because the archive is not in the tree to scan. Only a whole file
-in the pointer format counts: under 1024 bytes, the
-`version https://git-lfs.github.com/spec/v1` line first, `key value` lines of
+in the pointer format counts: under 1024 bytes, a version line first that git-lfs
+reads (`version https://git-lfs.github.com/spec/v1`, or one of the older
+`https://hawser.github.com/spec/v1` and `http://git-media.io/v/2`), `key value` lines of
 printable ASCII, and an `oid sha256:` and a `size` line. No zip, tar or gzip file the
 converter can extract meets that, so a readable archive is always extracted.
 

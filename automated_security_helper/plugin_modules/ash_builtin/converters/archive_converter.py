@@ -448,8 +448,15 @@ def _tar_members_within(
     return members
 
 
-#: The first line of a Git LFS pointer file, version 1 of the pointer format.
-_LFS_POINTER_FIRST_LINE = b"version https://git-lfs.github.com/spec/v1\n"
+#: The first line of a Git LFS pointer file, one per version URL git-lfs reads
+#: (v1Aliases in its lfs/pointer.go): the current one; the pre-release one, which its
+#: docs/spec.md shows for "Blobs created with the pre-release version of the tool";
+#: and the alpha one. git-lfs compares the URL as a plain string, and so does this.
+_LFS_POINTER_FIRST_LINES = (
+    b"version https://git-lfs.github.com/spec/v1\n",
+    b"version https://hawser.github.com/spec/v1\n",
+    b"version http://git-media.io/v/2\n",
+)
 #: "Pointer files must be less than 1024 bytes in size", in the LFS spec.
 _LFS_POINTER_MAX_BYTES = 1024
 #: ``key value``: the spec's key characters, and a value of printable ASCII. The
@@ -479,7 +486,7 @@ def _is_git_lfs_pointer(head: bytes, size: int) -> bool:
     """
     if size >= _LFS_POINTER_MAX_BYTES or len(head) != size:
         return False
-    if not head.startswith(_LFS_POINTER_FIRST_LINE):
+    if not head.startswith(_LFS_POINTER_FIRST_LINES):
         return False
     lines = head.splitlines(keepends=True)
     if not all(_LFS_POINTER_LINE.fullmatch(line) for line in lines):

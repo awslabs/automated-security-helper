@@ -47,11 +47,31 @@ ARCHIVE_MODULE = (
     "automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter"
 )
 
-LFS_POINTER = (
-    b"version https://git-lfs.github.com/spec/v1\n"
+LFS_OID_LINE = (
     b"oid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\n"
-    b"size 12345\n"
 )
+LFS_POINTER = (
+    b"version https://git-lfs.github.com/spec/v1\n" + LFS_OID_LINE + b"size 12345\n"
+)
+
+#: The version URLs git-lfs reads (lfs/pointer.go, v1Aliases): the current one, the
+#: pre-release one docs/spec.md shows ("Blobs created with the pre-release version
+#: of the tool generated files with a different version URL"), and the alpha one.
+LFS_VERSION_URLS = [
+    pytest.param(b"https://git-lfs.github.com/spec/v1", id="v1"),
+    pytest.param(b"https://hawser.github.com/spec/v1", id="pre-release-hawser"),
+    pytest.param(b"http://git-media.io/v/2", id="alpha-git-media"),
+]
+
+
+def pointer_with_version(url: bytes) -> bytes:
+    return b"version " + url + b"\n" + LFS_OID_LINE + b"size 12345\n"
+
+
+def pointer_of_length(length: int) -> bytes:
+    """A valid pointer padded with an extension-style line to exactly ``length`` bytes."""
+    padding = length - len(LFS_POINTER) - len(b"x \n")
+    return LFS_POINTER + b"x " + b"a" * padding + b"\n"
 
 
 def zip_that_also_reads_as_a_pointer() -> bytes:
@@ -242,6 +262,29 @@ class TestGitLfsPointers:
         assert "git lfs pull" in refusal.reason
         assert gate(converter) == []
 
+    @pytest.mark.parametrize("url", LFS_VERSION_URLS)
+    def test_a_pointer_with_any_version_git_lfs_reads_is_reported(
+        self, url, test_plugin_context, monkeypatch
+    ):
+        converter, results = convert(
+            test_plugin_context, monkeypatch, {"assets.zip": pointer_with_version(url)}
+        )
+
+        assert results == []
+        assert [r.path for r in converter.refused_inputs] == ["assets.zip"]
+        assert "Git LFS pointer" in converter.refused_inputs[0].reason
+        assert converter.failed_inputs == []
+
+    def test_a_pointer_of_1023_bytes_is_reported(
+        self, test_plugin_context, monkeypatch
+    ):
+        data = pointer_of_length(1023)
+        assert len(data) == 1023
+        converter, _ = convert(test_plugin_context, monkeypatch, {"x.zip": data})
+
+        assert [r.path for r in converter.refused_inputs] == ["x.zip"]
+        assert converter.failed_inputs == []
+
     @pytest.mark.parametrize(
         "data",
         [
@@ -257,6 +300,16 @@ class TestGitLfsPointers:
             ),
             pytest.param(LFS_POINTER + b"k a\x00b\n", id="nul-inside-a-value"),
             pytest.param(LFS_POINTER + b"k a\x7fb\n", id="control-byte-in-a-value"),
+            pytest.param(
+                b"version https://git-lfs.github.com/spec/v1\n" + LFS_OID_LINE,
+                id="no-size",
+            ),
+            pytest.param(LFS_POINTER + b"ext-0 \xff\xfe\n", id="non-ascii-value"),
+            pytest.param(pointer_of_length(1024), id="exactly-1024-bytes"),
+            pytest.param(
+                pointer_with_version(b"https://git-lfs.github.com/spec/v2"),
+                id="unknown-version",
+            ),
         ],
     )
     def test_a_file_that_only_starts_like_a_pointer_fails_the_gate(
