@@ -96,7 +96,7 @@ from automated_security_helper.utils.inner_run_outcome import (
     mark_results_file_completed,
     mark_run_completed,
     new_outer_run_id,
-    outer_run_id_from_environment,
+    take_outer_run_id,
     read_back_outcome,
     record_report_refusal,
 )
@@ -1185,10 +1185,9 @@ def _refuse_report_path_link(refusal: ReportPathRefused) -> NoReturn:
 
 
 def _record_inner_report_refusal(
-    opts: ScanOptions, refusal: ReportPathRefused, logger
+    opts: ScanOptions, refusal: ReportPathRefused, run_id: Optional[str], logger
 ) -> None:
     """As the inner run of a container or nix scan, record ``refusal`` for the outer process."""
-    run_id = outer_run_id_from_environment()
     if run_id is None:
         return
     results_file = opts.output_dir / "ash_aggregated_results.json"
@@ -2026,6 +2025,10 @@ def _run_local_mode(
 ) -> tuple[AshAggregatedResults, Optional[bool]]:
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 
+    # Before this run starts any process, so none of them inherits it. See
+    # utils/inner_run_outcome.py.
+    outer_run_id = take_outer_run_id()
+
     # Through utils/process_env.py rather than os.environ directly: an MCP server
     # runs this in an executor thread while other scans may be spawning, and the
     # helper's lock is what keeps their environment copies consistent. The
@@ -2233,7 +2236,7 @@ def _run_local_mode(
         # The run completed: as the inner run of a container or nix scan, say so for
         # the outer process, replacing any record an earlier run left in a results
         # file read back with --use-existing. See utils/inner_run_outcome.py.
-        mark_run_completed(results, outer_run_id_from_environment())
+        mark_run_completed(results, outer_run_id)
         if isinstance(results, BaseModel):
             content = results.model_dump_json(indent=2, by_alias=True)
         else:
@@ -2275,7 +2278,7 @@ def _run_local_mode(
         # run of a container or nix scan, recorded in the results file the scan left
         # for the outer process; if that fails, the outer process finds no record of
         # this run's completion and exits 1 all the same.
-        _record_inner_report_refusal(opts, e, logger)
+        _record_inner_report_refusal(opts, e, outer_run_id, logger)
         _refuse_report_path_link(e)
     except Exception as e:
         logger.exception(e)
@@ -2497,6 +2500,10 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
             "opts.workspace_plan is None"
         )
 
+    # Before this run starts any process, so none of them inherits it. See
+    # utils/inner_run_outcome.py.
+    outer_run_id = take_outer_run_id()
+
     # Built before ASH_OFFLINE is set, preserving the order the inline
     # construction had: the builder reads a config file off disk, and doing that
     # with the offline flag already in the environment is a different read.
@@ -2509,11 +2516,10 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
 
     try:
         result = execute_workspace(opts.workspace_plan, settings)
-        run_id = outer_run_id_from_environment()
-        if run_id is not None:
+        if outer_run_id is not None:
             # The inner run of a container scan: say it completed, for the outer
             # process. See utils/inner_run_outcome.py.
-            mark_results_file_completed(result.results_path, run_id)
+            mark_results_file_completed(result.results_path, outer_run_id)
         return result
     except WorkspaceDefinitionError as exc:
         # A refusal, not a project failure: nothing was scanned, so there is no

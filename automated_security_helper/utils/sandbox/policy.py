@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from automated_security_helper.utils.inner_run_outcome import OUTER_RUN_ID_ENV
+
 
 class SandboxUnavailable(OSError):
     """A sandbox was requested and cannot be provided for this scanner.
@@ -121,6 +123,10 @@ BASE_ENV_NAMES = frozenset(
     }
 )
 BASE_ENV_PREFIXES = ("LC_", "ASH_", "UV_", "PYTHON")
+#: Dropped whatever a scanner declares. The run ID a container or nix scan's outer
+#: process gives its inner run is for the inner run's results file only; see
+#: utils/inner_run_outcome.py.
+DROPPED_ENV_NAMES = frozenset({OUTER_RUN_ID_ENV})
 #: Inside an allowed prefix these still mark a credential (UV_PUBLISH_TOKEN,
 #: UV_INDEX_X_PASSWORD, npm_config__authToken), so the variable is dropped unless
 #: the scanner names it in ``env_names``.
@@ -231,6 +237,8 @@ class SandboxPolicy:
         named = set(self.env_names)
         kept = {}
         for key, value in env.items():
+            if key in DROPPED_ENV_NAMES:
+                continue
             if key in named:
                 kept[key] = value
                 continue

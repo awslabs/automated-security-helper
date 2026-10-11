@@ -219,6 +219,15 @@ class TestEnvironment:
         ):
             assert dropped not in env, dropped
 
+    def test_the_outer_run_id_is_dropped_even_when_named(self, layout):
+        """A scanner never gets the ID its run writes into the results file."""
+        policy = _policy(layout, SandboxRequirements(env_names=("ASH_OUTER_RUN_ID",)))
+        env = policy.filter_env(
+            {"ASH_OUTER_RUN_ID": "0" * 32, "ASH_OFFLINE": "YES", "PATH": "/usr/bin"}
+        )
+        assert "ASH_OUTER_RUN_ID" not in env
+        assert env["ASH_OFFLINE"] == "YES"
+
     def test_proxy_settings_pass_only_with_a_network(self, layout):
         online = _policy(layout, SandboxRequirements(network=True))
         assert online.filter_env({"HTTPS_PROXY": "p"})["HTTPS_PROXY"] == "p"

@@ -826,7 +826,12 @@
   written, and an inner run that failed after the scan phase had written the
   results file, which used to be read back as a verdict. A record an earlier run
   left in a file read back with `--use-existing` is ignored, and is dropped when
-  the file is loaded, so reports do not repeat it.
+  the file is loaded, so reports do not repeat it. The inner run takes the ID out
+  of its environment when it starts, and the scanner sandbox drops it, so the
+  processes the inner run starts do not see it; a value that is not such an ID is
+  reported and not used. The marker says whether the file is a complete account of
+  that run; it does not protect the file from code running as the inner run's
+  user.
 
 ### Breaking changes
 

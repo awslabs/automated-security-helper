@@ -29,6 +29,18 @@ which writes no marker. A record with another ID was left by an earlier run, in 
 results file read back with ``--use-existing``, and is ignored; the orchestrator
 drops such records when it loads existing results (``without_run_records``), so
 reports do not repeat them.
+
+What this guards against, and what it does not
+----------------------------------------------
+It tells the outer process whether the file it reads back is a complete account
+of the run it started: not a file an earlier run left, not one a run that stopped
+part way wrote, and not one from an ASH that does not record completion. It is not
+an authentication mechanism. Code running as the inner run's user can write any
+file the inner run can, the marker included. So the ID is kept from the processes
+the inner run starts only so that a scanner cannot copy it into a results file by
+accident: the inner run takes it out of its environment when it starts
+(``take_outer_run_id``), and the scanner sandbox drops it from a scanner's
+environment (utils/sandbox/policy.py).
 """
 
 from __future__ import annotations
@@ -63,10 +75,28 @@ def new_outer_run_id() -> str:
     return uuid.uuid4().hex
 
 
-def outer_run_id_from_environment() -> Optional[str]:
-    """The run ID an outer process gave this run, or None when it is not an inner run."""
-    value = os.environ.get(OUTER_RUN_ID_ENV, "")
-    return value if _RUN_ID.fullmatch(value) else None
+def take_outer_run_id() -> Optional[str]:
+    """Remove the run ID an outer process gave this run from the environment, and return it.
+
+    Called when the inner run starts, before it starts any process, so none of
+    them inherits the ID. None when this is not an inner run. A value that is not
+    an ID this ASH gives is reported and not used: the run then writes no marker,
+    and the outer process says the run did not complete.
+    """
+    from automated_security_helper.utils.log import ASH_LOGGER
+    from automated_security_helper.utils.process_env import apply_environ_overrides
+
+    value = apply_environ_overrides({OUTER_RUN_ID_ENV: None})[OUTER_RUN_ID_ENV]
+    if not value:
+        return None
+    if _RUN_ID.fullmatch(value):
+        return value
+    ASH_LOGGER.warning(
+        f"Ignoring {OUTER_RUN_ID_ENV}: {value!r} is not a run ID ASH gives the inner "
+        "run of a container or nix scan. This run's results file will not record "
+        "that it completed."
+    )
+    return None
 
 
 def _is_run_record(checkpoint: object) -> bool:

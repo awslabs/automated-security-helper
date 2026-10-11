@@ -26,6 +26,7 @@ with a stand-in ``nix`` on PATH that runs the inner command directly.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import stat
@@ -293,6 +294,62 @@ def test_an_inner_run_that_failed_after_the_scan_phase_fails_the_outer_run(
 
     assert refused.value.code == 1
     assert "did not complete" in _errors(logger), _errors(logger)
+
+
+@OUTER
+def test_a_process_the_inner_run_starts_does_not_see_the_run_id(tmp_path, outer):
+    """The ID is taken out of the environment when the inner run starts."""
+    opts = _opts(tmp_path)
+    seen: List[str] = []
+
+    def spawn() -> None:
+        seen.append(
+            subprocess.run(  # nosec B603 - fixed argv, the test's own interpreter
+                [
+                    sys.executable,
+                    "-c",
+                    f"import os; print(os.environ.get({RUN_ID_ENV!r}, 'absent'))",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+        )
+
+    results = outer(opts, _scan(opts, [], after_scan=spawn))
+
+    assert seen == ["absent"]
+    assert results.name == "inner scan"
+
+
+def test_a_malformed_run_id_is_reported_and_not_used(tmp_path, monkeypatch):
+    """Not an ID this ASH gives an inner run, so no marker carries it."""
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    opts = _opts(tmp_path)
+    warnings: List[str] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.WARNING:
+                warnings.append(record.getMessage())
+
+    handler = _Collect(level=logging.DEBUG)
+    ASH_LOGGER.addHandler(handler)
+    try:
+        status = _inner_run("not-a-run-id", opts.output_dir, [])
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+
+    assert status == 0
+    assert any(RUN_ID_ENV in message for message in warnings), warnings
+    written = json.loads(
+        (opts.output_dir / "ash_aggregated_results.json").read_text(encoding="utf-8")
+    )
+    assert not any(
+        checkpoint.get("type") == "run_completed"
+        for checkpoint in written["validation_checkpoints"]
+    )
 
 
 def _write_results(output_dir: Path, *checkpoints: dict) -> None:
