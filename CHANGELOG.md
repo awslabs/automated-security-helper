@@ -1056,8 +1056,10 @@
   `.ash/`) is refused before discovery opens it, by `scan_directory` before a scan
   starts and by the scan's own discovery, with the same response whether the
   target is missing, unreadable or readable; discovery used to open it, so a
-  missing or unreadable target refused the scan and a readable one did not. The
-  same refusal applies to `ash report`, `ash plugin list` and `ash dependencies install`
+  missing or unreadable target refused the scan and a readable one did not. A
+  config name ASH cannot look for (one inside an `.ash/` directory that cannot be
+  searched) is refused too; it used to count as no config, and the scan ran with
+  the defaults. The same refusal applies to `ash report`, `ash plugin list` and `ash dependencies install`
   (each exits 3), to workspace mode (planning, `--dry-run` included, and execution;
   `--config` is now passed to planning and must name an existing file even when
   every project has its own config; the workspace execution settings read from the

@@ -456,19 +456,65 @@ def _pyproject_is_a_source(path: Path, found_before: List[ConfigSource]) -> bool
         return False
 
 
-def _existing_candidates(search_dir: Path) -> List[ConfigSource]:
-    """Every config name in `search_dir` that exists, in precedence order, unopened."""
+def _name_exists(path: Path) -> bool:
+    """Whether a config name exists, as ``os.path.lexists`` says, but never guessed.
+
+    ``lexists`` answers False for any error, so a ``.ash/`` directory that cannot
+    be searched hid the config inside it and the scan ran with the defaults.
+    Only "no such file" and "a path component is not a directory" mean absent;
+    any other error refuses, since whether the repository has a config there
+    cannot be told.
+    """
+    try:
+        os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError as exc:
+        raise ASHConfigSourceError(
+            f"Could not look for a config file at {Path(path).as_posix()} "
+            f"({exc.strerror}), so ASH cannot tell whether one is there. Make the "
+            "directory readable, or name a config file with --config."
+        ) from exc
+    return True
+
+
+def _not_permitted(found: Path) -> ASHConfigInputNotPermittedError:
+    # Names the source as found, never what it resolves to, so the refusal reads
+    # the same whether that target is missing, unreadable or readable.
+    return ASHConfigInputNotPermittedError(
+        f"{found.as_posix()}, a config source found in the scanned directory, "
+        "reaches a file outside the directories this caller may read config from."
+    )
+
+
+def _permitted(path: Path, permit: PermitBase) -> bool:
+    # realpath reads links and opens nothing, and does not raise on a loop.
+    return permit(Path(os.path.realpath(path)))
+
+
+def _existing_candidates(
+    search_dir: Path, permit: Optional[PermitBase] = None
+) -> List[ConfigSource]:
+    """Every config name in `search_dir` that exists, in precedence order, unopened.
+
+    Under ``permit`` a ``.ash`` that is a link out of the grant is refused before
+    anything looks inside it: whether a name exists there would otherwise answer
+    whether a file exists in a directory the caller may not read.
+    """
+    dot_ash = search_dir / ".ash"
+    if permit is not None and _name_exists(dot_ash) and not _permitted(dot_ash, permit):
+        raise _not_permitted(dot_ash)
     candidates: List[ConfigSource] = []
     for name in ASH_CONFIG_FILE_NAMES:
-        for candidate in (search_dir / name, search_dir / ".ash" / name):
-            if os.path.lexists(candidate):
+        for candidate in (search_dir / name, dot_ash / name):
+            if _name_exists(candidate):
                 candidates.append(ConfigSource(candidate, SOURCE_KIND_DEDICATED))
     for name in ASH_RC_FILE_NAMES:
         candidate = search_dir / name
-        if os.path.lexists(candidate):
+        if _name_exists(candidate):
             candidates.append(ConfigSource(candidate, SOURCE_KIND_ASHRC))
     pyproject = search_dir / ASH_PYPROJECT_FILE_NAME
-    if os.path.lexists(pyproject):
+    if _name_exists(pyproject):
         candidates.append(ConfigSource(pyproject, SOURCE_KIND_PYPROJECT))
     return candidates
 
@@ -479,16 +525,8 @@ def _check_candidates(
     if permit is None:
         return
     for candidate in candidates:
-        # realpath reads links and opens nothing, and does not raise on a loop.
-        if not permit(Path(os.path.realpath(candidate.path))):
-            # Names the candidate as found, never what it resolves to, so the
-            # refusal reads the same whether that target is missing, unreadable
-            # or readable.
-            raise ASHConfigInputNotPermittedError(
-                f"{candidate.path.as_posix()}, a config source found in the "
-                "scanned directory, reaches a file outside the directories this "
-                "caller may read config from."
-            )
+        if not _permitted(candidate.path, permit):
+            raise _not_permitted(candidate.path)
 
 
 def check_discovery_candidates(search_dir: Path, permit: Optional[PermitBase]) -> None:
@@ -498,7 +536,8 @@ def check_discovery_candidates(search_dir: Path, permit: Optional[PermitBase]) -
     it opens anything, for a caller that refuses before a scan starts (MCP
     ``scan_directory``). Opens nothing itself.
     """
-    _check_candidates(_existing_candidates(Path(search_dir)), permit)
+    search_dir = Path(search_dir)
+    _check_candidates(_existing_candidates(search_dir, permit), permit)
 
 
 def discover_config_source(
@@ -517,7 +556,7 @@ def discover_config_source(
     source as found. Without it nothing is checked.
     """
     search_dir = Path(search_dir)
-    candidates = _existing_candidates(search_dir)
+    candidates = _existing_candidates(search_dir, permit)
     _check_candidates(candidates, permit)
     found: List[ConfigSource] = []
     for candidate in candidates:

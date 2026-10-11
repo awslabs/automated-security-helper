@@ -156,14 +156,24 @@ class TestDiscoveryChecksEachCandidateBeforeOpeningIt:
         with pytest.raises(ASHConfigInputNotPermittedError, match=r"\.ash\.yaml"):
             config_sources.discover_config_source(tree.scan, permit=_gate())
 
-    def test_a_linked_ash_directory_is_checked(self, tree):
+    @pytest.mark.parametrize("holds", ["a-config", "nothing", "unsearchable"])
+    def test_a_linked_ash_directory_is_refused_whatever_it_holds(self, tree, holds):
+        """Looking inside it would tell the client whether a file there exists."""
         outside = tree.elsewhere / "dot-ash"
         outside.mkdir()
-        (outside / ".ash.yaml").write_text("project_name: x\n", encoding="utf-8")
+        if holds == "a-config":
+            (outside / ".ash.yaml").write_text("project_name: x\n", encoding="utf-8")
         (tree.scan / ".ash").symlink_to(outside)
+        if holds == "unsearchable":
+            outside.chmod(0)
+        try:
+            with pytest.raises(ASHConfigInputNotPermittedError) as excinfo:
+                config_sources.discover_config_source(tree.scan, permit=_gate())
+        finally:
+            outside.chmod(0o755)
 
-        with pytest.raises(ASHConfigInputNotPermittedError):
-            config_sources.discover_config_source(tree.scan, permit=_gate())
+        assert "Errno" not in str(excinfo.value)
+        assert str(outside) not in str(excinfo.value)
 
     def test_control_a_candidate_inside_the_grant_is_discovered(self, tree):
         (tree.scan / "pyproject.toml").write_text(

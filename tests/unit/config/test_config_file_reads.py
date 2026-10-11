@@ -235,6 +235,57 @@ class TestDiscoveryOpensOnlyRegularFiles:
         assert flags and all(f & noctty == noctty for f in flags), flags
 
 
+needs_permissions = pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="needs POSIX permissions that root ignores",
+)
+
+
+class TestDiscoveryThatCannotLookIsRefused:
+    """A config name whose existence cannot be told is refused, not taken as absent.
+
+    os.path.lexists answers False for any error, so a ``.ash/`` directory the
+    scan cannot search hid the ``.ash/.ash.yaml`` inside it and the scan ran with
+    the defaults without a word.
+    """
+
+    @needs_permissions
+    def test_an_unsearchable_ash_directory_is_refused(self, tmp_path):
+        dot_ash = tmp_path / ".ash"
+        dot_ash.mkdir()
+        (dot_ash / ".ash.yaml").write_text(
+            "project_name: from-dot-ash\nfail_on_findings: false\n", encoding="utf-8"
+        )
+        dot_ash.chmod(0)
+        try:
+            with pytest.raises(ASHConfigSourceError) as excinfo:
+                resolve_config(source_dir=tmp_path)
+        finally:
+            dot_ash.chmod(0o755)
+
+        assert ".ash" in str(excinfo.value)
+        assert "Permission denied" in str(excinfo.value)
+
+    @needs_permissions
+    def test_control_an_unsearchable_unrelated_directory_does_not_matter(
+        self, tmp_path
+    ):
+        other = tmp_path / "vendor"
+        other.mkdir()
+        other.chmod(0)
+        try:
+            config = resolve_config(source_dir=tmp_path)
+        finally:
+            other.chmod(0o755)
+
+        assert config.project_name == "ash-scan"
+
+    def test_control_an_ash_that_is_a_file_holds_no_config(self, tmp_path):
+        (tmp_path / ".ash").write_text("not a directory\n", encoding="utf-8")
+
+        assert resolve_config(source_dir=tmp_path).project_name == "ash-scan"
+
+
 class TestEncodings:
     def test_a_json_config_with_a_utf8_byte_order_mark_is_read(self, tmp_path):
         """As YAML and TOML already are; Windows PowerShell 5 writes the mark."""

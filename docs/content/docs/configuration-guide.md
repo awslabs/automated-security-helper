@@ -78,7 +78,9 @@ scanner runs, and the message names the file. That covers:
   `.ash/.ash.yaml` linked to a shared file that is not checked out. It is not
   treated as "no config";
 - a `pyproject.toml` that cannot be read at all, when it would be the source ASH
-  uses: ASH cannot tell whether it holds a `[tool.ash]` table.
+  uses: ASH cannot tell whether it holds a `[tool.ash]` table;
+- a config name ASH cannot look for, such as one inside an `.ash/` directory
+  that cannot be searched: ASH cannot tell whether the file is there.
 
 Scanning with the defaults instead would run without the file's suppressions,
 ignore paths, thresholds and sandbox settings, and report the scan as completed.
