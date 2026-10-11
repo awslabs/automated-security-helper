@@ -161,8 +161,9 @@ Every scan writes its reports to `reports/` in the output directory. Send each t
 place your team works:
 
 - GitHub code scanning: upload `ash.ghas.sarif` ([Export reports](../how-to/export-reports.md#github)).
-- GitLab security dashboards: declare `ash.gl-sast-report.json` as a SAST report
-  ([Export reports](../how-to/export-reports.md#gitlab)).
+- GitLab security dashboards: publish `ash.gl-sast-report.json` as a SAST report from a
+  job that succeeds, because GitLab ingests security findings only from successful jobs
+  ([Run ASH in GitLab CI](../how-to/ci/gitlab-ci.md)).
 - A central store or SIEM: copy a findings file, such as `ash.ocsf.json` or `ash.sarif`,
   with your own tooling:
 

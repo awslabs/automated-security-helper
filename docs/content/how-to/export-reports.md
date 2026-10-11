@@ -100,27 +100,22 @@ the reusable workflows ASH ships.
 
 ## GitLab {#gitlab}
 
-`ash.gl-sast-report.json` is a GitLab SAST report (schema 15.2.2).
-`ash.gl-dependency-scanning-report.cdx.json` is CycloneDX with the properties GitLab's
-dependency scanning reads. Declare them as report artifacts, with the JUnit file for the
-test report:
+GitLab reads three of the files, each under its own `artifacts:reports` keyword:
 
-<!-- doctest: config kind=gitlab-ci -->
-```yaml
-ash:
-  script:
-    - ash scan
-  artifacts:
-    when: always
-    reports:
-      sast: .ash/ash_output/reports/ash.gl-sast-report.json
-      dependency_scanning: .ash/ash_output/reports/ash.gl-dependency-scanning-report.cdx.json
-      junit: .ash/ash_output/reports/ash.junit.xml
-```
+| File in `reports/` | Keyword |
+|---|---|
+| `ash.gl-sast-report.json` (GitLab SAST report, schema 15.2.2) | `sast` |
+| `ash.gl-dependency-scanning-report.cdx.json` (CycloneDX) | `cyclonedx` |
+| `ash.junit.xml` | `junit` |
+
+GitLab uploads report artifacts whatever the job's result, but it ingests the findings of a
+security report such as `sast` only when the job that produced it succeeds. A scan with
+findings exits 2, so the job that runs ASH has to succeed and leave the verdict to a later
+job. [Run ASH in GitLab CI](ci/gitlab-ci.md) has the two jobs that do this.
 
 The SAST report keeps suppressed findings at severity Info with the reason in their
 `solution` field. Set `reporters.gitlab-sast.options.exclude_suppressed: true` to leave
-them out. [Run ASH in GitLab CI](ci/gitlab-ci.md) has the full job.
+them out.
 
 ## JUnit {#junit}
 
