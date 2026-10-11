@@ -319,26 +319,52 @@ class TestSecretScannerFindingsAreCountedNotSent:
         self, runtime, tmp_path
     ):
         unknown_snippet = "acme_unknown_scanner_marker = compute()\n"
-        unknown = scanner_shaped_report(
-            "acme-linter",
-            [
-                _result(
-                    "ACME-001",
-                    "acme linter fixture finding",
-                    line=9,
-                    snippet_text=unknown_snippet,
-                    tags=["acme-linter"],
-                )
-            ],
+        # A suggested fix carries code too, in its replacement's insertedContent.
+        unknown_fix = "acme_unknown_fix_marker = compute_safely()\n"
+        result = _result(
+            "ACME-001",
+            "acme linter fixture finding",
+            line=9,
+            snippet_text=unknown_snippet,
+            tags=["acme-linter"],
         )
+        result["fixes"] = [
+            {
+                "description": {"text": "acme fix"},
+                "artifactChanges": [
+                    {
+                        "artifactLocation": {"uri": "src/app.py"},
+                        "replacements": [
+                            {
+                                "deletedRegion": {"startLine": 9},
+                                "insertedContent": {"text": unknown_fix},
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+        unknown = scanner_shaped_report("acme-linter", [result])
         reporter = make_reporter(
-            tmp_path, include_code_snippets=True, actionable_only=False
+            tmp_path,
+            include_code_snippets=True,
+            actionable_only=False,
+            output_markdown=True,
         )
 
         reporter.report(model_of(bandit_report(), unknown))
 
         sent = runtime.sent()
+        # The local summary's Raw JSON is the whole finding, fixes included.
+        summary = (tmp_path / "reports" / "ash.bedrock.summary.md").read_text(
+            encoding="utf-8"
+        )
         assert unknown_snippet.strip() not in sent
+        assert unknown_fix.strip() not in sent
+        assert unknown_fix.strip() not in summary
+        # The finding itself is still sent and written, so the checks are not vacuous.
+        assert "acme linter fixture finding" in sent
+        assert "acme linter fixture finding" in summary
         # The known scanner's snippet still goes, so the rule is not "no snippets".
         assert BANDIT_SNIPPET.strip() in sent
 
