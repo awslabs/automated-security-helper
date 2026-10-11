@@ -266,6 +266,13 @@
     file outside the tree can add it. This repository's
     `.ash/.ash_community_plugins.yaml` no longer lists it; its CI legs pass it with
     `--ash-plugin-modules`.
+  - Nor can such a file select one of the AWS reporters or the Snyk Code scanner
+    through another installed package that lists or imports it in its
+    `ASH_REPORTERS` or `ASH_SCANNERS`: a class defined in either off-host package is
+    selected only when `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`,
+    `--config-overrides` or a config file outside the tree loads that package, the
+    class's module, or the package that lists it. Each class left out is named in a
+    warning, in a scan and in `ash report`.
   - bandit's, grype's and syft's own config files are the operator's.
     `scanners.bandit.options.config_file`, `scanners.grype.options.config_file`
     and `scanners.syft.options.config_file` from such a file are ignored; ASH no

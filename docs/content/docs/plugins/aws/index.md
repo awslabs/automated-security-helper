@@ -36,7 +36,11 @@ ASH. So only the operator running ASH can load it, in one of these ways:
 
 A repository's own config cannot load it. An `ash_plugin_modules` entry that names
 the package, or a module inside it, in a config file inside the scanned tree (such as
-the repository's `.ash/.ash.yaml`) is ignored with a warning naming the entry.
+the repository's `.ash/.ash.yaml`) is ignored with a warning naming the entry. Nor
+can it select the reporters through another installed package that lists or imports
+them: a reporter defined in this package is selected only when one of the ways above
+loads the package, the reporter's module, or the package that lists it. Each one
+that is not is named in a warning.
 
 Under the MCP server, list the package in `ash_plugin_modules` of a profile registered
 with `ash mcp --profile NAME=path/to/ash.yaml`; scans in a session bound to that

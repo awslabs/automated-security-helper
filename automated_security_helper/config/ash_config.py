@@ -1293,6 +1293,13 @@ class AshConfig(BaseModel):
     _in_tree_config_files: Tuple[Path, ...] = PrivateAttr(default=())
     _trusted_reporter_base: Optional["AshConfig"] = PrivateAttr(default=None)
 
+    # Set by resolve_config in the same case: the ash_plugin_modules entries of the
+    # trusted base, with the overrides replayed. A plugin class defined in an
+    # off-host package is selected only when one of them, or
+    # --ash-plugin-modules, loads it (config/plugin_module_trust.py). None when
+    # no file of the chain needs it.
+    _trusted_plugin_modules: Optional[Tuple[str, ...]] = PrivateAttr(default=None)
+
     # Project information
     project_name: Annotated[
         str,

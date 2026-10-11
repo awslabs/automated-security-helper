@@ -83,6 +83,13 @@ ash_plugin_modules:
   - my_ash_plugins
 ```
 
+A repository's `.ash/.ash.yaml` may name only modules installed outside the scanned
+tree, and not ASH's `ash_aws_plugins` and `ash_snyk_plugins` packages, which send
+findings or source off the host. A class from either package that your package
+lists or imports is selected only when the operator loads your package, or theirs,
+with `--ash-plugin-modules` or a config outside the tree. See
+[Settings a repository's config cannot choose](../configuration-guide.md#settings-a-repositorys-config-cannot-choose).
+
 Or specify it on the command line:
 
 ```bash

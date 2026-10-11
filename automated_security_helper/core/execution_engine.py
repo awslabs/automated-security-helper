@@ -28,6 +28,9 @@ from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.config.ash_config import (
     AshConfig,
 )
+from automated_security_helper.config.plugin_module_trust import (
+    drop_untrusted_off_host_plugins,
+)
 from automated_security_helper.config.reporter_trust import (
     confine_declared_reporter_destinations,
 )
@@ -278,6 +281,13 @@ class ScanExecutionEngine:
         }
         for k, v in self.plugins.items():
             ASH_LOGGER.verbose(f"Discovered {len(v)} {k} plugins at runtime")
+
+        # A class from an off-host plugin package that only an in-tree or
+        # delivered config's module brought in is not selected.
+        if self._context.config is not None:
+            self.plugins = drop_untrusted_off_host_plugins(
+                self._context.config, self.plugins, ash_plugin_modules
+            )
 
         # The plugin modules are loaded, so every reporter's declared destination
         # options are known: those a config file in the scanned tree set are

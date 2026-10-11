@@ -30,6 +30,21 @@ Each level of a dotted name is located without importing its parent packages
 (``_spec_without_importing``), so checking a name runs no code.
 ``--ash-plugin-modules`` and ``ASH_PLUGIN_MODULES`` are the operator's and are not
 filtered here.
+
+The name check alone does not cover another installed package that imports one
+of those classes and lists it in its own ``ASH_SCANNERS``, ``ASH_REPORTERS`` or
+``ASH_CONVERTERS``: the entry names that package, and importing it registers the
+class. So ``resolve_config`` also records the trusted list on the config
+(``AshConfig._trusted_plugin_modules``), and ``drop_untrusted_off_host_plugins``,
+which ``ScanExecutionEngine`` and ``ash report`` call once the plugin modules are
+loaded, drops each selected class whose defining module (``cls.__module__``) is
+inside an off-host package, unless a trusted entry or ``--ash-plugin-modules``
+names that module or a package around it, or names a module that lists the
+class. One warning names each dropped class and its package. The off-host
+packages declare no ``ASH_EVENT_HANDLERS``
+(tests/unit/config/test_off_host_plugin_modules_from_repo_config.py derives what
+they send from their reporters, handlers and scanners), so only classes are
+checked.
 """
 
 from __future__ import annotations
@@ -38,7 +53,16 @@ import importlib.util
 import sys
 from importlib.machinery import ModuleSpec, PathFinder
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from automated_security_helper.config.config_sources import describe_config_path
 from automated_security_helper.config.path_trust import in_scanned_tree
@@ -176,6 +200,7 @@ def confine_plugin_modules(
     if module_overrides:
         trusted_config = apply_config_overrides(trusted_config, module_overrides)
     trusted_names = set(split_plugin_modules(trusted_config.ash_plugin_modules))
+    config._trusted_plugin_modules = tuple(sorted(trusted_names))
     kept: List[str] = []
     refused: List[str] = []
     for name in split_plugin_modules(getattr(config, "ash_plugin_modules", [])):
@@ -202,3 +227,75 @@ def confine_plugin_modules(
         "findings or source off the host. Name other modules with "
         "--ash-plugin-modules, --config-overrides or a config file outside the tree."
     )
+
+
+#: The module attributes that list a plugin package's classes.
+_PLUGIN_LISTS: Tuple[str, ...] = ("ASH_SCANNERS", "ASH_REPORTERS", "ASH_CONVERTERS")
+
+
+def _within(module: str, name: str) -> bool:
+    return module == name or module.startswith(name + ".")
+
+
+def drop_untrusted_off_host_plugins(
+    config: "AshConfig",
+    plugins: Mapping[str, Sequence[type]],
+    operator_modules: Optional[Iterable[object]],
+) -> Dict[str, List[type]]:
+    """``plugins`` without the off-host classes the trusted modules do not load.
+
+    A class whose defining module is inside a package of
+    ``OFF_HOST_PLUGIN_PACKAGES`` is kept only when a trusted module name (the
+    config's ``_trusted_plugin_modules`` and ``operator_modules``) is that module
+    or a package around it, or is an imported module that lists the class in its
+    ``ASH_SCANNERS``, ``ASH_REPORTERS`` or ``ASH_CONVERTERS``. Every other class is
+    kept. Nothing is dropped for a config ``resolve_config`` recorded no trusted
+    list on, since every file it was built from is the operator's.
+
+    Args:
+        config: The config ``resolve_config`` returned.
+        plugins: The selected plugin classes, by plugin type.
+        operator_modules: ``--ash-plugin-modules`` and ``ASH_PLUGIN_MODULES``.
+
+    Returns:
+        The classes to select, by plugin type, in their original order.
+    """
+    from automated_security_helper.config.ash_config import AshConfig
+
+    selected = {kind: list(classes) for kind, classes in plugins.items()}
+    if not isinstance(config, AshConfig) or config._trusted_plugin_modules is None:
+        return selected
+    trusted = split_plugin_modules(
+        [*config._trusted_plugin_modules, *(operator_modules or [])]
+    )
+    listed: List[type] = []
+    for name in trusted:
+        imported = sys.modules.get(name)
+        for attribute in _PLUGIN_LISTS:
+            listed.extend(getattr(imported, attribute, None) or [])
+    dropped: List[str] = []
+    for kind, classes in selected.items():
+        kept: List[type] = []
+        for cls in classes:
+            module = getattr(cls, "__module__", "") or ""
+            package = off_host_package(module)
+            if (
+                package is None
+                or any(_within(module, name) for name in trusted)
+                or any(cls is entry for entry in listed)
+            ):
+                kept.append(cls)
+                continue
+            entry = f"{getattr(cls, '__name__', cls)!r} from {package}"
+            if entry not in dropped:
+                dropped.append(entry)
+        selected[kind] = kept
+    if dropped:
+        ASH_LOGGER.warning(
+            f"Plugin classes {', '.join(dropped)} are not selected: a module that "
+            "a config inside the scanned tree, or one an MCP client delivered, "
+            "loads lists or imports them, and they send findings or source off the "
+            "host. Load their package with --ash-plugin-modules, --config-overrides "
+            "or a config file outside the tree."
+        )
+    return selected

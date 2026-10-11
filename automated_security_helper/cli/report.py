@@ -18,6 +18,9 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import (
     reporter_companion_file_names,
 )
+from automated_security_helper.config.plugin_module_trust import (
+    drop_untrusted_off_host_plugins,
+)
 from automated_security_helper.config.reporter_trust import (
     confine_declared_reporter_destinations,
 )
@@ -212,6 +215,11 @@ def report_command(
     reporter_plugins = ash_plugin_manager.plugin_modules(
         plugin_type="reporter",
     )
+    # A reporter from an off-host plugin package that only an in-tree config's
+    # module brought in is not one this command may run.
+    reporter_plugins = drop_untrusted_off_host_plugins(
+        ash_config, {"reporter": reporter_plugins}, None
+    )["reporter"]
     # The config's plugin modules are loaded now, so the destination options each
     # reporter declares are known; an in-tree config file does not choose them.
     confine_declared_reporter_destinations(ash_config, reporter_plugins)

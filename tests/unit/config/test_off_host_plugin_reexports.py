@@ -1,0 +1,301 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""A plugin class from an off-host package, re-exported by another package, is the operator's.
+
+``config/plugin_module_trust.py`` keeps a repository's or an MCP client's
+``ash_plugin_modules`` from naming ``ash_snyk_plugins`` or ``ash_aws_plugins``,
+keyed on the module name. Another installed ``*_ash_plugins`` package can list
+``SnykCodeScanner`` or an AWS reporter in its own ``ASH_SCANNERS`` or
+``ASH_REPORTERS``, and naming that package passes the name check. So the scan
+also checks the classes it selects: a class defined in an off-host package is
+dropped, with a warning, unless the trusted base or ``--ash-plugin-modules``
+loads that package or a module that lists the class.
+
+The re-exporting package is written outside the scanned tree and put on the
+path of a subprocess, because importing a plugin package registers its plugins
+for the rest of the process.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Dict, List
+
+import pytest
+import yaml
+
+PACKAGE = "reexport_ash_plugins"
+SNYK = "automated_security_helper.plugin_modules.ash_snyk_plugins"
+AWS = "automated_security_helper.plugin_modules.ash_aws_plugins"
+
+_PACKAGE_SOURCE = f"""
+from {SNYK}.snyk_code_scanner import SnykCodeScanner
+from {AWS}.s3_reporter import S3Reporter
+
+ASH_SCANNERS = [SnykCodeScanner]
+ASH_REPORTERS = [S3Reporter]
+"""
+
+# The scan engine built over a config resolved the way the CLI resolves it, with
+# argv[2:] as --ash-plugin-modules. Prints the classes it selected and the
+# warnings it logged.
+_ENGINE = """
+import json, logging, sys
+from pathlib import Path
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.core.execution_engine import ScanExecutionEngine
+from automated_security_helper.utils.log import ASH_LOGGER
+
+spec = json.loads(sys.argv[1])
+warnings = []
+
+class _Collect(logging.Handler):
+    def emit(self, record):
+        warnings.append(record.getMessage())
+
+ASH_LOGGER.addHandler(_Collect(level=logging.WARNING))
+ASH_LOGGER.setLevel(logging.DEBUG)
+source = Path(spec["source"])
+config = resolve_config(source_dir=source, **spec.get("resolve", {}))
+engine = ScanExecutionEngine(
+    context=PluginContext(source_dir=source, output_dir=source.parent / "out",
+                          work_dir=source.parent / "work", config=config),
+    show_progress=False,
+    ash_plugin_modules=spec["cli"],
+)
+print(json.dumps({
+    "scanners": sorted(c.__name__ for c in engine.plugins["scanner"]),
+    "reporters": sorted(c.__name__ for c in engine.plugins["reporter"]),
+    "warnings": warnings,
+}))
+"""
+
+#: Variables that would hand the subprocess a config or plugin list the test did
+#: not write.
+_AMBIENT = (
+    "ASH_CONFIG",
+    "ASH_PLUGIN_MODULES",
+    "ASH_MCP_WORKSPACE_ROOT",
+    "ASH_MCP_ALLOWED_ROOTS",
+    "ASH_MCP_ALLOWED_CONFIG_ROOTS",
+)
+
+
+@pytest.fixture
+def site(tmp_path: Path) -> Path:
+    """An installed package outside the scanned tree that re-exports both classes."""
+    path = tmp_path / "site"
+    (path / PACKAGE).mkdir(parents=True)
+    (path / PACKAGE / "__init__.py").write_text(_PACKAGE_SOURCE, encoding="utf-8")
+    return path
+
+
+def _write(path: Path, document: Dict[str, Any]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    return path
+
+
+def _tree(tmp_path: Path, modules: List[str]) -> Path:
+    source = tmp_path / "repo"
+    _write(
+        source / ".ash" / ".ash.yaml",
+        {"project_name": "scanned", "ash_plugin_modules": modules},
+    )
+    return source
+
+
+def _engine(
+    site: Path,
+    source: Path,
+    cli: List[str] | None = None,
+    env: Dict[str, str] | None = None,
+    **resolve: Any,
+) -> Dict[str, Any]:
+    environment = {k: v for k, v in os.environ.items() if k not in _AMBIENT}
+    environment.update(env or {})
+    environment["PYTHONPATH"] = os.pathsep.join(
+        [str(site), *filter(None, [os.environ.get("PYTHONPATH")])]
+    )
+    spec = {"source": str(source), "cli": cli or [], "resolve": resolve}
+    result = subprocess.run(
+        [sys.executable, "-c", _ENGINE, json.dumps(spec)],
+        cwd=site.parent,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert result.returncode == 0, result.stderr[-4000:]
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def _dropped(warnings: List[str], name: str) -> List[str]:
+    return [w for w in warnings if name in w and "not selected" in w]
+
+
+def test_a_repository_config_naming_the_package_does_not_select_them(tmp_path, site):
+    result = _engine(site, _tree(tmp_path, [PACKAGE]))
+
+    assert "SnykCodeScanner" not in result["scanners"], result
+    assert "S3Reporter" not in result["reporters"], result
+    [scanner] = _dropped(result["warnings"], "SnykCodeScanner")
+    assert SNYK in scanner, scanner
+    [reporter] = _dropped(result["warnings"], "S3Reporter")
+    assert AWS in reporter, reporter
+
+
+def test_the_command_line_naming_the_package_selects_them(tmp_path, site):
+    result = _engine(site, _tree(tmp_path, [PACKAGE]), cli=[PACKAGE])
+
+    assert "SnykCodeScanner" in result["scanners"], result
+    assert "S3Reporter" in result["reporters"], result
+    assert not _dropped(result["warnings"], "SnykCodeScanner"), result["warnings"]
+
+
+def test_an_operator_config_naming_the_package_selects_them(tmp_path, site):
+    """The operator's config replaces the tree's in workspace mode, and is trusted."""
+    source = _tree(tmp_path, [PACKAGE])
+    operator = _write(
+        tmp_path / "operator" / "ash.yaml", {"ash_plugin_modules": [PACKAGE]}
+    )
+
+    result = _engine(
+        site,
+        source,
+        config_path=str(source / ".ash" / ".ash.yaml"),
+        trusted_config_path=str(operator),
+    )
+
+    assert "SnykCodeScanner" in result["scanners"], result
+    assert "S3Reporter" in result["reporters"], result
+
+
+def test_the_command_line_naming_the_off_host_package_itself_selects_its_class(
+    tmp_path, site
+):
+    """Re-exported or not, the class is the operator's once the operator loads it."""
+    result = _engine(site, _tree(tmp_path, [PACKAGE]), cli=[SNYK])
+
+    assert "SnykCodeScanner" in result["scanners"], result
+    assert "S3Reporter" not in result["reporters"], result
+    assert _dropped(result["warnings"], "S3Reporter"), result["warnings"]
+
+
+def test_a_delivered_config_naming_the_package_does_not_select_them(tmp_path, site):
+    upload = _write(tmp_path / "upload" / "ash.yaml", {"ash_plugin_modules": [PACKAGE]})
+    source = tmp_path / "repo"
+    source.mkdir()
+
+    result = _engine(site, source, config_path=str(upload), untrusted_config=True)
+
+    assert "SnykCodeScanner" not in result["scanners"], result
+    assert "S3Reporter" not in result["reporters"], result
+
+
+def test_without_a_package_that_re_exports_nothing_is_dropped(tmp_path, site):
+    """Positive control: a tree config naming no plugin module drops no class."""
+    result = _engine(site, _tree(tmp_path, []))
+
+    assert "BanditScanner" in result["scanners"], result
+    assert not [w for w in result["warnings"] if "not selected" in w], result
+
+
+def test_a_class_outside_the_off_host_packages_is_kept(tmp_path):
+    """Only a class defined in an off-host package is checked."""
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.plugin_module_trust import (
+        drop_untrusted_off_host_plugins,
+    )
+
+    class LocalScanner:
+        pass
+
+    LocalScanner.__module__ = "other_ash_plugins.scanner"
+    config = AshConfig()
+    config._trusted_plugin_modules = ()
+
+    kept = drop_untrusted_off_host_plugins(config, {"scanner": [LocalScanner]}, [])
+
+    assert kept == {"scanner": [LocalScanner]}
+
+
+def test_nothing_is_dropped_for_a_config_with_no_untrusted_file():
+    """``resolve_config`` records the trusted list only when a file needs it."""
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.plugin_module_trust import (
+        drop_untrusted_off_host_plugins,
+    )
+
+    class ImportedScanner:
+        pass
+
+    ImportedScanner.__module__ = f"{SNYK}.snyk_code_scanner"
+    plugins = {"scanner": [ImportedScanner]}
+
+    assert drop_untrusted_off_host_plugins(AshConfig(), plugins, []) == plugins
+
+
+# ``ash report``: resolves --config, loads the config's plugin modules, and looks
+# up the reporter --format names.
+_REPORT = """
+import json, os, sys
+
+spec = json.loads(sys.argv[1])
+os.chdir(spec["cwd"])
+
+from typer.testing import CliRunner
+from automated_security_helper.cli.main import app
+
+result = CliRunner().invoke(app, spec["args"])
+print(json.dumps({"exit": result.exit_code, "output": result.output}))
+"""
+
+
+@pytest.mark.parametrize("where", ["tree", "operator"])
+def test_ash_report_runs_a_re_exported_reporter_only_from_the_operators_config(
+    tmp_path, site, where
+):
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    repo = tmp_path / "repo"
+    document = {"ash_plugin_modules": [PACKAGE]}
+    config = _write(
+        repo / ".ash" / ".ash.yaml"
+        if where == "tree"
+        else tmp_path / "operator" / "ash.yaml",
+        document,
+    )
+    output = repo / ".ash" / "ash_output"
+    output.mkdir(parents=True)
+    (output / "ash_aggregated_results.json").write_text(
+        AshAggregatedResults(ash_config=AshConfig()).model_dump_json(),
+        encoding="utf-8",
+    )
+    args = ["report", "--format", "s3", "--config", str(config)]
+    args += ["--output-dir", str(output)]
+    environment = {k: v for k, v in os.environ.items() if k not in _AMBIENT}
+    environment["PYTHONPATH"] = os.pathsep.join(
+        [str(site), *filter(None, [os.environ.get("PYTHONPATH")])]
+    )
+    spec = {"cwd": str(repo), "args": args}
+    run = subprocess.run(
+        [sys.executable, "-c", _REPORT, json.dumps(spec)],
+        cwd=site.parent,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert run.returncode == 0, run.stderr[-4000:]
+    result = json.loads(run.stdout.strip().splitlines()[-1])
+
+    not_found = "Reporter plugin 's3' not found" in result["output"]
+    assert not_found is (where == "tree"), result["output"]

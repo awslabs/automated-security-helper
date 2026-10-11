@@ -84,6 +84,11 @@ rest of this page assume is set:
 export ASH_PLUGIN_MODULES=automated_security_helper.plugin_modules.ash_snyk_plugins
 ```
 
+A repository's own config cannot load the package, or select the scanner through
+another installed package that lists or imports it: the scanner is selected only
+when `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`, `--config-overrides` or a config
+file outside the scanned tree loads this package or the package that lists it.
+
 A config file outside the scanned tree, passed with `--config`, can list it too:
 
 ```yaml
