@@ -601,7 +601,11 @@ class TestTheOperatorsBase:
 
         Compared against ``resolve_config`` for a scan whose ``.ash/.ash.yaml``
         holds the same document and whose operator config is the one passed to
-        ``ash merge``, so a rule added to the shared tables applies to both.
+        ``ash merge``, so a rule added to the shared tables applies to both. The
+        document stays inside what both treat alike: the merge is stricter about a
+        module the operator does not name and about a recorded ``enabled: false``,
+        and ``TestRecordedThirdPartyModules`` and ``TestEnablementIsTheOperators``
+        pin those.
         """
         operator_document = {
             "ash_plugin_modules": [AWS],
