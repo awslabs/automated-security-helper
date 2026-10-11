@@ -9,8 +9,10 @@ bandit, grype and syft each read a config file of their own, and that file can
 leave findings out: bandit's ``skips`` and ``exclude_dirs``, grype's ``ignore``
 and ``only-fixed``, syft's ``exclude``. opengrep's and semgrep's ``config``
 chooses the rules they run, from the registry, a URL the tool fetches, or a
-path it reads, and their ``metrics`` whether they send usage data. ASH used to find such a file by name in
-the source directory (``.bandit``, ``bandit.yaml``, ``.grype.yaml``,
+path it reads (opengrep's ``patterns`` replaces them all), and their
+``metrics`` whether they send usage data; ``metrics: off`` only narrows that, so
+any config may set it (``TIGHTENING_VALUES``). ASH used to find such a file by
+name in the source directory (``.bandit``, ``bandit.yaml``, ``.grype.yaml``,
 ``.syft.yaml`` and others), and took ``scanners.<name>.options.config_file``
 from whatever config the repository carried. So the repository being scanned
 chose what its own scan reported. A repository's tool configs are now ignored
@@ -81,14 +83,15 @@ if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
 
 #: Scanners whose own config is the operator's choice, and the options that set
-#: it: bandit's, grype's and syft's config file, and the rules opengrep and
-#: semgrep run (``config``: a registry entry, a URL or a path, fetched or read
-#: by the tool) and whether they send usage metrics (``metrics``).
+#: it: bandit's, grype's and syft's config file, the rules opengrep and semgrep
+#: run (``config``: a registry entry, a URL or a path, fetched or read by the
+#: tool; opengrep's ``patterns``, run in place of every rule config) and whether
+#: they send usage metrics (``metrics``).
 SCANNER_CONFIG_FILE_OPTIONS: Dict[str, Tuple[str, ...]] = {
     "bandit": ("config_file",),
     "grype": ("config_file",),
     "syft": ("config_file",),
-    "opengrep": ("config", "metrics"),
+    "opengrep": ("config", "metrics", "patterns"),
     "semgrep": ("config", "metrics"),
     # Files the tool reads that config/path_trust.py refuses inside the scanned
     # tree. A file outside it is the operator's to name, not the repository's.
@@ -96,6 +99,14 @@ SCANNER_CONFIG_FILE_OPTIONS: Dict[str, Tuple[str, ...]] = {
     "ferret-scan": ("config_file",),
     "detect-secrets": ("baseline_file",),
     "trivy-repo": ("ignore_file", "secret_config_file"),
+}
+
+#: Values of a confined option that only narrow what the tool does, so a
+#: repository's or a client's config may still set them: opengrep and semgrep
+#: with ``metrics: off`` send no usage data.
+TIGHTENING_VALUES: Dict[Tuple[str, str], Tuple[Any, ...]] = {
+    ("opengrep", "metrics"): ("off",),
+    ("semgrep", "metrics"): ("off",),
 }
 
 #: detect-secrets ``scan_settings`` lists whose entries may name a file the
@@ -121,6 +132,19 @@ def _confined_options() -> Dict[str, Dict[str, Any]]:
     for scanner, defaults in SCANNER_CONFIG_CHOICE_OPTIONS.items():
         confined.setdefault(scanner, {}).update(defaults)
     return confined
+
+
+def _trusted_option(options: Any, name: str) -> Any:
+    """``options[name]`` under either spelling of the key, as a plugin section holds it.
+
+    A plugin scanner's section is a plain dict, so an override written
+    ``ignore-file`` stays spelled that way after it is replayed.
+    """
+    from automated_security_helper.config.config_sources import _resolve_dict_key
+
+    if not isinstance(options, dict):
+        return _MISSING
+    return options.get(_resolve_dict_key(options, name), _MISSING)
 
 
 def _or_default(value: Any, default: Any) -> Any:
@@ -193,13 +217,11 @@ def confine_scanner_config_files(
             if options is None:
                 continue
             for name, default in option_defaults.items():
-                wanted = trusted_options.get(name, _MISSING)
+                wanted = _trusted_option(trusted_options, name)
                 current = _or_default(_get(options, name), default)
-                if current == _or_default(wanted, default) or (
-                    current is not None
-                    and wanted not in (_MISSING, None)
-                    and str(current) == str(wanted)
-                ):
+                if current in TIGHTENING_VALUES.get((scanner, name), ()):
+                    continue
+                if current == _or_default(wanted, default):
                     continue
                 if current != default:
                     ignored.append(f"scanners.{key}.options.{name}")

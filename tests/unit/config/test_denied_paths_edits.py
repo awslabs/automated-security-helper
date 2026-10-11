@@ -104,6 +104,9 @@ def test_replace_uses_the_list_as_written_and_names_what_it_drops(ash_log) -> No
 def test_effective_policy_is_idempotent() -> None:
     policy = _policy(denied_paths=["/project_name"])
     assert ccp.effective_policy(policy) is policy
+    # The merge itself: a list that already holds the defaults merges to itself.
+    again = _policy(denied_paths=list(policy.denied_paths))
+    assert again.denied_paths == policy.denied_paths
 
 
 def test_a_short_list_keeps_the_restrict_only_and_suppression_rules() -> None:
@@ -144,3 +147,157 @@ def test_an_entry_inside_a_field_decides_the_whole_field() -> None:
     exempt = ccp.exempt_paths(policy)
     assert "/sandbox" not in exempt and "/sandbox/**" not in exempt
     assert "/ash_plugin_modules" in exempt
+
+
+@pytest.mark.parametrize(
+    "entry,field",
+    [
+        ("/global-settings/suppressions", "/global_settings/suppressions"),
+        ("/global-settings", "/global_settings/suppressions"),
+        ("/global_settings/ignore-paths", "/global_settings/ignore_paths"),
+        ("/global_settings/*/**", "/global_settings/ignore_paths"),
+        ("/*/**", "/global_settings/suppressions"),
+        ("/*/mode", "/sandbox"),
+        ("/**/mode", "/sandbox"),
+        ("/ash-plugin-modules", "/ash_plugin_modules"),
+    ],
+)
+def test_an_entry_names_a_field_in_every_spelling_the_matcher_reads(
+    entry: str, field: str
+) -> None:
+    """``-`` for ``_`` and glob segments, as ``runtime_patch`` matches them."""
+    exempt = ccp.exempt_paths(_policy(denied_paths=[entry]))
+    assert field not in exempt and f"{field}/**" not in exempt
+
+
+def test_a_lookalike_entry_does_not_name_a_field() -> None:
+    exempt = ccp.exempt_paths(
+        _policy(denied_paths=["/global_settings/suppressions_extra"])
+    )
+    assert "/global_settings/suppressions" in exempt
+
+
+def _denials(document: dict, rules: ccp.ClientConfigRules, tmp_path) -> List[str]:
+    found = ccp.client_file_denials(
+        {tmp_path / "delivered.yaml": document},
+        rules,
+        scanned_root=tmp_path,
+        all_delivered=True,
+    )
+    return [denial.key for _, denials in found for denial in denials]
+
+
+@pytest.mark.parametrize(
+    "sandbox,field",
+    [
+        ({"network_scanners": ["bandit", "checkov"]}, "sandbox.network_scanners"),
+        ({"extra_read_paths": ["/etc"]}, "sandbox.extra_read_paths"),
+        ({"mode": "off"}, "sandbox.mode"),
+    ],
+)
+def test_replace_mode_with_one_sandbox_entry_still_refuses_widening(
+    tmp_path, sandbox: dict, field: str
+) -> None:
+    """The operator's list covers only ``mode``; the restrict-only check covers the rest."""
+    base = AshConfig.model_validate(
+        {
+            "sandbox": {"mode": "auto", "network_scanners": ["bandit"]},
+            "global_settings": {
+                "mcp": {
+                    "runtime_overrides": {
+                        "denied_paths": ["/fail_on_findings", "/sandbox/mode"],
+                        "replace_default_denied_paths": True,
+                    }
+                }
+            },
+        }
+    )
+    assert field in _denials({"sandbox": sandbox}, ccp.rules_from(base), tmp_path)
+
+
+def test_narrowing_the_network_scanners_to_one_that_has_a_network_is_accepted(
+    tmp_path,
+) -> None:
+    """With ``network_scanners`` unset, semgrep's own declared need gives it one."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
+        SemgrepScanner,
+    )
+
+    assert SemgrepScanner.sandbox_requirements.network
+    rules = ccp.rules_from(AshConfig())
+    assert rules.base.sandbox.network_scanners is None
+    assert (
+        _denials({"sandbox": {"network_scanners": ["semgrep"]}}, rules, tmp_path) == []
+    )
+    assert _denials(
+        {"sandbox": {"network_scanners": ["semgrep", "no-such-scanner"]}},
+        rules,
+        tmp_path,
+    ) == ["sandbox.network_scanners"]
+
+
+@pytest.mark.parametrize("scanner", ["opengrep", "semgrep"])
+def test_a_delivered_metrics_off_is_accepted_and_on_is_refused(
+    tmp_path, scanner: str
+) -> None:
+    """``off`` only stops the tool sending usage data."""
+    rules = ccp.rules_from(AshConfig())
+
+    def setting(value: str) -> dict:
+        return {"scanners": {scanner: {"options": {"metrics": value}}}}
+
+    assert _denials(setting("off"), rules, tmp_path) == []
+    assert _denials(setting("on"), rules, tmp_path) == [
+        f"scanners.{scanner}.options.metrics"
+    ]
+
+
+@pytest.mark.parametrize(
+    "op,field",
+    [
+        (
+            {"op": "add", "path": "/sandbox/extra_read_paths", "value": ["/etc"]},
+            "sandbox.extra_read_paths",
+        ),
+        (
+            {"op": "add", "path": "/sandbox/network-scanners", "value": ["checkov"]},
+            "sandbox.network_scanners",
+        ),
+        (
+            {"op": "add", "path": "/ash_plugin_modules/-", "value": "no_such_mod_9q"},
+            "ash_plugin_modules",
+        ),
+    ],
+)
+def test_a_patch_op_asking_for_more_is_refused(tmp_path, op: dict, field: str) -> None:
+    """The restrict-only check reads the document with its own ``patch`` applied."""
+    base = AshConfig.model_validate(
+        {"sandbox": {"mode": "auto", "network_scanners": ["bandit"]}}
+    )
+    assert field in _denials({"patch": [op]}, ccp.rules_from(base), tmp_path)
+
+
+def test_a_patch_op_that_narrows_is_accepted(tmp_path) -> None:
+    base = AshConfig.model_validate(
+        {"sandbox": {"mode": "auto", "network_scanners": ["bandit"]}}
+    )
+    narrowing = {
+        "patch": [{"op": "replace", "path": "/sandbox/network_scanners", "value": []}]
+    }
+    assert _denials(narrowing, ccp.rules_from(base), tmp_path) == []
+
+
+def test_a_written_out_default_list_missing_an_entry_names_it(ash_log) -> None:
+    """Removing a default entry does not lift it, and the warning says so."""
+    current = list(RuntimeOverridesConfig().denied_paths)
+    policy = _policy(denied_paths=[e for e in current if e != "/fail_on_findings"])
+
+    assert "/fail_on_findings" in policy.denied_paths
+    (warning,) = [r.getMessage() for r in ash_log if "leaves out" in r.getMessage()]
+    assert "/fail_on_findings" in warning
+    assert "replace_default_denied_paths" in warning
+
+
+def test_a_list_of_extra_entries_only_is_not_warned_about(ash_log) -> None:
+    _policy(denied_paths=["/project_name"])
+    assert not [r for r in ash_log if "leaves out" in r.getMessage()]

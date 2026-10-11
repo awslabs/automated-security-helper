@@ -267,15 +267,17 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
 
 
 #: Defaults of the denied options of scanners that come from a plugin package
-#: (ferret-scan, trivy-repo). The trusted config carries a built-in scanner's
-#: defaults, so a delivered value equal to one is accepted as no change; it need
-#: not carry a plugin's section at all, so without this a delivered file that
-#: wrote such a default would be refused. Used only where the trusted config has
-#: no value of its own. ``test_the_plugin_option_defaults_are_the_plugins``
-#: checks each against the plugin's own model.
+#: (ferret-scan, snyk-code, trivy-repo). The trusted config carries a built-in
+#: scanner's defaults, so a delivered value equal to one is accepted as no
+#: change; it need not carry a plugin's section at all, so without this a
+#: delivered file that wrote such a default would be refused. Used only where
+#: the trusted config has no value of its own.
+#: ``test_the_plugin_option_defaults_are_the_plugins`` derives the list from the
+#: default ``denied_paths`` and checks each value against the plugin's model.
 PLUGIN_OPTION_DEFAULTS: Mapping[Tuple[str, str], Any] = {
     ("ferret-scan", "checks"): "all",
     ("ferret-scan", "confidence_levels"): "all",
+    ("ferret-scan", "config_file"): None,
     ("ferret-scan", "disable_ip_types"): None,
     ("ferret-scan", "enable_preprocessors"): True,
     ("ferret-scan", "finding_limit"): 0,
@@ -283,11 +285,14 @@ PLUGIN_OPTION_DEFAULTS: Mapping[Tuple[str, str], Any] = {
     ("ferret-scan", "profile"): None,
     ("ferret-scan", "recursive"): True,
     ("ferret-scan", "respect_gitignore"): False,
+    ("ferret-scan", "tool_version"): None,
     ("ferret-scan", "use_default_config"): True,
     ("ferret-scan", "validator_budget"): None,
+    ("snyk-code", "honor_tree_exclusions"): False,
     ("trivy-repo", "license_full"): True,
     ("trivy-repo", "offline"): False,
     ("trivy-repo", "scanners"): ["vuln", "secret", "misconfig", "license"],
+    ("trivy-repo", "secret_config_file"): None,
 }
 
 
@@ -318,7 +323,8 @@ def policy_of(config: AshConfig) -> RuntimeOverridesConfig:
     return effective_policy(mcp.runtime_overrides)
 
 
-_WARNED_REPLACEMENTS: Set[FrozenSet[str]] = set()
+#: The lists already warned about, each with whether it replaced the defaults.
+_WARNED_REPLACEMENTS: Set[Tuple[bool, FrozenSet[str]]] = set()
 
 
 def effective_policy(policy: RuntimeOverridesConfig) -> RuntimeOverridesConfig:
@@ -329,7 +335,10 @@ def effective_policy(policy: RuntimeOverridesConfig) -> RuntimeOverridesConfig:
       that release's list; a stale copy would otherwise let through what the
       defaults have since denied.
     * Any other list is added to the current defaults, so an operator who lists
-      one more entry does not lift the rest.
+      one more entry does not lift the rest. A list that holds some default
+      entries and leaves others out reads as an edited copy of the defaults, so
+      the ones it leaves out, which still apply, are named in a warning, once
+      per list.
     * With ``replace_default_denied_paths``, the list is used as written, and
       each default entry it leaves out is named in a warning, once per list.
 
@@ -348,14 +357,27 @@ def effective_policy(policy: RuntimeOverridesConfig) -> RuntimeOverridesConfig:
     elif policy.replace_default_denied_paths:
         effective = list(listed)
         removed = [entry for entry in current if entry not in set(effective)]
-        if removed and frozenset(effective) not in _WARNED_REPLACEMENTS:
-            _WARNED_REPLACEMENTS.add(frozenset(effective))
+        if removed and (True, frozenset(effective)) not in _WARNED_REPLACEMENTS:
+            _WARNED_REPLACEMENTS.add((True, frozenset(effective)))
             ASH_LOGGER.warning(
                 "runtime_overrides.replace_default_denied_paths is true, so these "
                 f"default denied_paths entries do not apply: {', '.join(removed)}"
             )
     else:
         effective = current + [entry for entry in listed if entry not in set(current)]
+        left_out = [entry for entry in current if entry not in set(listed)]
+        if (
+            left_out
+            and set(listed) & set(current)
+            and (False, frozenset(listed)) not in _WARNED_REPLACEMENTS
+        ):
+            _WARNED_REPLACEMENTS.add((False, frozenset(listed)))
+            ASH_LOGGER.warning(
+                "runtime_overrides.denied_paths leaves out these default entries, "
+                "which still apply because the list adds to the defaults: "
+                f"{', '.join(left_out)}. To use the list as written, set "
+                "runtime_overrides.replace_default_denied_paths: true."
+            )
     resolved = policy.model_copy(update={"denied_paths": effective})
     resolved._listed_denied_paths = listed
     resolved._effective = True
@@ -409,13 +431,17 @@ def policy_is_default(policy: RuntimeOverridesConfig) -> bool:
 
 
 def _names(entry: str, pointer: str) -> bool:
-    """Whether ``denied_paths`` entry ``entry`` covers ``pointer`` or a key inside it."""
-    from fnmatch import fnmatchcase
+    """Whether ``denied_paths`` entry ``entry`` reaches ``pointer``: at, above or inside it.
 
-    if entry.endswith("/**"):
-        prefix = entry[: -len("/**")]
-        return pointer == prefix or pointer.startswith(prefix + "/") or not prefix
-    return fnmatchcase(pointer, entry) or pointer.startswith(entry.rstrip("/") + "/")
+    The runtime-override matcher's own test (``runtime_patch._denied_path_reason``),
+    so every spelling it reads (``-`` or ``_``, globs) names the field here too.
+    """
+    from automated_security_helper.config.runtime_patch import (
+        _denied_path_reason,
+        known_plugin_keys,
+    )
+
+    return _denied_path_reason(entry, pointer, known_plugin_keys(None)) is not None
 
 
 def exempt_paths(policy: RuntimeOverridesConfig) -> Tuple[str, ...]:
@@ -440,10 +466,7 @@ def exempt_paths(policy: RuntimeOverridesConfig) -> Tuple[str, ...]:
     return tuple(
         candidate
         for candidate in candidates
-        if not any(
-            _names(entry, candidate.removesuffix("/**")) or _names(candidate, entry)
-            for entry in listed
-        )
+        if not any(_names(entry, candidate.removesuffix("/**")) for entry in listed)
     )
 
 
@@ -496,19 +519,70 @@ def client_file_denials(
                 inert=INERT_PATHS,
             )
             if not _writes_plugin_default(document, denial, rules.base)
+            and not _writes_a_tightening(document, denial)
         ]
+        # Always: the restrict-only check only adds refusals, and an operator's
+        # own list may deny one sandbox key (replace_default_denied_paths) and
+        # leave the others to this check.
         denials.extend(
-            _widenings(
-                document,
-                rules.base,
-                root,
-                sandbox="/sandbox" in exempt,
-                modules="/ash_plugin_modules" in exempt,
-            )
+            _widenings(_with_own_patch(document, rules.base), rules.base, root)
         )
         if denials:
             found.append((path, denials))
     return found
+
+
+def _with_own_patch(document: Any, base: AshConfig) -> Any:
+    """``document`` with its own ``patch`` ops applied, over the trusted ``base``.
+
+    So the restrict-only check sees a sandbox setting or plugin module a ``patch``
+    op asks for, as well as one written out. Applied over ``base`` because an op
+    may write into a list or section the document itself does not hold, and
+    ``base``'s own values ask for nothing beyond it. A patch that does not apply
+    there is left to resolution, which applies it over the real chain, and to the
+    confinement that drops whatever it widens.
+    """
+    from automated_security_helper.config.config_sources import (
+        EXTENDS_KEY,
+        PATCH_KEY,
+        _apply_patch,
+        deep_merge,
+    )
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
+
+    if not isinstance(document, dict) or not document.get(PATCH_KEY):
+        return document
+    own = {k: v for k, v in document.items() if k not in (PATCH_KEY, EXTENDS_KEY)}
+    start = deep_merge(base.model_dump(mode="json", by_alias=True), own)
+    try:
+        return _apply_patch(start, document[PATCH_KEY], Path("delivered config"))
+    except ASHConfigSourceError:
+        return document
+
+
+def _writes_a_tightening(document: Any, denial: Any) -> bool:
+    """Whether ``denial`` is a confined option ``document`` sets to a value that only narrows.
+
+    ``tool_config_trust.TIGHTENING_VALUES``: opengrep's and semgrep's
+    ``metrics: off``.
+    """
+    from automated_security_helper.config.ash_config import plugin_key_lookup_names
+    from automated_security_helper.config.ash_config import reduced_plugin_name
+    from automated_security_helper.config.runtime_patch import _path_segments, _walk
+    from automated_security_helper.config.tool_config_trust import TIGHTENING_VALUES
+
+    if denial.from_patch:
+        return False
+    segments = _path_segments(denial.pointer)
+    if len(segments) != 4 or segments[0] != "scanners" or segments[2] != "options":
+        return False
+    option = segments[3].replace("-", "_")
+    names = plugin_key_lookup_names(segments[1])
+    for (scanner, name), values in TIGHTENING_VALUES.items():
+        if name == option and reduced_plugin_name(scanner) in names:
+            present, value = _walk(document, segments)
+            return present and value in values
+    return False
 
 
 def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
@@ -562,11 +636,11 @@ def _scanner_gets_network(name: str, trusted: Any) -> bool:
         if declared_plugin_name(cls) != name:
             continue
         requirements = getattr(cls, "sandbox_requirements", None)
-        return bool(
-            requirements is not None
-            and requirements.network
-            and not requirements.network_requires_grant
-        )
+        if requirements is None:
+            # A generic parametrization (GrepScannerBase[SemgrepScannerConfig])
+            # carries the name but not the requirements; its subclass does.
+            continue
+        return bool(requirements.network and not requirements.network_requires_grant)
     return False
 
 

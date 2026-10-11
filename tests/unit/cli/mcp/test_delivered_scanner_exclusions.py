@@ -1131,21 +1131,75 @@ def test_every_reviewed_option_is_a_real_one() -> None:
     assert stale == []
 
 
+def _denied_plugin_option_defaults() -> Dict[tuple, Any]:
+    """Each option of a plugin scanner that a default ``denied_paths`` entry covers.
+
+    Mapped to the option's default from the plugin's own model. These scanners
+    have no section in the trusted base, so nothing else says what their
+    default is. Read with the runtime-override matcher, so a glob entry such as
+    ``/scanners/*/options/tool_version`` counts.
+    """
+    from automated_security_helper.config.ash_config import RuntimeOverridesConfig
+    from automated_security_helper.config.runtime_patch import (
+        _denied_path_reason,
+        known_plugin_keys,
+    )
+    from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+        FerretScannerConfigOptions,
+    )
+    from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
+        SnykCodeScannerConfigOptions,
+    )
+    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+        TrivyRepoScannerConfigOptions,
+    )
+
+    denied = RuntimeOverridesConfig().denied_paths
+    keys = known_plugin_keys(None)
+    found: Dict[tuple, Any] = {}
+    for scanner, model in (
+        ("ferret-scan", FerretScannerConfigOptions()),
+        ("snyk-code", SnykCodeScannerConfigOptions()),
+        ("trivy-repo", TrivyRepoScannerConfigOptions()),
+    ):
+        for option in type(model).model_fields:
+            pointer = f"/scanners/{scanner}/options/{option}"
+            if any(_denied_path_reason(e, pointer, keys) for e in denied):
+                value = getattr(model, option)
+                found[(scanner, option)] = (
+                    value.model_dump(mode="json")
+                    if hasattr(value, "model_dump")
+                    else value
+                )
+    return found
+
+
 def test_the_plugin_option_defaults_are_the_plugins() -> None:
-    """``PLUGIN_OPTION_DEFAULTS`` holds each denied plugin option's real default."""
+    """``PLUGIN_OPTION_DEFAULTS`` holds every denied plugin option's real default."""
     from automated_security_helper.config.client_config_policy import (
         PLUGIN_OPTION_DEFAULTS,
     )
 
-    defaults = _option_defaults()
-    plugins = {
-        (scanner, option)
-        for scanner, option, _ in NON_PATH_EXCLUSIONS
-        if scanner in ("ferret-scan", "trivy-repo")
-    }
-    assert set(PLUGIN_OPTION_DEFAULTS) == plugins
-    for key, value in PLUGIN_OPTION_DEFAULTS.items():
-        assert value == defaults[key], key
+    expected = _denied_plugin_option_defaults()
+    assert ("ferret-scan", "tool_version") in expected, "the glob entry is read"
+    assert dict(PLUGIN_OPTION_DEFAULTS) == expected
+
+
+@pytest.mark.parametrize(
+    ("scanner", "option"),
+    sorted(_denied_plugin_option_defaults()),
+    ids=[f"{s}.{o}" for s, o in sorted(_denied_plugin_option_defaults())],
+)
+def test_a_delivered_plugin_option_at_its_default_scans(
+    scanner: str, option: str
+) -> None:
+    from automated_security_helper.config.ash_config import AshConfig
+
+    default = _denied_plugin_option_defaults()[(scanner, option)]
+    document = {"scanners": {scanner: {"options": {option: default}}}}
+    source = _upload({".ash/.ash.yaml": yaml.safe_dump(document)})
+    outcome = _scan_resolution(source)
+    assert isinstance(outcome, AshConfig), outcome
 
 
 def test_the_table_defaults_are_the_scanners_defaults() -> None:

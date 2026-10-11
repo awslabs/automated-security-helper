@@ -422,3 +422,116 @@ def test_an_operator_config_outside_the_tree_loads_its_plugin_file(
     )
     config = resolve_config(config_path=operator, source_dir=repo)
     assert _settings_paths(config) == [f"file://{outside}"]
+
+
+def test_a_repositorys_config_does_not_choose_opengreps_patterns(
+    tmp_path: Path,
+) -> None:
+    """Patterns mode runs the patterns in place of every rule config."""
+    repo = _repo(tmp_path, {"opengrep": {"options": {"patterns": ["X_9q"]}}})
+    assert _option(resolve_config(source_dir=repo), "opengrep", "patterns") == []
+    chosen = resolve_config(
+        source_dir=repo,
+        config_overrides=['scanners.opengrep.options.patterns=["Y_9q"]'],
+    )
+    assert _option(chosen, "opengrep", "patterns") == ["Y_9q"]
+
+
+def test_patterns_mode_keeps_the_semgrepignore_flag_and_the_exclusions(
+    tmp_path: Path,
+) -> None:
+    from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
+        SEMGREP_DEFAULT_IGNORES,
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+        OpengrepScanner,
+        OpengrepScannerConfig,
+    )
+
+    context = _context(tmp_path)
+    scanner = OpengrepScanner(
+        context=context,
+        config=OpengrepScannerConfig.model_validate(
+            {"options": {"patterns": ["X_9q"], "exclude": ["operator-dir"]}}
+        ),
+    )
+    argv = [
+        str(a)
+        for a in scanner._resolve_arguments(
+            target=Path(context.source_dir), results_file=tmp_path / "r.json"
+        )
+    ]
+    assert "--x-ignore-semgrepignore-files" in argv
+    assert set(SEMGREP_DEFAULT_IGNORES) | {"operator-dir"} <= set(
+        _values_after(argv, "--exclude")
+    )
+    assert _values_after(argv, "--pattern") == ["X_9q"]
+    assert "--json" in argv
+    for flag in ("--config", "--sarif", "--metrics"):
+        assert flag not in argv, argv
+
+
+@pytest.mark.parametrize("scanner", ["opengrep", "semgrep"])
+def test_a_repositorys_metrics_off_is_kept(tmp_path: Path, scanner: str) -> None:
+    """``off`` only stops the tool sending usage data, so any config may set it."""
+    repo = _repo(tmp_path, {scanner: {"options": {"metrics": "off"}}})
+    assert _option(resolve_config(source_dir=repo), scanner, "metrics") == "off"
+
+
+@pytest.mark.parametrize(
+    ("scanner", "option"),
+    [
+        ("trivy-repo", "ignore_file"),
+        ("trivy-repo", "secret_config_file"),
+        ("ferret-scan", "config_file"),
+    ],
+)
+def test_a_dash_spelled_override_names_a_plugins_tool_file(
+    tmp_path: Path, scanner: str, option: str
+) -> None:
+    outside = _outside(tmp_path)
+    repo = _repo(tmp_path, {scanner: {"options": {option: "in-tree-name"}}})
+    config = resolve_config(
+        source_dir=repo,
+        config_overrides=[
+            f"scanners.{scanner}.options.{option.replace('_', '-')}={outside}"
+        ],
+    )
+    options = config.get_plugin_config("scanner", scanner)["options"]
+    assert outside in {
+        str(options.get(option)),
+        str(options.get(option.replace("_", "-"))),
+    }
+
+
+def test_an_in_tree_config_repeating_the_operators_tool_config_is_no_change(
+    tmp_path: Path,
+) -> None:
+    """The same value as the trusted base's is kept, with no warning."""
+    import logging
+
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        yaml.safe_dump(
+            {"scanners": {"bandit": {"options": {"config_file": "/etc/bandit.ini"}}}}
+        ),
+        encoding="utf-8",
+    )
+    repo = _repo(tmp_path, {"bandit": {"options": {"config_file": "/etc/bandit.ini"}}})
+    records: List[logging.LogRecord] = []
+
+    class _Keep(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Keep(level=logging.WARNING)
+    ASH_LOGGER.addHandler(handler)
+    try:
+        config = resolve_config(source_dir=repo, trusted_config_path=operator)
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+    assert _config_file(config, "bandit") == "/etc/bandit.ini"
+    assert not [r for r in records if "Ignoring" in r.getMessage()], records
