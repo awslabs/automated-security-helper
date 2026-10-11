@@ -20,7 +20,8 @@ ASH passes zizmor two kinds of file, taken from its scan set so `.gitignore`,
 `.ignore` and `global_settings.ignore_paths` apply:
 
 - workflows: `*.yml` and `*.yaml` directly inside a `.github/workflows` directory
-  (the only place GitHub runs a workflow from; subdirectories are not scanned);
+  (the only place GitHub runs a workflow from; subdirectories are not scanned),
+  including when the source directory is itself `.github` or `.github/workflows`;
 - composite actions: every `action.yml` and `action.yaml`.
 
 Files under directories named `node_modules`, `.venv` or `venv` are skipped, and so is a

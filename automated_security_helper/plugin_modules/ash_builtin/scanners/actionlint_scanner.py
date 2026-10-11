@@ -23,14 +23,18 @@ Decisions, and why
    for the nearest ``.github/workflows`` from its working directory and ignores ASH's
    ignore rules. ASH instead takes every ``*.yml``/``*.yaml`` file whose parent
    directory is ``.github/workflows`` from the scan set, which applies ``.gitignore``
-   and ``.ignore`` files, then drops ``global_settings.ignore_paths`` matches and
-   anything under ASH's own output directory. A workflow that is a symlink resolving
-   outside the scan root is skipped with a warning, because actionlint follows it and
-   copies its lines into the report, and so is one that resolves to no file (a
-   missing target, or a loop), on which actionlint exits 3 and lints nothing.
+   and ``.ignore`` files, then drops ``global_settings.ignore_paths`` matches,
+   anything under ASH's own output directory, and anything under a
+   ``KNOWN_IGNORE_PATHS`` directory (``node_modules``, ``.venv``, ``venv``), so it
+   lints the workflows zizmor audits. The scan root's own name counts, so a source
+   directory that is ``.github`` or ``.github/workflows`` has its workflows linted.
+   A workflow that is a symlink resolving outside the scan root is skipped with a
+   warning, because actionlint follows it and copies its lines into the report, and
+   so is one that resolves to no file (a missing target, or a loop), on which
+   actionlint exits 3 and lints nothing.
    ``--`` ends the flags, so a path that begins with ``-`` is read as a file. A
-   scan root with no workflow files does not
-   run actionlint at all and reports SKIPPED ("evaluated nothing"), not PASSED.
+   scan root with no workflow files does not run actionlint at all and reports
+   SKIPPED ("evaluated nothing"), not PASSED.
 
 2. shellcheck and pyflakes are OFF by default. actionlint runs ``shellcheck`` on
    every ``run:`` script and ``pyflakes`` on ``shell: python`` steps when it finds
@@ -132,7 +136,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
 import yaml
@@ -143,6 +147,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
+from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -227,6 +232,10 @@ _DEFAULT_CONFIG_CANDIDATES = (".github/actionlint.yaml", ".github/actionlint.yml
 
 _WORKFLOW_SUFFIXES = (".yml", ".yaml")
 
+#: Directory names whose workflows are not linted: vendored dependencies and
+#: virtualenvs, which the repository does not own. zizmor skips the same ones.
+_KNOWN_IGNORED_DIRS = frozenset(item.strip("/") for item in KNOWN_IGNORE_PATHS)
+
 
 def severity_for(kind: str, message: str) -> str:
     """The ASH severity for one actionlint finding."""
@@ -239,14 +248,20 @@ def severity_for(kind: str, message: str) -> str:
     return KIND_SEVERITY.get(kind, UNKNOWN_KIND_SEVERITY)
 
 
-def is_workflow_file(relative_path: str) -> bool:
+def is_workflow_file(relative_path: str, scan_root: Optional[Path] = None) -> bool:
     """Whether *relative_path* is a workflow file GitHub would load.
 
     GitHub reads ``*.yml``/``*.yaml`` directly inside ``.github/workflows`` and not
     in its subdirectories. Applied at any depth, so a nested project's workflows are
     linted too.
+
+    ``scan_root`` is the directory *relative_path* is relative to. Its own name and
+    its parent's count, so a scan root that is itself a ``.github`` or
+    ``.github/workflows`` directory has its workflows recognized.
     """
-    parts = Path(relative_path.replace("\\", "/")).parts
+    parts: Tuple[str, ...] = Path(relative_path.replace("\\", "/")).parts
+    if scan_root is not None:
+        parts = (scan_root.parent.name, scan_root.name, *parts)
     return (
         len(parts) >= 3
         and parts[-3] == ".github"
@@ -644,7 +659,10 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             if target_type != "converted" and path.is_relative_to(output_abs):
                 continue
             rel = path.relative_to(target_abs).as_posix()
-            if not is_workflow_file(rel):
+            if not is_workflow_file(rel, scan_root=target_abs):
+                continue
+            # Vendored dependencies and virtualenvs, which zizmor skips too.
+            if _KNOWN_IGNORED_DIRS.intersection(PurePosixPath(rel).parts[:-1]):
                 continue
             # A link whose target is missing, or that loops, is a file actionlint
             # cannot open: it exits 3 and no workflow in the run is linted. Checked

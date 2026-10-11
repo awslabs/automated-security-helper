@@ -18,7 +18,7 @@ The pinned version and digests are in `automated_security_helper/utils/tool_down
 
 ## What is scanned
 
-ASH passes actionlint every `*.yml` / `*.yaml` file whose parent directory is `.github/workflows`, at any depth, taken from the scan set. Files excluded by `.gitignore`, `.ignore` or `global_settings.ignore_paths`, and anything under ASH's output directory, are not passed. A workflow that is a symlink pointing outside the scan root, or a broken symlink (its target is missing, or links loop), is skipped with a warning; actionlint would fail the whole run on a file it cannot open. Other YAML is never linted.
+ASH passes actionlint every `*.yml` / `*.yaml` file whose parent directory is `.github/workflows`, at any depth, taken from the scan set. That includes a source directory that is itself `.github` (its `workflows/*.yml`) or `.github/workflows`. Files excluded by `.gitignore`, `.ignore` or `global_settings.ignore_paths`, anything under ASH's output directory, and files under directories named `node_modules`, `.venv` or `venv` are not passed; zizmor skips the same workflows. A workflow that is a symlink pointing outside the scan root, or a broken symlink (its target is missing, or links loop), is skipped with a warning; actionlint would fail the whole run on a file it cannot open. Other YAML is never linted.
 
 If the scan root has no workflow files, actionlint does not run and the scanner reports `SKIPPED` (it evaluated nothing). A scan that selects only actionlint (`--scanners actionlint`) on such a tree therefore exits 1 with "Scan ran no scanners".
 

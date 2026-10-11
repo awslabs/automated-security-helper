@@ -297,6 +297,38 @@ def test_collects_workflows_and_actions_and_nothing_else(repo):
     assert _relative(inputs, repo) == EXPECTED_INPUTS
 
 
+@pytest.mark.parametrize(
+    ("source_dir", "expected"),
+    [
+        (".github", ["workflows/clean.yml", "workflows/vulnerable.yml"]),
+        (".github/workflows", ["clean.yml", "vulnerable.yml"]),
+    ],
+)
+def test_a_source_dir_that_is_a_github_or_workflows_dir_is_audited(
+    repo, source_dir, expected
+):
+    """Its files sit directly inside a ``.github/workflows`` directory."""
+    source = repo / source_dir
+    inputs = _scanner(source)._collect_inputs(source, "source", [])
+    assert _relative(inputs, source) == expected
+
+
+@pytest.mark.parametrize(
+    ("relative", "scan_root", "expected"),
+    [
+        ("workflows/ci.yml", "/r/.github", True),
+        ("ci.yml", "/r/.github/workflows", True),
+        ("sub/ci.yml", "/r/.github/workflows", False),
+        ("ci.yml", "/r/.github", False),
+        ("workflows/ci.yml", None, False),
+        ("action.yml", "/r/anything", True),
+    ],
+)
+def test_is_zizmor_input_counts_the_scan_roots_own_name(relative, scan_root, expected):
+    root = None if scan_root is None else Path(scan_root)
+    assert is_zizmor_input(PurePosixPath(relative), scan_root=root) is expected
+
+
 def test_global_ignore_paths_remove_inputs(repo):
     scanner = _scanner(repo)
     inputs = scanner._collect_inputs(

@@ -1143,3 +1143,158 @@ def test_the_scanned_tree_cannot_name_an_absolute_program_outside_it(
 
     assert "-shellcheck=" in argv
     assert tool.as_posix() not in " ".join(argv)
+
+
+# --------------------------------------------------------------------------- #
+# Which files: the workflows zizmor audits, no more and no fewer
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "vendored", ["node_modules/pkg", "web/node_modules/pkg", ".venv/lib", "venv"]
+)
+def test_workflows_under_vendored_directories_are_not_passed(
+    repo, monkeypatch, on_path, vendored
+):
+    """KNOWN_IGNORE_PATHS, as zizmor applies it: the repository does not own these."""
+    nested = repo / vendored / ".github" / "workflows"
+    nested.mkdir(parents=True)
+    shutil.copy(repo / ".github" / "workflows" / "vulnerable.yml", nested / "v.yml")
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    assert argv[argv.index("--") + 1 :] == [
+        ".github/workflows/clean.yml",
+        ".github/workflows/vulnerable.yml",
+    ]
+
+
+@pytest.mark.parametrize("source_dir", [".github", ".github/workflows"])
+def test_a_source_dir_that_is_a_github_or_workflows_dir_is_linted(
+    repo, monkeypatch, on_path, source_dir
+):
+    """``<source>/workflows/ci.yml`` with the source dir ``.github`` is a file whose
+    parent directory is ``.github/workflows``, which is what the scanner lints."""
+    source = repo / source_dir
+    scanner = _scanner(source, output=repo.parent / "ash_output")
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    scanner.scan(target=source, target_type="source")
+
+    ((argv, kwargs),) = fake.calls
+    prefix = "workflows/" if source_dir == ".github" else ""
+    assert argv[argv.index("--") + 1 :] == [
+        f"{prefix}clean.yml",
+        f"{prefix}vulnerable.yml",
+    ]
+    assert kwargs["cwd"] == source
+
+
+@pytest.mark.parametrize(
+    ("relative", "scan_root", "expected"),
+    [
+        ("workflows/ci.yml", "/r/.github", True),
+        ("ci.yml", "/r/.github/workflows", True),
+        ("sub/ci.yml", "/r/.github/workflows", False),
+        ("workflows/ci.yml", "/r/github", False),
+        ("ci.yml", "/r/.github", False),
+        ("workflows/ci.yml", None, False),
+        (".github/workflows/ci.yml", "/r/anything", True),
+    ],
+)
+def test_is_workflow_file_counts_the_scan_roots_own_name(relative, scan_root, expected):
+    root = None if scan_root is None else Path(scan_root)
+    assert is_workflow_file(relative, scan_root=root) is expected
+
+
+_PARITY_LAYOUT = [
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.YAML",
+    ".github/workflows/sub/nested.yml",
+    "svc/.github/workflows/deploy.yaml",
+    "node_modules/pkg/.github/workflows/v.yml",
+    "web/node_modules/pkg/.github/workflows/v.yml",
+    ".venv/lib/.github/workflows/v.yml",
+    "venv/.github/workflows/v.yml",
+    "ignored/.github/workflows/v.yml",
+    "config/not-a-workflow.yml",
+    "actions/greet/action.yml",
+]
+
+
+@pytest.mark.parametrize(
+    ("target_name", "expected"),
+    [
+        (
+            "source",
+            [
+                ".github/workflows/ci.yml",
+                ".github/workflows/release.YAML",
+                "svc/.github/workflows/deploy.yaml",
+            ],
+        ),
+        ("source/.github", ["workflows/ci.yml", "workflows/release.YAML"]),
+        ("source/.github/workflows", ["ci.yml", "release.YAML"]),
+        (
+            "converted",
+            [
+                "archive.zip/.github/workflows/ci.yml",
+                "archive.zip/.github/workflows/release.YAML",
+                "archive.zip/ignored/.github/workflows/v.yml",
+                "archive.zip/svc/.github/workflows/deploy.yaml",
+            ],
+        ),
+    ],
+)
+def test_actionlint_lints_exactly_the_workflows_zizmor_audits(
+    tmp_path, monkeypatch, on_path, target_name, expected
+):
+    """Both scanners select workflows from the same tree the same way.
+
+    zizmor also audits composite actions, which actionlint does not lint, so its
+    ``action.yml`` inputs are left out of the comparison. ``ignored/`` is in the
+    source's ``.gitignore``, which the converted files (not from the scan set) do
+    not read.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
+        ZizmorScanner,
+        ZizmorScannerConfig,
+    )
+
+    monkeypatch.setattr(
+        ZizmorScanner, "_get_uv_tool_version", lambda self, *_: "1.30.1"
+    )
+    repo_root = tmp_path / "source"
+    output = tmp_path / "ash_output"
+    work_dir = output / "converted"
+    for base in (repo_root, work_dir / "archive.zip"):
+        for relative in _PARITY_LAYOUT:
+            (base / relative).parent.mkdir(parents=True, exist_ok=True)
+            (base / relative).write_text("on: push\n")
+    (repo_root / ".gitignore").write_text("ignored/\n")
+    if target_name == "converted":
+        target, target_type, source = work_dir, "converted", repo_root
+    else:
+        target = tmp_path / target_name
+        target_type, source = "source", target
+    context = PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=work_dir,
+        config=get_default_config(),
+    )
+    actionlint = ActionlintScanner(context=context, config=ActionlintScannerConfig())
+    zizmor = ZizmorScanner(context=context, config=ZizmorScannerConfig())
+
+    linted = actionlint._workflow_files(target, target_type, [])
+    audited = [
+        path.relative_to(target.absolute()).as_posix()
+        for path in zizmor._collect_inputs(target, target_type, [])
+        if path.name.lower() not in ("action.yml", "action.yaml")
+    ]
+
+    assert linted == expected
+    assert sorted(audited) == linted

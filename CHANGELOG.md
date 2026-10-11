@@ -105,7 +105,8 @@
   `--sandbox` each gets what it declares, listed in
   `docs/content/docs/scanner-sandbox.md`. See
   [Built-in Scanners](docs/content/docs/plugins/builtin/scanners.md).
-  - actionlint 1.7.12 on `.github/workflows` files. Script
+  - actionlint 1.7.12 on `.github/workflows` files, skipping `node_modules`,
+    `.venv` and `venv` as zizmor does. Script
     injection from untrusted event data and hard-coded container credentials are
     HIGH, always-true `if:` conditions, invalid `permissions:` and
     `set-env`/`add-path` MEDIUM, other lint findings LOW. Its shellcheck and pyflakes

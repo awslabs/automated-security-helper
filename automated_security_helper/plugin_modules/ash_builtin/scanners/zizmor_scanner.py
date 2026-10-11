@@ -11,7 +11,8 @@ actions, excessive permissions and similar problems. ASH hands it two kinds of
 file, and only those:
 
 * workflows: ``*.yml`` / ``*.yaml`` directly inside a ``.github/workflows``
-  directory, which is the only place GitHub runs a workflow from;
+  directory, which is the only place GitHub runs a workflow from, including a
+  source directory that is itself ``.github`` or ``.github/workflows``;
 * composite actions: any file named ``action.yml`` or ``action.yaml``.
 
 The files come from ASH's scan set, so ``.gitignore``, ``.ignore`` and the
@@ -302,12 +303,20 @@ def map_zizmor_severity(
     return base
 
 
-def is_zizmor_input(relative_path: PurePath) -> bool:
-    """Whether a path (relative to the scan root) is a workflow or composite action."""
+def is_zizmor_input(relative_path: PurePath, scan_root: Optional[Path] = None) -> bool:
+    """Whether a path (relative to the scan root) is a workflow or composite action.
+
+    ``scan_root`` is the directory *relative_path* is relative to. Its own name and
+    its parent's count, so a scan root that is itself a ``.github`` or
+    ``.github/workflows`` directory has its workflows recognized, as actionlint's
+    ``is_workflow_file`` does.
+    """
     name = relative_path.name
     if name.lower() in _ACTION_FILE_NAMES:
         return True
-    parts = relative_path.parts
+    parts: Tuple[str, ...] = relative_path.parts
+    if scan_root is not None:
+        parts = (scan_root.parent.name, scan_root.name, *parts)
     return (
         len(parts) >= 3
         and parts[-3] == ".github"
@@ -672,7 +681,10 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             if target_type == "source" and candidate.is_relative_to(output_abs):
                 continue
             relative = candidate.relative_to(target_abs)
-            if not is_zizmor_input(relative):
+            if not is_zizmor_input(relative, scan_root=target_abs):
+                continue
+            # Before the link checks, so a vendored file is never warned about.
+            if known_ignored.intersection(relative.parts[:-1]):
                 continue
             # A link whose target is missing, or that loops, is an input zizmor
             # cannot open, and it fails the whole run. Checked before resolve(),
@@ -692,8 +704,6 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                     "scan root.",
                     level=logging.WARNING,
                 )
-                continue
-            if known_ignored.intersection(relative.parts[:-1]):
                 continue
             source_relative = (
                 candidate.relative_to(source_abs).as_posix()
