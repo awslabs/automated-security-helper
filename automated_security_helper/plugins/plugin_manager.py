@@ -187,6 +187,14 @@ class AshPluginManager(BaseModel):
     ):
         """Register a plugin module with the plugin manager.
 
+        A registration is identified by its module path and name. Registering the
+        same pair again adds nothing. A class whose name is already registered
+        from another module path is registered as well, under a key that adds its
+        module path (``<module path>:<name>``), so a plugin package with a class
+        named like another package's, or like one of ASH's built-in plugins, does
+        not keep either class from resolving, whichever registers first. No
+        registration is ever replaced.
+
         Args:
             plugin_type: Type of plugin (converter, scanner, reporter)
             plugin_module_class: The plugin class to register
@@ -211,11 +219,17 @@ class AshPluginManager(BaseModel):
 
         registrations = self._registrations(plugin_type)
         with self._registry_lock:
-            already_registered = (
-                registrations is not None and plugin_module_name in registrations
-            )
+            key = plugin_module_name
+            existing = registrations.get(key) if registrations is not None else None
+            if (
+                existing is not None
+                and existing.plugin_module_path != plugin_module_path
+            ):
+                key = f"{plugin_module_path}:{plugin_module_name}"
+                existing = registrations.get(key)
+            already_registered = existing is not None
             if registrations is not None and not already_registered:
-                registrations[plugin_module_name] = AshPluginRegistration(
+                registrations[key] = AshPluginRegistration(
                     name=plugin_module_name,
                     plugin_module_path=plugin_module_path,
                     version=plugin_module_version,
@@ -223,7 +237,8 @@ class AshPluginManager(BaseModel):
                 )
         if already_registered:
             ASH_LOGGER.warning(
-                f"Plugin module '{plugin_module_name}' already registered. Skipping."
+                f"Plugin module '{plugin_module_name}' from '{plugin_module_path}' "
+                "already registered. Skipping."
             )
             return
 

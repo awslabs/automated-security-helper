@@ -42,6 +42,8 @@ import sys
 from pathlib import Path
 from typing import Dict, List
 
+import pytest
+
 from automated_security_helper.plugins.plugin_manager import AshPluginManager
 from tests.utils.isolated_tool_env import (
     install_refusing_installers,
@@ -166,6 +168,11 @@ def _config_name(cls):
     raise RuntimeError("no config name for " + cls.__name__)
 
 
+# Imported before the built-in plugins load, an order a program embedding ASH can
+# produce.
+for name in json.loads(os.environ.get("PLUGIN_SELECTION_PREIMPORT") or "[]"):
+    __import__(name)
+
 BUILTINS = sorted({_config_name(c) for c in load_internal_plugins()["scanners"]})
 
 # Imported after the built-in plugins load, the order an `ash` process has.
@@ -243,6 +250,8 @@ class _Process:
         install_refusing_installers(self.stubs)
         self.workdir = tmp_path / "cwd"
         self.workdir.mkdir()
+        #: Modules the program imports before ASH's built-in plugins load.
+        self.preimport: List[str] = []
 
     def tree(self, name: str) -> Path:
         tree = self.root / name
@@ -271,6 +280,7 @@ class _Process:
                 "HOME": str(self.home),
                 "USERPROFILE": str(self.home),
                 "PLUGIN_SELECTION_MARKERS": str(self.markers),
+                "PLUGIN_SELECTION_PREIMPORT": json.dumps(self.preimport),
                 "PYTHONIOENCODING": "utf-8",
                 # No usable cloud credentials and a refusing endpoint, whatever
                 # the host has: an in-process scan builds ASH's reporters.
@@ -676,6 +686,112 @@ class TestAPackageDoesNotSelectItsSubpackagesPlugins:
         )
 
 
+class TestPluginClassesWithTheSameName:
+    """Registrations are told apart by module path and class name.
+
+    Two packages here each define a reporter class named ``ZzSharedReporter``, with
+    their own config names and report extensions, and a third defines one named
+    like ASH's built-in ``JunitXmlReporter``.
+    """
+
+    def _process(self, tmp_path: Path) -> _Process:
+        proc = _Process(tmp_path)
+        for prefix in ("zzaa", "zzbb"):
+            package = proc.site / f"{prefix}_ash_plugins"
+            package.mkdir()
+            (package / "__init__.py").write_text(
+                _mark_reporter_init("ZzSharedReporter", f"{prefix}-shared", prefix),
+                encoding="utf-8",
+            )
+        package = proc.site / "zzshadow_ash_plugins"
+        package.mkdir()
+        (package / "__init__.py").write_text(
+            _mark_reporter_init("JunitXmlReporter", "zz-shadow", "zzshadow"),
+            encoding="utf-8",
+        )
+        return proc
+
+    @pytest.mark.parametrize("first, second", [("zzaa", "zzbb"), ("zzbb", "zzaa")])
+    def test_each_scan_runs_the_class_of_the_package_it_names(
+        self, tmp_path, first, second
+    ):
+        proc = self._process(tmp_path)
+        tree1, tree2 = proc.tree("first"), proc.tree("second")
+        proc.run(
+            [
+                {
+                    "source_dir": str(tree1),
+                    "output_dir": str(tmp_path / "out1"),
+                    "modules": [f"{first}_ash_plugins"],
+                },
+                {
+                    "source_dir": str(tree2),
+                    "output_dir": str(tmp_path / "out2"),
+                    "modules": [f"{second}_ash_plugins"],
+                },
+            ]
+        )
+
+        assert _reports(tmp_path / "out1", first), proc.output[-3000:]
+        assert _reports(tmp_path / "out1", second) == []
+        assert _reports(tmp_path / "out2", second), (
+            (
+                f"the second scan named {second}_ash_plugins, whose reporter has "
+                f"the class name of the one {first}_ash_plugins registered first, "
+                "and its reporter did not run"
+            ),
+            proc.output[-3000:],
+        )
+        assert _reports(tmp_path / "out2", first) == []
+
+    def test_one_scan_naming_both_packages_runs_both_classes(self, tmp_path):
+        proc = self._process(tmp_path)
+        tree = proc.tree("tree")
+        proc.run(
+            [
+                {
+                    "source_dir": str(tree),
+                    "output_dir": str(tmp_path / "out"),
+                    "modules": ["zzaa_ash_plugins", "zzbb_ash_plugins"],
+                }
+            ]
+        )
+
+        assert _reports(tmp_path / "out", "zzaa"), proc.output[-3000:]
+        assert _reports(tmp_path / "out", "zzbb"), proc.output[-3000:]
+
+    @pytest.mark.parametrize("before_builtins", [False, True])
+    def test_a_class_named_like_a_built_in_neither_replaces_nor_hides_it(
+        self, tmp_path, before_builtins
+    ):
+        """Imported before or after the built-ins register, in a scan naming it or not."""
+        proc = self._process(tmp_path)
+        if before_builtins:
+            proc.preimport = ["zzshadow_ash_plugins"]
+        named, unnamed = proc.tree("named"), proc.tree("unnamed")
+        proc.run(
+            [
+                {
+                    "source_dir": str(named),
+                    "output_dir": str(tmp_path / "out1"),
+                    "modules": ["zzshadow_ash_plugins"],
+                },
+                {"source_dir": str(unnamed), "output_dir": str(tmp_path / "out2")},
+            ]
+        )
+
+        assert _reports(tmp_path / "out1", "zzshadow"), (
+            "control: the named package's reporter wrote no report",
+            proc.output[-3000:],
+        )
+        for out in ("out1", "out2"):
+            assert "reports/ash.junit.xml" in _reports(tmp_path / out, "xml"), (
+                f"the built-in JunitXmlReporter wrote no report in {out}",
+                proc.output[-3000:],
+            )
+        assert _reports(tmp_path / "out2", "zzshadow") == []
+
+
 def _plugin_module(root: Path, name: str, class_name: str) -> type:
     """An importable module holding one scanner-shaped class, registered nowhere."""
     (root / f"{name}.py").write_text(
@@ -717,3 +833,52 @@ class TestTheResolvedListFollowsRegistration:
         assert manager.plugin_modules(
             "scanner", lambda cls: cls.__module__ == "zzselect_other_mod"
         ) == [late]
+
+
+class TestRegistrationsAreKeyedByModuleAndName:
+    """On a private manager, so the process-wide registry is not touched."""
+
+    def test_a_same_named_class_from_another_module_registers_too(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.syspath_prepend(str(tmp_path))
+        one = _plugin_module(tmp_path, "zzsame_one_mod", "SameScanner")
+        two = _plugin_module(tmp_path, "zzsame_two_mod", "SameScanner")
+        manager = AshPluginManager()
+
+        manager.register_plugin_module("scanner", one, "zzsame_one_mod")
+        manager.register_plugin_module("scanner", two, "zzsame_two_mod")
+
+        assert manager.plugin_modules("scanner") == [one, two]
+
+    def test_registering_a_class_again_adds_nothing(self, tmp_path, monkeypatch):
+        monkeypatch.syspath_prepend(str(tmp_path))
+        one = _plugin_module(tmp_path, "zzsame_again_mod", "AgainScanner")
+        manager = AshPluginManager()
+
+        manager.register_plugin_module("scanner", one, "zzsame_again_mod")
+        manager.register_plugin_module("scanner", one, "zzsame_again_mod")
+
+        assert manager.plugin_modules("scanner") == [one]
+
+    @pytest.mark.parametrize("built_in_first", [True, False])
+    def test_a_built_in_and_a_class_named_like_it_both_resolve(
+        self, tmp_path, monkeypatch, built_in_first
+    ):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
+            BanditScanner,
+        )
+
+        monkeypatch.syspath_prepend(str(tmp_path))
+        named_alike = _plugin_module(tmp_path, "zzsame_bandit_mod", "BanditScanner")
+        order = [BanditScanner, named_alike]
+        if not built_in_first:
+            order.reverse()
+        manager = AshPluginManager()
+
+        for cls in order:
+            manager.register_plugin_module("scanner", cls, cls.__module__)
+        resolved = manager.plugin_modules("scanner")
+
+        assert BanditScanner in resolved, resolved
+        assert named_alike in resolved, resolved

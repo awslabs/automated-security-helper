@@ -482,6 +482,11 @@ either way. The scan logs each registered plugin it leaves out, in a line starti
 "Registered plugins not used by this scan", in the console and in `ash.log` in the
 output directory.
 
+Plugin classes are registered by module and class name, so your class may share its
+name with a class in another plugin package or with one of ASH's built-in plugins.
+Each one registers, neither replaces the other, and each takes part in the scans that
+select it.
+
 ## Best Practices
 
 ### Plugin Design
