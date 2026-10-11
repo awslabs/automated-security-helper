@@ -25,7 +25,10 @@ from typing import Dict
 import pytest
 
 from automated_security_helper.cli.mcp import build_sse_app
-from tests.utils.mcp_transport_harness import AsgiSseConnection
+from tests.utils.mcp_transport_harness import (
+    AsgiSseConnection,
+    LOOPBACK_PORT,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -53,7 +56,7 @@ def _zip() -> Dict[str, object]:
 @pytest.mark.parametrize("order", ["other-first", "own-first"])
 def test_a_repeated_session_id_names_no_session(workspace, order) -> None:
     async def _run():
-        app = build_sse_app(mount_path="/sse", host="127.0.0.1")
+        app = build_sse_app(mount_path="/sse", host="127.0.0.1", port=LOOPBACK_PORT)
         upload = _zip()
         async with AsgiSseConnection(app) as owner, AsgiSseConnection(app) as other:
             chunk = await owner.call_tool(

@@ -23,7 +23,11 @@ from starlette.testclient import TestClient
 
 from automated_security_helper.cli.mcp import build_streamable_http_app, mcp_command
 from automated_security_helper.cli.mcp import sessions
-from tests.utils.mcp_transport_harness import LOOPBACK_BASE_URL, StreamableHttpClient
+from tests.utils.mcp_transport_harness import (
+    LOOPBACK_BASE_URL,
+    LOOPBACK_PORT,
+    StreamableHttpClient,
+)
 
 DAY = 24 * 3600
 
@@ -68,7 +72,9 @@ def test_a_session_that_ends_during_its_scan_keeps_its_tree_until_the_scan_retur
 
 
 def test_an_app_shutting_down_removes_every_session_it_issued(root) -> None:
-    app = build_streamable_http_app(mount_path="/mcp", host="127.0.0.1")
+    app = build_streamable_http_app(
+        mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
+    )
     with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
         http = StreamableHttpClient(client)
         issued = [http.open_session()[0] for _ in range(2)]
@@ -107,6 +113,7 @@ def test_a_request_naming_a_session_keeps_its_workspace(root) -> None:
         stateless_http=True,
         host="127.0.0.1",
         trust_upstream_session_id=True,
+        port=LOOPBACK_PORT,
     )
     with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
         http = StreamableHttpClient(client)
@@ -124,6 +131,7 @@ def test_the_operator_ttl_decides_what_is_stale(root) -> None:
         stateless_http=True,
         host="127.0.0.1",
         session_workspace_ttl=3600,
+        port=LOOPBACK_PORT,
     )
     with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
         StreamableHttpClient(client).open_session()

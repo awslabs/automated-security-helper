@@ -44,6 +44,7 @@ from starlette.testclient import TestClient
 from automated_security_helper.cli.mcp import build_streamable_http_app
 from tests.utils.mcp_transport_harness import (
     LOOPBACK_BASE_URL,
+    LOOPBACK_PORT,
     StreamableHttpClient,
     stdio_tool_calls,
 )
@@ -100,7 +101,9 @@ def scans_do_not_run(monkeypatch):
 
 @pytest.fixture
 def http():
-    app = build_streamable_http_app(mount_path="/mcp", host="127.0.0.1")
+    app = build_streamable_http_app(
+        mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
+    )
     with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
         yield StreamableHttpClient(client)
 

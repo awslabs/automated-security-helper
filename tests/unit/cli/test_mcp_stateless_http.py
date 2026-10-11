@@ -31,6 +31,7 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app as ash_app
 from automated_security_helper.cli.mcp import build_streamable_http_app, mcp_command
 from automated_security_helper.core.exceptions import ASHValidationError
+from tests.utils.mcp_transport_harness import LOOPBACK_PORT
 
 INITIALIZE = {
     "jsonrpc": "2.0",
@@ -87,7 +88,9 @@ class TestWiring:
             return Starlette()
 
         monkeypatch.setattr(mcp_server.mcp, "streamable_http_app", _fake_app)
-        build_streamable_http_app(mount_path="/mcp", stateless_http=True)
+        build_streamable_http_app(
+            mount_path="/mcp", stateless_http=True, port=LOOPBACK_PORT
+        )
         assert captured.get("stateless_http") is True
 
     def test_default_is_stateful(self, monkeypatch) -> None:
@@ -102,7 +105,7 @@ class TestWiring:
             return Starlette()
 
         monkeypatch.setattr(mcp_server.mcp, "streamable_http_app", _fake_app)
-        build_streamable_http_app(mount_path="/mcp")
+        build_streamable_http_app(mount_path="/mcp", port=LOOPBACK_PORT)
         assert captured.get("stateless_http") is False
 
 
@@ -123,7 +126,9 @@ class TestSessionHandling:
     """The behavioural difference, asserted against a real ASGI app."""
 
     def test_stateful_rejects_a_session_id_it_did_not_issue(self) -> None:
-        app = build_streamable_http_app(mount_path="/mcp", stateless_http=False)
+        app = build_streamable_http_app(
+            mount_path="/mcp", stateless_http=False, port=LOOPBACK_PORT
+        )
         resp = _post(app, {**CLIENT_HEADERS, "Mcp-Session-Id": FOREIGN_SESSION_ID})
         # 404 specifically, not merely "some 4xx". A bad Host is 421 and a bad
         # token is 401; accepting any 4xx here let this assertion pass on a host
@@ -132,7 +137,9 @@ class TestSessionHandling:
         assert "session" in resp.text.lower()
 
     def test_stateless_accepts_a_session_id_it_did_not_issue(self) -> None:
-        app = build_streamable_http_app(mount_path="/mcp", stateless_http=True)
+        app = build_streamable_http_app(
+            mount_path="/mcp", stateless_http=True, port=LOOPBACK_PORT
+        )
         resp = _post(app, {**CLIENT_HEADERS, "Mcp-Session-Id": FOREIGN_SESSION_ID})
         assert resp.status_code == 200, (
             f"stateless mode must ignore a foreign session id, got "
@@ -140,14 +147,18 @@ class TestSessionHandling:
         )
 
     def test_stateless_initialize_succeeds_without_any_session_header(self) -> None:
-        app = build_streamable_http_app(mount_path="/mcp", stateless_http=True)
+        app = build_streamable_http_app(
+            mount_path="/mcp", stateless_http=True, port=LOOPBACK_PORT
+        )
         resp = _post(app, CLIENT_HEADERS)
         assert resp.status_code == 200, f"{resp.status_code}: {resp.text[:200]}"
 
     def test_stateful_initialize_succeeds_without_any_session_header(self) -> None:
         # The control for the two above: proves the 404 is about the foreign
         # session id and not about stateful mode refusing the request shape.
-        app = build_streamable_http_app(mount_path="/mcp", stateless_http=False)
+        app = build_streamable_http_app(
+            mount_path="/mcp", stateless_http=False, port=LOOPBACK_PORT
+        )
         resp = _post(app, CLIENT_HEADERS)
         assert resp.status_code == 200, f"{resp.status_code}: {resp.text[:200]}"
 
@@ -192,13 +203,15 @@ class TestHostBinding:
         # The protection is worth keeping for the default local case: it is what
         # stops a web page resolving a name to 127.0.0.1 and driving the scanner.
         app = build_streamable_http_app(
-            mount_path="/mcp", stateless_http=True, host="127.0.0.1"
+            mount_path="/mcp", stateless_http=True, host="127.0.0.1", port=LOOPBACK_PORT
         )
         resp = _post(app, CLIENT_HEADERS, base_url=self.PROXY_BASE_URL)
         assert resp.status_code == 421, f"{resp.status_code}: {resp.text[:200]}"
 
     def test_default_host_is_loopback_and_still_protected(self) -> None:
-        app = build_streamable_http_app(mount_path="/mcp", stateless_http=True)
+        app = build_streamable_http_app(
+            mount_path="/mcp", stateless_http=True, port=LOOPBACK_PORT
+        )
         resp = _post(app, CLIENT_HEADERS, base_url=self.PROXY_BASE_URL)
         assert resp.status_code == 421, f"{resp.status_code}: {resp.text[:200]}"
 
@@ -249,7 +262,7 @@ class TestCommandWiring:
             seen.update(kwargs)
             return object()
 
-        def _fake_uvicorn(app, host, port, log_level):
+        def _fake_uvicorn(app, host, port, log_level, listen_socket=None):
             seen["uvicorn_host"] = host
 
         monkeypatch.setattr(

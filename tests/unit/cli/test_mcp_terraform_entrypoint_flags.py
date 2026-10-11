@@ -63,7 +63,7 @@ def bound(monkeypatch) -> Dict[str, object]:
         seen["kwargs"] = kwargs
         return object()
 
-    def _serve(app, host, port, log_level):
+    def _serve(app, host, port, log_level, listen_socket=None):
         seen["bound"] = True
 
     monkeypatch.setattr(

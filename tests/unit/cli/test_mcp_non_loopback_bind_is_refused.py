@@ -79,7 +79,7 @@ def startup(monkeypatch) -> Dict[str, object]:
         seen["kwargs"] = kwargs
         return object()
 
-    def _fake_uvicorn(app, host, port, log_level):
+    def _fake_uvicorn(app, host, port, log_level, listen_socket=None):
         seen["bound"] = True
         seen["host"] = host
 

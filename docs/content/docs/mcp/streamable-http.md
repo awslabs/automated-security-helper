@@ -53,7 +53,9 @@ The MCP SDK protects against DNS rebinding by checking the `Host` and `Origin` h
 - `--allowed-host NAME` (repeatable): ASH checks Host against the names given. Use the name clients and your proxy send.
 - `--trust-upstream-host-check`: something in front of ASH checks Host and Origin, and ASH checks neither.
 
-On a loopback bind with no `--allowed-host`, the server accepts only its own origin: Host `127.0.0.1:PORT`, `localhost:PORT` or `[::1]:PORT`, where PORT is `--port`, and the same as `http://` origins. The SDK's own loopback check accepts those names on any port, so a page served by any other local web server could otherwise drive the MCP server from your browser. A request with no `Origin` header, which is what every non-browser MCP client sends, needs only the right Host.
+On a loopback bind with no `--allowed-host`, the server accepts only its own origin: Host `127.0.0.1:PORT`, `localhost:PORT` or `[::1]:PORT`, where PORT is `--port`, and the same as `http://` origins. The SDK's own loopback check accepts those names on any port, so a page served by any other local web server could otherwise drive the MCP server from your browser. A request with no `Origin` header, which is what every non-browser MCP client sends, needs only the right Host. On port 80 the names without a port (`127.0.0.1`, `http://localhost`) are accepted too, because clients leave out the default port. With `--port 0` the system picks the port: ASH binds the socket first, builds the server for the port it got, and prints it at startup.
+
+If you build the app yourself with `build_streamable_http_app` or `build_sse_app` on a loopback host without `allowed_hosts`, pass `port=` the port the server listens on; the builders refuse to build one without it (or with 0), because an app built for another port answers 421 to every request.
 
 The refusal names both options. The Terraform container entrypoint passes `--trust-upstream-host-check` only when `ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=true`, `ASH_MCP_ALLOWED_HOSTS` is empty and the bind is not loopback; the AgentCore module sets it. With neither variable set, an image bound to `0.0.0.0` refuses to start.
 

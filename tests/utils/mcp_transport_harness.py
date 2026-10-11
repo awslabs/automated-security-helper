@@ -43,10 +43,14 @@ STREAMABLE_HEADERS = {
     "Accept": "application/json, text/event-stream",
 }
 
-#: A Host the SDK's loopback allowlist accepts, so requests reach the session
-#: and tool logic instead of stopping at a 421.
-LOOPBACK_BASE_URL = "http://127.0.0.1:8000"
-LOOPBACK_HOST = "127.0.0.1:8000"
+#: The port a loopback test app is built for (``port=LOOPBACK_PORT``). Such an
+#: app accepts only its own address, so the Host the tests send carries it.
+LOOPBACK_PORT = 8000
+
+#: A Host the loopback allowlist accepts, so requests reach the session and
+#: tool logic instead of stopping at a 421.
+LOOPBACK_BASE_URL = f"http://127.0.0.1:{LOOPBACK_PORT}"
+LOOPBACK_HOST = f"127.0.0.1:{LOOPBACK_PORT}"
 
 #: Upper bound for any single wait on the server. A hang fails the test rather
 #: than the run.

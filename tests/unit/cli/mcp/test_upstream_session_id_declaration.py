@@ -33,6 +33,7 @@ from automated_security_helper.cli.mcp.session_identity import (
 )
 from tests.utils.mcp_transport_harness import (
     LOOPBACK_BASE_URL,
+    LOOPBACK_PORT,
     STREAMABLE_HEADERS,
     StreamableHttpClient,
     tool_payload,
@@ -88,6 +89,7 @@ def declared():
         stateless_http=True,
         host="127.0.0.1",
         trust_upstream_session_id=True,
+        port=LOOPBACK_PORT,
     )
     with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
         yield StreamableHttpClient(client)
@@ -179,7 +181,7 @@ def test_session_tools_refuse_a_stateless_caller_without_the_declaration(
     tool, arguments
 ) -> None:
     app = build_streamable_http_app(
-        mount_path="/mcp", stateless_http=True, host="127.0.0.1"
+        mount_path="/mcp", stateless_http=True, host="127.0.0.1", port=LOOPBACK_PORT
     )
     with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
         http = StreamableHttpClient(client)
@@ -230,7 +232,9 @@ def test_a_stateful_server_ignores_a_header_it_did_not_issue_on_the_newer_protoc
     """
     victim = workspace / "victim-session" / "source" / ".ash" / "ash_output"
     (victim / "reports").mkdir(parents=True)
-    app = build_streamable_http_app(mount_path="/mcp", host="127.0.0.1")
+    app = build_streamable_http_app(
+        mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
+    )
     body = {
         "jsonrpc": "2.0",
         "id": 1,

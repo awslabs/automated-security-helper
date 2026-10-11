@@ -40,6 +40,7 @@ from starlette.testclient import TestClient
 
 from automated_security_helper.cli.mcp import build_sse_app, mcp_command
 from automated_security_helper.core.exceptions import ASHValidationError
+from tests.utils.mcp_transport_harness import LOOPBACK_PORT
 
 #: Status the SDK returns when the Host header is not on the allowlist.
 HOST_REJECTED = 421
@@ -99,12 +100,12 @@ class TestHostReachesTheApp:
         It is what stops a web page resolving a name to 127.0.0.1 and driving the
         scanner through the operator's own browser.
         """
-        app = build_sse_app(mount_path="/sse", host="127.0.0.1")
+        app = build_sse_app(mount_path="/sse", host="127.0.0.1", port=LOOPBACK_PORT)
         assert _post_message(app, PROXY_BASE_URL) == HOST_REJECTED
 
     def test_default_host_is_loopback_and_still_protected(self) -> None:
         """Omitting host must keep the SDK's protective default, not lose it."""
-        app = build_sse_app(mount_path="/sse")
+        app = build_sse_app(mount_path="/sse", port=LOOPBACK_PORT)
         assert _post_message(app, PROXY_BASE_URL) == HOST_REJECTED
 
 
@@ -142,7 +143,7 @@ class TestCommandWiring:
             seen.update(kwargs)
             return object()
 
-        def _fake_uvicorn(app, host, port, log_level):
+        def _fake_uvicorn(app, host, port, log_level, listen_socket=None):
             seen["uvicorn_host"] = host
 
         monkeypatch.setattr(

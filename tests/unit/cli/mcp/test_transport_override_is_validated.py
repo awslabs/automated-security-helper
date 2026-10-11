@@ -76,7 +76,7 @@ def test_a_known_value_in_another_case_still_starts(monkeypatch) -> None:
     started = {}
     monkeypatch.setattr(
         "automated_security_helper.cli.mcp._run_uvicorn",
-        lambda app, host, port, log_level: started.update(ok=True),
+        lambda app, host, port, log_level, listen_socket=None: started.update(ok=True),
     )
 
     mcp_command(ctx=_Ctx(), transport="streamable-http", host="127.0.0.1", quiet=True)

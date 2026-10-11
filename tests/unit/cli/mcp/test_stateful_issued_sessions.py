@@ -29,6 +29,7 @@ from automated_security_helper.cli.mcp import build_streamable_http_app
 from automated_security_helper.cli.mcp.http_sessions import SessionBoundary
 from tests.utils.mcp_transport_harness import (
     LOOPBACK_BASE_URL,
+    LOOPBACK_PORT,
     STREAMABLE_HEADERS,
     StreamableHttpClient,
 )
@@ -76,7 +77,9 @@ def _deliver(http: StreamableHttpClient, headers) -> Path:
 
 
 def test_refused_opening_requests_record_no_session() -> None:
-    app = build_streamable_http_app(mount_path="/mcp", host="127.0.0.1")
+    app = build_streamable_http_app(
+        mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
+    )
     with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
         statuses = {
             client.post(
@@ -95,7 +98,9 @@ def test_refused_opening_requests_record_no_session() -> None:
 def test_a_session_the_sdk_discarded_is_ended(workspace) -> None:
     from automated_security_helper.cli.mcp_server import mcp
 
-    app = build_streamable_http_app(mount_path="/mcp", host="127.0.0.1")
+    app = build_streamable_http_app(
+        mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
+    )
     with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
         http = StreamableHttpClient(client)
         session_id, headers = http.open_session()
@@ -116,7 +121,9 @@ def test_a_session_the_sdk_discarded_is_ended(workspace) -> None:
 
 
 def test_a_404_on_the_newer_protocol_path_ends_nothing(workspace) -> None:
-    app = build_streamable_http_app(mount_path="/mcp", host="127.0.0.1")
+    app = build_streamable_http_app(
+        mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
+    )
     with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
         http = StreamableHttpClient(client)
         session_id, headers = http.open_session()

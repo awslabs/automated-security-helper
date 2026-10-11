@@ -206,7 +206,7 @@ def _transport_security(
     host: str,
     allowed_hosts: Optional[List[str]],
     trust_upstream_host_check: bool,
-    port: int,
+    port: Optional[int],
 ):
     """The ``transport_security`` to build an app with.
 
@@ -214,10 +214,14 @@ def _transport_security(
     ``localhost`` origin on any port, so a page served by any other local web
     server could drive this one from the user's browser. The server accepts its
     own origin only: Host ``127.0.0.1``, ``localhost`` or ``[::1]`` with the
-    port it is bound to, and the same as ``http://`` origins.
+    port it is bound to, and the same as ``http://`` origins. On port 80 the
+    names without a port are accepted too, because clients and browsers leave
+    the default port out of Host and Origin.
 
     Raises:
-        ASHValidationError: per :func:`_validate_bind`.
+        ASHValidationError: per :func:`_validate_bind`, and on a loopback bind
+            with no allowlist when ``port`` is None or 0: an app built for a
+            port other than the one it listens on answers 421 to every request.
     """
     _validate_bind(host, allowed_hosts, trust_upstream_host_check)
     from mcp.server.transport_security import TransportSecuritySettings
@@ -236,7 +240,16 @@ def _transport_security(
         # Stated explicitly rather than left to the SDK's default for a
         # non-loopback host, so the decision is visible here.
         return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    if port is None or int(port) == 0:
+        raise ASHValidationError(
+            "A loopback server without allowed_hosts accepts only its own address, "
+            "port included, so it has to be built with the port it listens on. "
+            "Pass port= the bound port; when the system picks the port, bind the "
+            "socket first and pass the port it got."
+        )
     own = [f"{name}:{int(port)}" for name in _LOOPBACK_HOST_NAMES]
+    if int(port) == 80:
+        own.extend(_LOOPBACK_HOST_NAMES)
     return TransportSecuritySettings(
         allowed_hosts=own,
         allowed_origins=[f"http://{name}" for name in own],
@@ -318,7 +331,7 @@ def build_streamable_http_app(
     trust_upstream_session_id: bool = False,
     trust_upstream_host_check: bool = False,
     session_workspace_ttl: Optional[int] = None,
-    port: int = 8000,
+    port: Optional[int] = None,
 ):
     """Build the MCPServer streamable-HTTP ASGI app, optionally guarded by auth.
 
@@ -350,9 +363,11 @@ def build_streamable_http_app(
         session_workspace_ttl: Seconds a session workspace may go unused before
             it is swept; None is the default, 24 hours. See
             ``http_sessions.SessionBoundary`` for when sessions end.
-        port: The port the server will bind, the same value handed to uvicorn.
-            A loopback server accepts only its own origin, which includes the
-            port; see :func:`_transport_security`.
+        port: The port the server listens on, the same value handed to
+            uvicorn. Required on a loopback ``host`` without ``allowed_hosts``
+            or ``trust_upstream_host_check``, where the server accepts only its
+            own origin, port included (see :func:`_transport_security`); unused
+            otherwise. Not 0: bind first and pass the port the system chose.
 
     The host argument is load-bearing, not cosmetic
     ----------------------------------------------
@@ -427,7 +442,7 @@ def build_sse_app(
     allowed_hosts: Optional[List[str]] = None,
     trust_upstream_host_check: bool = False,
     session_workspace_ttl: Optional[int] = None,
-    port: int = 8000,
+    port: Optional[int] = None,
 ):
     """Build the MCPServer SSE ASGI app (legacy).
 
@@ -513,8 +528,34 @@ def _ash_log_level_to_uvicorn(level: AshLogLevel) -> str:
     return "info"
 
 
-def _run_uvicorn(app, host: str, port: int, log_level: AshLogLevel) -> None:
-    """Run an ASGI app via uvicorn, blocking until shutdown."""
+def _bind_listen_socket(host: str):
+    """Bind ``host`` on a port the system chooses, the way uvicorn binds a host.
+
+    Used for ``--port 0``: the app has to be built for the port it listens on
+    (see :func:`_transport_security`), and that port is known only once bound.
+    """
+    import socket
+
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    listen_socket = socket.socket(family=family)
+    try:
+        listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listen_socket.bind((host, 0))
+    except OSError:
+        listen_socket.close()
+        raise
+    listen_socket.set_inheritable(True)
+    return listen_socket
+
+
+def _run_uvicorn(
+    app, host: str, port: int, log_level: AshLogLevel, listen_socket=None
+) -> None:
+    """Run an ASGI app via uvicorn, blocking until shutdown.
+
+    ``listen_socket`` is an already bound socket to serve on instead of binding
+    ``host`` and ``port`` (see :func:`_bind_listen_socket`).
+    """
     import uvicorn
 
     config = uvicorn.Config(
@@ -525,7 +566,7 @@ def _run_uvicorn(app, host: str, port: int, log_level: AshLogLevel) -> None:
         access_log=False,
     )
     server = uvicorn.Server(config)
-    server.run()
+    server.run(sockets=None if listen_socket is None else [listen_socket])
 
 
 def mcp_command(
@@ -808,7 +849,15 @@ def mcp_command(
     honor_in_tree_opt_in(MCP_HONORS_IN_TREE_OPT_IN)
 
     # Initialize and start the MCP server with comprehensive error handling
+    listen_socket = None
     try:
+        if transport != "stdio" and port == 0:
+            # A loopback app accepts only its own port, so it is built for the
+            # port the system chose: bind first. The bind is checked before
+            # anything is bound.
+            _validate_bind(host, allowed_host, trust_upstream_host_check)
+            listen_socket = _bind_listen_socket(host)
+            port = listen_socket.getsockname()[1]
         if transport == "stdio":
             # Import and run the stdio MCP server implementation here to avoid
             # circular imports.
@@ -836,7 +885,13 @@ def mcp_command(
                     f"[green]Streamable-HTTP MCP server listening on "
                     f"http://{host}:{port}{mount_path}[/green]"
                 )
-            _run_uvicorn(app, host=host, port=port, log_level=log_level_value)
+            _run_uvicorn(
+                app,
+                host=host,
+                port=port,
+                log_level=log_level_value,
+                listen_socket=listen_socket,
+            )
         elif transport == "sse":
             # The mount-path default is /mcp, but SSE conventionally lives at
             # /sse. Honor whatever the user passed; only override if they kept
@@ -861,7 +916,13 @@ def mcp_command(
                     f"[green]SSE MCP server listening on "
                     f"http://{host}:{port}{sse_path}[/green]"
                 )
-            _run_uvicorn(app, host=host, port=port, log_level=log_level_value)
+            _run_uvicorn(
+                app,
+                host=host,
+                port=port,
+                log_level=log_level_value,
+                listen_socket=listen_socket,
+            )
     except KeyboardInterrupt:
         _logger.info("MCP server shutdown requested by user")
         if not quiet:
@@ -892,3 +953,6 @@ def mcp_command(
                 "[yellow]Please check system resources and ASH installation.[/yellow]"
             )
         raise typer.Exit(1)
+    finally:
+        if listen_socket is not None:
+            listen_socket.close()

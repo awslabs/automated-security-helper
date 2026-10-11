@@ -36,8 +36,9 @@ from starlette.testclient import TestClient
 
 from automated_security_helper.cli.mcp import build_sse_app, build_streamable_http_app
 from tests.utils.mcp_transport_harness import (
-    LOOPBACK_BASE_URL,
     AsgiSseConnection,
+    LOOPBACK_BASE_URL,
+    LOOPBACK_PORT,
     StreamableHttpClient,
     stdio_tool_calls,
 )
@@ -101,7 +102,7 @@ def _refused(result: Dict[str, object]) -> bool:
 @pytest.fixture
 def stateless():
     app = build_streamable_http_app(
-        mount_path="/mcp", stateless_http=True, host="127.0.0.1"
+        mount_path="/mcp", stateless_http=True, host="127.0.0.1", port=LOOPBACK_PORT
     )
     with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
         yield StreamableHttpClient(client)
@@ -207,7 +208,9 @@ class TestStatelessStreamableHttp:
 
 
 def test_a_stateful_session_cannot_read_an_ungranted_tree(layout) -> None:
-    app = build_streamable_http_app(mount_path="/mcp", host="127.0.0.1")
+    app = build_streamable_http_app(
+        mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
+    )
     with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
         http = StreamableHttpClient(client)
         _issued, headers = http.open_session()
@@ -225,7 +228,9 @@ def test_a_stateful_session_gets_config_confinement_under_a_grant(
 ) -> None:
     """Control: the refusal shape the stateless config test expects."""
     monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(layout["granted"]))
-    app = build_streamable_http_app(mount_path="/mcp", host="127.0.0.1")
+    app = build_streamable_http_app(
+        mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
+    )
     with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
         http = StreamableHttpClient(client)
         _issued, headers = http.open_session()
@@ -245,7 +250,7 @@ def test_a_stateful_session_gets_config_confinement_under_a_grant(
 
 def _sse(coro_factory):
     async def _run():
-        app = build_sse_app(mount_path="/sse", host="127.0.0.1")
+        app = build_sse_app(mount_path="/sse", host="127.0.0.1", port=LOOPBACK_PORT)
         return await coro_factory(app)
 
     return asyncio.run(_run())
@@ -346,7 +351,7 @@ def test_serving_a_network_transport_leaves_stdio_trust_unchanged(
 
     served = {}
 
-    def _serve_one_request(app, host, port, log_level):
+    def _serve_one_request(app, host, port, log_level, listen_socket=None):
         with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
             http = StreamableHttpClient(client)
             _issued, headers = http.open_session()

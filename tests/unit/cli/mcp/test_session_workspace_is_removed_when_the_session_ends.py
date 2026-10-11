@@ -55,8 +55,9 @@ from automated_security_helper.cli.mcp.profile_registry import (
     set_profile_registry,
 )
 from tests.utils.mcp_transport_harness import (
-    LOOPBACK_BASE_URL,
     AsgiSseConnection,
+    LOOPBACK_BASE_URL,
+    LOOPBACK_PORT,
     StreamableHttpClient,
 )
 
@@ -121,7 +122,9 @@ def _deliver_http(http: StreamableHttpClient, headers: Dict[str, str]) -> Path:
 
 @pytest.fixture
 def http():
-    app = build_streamable_http_app(mount_path="/mcp", host="127.0.0.1")
+    app = build_streamable_http_app(
+        mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
+    )
     with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
         yield StreamableHttpClient(client)
 
@@ -201,7 +204,7 @@ class TestStatefulSessionTermination:
 
 def test_an_sse_disconnect_removes_the_sessions_sandbox() -> None:
     async def _run() -> Path:
-        app = build_sse_app(mount_path="/sse", host="127.0.0.1")
+        app = build_sse_app(mount_path="/sse", host="127.0.0.1", port=LOOPBACK_PORT)
         data = _zip_bytes()
         async with AsgiSseConnection(app) as sse:
             chunk = await sse.call_tool("set_source_zip_chunk", _chunk_args(data))
@@ -339,7 +342,7 @@ def test_a_stateless_server_sweeps_sandboxes_older_than_the_ttl(workspace_root) 
     fresh = _sandbox_with_age(workspace_root, "fresh-session", 0)
 
     app = build_streamable_http_app(
-        mount_path="/mcp", stateless_http=True, host="127.0.0.1"
+        mount_path="/mcp", stateless_http=True, host="127.0.0.1", port=LOOPBACK_PORT
     )
     with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
         http = StreamableHttpClient(client)

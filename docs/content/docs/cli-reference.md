@@ -1148,7 +1148,7 @@ ash mcp --transport streamable-http --host 0.0.0.0 --port 8000 \
   --allowed-host ash-mcp.internal.example.com
 ```
 
-On a loopback bind without `--allowed-host`, ASH accepts only the server's own origin: Host `127.0.0.1`, `localhost` or `[::1]` with the `--port` it is bound to, and those as `http://` origins. The SDK's own check would accept them on any port.
+On a loopback bind without `--allowed-host`, ASH accepts only the server's own origin: Host `127.0.0.1`, `localhost` or `[::1]` with the `--port` it is bound to, and those as `http://` origins. The SDK's own check would accept them on any port. On `--port 80` the names are accepted without the port as well, as clients write them. `--port 0` lets the system choose: ASH binds first and accepts the port it got, which the startup message prints.
 
 The `Origin` allowlist is left empty rather than mirroring the host list. `Origin` is a browser-supplied header, and an MCP server reached through a proxy has no reason to trust one.
 
