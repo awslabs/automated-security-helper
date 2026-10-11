@@ -2,7 +2,7 @@
 
 Every scan prints a summary table and writes its results to an output directory. This
 page shows where the results go, how to read the table, and which file to open for each
-job. [Output files](../reference/output-files.md) describes every file in detail.
+task. [Output files](../reference/output-files.md) describes every file in detail.
 
 ## Where results land
 
@@ -42,13 +42,14 @@ ash --scanners detect-secrets --no-progress --output-dir build/ash-results
 Things to know about the output directory:
 
 - Each scan replaces the previous results. ASH empties `reports/`, `scanners/`,
-  `converted/` and `analysis/`, and removes the top-level results files, before it
+  `converted/`, and `analysis/`, and removes the top-level results files, before it
   writes. Copy anything you want to keep.
 - The default location is inside the scanned tree. Keep it out of version control:
   `ash config init` writes a `.ash/.gitignore` that ignores `ash_output*`.
-- ASH refuses an output directory that is reached through a symbolic link or a Windows
-  junction, or that has one at `reports/`, `scanners/`, `converted/` or `analysis/`. The
-  scan stops with exit code 1 before it writes anything. See
+- ASH refuses an output directory that is itself a symbolic link or a Windows junction,
+  that is reached through one below the scanned directory (such as a linked `.ash`), or
+  that has one at `reports/`, `scanners/`, `converted/`, or `analysis/`. The scan stops
+  with exit code 1 before it writes anything. See
   [Output files](../reference/output-files.md#links).
 - Reports contain source text. ASH masks secrets in finding messages, but the code
   snippets attached to findings are copied as they are, secrets included. Treat the
@@ -77,9 +78,9 @@ reason per target.
 Scan incomplete: actionlint (ERROR), gitleaks (MISSING)
 ```
 
-When the terminal is narrower than 100 columns, or the output goes to a file, the headers
-are shortened to S, C, H, M, L, I, Time, Action, Result and Thresh, and the threshold
-reads `MED (g)`.
+When the terminal is narrower than 100 columns, or the output is not a terminal (as when
+you redirect it to a file), the headers are shortened to S, C, H, M, L, I, Time, Action,
+Result, and Thresh, and the threshold reads `MED (g)`.
 
 | Column | Meaning |
 |---|---|
@@ -90,14 +91,17 @@ reads `MED (g)`.
 | Result | The scanner's status, below. |
 | Threshold | The threshold and where it came from: `global` is `global_settings.severity_threshold` (default `MEDIUM`), `config` is the scanner's own `scanners.<name>.options.severity_threshold`. |
 
-The Result column has five values. A row takes the first one that applies, in this order:
+The Result column has five values. A row takes the first one that applies, in this
+order: `ERROR`; `FAILED`; `SKIPPED` because the scanner was not selected or its platform
+is not supported; `MISSING`; `SKIPPED` because it had nothing to read; `PASSED`.
 
 | Result | What happened | What to do |
 |---|---|---|
 | `ERROR` | The scanner started and produced no usable result for any of its targets. | Read the error in the scan output or in `ash.log`; the full record is in `scanners/<name>/source/ASH.ScanResults.json`. |
 | `FAILED` | The scanner ran and reported at least one actionable finding. It says nothing about the tool crashing. | Fix or suppress the findings. |
-| `SKIPPED` | The scanner was not selected (`--scanners`, `--exclude-scanners`, `enabled: false`, `--python-only`), its platform is not supported, or it had nothing to read, such as actionlint in a repository with no workflows. | Nothing, unless you expected it to run. |
+| `SKIPPED` (not selected) | The scanner was not selected (`--scanners`, `--exclude-scanners`, `enabled: false`, or `--python-only`), or its platform is not supported. | Nothing, unless you expected it to run. |
 | `MISSING` | The scanner never ran: its tool was not found, was found only inside the scanned directory, or the scanner could not be sandboxed as requested. | Install the tool (`ash dependencies install`), or see [Troubleshoot](troubleshoot.md). |
+| `SKIPPED` (nothing to read) | The scanner ran and had nothing to read, such as actionlint in a repository with no workflows. | Nothing, unless you expected it to find files. |
 | `PASSED` | The scanner ran and nothing reached its threshold. Findings below the threshold still show in the severity columns. | Nothing. |
 
 Lines under the table add what the status cannot say: `Incomplete coverage` names a
@@ -109,13 +113,13 @@ every scanner was `SKIPPED`, or a file a converter could not convert makes the s
 1, and an actionable finding makes it exit 2. [Set the gate](set-the-gate.md) changes
 these rules, and [Exit codes](../reference/exit-codes.md) lists them all.
 
-The markdown, text and HTML reports carry the same table, and `ash.flat.json` has the
+The Markdown, text, and HTML reports carry the same table, and `ash.flat.json` has the
 same counts under `scanner_metrics`.
 
 ## How ASH counts findings {#counting}
 
 The counts come from the aggregated SARIF after suppressions are applied, so the table,
-the reports and the exit code agree on which findings are actionable.
+the reports, and the exit code agree on which findings are actionable.
 
 A finding counts as suppressed when its SARIF result carries a suppression: one ASH
 applied from a `global_settings.suppressions` entry or an inline `ash-ignore` comment,
@@ -125,7 +129,7 @@ removed, not counted. See [Suppress findings](suppress-findings.md).
 ASH gives each unsuppressed finding one severity, from the first of these that exists:
 
 1. The severity the scanner integration assigned (the result's `issue_severity`
-   property: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW` or `INFO`).
+   property: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, or `INFO`).
 2. The rule's CVSS base score (its `security-severity` property): 9 or more is
    critical, 7 or more high, 4 or more medium, above 0 low. A score of 0, or one that
    is not a number from 0 to 10, counts as no score.
@@ -135,19 +139,13 @@ ASH gives each unsuppressed finding one severity, from the first of these that e
 So a rule's CVSS score wins over the scanner's level, in either direction: an `error`
 advisory with a score of 5.0 counts as medium.
 
-A finding is actionable when its severity is at or above the threshold:
-
-| Threshold | Actionable severities |
-|---|---|
-| `ALL` | critical, high, medium, low, info |
-| `LOW` | critical, high, medium, low |
-| `MEDIUM` | critical, high, medium |
-| `HIGH` | critical, high |
-| `CRITICAL` | critical |
+A finding is actionable when its severity is at or above the threshold;
+[Severity thresholds](set-the-gate.md#thresholds) lists the severities each threshold
+includes.
 
 Two things make counts differ between outputs:
 
-- `ash.flat.json`, `ash.csv` and `ash inspect findings` map a SARIF `error` with no
+- `ash.flat.json`, `ash.csv`, and `ash inspect findings` map a SARIF `error` with no
   severity of its own to high, not critical. A checkov finding that the table counts as
   critical shows as `HIGH` in `ash.flat.json`.
 - ASH does not merge findings across scanners. When two scanners report the same issue,
@@ -174,7 +172,7 @@ All paths are relative to the output directory.
 A row's `missing_reason` in `ash_aggregated_results.json` says why a scanner is
 `MISSING` when ASH knows more than "not installed", for example that its tool was found
 only inside the scanned directory. In that file, read a scanner's `status`; its
-`dependencies_satisfied`, `excluded` and `exit_code` fields keep their defaults in this
+`dependencies_satisfied`, `excluded`, and `exit_code` fields keep their defaults in this
 release. The tool's own exit code is in `scanners/<name>/source/ASH.ScanResults.json`.
 
 To read the results from a script:
@@ -217,13 +215,15 @@ To read another output directory, pass `--output-dir`. ASH looks for the results
 itself:
 
 ```bash
-ash report --output-dir build/ash-results --format sarif
+ash report --output-dir build/ash-results --format sarif --log-level QUIET > build/ash-report.sarif
 ```
 
-`ash report` styles its output for the terminal and wraps it at the terminal's width,
-even when you redirect it. To keep a report in a file, use the copy in `reports/`.
-A missing results file prints `Error loading results file` and exits 1. An unknown
-format lists the reporter names and exits 1. The reporters are listed in
+`ash report` writes its log to standard output too, so pass `--log-level QUIET` when you
+redirect it. The JSON formats print as plain JSON. The others are wrapped at the
+terminal's width, or at 80 columns when the output is not a terminal, so to keep one of
+those in a file, use the copy in `reports/`. A missing results file prints
+`Error loading results file` and exits 1. An unknown format lists the reporter names and
+exits 1. The reporters are listed in
 [Reporters](../reference/reporters.md).
 
 ## Explore findings with `ash inspect findings`
@@ -250,11 +250,13 @@ The Severity column is the SARIF level alone (`error` is high, `warning` medium,
 low), so it can differ from the summary table.
 
 `x` asks for a reason and an optional expiration date, then adds a suppression for that
-rule, file and line to a config file: the one `--config` or `ASH_CONFIG` names, else the
+rule, file, and line to a config file: the one `--config` or `ASH_CONFIG` names, else the
 config file a scan of the current directory would use, else `.ash.yaml` in the current
-directory. It refuses a TOML file, and a file that `extends` another and has no
-suppressions list of its own, because writing one there would replace the base file's
-list. The suppression applies from the next scan. See
+directory. It writes YAML. It refuses a TOML file, and a file that `extends` another and
+has no suppressions list of its own, because writing one there would replace the base
+file's list. It appends YAML to a JSON file, which ASH then cannot read, so edit
+`.ash.json` files by hand. If the file already has a suppression for the same rule and
+file, `x` writes nothing. The suppression applies from the next scan. See
 [Suppress findings](suppress-findings.md) before you suppress from here.
 
 ## Check which SARIF fields survive with `ash inspect sarif-fields`
@@ -269,7 +271,7 @@ ash inspect sarif-fields --sarif-dir .ash/ash_output --output-dir build/sarif-fi
 ```
 
 It prints a summary and writes `sarif_fields.json`, `sarif_fields.csv`,
-`sarif_excluded_fields.json`, `sarif_excluded_fields.csv` and
+`sarif_excluded_fields.json`, `sarif_excluded_fields.csv`, and
 `sarif_validation_report.html` to the output directory, which defaults to
 `.ash/ash_output/inspect` under the current directory. It exits 1 when it finds no SARIF
 files.

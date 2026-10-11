@@ -6,7 +6,7 @@ What a scan writes to its output directory. The output directory is
 
 ## Layout
 
-A scan of a project with Python, a CloudFormation template and a GitHub Actions workflow,
+A scan of a project with Python, a CloudFormation template, and a GitHub Actions workflow,
 with every built-in scanner installed:
 
 ```text
@@ -49,29 +49,35 @@ with every built-in scanner installed:
 
 | Path | Written by | Contents |
 |---|---|---|
-| `ash.log` | ASH's logger | The run's log, INFO and above by default, one tab-separated line per record: time, level, source location, message. |
+| `ash.log` | ASH's logger | The run's log, INFO and above by default, one tab-separated line per record: time, level, source location, and message. Lines from a scanner have a field before the message naming the scanner and target, such as `([yellow]bandit[/yellow] @ [magenta]source[/magenta])`, and messages can contain the same Rich markup. |
 | `ash_aggregated_results.json` | the scan engine | Every result of the scan in one document. See [below](#aggregated-results). |
 | `ash-ignore-report.txt` | the scan set step | The ignore rules that shaped the scan set: the text of each `.gitignore` and `.ignore` ASH found, and ASH's built-in rules (`.git` and `**/cdk.out/asset.*` left out, `**/*.template.json` kept). |
 | `ash-scan-set-files-list.txt` | the scan set step | The files ASH selected, one absolute path per line. Scanners that walk the source directory themselves can read more; see [Coverage](coverage.md#what-decides-the-files). |
 | `analysis/` | `ash scan --inspect` | The SARIF field analysis. Empty otherwise. |
-| `converted/` | the converters | `archive/` holds a directory per `.zip`, `.tar` or `.gz` file with the members ASH extracted; `jupyter/` holds each notebook converted to a script (`<name>-converted.py` for a Python notebook). Empty when there was nothing to convert. |
+| `converted/` | the converters | `archive/` holds a directory per `.zip`, `.tar`, or `.gz` file with the members ASH extracted; `jupyter/` holds each notebook converted to a script (`<name>-converted.py` for a Python notebook). Empty when there was nothing to convert. |
 | `reports/` | the reporters | One file per enabled reporter, named `ash.<extension>`. See [below](#reports). |
 | `scanners/<name>/<target>/` | each scanner | `ASH.ScanResults.json` and the tool's own output for one target: `source` for the source directory, `converted` for `converted/`. See [below](#per-scanner-results). |
 
 In workspace mode the workspace's output directory holds the combined
 `ash_aggregated_results.json`, and each project's own output tree is under
-`projects/<project>/`. See [Scale to large repositories](../how-to/scale-large-repos.md).
+`projects/<project>/`. The workspace's `reports/` holds the reports that combine every
+project, and `workspace-reports.json`, which lists where each project's own reports are.
+The reporters that write one file per project, `cyclonedx`, `spdx`, `github-ghas`,
+`gitlab-sast`, and `gitlab-cyclonedx`, write nothing at the workspace level; their files
+are in each project's `reports/`. See
+[Scale to large repositories](../how-to/scale-large-repos.md).
 
 ## Each scan replaces the last
 
 Before a scan writes anything, ASH removes and recreates `analysis/`, `reports/`,
-`scanners/` and `converted/`, and deletes `ash_aggregated_results.json`,
-`ash-ignore-report.txt` and `ash-scan-set-files-list.txt`. `ash.log` is truncated
+`scanners/`, and `converted/`, and deletes `ash_aggregated_results.json`,
+`ash-ignore-report.txt`, and `ash-scan-set-files-list.txt`. `ash.log` is truncated
 when the logger opens it.
 
 `ash scan --use-existing` runs only the report phase: it writes `reports/` again from the
-`ash_aggregated_results.json` already in the output directory, leaves `scanners/` and
-the other files in place, and exits with the verdict of the stored results.
+`ash_aggregated_results.json` already in the output directory, rewrites
+`metadata.summary_stats` in that file, leaves `scanners/` and the other files in place,
+and exits with the verdict of the stored results.
 
 ## Links are refused {#links}
 
@@ -81,7 +87,7 @@ these:
 - the output directory itself, or a directory on the way to it below the source
   directory (the default `.ash/ash_output` is below it, so a repository can commit such
   a link);
-- `analysis`, `reports`, `scanners` or `converted` in the output directory;
+- `analysis`, `reports`, `scanners`, or `converted` in the output directory;
 - the files ASH writes there by a fixed name.
 
 The check runs before anything is written or deleted, in every run mode and whatever
@@ -116,7 +122,7 @@ reads it. Its JSON schema is
 | `used_suppressions` | The ids of the `global_settings.suppressions` entries that matched a finding (format below). Inline `ash-ignore` comments are not listed. |
 | `workspace` | The workspace plan and per-project outcomes in workspace mode; `null` otherwise. |
 
-A suppression's id is its path, rule id, first line and last line joined with `|`, with
+A suppression's ID is its path, rule ID, first line, and last line joined with `|`, with
 `*` for a part the entry does not set, so an entry for rule `B602` in `app.py` with no
 lines is `app.py|B602|*|*`. Entries that set package or symbol fields have more parts.
 
@@ -124,21 +130,21 @@ lines is `app.py|B602|*|*`. Entries that set package or symbol fields have more 
 day), `generated_at`, `project_name` (`ASH` in a single-directory scan, whatever the
 config's `project_name` says), `tool_version` (the ASH version), `summary_stats`,
 `validation_summary`, `execution_discrepancy_report`, `shard` (set by
-`--shard-index`), `expected_scanners` and `plugin_load_errors` (plugin groups that
+`--shard-index`), `expected_scanners`, and `plugin_load_errors` (plugin groups that
 failed to import).
 
 `summary_stats` totals the scan: `severity_counts` (`suppressed`, `critical`, `high`,
 `medium`, `low`, `info`), `total` (unsuppressed findings), `actionable`, the count of
 scanners in each status (`passed`, `failed`, `missing`, `skipped`, `error`), and
-`start`, `end` and `duration`.
+`start`, `end`, and `duration`.
 
 ### Scanner rows
 
-Each `scanner_results` row has `status` (`PASSED`, `FAILED`, `ERROR`, `MISSING` or
+Each `scanner_results` row has `status` (`PASSED`, `FAILED`, `ERROR`, `MISSING`, or
 `SKIPPED`; see [the summary table](../how-to/read-results.md#read-the-summary-table)),
 `severity_counts`, `finding_count`, `actionable_finding_count`,
 `suppressed_finding_count`, `duration`, `missing_reason`, and three fields that keep
-their defaults in this release: `dependencies_satisfied` (`true`), `excluded` (`false`)
+their defaults in this release: `dependencies_satisfied` (`true`), `excluded` (`false`),
 and `exit_code` (`0`). Read `status` to learn whether a scanner ran, and
 `ASH.ScanResults.json` for the tool's exit code.
 
@@ -207,8 +213,8 @@ then exits 1, because the scanners were given fewer files than the repository ha
 Each entry under `ash_config.global_settings.suppressions` and
 `ash_config.global_settings.ignore_paths` has a `client_supplied` flag. ASH sets it to
 `true` on entries that came from the config file of a tree an MCP client delivered, and
-marks the findings they hide in the SARIF (below). A config file can also set the flag
-itself, so read it as a label, not as proof of where an entry came from. See
+marks the findings they hide in the SARIF (below). Treat the flag as a label for reading
+results, not as an access control. See
 [Configuration trust model](../concepts/trust-model.md#client-supplied).
 
 ## SARIF {#sarif}
@@ -221,20 +227,23 @@ itself, so read it as a label, not as proof of where an entry came from. See
 - `tool.extensions` has one entry per scanner that produced SARIF, named after the
   scanner, carrying that scanner's rules. A scanner that produces only an SBOM, such as
   syft, has no entry. In this release each extension's `version` is ASH's version, not
-  the tool's.
+  the tool's. Some extensions also give the tool's own version in `semanticVersion`; in
+  a default scan, bandit, semgrep, opengrep, and zizmor do.
 - `results` holds every scanner's results, appended without merging duplicates.
   `ruleIndex` is removed, so match results to rules by `ruleId` within the extension
   named in `properties.scanner_name`.
 - `invocations` has one entry per scanner run, with its command line, working
-  directory, exit code and times. The command lines contain absolute paths from the
+  directory, exit code, and times. The command lines contain absolute paths from the
   machine that ran the scan.
 
 Each result's `properties` carries `scanner_name`, `tags`, `scanner_details`
-(`tool_name`, `tool_version` and the run's start and end times), and `issue_severity`
+(`tool_name`, `tool_version`, and the run's start and end times), and `issue_severity`
 when the scanner integration assigned one. `scanner_version` and
 `scanner_details.tool_version` hold ASH's version in this release. Locations in the
 source directory are relative to it. Findings in `converted/` point into the output
-directory.
+directory. In this release, detect-secrets locations can be relative to the working
+directory instead, when you run ASH from another directory with `--source-dir`; in
+workspace mode this can give those results a wrong `workspace_uri`.
 
 <!-- doctest: config kind=ash-output -->
 ```json
@@ -280,7 +289,7 @@ A suppressed finding stays in `results` with a `suppressions` entry:
 
 Client-supplied entries also carry `properties.clientSupplied: true`. A finding under
 one of your own `global_settings.ignore_paths` is removed from the results, not
-suppressed. See [Suppressions, ignore paths and scanner exclusions](../concepts/suppressions.md).
+suppressed. See [Suppressions, ignore paths, and scanner exclusions](../concepts/suppressions.md).
 
 In workspace mode the document has one run per project. Each run declares its
 project's root in `originalUriBaseIds`, keeps its URIs relative to that root, and gives
@@ -321,7 +330,7 @@ code.
 
 `scanners/<name>/` is where each scanner writes, and under the sandbox it is the only
 directory a scanner can write to. Each target's directory below it holds the tool's raw
-output (SARIF, JSON, `<Class>.stdout.log` and `<Class>.stderr.log`), the configuration
+output (SARIF, JSON, `<Class>.stdout.log`, and `<Class>.stderr.log`), the configuration
 files ASH generated for the tool, and `ASH.ScanResults.json`, ASH's record of that run.
 Some scanners keep the files ASH generated in `scanners/<name>/` itself. Every scanner
 gets a directory; one that did not run holds only a short `ASH.ScanResults.json` with
@@ -337,4 +346,4 @@ its status.
 | `finding_count`, `severity_counts` | How many results the run produced, suppressed ones included, and their split by severity, with suppressed results under `suppressed`. |
 | `status` | The status of this run. It can differ from the scanner's row in `scanner_results`, which is the verdict the summary table shows. |
 | `targets_attempted`, `targets_failed` | For scanners that count their inputs, how many they tried and how many they could not evaluate. |
-| `raw_results` | For a failed run, `errors`, `exception` and `stack_trace`. |
+| `raw_results` | For a failed run, `errors`, `exception`, and `stack_trace`. |

@@ -3,7 +3,7 @@
 Which scanners read which files. Every built-in scanner is on by default, and each one
 decides for itself what to read, so a scanner with nothing to read in your repository
 reports `SKIPPED` or `PASSED` with no findings. [Scanners](scanners.md) lists each
-scanner's tool, version and options, and [Choose scanners](../how-to/choose-scanners.md)
+scanner's tool, version, and options, and [Choose scanners](../how-to/choose-scanners.md)
 shows how to turn them on and off.
 
 Community plugins run only when you load their module with `ash_plugin_modules` or
@@ -15,10 +15,11 @@ Community plugins run only when you load their module with `ash_plugin_modules` 
 |---|---|---|
 | Python code | bandit, semgrep, opengrep | snyk-code |
 | JavaScript and TypeScript code | semgrep, opengrep | snyk-code |
-| Java, Go, Ruby, C#, PHP and other languages | semgrep, opengrep, as far as their rules cover the language | snyk-code |
-| Python dependencies (`requirements.txt`, lockfiles) | grype, trivy, syft | guarddog, trivy-repo |
-| npm, Yarn and pnpm dependencies | npm-audit, grype, trivy, syft | guarddog, trivy-repo |
-| Other dependency manifests and lockfiles (`go.mod`, `pom.xml` and the others grype and trivy recognize) | grype, trivy, syft | guarddog (Go, Ruby gems, Rust crates), trivy-repo |
+| Java, Go, Ruby, C#, PHP, and other languages | semgrep, opengrep, as far as their rules cover the language | snyk-code |
+| Python dependencies (`requirements.txt`, lockfiles) | grype, trivy, syft | trivy-repo |
+| npm, Yarn, and pnpm dependencies | npm-audit, grype, trivy, syft | trivy-repo |
+| Other dependency manifests and lockfiles (`go.mod`, `pom.xml`, and the others grype and trivy recognize) | grype, trivy, syft | trivy-repo |
+| Your own package's manifest (`setup.py`, `pyproject.toml`, `package.json`, `go.mod`, `*.gemspec`, `Cargo.toml`) | | guarddog |
 | CloudFormation templates | cfn-nag, cfn-lint, cfn-guard, cdk-nag, checkov | trivy-repo |
 | AWS CDK apps | the CloudFormation scanners, on the templates `cdk synth` writes to `cdk.out`; the source-code scanners on the app code | trivy-repo |
 | Terraform | checkov | trivy-repo |
@@ -29,10 +30,10 @@ Community plugins run only when you load their module with `ash_plugin_modules` 
 | Secrets, in any file | detect-secrets, gitleaks | ferret-scan (sensitive data), trivy-repo |
 | A software bill of materials | syft | |
 | Jupyter notebooks | every scanner that reads the converted script (see [Converted files](#converted-files)) | |
-| `.zip`, `.tar` and `.gz` archives | every scanner that reads the extracted files (see [Converted files](#converted-files)) | |
+| `.zip`, `.tar`, and `.gz` archives | every scanner that reads the extracted files (see [Converted files](#converted-files)) | |
 
 For a CDK app, synthesize before you scan, so that `cdk.out` holds the templates. If your
-root `.gitignore` excludes `cdk.out`, cfn-nag, cfn-lint, cfn-guard and cdk-nag do not
+root `.gitignore` excludes `cdk.out`, cfn-nag, cfn-lint, cfn-guard, and cdk-nag do not
 see them, and checkov does; see
 [What decides the files](#what-decides-the-files).
 
@@ -45,12 +46,12 @@ them to the tool.
 | Scanner | Type | What it reads | `--python-only` | `--mode precommit` |
 |---|---|---|---|---|
 | actionlint | IaC | Selected files: GitHub Actions workflows | no | no |
-| bandit | SAST | Whole directory: Python files, skipping `.venv/`, `venv/` and `node_modules/` | yes | yes |
+| bandit | SAST | Whole directory: Python files, skipping `.venv/`, `venv/`, and `node_modules/` | yes | yes |
 | cdk-nag | IaC | Selected files: CloudFormation templates | yes | yes |
-| cfn-guard | IaC | Selected files: CloudFormation templates, against the `wa-Security-Pillar` rule set by default | no | no |
+| cfn-guard | IaC | Selected files: CloudFormation templates, against the `wa-Security-Pillar` ruleset by default | no | no |
 | cfn-lint | IaC | Selected files: CloudFormation templates | yes | no |
 | cfn-nag | IaC | Selected files: CloudFormation templates | no | no |
-| checkov | IaC | Whole directory, every checkov framework (`--framework all`), skipping `.venv/`, `venv/` and `node_modules/` | yes | yes |
+| checkov | IaC | Whole directory, every checkov framework (`--framework all`), skipping `.venv/`, `venv/`, and `node_modules/` | yes | yes |
 | detect-secrets | Secrets | Selected files: every file in the scan set except generated lockfiles | yes | yes |
 | gitleaks | Secrets | Whole directory: the files on disk, not git history | no | no |
 | grype | SCA | Whole directory: the packages it catalogs from manifests and lockfiles | no | no |
@@ -64,7 +65,7 @@ them to the tool.
 | guarddog | SCA | Selected files: a copy of each package root (see [Dependencies](#dependencies)) | yes | no |
 | hadolint | IaC | Selected files: Dockerfiles | no | no |
 | snyk-code | SAST | Whole directory, sent to Snyk's service | yes | no |
-| trivy-repo | SAST | Whole directory: `trivy repository` with the vulnerability, secret, misconfiguration and license scanners | no | no |
+| trivy-repo | SAST | Whole directory: `trivy repository` with the vulnerability, secret, misconfiguration, and license scanners | no | no |
 
 `--python-only` runs only the scanners marked yes and reports the rest `SKIPPED`. A
 scanner marked no whose tool is not installed is reported `MISSING` instead, which makes
@@ -84,7 +85,7 @@ inside a `.github` directory, at any depth, so `sub/.github/workflows/ci.yml` co
 extension is not.
 
 zizmor reads the same workflows plus every `action.yml` and `action.yaml`, and skips
-paths under `.venv`, `venv` or `node_modules`. zizmor itself rejects an upper-case
+paths under `.venv`, `venv`, or `node_modules`. zizmor itself rejects an upper-case
 extension such as `CI.YML`, and the scanner then reports `ERROR`.
 
 With no workflows, both report `SKIPPED`. checkov also checks workflows, through its
@@ -92,8 +93,8 @@ own GitHub Actions framework.
 
 ### CloudFormation
 
-cfn-nag, cfn-lint, cfn-guard and cdk-nag share one rule: a file in the scan set whose
-name ends in `.json`, `.yaml` or `.yml` (lowercase) and that parses to a document with a
+cfn-nag, cfn-lint, cfn-guard, and cdk-nag share one rule: a file in the scan set whose
+name ends in `.json`, `.yaml`, or `.yml` (lowercase) and that parses to a document with a
 top-level `Resources` mapping. `AWSTemplateFormatVersion` is not required. Files ending
 in `.template` are not read by these four; checkov reads them.
 
@@ -104,7 +105,7 @@ cdk-nag applies its AWS Solutions rule pack. With no templates, all four report
 ### Dependencies {#dependencies}
 
 npm-audit finds each `package.json` and audits the first lockfile beside it of
-`yarn.lock`, `pnpm-lock.yaml` and `package-lock.json`, with `yarn`, `pnpm` or `npm`. A
+`yarn.lock`, `pnpm-lock.yaml`, and `package-lock.json`, with `yarn`, `pnpm`, or `npm`. A
 `package.json` with no lockfile is not audited. If `yarn` or `pnpm` is not installed,
 that lockfile is skipped with a warning. With no lockfile anywhere, npm-audit reports
 `PASSED`.
@@ -114,9 +115,11 @@ lockfile their own catalogers recognize. trivy runs only its vulnerability scann
 unless you set `scanners.trivy.options.scanners`. syft builds the SBOM from the same
 kind of catalog and reports no findings.
 
-guarddog scans each package root it finds: `setup.py`, `setup.cfg` or `pyproject.toml`
-(PyPI), `package.json` (npm), `go.mod` (Go), `action.yml` or `action.yaml` (GitHub
-Actions), `*.gemspec` (RubyGems) and `Cargo.toml` (crates).
+guarddog checks your own package for signs of malicious code: it scans each package root
+it finds, `setup.py`, `setup.cfg`, or `pyproject.toml` (PyPI), `package.json` (npm),
+`go.mod` (Go), `action.yml` or `action.yaml` (GitHub Actions), `*.gemspec` (RubyGems),
+and `Cargo.toml` (crates). It checks your dependency manifests and lockfiles only with
+`scanners.guarddog.options.verify: true`, which downloads every dependency.
 
 ### Dockerfiles
 
@@ -134,7 +137,7 @@ the files on disk and not the git history.
 
 ### Source code
 
-bandit, semgrep, opengrep, checkov and snyk-code read the source directory themselves.
+bandit, semgrep, opengrep, checkov, and snyk-code read the source directory themselves.
 semgrep and opengrep always use ASH's bundled rules. Online they add the ruleset in
 their `config` option, `p/ci` by default (`scanners.semgrep.options.config`); offline
 they add the rules cached in the directory `SEMGREP_RULES_CACHE_DIR` or
@@ -157,16 +160,17 @@ Before the scan, ASH lists the files to scan, the scan set, and writes it to
   `.gitignore` excludes a whole directory such as `cdk.out`: ASH then skips the
   directory, and only the scanners that walk the directory themselves, such as
   checkov, see the templates in it.
-- `node_modules`, `.venv` and `venv` stay in the scan set. bandit, checkov, zizmor and
+- `node_modules`, `.venv`, and `venv` stay in the scan set. bandit, checkov, zizmor, and
   guarddog skip them on their own.
 
 The scanners marked "Selected files" above read only the scan set. The scanners that
 walk the directory themselves do not use it, so they can report files your `.gitignore`
-excludes; bandit, checkov, gitleaks, grype and trivy do.
+excludes; bandit, checkov, gitleaks, grype, and trivy do.
 
 To drop findings from every scanner, add paths to `global_settings.ignore_paths`. ASH
-removes the findings under them after the scan, and actionlint, zizmor, bandit,
-detect-secrets, hadolint, guarddog and the converters also skip those files. See
+removes the findings under them after the scan, and actionlint, zizmor, detect-secrets,
+hadolint, guarddog, and the converters also skip those files. bandit still reads them,
+and ASH drops its findings there afterward. See
 [Suppress findings](../how-to/suppress-findings.md).
 
 Findings inside the output directory are dropped, except in `converted/`.
@@ -178,10 +182,10 @@ its whole input.
 Two converters run before the scanners, and every selected scanner then scans their
 output in `converted/` as a second target:
 
-- `archive` extracts `.zip`, `.tar` and `.gz` files from the scan set. It extracts only
+- `archive` extracts `.zip`, `.tar`, and `.gz` files from the scan set. It extracts only
   members with a file extension ASH knows how to scan, compared case-sensitively, so
   files such as `Dockerfile` or `go.mod` inside an archive, and archives inside
-  archives, are not extracted. `.tgz`, `.bz2`, `.xz`, `.jar` and `.whl` files are not
+  archives, are not extracted. `.tgz`, `.bz2`, `.xz`, `.jar`, and `.whl` files are not
   opened.
 - `jupyter` converts each `.ipynb` notebook to a script with nbconvert.
 
