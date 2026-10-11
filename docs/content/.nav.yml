@@ -32,7 +32,7 @@ nav:
       - Migrate from v2: how-to/migrate-from-v2.md
   - Concepts:
       - How ASH works: concepts/how-ash-works.md
-      - Trust model: concepts/trust-model.md
+      - Configuration trust model: concepts/trust-model.md
       - Scanning untrusted code: concepts/scanning-untrusted-code.md
       - Scanner sandbox: concepts/sandbox.md
       - Content databases: concepts/content-databases.md
@@ -52,16 +52,16 @@ nav:
       - Coverage by language: reference/coverage.md
       - Python API: reference/python-api.md
   - Plugins:
-      - Plugin model: plugins/index.md
+      - Plugins: plugins/index.md
       - Built-in scanner pages: "docs/plugins/builtin/*.md"
       - Community plugins:
-          - Overview: docs/plugins/community/index.md
+          - Community plugins: docs/plugins/community/index.md
           - "docs/plugins/community/*.md"
       - AWS reporters: plugins/aws.md
-      - Write a scanner: plugins/write-a-scanner.md
-      - Write a reporter: plugins/write-a-reporter.md
-      - Write a converter: plugins/write-a-converter.md
-      - Event subscribers: plugins/event-subscribers.md
+      - Write a scanner plugin: plugins/write-a-scanner.md
+      - Write a reporter plugin: plugins/write-a-reporter.md
+      - Write a converter plugin: plugins/write-a-converter.md
+      - Subscribe to scan events: plugins/event-subscribers.md
   - Contributing:
       - Development setup: contributing/index.md
       - Testing: contributing/testing.md
