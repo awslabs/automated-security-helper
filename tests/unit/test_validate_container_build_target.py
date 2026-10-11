@@ -3,13 +3,11 @@
 
 """Every image the validate-container action builds or scans with is the ``ci`` stage.
 
-The action used to rely on CI variables forcing ``ash build-image`` and
-``ash --mode container`` onto the root ``ci`` stage: its nerdctl leg hardcodes
-``IMAGE: automated-security-helper:ci`` as the tag of the image it removes before a
-retry, and the license check that follows reads ``automated-security-helper:ci`` by
-default. CI variables no longer choose the stage, so each invocation has to ask for
-``ci`` itself, or the action builds ``non-root`` and then looks for a ``ci`` image
-nothing built.
+Its nerdctl leg hardcodes ``IMAGE: automated-security-helper:ci`` as the tag of the
+image it removes before a retry, and the license check that follows reads
+``automated-security-helper:ci`` by default. CI variables do not choose the stage,
+so each invocation asks for ``ci`` itself; without it the action would build
+``non-root`` and then look for a ``ci`` image nothing built.
 """
 
 from __future__ import annotations

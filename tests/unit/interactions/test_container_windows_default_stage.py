@@ -4,11 +4,9 @@
 """On Windows the default image stage is ``ci``, for both commands, and only the default.
 
 The non-root user cannot write a bind-mounted output directory on Windows, so a
-Windows host builds the ``ci`` stage when no stage is asked for. That used to be
-true of ``ash build-image`` alone, and there it overrode an explicit
-``--build-target non-root`` too, while ``ash --mode container`` on Windows built
-``non-root`` and then could not write its reports. Now both commands default to
-``ci`` on Windows, and an explicit ``--build-target`` wins on every platform.
+Windows host builds the ``ci`` stage when no stage is asked for, with
+``ash build-image`` and with ``ash --mode container`` alike. An explicit
+``--build-target`` wins on every platform.
 """
 
 from __future__ import annotations
@@ -99,7 +97,7 @@ def test_the_stage_built(
     from automated_security_helper.cli.main import app
 
     _pretend_windows(monkeypatch, windows)
-    # `ash build-image` used to make the decision itself, from its own `platform`.
+    # `ash build-image` leaves the decision to the container runner.
     host = SimpleNamespace(system=lambda: "Windows" if windows else "Linux")
     monkeypatch.setattr(image, "platform", host, raising=False)
 

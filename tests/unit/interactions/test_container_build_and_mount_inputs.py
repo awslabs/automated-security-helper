@@ -70,8 +70,8 @@ _SCRUBBED_ENV = (
     "ASH_BASE_IMAGE_OVERRIDE",
 )
 
-#: A CI-like variable with the values a fix could special-case: a truthy one, the
-#: string "false", an empty string, a number, and a build id.
+#: A CI-like variable with values a check could treat differently: a truthy one,
+#: the string "false", an empty string, a number, and a build id.
 CI_SETTINGS = [
     pytest.param("CI", "true", id="CI=true"),
     pytest.param("CI", "false", id="CI=false"),

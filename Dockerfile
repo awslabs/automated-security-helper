@@ -285,8 +285,8 @@ RUN with-retry 'corepack enable && corepack prepare yarn@stable --activate && co
 #
 # Grype/Syft/Semgrep - Also sets default location env vars for root user for CI compat
 #
-# Owned by root and writable by root only: a scan trusts the database and the rules
-# in these caches, so no other user may replace them. The offline build below
+# Owned by root and writable by root only: a scan reads the database and the rules
+# in these caches, so they have one owner. The offline build below
 # writes them as root. At scan time only grype's database update writes here,
 # which the ci stage runs as root and for which the non-root stage hands
 # GRYPE_DB_CACHE_DIR to its own user.

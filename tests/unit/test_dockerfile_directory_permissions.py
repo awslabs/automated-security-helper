@@ -3,15 +3,11 @@
 
 """No directory in ASH's image is writable by every user unless it has to be.
 
-Why this file exists
---------------------
-The Dockerfile used to ``chmod 777`` /deps, the grype database cache and the
-offline semgrep and opengrep rule caches under it, and ``chmod -R 777`` ASH_BIN_PATH
-(/.ash/bin), which is first on PATH. Any user in the container could then replace a
-scanner binary, the rules a scan trusts or grype's database a scan reads,
-and the next scan would run with them.
+The scanner binaries in ASH_BIN_PATH (/.ash/bin, first on PATH), the rules under
+/deps and grype's database are what a scan runs and reads, so each has one owner
+and no other user may write it.
 
-What each directory gets instead, and why:
+What each directory gets, and why:
 
 - /deps, the semgrep and opengrep rule caches, /ash and ASH_BIN_PATH: owned by root
   and writable by root only. Nothing writes to them at scan time.
@@ -364,7 +360,7 @@ def test_an_offline_image_keeps_its_database_root_owned(instructions):
     ],
 )
 def test_the_parser_sees_every_way_to_set_a_mode(dockerfile, path):
-    """Every Dockerfile form that sets a mode, so a new one cannot slip past the rule."""
+    """Every Dockerfile form that sets a mode, so a mode set by any of them is seen."""
     found = _chmods(_instructions("FROM scratch AS core\n" + dockerfile), {})
 
     assert [

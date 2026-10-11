@@ -198,8 +198,8 @@ function Invoke-ASH {
         # The commands below run through Invoke-Expression, which parses its string as
         # PowerShell. Every value that comes from the operator or the file system is
         # therefore written into it by name (`$Scanners[0]`, "$sourceDirFull"), which
-        # Invoke-Expression expands as a value, never by its text, which it would parse
-        # and could run: a source directory named `a$(...)` ran what was inside.
+        # Invoke-Expression expands as a value without parsing it, so a directory
+        # named `a$(...)` is passed as that name.
         if ($PSBoundParameters.ContainsKey('Scanners')) {
             for ($i = 0; $i -lt $Scanners.Count; $i++) {
                 $ashCmdArgs.Add("--scanners")
@@ -239,7 +239,7 @@ function Invoke-ASH {
         $outputDirFull = Get-Item $OutputDir | Select-Object -ExpandProperty FullName
 
         # --mount reads its value as comma-separated fields, so a comma in a host path
-        # starts a field of its own (x,readonly=false), a double quote starts CSV
+        # starts a field of its own (a,b), a double quote starts CSV
         # quoting, and a line break ends the argument. A path holding one is refused
         # before anything is built or run, with exit 3.
         function Assert-Mountable([string]$Label, [string]$Path) {
@@ -300,10 +300,9 @@ function Invoke-ASH {
                 }
                 $checkoutPrefix = $checkout.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
                 $configFromRepository = $configFull.StartsWith($checkoutPrefix, $pathComparison)
-                # The runner resolves links when it mounts, so a config the scanned
-                # repository reaches through a link -- the file itself or a directory on
-                # the way to it -- could put a host file of its choosing into the
-                # container. Any link on that path refuses the run.
+                # The runner resolves links when it mounts. A config inside the scanned
+                # checkout is mounted only when neither the file nor a directory on the
+                # way to it is a link; otherwise the run is refused.
                 if ($configFromRepository) {
                     $item = Get-Item -LiteralPath $configFull
                     while ($null -ne $item -and $item.FullName.StartsWith($checkoutPrefix, $pathComparison)) {

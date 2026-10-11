@@ -129,9 +129,9 @@
   of the ASH source tree the running package was installed from, found from the
   package itself or from the installer's `direct_url.json`; an installation with no
   such tree (for example, one from a wheel file) is refused with what to do instead.
-  An installed package (in `site-packages`, or with its dist-info beside it) is no
-  longer taken for a clone because a scanned repository committed a `Dockerfile`,
-  `docs/`, `tests/` and the like into its own virtual environment.
+  An installed package (in `site-packages`, or with its dist-info beside it) is not
+  taken for a clone whatever files sit beside it (a `Dockerfile`, `docs/`, `tests/`
+  and the like).
   See [Which Dockerfile ASH builds](docs/content/docs/building-your-own-image.md#which-dockerfile-ash-builds).
 - **Container mode always mounts the source directory read-only.** `ash --mode
   container`, `./ash` and `Invoke-ASH` used to mount `/src` read-write whenever the
@@ -167,10 +167,9 @@
   chain, for one outside the source directory) and the inner scan is given the path it
   has in the container; one that is not an existing file refuses the scan with exit 3,
   as does an `extends` entry that names a base by absolute path, which inside the
-  container is not the same file, a config named inside the scanned tree that links
-  out of it (its target would have been mounted), a config file ASH cannot read, and
-  a config outside `--source-dir` that extends a file inside it, whose own `extends`
-  entries the scanned repository would then choose, or whose chain has a file of the
+  container is not the same file, a config named inside the scanned tree whose real
+  path is outside it, a config file ASH cannot read, and a config outside
+  `--source-dir` that extends a file inside it, or whose chain has a file of the
   scanned checkout extending a file outside it.
   A config inside the scanned checkout but outside `--source-dir` keeps the limits a
   local scan gives a repository's config: the host decides, and passes the scan inside
@@ -188,19 +187,19 @@
   double quote, a carriage return or a line feed in the source or output directory, the
   config file or a file it extends, or the workspace policy now refuses the run with
   exit 3 before anything is built. `--mount` reads its value as comma-separated
-  fields, so a directory named `x,readonly=false` used to add a mount option of its own.
+  fields, so such a character was read as part of the mount options.
   The same holds for `./ash` and `Invoke-ASH`.
 - **A container scan refused for its inputs keeps the previous run's output.** A
   `--config` that could not be handed to the container, or a path `--mount` cannot
   carry, refused the scan with exit 3 only after the previous run's results and reports
   had been cleared from the output directory. The inputs are now checked first.
-- **`Invoke-ASH` exits 3 when it refuses, and runs no part of a path.** Its refusals
+- **`Invoke-ASH` exits 3 when it refuses, and passes each path as written.** Its refusals
   wrote their message with `Write-Error`, which under `$ErrorActionPreference = 'Stop'`
   (every `pwsh` step on GitHub Actions) ends the script with exit 1 before its `exit 3`;
   they now write to stderr directly. The build and run commands it hands to
   `Invoke-Expression` had the source, output and config paths, the image name and the
-  other values spliced into the string, so PowerShell parsed them, and a directory
-  named `a$(...)` ran what was inside the parentheses. They are now passed by name.
+  other values spliced into the string, which PowerShell parses. They are now passed
+  by name, so each reaches the runner as written, `$(...)` included.
 - **`./ash` mounts the directory you named, or stops.** A `--source-dir` it could not
   enter (one that does not exist) left the working directory in its place, and that
   was mounted and scanned; it now exits 1, as `ash --source-dir` does, and so does an
@@ -212,9 +211,8 @@
   out of the reports and out of the exit code the host computes from them.
 - **The container image no longer has directories every user can write.** `/deps`,
   the grype database cache and the offline semgrep and opengrep rule caches under it
-  were mode 777, and `/.ash/bin`, first on `PATH`, was `chmod -R 777`, so any user in
-  the container could replace a bundled tool, the rules or grype's database
-  a later scan used. They are root-owned and writable by root only. The grype database
+  were mode 777, and `/.ash/bin`, first on `PATH`, was `chmod -R 777`. They are
+  root-owned and writable by root only. The grype database
   cache is owned by the user the image runs as (root in `ci`, the unprivileged user in
   `non-root`), because its update writes it at scan time; in an offline image, which never
   updates it, it stays root's. A `non-root` image started under another UID than it

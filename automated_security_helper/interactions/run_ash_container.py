@@ -134,11 +134,11 @@ _INSTALL_DIR_NAMES = ("site-packages", "dist-packages")
 def _is_checkout(root: Path) -> bool:
     """Whether *root*, the directory holding the package, is a clone of the repository.
 
-    The markers alone are not enough: a scanned repository can commit them into its
-    own ``.venv/.../site-packages`` and have ASH installed there. A package an
-    installer put in place sits in a site-packages (or dist-packages) directory with
-    its distribution's dist-info beside it, and a clone has neither, so either one
-    rules a clone out.
+    The markers alone are not enough, since the same files can sit beside an
+    installed package, for example in a project's own ``.venv/.../site-packages``.
+    A package an installer put in place sits in a site-packages (or dist-packages)
+    directory with its distribution's dist-info beside it, and a clone has neither,
+    so either one rules a clone out.
     """
     if root.name in _INSTALL_DIR_NAMES:
         return False
@@ -472,12 +472,10 @@ def _resolve_build_target(
     be written. It is the same for ``ash --mode container`` and ``ash build-image``;
     an explicit stage wins on every platform.
 
-    Environment variables play no part. ``CI``, ``IsCI``, ``ISCI`` and
-    ``CODEBUILD_BUILD_ID`` used to select the root ``ci`` stage whenever they were
-    set to anything, ``CI=false`` and an empty value included, and to override an
-    explicit ``--build-target non-root`` while doing it. ``ci`` is now built when it
-    is asked for, or under ``--custom-containerfile``, which is documented to build
-    on ``ci`` so the custom image is not shifted to the non-root user.
+    Environment variables play no part: ``CI``, ``IsCI``, ``ISCI`` and
+    ``CODEBUILD_BUILD_ID`` do not change the stage, whatever their value. ``ci`` is
+    built when it is asked for, or under ``--custom-containerfile``, which is
+    documented to build on ``ci`` so the custom image keeps running as root.
     """
     if custom_containerfile is not None:
         return BuildTarget.CI.value
@@ -900,8 +898,9 @@ CONTAINER_WORKSPACE_CONFIG_ROOT = "/ash-workspace-config"
 
 #: Characters the runner's ``--mount`` syntax cannot carry in a path. Its value is
 #: read as comma-separated ``key=value`` fields (CSV), so a comma starts a field of
-#: its own (``x,readonly=false``), a double quote starts CSV quoting, and a line
-#: break ends the argument for a runner that reads it a line at a time.
+#: its own (``a,b`` is read as ``a`` and a field ``b``), a double quote starts CSV
+#: quoting, and a line break ends the argument for a runner that reads it a line at
+#: a time.
 _UNMOUNTABLE_CHARACTERS = (",", '"', "\n", "\r")
 
 
@@ -914,14 +913,13 @@ class UnmountablePathError(ContainerInputError):
 
 
 def _refuse_config_linked_out_of_the_tree(config: str, source_dir: Path) -> None:
-    """Refuse a config the scanned repository points at a file outside its tree.
+    """Refuse a config named inside the scanned tree whose real path is outside it.
 
-    A config named inside the scanned tree (the outermost checkout at or above the
-    source directory, as ``config/sandbox_grants.scanned_trees`` defines it) is the
-    repository's path to define. When it, or a directory on the way to it, is a
-    link to something outside that tree, mounting what it resolves to would put a
-    host file of the repository's choosing into a container that runs the
-    repository's code. A link that stays inside the tree is followed.
+    The scanned tree is the outermost checkout at or above the source directory, as
+    ``config/sandbox_grants.scanned_trees`` defines it. A config path inside it is
+    mounted only when its real path, every link on the way resolved, is inside it
+    too; a link that stays inside the tree is followed. A config path outside the
+    tree is followed wherever it points.
     """
     from automated_security_helper.config.sandbox_grants import (
         is_within,
@@ -1142,11 +1140,11 @@ def _refuse_bases_inside_the_source(
 ) -> None:
     """Refuse a chain kept outside the source directory that extends a file inside it.
 
-    Such a chain may reach any file under the outside config's own directory
-    (``config_sources.default_confinement_root``), the operator's. A base inside the
-    source directory belongs to the repository being scanned, so its ``extends``
-    entries would decide which of the operator's files there are mounted into a
-    container that runs the repository's code.
+    The files of a chain kept outside the source directory are mounted from under
+    the outside config's own directory (``config_sources.default_confinement_root``).
+    A base inside the source directory is refused, and with it the files that base
+    extends: a chain is either read whole through ``/src``, with the config inside
+    the source directory, or mounted whole from outside it.
     """
     from automated_security_helper.config.sandbox_grants import is_within
 
@@ -1164,11 +1162,11 @@ def _refuse_bases_inside_the_source(
 def _refuse_repository_bases_reaching_out(
     placements: List[Tuple[Path, str]], source: Path
 ) -> None:
-    """Refuse a chain in which a file the scanned repository wrote extends one it did not.
+    """Refuse a chain where a file inside the scanned checkout extends one outside it.
 
-    A base elsewhere in the scanned checkout is the repository's file, and so are
-    its ``extends`` entries. Followed out of the checkout, they would choose which
-    files under the outside config's directory are mounted into the container.
+    A file of the chain inside the scanned checkout (``scanned_trees``) may extend
+    only files inside that checkout. Files outside it are mounted when a config
+    outside the checkout names them.
     """
     from automated_security_helper.config.sandbox_grants import (
         is_within,
@@ -1210,10 +1208,9 @@ def _host_file_in_container(
     so the bases resolve inside the container to the files the host reads. Only
     those files are mounted, not the directory they are in. A chain that does not
     resolve on the host mounts the file alone: the scan inside reaches the same
-    error and reports it with its own exit code. A chain in which the scanned
-    repository would choose what is mounted is refused with ContainerInputError:
-    one with a base inside the source directory, or one in which a file of the
-    scanned checkout extends a file outside it.
+    error and reports it with its own exit code. A chain with a base inside the
+    source directory, or with a file of the scanned checkout that extends a file
+    outside it, is refused with ContainerInputError.
 
     The path is resolved first, so a symlink is judged, and mounted, by its target.
     """
@@ -1300,15 +1297,13 @@ def _assemble_run_command(
     Args:
         log_level: ``--log-level``, forwarded unless it is INFO, the inner
             default. ``--debug``, ``--verbose`` and ``--simple`` cover only three
-            of the levels, so ERROR, QUIET and TRACE were otherwise lost.
+            of the levels; ERROR, QUIET and TRACE reach the scan this way.
         ignore_suppressions: Forwarded, because the suppressions are applied by
             the scan inside: the host recomputes the verdict from the ash.sarif
             that scan writes, which already carries them.
         config: The host path of ``--config``. It is made readable in the
             container and the inner scan is given the path it has there; see
-            :func:`_host_file_in_container`. Handing the host path over verbatim
-            named a file the container does not have, and the inner scan ran with
-            its defaults.
+            :func:`_host_file_in_container`.
         workspace_config: In workspace mode, the host path of the workspace
             policy the host resolved, handed over the same way as
             ``--workspace-config``.

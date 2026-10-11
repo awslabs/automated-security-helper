@@ -135,7 +135,7 @@ fi
 OUTPUT_DIR="${resolved}"
 
 # --mount reads its value as comma-separated fields, so a comma in a host path starts
-# a field of its own (x,readonly=false), a double quote starts CSV quoting, and a line
+# a field of its own (a,b), a double quote starts CSV quoting, and a line
 # break ends the argument. A path holding one is refused before anything is built or
 # run, with exit 3.
 require_mountable() {
@@ -209,9 +209,8 @@ if [[ "${NO_RUN}" = "NO" && ( "${CONFIG_GIVEN}" = "YES" || -n "${CONFIG_PATH}" )
     case "${CONFIG_NAMED}" in "${tree%/}"/*) named_in_tree="YES" ;; esac
     case "${CONFIG_REAL}" in "${tree%/}"/*) real_in_tree="YES" ;; esac
   done
-  # A config named inside the tree that links, itself or through a directory, to a
-  # file outside it: mounting the target would put a host file of the scanned
-  # repository's choosing into the container.
+  # A config named inside the tree is mounted only when its real path, every link
+  # on the way resolved, is inside the tree too; otherwise the run is refused.
   if [[ "${named_in_tree}" = "YES" && "${real_in_tree}" = "NO" ]]; then
     echo "ERROR: The config file '${CONFIG_PATH}' is inside the scanned tree but is a link, or is reached through one, to '${CONFIG_REAL}', which is outside it. ASH does not mount a file the repository being scanned points it at." >&2
     exit 3

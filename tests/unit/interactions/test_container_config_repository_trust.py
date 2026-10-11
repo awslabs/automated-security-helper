@@ -8,10 +8,9 @@ checkout at or above ``--source-dir``, not only ``--source-dir`` itself -- as
 written by the repository being scanned, and limits what it may set
 (``config/sandbox_grants.py``, ``config/plugin_module_trust.py``). Container mode
 mounts a ``--config`` from outside ``--source-dir`` at ``/ash-config``, where the
-scan inside sees it outside its tree, so a config elsewhere in the same checkout
-lost those limits there. The host now decides, with the same rule a local scan
-uses, and tells the scan inside with ``--config-from-scanned-repository``, which
-applies the in-tree limits to the config and every file it extends.
+scan inside sees it outside its own tree. The host decides, with the same rule a
+local scan uses, and tells the scan inside with ``--config-from-scanned-repository``,
+which applies the in-tree limits to the config and every file it extends.
 """
 
 from __future__ import annotations
@@ -196,5 +195,5 @@ class TestTheScanInsideAppliesTheSameLimits:
 
         assert UNINSTALLED not in local.ash_plugin_modules
         assert marked.ash_plugin_modules == local.ash_plugin_modules
-        # What the scan inside used to do with it: the operator's standing.
+        # Without the mark, the scan inside gives the copy the operator's standing.
         assert UNINSTALLED in unmarked.ash_plugin_modules

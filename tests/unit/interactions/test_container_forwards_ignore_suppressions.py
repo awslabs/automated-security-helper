@@ -3,11 +3,10 @@
 
 """``--ignore-suppressions`` reaches the scan inside the container.
 
-Container mode used to drop it. The host recomputes the exit code from the
-``ash.sarif`` the container writes, and that file carries the suppressions the
-inner scan applied, so with the flag dropped every suppressed finding stayed out
-of the reports and out of the verdict: the scan the operator asked for, which
-reports everything, was never run.
+The host recomputes the exit code from the ``ash.sarif`` the container writes, and
+that file carries the suppressions the inner scan applied. So the flag is
+forwarded to the inner scan, and its reports and the verdict include the
+suppressed findings, as a local scan with the flag does.
 """
 
 from __future__ import annotations

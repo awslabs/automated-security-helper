@@ -5,13 +5,12 @@
 file inside it.
 
 Container mode mounts each file of a config's ``extends`` chain, read-only, where
-the scan inside looks for it. For a config kept outside the source directory, the
-files the chain may reach are bounded by that config's own directory
-(``config_sources.default_confinement_root``), which is the operator's. A base inside
-the source directory is a file of the repository being scanned, and its own
-``extends`` entries then decide which of the operator's files under that directory
-are mounted into a container that runs the repository's code. So the host refuses
-such a chain with exit 3 before anything is built or run, naming the base.
+the scan inside looks for it. A config kept outside the source directory has its
+chain mounted from under that config's own directory
+(``config_sources.default_confinement_root``); a config inside the source directory
+has its chain read through ``/src``. A chain that starts outside the source
+directory and has a base inside it is refused with exit 3 before anything is built
+or run, and the message names the base.
 """
 
 from __future__ import annotations
@@ -66,7 +65,7 @@ def layout(tmp_path, monkeypatch):
     repo = operator / "repo"
     (repo / ".git").mkdir(parents=True)
     (repo / "src" / ".ash").mkdir(parents=True)
-    (operator / "secrets.yaml").write_text("token: abc\n", encoding="utf-8")
+    (operator / "operator-only.yaml").write_text("project_name: p\n", encoding="utf-8")
     monkeypatch.chdir(operator)
     return {"operator": operator, "repo": repo, "source": repo / "src"}
 
@@ -92,7 +91,7 @@ def _refused(result, commands, base: Path) -> None:
 @pytest.mark.parametrize("build", [True, False], ids=["build", "no-build"])
 def test_a_base_inside_the_source_directory_is_refused(build, layout, commands):
     base = layout["source"] / ".ash" / "base.yaml"
-    base.write_text("extends: ../../../secrets.yaml\n", encoding="utf-8")
+    base.write_text("extends: ../../../operator-only.yaml\n", encoding="utf-8")
     config = layout["operator"] / "ash.yaml"
     config.write_text("extends: repo/src/.ash/base.yaml\n", encoding="utf-8")
 

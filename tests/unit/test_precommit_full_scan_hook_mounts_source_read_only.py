@@ -5,10 +5,9 @@
 
 The hook (.pre-commit-hooks.yaml) runs ``ashv3 --mode=container --simple`` in the
 repository being committed to, with no ``--output-dir``, so the output is the
-default ``.ash/ash_output`` inside the source directory. That is exactly the case
-that used to mount ``/src`` read-write. This drives the hook's own command line
-through the CLI the ``ashv3`` script runs, with the runner recorded instead of
-started, and checks the mount.
+default ``.ash/ash_output`` inside the source directory, on its own mount. This
+drives the hook's own command line through the CLI the ``ashv3`` script runs, with
+the runner recorded instead of started, and checks the mounts.
 """
 
 from __future__ import annotations

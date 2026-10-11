@@ -748,7 +748,7 @@ jobs:
   # above builds `ci` (validate-container and run-scan-test pass --build-target ci),
   # so the steps only `non-root` has -- its user's home, the grype cache handed to
   # that user, ASH_BIN_PATH handed back to root, its closing sweep of what an install
-  # left writable by every user -- were checked only as Dockerfile text. This builds
+  # left writable by every user -- are checked here in a built image. This builds
   # the stage with no target, as an operator does, and runs the image permissions
   # probe against the tag that build produces.
   #

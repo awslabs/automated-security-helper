@@ -5,11 +5,10 @@
 
 Before it starts the container, ``_run_container_mode`` clears what an earlier run
 left in the output directory (``_discard_prior_run_artifacts``), so a results file
-found afterwards is this run's. That clearing ran before the inputs were checked: a
-mistyped ``--config``, an ``extends`` entry the container could not resolve, or an
-output path ``--mount`` cannot carry refused the scan with exit 3 and had already
-deleted the last good reports. The inputs are now checked first, and a refusal exits
-3 with the output directory as it was.
+found afterwards is this run's. The inputs are checked before that: a ``--config``
+that does not exist, an ``extends`` entry the container cannot resolve, or an
+output path ``--mount`` cannot carry refuses the scan with exit 3 and leaves the
+output directory as it was.
 """
 
 from __future__ import annotations
@@ -115,7 +114,7 @@ def test_a_config_whose_chain_the_container_cannot_resolve(runtime, tmp_path):
 
 
 def test_an_output_path_the_mount_cannot_carry(runtime, tmp_path):
-    output = tmp_path / "out,readonly=false"
+    output = tmp_path / "out,b"
     _prior_run(output)
 
     result = _scan(output)

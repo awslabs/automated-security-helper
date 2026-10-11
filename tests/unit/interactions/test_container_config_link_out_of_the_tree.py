@@ -1,17 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A ``--config`` the scanned repository points out of its tree is never mounted.
+"""A ``--config`` named inside the scanned tree is mounted only if its real path is too.
 
-A run that names a config inside the repository (``--config .ash/x.yaml``, as CI
-jobs do) trusts the repository to say what that path is. If the repository made it
-a symbolic link -- the file itself, or a directory on the way to it -- to a file
-outside the scanned tree, resolving the link and mounting its target puts that
-host file, say ``~/.docker/config.json`` with a registry token, inside a container
-that runs the repository's own code. So a config path that is inside the scanned
-tree as named but outside it once resolved refuses the run with exit 3, before
-anything is built or run, and so does a config file ASH itself cannot read: the
-runner mounts with its own rights, which can be wider.
+The scanned tree is the outermost checkout at or above ``--source-dir``. A config
+named inside it whose real path is outside it -- the file is a symbolic link, or a
+directory on the way to it is -- refuses the run with exit 3, before anything is
+built or run. A link that stays inside the tree is followed, and so is a link
+outside the tree, which the operator named. A config file ASH cannot read refuses
+the run with exit 3 too: the runner mounts with its own rights, which can be wider.
 """
 
 from __future__ import annotations
@@ -61,11 +58,11 @@ def layout(tmp_path, monkeypatch):
     (repo / ".git").mkdir(parents=True)
     (repo / ".ash").mkdir()
     (repo / "src").mkdir()
-    secret = tmp_path / "home" / ".docker" / "config.json"
-    secret.parent.mkdir(parents=True)
-    secret.write_text('{"auths": {"registry.example": {"auth": "dXNlcjp0b2tlbg=="}}}')
+    outside = tmp_path / "other" / "settings" / "config.json"
+    outside.parent.mkdir(parents=True)
+    outside.write_text('{"name": "outside the tree"}')
     monkeypatch.chdir(repo)
-    return {"repo": repo, "secret": secret}
+    return {"repo": repo, "outside": outside}
 
 
 def _run(source: str, config: str):
@@ -82,7 +79,7 @@ def _refused(result, commands) -> None:
 
 @pytest.mark.parametrize("source", [".", "src"], ids=["source-is-repo", "subdir"])
 def test_a_config_linked_out_of_the_tree_is_refused(source, layout, commands):
-    (layout["repo"] / ".ash" / ".ash.yaml").symlink_to(layout["secret"])
+    (layout["repo"] / ".ash" / ".ash.yaml").symlink_to(layout["outside"])
 
     result = _run(source, ".ash/.ash.yaml")
 
@@ -92,7 +89,7 @@ def test_a_config_linked_out_of_the_tree_is_refused(source, layout, commands):
 
 def test_a_directory_linked_out_of_the_tree_is_refused(layout, commands):
     (layout["repo"] / "conf").symlink_to(
-        layout["secret"].parent, target_is_directory=True
+        layout["outside"].parent, target_is_directory=True
     )
 
     result = _run(".", "conf/config.json")

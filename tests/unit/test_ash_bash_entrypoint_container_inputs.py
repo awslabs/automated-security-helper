@@ -246,8 +246,8 @@ def _inner_args(call: List[str]) -> List[str]:
 
 class TestTheConfigIsReadableInsideTheContainer:
     """``--config`` (or ``ASH_CONFIG``) names a host file; the container sees it
-    only through a mount. The host path itself used to be passed through, which
-    names nothing inside, so the scan ran with its defaults."""
+    only through a mount, so the scan inside is given the path the file has
+    there."""
 
     def test_a_config_inside_the_source_is_read_through_the_source_mount(
         self, fake_runner, project
@@ -315,14 +315,14 @@ class TestAPathTheMountCannotCarryIsRefused:
     """A comma, a double quote or a line break in a mounted path refuses the run.
 
     ``--mount`` is read as comma-separated fields, so a comma in a host path starts a
-    field of its own (``x,readonly=false``), a double quote starts CSV quoting, and a
+    field of its own (``a,b``), a double quote starts CSV quoting, and a
     line break ends the argument. The wrapper refuses with exit 3 before it builds or
     runs anything.
     """
 
     @pytest.mark.parametrize(
         "name",
-        ["x,readonly=false", 'x"y', "x\ny", "x\ry"],
+        ["a,b", 'x"y', "x\ny", "x\ry"],
         ids=["comma", "double-quote", "line-feed", "carriage-return"],
     )
     @pytest.mark.parametrize("which", ["source", "output", "config"])
@@ -407,10 +407,10 @@ class TestAConfigTheScannedRepositoryWroteKeepsItsLimits:
 
 
 class TestAConfigLinkedOutOfTheTreeIsRefused:
-    """A config named inside the scanned checkout that links to a file outside it.
+    """A config named inside the scanned checkout whose real path is outside it.
 
-    Mounting the link's target would put a host file of the repository's choosing
-    into the container; the wrapper refuses with exit 3 instead.
+    The wrapper refuses it with exit 3, whether the file or a directory on the way
+    to it is the link. A link that stays inside the checkout is followed.
     """
 
     @pytest.fixture
@@ -418,14 +418,14 @@ class TestAConfigLinkedOutOfTheTreeIsRefused:
         root = tmp_path / "repo"
         (root / ".git").mkdir(parents=True)
         (root / ".ash").mkdir()
-        secret = tmp_path / "home" / ".docker" / "config.json"
-        secret.parent.mkdir(parents=True)
-        secret.write_text("{}\n")
-        return root, secret
+        outside = tmp_path / "other" / "settings" / "config.json"
+        outside.parent.mkdir(parents=True)
+        outside.write_text("{}\n")
+        return root, outside
 
     def test_a_file_link_is_refused(self, fake_runner, checkout):
-        root, secret = checkout
-        (root / ".ash" / ".ash.yaml").symlink_to(secret)
+        root, outside = checkout
+        (root / ".ash" / ".ash.yaml").symlink_to(outside)
 
         rc, output, calls = _run_ash_status(
             fake_runner, root, ["--no-build", "--config", ".ash/.ash.yaml"]
@@ -435,8 +435,8 @@ class TestAConfigLinkedOutOfTheTreeIsRefused:
         assert calls == []
 
     def test_a_directory_link_is_refused(self, fake_runner, checkout):
-        root, secret = checkout
-        (root / "conf").symlink_to(secret.parent, target_is_directory=True)
+        root, outside = checkout
+        (root / "conf").symlink_to(outside.parent, target_is_directory=True)
 
         rc, output, calls = _run_ash_status(
             fake_runner, root, ["--no-build", "--config", "conf/config.json"]
@@ -480,8 +480,8 @@ class TestAConfigLinkedOutOfTheTreeIsRefused:
 
 class TestAPathStartingWithADashIsAPath:
     """``dirname``, ``basename``, ``readlink``, ``cd`` and ``mkdir`` read a word
-    starting with ``-`` as options unless ``--`` comes first. A config, source or
-    output directory named that way then resolved to the wrong path, or to none."""
+    starting with ``-`` as options unless ``--`` comes first. The wrapper passes
+    ``--``, so a config, source or output path named that way resolves to itself."""
 
     def test_a_config_named_with_a_leading_dash(self, fake_runner, project):
         (project / "-strict.yaml").write_text("project_name: p\n")
@@ -525,9 +525,9 @@ class TestAPathStartingWithADashIsAPath:
 
 
 class TestADirectoryThatCannotBeEnteredEndsTheRun:
-    """``$(cd dir; pwd)`` printed the working directory when ``cd`` failed, so the
-    wrapper mounted that in place of the directory named. It now exits 1, as the
-    Python CLI does for a source directory that does not exist."""
+    """A ``--source-dir`` the wrapper cannot enter, or an ``--output-dir`` it cannot
+    create, ends the run with exit 1, as the Python CLI does for a source directory
+    that does not exist. Nothing else is mounted in its place."""
 
     def test_a_source_directory_that_does_not_exist_ends_the_run(
         self, fake_runner, project
@@ -543,8 +543,8 @@ class TestADirectoryThatCannotBeEnteredEndsTheRun:
 
 class TestANonRootBuildAsUid0IsRefused:
     """The ``non-root`` stage creates its user with ``adduser --uid <UID>``, and UID 0
-    is root, which already exists: the build failed at that step after the whole
-    ``core`` stage had been built. As in ``ash build-image``, the wrapper refuses it
+    is root, which already exists: the build fails at that step after the whole
+    ``core`` stage has been built. As in ``ash build-image``, the wrapper refuses it
     before building, with exit 1 and the two ways forward. Any spelling of zero
     counts: the build reads ``UID=00`` as 0 too."""
 

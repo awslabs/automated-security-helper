@@ -4,16 +4,17 @@
 """CI builds the image's default stage and checks who can write to it.
 
 ``ash build-image`` and ``ash --mode container`` build the ``non-root`` stage when no
-``--build-target`` is given, and that is the image an operator runs. Every scan leg in
-``ash-unified-ci.yml`` builds ``ci`` instead (with an explicit ``--build-target ci``),
-so the steps only ``non-root`` has -- its user's home, the grype cache handed to that
-user, ASH_BIN_PATH handed back to root, its closing sweep of anything left writable by
-every user -- were checked only as Dockerfile text
-(tests/unit/test_dockerfile_directory_permissions.py). One job builds that stage with
-no target, as an operator does, and runs the image permissions probe
-(tests/snapshot/container/runtime/test_container_image_permissions.py) against the
-``automated-security-helper:non-root`` tag it produces. It runs on pull requests too,
-and the required-checks census (test_required_checks_census.py) holds it to the gate.
+``--build-target`` is given, and that is the image an operator runs. The scan legs in
+``ash-unified-ci.yml`` build ``ci`` (with an explicit ``--build-target ci``). The
+steps only ``non-root`` has -- its user's home, the grype cache handed to that user,
+ASH_BIN_PATH handed back to root, its closing sweep of anything left writable by
+every user -- are checked as Dockerfile text by
+tests/unit/test_dockerfile_directory_permissions.py, and in a built image by one
+job: it builds that stage with no target, as an operator does, and runs the image
+permissions probe (tests/snapshot/container/runtime/test_container_image_permissions.py)
+against the ``automated-security-helper:non-root`` tag it produces. It runs on pull
+requests too, and the required-checks census (test_required_checks_census.py) holds
+it to the gate.
 """
 
 from __future__ import annotations

@@ -1,18 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A base the scanned repository wrote may not pull a file from outside its tree into
-a container scan.
+"""In a container scan, a chain file of the scanned checkout extends only files in it.
 
 An operator's config kept outside the source directory may extend a file elsewhere
-in the scanned checkout (a shared ``ci/ash.yaml``, say); the scan inside is then told
-the merged config is the repository's (``--config-from-scanned-repository``). That
-base is still the repository's file, so its own ``extends`` entries are too. The
-chain may reach any file under the operator config's directory, and container mode
-mounts each file it reaches, so an entry such as ``../../.docker/config.json`` in
-that base would mount an operator file of the repository's choosing into a container
-that runs the repository's code. The host refuses such a chain with exit 3 before
-anything is built or run, naming the base and the file it extends. A base inside the
+in the scanned checkout (a shared ``ci/ash.yaml``, say); the scan inside is then
+told the merged config is the repository's (``--config-from-scanned-repository``).
+That base may extend other files of the checkout. One whose ``extends`` entry
+leads out of the checkout refuses the run with exit 3 before anything is built or
+run, and the message names the base and the file it extends. A base inside the
 source directory itself is refused whatever it extends
 (test_container_config_chain_base_in_the_source.py).
 """
@@ -66,10 +62,9 @@ def layout(tmp_path, monkeypatch):
     (repo / ".git").mkdir(parents=True)
     (repo / "src").mkdir(parents=True)
     (repo / "ci").mkdir()
-    (operator / ".docker").mkdir()
-    (operator / ".docker" / "config.json").write_text(
-        '{"auths": {"registry.example": {"auth": "dXNlcjp0b2tlbg=="}}}',
-        encoding="utf-8",
+    (operator / "settings").mkdir()
+    (operator / "settings" / "shared.yaml").write_text(
+        "project_name: p\n", encoding="utf-8"
     )
     config = operator / "ash.yaml"
     config.write_text("extends: repo/ci/ash.yaml\n", encoding="utf-8")
@@ -87,7 +82,7 @@ def test_a_repository_base_extending_a_file_outside_the_tree_is_refused(
     layout, commands
 ):
     base = layout["repo"] / "ci" / "ash.yaml"
-    base.write_text("extends: ../../.docker/config.json\n", encoding="utf-8")
+    base.write_text("extends: ../../settings/shared.yaml\n", encoding="utf-8")
 
     result = _run(layout["config"])
 
@@ -95,7 +90,7 @@ def test_a_repository_base_extending_a_file_outside_the_tree_is_refused(
     assert result.returncode == 3
     assert not rac.container_was_started(result)
     assert str(base.resolve()) in result.stderr
-    assert str((layout["operator"] / ".docker" / "config.json").resolve()) in (
+    assert str((layout["operator"] / "settings" / "shared.yaml").resolve()) in (
         result.stderr
     )
 

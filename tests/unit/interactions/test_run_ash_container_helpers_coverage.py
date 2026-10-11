@@ -1070,11 +1070,9 @@ class TestAssembleRunCommandFlagPassthrough:
         assert "my_plugin" in cmd
 
     def test_config_is_forwarded(self, tmp_path, monkeypatch):
-        """Rewritten: this asserted the host path reached the inner scan verbatim.
+        """The file is mounted read-only and the inner scan is given its path there.
 
-        The container cannot see that path, so the inner scan ran with its
-        defaults. The file is mounted read-only and the inner scan is given the
-        path it has in the container; see test_container_config_reaches_the_scan.py.
+        See test_container_config_reaches_the_scan.py.
         """
         operator = tmp_path / "operator"
         operator.mkdir()

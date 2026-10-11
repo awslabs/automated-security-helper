@@ -3,12 +3,12 @@
 
 """``run_ash_scan(mode=container)`` honors ``ASH_CONFIG`` the way a local scan does.
 
-The CLI reads ``ASH_CONFIG`` as ``--config``, so a CLI run already hands the file
-to the container. A library caller passes ``config=None``, and a local scan then
-uses ``ASH_CONFIG``'s file when no config is found in the source directory
-(config/default_config.py). Container mode passed nothing: the scan inside sees
-neither the host's environment nor that file, so it ran with the defaults. Now
-the file is named for it, in exactly the case a local scan would use it.
+The CLI reads ``ASH_CONFIG`` as ``--config``, so a CLI run hands the file to the
+container. A library caller passes ``config=None``, and a local scan then uses
+``ASH_CONFIG``'s file when no config is found in the source directory
+(config/default_config.py). The scan inside the container sees neither the host's
+environment nor that file, so container mode names the file for it, in exactly the
+case a local scan would use it.
 """
 
 from __future__ import annotations

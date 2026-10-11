@@ -73,7 +73,7 @@ impossible to explain.
 
 ## Who can write to the image's directories
 
-The image keeps what a scan trusts out of reach of other users in the container:
+Who owns each of the image's directories, and who else may write it:
 
 | Directory | Owner | Why |
 |---|---|---|
@@ -87,9 +87,8 @@ clearing group and other write on anything an installer left that way, such as t
 lock files uv creates mode 666 in its cache and tool directories and the files some
 gems ship mode 777 under `/var/lib/gems`.
 
-Earlier images made `/deps`, its caches and `/.ash/bin` writable by every user. An image
-you extend with `--custom-containerfile` keeps these modes unless your Dockerfile
-changes them.
+An image you extend with `--custom-containerfile` keeps these modes unless your
+Dockerfile changes them.
 
 Because only its own user may write the grype database cache, a `non-root` image started
 under a different UID than the one it was built with (`--container-uid`, or the host's)

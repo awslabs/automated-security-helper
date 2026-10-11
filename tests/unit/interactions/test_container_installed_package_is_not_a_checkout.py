@@ -1,19 +1,18 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""An installed ASH is not mistaken for a clone because of files beside it.
+"""An installed ASH is not taken for a clone because of files beside it.
 
-ASH decides it runs from a clone of its repository (revision LOCAL, build the
-Dockerfile beside the package) when ``.github``, ``docs``, ``tests``, a
-``Dockerfile``, ``pyproject.toml`` and a few more sit next to the package. A
-repository being scanned can commit exactly those files into its own
-``.venv/lib/pythonX.Y/site-packages`` and then have ASH installed into that venv,
-as a CI job does with ``pip install`` in the checkout. ASH then built the
-repository's planted Dockerfile, with site-packages as the build context.
+ASH runs from a clone of its repository (revision LOCAL, build the Dockerfile
+beside the package) when ``.github``, ``docs``, ``tests``, a ``Dockerfile``,
+``pyproject.toml`` and a few more sit next to the package. The same files can sit
+beside an installed package too, for example when a project that has them in its
+own ``.venv/lib/pythonX.Y/site-packages`` installs ASH into that venv.
 
 A package that pip or uv installed has its distribution's dist-info directory
 beside it, and sits in a directory named site-packages or dist-packages; a clone
-has neither. Either one means installed, and the markers are not consulted.
+has neither. Either one means installed, and the markers are not consulted: the
+Dockerfile beside the package is not built.
 """
 
 from __future__ import annotations
@@ -66,7 +65,7 @@ Path(report).write_text(json.dumps(
         pytest.param("lib", True, id="dist-info-only"),
     ],
 )
-def test_markers_planted_beside_an_installed_package_do_not_make_it_a_clone(
+def test_markers_beside_an_installed_package_do_not_make_it_a_clone(
     site_name, dist_info, tmp_path
 ):
     repo = tmp_path / "scanned-repo"
@@ -76,8 +75,8 @@ def test_markers_planted_beside_an_installed_package_do_not_make_it_a_clone(
         (site / name).mkdir()
     for name in MARKER_FILES:
         (site / name).write_text("x\n")
-    planted = site / "Dockerfile"
-    planted.write_text("FROM scratch AS non-root\nRUN echo from-the-scanned-repo\n")
+    beside = site / "Dockerfile"
+    beside.write_text("FROM scratch AS non-root\nRUN echo project-dockerfile\n")
     shutil.copytree(
         ASH_PACKAGE,
         site / "automated_security_helper",
@@ -110,7 +109,7 @@ def test_markers_planted_beside_an_installed_package_do_not_make_it_a_clone(
     assert outcome["revision"] != "LOCAL"
     for cmd in outcome["commands"]:
         if cmd[1] == "build":
-            assert Path(cmd[cmd.index("--file") + 1]).resolve() != planted.resolve()
+            assert Path(cmd[cmd.index("--file") + 1]).resolve() != beside.resolve()
             assert Path(cmd[-1]).resolve() != site.resolve()
 
 

@@ -5,12 +5,11 @@
 
 tests/snapshot/container/runtime/test_container_image_permissions.py runs a find
 inside a built image and fails on any file every user may write outside a sticky
-directory. That find looked only under /deps, /ash, /.ash, /src and /out, so the
-mode-777 files a gem ships in /var/lib/gems and the mode-666 lock files uv leaves
-in two home directories were never seen. It now starts at ``/`` and stays on the
-image's own filesystem (``-xdev``), skipping /proc, /sys and /dev and the sticky
-scratch directories /tmp, /var/tmp and /run/lock, whose files belong to whoever
-wrote them.
+directory: the files some gems ship mode 777 under /var/lib/gems and the lock files
+uv creates mode 666 in home directories are such files. The find starts at ``/`` and
+stays on the image's own filesystem (``-xdev``), skipping /proc, /sys and /dev and
+the sticky scratch directories /tmp, /var/tmp and /run/lock, whose files belong to
+whoever wrote them.
 
 The probe needs a built image and an OCI runner, which the unit suite does not
 have, so this runs the probe's own find against a small tree laid out like one.

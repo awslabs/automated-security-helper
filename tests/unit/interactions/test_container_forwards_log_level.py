@@ -3,10 +3,9 @@
 
 """``--log-level`` reaches the scan inside the container.
 
-``run_ash_container`` accepted ``log_level`` and dropped it. Only the levels that
-the host also turns into ``--debug``, ``--verbose`` or ``--simple`` got through,
-by that other route; ``--log-level ERROR``, ``QUIET`` or ``TRACE`` left the scan
-inside logging at INFO, so its log said more, or less, than was asked for.
+``--debug``, ``--verbose`` and ``--simple`` carry three of the levels inward.
+``--log-level`` is forwarded for the others, so ``ERROR``, ``QUIET`` and ``TRACE``
+set the inner scan's logging as they set a local scan's.
 """
 
 from __future__ import annotations

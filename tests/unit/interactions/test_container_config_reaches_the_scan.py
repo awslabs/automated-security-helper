@@ -3,22 +3,17 @@
 
 """The config file named on the host is the one the scan inside the container reads.
 
-``--config`` (or ``ASH_CONFIG``) names a path on the host. The container sees the
-host only through its bind mounts, so handing that path to the inner ``ash``
-verbatim names a file that does not exist there, and the inner scan quietly ran
-with its defaults: no suppressions, no scanner settings, no severity threshold
-from the file the operator chose. The same held for a workspace's
-``--workspace-config`` policy, which was not forwarded at all.
+``--config`` (or ``ASH_CONFIG``) names a path on the host, and the container sees
+the host only through its bind mounts. So the command:
 
-What the command has to do instead:
-
-- A config inside the source directory is already under the read-only ``/src``
-  mount; the inner scan is pointed at ``/src/<relative path>``.
-- A config outside it is mounted read-only under ``/ash-config``, together with
-  the files of its ``extends`` chain at the same place relative to the config's
-  confinement root, so relative bases resolve inside as they do on the host.
-- A config that does not exist (or is empty, or is not a file) refuses the scan
-  with exit 3, before anything is built or run, as a local scan refuses it.
+- points the inner scan at ``/src/<relative path>`` for a config inside the source
+  directory, which is already under the read-only ``/src`` mount;
+- mounts a config outside it read-only under ``/ash-config``, together with the
+  files of its ``extends`` chain at the same place relative to the config's
+  confinement root, so relative bases resolve inside as they do on the host;
+- forwards a workspace's ``--workspace-config`` policy the same way;
+- refuses, with exit 3 and before anything is built or run, a config that does not
+  exist (or is empty, or is not a file), as a local scan refuses it.
 
 Every test records the runner commands instead of starting them.
 """
@@ -214,11 +209,9 @@ class TestTheConfigIsReadableInsideTheContainer:
         assert _mounts(cmd)["/ash-config/ash.yaml"]["source"] == str(config)
 
     def test_a_link_inside_the_source_to_a_file_outside_is_refused(self, tree):
-        """Rewritten: this asserted the link's target was mounted.
+        """A config in the source directory whose real path is outside the tree.
 
-        The source directory is the scanned repository's, so a link there to a file
-        outside it is the repository choosing which host file the container gets;
-        see test_container_config_link_out_of_the_tree.py.
+        It is refused with exit 3; see test_container_config_link_out_of_the_tree.py.
         """
         target = tree["operator"] / "ash.yaml"
         target.write_text("project_name: p\n", encoding="utf-8")

@@ -5,10 +5,9 @@
 
 ``--mount type=bind,source=<path>,destination=<path>,readonly`` is a list of
 comma-separated ``key=value`` fields, read as CSV. A comma in a host path ends its
-field early and starts another: a source directory named ``x,readonly=false`` or
-``x,destination=/elsewhere`` changes what is mounted and where. A double quote
-starts CSV quoting, and a line break ends the argument for runners that read it a
-line at a time. None of these can be passed through safely, so every path that
+field early and starts another, so a source directory named ``a,b`` is read as
+``a`` and a field ``b``. A double quote starts CSV quoting, and a line break ends
+the argument for runners that read it a line at a time. So every path that
 becomes a mount -- the source directory, the output directory, the config file
 and its ``extends`` chain, and a workspace policy -- is checked first, and one
 holding a comma, a double quote, a carriage return or a line feed is refused with
@@ -32,7 +31,7 @@ from automated_security_helper.utils.subprocess_utils import create_completed_pr
 
 #: Each character the mount syntax cannot carry, in a directory name.
 UNREPRESENTABLE = [
-    pytest.param("x,readonly=false", id="comma"),
+    pytest.param("a,b", id="comma"),
     pytest.param('x"y', id="double-quote"),
     pytest.param("x\ny", id="line-feed"),
     pytest.param("x\ry", id="carriage-return"),

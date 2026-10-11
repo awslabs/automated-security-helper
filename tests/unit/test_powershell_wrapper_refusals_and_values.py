@@ -1,22 +1,20 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``Invoke-ASH`` exits with the code it means, and runs no part of a path it is given.
+"""``Invoke-ASH`` exits with the code it means and passes each given path as a value.
 
-Two defects in utils/ash_helpers.ps1:
+utils/ash_helpers.ps1:
 
-- Each refusal wrote its message with ``Write-Error`` and then ran ``exit 3``. Under
-  ``$ErrorActionPreference = 'Stop'``, which GitHub Actions sets for every ``pwsh``
-  step and many scripts set themselves, ``Write-Error`` is a terminating error, so
-  the ``exit 3`` never ran and the caller saw exit 1. The message is now written to
-  stderr directly, which never throws.
-- The build and run commands were assembled as strings for ``Invoke-Expression``
-  with the operator's paths and values spliced into them, so PowerShell parsed those
-  values as code: a source directory named ``a$(...)`` ran what was in the
-  parentheses. The command strings now name each value by its variable
-  (``"$sourceDirFull"``), which ``Invoke-Expression`` expands as a value without
-  parsing it. ``AshArgs``, the arguments passed through to ASH as written, is still
-  parsed again; that is the documented limit of passing it through at all.
+- Each refusal writes its message to stderr directly and then runs ``exit 3`` (or
+  ``exit 1``). ``Write-Error`` would not do: under ``$ErrorActionPreference =
+  'Stop'``, which GitHub Actions sets for every ``pwsh`` step and many scripts set
+  themselves, it is a terminating error, and the caller would see exit 1.
+- The build and run commands are strings run by ``Invoke-Expression``, which parses
+  them as PowerShell. Every path and value the operator gives is written into them
+  by its variable name (``"$sourceDirFull"``), which ``Invoke-Expression`` expands
+  as a value without parsing it, so a directory named ``a$(...)`` is passed as that
+  name. ``AshArgs``, the arguments passed through to ASH as written, is parsed
+  again; that is the documented limit of passing it through at all.
 
 The text tests run everywhere. The ones that run the script need ``pwsh``: they
 skip on a developer machine without it and fail in CI, as
@@ -112,7 +110,7 @@ def test_the_commands_name_operator_values_instead_of_splicing_them():
 
 
 def test_the_check_sees_a_spliced_value():
-    """Control for the checker: the old form of two lines."""
+    """Control for the checker: two lines splicing a value, and their by-name form."""
     old = [
         '$runCmd += "--mount `"type=bind,source=$sourceDirFull,destination=/src`""',
         "$ashCmdArgs.Add($scanner)",
@@ -191,7 +189,7 @@ def _invoke(pwsh, tmp_path: Path, bin_dir: Path, arguments: str):
     "arguments",
     [
         pytest.param("-SourceDir src -OutputDir out -Config missing.yaml", id="config"),
-        pytest.param("-SourceDir src -OutputDir 'o,readonly=false'", id="mount-path"),
+        pytest.param("-SourceDir src -OutputDir 'a,b'", id="mount-path"),
     ],
 )
 def test_a_refusal_exits_3_under_error_action_stop(
@@ -212,7 +210,7 @@ def test_a_refusal_exits_3_under_error_action_stop(
 def test_a_source_path_is_passed_as_a_value_and_not_run(
     pwsh, recording_docker, tmp_path
 ):
-    source = tmp_path / "a$(New-Item -ItemType File -Path ran)"
+    source = tmp_path / "a$(New-Item -ItemType File -Path marker)"
     source.mkdir()
 
     result = _invoke(
@@ -223,6 +221,6 @@ def test_a_source_path_is_passed_as_a_value_and_not_run(
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert not (tmp_path / "ran").exists(), "a part of the path was run"
+    assert not (tmp_path / "marker").exists(), "the path was parsed as PowerShell"
     args = (tmp_path / "docker-args.txt").read_text(encoding="utf-8").splitlines()
     assert f"type=bind,source={source},destination=/src,readonly" in args
