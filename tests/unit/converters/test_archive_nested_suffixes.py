@@ -17,7 +17,9 @@ from pathlib import Path
 import pytest
 
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
+    NESTED_ARCHIVE_SUFFIXES,
     ArchiveConverter,
+    _is_archive_name,
 )
 from tests.utils.archive_builders import zip_bytes
 
@@ -42,6 +44,18 @@ NESTED = [
     "in.zip",
     "in.Tar",
     "in.tar.gz",
+    "in.tar.Z",
+    "in.tz",
+    "in.lz",
+    "in.lz4",
+    "in.tzst",
+    "in.apk",
+    "in.aar",
+    "in.nupkg",
+    "in.deb",
+    "in.rpm",
+    "in.cpio",
+    "in.zip.",
 ]
 
 
@@ -54,6 +68,8 @@ def converter(test_plugin_context, monkeypatch):
     archive = tree / "outer.zip"
     archive.write_bytes(zip_bytes(members))
     monkeypatch.setattr(f"{ARCHIVE_MODULE}.scan_set", lambda **kwargs: [str(archive)])
+    # More names than one archive lists one by one; listed here so each is checked.
+    monkeypatch.setattr(f"{ARCHIVE_MODULE}.MEMBER_REFUSALS_LISTED", 100, raising=True)
     return ArchiveConverter(
         context=test_plugin_context,
         config=test_plugin_context.config.converters.archive,
@@ -68,6 +84,14 @@ def test_every_nested_archive_suffix_is_recorded_as_not_scanned(converter):
     assert converter.failed_inputs == []
     assert (extracted / "top.py").is_file()
     assert (extracted / "x.zip.py").is_file(), "a .py member is not an archive"
+
+
+@pytest.mark.parametrize("suffix", NESTED_ARCHIVE_SUFFIXES)
+def test_each_suffix_in_the_list_marks_a_member_as_an_archive(suffix):
+    """Read from the constant, so a suffix dropped from it fails here."""
+    assert _is_archive_name(f"in.{suffix}")
+    assert _is_archive_name(f"dir/in.{suffix.upper()}")
+    assert _is_archive_name(f"in.{suffix}.")
 
 
 def test_nested_archive_suffixes_do_not_select_archives_in_the_tree():

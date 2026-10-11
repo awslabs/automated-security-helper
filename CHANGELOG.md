@@ -238,7 +238,15 @@
   like, in any case) used to be left out without a trace. It is now a refused member
   of its archive, with a warning, and does not change the exit code. Past the first
   20 refusals of a reason in one archive, the rest are counted in one record
-  (`unlisted_members`) rather than listed.
+  (`unlisted_members`) rather than listed. The list also covers `.tar.Z`, `.lz4`,
+  `.tzst`, `.apk`, `.deb`, `.rpm`, `.nupkg` and other package formats, and a name
+  with a trailing dot (`lib.zip.`).
+
+- **An archive in the tree that is not extracted is recorded.** Only `.zip`, `.tar`
+  and `.gz` files are extracted. A `.tgz`, `.tar.bz2`, `.tar.xz`, `.7z`, `.jar` or
+  `.whl` in the scanned tree used to get no record at all, so a tree whose only
+  archive was `release.tgz` reported no archives. Each is now a refused input that
+  says it was not extracted, with a warning; it does not change the exit code.
 
 - **Every input a converter did not read is in the reports.** The console summary,
   `ash.summary.txt`, `ash.summary.md`, `ash.flat.json` (`converter_refusals`, always

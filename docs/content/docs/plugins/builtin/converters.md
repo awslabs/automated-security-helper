@@ -20,7 +20,10 @@ ASH includes 2 built-in converters that preprocess files to make them suitable f
 **Supported Formats**:
 - ZIP files (.zip)
 - TAR archives (.tar, .tar.gz). A file is selected by its last suffix only, so a
-  `.tgz` is not extracted.
+  `.tgz` is not extracted. A file in the tree named as any other archive or
+  compressed format in the list below (`.tgz`, `.tar.bz2`, `.7z`, `.jar`, `.whl` and
+  the rest) is recorded as a refused input that was not extracted, so the summaries
+  show that its contents were not scanned. It does not fail the scan.
 
 **Configuration**:
 ```yaml
@@ -36,9 +39,11 @@ converters:
 
 **Key Features**:
 - One level of extraction. A member that is itself an archive or compressed file is
-  not extracted; it is recorded as not scanned. That is a last suffix, in any case,
-  of `.zip`, `.tar`, `.gz`, `.tgz`, `.bz2`, `.tbz`, `.tbz2`, `.xz`, `.txz`, `.zst`,
-  `.lzma`, `.7z`, `.rar`, `.jar`, `.war`, `.ear`, `.whl` or `.egg`.
+  not extracted; it is recorded as not scanned. That is a last suffix, in any case
+  and after any trailing dots, of `.zip`, `.tar`, `.gz`, `.tgz`, `.bz2`, `.tbz`,
+  `.tbz2`, `.xz`, `.txz`, `.zst`, `.tzst`, `.lzma`, `.lz`, `.tlz`, `.lz4`, `.Z`,
+  `.tz`, `.7z`, `.rar`, `.cpio`, `.jar`, `.war`, `.ear`, `.aar`, `.apk`, `.whl`,
+  `.egg`, `.nupkg`, `.deb` or `.rpm`.
 - Extraction limits, described below
 - Only members with a scannable extension are written, as regular files
 - Each archive is extracted into a directory of its own, named from its path. Two

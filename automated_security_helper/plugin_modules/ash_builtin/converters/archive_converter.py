@@ -59,10 +59,12 @@ from automated_security_helper.utils.suppression_matcher import (
 #: against the last one only, so ``.tar.gz`` is ``gz`` and ``.tgz`` is not selected.
 ARCHIVE_SUFFIXES = ("zip", "tar", "gz")
 
-#: The suffixes that mark an archive member as an archive or compressed file of its
-#: own. Kept apart from ARCHIVE_SUFFIXES, which decides what is extracted: any of
-#: these inside an archive is recorded as not scanned, because extraction is one
-#: level deep. Compared lowercased against the member's last suffix.
+#: The suffixes that mark a file as an archive or compressed file. Kept apart from
+#: ARCHIVE_SUFFIXES, which decides what is extracted: any of these inside an archive
+#: is recorded as not scanned, because extraction is one level deep, and one in the
+#: tree that ARCHIVE_SUFFIXES does not select is recorded as not extracted.
+#: Compared lowercased against the last suffix, after trailing dots and spaces
+#: (which Windows drops from a name) are removed.
 NESTED_ARCHIVE_SUFFIXES = (
     *ARCHIVE_SUFFIXES,
     "tgz",
@@ -72,14 +74,26 @@ NESTED_ARCHIVE_SUFFIXES = (
     "xz",
     "txz",
     "zst",
+    "tzst",
     "lzma",
+    "lz",
+    "tlz",
+    "lz4",
+    "z",
+    "tz",
     "7z",
     "rar",
+    "cpio",
     "jar",
     "war",
     "ear",
+    "aar",
+    "apk",
     "whl",
     "egg",
+    "nupkg",
+    "deb",
+    "rpm",
 )
 
 #: The options of ArchiveConverterConfigOptions that bound what extracting an archive
@@ -526,8 +540,12 @@ def _gzip_holds_a_tar(handle: BinaryIO) -> bool:
 
 
 def _is_archive_name(name: str) -> bool:
-    """Whether a member's name marks it as an archive or compressed file of its own."""
-    base = name.replace("\\", "/").rsplit("/", 1)[-1]
+    """Whether a name marks a file as an archive or compressed file.
+
+    Trailing dots and spaces are dropped first, as Windows drops them, so
+    ``lib.zip.`` is a zip there and is one here.
+    """
+    base = name.replace("\\", "/").rsplit("/", 1)[-1].rstrip(". ")
     return "." in base and base.rsplit(".", 1)[-1].lower() in NESTED_ARCHIVE_SUFFIXES
 
 
@@ -545,6 +563,10 @@ _MEMBER_NOT_REGULAR = "it is not a regular file"
 _MEMBER_SPARSE_BEYOND_SIZE = (
     "it is a sparse file whose map places data beyond the size it declares, or "
     "writes the same bytes twice"
+)
+_NOT_EXTRACTED = (
+    "it is an archive or compressed file of a format that is not extracted (the "
+    "archive converter extracts .zip, .tar and .gz), so its contents are not scanned"
 )
 _MEMBER_NESTED_ARCHIVE = (
     "it is named as an archive or compressed file (such as .zip, .tar.gz, .jar or "
@@ -765,6 +787,20 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
         return False
 
+    def _skipped(self, path: str) -> bool:
+        """Whether ``path`` from the scan set is a directory or under an ignore path."""
+        if Path(path).is_dir():
+            ASH_LOGGER.debug(f"Skipping directory: {path}")
+            return True
+        for ignore_path in self.context.config.global_settings.ignore_paths:
+            rel_path = Path(path).relative_to(self.context.source_dir).as_posix()
+            if path_matches_pattern(rel_path, ignore_path.path):
+                ASH_LOGGER.debug(
+                    f"Skipping conversion of ignored path: {path} due to global ignore_path '{ignore_path.path}' with reason '{ignore_path.reason}'"
+                )
+                return True
+        return False
+
     def _refuse_member(self, archive: Optional[str], member: str, reason: str) -> None:
         if archive is None:
             ASH_LOGGER.warning(f"Skipped archive member '{member}': {reason}")
@@ -886,11 +922,25 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             output=self.context.output_dir,
             honor_ignore_files=honors_ignore_files(self.context.config),
         )
+        candidates = [f.strip() for f in archive_files]
         archive_files = [
-            f.strip()
-            for f in archive_files
-            if f.strip().split(".")[-1].lower() in ARCHIVE_SUFFIXES
+            f for f in candidates if f.split(".")[-1].lower() in ARCHIVE_SUFFIXES
         ]
+        selected = set(archive_files)
+        # Named as an archive the converter does not extract (a .tgz, .jar, .7z
+        # ...): recorded, so the summaries show it was not scanned, without
+        # failing the completeness gate, as the same name inside an archive is.
+        for path in candidates:
+            if path in selected or not _is_archive_name(path):
+                continue
+            if self._skipped(path):
+                continue
+            self.record_refused_input(
+                TreeInputRefused(
+                    relative_display(path, self.context.source_dir),
+                    _NOT_EXTRACTED,
+                )
+            )
 
         ASH_LOGGER.debug(f"Found {len(archive_files)} files to convert in scan set.")
         results: List[Path] = []
@@ -913,25 +963,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             created_target: Optional[Path] = None
             archive_display = relative_display(archive_file, self.context.source_dir)
             try:
-                skip_item = False
-                # Skip directories
-                if Path(archive_file).is_dir():
-                    ASH_LOGGER.debug(f"Skipping directory: {archive_file}")
-                    skip_item = True
-                else:
-                    for ignore_path in self.context.config.global_settings.ignore_paths:
-                        rel_path = (
-                            Path(archive_file)
-                            .relative_to(self.context.source_dir)
-                            .as_posix()
-                        )
-                        if path_matches_pattern(rel_path, ignore_path.path):
-                            ASH_LOGGER.debug(
-                                f"Skipping conversion of ignored path: {archive_file} due to global ignore_path '{ignore_path.path}' with reason '{ignore_path.reason}'"
-                            )
-                            skip_item = True
-                            break
-                if skip_item:
+                if self._skipped(archive_file):
                     continue
 
                 short_archive_file = get_shortest_name(archive_file)
