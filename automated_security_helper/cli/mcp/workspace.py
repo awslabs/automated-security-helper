@@ -128,7 +128,10 @@ from automated_security_helper.cli.mcp.profile_registry import session_client_ru
 from automated_security_helper.cli.mcp.progress_monitor import (
     monitor_workspace_progress,
 )
-from automated_security_helper.cli.mcp.sandbox import caller_is_remote
+from automated_security_helper.cli.mcp.sandbox import (
+    caller_is_remote,
+    config_base_gate,
+)
 from automated_security_helper.cli.mcp.scan_target import (
     ASH_MCP_ALLOWED_ROOTS_ENV,
     validate_scan_target,
@@ -136,6 +139,7 @@ from automated_security_helper.cli.mcp.scan_target import (
 from automated_security_helper.core.constants import ASH_EXIT_CODES
 from automated_security_helper.core.exceptions import (
     ASHConfigEnvNotResolvedError,
+    ASHConfigInputNotPermittedError,
     ASHConfigValidationError,
     WorkspaceDefinitionError,
 )
@@ -261,28 +265,38 @@ def _error_response(
     it rather than by catching it, and swallowing ``KeyboardInterrupt`` would leave
     the server unstoppable mid-scan.
     """
+    from automated_security_helper.cli.mcp_tools import (
+        CONFIG_ENV_NOT_RESOLVED,
+        CONFIG_INPUT_NOT_PERMITTED,
+    )
+
     response = create_error_response(error, operation)
-    if _caused_by_env_refusal(error):
+    if _caused_by(error, ASHConfigEnvNotResolvedError):
         # A project config that may not use !ENV (resolve_config's
         # remote_client), under the error_type every other tool reports it with.
-        from automated_security_helper.cli.mcp_tools import CONFIG_ENV_NOT_RESOLVED
-
         response["error_type"] = CONFIG_ENV_NOT_RESOLVED
+    elif _caused_by(error, ASHConfigInputNotPermittedError):
+        # A project config that resolves outside the directories the session
+        # may read config from (``config_base_gate``): a confinement refusal,
+        # so 4, under the error_type the other tools report it with.
+        response["error_type"] = CONFIG_INPUT_NOT_PERMITTED
+        if exit_code is None:
+            exit_code = int(WorkspaceExitCode.WORKSPACE_ERROR)
     resolved = int(exit_code) if exit_code is not None else _exit_code_for(error)
     response["exit_code"] = resolved
     response["exit_code_meaning"] = ASH_EXIT_CODES.get(resolved, "unknown exit code")
     return response
 
 
-def _caused_by_env_refusal(error: BaseException) -> bool:
-    """Whether ``error`` is, or was raised from, an ``ASHConfigEnvNotResolvedError``.
+def _caused_by(error: BaseException, kind: type) -> bool:
+    """Whether ``error`` is, or was raised from, a ``kind``.
 
     The resolver re-raises a project's config error with the project named,
     from the original.
     """
     seen: Optional[BaseException] = error
     while seen is not None:
-        if isinstance(seen, ASHConfigEnvNotResolvedError):
+        if isinstance(seen, kind):
             return True
         seen = seen.__cause__
     return False
@@ -302,6 +316,7 @@ def _resolve(
     client_config_rules: Optional["ClientConfigRules"] = None,
     trusted_config: Optional[str] = None,
     remote_client: bool = False,
+    permit_base: Optional[Callable[[Path], bool]] = None,
 ) -> WorkspacePlan:
     """Resolve the workspace, or raise.
 
@@ -322,7 +337,10 @@ def _resolve(
     (``_resolve_session_config``).
 
     ``remote_client`` is ``caller_is_remote`` for the session, and has to reach
-    the settings builder too (``_scan_options``), for the same reason.
+    the settings builder too (``_scan_options``), for the same reason. So does
+    ``permit_base``, the session's ``config_base_gate``: a project's config that
+    is a link out of the directories the session may read config from is refused
+    before it is read, as a single-directory scan refuses it.
     """
     return resolve_workspace(
         Path(workspace_file),
@@ -335,6 +353,7 @@ def _resolve(
         client_config_rules=client_config_rules,
         trusted_config=Path(trusted_config) if trusted_config else None,
         remote_client=remote_client,
+        permit_base=permit_base,
     )
 
 
@@ -388,7 +407,9 @@ def _refuse_config_inputs_outside_the_permitted_roots(
     not caller-named -- each is found inside a project directory that project
     confinement has already accepted -- so gating them here would re-check a
     decision already made and would refuse a legitimate in-tree config on a
-    deployment that granted the tree but not its own path as a config root.
+    deployment that granted the tree but not its own path as a config root. A
+    project's config that is a link out of that directory is a different case,
+    and resolution refuses it before reading it (``_resolve``'s ``permit_base``).
     """
 
     from automated_security_helper.cli.mcp.sandbox import validate_config_input
@@ -716,6 +737,7 @@ def _scan_options(
     client_config_rules: Optional["ClientConfigRules"] = None,
     trusted_config_path: Optional[str] = None,
     remote_client: bool = False,
+    config_base_gate: Optional[Callable[[Path], bool]] = None,
 ) -> ScanOptions:
     """Assemble the ``ScanOptions`` the shared settings builder reads.
 
@@ -749,6 +771,8 @@ def _scan_options(
         client_config_policy=client_config_rules,
         # And the same caller.
         remote_client=remote_client,
+        # And the same gate, which each project's scan applies again.
+        config_base_gate=config_base_gate,
         workspace_plan=plan,
         allow_missing_projects=allow_missing_projects,
         config_overrides=list(config_overrides or []),
@@ -1191,6 +1215,7 @@ async def mcp_resolve_workspace(
             client_config_rules=rules,
             trusted_config=trusted_config,
             remote_client=caller_is_remote(session_id),
+            permit_base=config_base_gate(session_id),
         )
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "resolve_workspace")
@@ -1348,6 +1373,7 @@ async def mcp_scan_workspace(
             client_config_rules=rules,
             trusted_config=trusted_config,
             remote_client=caller_is_remote(session_id),
+            permit_base=config_base_gate(session_id),
         )
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "scan_workspace")
@@ -1389,6 +1415,7 @@ async def mcp_scan_workspace(
                 client_config_rules=rules,
                 trusted_config_path=trusted_config,
                 remote_client=caller_is_remote(session_id),
+                config_base_gate=config_base_gate(session_id),
             )
         )
         project_outputs = _prepare_project_outputs(

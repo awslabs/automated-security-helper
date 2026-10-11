@@ -2481,6 +2481,8 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         fail_on_incomplete_scanners=opts.fail_on_incomplete_scanners,
         changed_files_only=opts.changed_files_only,
         base_ref=opts.base_ref,
+        # The MCP session's gate, the same one the plan was resolved with.
+        config_base_gate=opts.config_base_gate,
         precommit=opts.mode == RunMode.precommit,
         cleanup=opts.cleanup,
         verbose=opts.verbose,

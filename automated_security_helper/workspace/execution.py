@@ -408,6 +408,11 @@ class ProjectScanSettings:
     #: operator did not set aside resolves no ``!ENV`` (``resolve_config``). The
     #: same value the plan was resolved with.
     remote_client: bool = False
+    #: The MCP session's gate (``cli/mcp/sandbox.config_base_gate``), or None.
+    #: Each project's config file and its bases must resolve to a file it
+    #: permits, as for the plan (``resolver.resolve_workspace``'s
+    #: ``permit_base``), so a link changed after the plan is refused too.
+    config_base_gate: Optional[Callable[[Path], bool]] = None
 
 
 @dataclass
@@ -907,6 +912,9 @@ def _project_config_with_policy(
             override cannot be applied. Fatal rather than dropped; the caller
             records the project FAILED and the run exits 3.
     """
+    from automated_security_helper.config.config_sources import (
+        check_discovered_source,
+    )
     from automated_security_helper.config.resolve_config import resolve_config
 
     # ``config_source`` is None for a project that declared no config. The plan was
@@ -914,6 +922,10 @@ def _project_config_with_policy(
     # fallback as this project's config_source when one applied -- this branch
     # covers a plan built without it, and a hand-built plan.
     config_path = project.config_source or settings.default_config_path
+    if config_path is not None:
+        # Checked again here, not only by the plan: the file is read now, and a
+        # link can change between the two (config_sources, "Base paths").
+        check_discovered_source(Path(config_path), settings.config_base_gate)
 
     config = resolve_config(
         config_path=config_path,
@@ -938,6 +950,7 @@ def _project_config_with_policy(
         # Read from the plan rather than re-derived from the settings, so the
         # scan layers exactly the file --dry-run reported.
         overlay_config_path=project.operator_config,
+        permit_base=settings.config_base_gate,
     )
 
     # The scanners' own checks on tool config file paths (config/path_trust.py)

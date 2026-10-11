@@ -204,11 +204,18 @@ def _opts(tmp_path: Path) -> ScanOptions:
         trusted_config_path=str(tmp_path / "operator" / "profile.yaml"),
         # A remote MCP caller's run: which project configs resolve no !ENV.
         remote_client=True,
+        # The session's gate on where each project's config may resolve to.
+        config_base_gate=_GATE,
     )
 
 
 #: Non-None, so the entry discriminates against the dataclass default.
 _RULES = rules_from(AshConfig())
+
+
+def _GATE(path: Path) -> bool:
+    """A stand-in session gate; only its identity is compared."""
+    return True
 
 
 def _expected(tmp_path: Path) -> Dict[str, Any]:
@@ -253,6 +260,7 @@ def _expected(tmp_path: Path) -> Dict[str, Any]:
         "trusted_config_path": str(tmp_path / "operator" / "profile.yaml"),
         "client_config_rules": _RULES,
         "remote_client": True,
+        "config_base_gate": _GATE,
     }
 
 

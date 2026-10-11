@@ -126,10 +126,11 @@ from __future__ import annotations
 import os
 from itertools import combinations
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.client_config_policy import ClientConfigRules
+from automated_security_helper.config.config_sources import check_discovered_source
 from automated_security_helper.config.resolve_config import (
     find_config_file,
     resolve_config,
@@ -435,6 +436,7 @@ def _resolve_project_config(
     client_config_rules: Optional[ClientConfigRules] = None,
     trusted_config: Optional[Path] = None,
     remote_client: bool = False,
+    permit_base: Optional[Callable[[Path], bool]] = None,
 ) -> Tuple[AshConfig, Optional[Path], Optional[Path]]:
     """Load one project's config through ASH's ordinary resolution path.
 
@@ -524,6 +526,11 @@ def _resolve_project_config(
     operator = trusted_config if trusted_config is not None else default_config
     try:
         config_path = find_config_file(candidate.resolved)
+        if config_path is not None:
+            # The project directory is one the caller may read, but the file
+            # found there may be a link out of it; a caller's gate covers it
+            # before anything reads it (config_sources, "Base paths").
+            check_discovered_source(config_path, permit_base)
         overlay = operator if config_path is not None else None
         if config_path is None and default_config is not None:
             config_path = Path(default_config)
@@ -537,6 +544,7 @@ def _resolve_project_config(
             client_config_policy=client_config_rules,
             remote_client=remote_client,
             overlay_config_path=overlay,
+            permit_base=permit_base,
         )
         return config, config_path, overlay
     except ASHConfigValidationError as exc:
@@ -887,6 +895,7 @@ def resolve_workspace(
     client_config_rules: Optional[ClientConfigRules] = None,
     trusted_config: Optional[PathLike] = None,
     remote_client: bool = False,
+    permit_base: Optional[Callable[[Path], bool]] = None,
 ) -> WorkspacePlan:
     """Resolve and validate a workspace, returning an inspectable plan.
 
@@ -932,6 +941,11 @@ def resolve_workspace(
             project config the operator did not set aside resolves no ``!ENV``
             (``resolve_config``). Must reach ``ProjectScanSettings.remote_client``
             too.
+        permit_base: The MCP session's gate (``cli/mcp/sandbox.config_base_gate``),
+            or None. Each project's own config file, and every base its chain
+            extends, must resolve to a file it permits; one that is a link out
+            is refused before it is read (``config_sources.check_discovered_source``).
+            Must reach ``ProjectScanSettings.config_base_gate`` too.
 
     Returns:
         A :class:`~automated_security_helper.workspace.plan.WorkspacePlan` with
@@ -985,6 +999,7 @@ def resolve_workspace(
             client_config_rules=client_config_rules,
             trusted_config=Path(trusted_config) if trusted_config else None,
             remote_client=remote_client,
+            permit_base=permit_base,
         )
         scanners, pins = _scanner_state(config)
         label = _project_label(config, candidate.key)

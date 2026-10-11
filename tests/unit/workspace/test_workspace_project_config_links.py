@@ -167,3 +167,131 @@ def test_an_mcp_workspace_scan_marks_a_delivered_links_suppressions(
     assert resolved, "the scan never resolved the project's config"
     suppressions = resolved[-1].global_settings.suppressions
     assert [entry.client_supplied for entry in suppressions] == [True]
+
+
+# ---------------------------------------------------------------------------
+# The MCP workspace tools refuse a project config that links out of the roots
+# ---------------------------------------------------------------------------
+
+#: A host config whose text must not reach the client.
+CANARY = "canary-ws-6d0b2e"
+LINK_OUT = f"project_name: {CANARY}\nglobal_settings:\n  severity_threshold: CRITICAL\n"
+
+
+def _assert_refused_unread(server, result: Any, read: List[Path]) -> None:
+    host_file = (server["host"] / "ash.yaml").resolve()
+    assert result.get("success") is False, result
+    assert result.get("error_type") == "config_input_not_permitted", result
+    assert result.get("exit_code") == 4, result
+    assert host_file not in read
+    assert CANARY not in repr(result)
+    assert str(server["host"]) not in repr(result)
+
+
+def test_a_remote_resolve_workspace_refuses_a_project_config_linking_out(
+    _server,
+) -> None:
+    from automated_security_helper.cli.mcp import workspace as ws
+    from tests.utils.delivered_trees import reads
+
+    source = _delivered_workspace(_server, LINK_OUT)
+    out: List[Any] = []
+
+    read = reads(
+        lambda: out.append(
+            asyncio.run(
+                ws.mcp_resolve_workspace(
+                    str(source / "dev.code-workspace"), session_id=SESSION
+                )
+            )
+        )
+    )
+
+    (result,) = out
+    _assert_refused_unread(_server, result, read)
+    assert ".ash/.ash.yaml" in result["error"], result
+
+
+def test_a_remote_scan_workspace_refuses_it_too(_server) -> None:
+    from automated_security_helper.cli.mcp import workspace as ws
+    from tests.utils.delivered_trees import reads
+
+    source = _delivered_workspace(_server, LINK_OUT)
+    out: List[Any] = []
+
+    read = reads(
+        lambda: out.append(
+            asyncio.run(
+                ws.mcp_scan_workspace(
+                    str(source / "dev.code-workspace"), session_id=SESSION
+                )
+            )
+        )
+    )
+
+    (result,) = out
+    _assert_refused_unread(_server, result, read)
+
+
+def test_the_scan_side_refuses_it_without_the_plans_check(_server, tmp_path) -> None:
+    """Should the file change after the plan, the scan's own resolve refuses it."""
+    from automated_security_helper.cli.mcp.sandbox import config_base_gate
+    from automated_security_helper.core.exceptions import (
+        ASHConfigInputNotPermittedError,
+    )
+    from automated_security_helper.workspace import execution
+    from automated_security_helper.workspace.resolver import resolve_workspace
+    from tests.utils.delivered_trees import reads
+
+    # At plan time the link stays inside the delivered tree.
+    source = clone(
+        _server["tmp"],
+        {
+            "dev.code-workspace": json.dumps({"folders": [{"path": "app"}]}),
+            "app/main.py": "x = 1\n",
+            "app/conf/real.yaml": "project_name: first\n",
+        },
+        {"app/.ash/.ash.yaml": Path("../conf/real.yaml")},
+        SESSION,
+    )
+    (project,) = resolve_workspace(
+        source / "dev.code-workspace", permit_base=config_base_gate(SESSION)
+    ).projects
+    # The link now points outside every root.
+    link = source / "app" / ".ash" / ".ash.yaml"
+    link.unlink()
+    symlink(link, write(_server["host"] / "ash.yaml", LINK_OUT))
+    settings = execution.ProjectScanSettings(
+        output_dir=tmp_path / "out", config_base_gate=config_base_gate(SESSION)
+    )
+    raised: List[BaseException] = []
+
+    def run() -> None:
+        try:
+            execution._project_config_with_policy(project, settings)
+        except ASHConfigInputNotPermittedError as exc:
+            raised.append(exc)
+
+    read = reads(run)
+
+    assert raised, "the scan resolved a project config outside the roots"
+    assert (_server["host"] / "ash.yaml").resolve() not in read
+    assert CANARY not in str(raised[0])
+
+
+def test_a_link_into_a_set_aside_directory_is_followed(
+    _server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from automated_security_helper.cli.mcp import workspace as ws
+
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(_server["host"]))
+    source = _delivered_workspace(_server, "project_name: linked\n")
+
+    result = asyncio.run(
+        ws.mcp_resolve_workspace(str(source / "dev.code-workspace"), session_id=SESSION)
+    )
+
+    assert result.get("success") is True, result
+    (project,) = result["projects"]
+    assert project["display_label"] == "linked"
+    assert str(_server["host"]) not in project["config_source"]
