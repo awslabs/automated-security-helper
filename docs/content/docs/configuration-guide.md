@@ -209,10 +209,13 @@ content_db_staleness_overrides:
 The entry applies only to the database it names, so every other database is
 still held to `content_db_staleness`. It stops applying at 00:00 UTC on its
 expiration date: from then on it is ignored, with a warning in the log, and the
-database is held to `content_db_staleness` again. A stale database relaxed this
-way is reported the same as under `warn`, and the message names the entry and its
-expiry. Each database can appear in at most one entry, and an unknown database
-name is a config error. The list is empty by default.
+database is held to the policy it has without the entry. That is
+`content_db_staleness`, except for `trivy-db` in an image built with
+`OFFLINE=YES`, which returns to that image's `warn` default described below. A
+stale database relaxed this way is reported the same as under `warn`, and the
+message names the entry and its expiry. Each database can appear in at most one
+entry, and an unknown database name is a config error. The list is empty by
+default.
 
 An image built with `OFFLINE=YES` (`ash build-image --offline`) holds `trivy-db` to
 `warn` rather than to `content_db_staleness: fail`. The image carries the trivy

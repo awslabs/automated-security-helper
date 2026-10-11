@@ -33,8 +33,9 @@ Decided per scan by ``content_db_staleness`` (``--allow-stale-content-db`` on th
 policy, and a required expiration date, and holds only that database to its own policy until
 00:00 UTC on that date. It exists for an upstream publisher that has stopped publishing for a
 few days, where ``warn`` for the whole scan would also stop failing on every other database.
-An expired entry is ignored with a warning, so the database returns to the scan-wide policy
-without anyone having to remember to remove it. Either form of ``--allow-stale-content-db``
+An expired entry is ignored with a warning, so the database returns to the policy it has
+without the entry (the scan-wide policy, or for trivy-db the offline image's default described
+below) without anyone having to remember to remove it. Either form of ``--allow-stale-content-db``
 clears the list for its scan (``content_db_staleness_flag_overrides``), so the flag still
 decides for every database.
 

@@ -1018,7 +1018,9 @@ class ContentDbStalenessOverride(BaseModel):
     same two fields a time-boxed suppression carries: an exception to a freshness
     gate that has no end date is a permanent one. On and after ``expiration``
     (00:00 UTC) the entry is ignored, with a warning in the log, and the database
-    falls back to ``content_db_staleness``.
+    is held to the policy it has without the entry: ``content_db_staleness``, or,
+    for trivy-db in an image built with ``OFFLINE=YES``, that image's ``warn``
+    default unless ``content_db_staleness_offline_image_default`` is false.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -1044,8 +1046,10 @@ class ContentDbStalenessOverride(BaseModel):
         Field(
             description=(
                 "Required. The date (YYYY-MM-DD, UTC) from which the entry no longer "
-                "applies: at 00:00 UTC that day the database returns to "
-                "content_db_staleness."
+                "applies: at 00:00 UTC that day the database returns to the policy it "
+                "has without the entry, which is content_db_staleness, or, for "
+                "trivy-db in an image built with OFFLINE=YES, that image's warn "
+                "default unless content_db_staleness_offline_image_default is false."
             )
         ),
     ]

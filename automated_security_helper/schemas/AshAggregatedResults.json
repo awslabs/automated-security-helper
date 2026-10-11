@@ -4952,7 +4952,7 @@
     },
     "ContentDbStalenessOverride": {
       "additionalProperties": false,
-      "description": "One content database held to a different staleness policy, until a fixed date.\n\n``content_db_staleness`` decides for every database at once. This narrows a\nrelaxation to the one database that needs it -- typically one whose upstream\npublisher has stopped publishing for a while -- so every other database is still\nheld to the scan-wide policy. ``expiration`` and ``reason`` are required, the\nsame two fields a time-boxed suppression carries: an exception to a freshness\ngate that has no end date is a permanent one. On and after ``expiration``\n(00:00 UTC) the entry is ignored, with a warning in the log, and the database\nfalls back to ``content_db_staleness``.",
+      "description": "One content database held to a different staleness policy, until a fixed date.\n\n``content_db_staleness`` decides for every database at once. This narrows a\nrelaxation to the one database that needs it -- typically one whose upstream\npublisher has stopped publishing for a while -- so every other database is still\nheld to the scan-wide policy. ``expiration`` and ``reason`` are required, the\nsame two fields a time-boxed suppression carries: an exception to a freshness\ngate that has no end date is a permanent one. On and after ``expiration``\n(00:00 UTC) the entry is ignored, with a warning in the log, and the database\nis held to the policy it has without the entry: ``content_db_staleness``, or,\nfor trivy-db in an image built with ``OFFLINE=YES``, that image's ``warn``\ndefault unless ``content_db_staleness_offline_image_default`` is false.",
       "properties": {
         "database": {
           "description": "The content database's registry name, as listed in automated_security_helper/utils/content_databases.py: grype-db, trivy-db, semgrep-offline-rules or opengrep-offline-rules.",
@@ -4960,7 +4960,7 @@
           "type": "string"
         },
         "expiration": {
-          "description": "Required. The date (YYYY-MM-DD, UTC) from which the entry no longer applies: at 00:00 UTC that day the database returns to content_db_staleness.",
+          "description": "Required. The date (YYYY-MM-DD, UTC) from which the entry no longer applies: at 00:00 UTC that day the database returns to the policy it has without the entry, which is content_db_staleness, or, for trivy-db in an image built with OFFLINE=YES, that image's warn default unless content_db_staleness_offline_image_default is false.",
           "title": "Expiration",
           "type": "string"
         },
