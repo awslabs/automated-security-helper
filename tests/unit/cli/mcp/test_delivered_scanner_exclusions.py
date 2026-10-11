@@ -637,13 +637,13 @@ def test_a_trivy_ignore_file_outside_what_the_client_delivered_is_not_read(
     ), config._resolution_warnings
 
 
-SECRET_LINE = "CVE-2099-0001 host-only-marker-7f3a"
+HOST_ONLY_LINE = "CVE-2099-0001 host-only-marker-7f3a"
 
 
 def _host_file(tmp: Path) -> Path:
     host = tmp / "host" / "ignore.txt"
     host.parent.mkdir(exist_ok=True)
-    host.write_text(SECRET_LINE + "\n", encoding="utf-8")
+    host.write_text(HOST_ONLY_LINE + "\n", encoding="utf-8")
     return host
 
 
@@ -709,7 +709,7 @@ def test_a_trivy_ignore_file_in_another_sessions_source_is_not_read(
 
     other = _server["workspace"] / "other-session" / "source" / "notes.txt"
     other.parent.mkdir(parents=True)
-    other.write_text(SECRET_LINE + "\n", encoding="utf-8")
+    other.write_text(HOST_ONLY_LINE + "\n", encoding="utf-8")
     source = _trivy_delivered({"app.py": "x = 1\n"}, str(other))
     config = _scan_resolution(source)
     assert isinstance(config, AshConfig), config
