@@ -1,8 +1,8 @@
 # Exit codes
 
-The exit code of every `ash` command, with the conditions that produce it. For how to change the scan verdict, see [Set when a scan fails](../how-to/set-the-gate.md).
+The exit code of every `ash` command, with the conditions that produce it. For how to change the scan verdict, see [Set the gate](../how-to/set-the-gate.md).
 
-On every command, a command-line usage error exits 2: an unknown option or subcommand, an invalid choice for an option, or a missing required option. That is the same code `ash scan` uses for findings. `ash scan` itself does not reject an option it does not recognize; it ignores it. `ash` with no subcommand rejects it with 2.
+On every command, a command-line usage error exits 2: an unknown option or subcommand, an invalid value for an option that takes a fixed set of values (such as `--mode`) or a number, or a missing required option. That is the same code `ash scan` uses for findings. Two exceptions: `ash scan` and `ash build-image` do not reject an option they do not define (`ash scan` ignores it), while `ash` with no subcommand rejects it with 2; and `--min-severity` does not check its value, so an unrecognized value acts like `low`.
 
 ## `ash scan` {#scan}
 
@@ -19,18 +19,18 @@ On every command, a command-line usage error exits 2: an unknown option or subco
 | 2 | Actionable findings: an unsuppressed finding at or above its scanner's severity threshold, with `fail_on_findings` on and `--min-severity` met |
 | 2 | A usage error, including an invalid `--output-formats` value |
 | 3 | The configuration is invalid: it does not validate, an override does not validate, or a config file an MCP client delivered sets a field the server's policy denies |
-| 4 | A workspace error (see [Workspace mode](#workspace)), or `--dry-run`, `--allow-missing-projects` or `--workspace-config` given without `--workspace` |
+| 4 | A workspace error (see [Workspace mode](#workspace)), or `--dry-run`, `--allow-missing-projects`, or `--workspace-config` given without `--workspace` |
 | 130 | Interrupted with Ctrl-C |
 
-A config file that is named but missing, or that does not parse, is not exit 3: ASH logs a warning and scans with the default configuration.
+A config file that is named but missing, or a YAML or JSON config file that does not parse, is not exit 3: ASH logs a warning and scans with the default configuration. A TOML config file that does not parse, or an `extends` base that is missing or does not parse, is exit 3.
 
 ### Precedence {#scan-precedence}
 
 ASH stops at the first of these that applies:
 
 1. A usage error: 2.
-2. A check before scanning: the shard and workspace options, workspace resolution, the source directory, `--use-existing`, the output directory, the config, then the scanner selection. Each exits as the table above says (1, 3 or 4).
-3. With `fail_on_incomplete_scanners` on: a selected scanner ERROR, MISSING or with lost targets; then no scanner ran; then a failed converter: 1.
+2. A check before scanning: the shard and workspace options, workspace resolution, the source directory, `--use-existing`, the output directory, the config, then the scanner selection. Each exits as the table above says (1, 3, or 4).
+3. With `fail_on_incomplete_scanners` on: a selected scanner ERROR, MISSING, or with lost targets; then no scanner ran; then a failed converter: 1.
 4. A rule could not be evaluated: 1.
 5. A stale content database under `content_db_staleness: fail`: 1.
 6. `fail_on_findings` off: 0.
@@ -39,9 +39,9 @@ ASH stops at the first of these that applies:
 
 `fail_on_findings` and `fail_on_incomplete_scanners` each come from the command-line flag, then the config, then their default (on). `--allow-stale-content-db` and `--no-allow-stale-content-db` replace the config's `content_db_staleness`.
 
-### Container and nix mode {#container}
+### Container and Nix mode {#container}
 
-In `--mode container` (and `ash build-image`) and `--mode nix`, ASH reads the results back on the host and computes the code by the rules above, applying `--min-severity` and `--ignore-suppressions` there.
+In `--mode container` (and `ash build-image`) and `--mode nix`, ASH reads the results back on the host and computes the code by the rules above, applying `--min-severity` there. `--ignore-suppressions` has no effect in container mode: suppressions still apply.
 
 | Code | Condition |
 |---|---|
@@ -49,7 +49,7 @@ In `--mode container` (and `ash build-image`) and `--mode nix`, ASH reads the re
 | 1, or the container runtime's code | Refused before a container started: no container runtime found, a non-numeric UID or GID, an invalid revision, no Dockerfile, or a failed image build |
 | 1 | The results file is missing or does not parse |
 | 0, or the build's code | `--no-run` |
-| any other | The container exited with a code other than 0, 1 or 2 (for example 3, 4, 125, 126, 127 or 137); ASH exits with the same code |
+| any other | The container exited with a code other than 0, 1, or 2 (for example 3, 4, 125, 126, 127, or 137); ASH exits with the same code |
 | 1 | Nix mode: `nix` is not installed |
 
 ### Sharded scans {#shards}
@@ -72,7 +72,7 @@ Because the combination puts 2 above 1, a project with findings and a MISSING sc
 
 | Code | Condition |
 |---|---|
-| 0, 1, 2 | The verdict over all shards, by the same rules as `ash scan`, including incompleteness, stale databases and `--min-severity` |
+| 0, 1, 2 | The verdict over all shards, by the same rules as `ash scan`, including incompleteness, stale databases, and `--min-severity` |
 | 1 | Refused: no shard index; results from a scan that was not sharded; a `--results` path that does not exist; a duplicated or mismatched shard; a results file that does not parse; a shard that completed none of its scanners; a symbolic link as the output directory |
 | 2 | A usage error, including a missing `--results` and an invalid `--output-formats` value |
 
@@ -90,9 +90,9 @@ Because the combination puts 2 above 1, a project with findings and a MISSING sc
 
 | Code | Condition |
 |---|---|
-| 0 | The stdio transport's input closed, or the server was stopped with Ctrl-C |
-| 1 | The MCP dependencies are not installed, or the server failed to start |
-| 2 | A scanner error at startup; a usage error |
+| 0 | The stdio transport's input closed, or the server was stopped with Ctrl-C. On the stdio transport, also an error while the server runs: ASH logs it and exits 0. |
+| 1 | The MCP dependencies are not installed, or an HTTP server failed to start |
+| 2 | A usage error, such as an unknown option or a `--port` that is not a number; a scanner error that stops an HTTP server |
 | 3 | Conflicting options: `--quiet` with `--verbose`, only one of `--auth-header-name` and `--auth-header-value`, an invalid `--transport`, or `--stateless-http` without the streamable-http transport. Also when the HTTP server cannot bind its port, which the HTTP server reports with 3. |
 
 ## `ash config` {#config}
@@ -106,23 +106,23 @@ Because the combination puts 2 above 1, a project with findings and a MISSING sc
 | | 3 | The config does not parse or does not validate |
 | `ash config update` | 0 | The file was updated, or no `--set` was given. Also when a `--set` value has no `=`: ASH prints an error and still rewrites the file. |
 | | 1 | No config file found or the file does not exist; the file is TOML or uses `extends` or `patch`; it does not load; the result does not validate; it cannot be written |
-| `ash config validate` | 0 | Every check passed |
+| `ash config validate` | 0 | Every structural check passed (known top-level keys, no internal-only fields, path patterns). Values are not checked, so a file that passes can still make `ash scan` exit 3; `ash config get` checks values. |
 | | 1 | The file does not exist, a check failed, or an error occurred |
 | `ash config lint` | 0 | No errors (warnings and notes are allowed); or `--fix` or `--fix-unused` was given, even if errors remain; or a fix prompt was declined |
-| | 1 | The file is not found; errors were found and no fix was requested; `--fix` on a TOML file |
-| `ash config validate-plugin-dependencies` | 0 | The config resolves and sets `project_name` |
+| | 1 | The file is not found; errors were found and no fix was requested; `--fix` on a TOML file; it stopped with a Python error, as it does on an unquoted `expiration` date |
+| `ash config validate-plugin-dependencies` | 0 | The config resolves (`project_name` has a default, so the file does not need to set it) |
 | | 1 | The named file does not exist, the config does not resolve, or no config file is found (`ASH_CONFIG` is not read) |
 | `ash config wizard` | 0 | The file was written |
 | | 1 | The file is TOML or uses `extends` or `patch`; a prompt was aborted |
 
-[Configure ASH](../how-to/configure.md#check) explains what `validate`, `lint` and `get` check.
+[Configure ASH](../how-to/configure.md#check) explains what `validate`, `lint`, and `get` check.
 
 ## Other commands {#other}
 
 | Command | Code | Condition |
 |---|---|---|
-| `ash dependencies install` | 0 | Every selected tool was installed and verified |
-| | 1 | An install failed; a requested tool is not found after installing; a plugin failed; the config or an override is invalid |
+| `ash dependencies install` | 0 | No install command failed. A tool that is still absent afterward does not change this, unless you named it with `--tool` or ASH ran no install command at all. |
+| | 1 | An install command failed; a tool named with `--tool` is still absent; ASH ran no install command while a tool it needs is absent; a plugin failed; the config or an override is invalid |
 | | 2 | An unknown `--tool` name |
 | `ash plugin list` | 0 | The lists were printed, also when a `--config` file is missing (ASH warns and uses the defaults) or a plugin module is skipped |
 | | 1 | Any error, such as an invalid config or override |

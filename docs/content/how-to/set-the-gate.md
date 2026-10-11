@@ -1,4 +1,4 @@
-# Set when a scan fails
+# Set the gate
 
 A scan's exit code is its verdict: 0 passes, 2 means findings failed it, 1 means the scan did not produce a result you can rely on, and 3 means the config is invalid. This page shows which settings decide the verdict, in what order ASH checks them, and how to set them for CI. Every code, for every command, is in [Exit codes](../reference/exit-codes.md).
 
@@ -18,7 +18,7 @@ ASH decides the exit code from these conditions, in order, and stops at the firs
 
 Two consequences of the order: a scan with findings and a MISSING scanner exits 1, not 2, and turning off `fail_on_findings` does not hide an incomplete scan or a stale database.
 
-Suppressed findings and findings under an ignore path never count in row 6. See [Suppress a finding](suppress-findings.md).
+Suppressed findings and findings under an ignore path never count in row 6. See [Suppress findings](suppress-findings.md).
 
 ## Severity thresholds {#thresholds}
 
@@ -26,9 +26,9 @@ The threshold names the least severe finding that still fails the scan. A higher
 
 | Threshold | Findings that fail the scan |
 |---|---|
-| `ALL` | CRITICAL, HIGH, MEDIUM, LOW and INFO |
-| `LOW` | CRITICAL, HIGH, MEDIUM and LOW |
-| `MEDIUM` (default) | CRITICAL, HIGH and MEDIUM |
+| `ALL` | CRITICAL, HIGH, MEDIUM, LOW, and INFO |
+| `LOW` | CRITICAL, HIGH, MEDIUM, and LOW |
+| `MEDIUM` (default) | CRITICAL, HIGH, and MEDIUM |
 | `HIGH` | CRITICAL and HIGH |
 | `CRITICAL` | CRITICAL |
 
@@ -46,7 +46,7 @@ scanners:
       severity_threshold: CRITICAL
 ```
 
-The values are uppercase and case-sensitive. `high`, `INFO` and `NONE` are not thresholds, and a config that uses them is refused:
+The values are uppercase and case-sensitive. `high`, `INFO`, and `NONE` are not thresholds, and a config that uses them is refused:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
@@ -54,13 +54,15 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress \
   --config-overrides global_settings.severity_threshold=high
 ```
 
-When no config sets the global threshold, the `ASH_DEFAULT_SEVERITY_LEVEL` environment variable does, with the same values; an unrecognized value falls back to `MEDIUM` with a warning.
+When no config sets the global threshold, the `ASH_DEFAULT_SEVERITY_LEVEL` environment variable does. It takes the same five names in any case (`high` works there), and an unrecognized value falls back to `MEDIUM` with a warning.
 
-A finding's severity is the one its scanner reports. A scanner that reports none is graded from its SARIF level: `error` is CRITICAL, `warning` is MEDIUM and `note` is LOW. detect-secrets and gitleaks findings are graded CRITICAL this way, although `ash.flat.json` and `ash.csv` show them as HIGH, so a `CRITICAL` threshold still fails on them. For trivy, ASH also passes the threshold to trivy itself (`trivy --severity`), so trivy does not report findings below it at all.
+A finding's severity is the one its scanner reports. A finding with none is graded from its rule's `security-severity` score when the rule has one (9 and above is CRITICAL, 7 HIGH, 4 MEDIUM, and above 0 LOW), and otherwise from its SARIF level: `error` is CRITICAL, `warning` is MEDIUM, and `note` is LOW. detect-secrets and gitleaks findings are graded CRITICAL this way, although `ash.flat.json` and `ash.csv` show them as HIGH, so a `CRITICAL` threshold still fails on them.
+
+When `scanners.trivy.options.severity_threshold` is set, ASH also passes it to trivy (`trivy --severity`), so trivy does not report findings below it at all. The global threshold is not passed to trivy.
 
 ### `--min-severity`
 
-`--min-severity` (`critical`, `high`, `medium`, `low` or `none`; default `low`) is a second, scan-wide condition on the command line. A scan that fails its thresholds exits 2 only when at least one unsuppressed finding is at or above this severity; otherwise it exits 0. `critical` and `high` are equivalent. `none` turns the condition off.
+`--min-severity` (`critical`, `high`, `medium`, `low`, or `none`; default `low`) is a second, scan-wide condition on the command line. A scan that fails its thresholds exits 2 only when at least one unsuppressed finding is at or above this severity; otherwise it exits 0. `critical` and `high` are equivalent, and `none` turns the condition off. ASH does not check the value: anything else acts like `low`.
 
 ## Report findings without failing {#fail-on-findings}
 
@@ -74,19 +76,13 @@ The flag takes precedence over the config, and `--fail-on-findings` turns the ga
 
 ## Incomplete scans {#incomplete}
 
-With `fail_on_incomplete_scanners` on, the default, a scan exits 1 when a scanner it selected did not finish: ERROR (it ran and failed), MISSING (its tool is not installed, or the sandbox could not confine it) or a scanner that lost some of its targets. It also exits 1 when no scanner ran or a converter failed. The message names each scanner and its status.
+With `fail_on_incomplete_scanners` on, the default, a scan exits 1 when a scanner it selected did not finish: ERROR (it ran and failed), MISSING (its tool is not installed, or the sandbox could not confine it), or a scanner that lost some of its targets. It also exits 1 when no scanner ran or a converter failed. The message names each scanner and its status.
 
-Turn a scanner you cannot run off, or exclude it, rather than turning this gate off: a SKIPPED scanner is recorded as not measured, and the gate stays on for the others. `fail_on_incomplete_scanners: false` or `--no-fail-on-incomplete-scanners` accepts a partial scan; with it off, a scan in which no scanner ran exits 0.
+Turn a scanner you cannot run off, or exclude it, rather than turning this gate off: a SKIPPED scanner is recorded as not measured, and the gate stays on for the others. `fail_on_incomplete_scanners: false` or `--no-fail-on-incomplete-scanners` accepts an incomplete scan; with it off, a scan in which no scanner ran exits 0.
 
 ## Stale content databases {#content-databases}
 
-grype, trivy and the offline semgrep and opengrep rule sets read databases that age. ASH measures each one after the scanner runs and treats a database it cannot date as stale:
-
-| Database | Bound |
-|---|---|
-| `grype-db` | 120 hours |
-| `trivy-db` | 24 hours |
-| `semgrep-offline-rules`, `opengrep-offline-rules` | 30 days |
+grype, trivy, and the offline semgrep and opengrep rulesets read databases that age. ASH measures each one after the scanner runs, treats a database it cannot date as stale, and fails the scan when one is past its age bound; [Content databases](../concepts/content-databases.md#which-scanners-use-one) lists the databases and their bounds.
 
 With `content_db_staleness: fail`, the default, a stale database fails the scan with exit 1, before `fail_on_findings` is considered, and the message says how to refresh it. With `warn`, the scan continues and the reports carry the warning. To relax one database for a limited time, add an override; it applies until 00:00 UTC on its expiration date and is then ignored with a warning:
 
@@ -103,15 +99,17 @@ content_db_staleness_overrides:
 
 ## Who can change the gate {#who}
 
-On the command line, a repository's own config is honored for every setting on this page. A repository you scan can set `fail_on_findings: false`, raise thresholds, turn scanners off, set `content_db_staleness: warn` and add suppressions, and none of it is marked in the results.
+On the command line, a repository's own config is honored for every setting on this page. A repository you scan can set `fail_on_findings: false`, raise thresholds, turn scanners off, set `content_db_staleness: warn`, and add suppressions, and none of it is marked in the results.
 
 When the repository is not yours to trust, keep these settings yours:
 
-- Pass your own config with `--config`, from a file the repository's authors cannot change. ASH then does not read the repository's config at all.
-- Pass the gate flags explicitly. `--fail-on-findings`, `--fail-on-incomplete-scanners` and `--no-allow-stale-content-db` take precedence over any config file, and `--config-overrides` beats the file for the global threshold. A per-scanner threshold in the repository's config still replaces the global one for its scanner, which is why the first point matters.
-- Pass `--ignore-suppressions` to report findings that suppressions and `ash-ignore` comments would hide. It lifts yours as well as the repository's.
+- Pass your own config with `--config`, from a file the repository's authors cannot change. In a scan of one directory, ASH then does not read the repository's config at all. In workspace mode, `--config` applies only to projects that have no config of their own, so set the gate with flags and `--config-overrides` there.
+- Pass the gate flags explicitly. `--fail-on-findings`, `--fail-on-incomplete-scanners`, and `--no-allow-stale-content-db` take precedence over any config file, and `--config-overrides` beats the file for the global threshold. A per-scanner threshold in the repository's config still replaces the global one for its scanner, which is why the first point matters.
+- Pass `--ignore-suppressions` to report findings that suppressions and `ash-ignore` comments would hide. It lifts yours as well as the repository's. It has no effect in container mode, where suppressions still apply.
 
-A config file that an MCP client delivers to the ASH MCP server cannot set `fail_on_findings`, `fail_on_incomplete_scanners`, `content_db_staleness` or `content_db_staleness_overrides` to a value other than the server's own: the server refuses the whole file. Under the server's default policy such a file can still raise thresholds and turn scanners off. [Configuration trust model](../concepts/trust-model.md#denied-settings) covers both tiers.
+The repository still affects the results in other ways. Its inline suppressions apply: ASH's `ash-ignore` comments unless you pass `--ignore-suppressions`, and the scanners' own comments, such as bandit's `# nosec` (set `scanners.bandit.options.ignore_nosec: true` in your config to ignore those). Its `.gitignore` and `.ignore` files also remove files from the set that several scanners read; [Coverage](../reference/coverage.md#what-decides-the-files) lists which scanners use that set. [Configuration trust model](../concepts/trust-model.md#not-protected) lists the rest.
+
+A config file that an MCP client delivers to the ASH MCP server cannot set `fail_on_findings`, `fail_on_incomplete_scanners`, `content_db_staleness`, or `content_db_staleness_overrides` to a value other than the server's own: the server refuses the whole file. Under the server's default policy such a file can still raise thresholds and turn scanners off. [Configuration trust model](../concepts/trust-model.md#denied-settings) covers both tiers.
 
 ## CI recipes {#ci}
 

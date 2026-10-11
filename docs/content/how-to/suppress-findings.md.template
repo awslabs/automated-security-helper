@@ -1,6 +1,6 @@
-# Suppress a finding
+# Suppress findings
 
-When a finding is a false positive or an accepted risk, suppress it so it stops failing the scan. A suppression keeps the finding in the results, marked suppressed, with your reason. An ignore path drops findings in a path from the results entirely. [Suppressions, ignore paths and scanner exclusions](../concepts/suppressions.md) explains how they differ and how they interact with the gate and the reports.
+When a finding is a false positive or an accepted risk, suppress it so it stops failing the scan. A suppression keeps the finding in the results, marked suppressed, with your reason. An ignore path drops findings in a path from the results entirely. [Suppressions, ignore paths, and scanner exclusions](../concepts/suppressions.md) explains how they differ and how they interact with the gate and the reports.
 
 To write a suppression you need the finding's rule ID and file. Both are in `.ash/ash_output/reports/ash.flat.json` (`rule_id`, `file_path`, `line_start`) and in the SARIF report `ash.sarif` (`ruleId`).
 
@@ -22,6 +22,7 @@ global_settings:
       reason: assert is how the tests check results
 ```
 
+<!-- doctest: options of=global_settings.suppressions -->
 | Field | Required | Meaning |
 |---|---|---|
 | `path` | yes | The file, or a pattern, relative to the scanned directory |
@@ -29,15 +30,15 @@ global_settings:
 | `rule_id` | no | The rule to suppress, as ASH reports it. Without it, the entry suppresses every rule in its path. |
 | `line_start`, `line_end` | no | Lines the finding must overlap, inclusive. `line_start` alone runs to the end of the file. |
 | `expiration` | no | The date, `YYYY-MM-DD`, from which the suppression stops matching |
-| `symbol` | no | Only findings inside this function, class or method; see [Scope a suppression to a symbol](#symbol) |
+| `symbol` | no | Only findings inside this function, class, or method; see [Scope a suppression to a symbol](#symbol) |
 | `package_name`, `package_version`, `package_path` | no | Only findings about this dependency, for dependency scanners such as grype and npm-audit |
 
 - Paths ignore case. In a pattern, `*` also matches across directory separators, so `src/*.py` matches `src/sub/app.py`, and `**` matches any depth. A bare directory name such as `tests` or `tests/` matches nothing inside it; write `tests/**`.
 - `rule_id` is a case-insensitive pattern with no scanner prefix. It matches any scanner that reports that rule ID.
-- Quote the `expiration` date. YAML reads an unquoted `2027-01-31` as a date, not a string, and ASH then refuses the whole config (exit 3).
-- Unknown keys are dropped without an error. An entry whose `rule_id` is misspelled (`ruleId`, for example) loses it and suppresses every rule in its path. `ash config get` shows the entry as ASH read it.
+- Quote the `expiration` date. YAML reads an unquoted `2027-01-31` as a date, not a string, and ASH then refuses the whole config (exit 3). `ash config lint` stops with a Python error on such a file; `ash config get` names the problem.
+- Unknown keys are dropped without an error. An entry whose `rule_id` is misspelled (`ruleId`, for example) loses it and suppresses every rule in its path, and an entry whose `expiration` is misspelled (`expiry`) never expires. `ash config get` shows the entry as ASH read it.
 
-To try a suppression before you write it into the file, pass it for one run. The sample project's finding is a detect-secrets `SECRET-SECRET-KEYWORD` in `app.py`; with this suppression the scan passes:
+To try a suppression before you write it into the file, pass it for one run. In a repository where detect-secrets reports `SECRET-SECRET-KEYWORD` in `app.py`, this run passes:
 
 ```bash
 ash --source-dir . --scanners detect-secrets --offline --no-progress \
@@ -46,7 +47,7 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress \
 
 ### Expiration {#expiration}
 
-On its `expiration` date, by the local clock of the machine that runs the scan, a suppression stops matching, and the finding fails the next scan again. A scan logs a warning for each suppression that expires within 30 days. `ash config lint` reports suppressions that have expired, and `ash config lint --fix` removes them.
+On its `expiration` date, by the local clock of the machine that runs the scan, a suppression stops matching, and the finding fails the next scan again. A scan logs a warning for each suppression whose expiration date is within the next 30 days, counting today. `ash config lint` reports suppressions that have expired, and `ash config lint --fix` removes them.
 
 ### Scope a suppression to a symbol {#symbol}
 
@@ -61,7 +62,7 @@ global_settings:
       reason: run_hook only runs commands from the deploy manifest
 ```
 
-ASH finds the definition by parsing the file with tree-sitter, for Python, JavaScript, TypeScript and Java files. The parsers are in the `symbols` extra, which is not installed by default; without it, a suppression with `symbol` matches nothing and the scan logs a warning that names the extra. The container image includes it. ASH is installed from its git repository, so install the extra the same way, for example with uv:
+ASH finds the definition by parsing the file with tree-sitter, for Python, JavaScript, TypeScript, and Java files. The parsers are in the `symbols` extra, which is not installed by default; without it, a suppression with `symbol` matches nothing and the scan logs a warning that names the extra. The container image includes it. ASH is installed from its git repository, so install the extra the same way, for example with uv:
 
 <!-- doctest: illustrative reason="installs from the network" -->
 ```bash
@@ -86,7 +87,7 @@ TEST_PASSWORD = "not-a-real-password"
 ```
 
 - Write the comment with `#` or `//`. Other comment styles, such as `/* */` and `<!-- -->`, are not recognized.
-- Name exactly one rule ID, as ASH reports it, for example `B602`, `SECRET-SECRET-KEYWORD` or `zizmor/unpinned-uses`. It is compared without case but is not a pattern. A comment without a rule ID suppresses nothing.
+- Name exactly one rule ID, as ASH reports it, for example `B602`, `SECRET-SECRET-KEYWORD`, or `zizmor/unpinned-uses`. It is compared without case but is not a pattern. A comment without a rule ID suppresses nothing.
 - The comment must be on the line where the finding starts (or the line above it, for `ash-ignore-next-line`). Scanners report different start lines for the same code; check `line_start` in `ash.flat.json`.
 - The text after the rule ID is the reason. It is optional, and the reports show it after `(ASH inline)`.
 
@@ -125,21 +126,21 @@ global_settings:
 
 `path` and `reason` are required, and paths match the way suppression paths do. ASH also accepts an `expiration` on an ignore path but does not enforce it: an expired ignore path keeps dropping findings. To hide a path for a limited time, use a suppression without `rule_id` and with an `expiration`.
 
-ASH does not read a `.ashignore` file. Several scanners also have their own exclusion options, such as bandit's `excluded_paths`, checkov's `skip_path` and semgrep's `exclude`; the [scanner reference](../reference/scanners.md) lists them.
+ASH does not read a `.ashignore` file. It does apply the repository's `.gitignore` and `.ignore` files to the files it hands several scanners; see [Coverage](../reference/coverage.md#what-decides-the-files). Several scanners also have their own exclusion options, such as bandit's `excluded_paths`, checkov's `skip_path`, and semgrep's `exclude`; the [scanner reference](../reference/scanners.md) lists them.
 
 ## Find suppressions that no longer match {#unused}
 
-The `unused-suppressions` reporter, on by default, writes `.ash/ash_output/reports/ash.unused-suppressions.json` and `ash.unused-suppressions.md`. They list each entry in `global_settings.suppressions` that matched no finding in the scan, including expired ones. They do not cover ignore paths or inline comments.
+The `unused-suppressions` reporter, on by default, writes `.ash/ash_output/reports/ash.unused-suppressions.json` and `ash.unused-suppressions.md`. They list each entry in `global_settings.suppressions` that matched no finding in the scan, including expired ones. They do not cover ignore paths or inline suppressions.
 
-After a scan, `ash config lint --fix-unused` comments out the entries that the report lists, with the date. A suppression can look unused in one environment and still be needed in another, for example when a scanner whose finding it covers is not installed locally but runs in CI. Check the report before you remove entries.
+After a scan, `ash config lint --fix-unused` comments out the entries that the report lists, with the date. If it comments out every entry, replace the empty `suppressions:` it leaves with `suppressions: []` or delete the key; otherwise the next scan exits 3. A suppression can look unused in one environment and still be needed in another, for example when a scanner whose finding it covers is not installed locally but runs in CI. Check the report before you remove entries.
 
 ## Add a suppression while you review findings {#inspect}
 
-`ash inspect findings` opens the last scan's findings in your terminal. Select a finding and press `x` to suppress it: ASH asks for a reason and an optional expiration, and adds an entry with the finding's path, rule ID and line to the config file (the `--config` file, else the config ASH discovers, else `.ash.yaml`). It keeps the file's comments. It does not edit TOML files, or a file that uses `extends` but has no suppressions list of its own.
+`ash inspect findings` opens the last scan's findings in your terminal. Select a finding and press `x` to suppress it: ASH asks for a reason and an optional expiration, and adds an entry with the finding's path and rule ID, and its line as `line_start` and `line_end`, to the config file (the `--config` file, else the config ASH discovers, else `.ash.yaml`). It keeps the file's comments. If the file already has an entry with that rule ID and path, nothing is added, even for another line, although the status bar says the suppression was saved. It does not edit TOML files, or a file that uses `extends` but has no suppressions list of its own. In a JSON config it writes YAML, which ASH then cannot read, so the next scan uses the default configuration; add suppressions to a JSON config by hand.
 
 ## See every finding {#ignore-suppressions}
 
-`--ignore-suppressions` reports findings as if no suppression existed, so you can review what the suppressions hide. The sample project's suppression from above no longer applies, and the scan fails:
+`--ignore-suppressions` reports findings as if no suppression existed, so you can review what the suppressions hide. With the suppression from the earlier example, the finding fails the scan again:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
@@ -147,6 +148,6 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress --ignore-su
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "rule_id": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
 ```
 
-It lifts config suppressions, `ash-ignore` comments and cdk-nag's `Metadata` suppressions. It brings back findings under an ignore path only from scanners that scan those files anyway. It does not bring back what a scanner never reported: findings hidden by the scanner's own comments, its exclusion options, or semgrep's and checkov's own suppressions.
+It lifts config suppressions, `ash-ignore` comments, and cdk-nag's `Metadata` suppressions. It brings back findings under an ignore path only from scanners that scan those files anyway. It does not bring back what a scanner never reported (findings hidden by the scanner's own comments or its exclusion options), and findings that semgrep and checkov report as suppressed stay suppressed. In container mode `--ignore-suppressions` has no effect, and suppressions still apply.
 
 When an MCP client delivers the config, its suppressions and ignore paths are marked client-supplied in the results; see [Configuration trust model](../concepts/trust-model.md#client-supplied).
