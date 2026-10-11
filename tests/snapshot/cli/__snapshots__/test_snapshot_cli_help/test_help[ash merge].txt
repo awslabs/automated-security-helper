@@ -30,13 +30,12 @@
 │                                                                            configuration asks    │
 │                                                                            for.                  │
 │    --config              -c                          <str>                 The operator's config │
-│                                                                            file. Reporter        │
-│                                                                            destinations and      │
-│                                                                            credentials, and      │
-│                                                                            whether plugin        │
-│                                                                            packages that send    │
-│                                                                            findings off the host │
-│                                                                            are loaded, come from │
+│                                                                            file. Which plugin    │
+│                                                                            modules are imported, │
+│                                                                            which off-host        │
+│                                                                            reporters run, and    │
+│                                                                            where reporters send  │
+│                                                                            findings come from    │
 │                                                                            it, the defaults and  │
 │                                                                            --config-overrides,   │
 │                                                                            not from the shards'  │

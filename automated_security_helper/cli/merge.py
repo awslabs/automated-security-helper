@@ -114,22 +114,24 @@ builds its reporters from the lowest-indexed shard's copy. That copy was built
 from whatever config the shard's scan read, a file inside the scanned tree
 included, and it reaches the merge as data in an artifact. So the settings a
 config file inside the scanned tree may not choose are not taken from it here
-either. :func:`confine_recorded_config` calls the entry points ``resolve_config``
-calls for such a file, ``confine_plugin_modules`` and
-``confine_reporter_destinations``, and ``confine_declared_reporter_destinations``
-runs once the plugin modules are loaded, all against the operator's trusted base
-at merge time: the defaults, ``--config`` (itself confined when it is inside the
-working directory's checkout, as for ``ash report``), and ``--config-overrides``.
-A value the recorded configuration sets that the base does not is replaced by
-the base's, with the same warning a scan gives, naming the shard's results file.
-Later additions to those modules' tables apply here without a change to this one.
+either. :func:`confine_recorded_config` runs ``confine_to_trusted_base``, the
+steps ``resolve_config`` runs for such a file (sandbox grants, plugin modules,
+reporter destinations and whether the off-host reporters run, scanner config
+files), and ``confine_declared_reporter_destinations`` runs once the plugin
+modules are loaded. Both run against the operator's trusted base at merge time:
+the defaults, ``--config``, and ``--config-overrides``. ``--config`` is itself
+confined when it is inside the working directory's tree, as for ``ash report``:
+the outermost git checkout around the working directory, or the working
+directory itself outside one. A step added to ``confine_to_trusted_base``, or a
+row added to those modules' tables, applies here without a change to this one.
 
-Only those two apply because only they reach anything the merge does:
-``ash_plugin_modules`` decides which reporter classes and event handlers are
-imported, and the reporter options decide where findings are sent and with which
-credentials. The sandbox grants and the scanners' own config files govern
-scanners, and no scanner or converter runs here, so they are left as recorded and
-the merged results still say how the shards scanned.
+Two things differ from a scan, and ``SHARD_RECORDED`` carries both. The warnings
+name the shard's results file and give ``ash merge``'s own options as the fix.
+And an ``ash_plugin_modules`` entry the operator's configuration does not name is
+dropped even when it is an installed module outside the tree: nothing the merge
+imports is a shard's choice. So the merge does not need
+``drop_untrusted_off_host_plugins``; every class it loads comes from a module the
+operator named.
 
 ``--config-overrides`` are applied to every shard's recorded configuration as it
 is loaded (:func:`apply_operator_overrides`), so the completion gate, the verdict
@@ -137,6 +139,15 @@ and the reporters all see them, and they are replayed onto the trusted base, as
 in a scan. ``--config`` supplies only the trusted values and does not replace the
 recorded configuration: a reporter or plugin module the shards did not configure
 is added with ``--config-overrides``.
+
+The verdict settings (``fail_on_findings``, ``fail_on_incomplete_scanners``, the
+severity thresholds, suppressions, ignore paths and content database bounds)
+still come from the shards, since the verdict follows the scan's own
+configuration. One verdict covers the merged scan, so shards whose recorded
+values differ after the overrides are refused (:func:`verify_verdict_settings_agree`)
+rather than decided by the lowest index, and a value ``--config`` sets for one of
+them is named in a warning with the override that would apply it
+(:func:`warn_on_ignored_operator_verdict_settings`).
 
 Known limitations
 -----------------
@@ -164,6 +175,7 @@ across shards is not recorded.
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional, Sequence, Tuple
@@ -188,17 +200,15 @@ from automated_security_helper.base.plugin_context import PluginContext
 # rebuild by side effect of importing resolve_config; relying on an import made
 # for another purpose is what makes this fragile, so the dependency is named here.
 from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.config.plugin_module_trust import (
-    confine_plugin_modules,
-)
 from automated_security_helper.config.reporter_trust import (
     confine_declared_reporter_destinations,
-    confine_reporter_destinations,
 )
 from automated_security_helper.config.resolve_config import (
     apply_config_overrides,
+    confine_to_trusted_base,
     resolve_config,
 )
+from automated_security_helper.config.untrusted_source import SHARD_RECORDED
 from automated_security_helper.core.enums import (
     AshLogLevel,
     ExportFormat,
@@ -1167,11 +1177,13 @@ def confine_recorded_config(
 ) -> None:
     """Hold a shard's recorded config to the rules for a config file in the scanned tree.
 
-    Calls the entry points ``resolve_config`` calls for such a file, with their
-    warnings, which name ``results_file``; see the module docstring for why these
-    two. ``confine_reporter_destinations`` also records the trusted base on
+    Runs ``confine_to_trusted_base``, the steps ``resolve_config`` runs for such a
+    file, with ``SHARD_RECORDED`` as the source: the warnings name
+    ``results_file`` and give ``ash merge``'s options as the fix, and an
+    ``ash_plugin_modules`` entry the operator's configuration does not name is
+    dropped. ``confine_reporter_destinations`` also records the trusted base on
     ``config`` for ``confine_declared_reporter_destinations``, which the caller
-    runs once the plugin modules are loaded.
+    runs with the same source once the plugin modules are loaded.
 
     Args:
         config: The merged report's config, changed in place.
@@ -1179,23 +1191,160 @@ def confine_recorded_config(
         config_overrides: ``--config-overrides``, replayed onto ``trusted_config``.
         results_file: The results file ``config`` was recorded in.
     """
-    in_tree = [results_file]
-    confine_plugin_modules(
-        config, trusted_config, list(config_overrides), Path.cwd(), in_tree
+    confine_to_trusted_base(
+        config,
+        trusted_config,
+        list(config_overrides),
+        Path.cwd(),
+        [results_file],
+        source=SHARD_RECORDED,
     )
-    confine_reporter_destinations(
-        config, trusted_config, list(config_overrides), in_tree
-    )
+
+
+def _in_index_order(
+    loaded: Sequence[Tuple[Path, AshAggregatedResults]],
+) -> List[Tuple[Path, AshAggregatedResults]]:
+    """``loaded`` by shard index, with any file that carries no provenance last.
+
+    The order :func:`merge_shard_results` takes the merged report's identity in,
+    for the readers of the recorded config that run before it.
+    """
+
+    def position(entry: Tuple[Path, AshAggregatedResults]) -> Tuple[bool, int]:
+        assignment = read_shard_assignment(entry[1])
+        return (assignment is None, assignment.shard_index if assignment else 0)
+
+    return sorted(loaded, key=position)
 
 
 def _base_results_file(loaded: Sequence[Tuple[Path, AshAggregatedResults]]) -> Path:
     """The results file of the lowest-indexed shard, which supplies the merged config."""
-    stamped = [
-        (assignment.shard_index, path)
-        for path, results in loaded
-        if (assignment := read_shard_assignment(results)) is not None
+    return _in_index_order(loaded)[0][0]
+
+
+def _verdict_settings(dumped: Dict[str, Any]) -> Dict[str, Any]:
+    """The settings of a dumped config that decide the merged verdict, by override key.
+
+    ``dumped`` is ``AshConfig.model_dump(mode="json", by_alias=True)``, with
+    ``exclude_unset`` for the settings a file sets. The keys are the
+    ``--config-overrides`` spelling of each setting.
+    """
+    settings: Dict[str, Any] = {}
+    for name, value in dumped.items():
+        if name in ("fail_on_findings", "fail_on_incomplete_scanners") or (
+            name.startswith("content_db_staleness")
+        ):
+            settings[name] = value
+    global_settings = dumped.get("global_settings") or {}
+    for name in ("severity_threshold", "suppressions", "ignore_paths"):
+        if name in global_settings:
+            settings[f"global_settings.{name}"] = global_settings[name]
+    for scanner, section in (dumped.get("scanners") or {}).items():
+        options = section.get("options") if isinstance(section, dict) else None
+        if isinstance(options, dict) and "severity_threshold" in options:
+            key = f"scanners.{scanner}.options.severity_threshold"
+            settings[key] = options["severity_threshold"]
+    return settings
+
+
+def _recorded_verdict_settings(results: AshAggregatedResults) -> Dict[str, Any]:
+    config = results.ash_config
+    if config is None:
+        return {}
+    return _verdict_settings(config.model_dump(mode="json", by_alias=True))
+
+
+def _shown(value: Any) -> str:
+    text = json.dumps(value, sort_keys=True)
+    return text if len(text) <= 60 else text[:57] + "..."
+
+
+def verify_verdict_settings_agree(
+    loaded: Sequence[Tuple[Path, AshAggregatedResults]],
+) -> None:
+    """Refuse shards whose recorded configs disagree on a setting the verdict reads.
+
+    One verdict covers the merged scan, and it is computed from one config. Taking
+    the lowest-indexed shard's value for every shard would let one shard's
+    ``fail_on_findings: false`` or suppressions decide for findings another shard
+    produced under different settings. Compared after ``--config-overrides`` are
+    applied, so an override that sets the value for every shard settles it.
+
+    Raises:
+        ASHConfigValidationError: Naming each setting that differs and every
+            shard's value for it.
+    """
+    shards = []
+    for path, results in _in_index_order(loaded):
+        assignment = read_shard_assignment(results)
+        label = (
+            f"shard {assignment.shard_index}"
+            if assignment is not None
+            else "a shard without provenance"
+        )
+        shards.append((label, path, _recorded_verdict_settings(results)))
+    keys = sorted({key for _, _, settings in shards for key in settings})
+    differing = [
+        key
+        for key in keys
+        if len(
+            {json.dumps(settings.get(key), sort_keys=True) for *_, settings in shards}
+        )
+        > 1
     ]
-    return min(stamped, key=lambda entry: entry[0])[1]
+    if not differing:
+        return
+    lines = [
+        f"{key}: "
+        + "; ".join(
+            f"{label} ({path.as_posix()}) {_shown(settings.get(key))}"
+            for label, path, settings in shards
+        )
+        for key in differing
+    ]
+    raise ASHConfigValidationError(
+        "the shards' recorded configurations disagree on settings that decide the "
+        "merged verdict:\n  " + "\n  ".join(lines) + "\nOne verdict covers the "
+        "merged scan, so ash merge does not take one shard's value for the others. "
+        "Run every shard with the same configuration, or set the value for all of "
+        "them with --config-overrides."
+    )
+
+
+def _override_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return value
+    return json.dumps(value)
+
+
+def warn_on_ignored_operator_verdict_settings(
+    trusted_config: AshConfig, recorded: AshConfig
+) -> None:
+    """Name each verdict setting ``--config`` sets that the recorded config decides.
+
+    The verdict follows the scan's own configuration, so a setting the operator's
+    file sets for it does not apply at merge time. Only the settings the file
+    writes are compared, so a file that sets only reporters warns about nothing.
+    """
+    operator = _verdict_settings(
+        trusted_config.model_dump(mode="json", by_alias=True, exclude_unset=True)
+    )
+    if not operator:
+        return
+    shards = _verdict_settings(recorded.model_dump(mode="json", by_alias=True))
+    for key, value in operator.items():
+        if json.dumps(value, sort_keys=True) == json.dumps(
+            shards.get(key), sort_keys=True
+        ):
+            continue
+        ASH_LOGGER.warning(
+            f"ash merge's --config sets {key} to {_shown(value)}, and the shards "
+            f"recorded {_shown(shards.get(key))}. The verdict follows the shards' "
+            "own configuration, so their value applies. To apply yours, pass "
+            f"--config-overrides {key}={_override_value(value)}."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1261,10 +1410,10 @@ def merge_command(
             "--config",
             "-c",
             help=(
-                "The operator's config file. Reporter destinations and credentials, "
-                "and whether plugin packages that send findings off the host are "
-                "loaded, come from it, the defaults and --config-overrides, not "
-                "from the shards' recorded config."
+                "The operator's config file. Which plugin modules are imported, "
+                "which off-host reporters run, and where reporters send findings "
+                "come from it, the defaults and --config-overrides, not from the "
+                "shards' recorded config."
             ),
             envvar="ASH_CONFIG",
         ),
@@ -1382,15 +1531,17 @@ def merge_command(
         # the source tree checked out, and a config file found on this host could
         # disagree with the one the shards scanned under. The lowest-indexed shard
         # supplies the report's identity elsewhere in this module, so it supplies
-        # this too.
+        # this too, read in index order rather than --results order.
         require_completion = _resolve_require_scanner_completion(
-            loaded, fail_on_incomplete_scanners
+            _in_index_order(loaded), fail_on_incomplete_scanners
         )
         merged = merge_shard_results(
             loaded, require_scanner_completion=require_completion
         )
+        verify_verdict_settings_agree(loaded)
         if merged.ash_config is None:
             merged.ash_config = apply_config_overrides(AshConfig(), overrides)
+        warn_on_ignored_operator_verdict_settings(trusted_config, merged.ash_config)
         # What a config inside the scanned tree may not choose comes from the
         # operator's base instead; see the module docstring.
         confine_recorded_config(
@@ -1431,7 +1582,9 @@ def merge_command(
     # The plugin modules are loaded, so the destination options each reporter
     # declares are known. Before the merged results are written, so they record
     # these as confined too.
-    confine_declared_reporter_destinations(merged.ash_config, reporter_plugins)
+    confine_declared_reporter_destinations(
+        merged.ash_config, reporter_plugins, source=SHARD_RECORDED
+    )
 
     merged = apply_aggregated_suppressions(merged, plugin_context)
 
@@ -1553,11 +1706,11 @@ def _resolve_require_scanner_completion(
     the two are equal rather than asserting either value, so it catches a change to
     one without the other in either direction.
 
-    Called before coverage has been verified, so the shards are in whatever order
-    ``--results`` listed them and any of them may be unstamped. Every shard of one
-    run carries the same config, so the first that carries one is as good as any;
-    reading them all would only matter for a set that is about to be refused for
-    disagreeing anyway.
+    Called before coverage has been verified, with the shards in index order
+    (:func:`_in_index_order`), so the first that carries a config is the
+    lowest-indexed shard's, whose config the merged report keeps. Shards that
+    disagree on this setting are refused once coverage is verified
+    (:func:`verify_verdict_settings_agree`).
     """
     if cli_value is not None:
         return cli_value

@@ -4,20 +4,23 @@
 """``ash merge`` holds the config each shard recorded to the rules for a repository's config.
 
 Each shard's ``ash_aggregated_results.json`` carries the config its scan resolved,
-and ``ash merge`` builds its reporters from the lowest-indexed shard's copy. Which
-of ASH's off-host plugin packages are loaded, where the reporters send findings
-and which credentials send them are the operator's choice at merge time, as they
-are for a config file inside the scanned tree during a scan
-(``config/plugin_module_trust.py``, ``config/reporter_trust.py``): the defaults,
-``--config`` outside the tree, and ``--config-overrides``.
+and ``ash merge`` builds its reporters from the lowest-indexed shard's copy. What a
+config file inside the scanned tree may not choose is the operator's choice at
+merge time (``resolve_config.confine_to_trusted_base``): which plugin modules are
+imported, whether the off-host reporters run, where reporters send findings and
+with which credentials, the sandbox grants and the scanners' own config files. The
+operator's values are the defaults, ``--config`` outside the working directory's
+tree, and ``--config-overrides``. The settings the verdict reads still come from
+the shards, and shards that disagree on one are refused.
 
 Shards are written by ``AshAggregatedResults.save_model``, the scan's own writer,
 and carry the config ``resolve_config`` returns for a config file outside any
 tree, so the recorded config is one a real shard writes. No AWS call is made: the
 AWS reporters' modules get a stand-in ``boto3``, their dependency checks report
-unsatisfied unless a test says otherwise, and the S3 upload is recorded instead of
-sent. Every reporter ``ReportPhase`` builds is kept, so a test can read what it
-was built with whether or not it ran.
+unsatisfied unless a test says otherwise, their ``report`` calls are recorded, and
+the S3 upload is recorded instead of sent. Every reporter ``ReportPhase`` builds is
+kept, so a test can read what it was built with whether or not it ran.
+``TestTheRealChain`` runs the merge in a fresh process with nothing patched.
 """
 
 from __future__ import annotations
@@ -95,6 +98,7 @@ SHARD_DESTINATION_KEYS = (
 
 _RECORDED_KEY = re.compile(
     r"reporters\.[\w-]+\.(?:options\.\w+|enabled)|ash_plugin_modules"
+    r"|sandbox\.\w+|scanners\.[\w-]+\.options\.\w+"
 )
 
 ENDPOINT_DEFAULT = "https://default.invalid/"
@@ -152,6 +156,7 @@ class _Harness:
         from automated_security_helper.core.phases.report_phase import ReportPhase
         from automated_security_helper.plugin_modules.ash_aws_plugins import (
             bedrock_summary_reporter,
+            cloudwatch_logs_reporter,
             s3_reporter,
             security_hub_reporter,
         )
@@ -166,23 +171,32 @@ class _Harness:
         self.built: List[Any] = []
         self.loaded_modules: List[List[str]] = []
         self.uploads: List[Dict[str, Any]] = []
+        self.reported: List[str] = []
         self.warnings: List[str] = []
         self.report_config: Optional[Any] = None
         self.boto3 = MagicMock()
         self.S3Reporter = s3_reporter.S3Reporter
         self.SecurityHubReporter = security_hub_reporter.SecurityHubReporter
         self.BedrockSummaryReporter = bedrock_summary_reporter.BedrockSummaryReporter
-        self.reporters: List[type] = [
-            SarifReporter,
+        self.CloudWatchLogsReporter = cloudwatch_logs_reporter.CloudWatchLogsReporter
+        self.aws_reporters: List[type] = [
             self.S3Reporter,
             self.SecurityHubReporter,
             self.BedrockSummaryReporter,
+            self.CloudWatchLogsReporter,
         ]
+        self.reporters: List[type] = [SarifReporter, *self.aws_reporters]
 
-        for module in (s3_reporter, security_hub_reporter, bedrock_summary_reporter):
+        for module in (
+            s3_reporter,
+            security_hub_reporter,
+            bedrock_summary_reporter,
+            cloudwatch_logs_reporter,
+        ):
             monkeypatch.setattr(module, "boto3", self.boto3)
-        for cls in self.reporters[1:]:
+        for cls in self.aws_reporters:
             monkeypatch.setattr(cls, "validate_plugin_dependencies", lambda _: False)
+            monkeypatch.setattr(cls, "report", self._recording(cls, cls.report))
         monkeypatch.setattr(
             self.S3Reporter,
             "_put_object_with_retry",
@@ -216,10 +230,32 @@ class _Harness:
             lambda message, *args, **kwargs: self.warnings.append(str(message)),
         )
 
+    def _recording(self, reporter_class: type, report):
+        def recorded(reporter, model):
+            self.reported.append(reporter_class.__name__)
+            return report(reporter, model)
+
+        return recorded
+
     def satisfy(self, reporter_class: type) -> None:
         """Let ``reporter_class``'s dependency check pass, so it runs."""
         self.monkeypatch.setattr(
             reporter_class, "validate_plugin_dependencies", lambda _: True
+        )
+
+    def satisfy_s3_when_it_has_a_destination(self) -> None:
+        """S3's dependency check passes once it has a bucket and a region.
+
+        The real check needs both before it calls AWS. So the S3 reporter runs, and
+        uploads, exactly when the config it was built from names a destination.
+        """
+        self.monkeypatch.setattr(
+            self.S3Reporter,
+            "validate_plugin_dependencies",
+            lambda reporter: bool(
+                reporter.config.options.bucket_name
+                and reporter.config.options.aws_region
+            ),
         )
 
     def recorded_config(self, document: Dict[str, Any]):
@@ -308,6 +344,7 @@ class TestRecordedReporterDestinations:
         self, harness
     ):
         """The operator loads the AWS reporters and sets no destination: S3 gets none."""
+        harness.satisfy_s3_when_it_has_a_destination()
         shard_paths = harness.write_shards(SHARD_CONFIG)
         operator = _write_yaml(
             harness.tmp_path / "operator" / "ash.yaml", {"ash_plugin_modules": [AWS]}
@@ -320,6 +357,7 @@ class TestRecordedReporterDestinations:
         assert options.get("bucket_name") is None
         assert options.get("aws_region") is None
         assert options.get("key_prefix") == "ash-reports/"
+        assert "S3Reporter" not in harness.reported
         assert harness.uploads == []
         assert not (harness.output_dir / "reports" / "ash.s3.json").exists()
         ignored = harness.ignored_keys()
@@ -335,7 +373,8 @@ class TestRecordedReporterDestinations:
             assert value not in harness.aws_calls()
 
     def test_an_operator_config_with_s3_off_and_no_bucket(self, harness):
-        """The brief's case: the operator loads the AWS reporters, S3 off, no bucket."""
+        """The operator loads the AWS reporters, S3 off, no bucket: S3 does not run."""
+        harness.satisfy(harness.S3Reporter)
         shard_paths = harness.write_shards(SHARD_CONFIG)
         operator = _write_yaml(
             harness.tmp_path / "operator" / "ash.yaml",
@@ -346,9 +385,13 @@ class TestRecordedReporterDestinations:
 
         _assert_merged(result, harness)
         assert harness.options(harness.S3Reporter).get("bucket_name") is None
+        assert _section(harness.instance(harness.S3Reporter).config)["enabled"] is False
+        assert "S3Reporter" not in harness.reported
         assert harness.uploads == []
         assert not (harness.output_dir / "reports" / "ash.s3.json").exists()
-        assert "reporters.s3.options.bucket_name" in harness.ignored_keys()
+        ignored = harness.ignored_keys()
+        assert "reporters.s3.options.bucket_name" in ignored
+        assert "reporters.s3.enabled" in ignored
         assert "shard-bucket" not in harness.aws_calls()
         # The operator's config loads the package, so the shard's entry is kept.
         assert harness.loaded_modules == [[AWS]]
@@ -431,7 +474,12 @@ class TestRecordedReporterDestinations:
             (harness.output_dir / "reports" / "ash.endpoint.json").read_text("utf-8")
         )
         assert written == {"endpoint": ENDPOINT_DEFAULT}
-        assert "reporters.endpoint-reporter.options.endpoint" in harness.ignored_keys()
+        named = [m for m in harness.ignoring() if "endpoint-reporter" in m]
+        assert named, harness.warnings
+        assert "reporters.endpoint-reporter.options.endpoint" in harness.ignored_keys(
+            named
+        )
+        assert "ash merge's --config-overrides or --config" in named[0]
 
     def test_the_merged_results_do_not_record_the_shards_destinations(self, harness):
         shard_paths = harness.write_shards(SHARD_CONFIG)
@@ -503,18 +551,24 @@ class TestTheOperatorsBase:
         assert harness.ignoring() == []
         assert harness.loaded_modules == [[]]
 
-    def test_a_config_inside_the_collectors_checkout_is_not_the_operators(
-        self, harness
+    @pytest.mark.parametrize("checkout", [True, False], ids=["checkout", "plain-dir"])
+    def test_a_config_inside_the_working_directorys_tree_is_not_the_operators(
+        self, harness, checkout
     ):
-        """``--config`` inside the working directory's checkout is a repository's file.
+        """``--config`` inside the working directory's tree is a repository's file.
 
-        As for ``ash report``: the trusted base is the defaults, so the AWS
-        reporters' package is not loaded, and neither that file's bucket nor the
-        shard's is used by an S3 reporter built in this process.
+        As for ``ash report``. The tree is the outermost git checkout around the
+        working directory, or the working directory itself when it is in none, so
+        a file there is not the operator's either way. The trusted base is then
+        the defaults: the AWS reporters' package is not loaded, and neither that
+        file's bucket nor the shard's reaches an S3 reporter built in this process.
         """
+        harness.satisfy_s3_when_it_has_a_destination()
         collector = Path.cwd()
-        (collector / ".git").mkdir()
-        in_checkout = _write_yaml(
+        if checkout:
+            (collector / ".git").mkdir()
+        assert (collector / ".git").exists() is checkout
+        in_tree = _write_yaml(
             collector / "ash.yaml",
             {
                 "ash_plugin_modules": [AWS],
@@ -531,15 +585,14 @@ class TestTheOperatorsBase:
         )
         shard_paths = harness.write_shards(SHARD_CONFIG)
 
-        result = harness.merge(shard_paths, "--config", str(in_checkout))
+        result = harness.merge(shard_paths, "--config", str(in_tree))
 
         _assert_merged(result, harness)
         assert harness.loaded_modules == [[]]
-        # The harness registers the S3 reporter whatever is loaded; a step that
-        # drops classes from a package the operator does not load may leave it
-        # unbuilt, which is stronger still.
+        # The harness hands the merge the S3 reporter whatever is loaded.
         for built in harness.built_of(harness.S3Reporter):
             assert _section(built.config)["options"].get("bucket_name") is None
+        assert "S3Reporter" not in harness.reported
         assert harness.uploads == []
         assert "reporters.s3.options.bucket_name" in harness.ignored_keys()
 
@@ -608,3 +661,457 @@ class TestOverridesApplyOverTheRecordedConfig:
         assert result.exit_code == 3, (result.output, result.exception)
         assert "Invalid configuration" in result.output
         assert not (harness.output_dir / RESULTS_FILE_NAME).exists()
+
+
+def _write_each(harness: _Harness, models, documents) -> List[Path]:
+    """Shards that each record their own document, written by the scan's writer."""
+    paths = []
+    for index, (model, document) in enumerate(zip(models, documents)):
+        model.ash_config = harness.recorded_config(document)
+        target = harness.tmp_path / "artifacts" / f"shard-{index}"
+        model.save_model(target)
+        paths.append(target / RESULTS_FILE_NAME)
+    return paths
+
+
+class TestEnablementIsTheOperators:
+    def test_a_shard_does_not_turn_on_s3_the_operators_config_turns_off(self, harness):
+        """The operator's config names a bucket and turns S3 off; a shard turns it on."""
+        harness.satisfy(harness.S3Reporter)
+        shard_paths = harness.write_shards(SHARD_CONFIG)
+        operator = _write_yaml(
+            harness.tmp_path / "operator" / "ash.yaml",
+            {
+                "ash_plugin_modules": [AWS],
+                "reporters": {
+                    "s3": {
+                        "enabled": False,
+                        "options": {
+                            "bucket_name": "operator-bucket",
+                            "aws_region": "us-east-2",
+                        },
+                    }
+                },
+            },
+        )
+
+        result = harness.merge(shard_paths, "--config", str(operator))
+
+        _assert_merged(result, harness)
+        assert "S3Reporter" not in harness.reported
+        assert harness.uploads == []
+        assert _section(harness.instance(harness.S3Reporter).config)["enabled"] is False
+        assert "reporters.s3.enabled" in harness.ignored_keys()
+
+    def test_a_shard_does_not_turn_on_bedrock_the_operators_config_turns_off(
+        self, harness
+    ):
+        harness.satisfy(harness.BedrockSummaryReporter)
+        shard_paths = harness.write_shards(SHARD_CONFIG)
+        operator = _write_yaml(
+            harness.tmp_path / "operator" / "ash.yaml",
+            {
+                "ash_plugin_modules": [AWS],
+                "reporters": {
+                    "s3": {"enabled": False},
+                    "aws-security-hub": {"enabled": False},
+                    "bedrock-summary-reporter": {"enabled": False},
+                },
+            },
+        )
+
+        result = harness.merge(shard_paths, "--config", str(operator))
+
+        _assert_merged(result, harness)
+        assert "BedrockSummaryReporter" not in harness.reported
+        assert "converse" not in harness.aws_calls()
+        assert "reporters.bedrock-summary-reporter.enabled" in harness.ignored_keys()
+
+    def test_a_shard_that_loads_the_aws_reporters_and_names_a_bucket_uploads_nothing(
+        self, harness
+    ):
+        """No operator setting at all: the shard's package and bucket are both refused."""
+        harness.satisfy_s3_when_it_has_a_destination()
+        shard_paths = harness.write_shards(SHARD_CONFIG)
+
+        result = harness.merge(shard_paths)
+
+        _assert_merged(result, harness)
+        assert harness.loaded_modules == [[]]
+        assert "S3Reporter" not in harness.reported
+        assert harness.uploads == []
+        ignored = harness.ignored_keys()
+        assert "ash_plugin_modules" in ignored
+        assert "reporters.s3.options.bucket_name" in ignored
+
+
+def _documented_s3_example_overrides() -> List[str]:
+    """The ``--config-overrides`` values of the S3 example in the ash merge docs."""
+    import shlex
+
+    from tests.utils.helpers import REPO_ROOT
+
+    text = (REPO_ROOT / "docs" / "content" / "docs" / "cli-reference.md").read_text(
+        encoding="utf-8"
+    )
+    section = text.split(
+        "#### Settings a shard's recorded configuration cannot choose", 1
+    )[1]
+    block = section.split("```bash\n", 1)[1].split("```", 1)[0]
+    words = shlex.split(block.replace("\\\n", " "))
+    assert words[:2] == ["ash", "merge"], words
+    return [
+        words[i + 1] for i, word in enumerate(words) if word == "--config-overrides"
+    ]
+
+
+class TestTheDocumentedS3Example:
+    def test_the_example_uploads_to_s3_and_runs_no_other_aws_reporter(self, harness):
+        for reporter_class in harness.aws_reporters:
+            harness.satisfy(reporter_class)
+        overrides = _documented_s3_example_overrides()
+        assert overrides, "the docs no longer hold the S3 example"
+        shard_paths = harness.write_shards({"project_name": "test-merge"})
+        args: List[str] = []
+        for value in overrides:
+            args += ["--config-overrides", value]
+
+        result = harness.merge(shard_paths, *args)
+
+        _assert_merged(result, harness)
+        assert harness.reported == ["S3Reporter"]
+        assert [upload["Bucket"] for upload in harness.uploads] == ["my-bucket"]
+        assert harness.loaded_modules == [[AWS]]
+
+
+class TestMergeWarnings:
+    def test_the_warnings_name_the_results_file_and_ash_merges_options(self, harness):
+        shard_paths = harness.write_shards(SHARD_CONFIG)
+
+        result = harness.merge(shard_paths)
+
+        _assert_merged(result, harness)
+        messages = harness.ignoring()
+        assert {"ash_plugin_modules", "reporters.s3.options.bucket_name"} <= (
+            harness.ignored_keys()
+        )
+        for message in messages:
+            assert shard_paths[0].as_posix() in message, message
+            assert "a shard recorded in its results" in message, message
+            assert "ash merge's --config-overrides or --config" in message, message
+            assert "inside the scanned tree" not in message, message
+            assert "--ash-plugin-modules" not in message, message
+
+    def test_every_confinement_step_runs_on_the_recorded_config(self, harness):
+        """Sandbox grants and scanner config files are confined too, not only reporters."""
+        outside = harness.tmp_path / "elsewhere"
+        outside.mkdir()
+        bandit_config = outside / "bandit.yaml"
+        bandit_config.write_text("skips: []\n", encoding="utf-8")
+        shard_paths = harness.write_shards(
+            {
+                "sandbox": {"extra_read_paths": [str(outside)]},
+                "scanners": {
+                    "bandit": {"options": {"config_file": str(bandit_config)}}
+                },
+            }
+        )
+
+        result = harness.merge(shard_paths)
+
+        _assert_merged(result, harness)
+        ignored = harness.ignored_keys()
+        assert "sandbox.extra_read_paths" in ignored, harness.warnings
+        assert "scanners.bandit.options.config_file" in ignored, harness.warnings
+        recorded = json.loads(
+            (harness.output_dir / RESULTS_FILE_NAME).read_text("utf-8")
+        )["ash_config"]
+        assert recorded["sandbox"]["extra_read_paths"] == []
+        assert str(bandit_config) not in json.dumps(recorded)
+
+
+class TestRecordedThirdPartyModules:
+    MODULE = "merge_probe_ash_plugins"
+
+    def _install(self, harness) -> None:
+        """An installed plugin package outside every tree, on ``sys.path`` for the test."""
+        site = harness.tmp_path / "site"
+        package = site / self.MODULE
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("ASH_REPORTERS = []\n", encoding="utf-8")
+        harness.monkeypatch.syspath_prepend(str(site))
+
+    def test_an_installed_module_the_operator_does_not_name_is_not_loaded(
+        self, harness
+    ):
+        self._install(harness)
+        shard_paths = harness.write_shards({"ash_plugin_modules": [self.MODULE]})
+
+        result = harness.merge(shard_paths)
+
+        _assert_merged(result, harness)
+        assert harness.loaded_modules == [[]]
+        named = [m for m in harness.ignoring() if self.MODULE in m]
+        assert named and "the operator's configuration does not name it" in named[0]
+
+    def test_a_module_the_operator_names_is_loaded(self, harness):
+        """Control: the same entry, named by the operator too, is kept."""
+        self._install(harness)
+        shard_paths = harness.write_shards({"ash_plugin_modules": [self.MODULE]})
+        operator = _write_yaml(
+            harness.tmp_path / "operator" / "ash.yaml",
+            {"ash_plugin_modules": [self.MODULE]},
+        )
+
+        result = harness.merge(shard_paths, "--config", str(operator))
+
+        _assert_merged(result, harness)
+        assert harness.loaded_modules == [[self.MODULE]]
+        assert not [m for m in harness.ignoring() if self.MODULE in m]
+
+
+class TestShardOrder:
+    def test_the_lowest_indexed_shard_supplies_the_config_in_any_argument_order(
+        self, harness
+    ):
+        """Shards given in reverse: the warnings still name shard 0's results file."""
+        shard_paths = harness.write_shards(SHARD_CONFIG, shard_count=3)
+
+        result = harness.merge(list(reversed(shard_paths)))
+
+        _assert_merged(result, harness)
+        messages = harness.ignoring()
+        assert messages
+        for message in messages:
+            assert shard_paths[0].as_posix() in message, message
+            assert shard_paths[2].as_posix() not in message, message
+
+    def test_the_completion_gate_answers_the_same_in_any_argument_order(self, harness):
+        shards = build_shards(3)
+        _make_shard_contribute_nothing(shards[1])
+        paths = _write_each(
+            harness,
+            shards,
+            [{"fail_on_incomplete_scanners": value} for value in (True, True, False)],
+        )
+
+        in_order = harness.merge(paths)
+        harness.output_dir = harness.tmp_path / "merged-reordered"
+        reordered = harness.merge([paths[2], paths[0], paths[1]])
+
+        assert in_order.exit_code == reordered.exit_code, (
+            in_order.output,
+            reordered.output,
+        )
+
+
+#: A setting the verdict reads, and two values for it.
+VERDICT_DISAGREEMENTS = [
+    ("fail_on_findings", {"fail_on_findings": False}, {"fail_on_findings": True}),
+    (
+        "fail_on_incomplete_scanners",
+        {"fail_on_incomplete_scanners": False},
+        {"fail_on_incomplete_scanners": True},
+    ),
+    (
+        "global_settings.severity_threshold",
+        {"global_settings": {"severity_threshold": "LOW"}},
+        {"global_settings": {"severity_threshold": "HIGH"}},
+    ),
+    (
+        "global_settings.suppressions",
+        {
+            "global_settings": {
+                "suppressions": [
+                    {"path": "src/**", "reason": "vendored", "rule_id": "X"}
+                ]
+            }
+        },
+        {"global_settings": {"suppressions": []}},
+    ),
+    (
+        "global_settings.ignore_paths",
+        {"global_settings": {"ignore_paths": [{"path": "docs/**", "reason": "docs"}]}},
+        {"global_settings": {"ignore_paths": []}},
+    ),
+    (
+        "scanners.bandit.options.severity_threshold",
+        {"scanners": {"bandit": {"options": {"severity_threshold": "LOW"}}}},
+        {"scanners": {"bandit": {"options": {"severity_threshold": "HIGH"}}}},
+    ),
+    (
+        "content_db_staleness",
+        {"content_db_staleness": "warn"},
+        {"content_db_staleness": "fail"},
+    ),
+]
+
+
+class TestVerdictSettings:
+    @pytest.mark.parametrize(
+        "key, first, second",
+        VERDICT_DISAGREEMENTS,
+        ids=[entry[0] for entry in VERDICT_DISAGREEMENTS],
+    )
+    def test_shards_that_disagree_are_refused(self, harness, key, first, second):
+        paths = _write_each(harness, build_shards(2), [first, second])
+
+        result = harness.merge(paths)
+
+        assert result.exit_code == 3, (result.output, result.exception)
+        console = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", result.output).split())
+        assert key in console, console
+        assert "shard 0" in console and "shard 1" in console, console
+        assert not (harness.output_dir / RESULTS_FILE_NAME).exists()
+
+    def test_an_override_settles_a_disagreement(self, harness):
+        paths = _write_each(
+            harness,
+            build_shards(2),
+            [{"fail_on_findings": False}, {"fail_on_findings": True}],
+        )
+
+        result = harness.merge(paths, "--config-overrides", "fail_on_findings=true")
+
+        _assert_merged(result, harness)
+
+    def test_a_verdict_setting_in_the_operators_config_is_named(self, harness):
+        """The shards' value applies, and the warning gives the override that would not."""
+        shard_paths = harness.write_shards({"fail_on_findings": False})
+        operator = _write_yaml(
+            harness.tmp_path / "operator" / "ash.yaml", {"fail_on_findings": True}
+        )
+
+        result = harness.merge(shard_paths, "--config", str(operator))
+
+        assert result.exit_code == 0, (result.output, result.exception)
+        named = [m for m in harness.warnings if "fail_on_findings" in m]
+        assert named, harness.warnings
+        assert "--config-overrides fail_on_findings=true" in named[0]
+
+    def test_an_operator_config_that_sets_no_verdict_setting_names_none(self, harness):
+        """Control: a --config that sets only reporters warns about no verdict setting."""
+        shard_paths = harness.write_shards(
+            {
+                "fail_on_findings": False,
+                "global_settings": {
+                    "suppressions": [{"path": "src/**", "reason": "r", "rule_id": "X"}]
+                },
+            }
+        )
+        operator = _write_yaml(
+            harness.tmp_path / "operator" / "ash.yaml",
+            {"reporters": {"s3": {"enabled": False}}},
+        )
+
+        result = harness.merge(shard_paths, "--config", str(operator))
+
+        assert result.exit_code == 0, (result.output, result.exception)
+        assert not [m for m in harness.warnings if "ash merge's --config sets" in m]
+
+
+class TestTheRealChain:
+    """``ash merge`` in a fresh process, with nothing patched.
+
+    The harness above hands the merge the AWS reporter classes whatever it loads.
+    Here the plugin loader and registry are the real ones, so what a refused
+    package does is measured: it is not imported, and no AWS reporter is
+    registered. The control names the package from the operator's side and turns
+    off the three AWS reporters whose dependency checks call AWS, so it makes no
+    AWS call either; S3 has no bucket, and its check stops before calling AWS.
+    """
+
+    _DRIVER = (
+        "import json, sys\n"
+        "from typer.testing import CliRunner\n"
+        "from automated_security_helper.cli.main import app\n"
+        "from automated_security_helper.plugins import ash_plugin_manager\n"
+        "result = CliRunner().invoke(app, json.loads(sys.argv[1]))\n"
+        "reporters = [\n"
+        "    f'{cls.__module__}.{cls.__name__}'\n"
+        "    for cls in ash_plugin_manager.plugin_modules(plugin_type='reporter')\n"
+        "]\n"
+        "print('RESULT ' + json.dumps({\n"
+        "    'exit': result.exit_code,\n"
+        f"    'imported': sorted(m for m in sys.modules if m.startswith({AWS!r})),\n"
+        "    'reporters': reporters,\n"
+        "    'output': result.output[-3000:],\n"
+        "}))\n"
+    )
+
+    def _run(self, tmp_path: Path, extra_args: Sequence[str]) -> Dict[str, Any]:
+        import os
+        import subprocess
+        import sys
+
+        from tests.utils.helpers import importing_this_checkout
+
+        collector = tmp_path / "collector"
+        collector.mkdir(exist_ok=True)
+        recorded_file = _write_yaml(
+            tmp_path / "shard-config" / "ash.yaml", SHARD_CONFIG
+        )
+        recorded = resolve_config(config_path=recorded_file)
+        argv = ["merge"]
+        for index, model in enumerate(build_shards(2)):
+            model.ash_config = recorded
+            target = tmp_path / "artifacts" / f"shard-{index}"
+            model.save_model(target)
+            argv += ["--results", str(target / RESULTS_FILE_NAME)]
+        output_dir = tmp_path / f"merged-{len(extra_args)}"
+        argv += ["--output-dir", str(output_dir), *extra_args]
+        environment = {
+            name: value
+            for name, value in os.environ.items()
+            if not name.startswith(("AWS_", "ASH_"))
+        }
+        run = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                importing_this_checkout(self._DRIVER),
+                json.dumps(argv),
+            ],
+            cwd=collector,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        assert run.returncode == 0, (run.returncode, run.stderr[-3000:])
+        line = [row for row in run.stdout.splitlines() if row.startswith("RESULT ")]
+        assert line, (run.stdout[-3000:], run.stderr[-3000:])
+        measured = json.loads(line[-1][len("RESULT ") :])
+        measured["output_dir"] = output_dir
+        return measured
+
+    def test_a_refused_package_is_not_imported_and_registers_no_reporter(
+        self, tmp_path
+    ):
+        measured = self._run(tmp_path, [])
+
+        assert measured["exit"] == 2, measured["output"]
+        assert measured["imported"] == []
+        assert not [name for name in measured["reporters"] if name.startswith(AWS)]
+        assert not (measured["output_dir"] / "reports" / "ash.s3.json").exists()
+
+    def test_control_the_package_the_operator_names_is_imported(self, tmp_path):
+        measured = self._run(
+            tmp_path,
+            [
+                "--config-overrides",
+                f'ash_plugin_modules=["{AWS}"]',
+                "--config-overrides",
+                "reporters.aws-security-hub.enabled=false",
+                "--config-overrides",
+                "reporters.bedrock-summary-reporter.enabled=false",
+                "--config-overrides",
+                "reporters.cloudwatch-logs.enabled=false",
+            ],
+        )
+
+        assert measured["exit"] == 2, measured["output"]
+        assert AWS in measured["imported"]
+        assert f"{AWS}.s3_reporter.S3Reporter" in measured["reporters"]
+        assert not (measured["output_dir"] / "reports" / "ash.s3.json").exists()

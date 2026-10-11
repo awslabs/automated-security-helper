@@ -457,20 +457,26 @@ The reporters and severity thresholds come from the scan's own configuration, ca
 
 #### Settings a shard's recorded configuration cannot choose
 
-A shard's recorded configuration may have been read from a config file inside the scanned tree, so `ash merge` treats it the way a scan treats such a file: the `ash_plugin_modules` row and the reporter rows of [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose) apply to it, and so does the rule for the options a plugin reporter declares in `destination_options`. Whether ASH's plugin packages that send findings off the host (`ash_aws_plugins`, `ash_snyk_plugins`) are loaded, where the reporters send findings, and the credentials they use therefore come from the operator at merge time: ASH's defaults, `--config` (or `ASH_CONFIG`), and `--config-overrides`. A value the recorded configuration sets that the operator's does not is replaced by the operator's, and a warning names the setting and the shard's results file.
+A shard's recorded configuration may have been read from a config file inside the scanned tree, so `ash merge` treats it the way a scan treats such a file: every row of [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose) applies to it, and so does the rule for the options a plugin reporter declares in `destination_options`. Which plugin modules are imported, whether ASH's off-host reporters run, where the reporters send findings, and the credentials they use therefore come from the operator at merge time: ASH's defaults, `--config` (or `ASH_CONFIG`), and `--config-overrides`. A value the recorded configuration sets that the operator's does not is replaced by the operator's, and a warning names the setting and the shard's results file.
 
+- `ash_plugin_modules` is stricter than in a scan: `ash merge` imports only the modules the operator's configuration names. An entry the shards recorded that the operator does not name is dropped, even an installed module outside the tree.
 - `--config-overrides` apply over each shard's recorded configuration before anything reads it, so they reach the reporters, the completion gate and the verdict, and they count as the operator's values for the settings above.
-- `--config` supplies the operator's values for those settings. It does not replace the recorded configuration, so a reporter or plugin module the shards did not configure is added with `--config-overrides`. A `--config` file inside the working directory's checkout is not the operator's, as for `ash report`.
-- The sandbox settings and the scanners' own config files are left as recorded: no scanner runs during a merge, and the merged results still say how the shards scanned.
+- `--config` supplies the operator's values for those settings. It does not replace the recorded configuration, so a reporter or plugin module the shards did not configure is added with `--config-overrides`. As for `ash report`, a `--config` file inside the working directory's tree is not the operator's: the outermost git checkout around the working directory, or the working directory itself when it is in no checkout. Keep the operator's file outside it.
+- The sandbox settings and the scanners' own config files are held to the same rules, so the merged results record the operator's values for them. No scanner runs during a merge, so they change nothing else.
 
-To keep a shard's reporter settings, pass the same values at merge time. For example, to upload the merged report to S3:
+The settings the verdict reads still come from the shards, as the verdict follows the scan's own configuration: `fail_on_findings`, `fail_on_incomplete_scanners`, `global_settings.severity_threshold`, `global_settings.suppressions`, `global_settings.ignore_paths`, each scanner's `options.severity_threshold`, `content_db_staleness` and `content_db_staleness_overrides`. One verdict covers the merged scan, so shards whose values for any of these differ after `--config-overrides` are applied are refused with exit code 3, and the error names the setting and each shard's value. A value `--config` sets for one of them does not apply; a warning names it and the `--config-overrides` key that would.
+
+To keep a shard's reporter settings, pass the same values at merge time. Loading `ash_aws_plugins` makes all four AWS reporters available, and each is on unless its configuration turns it off. For example, to upload the merged report to S3 and to no other AWS service:
 
 ```bash
 ash merge --results ./shard-0 --results ./shard-1 --output-dir ./ash-merged \
   --config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_aws_plugins"]' \
   --config-overrides reporters.s3.enabled=true \
   --config-overrides reporters.s3.options.bucket_name=my-bucket \
-  --config-overrides reporters.s3.options.aws_region=us-east-1
+  --config-overrides reporters.s3.options.aws_region=us-east-1 \
+  --config-overrides reporters.aws-security-hub.enabled=false \
+  --config-overrides reporters.bedrock-summary-reporter.enabled=false \
+  --config-overrides reporters.cloudwatch-logs.enabled=false
 ```
 
 ### What Merge Refuses
@@ -483,6 +489,7 @@ Coverage is verified before anything is merged, so a bad set of shards fails wit
 - two shards claim the same scanner, which would count its findings once per shard
 - a scanner appears in some shard's results but no shard was assigned it — the executors resolved different scanner sets, so no shard ran it and the union has a hole
 - the shard that owned a scanner recorded no result for it, leaving another shard's skip marker as the only trace
+- the shards' recorded configurations disagree on a setting the verdict reads, after `--config-overrides` are applied (exit code 3; see [Settings a shard's recorded configuration cannot choose](#settings-a-shards-recorded-configuration-cannot-choose))
 
 With the completeness gate on, which is the default, one more:
 
@@ -503,6 +510,7 @@ The merged output carries no shard provenance of its own; it records `merged_sha
 | 0    | The shards reconstructed one whole scan and the union has no actionable findings |
 | 1    | The merge was refused, or a scanner in the union did not complete — the scan's findings are unknown, not absent |
 | 2    | The union has findings at or above `--min-severity`                            |
+| 3    | The configuration is invalid: `--config` or a `--config-overrides` value does not validate, or the shards' recorded configurations disagree on a setting the verdict reads |
 
 Codes 1 and 2 are genuinely different situations. Code 2 means the merge succeeded and the union failed the threshold. Code 1 means no verdict was reached at all, which a CI gate must not read as a clean scan.
 

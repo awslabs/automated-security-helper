@@ -1108,28 +1108,47 @@
 - **`ash merge` treats the configuration each shard recorded as a repository's
   config.** A shard's `ash_aggregated_results.json` carries the configuration its
   scan resolved, and `ash merge` builds its reporters from the lowest-indexed
-  shard's copy. Whether ASH's plugin packages that send findings off the host
-  (`ash_aws_plugins`, `ash_snyk_plugins`) are loaded, where the reporters send
-  findings, and the credentials they use now come from the operator at merge
-  time, as they do for a config file inside the scanned tree during a scan: ASH's
-  defaults, the new `--config` option (or `ASH_CONFIG`), and the new
-  `--config-overrides` option. A recorded value that the operator's configuration
-  does not set is replaced, and a warning names the setting and the shard's
-  results file. The merged `ash_aggregated_results.json` records the configuration
-  as the merge applied it. The recorded sandbox settings and scanner config files
-  are unchanged, since no scanner runs during a merge.
+  shard's copy. Every setting a config file inside the scanned tree cannot choose
+  now comes from the operator at merge time instead: which plugin modules are
+  imported, whether ASH's off-host reporters run, where the reporters send
+  findings and the credentials they use, the sandbox grants and the scanners' own
+  config files. The operator's values are ASH's defaults, the new `--config`
+  option (or `ASH_CONFIG`), and the new `--config-overrides` option. A recorded
+  value the operator's configuration does not set is replaced, and a warning names
+  the setting and the shard's results file. The merged `ash_aggregated_results.json`
+  records the configuration as the merge applied it.
+
+  `ash_plugin_modules` is stricter than in a scan: `ash merge` imports only the
+  modules the operator's configuration names, so an installed plugin module a
+  shard recorded is dropped unless the operator names it too.
+
+  The settings the verdict reads (`fail_on_findings`, `fail_on_incomplete_scanners`,
+  `global_settings.severity_threshold`, `global_settings.suppressions`,
+  `global_settings.ignore_paths`, each scanner's `options.severity_threshold`,
+  `content_db_staleness` and `content_db_staleness_overrides`) still come from the
+  shards. Shards whose values for any of them differ, after `--config-overrides`
+  are applied, are now refused with exit code 3 instead of merged under the
+  lowest-indexed shard's values, and the completion gate reads the same shard's
+  value whatever order `--results` lists the shards in. A value `--config` sets
+  for one of these settings is named in a warning, with the `--config-overrides`
+  key that would apply it.
 
   A merge that relied on a shard's recorded reporter settings (an S3 bucket, a
   Security Hub region, an `ash_plugin_modules` entry that loads the AWS reporters)
   no longer sends findings there. To keep it, pass the same values to `ash merge`,
-  with `--config-overrides` or in a config file outside the working directory's
-  checkout named with `--config`. `--config` supplies the operator's values for the
-  settings the recorded configuration names; a reporter or plugin module the
-  shards did not configure is added with `--config-overrides`, for example
+  with `--config-overrides` or in a config file named with `--config`. As for
+  `ash report`, a `--config` file inside the working directory's tree (the
+  outermost git checkout around it, or the working directory itself outside a
+  checkout) is not the operator's, so keep that file elsewhere. `--config`
+  supplies the operator's values for the settings the recorded configuration
+  names; a reporter or plugin module the shards did not configure is added with
+  `--config-overrides`, for example
   `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_aws_plugins"]'`.
-  `--config-overrides` apply over every shard's recorded configuration, so they
-  also reach `fail_on_findings`, `fail_on_incomplete_scanners` and the other
-  settings `ash merge` reads from it.
+  Loading that package makes all four AWS reporters available, each on unless its
+  configuration turns it off, so turn off the ones you do not want; the
+  [`ash merge` reference](docs/content/docs/cli-reference.md#settings-a-shards-recorded-configuration-cannot-choose)
+  has an S3-only example. Shards that disagree on a verdict setting merge once
+  `--config-overrides` sets it for all of them.
 
 - **An MCP profile's `runtime_overrides` and a workspace policy are read more
   strictly.**
