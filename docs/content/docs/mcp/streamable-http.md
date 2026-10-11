@@ -202,6 +202,8 @@ Any of these triggers an immediate failure. Out-of-order sequences, checksum mis
 
 `mcp__ash__clear_source` wipes the session workspace and resets `source_dir` if you need to reload.
 
+While a scan of the session runs, `clear_source`, `set_source_git` and `set_source_zip_finalize` are refused with `error_type: source_delivery_busy`: each would remove or replace the tree the scan is reading, and a scan whose tree changes under it can report clean for code it never examined. Call them again once `get_scan_progress` reports the scan finished. Uploading chunks is not refused, because chunks land beside the tree rather than in it.
+
 ### Config files in delivered source
 
 A delivered tree can carry its own `.ash.yaml`, and a client can name any file in its session workspace as `run_ash_scan`'s `config_path`. Such a file was written by the client, not the operator, so its sandbox settings are restrict-only, the same as a config file inside the scanned repository, wherever the scan target is:

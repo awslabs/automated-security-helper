@@ -1541,6 +1541,9 @@ async def set_source_git(
                     is refused. Raw private keys are never accepted over the wire.
         depth: Shallow-clone depth. Defaults to 1.
 
+    Refused while a scan of this session runs (error_type source_delivery_busy),
+    because the clone replaces the tree the scan is reading.
+
     Returns:
         Dict with success and source_dir, or success=False and error.
     """
@@ -1645,7 +1648,8 @@ async def set_source_zip_finalize(
     The assembled zip must hash to expected_sha256. Entries with absolute paths,
     '..' components, or symlinks are refused before anything is extracted, and
     the archive is capped at 100 MiB on the wire, 500 MiB extracted, and 50000
-    entries. After this returns, call run_ash_scan() with no source_dir.
+    entries. After this returns, call run_ash_scan() with no source_dir. Refused
+    while a scan of this session runs (error_type source_delivery_busy).
 
     Args:
         upload_id: The identifier used for the preceding chunk calls.
@@ -1692,7 +1696,9 @@ async def clear_source(ctx: Context) -> Dict[str, Any]:
     """Delete this session's delivered source tree and workspace.
 
     Idempotent: a session that delivered nothing still succeeds. Call this to
-    reclaim space or before delivering a different tree.
+    reclaim space or before delivering a different tree. Refused while a scan of
+    this session runs (error_type source_delivery_busy); call it again once the
+    scan has finished.
 
     Returns:
         Dict with success.
@@ -1719,7 +1725,10 @@ async def clear_source(ctx: Context) -> Dict[str, Any]:
             "error_type": type(e).__name__,
         }
 
-    await ctx.info(f"Source cleared for session {session_id}")
+    if result.get("success"):
+        await ctx.info(f"Source cleared for session {session_id}")
+    else:
+        await ctx.error(str(result.get("error", "clear_source failed")))
     return _with_session(result, session_id)
 
 

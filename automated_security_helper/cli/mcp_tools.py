@@ -1826,6 +1826,8 @@ def mcp_set_source_git(
     """
     from automated_security_helper.cli.mcp.source_delivery import (
         ASH_MCP_GIT_ALLOWED_HOSTS_ENV,
+        SOURCE_DELIVERY_BUSY,
+        SourceDeliveryBusyError,
         _refuse_ssh_key_id,
         _validate_clone_url,
         git_allowed_hosts,
@@ -1892,6 +1894,8 @@ def mcp_set_source_git(
             depth=depth,
             session_id=session_id,
         )
+    except SourceDeliveryBusyError as e:
+        return {"success": False, "error": str(e), "error_type": SOURCE_DELIVERY_BUSY}
     except (RuntimeError, ValueError) as e:
         return {"success": False, "error": str(e)}
 
@@ -1956,6 +1960,8 @@ def mcp_set_source_zip_finalize(
         path-traversal/symlink-out-of-tree entry.
     """
     from automated_security_helper.cli.mcp.source_delivery import (
+        SOURCE_DELIVERY_BUSY,
+        SourceDeliveryBusyError,
         set_source_zip_finalize,
     )
 
@@ -1965,6 +1971,8 @@ def mcp_set_source_zip_finalize(
             expected_sha256=expected_sha256,
             session_id=session_id,
         )
+    except SourceDeliveryBusyError as e:
+        return {"success": False, "error": str(e), "error_type": SOURCE_DELIVERY_BUSY}
     except (FileNotFoundError, ValueError) as e:
         return {"success": False, "error": str(e)}
 
@@ -1974,15 +1982,24 @@ def mcp_set_source_zip_finalize(
 def mcp_clear_source(session_id: str) -> Dict[str, Any]:
     """Wipe the session workspace and forget any recorded ``source_dir``.
 
-    Idempotent: missing workspaces succeed.
+    Idempotent: missing workspaces succeed. Refused while a scan of the session
+    runs, because the scan is reading the tree.
 
     Args:
         session_id: MCP session identifier.
 
     Returns:
-        ``{"success": True}``.
+        ``{"success": True}``, or ``{"success": False, "error": str,
+        "error_type": "source_delivery_busy"}`` while a scan of the session runs.
     """
-    from automated_security_helper.cli.mcp.source_delivery import clear_source
+    from automated_security_helper.cli.mcp.source_delivery import (
+        SOURCE_DELIVERY_BUSY,
+        SourceDeliveryBusyError,
+        clear_source,
+    )
 
-    clear_source(session_id=session_id)
+    try:
+        clear_source(session_id=session_id)
+    except SourceDeliveryBusyError as e:
+        return {"success": False, "error": str(e), "error_type": SOURCE_DELIVERY_BUSY}
     return {"success": True}

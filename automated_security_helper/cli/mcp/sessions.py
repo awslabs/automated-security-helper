@@ -274,10 +274,13 @@ def _remove_session_state(session_id: str) -> None:
     from automated_security_helper.cli.mcp.profile_registry import (
         clear_session_state,
     )
-    from automated_security_helper.cli.mcp.source_delivery import clear_source
+    from automated_security_helper.cli.mcp.source_delivery import (
+        remove_session_workspace,
+    )
 
     try:
-        clear_source(session_id)
+        # end_session holds the session's lock already.
+        remove_session_workspace(session_id)
     except ValueError:
         # An id that cannot name a directory never had a workspace.
         pass

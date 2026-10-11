@@ -110,7 +110,7 @@
       }
     },
     "clear_source": {
-      "description": "Delete this session's delivered source tree and workspace.\n\nIdempotent: a session that delivered nothing still succeeds. Call this to\nreclaim space or before delivering a different tree.\n\nReturns:\n    Dict with success.",
+      "description": "Delete this session's delivered source tree and workspace.\n\nIdempotent: a session that delivered nothing still succeeds. Call this to\nreclaim space or before delivering a different tree. Refused while a scan of\nthis session runs (error_type source_delivery_busy); call it again once the\nscan has finished.\n\nReturns:\n    Dict with success.",
       "inputSchema": {
         "properties": {},
         "title": "clear_sourceArguments",
@@ -739,7 +739,7 @@
       }
     },
     "set_source_git": {
-      "description": "Clone a repository into this session's workspace and make it the scan target.\n\nAfter this returns, call run_ash_scan() with no source_dir to scan the clone.\n\nThe server clones only from hosts its operator listed, over https or ssh,\nand never with the server's own credentials: no ssh agent, keys, credential\nhelpers, proxies or git configuration of the server account reach git. A\nlocal path or file:// URL is refused.\n\nArgs:\n    url: Remote URL to clone: https://, ssh:// or user@host:path. Refused if\n         it begins with '-' or uses the ext:: transport, both of which make\n         git run a command, and unless its host is on the operator's list.\n    ref: Optional branch, tag, or commit. Defaults to the remote's default branch.\n    ssh_key_id: Must be omitted. The server registers no ssh keys, so any id\n                is refused. Raw private keys are never accepted over the wire.\n    depth: Shallow-clone depth. Defaults to 1.\n\nReturns:\n    Dict with success and source_dir, or success=False and error.",
+      "description": "Clone a repository into this session's workspace and make it the scan target.\n\nAfter this returns, call run_ash_scan() with no source_dir to scan the clone.\n\nThe server clones only from hosts its operator listed, over https or ssh,\nand never with the server's own credentials: no ssh agent, keys, credential\nhelpers, proxies or git configuration of the server account reach git. A\nlocal path or file:// URL is refused.\n\nArgs:\n    url: Remote URL to clone: https://, ssh:// or user@host:path. Refused if\n         it begins with '-' or uses the ext:: transport, both of which make\n         git run a command, and unless its host is on the operator's list.\n    ref: Optional branch, tag, or commit. Defaults to the remote's default branch.\n    ssh_key_id: Must be omitted. The server registers no ssh keys, so any id\n                is refused. Raw private keys are never accepted over the wire.\n    depth: Shallow-clone depth. Defaults to 1.\n\nRefused while a scan of this session runs (error_type source_delivery_busy),\nbecause the clone replaces the tree the scan is reading.\n\nReturns:\n    Dict with success and source_dir, or success=False and error.",
       "inputSchema": {
         "properties": {
           "depth": {
@@ -843,7 +843,7 @@
       }
     },
     "set_source_zip_finalize": {
-      "description": "Verify an uploaded zip and extract it as this session's scan target.\n\nThe assembled zip must hash to expected_sha256. Entries with absolute paths,\n'..' components, or symlinks are refused before anything is extracted, and\nthe archive is capped at 100 MiB on the wire, 500 MiB extracted, and 50000\nentries. After this returns, call run_ash_scan() with no source_dir.\n\nArgs:\n    upload_id: The identifier used for the preceding chunk calls.\n    expected_sha256: Hex sha256 of the complete zip.\n\nReturns:\n    Dict with success and source_dir, or success=False and error.",
+      "description": "Verify an uploaded zip and extract it as this session's scan target.\n\nThe assembled zip must hash to expected_sha256. Entries with absolute paths,\n'..' components, or symlinks are refused before anything is extracted, and\nthe archive is capped at 100 MiB on the wire, 500 MiB extracted, and 50000\nentries. After this returns, call run_ash_scan() with no source_dir. Refused\nwhile a scan of this session runs (error_type source_delivery_busy).\n\nArgs:\n    upload_id: The identifier used for the preceding chunk calls.\n    expected_sha256: Hex sha256 of the complete zip.\n\nReturns:\n    Dict with success and source_dir, or success=False and error.",
       "inputSchema": {
         "properties": {
           "expected_sha256": {

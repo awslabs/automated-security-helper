@@ -51,14 +51,17 @@ on the per-session object.
 from __future__ import annotations
 
 import base64
+import contextlib
+import functools
 import hashlib
+import inspect
 import os
 import re
 import shutil
 import subprocess  # nosec B404 - git is invoked as a subprocess; see _validate_clone_url
 import zipfile
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Callable, Dict, Iterator, Optional, TypeVar
 
 from automated_security_helper.cli.mcp.session_identity import (
     UNIDENTIFIED_SESSION_ID,
@@ -102,6 +105,62 @@ _S_IFMT_SHIFTED = 0xF000 << 16
 # ---------------------------------------------------------------------------
 
 _SESSION_SOURCE_DIRS: Dict[str, Path] = {}
+
+
+class SourceDeliveryBusyError(RuntimeError):
+    """A change to the delivered tree was refused because a scan of the session runs.
+
+    Delivering replaces the tree, and clearing removes it, while the running
+    scan is reading it; a scan whose tree disappears under it can report clean
+    for code it never examined.
+    """
+
+
+#: ``error_type`` the MCP tools return for :class:`SourceDeliveryBusyError`.
+SOURCE_DELIVERY_BUSY = "source_delivery_busy"
+
+
+@contextlib.contextmanager
+def _no_scan_running(session_id: str) -> Iterator[None]:
+    """Hold the session's scan lock for a change to its tree, or refuse.
+
+    Not blocking: a delivery is called on the server's event loop, and waiting
+    there for a scan to finish would stall every other session. A session that
+    ended while the change held the lock is removed once it is released.
+    """
+    from automated_security_helper.cli.mcp.sessions import (
+        finish_ended_session,
+        get_default_registry,
+    )
+
+    lock = get_default_registry().get_or_create(session_id).lock
+    if not lock.acquire(blocking=False):
+        raise SourceDeliveryBusyError(
+            "a scan of this session is running; change the delivered source after "
+            "it finishes"
+        )
+    try:
+        yield
+    finally:
+        lock.release()
+        finish_ended_session(session_id)
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _while_no_scan_runs(function: _F) -> _F:
+    """Run a change to a session's tree under ``_no_scan_running`` for its session."""
+
+    signature = inspect.signature(function)
+
+    @functools.wraps(function)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        session_id = signature.bind(*args, **kwargs).arguments["session_id"]
+        with _no_scan_running(session_id):
+            return function(*args, **kwargs)
+
+    return wrapper  # type: ignore[return-value]
 
 
 def get_session_source_dir(session_id: str) -> Optional[Path]:
@@ -497,6 +556,7 @@ def _git_executable() -> str:
     return git
 
 
+@_while_no_scan_runs
 def set_source_git(
     url: str,
     ref: Optional[str] = None,
@@ -825,6 +885,7 @@ def _validate_zip_member(name: str) -> None:
             raise ValueError(f"path traversal in zip: {name!r}")
 
 
+@_while_no_scan_runs
 def set_source_zip_finalize(
     upload_id: str,
     expected_sha256: str,
@@ -967,10 +1028,26 @@ def set_source_zip_finalize(
 # ---------------------------------------------------------------------------
 
 
+@_while_no_scan_runs
 def clear_source(session_id: str, *, workspace_root: Optional[Path] = None) -> None:
     """Wipe the session workspace and forget any recorded ``source_dir``.
 
     Idempotent: missing workspaces are silently ignored.
+
+    Raises:
+        SourceDeliveryBusyError: while a scan of the session runs.
+    """
+
+    remove_session_workspace(session_id, workspace_root=workspace_root)
+
+
+def remove_session_workspace(
+    session_id: str, *, workspace_root: Optional[Path] = None
+) -> None:
+    """Remove the session workspace and its record, without taking the scan lock.
+
+    For a caller that already holds the session's lock --
+    ``sessions.end_session`` -- or that has decided a scan cannot be running.
     """
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
