@@ -44,7 +44,11 @@ The response carries:
 
 The session's profile (the one `select_profile` bound, or the one the call names with `profile`) is the operator's config, as `--config` is on the CLI (see [The operator's config](../cli-reference.md#the-operators-config)). Every field the profile sets is final for every project, and a project's own `.ash.yaml` fills only the fields the profile leaves unset. A project without a config of its own runs under the session's config alone.
 
-What is layered over a project's own config is the profile as the operator registered it, not a copy the client patched with `patch_ops` or `override_yaml`. A value the client patched in is never final over a project's own config: it applies only to a project with no config of its own, and there it is limited as a config the client delivered is (see [A patched value is the client's](streamable-http.md#a-patched-value-is-the-clients)).
+What is layered over a project's own config is the profile as the operator registered it, not a copy the client patched with `patch_ops` or `override_yaml`. A value the client patched in is never final over a project's own config: it applies only to a project with no config of its own, and there it is limited as a config the client delivered is (see [A patched value is the client's](streamable-http.md#a-patched-value-is-the-clients)). If the session's copy of the registered profile is gone while the patched copy is not, the call is refused with exit code `3`; bind the profile again with `select_profile`.
+
+A session that bound no profile, and a call that names none, run under the server's own config, the file `ASH_CONFIG` names: it is layered over each project's own config the same way. Not when that file, or a base it extends, is under the MCP workspace root, which makes it a file a client delivered; then nothing is layered.
+
+A profile a call names with `profile` is written to a file of its own per profile in the session's `config/` directory, so two calls in one session that name different profiles do not change each other's plan.
 
 ## run_ash_workspace_scan
 

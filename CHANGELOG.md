@@ -1040,8 +1040,8 @@
   used the file only for a project with no config of its own, and a project's own
   `.ash.yaml` replaced it, apart from the sandbox grants, plugin modules, scanner
   config files and reporter destinations, which already came from the operator's
-  file. Now the operator's file is layered over each project's own config, by the `extends`
-  merge rules with the operator's file as the child: a key present in it, or in a
+  file. Now the operator's file is layered over each project's own config, by the
+  `extends` merge rules with the operator's file as the child: a key present in it, or in a
   base it `extends`, wins whatever its value, mappings merge key by key, and a
   list it sets replaces the project's list whole (an operator
   `global_settings.suppressions` list drops each project's own suppressions). The
@@ -1061,7 +1061,27 @@
     `patch_ops` or `override_yaml`, so a client's value is never final over a
     project's own config. `resolve_ash_workspace`'s `projects` entries carry
     `operator_config`. The session's `config/ash.yaml` now holds only the fields
-    the profile sets; it loads as the same values as before.
+    the profile sets; it loads as the same values as before. A session that bound
+    no profile layers the server's `ASH_CONFIG` file, unless it is under the MCP
+    workspace root. A patched binding whose registered copy is gone is refused
+    (exit 3), and a call's `profile` is written to a file of its own per profile.
+  - Every file the operator's config is built from must be the operator's: a
+    `--config` inside the workspace, one that `extends` a base inside it, or one
+    under the MCP workspace root is refused with exit 3 before any project is
+    resolved. Keep the config and its bases outside the workspace.
+  - The plan records a digest of the operator's config and its bases. A project
+    whose operator config changed after the plan, or whose plan was resolved
+    without the operator config the scan is given, fails with exit 3.
+  - A project that spells a key another way (`cdk-nag` beside `cdk_nag`,
+    `global-settings`, `ash-plugin-modules`) no longer keeps the operator's value
+    from applying; see the `extends` fix under Fixes.
+  - In container mode, the operator's config and the bases it extends are mounted
+    read-only at `/ash-operator-config` and the scan inside the container is
+    given that path; before, it was given the host path, which it could not read,
+    and exited 3. Only the `--fail-on-findings` and
+    `--fail-on-incomplete-scanners` values given on the command line are
+    forwarded into the container now, not values the host read from a config,
+    which beat every project's own value there.
   - Rejected: ignoring every project's own config when `--config` is given, which
     loses the per-project settings a workspace exists to keep; and taking the
     operator's file as the base with the project's merged over it, which would
@@ -1448,6 +1468,19 @@
   the scanner sandbox's probes, and the image build's checks. A call that passes
   `input=` still writes it to the tool, and that now also holds when the tool runs
   under the scanner sandbox.
+
+- **A setting spelled two ways merges as the one setting ASH reads**, in `extends`
+  and in the workspace operator layer. Keys that differ only in `-` versus `_` were
+  merged under the base's spelling, whatever ASH reads, so a base could keep a
+  child's value from applying (and a project an operator's), by writing an
+  unread spelling (`global-settings: {}`, `ash-plugin-modules: []`,
+  `nag-packs: {}`) or both spellings of an aliased section (`cdk-nag` beside
+  `cdk_nag`, where the alias wins). Now each setting is merged under the
+  spellings ASH reads and written once; a base's unread spelling is left alone,
+  and a child's still reaches the base's spelling of the setting unless the
+  child also uses a spelling ASH reads. Two spellings of a plugin's section that
+  ASH reads for the same plugin (`BedrockSummary` and
+  `bedrock-summary-reporter`) are one section, under the child's spelling.
 
 - `ash mcp --profile NAME=path/to/ash.yaml` works. The server registered profiles
   given with `--profile`, but `ash mcp` did not accept the option and exited 2 with

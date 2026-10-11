@@ -206,14 +206,20 @@ Folder paths are relative to the directory holding the workspace file, which bec
 `--config` (or `ASH_CONFIG`) in workspace mode is the operator's config for every project. Every field it sets is final, and a project's own config fills only the fields it leaves unset:
 
 - A project with a config of its own uses that file with the operator's file layered over it. "Sets" means the key is present in the operator's file or in a base it `extends`, whatever its value: `fail_on_findings: true` in the operator's file holds for every project even though `true` is the default.
-- The layering follows the [`extends` merge rules](configuration-guide.md#extending-another-configuration), with the operator's file as the child. Mappings merge key by key, so the operator's `scanners.bandit.enabled` and a project's `scanners.bandit.options` both apply. A list the operator sets replaces the project's list whole: an operator `global_settings.suppressions` list drops each project's own suppressions. The operator's file is resolved on its own first, its `extends` and `patch` included, so its `patch` operations change only its own settings and never reach a project's.
+- The layering follows the [`extends` merge rules](configuration-guide.md#extending-another-configuration), with the operator's file as the child. Mappings merge key by key, so the operator's `scanners.bandit.enabled` and a project's `scanners.bandit.options` both apply. A list the operator sets replaces the project's list whole: an operator `global_settings.suppressions` list drops each project's own suppressions. The operator's file is resolved on its own first, its `extends` and `patch` included, so its `patch` operations change only its own settings and never reach a project's. A setting is merged as ASH reads it, so a project that spells a key another way (`cdk-nag` and `cdk_nag`, or `global-settings` for `global_settings`) does not keep the operator's value from applying.
 - A project without a config of its own uses the operator's file alone.
 - `--config-overrides` and the CLI flags (`--fail-on-findings`, `--sandbox` and the others) apply after both, so they win over the operator's file and over every project.
 - A workspace policy file applies after all of this, as described below.
 
 To leave a field to each project, leave it out of `--config`. `--dry-run` prints an `operator:` line under each project the file was layered over, and the threshold and scanners it prints are the layered result.
 
+Every file the operator's config is built from must be the operator's, because it is final over the workspace. A `--config` inside the workspace, one that `extends` a base inside the workspace, or one under the MCP workspace root (a file an MCP client delivered) is refused, with exit code `3` and the file named, before any project is resolved. Keep the config, and every base it extends, outside the workspace.
+
+The scan runs the plan `--dry-run` reports. The plan records a digest of the operator's config and the bases it extends, and a project whose operator config changed after the plan was resolved, or whose plan was resolved without the operator config the scan is given, fails with exit code `3` instead of being scanned with settings the plan did not report.
+
 The settings a repository's config cannot choose ([Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)) are still limited for a project's own file. A value the operator's file sets is the operator's and is kept; a value only the project's file sets is limited as before.
+
+In container mode (`--mode container`), each file the operator's config is built from is mounted read-only at `/ash-operator-config` in the container, and the scan inside the container is given that path. Only those files are mounted, not the directory they are in. The `--fail-on-findings` and `--fail-on-incomplete-scanners` values given on the command line are forwarded into the container; the values in the operator's file reach it through the mounted file, so they stay layered as above.
 
 In a single-directory scan, `--config` replaces discovery instead: the repository's own config is not read at all.
 

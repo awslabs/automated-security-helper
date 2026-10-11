@@ -749,8 +749,17 @@ Merge rules:
   `global_settings.suppressions` replaces the base's list. To keep the base's
   entries and add more, use `patch` with `op: add` and a path ending in `/-`.
 - To delete something a base set, use `patch` with `op: remove`.
-- A key spelled with `-` and the same key spelled with `_` (`cdk-nag` and
-  `cdk_nag`) are one key, in merges and in `patch` paths.
+- A setting is merged as ASH reads it. Where ASH reads one setting under two
+  spellings (`cdk-nag` and `cdk_nag`), both are the one setting: the child's
+  value wins over the base's whichever spelling either file uses, and the
+  result is kept under one spelling. A spelling ASH does not read
+  (`global-settings` for `global_settings`) in a base is left alone, so it
+  cannot keep a child's value from applying; one in a child still reaches the
+  base's spelling of the setting, unless the child also uses a spelling ASH
+  reads, which wins. Two spellings of a plugin's section that ASH reads for the
+  same plugin (`BedrockSummary` and `bedrock-summary-reporter`) are one
+  section, under the child's spelling. In `patch` paths, a key spelled with `-`
+  and the same key spelled with `_` are one key.
 - `patch` accepts `add`, `remove`, `replace` and `test`. `move` and `copy` are
   refused. A failing operation, including a failing `test`, fails the load.
 
