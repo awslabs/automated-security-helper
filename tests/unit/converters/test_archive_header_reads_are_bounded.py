@@ -12,7 +12,10 @@ archive's leading bytes rather than by trying each one. An archive over either i
 refused as one the converter cannot read.
 
 Every archive here is a few kilobytes. The caps are lowered for each test, so a
-header a little over the lowered cap stands for one over the real cap.
+header a little over the lowered cap stands for one over the real cap. The tests
+for the read cap put the header allowance out of reach, so the read cap is the
+only check that can refuse their archives, and each refusal is matched to the
+check that made it by its reason.
 """
 
 from __future__ import annotations
@@ -33,9 +36,12 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.archive_con
 ARCHIVE_MODULE = (
     "automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter"
 )
-READ_CAP = 4096
+READ_CAP = 2048
 HEADER_BASE = 2048
 HEADER_PER_MEMBER = 1024
+#: A header allowance far above what any archive here reads, so only the read cap
+#: can refuse one.
+HEADER_BASE_OUT_OF_REACH = 1024 * 1024
 
 
 @pytest.fixture
@@ -48,6 +54,16 @@ def lowered_caps(monkeypatch):
     monkeypatch.setattr(
         f"{ARCHIVE_MODULE}._TAR_HEADER_BYTES_PER_MEMBER",
         HEADER_PER_MEMBER,
+        raising=True,
+    )
+
+
+@pytest.fixture
+def only_the_read_cap(lowered_caps, monkeypatch):
+    """The read cap lowered and the header allowance out of reach."""
+    monkeypatch.setattr(
+        f"{ARCHIVE_MODULE}._TAR_HEADER_BYTES_BASE",
+        HEADER_BASE_OUT_OF_REACH,
         raising=True,
     )
 
@@ -85,15 +101,21 @@ def convert(context, monkeypatch, name: str, raw: bytes):
     return converter, converter.convert()
 
 
-def assert_refused_for_header_reads(converter, results, name: str) -> None:
+#: What each check's reason says: the read cap refuses one read, the allowance
+#: refuses the header pass as a whole.
+OVER_THE_READ_CAP = f"more than the {READ_CAP} ASH reads at once"
+OVER_THE_ALLOWANCE = f"{HEADER_BASE} bytes plus {HEADER_PER_MEMBER} per member"
+
+
+def assert_refused_for_header_reads(converter, results, name: str, check: str) -> None:
     assert results == []
     assert [r.path for r in converter.failed_inputs] == [name], converter.failed_inputs
-    assert "header" in converter.failed_inputs[0].reason, converter.failed_inputs
+    assert check in converter.failed_inputs[0].reason, converter.failed_inputs
     assert converter.refused_inputs == []
 
 
 def test_an_extended_header_over_the_read_cap_is_refused(
-    lowered_caps, test_plugin_context, monkeypatch
+    only_the_read_cap, test_plugin_context, monkeypatch
 ):
     raw = tar_of(
         [member("a.py", {"comment": "x" * (READ_CAP + 512)})], {"a.py": b"a = 1\n"}
@@ -101,7 +123,7 @@ def test_an_extended_header_over_the_read_cap_is_refused(
 
     converter, results = convert(test_plugin_context, monkeypatch, "pax.tar", raw)
 
-    assert_refused_for_header_reads(converter, results, "pax.tar")
+    assert_refused_for_header_reads(converter, results, "pax.tar", OVER_THE_READ_CAP)
 
 
 def test_an_extended_header_under_the_read_cap_is_extracted(
@@ -117,14 +139,14 @@ def test_an_extended_header_under_the_read_cap_is_extracted(
 
 
 def test_a_long_name_over_the_read_cap_is_refused(
-    lowered_caps, test_plugin_context, monkeypatch
+    only_the_read_cap, test_plugin_context, monkeypatch
 ):
-    name = "/".join(["d" * 100] * 45) + "/a.py"
+    name = "/".join(["d" * 100] * 21) + "/a.py"
     raw = tar_of([member(name)], {name: b"a = 1\n"}, fmt=tarfile.GNU_FORMAT)
 
     converter, results = convert(test_plugin_context, monkeypatch, "long.tar", raw)
 
-    assert_refused_for_header_reads(converter, results, "long.tar")
+    assert_refused_for_header_reads(converter, results, "long.tar", OVER_THE_READ_CAP)
 
 
 def test_header_reads_past_the_per_member_allowance_are_refused(
@@ -139,7 +161,7 @@ def test_header_reads_past_the_per_member_allowance_are_refused(
 
     converter, results = convert(test_plugin_context, monkeypatch, "many.tar", raw)
 
-    assert_refused_for_header_reads(converter, results, "many.tar")
+    assert_refused_for_header_reads(converter, results, "many.tar", OVER_THE_ALLOWANCE)
 
 
 def test_members_with_plain_headers_fit_the_per_member_allowance(
