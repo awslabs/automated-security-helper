@@ -567,6 +567,14 @@ here rather than to a variant.
   two-hour project timeout, may never run `post_build`, and the stack then sits in
   `CREATE_IN_PROGRESS` on `BootstrapBuild` until CloudFormation's own timeout.
   Cancel the stack operation if you see that.
+- **The build learns CloudFormation's response URL from a parameter.** Whoever holds
+  that URL can answer CloudFormation for the bootstrap, so the starter writes it to a
+  SecureString parameter, `/ash-bootstrap/<image build project name>`, encrypted with
+  the stack's own KMS key, and hands the build only the parameter's name. It is not a
+  build environment value, so `codebuild:BatchGetBuilds` and the console do not show
+  it, and reading the parameter takes `kms:Decrypt` on that key. Each create or update
+  overwrites it and deleting the stack removes it; between those it holds the URL of
+  the last bootstrap, whose stack operation has already completed.
 - **The Lambda gate is bounded by Lambda.** 900 seconds is the
   [hard maximum](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html),
   and the clone plus ASH's output share 4 GB of `/tmp`. A large repository or a slow

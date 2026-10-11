@@ -331,7 +331,7 @@ describe('no IAM policy grants the same thing twice', () => {
   );
 
   test('there are policies to check in every stack', () => {
-    // 86 across the five stacks, in the order STACKS declares them. Exact and
+    // 89 across the five stacks, in the order STACKS declares them. Exact and
     // per-stack, so one stack losing its policies to a rename cannot leave the loop
     // for that stack iterating over nothing while the others carry the assertion.
     //
@@ -352,8 +352,13 @@ describe('no IAM policy grants the same thing twice', () => {
     // AshDistributedPipeline was 50 until its four shard roles and the merge role stopped
     // receiving `GetSecretValue` on the auth secret, which nothing in that stack reads; the
     // split had filed each of those grants as its own `SecretsmanagerAccess` policy.
+    //
+    // AshAgentCore, AshFargate and AshCodeCommitGate each carry one more,
+    // `ImageBootstrapSsmAccess`: the image build reads CloudFormation's response URL
+    // from a SecureString parameter, and that read is authored directly rather than
+    // through the split (ash-image-build.ts says why).
     expect(policiesPerStack.map(([, policies]) => policies.length)).toEqual([
-      10, 13, 10, 8, 45,
+      10, 14, 11, 9, 45,
     ]);
   });
 
