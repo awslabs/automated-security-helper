@@ -206,7 +206,9 @@ mounted read-only under `/ash-config`, together with the files its `extends` cha
 names, each at the same place relative to the config's directory (the parent of `.ash/`
 for a file in `.ash/`), so relative bases resolve as they do on the host; only those
 files are mounted, not the directory. A `--config` that is not an existing file, or is
-empty, refuses the scan with exit 3 before anything is built. A config the scanned
+empty, refuses the scan with exit 3 before anything is built, and so does an `extends`
+entry anywhere in the chain that names its base by absolute path: inside the container
+that path is not the same file. A config the scanned
 repository wrote keeps the limits a local scan gives it (see
 [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)):
 when the config or a file it extends is inside the outermost git checkout at or above

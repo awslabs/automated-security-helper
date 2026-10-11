@@ -884,8 +884,53 @@ CONTAINER_WORKSPACE_CONFIG_ROOT = "/ash-workspace-config"
 _UNMOUNTABLE_CHARACTERS = (",", '"', "\n", "\r")
 
 
-class UnmountablePathError(ValueError):
+class ContainerInputError(ValueError):
+    """An input the scan inside the container could not be given as it is on the host."""
+
+
+class UnmountablePathError(ContainerInputError):
     """A host path that would be mounted holds a character ``--mount`` cannot carry."""
+
+
+def _refuse_absolute_extends(config: str) -> None:
+    """Refuse a config whose ``extends`` chain names a base by absolute path.
+
+    The chain is mounted at its place relative to the config, so a relative base
+    resolves inside the container as on the host. An absolute one names a host
+    path, which inside the container is missing or is some other file at the same
+    path in the image. Walked from the config without the confinement checks, which
+    the scan applies itself; a file that cannot be read ends the walk there, and the
+    scan inside reports it.
+    """
+    from automated_security_helper.config.config_sources import (
+        EXTENDS_KEY,
+        read_config_file,
+    )
+
+    pending = [Path(config).resolve()]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        try:
+            data = read_config_file(current)
+        except Exception:  # the scan inside reports why it cannot be read
+            continue
+        refs = data.get(EXTENDS_KEY) if isinstance(data, dict) else None
+        for ref in [refs] if isinstance(refs, str) else refs or []:
+            if not isinstance(ref, str):
+                continue
+            if Path(ref).is_absolute() or Path(ref).drive:
+                raise ContainerInputError(
+                    f"'{EXTENDS_KEY}: {ref}' in {current} names a base by absolute "
+                    "path, which does not name the same file inside the container: "
+                    "the config and the files it extends are mounted at their place "
+                    "relative to the config. Write the base relative to the file "
+                    "that extends it."
+                )
+            pending.append((current.parent / ref).resolve())
 
 
 def _require_mountable(label: str, path: Path | str) -> None:
@@ -912,6 +957,7 @@ def _require_mountable_inputs(
     _require_mountable("source directory", source)
     _require_mountable("output directory", Path(output_dir).resolve())
     if config:
+        _refuse_absolute_extends(config)
         _host_file_in_container(
             config, source, CONTAINER_CONFIG_ROOT, follow_extends=True
         )
@@ -1127,6 +1173,7 @@ def _assemble_run_command(
     inner_config = None
     config_from_scanned_repository = False
     if config:
+        _refuse_absolute_extends(config)
         config_mounts, inner_config, config_files = _host_file_in_container(
             config, source_dir, CONTAINER_CONFIG_ROOT, follow_extends=True
         )
@@ -1461,7 +1508,7 @@ def run_ash_container(
                 workspace_config,
                 workspace_relative_file,
             )
-        except UnmountablePathError as e:
+        except ContainerInputError as e:
             config_refusal = str(e)
     if config_refusal is not None:
         typer.secho(config_refusal, fg=typer.colors.RED)
@@ -1693,7 +1740,7 @@ def run_ash_container(
                 ignore_suppressions=ignore_suppressions,
                 log_level=log_level,
             )
-        except UnmountablePathError as e:
+        except ContainerInputError as e:
             # Checked before the build already; this catches a path that only
             # became unmountable once resolved here.
             typer.secho(str(e), fg=typer.colors.RED)
