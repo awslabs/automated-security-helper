@@ -221,6 +221,165 @@ def test_config_overrides_are_honored(tmp_path, ash_log):
     assert not any("bucket_name" in message for message in _warnings(ash_log))
 
 
+def _enabled(config, reporter: str):
+    """Whether ``reporter`` runs under ``config``: its section's value, or its default."""
+    from automated_security_helper.config.reporter_trust import (
+        REPORTER_ENABLED_DEFAULTS,
+    )
+
+    section = config.get_plugin_config("reporter", reporter) or {}
+    return section.get("enabled", REPORTER_ENABLED_DEFAULTS[reporter])
+
+
+def _operator(tmp_path: Path, reporter: str, enabled: bool) -> Path:
+    return _write_config(
+        tmp_path / "operator" / "ash.yaml", {reporter: {"enabled": enabled}}
+    )
+
+
+def _operator_off(tmp_path: Path, reporter: str) -> Path:
+    return _operator(tmp_path, reporter, False)
+
+
+@pytest.mark.parametrize("reporter", sorted(REPO_VALUES))
+def test_an_in_tree_config_does_not_turn_on_a_reporter_the_operator_turned_off(
+    tmp_path, ash_log, reporter
+):
+    """Each of these sends findings off the host, so running it is the operator's choice."""
+    source = tmp_path / "repo"
+    project = _write_config(
+        source / ".ash" / ".ash.yaml", {reporter: {"enabled": True}}
+    )
+
+    config = resolve_config(
+        config_path=project,
+        source_dir=source,
+        trusted_config_path=_operator_off(tmp_path, reporter),
+    )
+
+    assert _enabled(config, reporter) is False
+    warnings = "\n".join(_warnings(ash_log))
+    assert f"reporters.{reporter}.enabled" in warnings, warnings
+
+
+@pytest.mark.parametrize("reporter", sorted(REPO_VALUES))
+def test_an_in_tree_config_that_leaves_the_reporter_out_keeps_it_off(
+    tmp_path, ash_log, reporter
+):
+    """The tree's config replaces the operator's, and leaving a section out would
+    return the reporter to its own default; the operator's off still holds."""
+    source = tmp_path / "repo"
+    project = _write_config(
+        source / ".ash" / ".ash.yaml", {"markdown": {"enabled": True}}
+    )
+
+    config = resolve_config(
+        config_path=project,
+        source_dir=source,
+        trusted_config_path=_operator_off(tmp_path, reporter),
+    )
+
+    assert _enabled(config, reporter) is False
+    assert not any("enabled" in message for message in _warnings(ash_log))
+
+
+def test_the_operators_ash_config_turning_one_off_holds_too(
+    tmp_path, ash_log, monkeypatch
+):
+    """The CLI's trusted base outside workspace mode is ASH_CONFIG's file."""
+    monkeypatch.setenv("ASH_CONFIG", str(_operator_off(tmp_path, "s3")))
+    source = tmp_path / "repo"
+    _write_config(source / ".ash" / ".ash.yaml", {"s3": {"enabled": True}})
+
+    config = resolve_config(source_dir=source)
+
+    assert _enabled(config, "s3") is False
+    assert any("reporters.s3.enabled" in m for m in _warnings(ash_log))
+
+
+@pytest.mark.parametrize("reporter", sorted(REPO_VALUES))
+def test_an_in_tree_config_may_turn_one_off(tmp_path, ash_log, reporter):
+    """``enabled: false`` only narrows what is sent, so it applies from any config."""
+    source = tmp_path / "repo"
+    _write_config(source / ".ash" / ".ash.yaml", {reporter: {"enabled": False}})
+
+    config = resolve_config(source_dir=source)
+
+    assert _enabled(config, reporter) is False
+    assert not any("enabled" in message for message in _warnings(ash_log))
+
+
+@pytest.mark.parametrize("reporter", sorted(REPO_VALUES))
+def test_enabled_true_where_the_operator_has_it_on_changes_nothing(
+    tmp_path, ash_log, reporter
+):
+    source = tmp_path / "repo"
+    project = _write_config(
+        source / ".ash" / ".ash.yaml", {reporter: {"enabled": True}}
+    )
+
+    config = resolve_config(
+        config_path=project,
+        source_dir=source,
+        trusted_config_path=_operator(tmp_path, reporter, True),
+    )
+
+    assert _enabled(config, reporter) is True
+    assert not any("enabled" in message for message in _warnings(ash_log))
+
+
+@pytest.mark.parametrize(
+    "section",
+    [None, {"options": {"file_format": "yaml"}}],
+    ids=["absent", "no-enabled"],
+)
+def test_a_reporter_off_by_its_default_gets_no_section_added(section):
+    """Nothing is written for a reporter the config already leaves off."""
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.reporter_trust import _confine_enabled
+
+    reporters = {} if section is None else {"s3": dict(section)}
+    config = AshConfig.model_validate({"reporters": reporters})
+    trusted = AshConfig.model_validate({"reporters": {"s3": {"enabled": False}}})
+    before = config.model_dump(by_alias=True)
+
+    ignored = _confine_enabled(config, trusted, {"s3": False})
+
+    assert ignored == []
+    assert config.model_dump(by_alias=True) == before
+
+
+@pytest.mark.parametrize("trusted_value", ["no", 0, "false"])
+def test_an_operator_off_written_another_way_still_counts(tmp_path, trusted_value):
+    """The operator's value is read as the reporter's model reads it."""
+    source = tmp_path / "repo"
+    project = _write_config(source / ".ash" / ".ash.yaml", {"s3": {"enabled": True}})
+    operator = _write_config(
+        tmp_path / "operator" / "ash.yaml", {"s3": {"enabled": trusted_value}}
+    )
+
+    config = resolve_config(
+        config_path=project, source_dir=source, trusted_config_path=operator
+    )
+
+    assert _enabled(config, "s3") is False
+
+
+def test_an_override_turns_one_on(tmp_path, ash_log):
+    source = tmp_path / "repo"
+    project = _write_config(source / ".ash" / ".ash.yaml", {"s3": {"enabled": False}})
+
+    config = resolve_config(
+        config_path=project,
+        source_dir=source,
+        trusted_config_path=_operator_off(tmp_path, "s3"),
+        config_overrides=["reporters.s3.enabled=true"],
+    )
+
+    assert _enabled(config, "s3") is True
+    assert not any("enabled" in message for message in _warnings(ash_log))
+
+
 def test_a_base_the_tree_extends_sets_no_destination_either(tmp_path, ash_log):
     source = tmp_path / "repo"
     _write_config(
@@ -315,10 +474,12 @@ def walk(model, prefix, out, seen):
 out = {}
 for cls in ash_plugin_manager.plugin_modules("reporter"):
     configs = models(cls.model_fields["config"].annotation)
-    section, options = set(), []
+    section, options, enabled_defaults = set(), [], []
     refuses_paths = True
     for config in configs:
         section |= set(config.model_fields)
+        enabled_defaults.append(
+            config.model_fields["enabled"].get_default(call_default_factory=True))
         for options_model in models(config.model_fields["options"].annotation):
             walk(options_model, "", options, frozenset())
         try:
@@ -332,6 +493,7 @@ for cls in ash_plugin_manager.plugin_modules("reporter"):
         "options": options,
         "refuses_paths_in_extension": refuses_paths,
         "destination_options": None if declared is None else list(declared),
+        "enabled_defaults": enabled_defaults,
     }
 print(json.dumps(out))
 """
@@ -412,6 +574,19 @@ def test_each_built_in_reporter_declares_the_options_listed_for_it(reporter_fiel
         for reporter in declared
     } == declared
     assert set(REPORTER_DESTINATION_OPTIONS) <= set(declared)
+
+
+def test_each_off_host_reporters_enabled_default_is_listed(reporter_fields):
+    """A reporter's ``enabled`` is confined against its own default, which the
+    table gives before its plugin package is imported."""
+    from automated_security_helper.config.reporter_trust import (
+        REPORTER_DESTINATION_OPTIONS,
+        REPORTER_ENABLED_DEFAULTS,
+    )
+
+    assert set(REPORTER_ENABLED_DEFAULTS) == set(REPORTER_DESTINATION_OPTIONS)
+    for reporter, default in REPORTER_ENABLED_DEFAULTS.items():
+        assert set(reporter_fields[reporter]["enabled_defaults"]) == {default}, reporter
 
 
 def test_no_listed_option_has_an_alias(reporter_fields):

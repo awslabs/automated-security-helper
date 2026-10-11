@@ -44,7 +44,6 @@ BEDROCK_REGION = (
     "project_name: uploaded\n"
     "reporters:\n"
     "  bedrock-summary-reporter:\n"
-    "    enabled: true\n"
     "    options:\n"
     "      aws_region: us-west-2\n"
 )
@@ -511,6 +510,42 @@ _OPERATOR_CHOICES = [
         ),
         "reporters.bedrock-summary-reporter.options.model_id",
     ),
+    ("reporters:\n  s3:\n    enabled: true\n", "reporters.s3.enabled"),
+    (
+        "reporters:\n  aws-security-hub:\n    enabled: true\n",
+        "reporters.aws-security-hub.enabled",
+    ),
+    (
+        "reporters:\n  bedrock-summary-reporter:\n    enabled: true\n",
+        "reporters.bedrock-summary-reporter.enabled",
+    ),
+    (
+        "reporters:\n  cloudwatch-logs:\n    enabled: true\n",
+        "reporters.cloudwatch-logs.enabled",
+    ),
+    (
+        (
+            "reporters:\n  bedrock-summary-reporter:\n    options:\n"
+            "      include_code_snippets: true\n"
+        ),
+        "reporters.bedrock-summary-reporter.options.include_code_snippets",
+    ),
+    (
+        (
+            "reporters:\n  bedrock-summary-reporter:\n    options:\n"
+            "      custom_prompt: Summarize differently.\n"
+        ),
+        "reporters.bedrock-summary-reporter.options.custom_prompt",
+    ),
+]
+
+#: The reporters that send findings off the host, whose ``enabled`` a client's
+#: file may set only to false (config/reporter_trust.py).
+_OFF_HOST_REPORTERS = [
+    "aws-security-hub",
+    "bedrock-summary-reporter",
+    "cloudwatch-logs",
+    "s3",
 ]
 
 
@@ -525,6 +560,56 @@ def test_a_tool_choice_or_report_destination_in_an_upload_is_refused(
     _assert_refused(
         _scan_resolution(_server["target"], str(source / "ash.yaml")), key=key
     )
+
+
+@pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
+def test_an_upload_may_turn_an_off_host_reporter_off(_server, reporter) -> None:
+    """``enabled: false`` only narrows what is sent, under every entry that covers it."""
+    source = _upload({"ash.yaml": f"reporters:\n  {reporter}:\n    enabled: false\n"})
+    config = _scan_resolution(_server["target"], str(source / "ash.yaml"))
+    assert not isinstance(config, Exception), config
+    assert config.get_plugin_config("reporter", reporter)["enabled"] is False
+
+
+def test_an_upload_repeating_the_servers_reporter_settings_scans(_server) -> None:
+    """A delivered value equal to the server's changes nothing."""
+    settings = (
+        "reporters:\n"
+        "  s3:\n    enabled: true\n"
+        "  bedrock-summary-reporter:\n"
+        "    enabled: true\n"
+        "    options:\n"
+        "      include_code_snippets: true\n"
+        "      custom_prompt: Operator prompt.\n"
+    )
+    operator = _server["tmp"] / "operator" / "ash.yaml"
+    operator.write_text("project_name: operator\n" + settings, encoding="utf-8")
+    source = _upload({"ash.yaml": settings})
+    config = _scan_resolution(_server["target"], str(source / "ash.yaml"))
+    assert not isinstance(config, Exception), config
+    bedrock = config.get_plugin_config("reporter", "bedrock-summary-reporter")
+    assert bedrock["options"]["include_code_snippets"] is True
+    assert config.get_plugin_config("reporter", "s3")["enabled"] is True
+
+
+def test_a_delivered_tree_cannot_turn_on_a_reporter_the_server_turned_off(
+    _server,
+) -> None:
+    """Left out, the section would return the reporter to its default, which is on."""
+    operator = _server["tmp"] / "operator" / "ash.yaml"
+    operator.write_text(
+        "project_name: operator\nreporters:\n  s3:\n    enabled: false\n",
+        encoding="utf-8",
+    )
+    source = _upload({".ash/.ash.yaml": "project_name: delivered\n"})
+    config = _scan_resolution(source, None)
+    assert not isinstance(config, Exception), config
+    from automated_security_helper.config.reporter_trust import (
+        REPORTER_ENABLED_DEFAULTS,
+    )
+
+    section = config.get_plugin_config("reporter", "s3") or {}
+    assert section.get("enabled", REPORTER_ENABLED_DEFAULTS["s3"]) is False
 
 
 _NEWER_DENIALS = [

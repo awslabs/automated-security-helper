@@ -86,6 +86,14 @@ the scanned tree, or one an MCP client delivered, cannot set them: from the tree
 are ignored with a warning, and under the MCP server they are default `denied_paths`
 entries, so a delivered config that changes one is refused.
 
+Whether the reporter runs is the operator's too: where the operator's settings have
+it off, a config file inside the scanned tree does not turn it on (see
+[Settings only the operator can set](index.md#settings-only-the-operator-can-set)).
+Under the MCP server every setting of the section is a default `denied_paths` entry
+(`/reporters/bedrock-summary-reporter/**`), including `include_code_snippets` and
+`custom_prompt`, which choose what is sent to the model, so a delivered config that
+changes one is refused. `enabled: false` is accepted from any config.
+
 The reporter is in the `ash_aws_plugins` package, which only the operator can load,
 with `--ash-plugin-modules`, `ASH_PLUGIN_MODULES` or the operator's own config, never
 a repository's. See [Loading the plugins](index.md#loading-the-plugins).

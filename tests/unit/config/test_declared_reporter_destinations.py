@@ -151,8 +151,9 @@ options = {
     name: dict((config.get_plugin_config("reporter", name) or {}).get("options") or {})
     for name in ("s3", "aws-security-hub")
 }
+sent = reports / "ash.endpoint.json"
 print(json.dumps({
-    "sent": json.loads((reports / "ash.endpoint.json").read_text()),
+    "sent": json.loads(sent.read_text()) if sent.exists() else None,
     "options": options,
     "warnings": warnings,
 }))
@@ -334,6 +335,32 @@ def test_an_in_tree_config_that_loads_the_plugin_itself_does_not_choose_it(
     result = _scan(tmp_path, site, modules=())
 
     assert result["sent"]["endpoint"] == DEFAULT_ENDPOINT, result
+
+
+def test_a_project_config_does_not_turn_on_a_reporter_the_operator_turned_off(
+    tmp_path, site
+):
+    """A reporter that declares a destination sends findings somewhere, so whether
+    it runs is the operator's choice, as for the built-in AWS reporters."""
+    project = _write(
+        tmp_path / "repo" / ".ash" / ".ash.yaml",
+        {"reporters": {REPORTER: {"enabled": True}}},
+    )
+    operator = _write(
+        tmp_path / "operator" / "ash.yaml",
+        {"reporters": {REPORTER: {"enabled": False}}},
+    )
+
+    result = _scan(
+        tmp_path,
+        site,
+        config_path=str(project),
+        trusted_config_path=str(operator),
+    )
+
+    assert result["sent"] is None, result
+    enabled_key = f"reporters.{REPORTER}.enabled"
+    assert len(_ignoring(result["warnings"], enabled_key)) == 1, result["warnings"]
 
 
 # ---------------------------------------------------------------------------
@@ -626,4 +653,97 @@ def test_nothing_is_confined_for_a_config_with_no_file_in_the_tree(tmp_path, ash
 
     section = config.get_plugin_config("reporter", "aliased-reporter")
     assert section["options"]["region"] == "op-region"
+    assert not ash_log
+
+
+class _LocalReporter(ReporterPluginBase[_AliasedConfig]):
+    """Writes only a local file: it declares no destination options."""
+
+    def report(self, model):
+        return None
+
+
+def _operator_turns_off(tmp_path: Path, project_section: Dict[str, Any] | None):
+    operator = _write(
+        tmp_path / "operator" / "ash.yaml",
+        {"reporters": {"aliased-reporter": {"enabled": False}}},
+    )
+    source = tmp_path / "repo"
+    reporters: Dict[str, Any] = {"markdown": {"enabled": True}}
+    if project_section is not None:
+        reporters["aliased-reporter"] = project_section
+    project = _write(source / ".ash" / ".ash.yaml", {"reporters": reporters})
+    return resolve_config(
+        config_path=project, source_dir=source, trusted_config_path=operator
+    )
+
+
+def _enabled(config) -> Any:
+    return (config.get_plugin_config("reporter", "aliased-reporter") or {}).get(
+        "enabled"
+    )
+
+
+def test_a_declared_reporters_enabled_comes_from_the_trusted_base(tmp_path, ash_log):
+    from automated_security_helper.config.reporter_trust import (
+        confine_declared_reporter_destinations,
+    )
+
+    config = _operator_turns_off(tmp_path, {"enabled": True})
+
+    confine_declared_reporter_destinations(config, [_AliasedReporter])
+
+    assert _enabled(config) is False
+    [warning] = [
+        r.getMessage() for r in ash_log if "aliased-reporter" in r.getMessage()
+    ]
+    assert "reporters.aliased-reporter.enabled" in warning
+
+
+def test_leaving_a_declared_reporter_out_keeps_the_operators_off(tmp_path, ash_log):
+    """The project's config replaces the operator's, so leaving the section out
+    would turn the reporter back on by its default."""
+    from automated_security_helper.config.reporter_trust import (
+        confine_declared_reporter_destinations,
+    )
+
+    config = _operator_turns_off(tmp_path, None)
+
+    confine_declared_reporter_destinations(config, [_AliasedReporter])
+
+    assert _enabled(config) is False
+    assert not ash_log
+
+
+def test_a_tree_may_turn_a_declared_reporter_off(tmp_path, ash_log):
+    from automated_security_helper.config.reporter_trust import (
+        confine_declared_reporter_destinations,
+    )
+
+    source = tmp_path / "repo"
+    _write(
+        source / ".ash" / ".ash.yaml",
+        {"reporters": {"aliased-reporter": {"enabled": False}}},
+    )
+    config = resolve_config(source_dir=source)
+
+    confine_declared_reporter_destinations(config, [_AliasedReporter])
+
+    assert _enabled(config) is False
+    assert not ash_log
+
+
+def test_a_reporter_with_no_destination_keeps_its_enabled_from_the_tree(
+    tmp_path, ash_log
+):
+    """It writes only local files, so whether it runs is the tree's to say."""
+    from automated_security_helper.config.reporter_trust import (
+        confine_declared_reporter_destinations,
+    )
+
+    config = _operator_turns_off(tmp_path, {"enabled": True})
+
+    confine_declared_reporter_destinations(config, [_LocalReporter])
+
+    assert _enabled(config) is True
     assert not ash_log

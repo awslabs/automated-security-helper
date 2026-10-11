@@ -516,6 +516,9 @@ _REPORTER_DENIALS: Dict[str, Any] = {
     "/reporters/s3/options/aws_profile": "other-profile",
     "/reporters/s3/options/bucket_name": "other-bucket",
     "/reporters/s3/options/key_prefix": "other/",
+    "/reporters/aws-security-hub/enabled": True,
+    "/reporters/s3/enabled": True,
+    "/reporters/bedrock-summary-reporter/**": True,
 }
 
 
@@ -538,11 +541,78 @@ for _entry, (_pointer, _value) in _POINTED_DENIALS.items():
     )
 for _pointer, _value in _REPORTER_DENIALS.items():
     _reporter, _option = _pointer.split("/")[2], _pointer.split("/")[-1]
-    _section = {"enabled": True, "options": {_option: _value}}
+    if _option == "enabled":
+        _section = {"enabled": _value}
+    elif _option == "**":
+        _section = {"options": {"include_code_snippets": _value}}
+    else:
+        _section = {"enabled": True, "options": {_option: _value}}
     _DENIED_CASES[_pointer] = (
         {"op": "add", "path": f"/reporters/{_reporter}", "value": _section},
         {"reporters": {_reporter: _section}},
     )
+
+
+#: A change a client makes to an off-host reporter the profile configures, and the
+#: entry that refuses it.
+_CONFIGURED_REPORTER_CASES: Dict[str, Tuple[str, Any, str]] = {
+    "security hub on": (
+        "/reporters/aws-security-hub/enabled",
+        True,
+        "/reporters/aws-security-hub/enabled",
+    ),
+    "s3 on": ("/reporters/s3/enabled", True, "/reporters/s3/enabled"),
+    "bedrock on": (
+        "/reporters/bedrock-summary-reporter/enabled",
+        True,
+        "/reporters/bedrock-summary-reporter/**",
+    ),
+    "bedrock code snippets": (
+        "/reporters/bedrock-summary-reporter/options/include_code_snippets",
+        True,
+        "/reporters/bedrock-summary-reporter/**",
+    ),
+    "bedrock prompt": (
+        "/reporters/bedrock-summary-reporter/options/custom_prompt",
+        "Summarize differently.",
+        "/reporters/bedrock-summary-reporter/**",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_CONFIGURED_REPORTER_CASES))
+def test_a_client_cannot_turn_on_or_feed_a_reporter_the_profile_configures(
+    tmp_path: Path, case: str
+) -> None:
+    """Refused by the entry for the field itself, not by one for a sibling option."""
+    pointer, value, entry = _CONFIGURED_REPORTER_CASES[case]
+    document = _profile(allowed_paths=["/**"])
+    document["reporters"] = {
+        "aws-security-hub": {"enabled": False},
+        "s3": {"enabled": False},
+        "bedrock-summary-reporter": {
+            "enabled": False,
+            "options": {"include_code_snippets": False, "custom_prompt": None},
+        },
+    }
+    _install(tmp_path, document)
+    restated = yaml.safe_load(yaml.safe_dump(document))
+    reporter, *rest = pointer.split("/")[2:]
+    node = restated["reporters"][reporter]
+    for segment in rest[:-1]:
+        node = node[segment]
+    node[rest[-1]] = value
+
+    patched, overridden = _both_routes(
+        {"op": "replace", "path": pointer, "value": value},
+        yaml.safe_dump(restated),
+    )
+
+    for result in (patched, overridden):
+        assert result["success"] is False, result
+        assert f"denied_paths entry {entry!r}" in result["error"], result["error"]
+    _assert_unbound("patch")
+    _assert_unbound("override")
 
 
 def test_every_shipped_denied_path_has_a_case() -> None:

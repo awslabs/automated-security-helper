@@ -828,7 +828,12 @@ class RuntimeOverridesConfig(BaseModel):
         "/scanners/semgrep/options/metrics",
         # AWS-credential-bearing reporter options (plugin-provided, hyphenated
         # names), and every other destination and credential option of the
-        # built-in AWS reporters (config/reporter_trust.py).
+        # built-in AWS reporters (config/reporter_trust.py). Then whether each of
+        # them runs, since each sends findings off the host (cloudwatch-logs'
+        # and the Bedrock reporter's are under their /** entries), and every
+        # other Bedrock option: what is sent to the model (code snippets, the
+        # prompt) and the model parameters. A client may still set enabled to
+        # false (client_config_policy._writes_a_tightening).
         "/reporters/bedrock-summary-reporter/options/aws_*",
         "/reporters/cloudwatch-logs/**",
         "/reporters/aws-security-hub/options/aws_region",
@@ -842,6 +847,9 @@ class RuntimeOverridesConfig(BaseModel):
         "/reporters/s3/options/aws_profile",
         "/reporters/s3/options/bucket_name",
         "/reporters/s3/options/key_prefix",
+        "/reporters/aws-security-hub/enabled",
+        "/reporters/s3/enabled",
+        "/reporters/bedrock-summary-reporter/**",
         # The GitLab SAST report leaves suppressed findings out with this set, so
         # the findings a client's own suppressions are marked on would be gone
         # from it (off by default; GHAS's is on by default and off reports more).

@@ -205,6 +205,9 @@
                   "/reporters/s3/options/aws_profile",
                   "/reporters/s3/options/bucket_name",
                   "/reporters/s3/options/key_prefix",
+                  "/reporters/aws-security-hub/enabled",
+                  "/reporters/s3/enabled",
+                  "/reporters/bedrock-summary-reporter/**",
                   "/reporters/gitlab-sast/options/exclude_suppressed"
                 ],
                 "denied_value_patterns": {},
@@ -648,6 +651,9 @@
                 "/reporters/s3/options/aws_profile",
                 "/reporters/s3/options/bucket_name",
                 "/reporters/s3/options/key_prefix",
+                "/reporters/aws-security-hub/enabled",
+                "/reporters/s3/enabled",
+                "/reporters/bedrock-summary-reporter/**",
                 "/reporters/gitlab-sast/options/exclude_suppressed"
               ],
               "denied_value_patterns": {},
@@ -757,6 +763,9 @@
               "/reporters/s3/options/aws_profile",
               "/reporters/s3/options/bucket_name",
               "/reporters/s3/options/key_prefix",
+              "/reporters/aws-security-hub/enabled",
+              "/reporters/s3/enabled",
+              "/reporters/bedrock-summary-reporter/**",
               "/reporters/gitlab-sast/options/exclude_suppressed"
             ],
             "denied_value_patterns": {},
@@ -3367,6 +3376,9 @@
             "/reporters/s3/options/aws_profile",
             "/reporters/s3/options/bucket_name",
             "/reporters/s3/options/key_prefix",
+            "/reporters/aws-security-hub/enabled",
+            "/reporters/s3/enabled",
+            "/reporters/bedrock-summary-reporter/**",
             "/reporters/gitlab-sast/options/exclude_suppressed"
           ],
           "description": "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). Each entry starts with '/'. The defaults block the fields that decide whether a scan fails, what it runs and reports, where findings are sent, the scanner sandbox, and this policy. A list equal to a default ASH has shipped counts as the current default list. Any other list is added to the current defaults, unless replace_default_denied_paths is true. When it is added, a list that holds some default entries and leaves others out still gets them, and a warning names the ones it leaves out.",

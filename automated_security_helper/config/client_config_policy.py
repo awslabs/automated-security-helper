@@ -260,6 +260,9 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/reporters/s3/options/aws_profile",
             "/reporters/s3/options/bucket_name",
             "/reporters/s3/options/key_prefix",
+            "/reporters/aws-security-hub/enabled",
+            "/reporters/s3/enabled",
+            "/reporters/bedrock-summary-reporter/**",
             "/reporters/gitlab-sast/options/exclude_suppressed",
         ),
     )
@@ -568,16 +571,28 @@ def _writes_a_tightening(document: Any, denial: Any) -> bool:
     """Whether ``denial`` is a confined option ``document`` sets to a value that only narrows.
 
     ``tool_config_trust.TIGHTENING_VALUES``: opengrep's and semgrep's
-    ``metrics: off``.
+    ``metrics: off``. And ``enabled: false`` of a reporter that sends findings off
+    the host (``reporter_trust.REPORTER_ENABLED_DEFAULTS``), under any entry that
+    covers it, ``/reporters/cloudwatch-logs/**`` included.
     """
     from automated_security_helper.config.ash_config import plugin_key_lookup_names
     from automated_security_helper.config.ash_config import reduced_plugin_name
+    from automated_security_helper.config.reporter_trust import (
+        REPORTER_ENABLED_DEFAULTS,
+        turns_a_reporter_off,
+    )
     from automated_security_helper.config.runtime_patch import _path_segments, _walk
     from automated_security_helper.config.tool_config_trust import TIGHTENING_VALUES
 
     if denial.from_patch:
         return False
     segments = _path_segments(denial.pointer)
+    if len(segments) == 3 and segments[0] == "reporters" and segments[2] == "enabled":
+        names = plugin_key_lookup_names(segments[1])
+        if any(reduced_plugin_name(r) in names for r in REPORTER_ENABLED_DEFAULTS):
+            present, value = _walk(document, segments)
+            return present and turns_a_reporter_off(value)
+        return False
     if len(segments) != 4 or segments[0] != "scanners" or segments[2] != "options":
         return False
     option = segments[3].replace("-", "_")

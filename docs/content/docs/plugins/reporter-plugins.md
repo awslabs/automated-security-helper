@@ -352,6 +352,14 @@ does this once it has imported your plugin module and before it builds any
 reporter, in a scan and in `ash report`. The built-in AWS reporters declare theirs
 the same way; see [Settings a repository's config cannot choose](../configuration-guide.md#settings-a-repositorys-config-cannot-choose).
 
+A reporter that declares any destination option sends findings somewhere, so
+whether it runs is the operator's choice too. Where the trusted base has it off
+(its `enabled`, or the default of your config model's `enabled` when the trusted
+base sets none), such a file does not turn it on: its `enabled: true` is replaced
+with a warning, and leaving the section out leaves the reporter off. Its
+`enabled: false` applies. A reporter that declares no destination options writes
+only local files, and its `enabled` applies from the file.
+
 Under the MCP server, a delivered file that sets a declared option is scanned with
 the server's value rather than refused, because the server checks the file against
 `denied_paths` before it imports your plugin module. To have such a file refused,

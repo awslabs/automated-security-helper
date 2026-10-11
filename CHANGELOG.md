@@ -1022,6 +1022,30 @@
     directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, where before they used it.
     Move the file into such a directory, or name its directory there.
 
+- **A repository's config can no longer turn on an AWS reporter the operator has
+  off.** The Security Hub, Bedrock summary, CloudWatch Logs and S3 reporters send
+  findings off the host, so whether they run is the operator's choice, as their
+  destinations already are. Where the defaults, `--config-overrides` or a config
+  file outside the scanned tree have one of them off, a config file inside the tree,
+  or one an MCP client delivered, does not turn it on: its `enabled: true` is
+  ignored with a warning, and a config that leaves the section out, which would
+  return the reporter to its own default, leaves it off. `enabled: false` still
+  applies from any config. The same holds for a reporter from a plugin module that
+  declares `destination_options`, once the scan or `ash report` has imported it.
+  A repository that turned one of these reporters on from its own config keeps it
+  with `--config-overrides`, such as
+  `--config-overrides reporters.s3.enabled=true`, or with a config file outside the
+  tree.
+  - Under the MCP server, `/reporters/aws-security-hub/enabled`,
+    `/reporters/s3/enabled` and `/reporters/bedrock-summary-reporter/**` join the
+    default `denied_paths` (`/reporters/cloudwatch-logs/**` already covers that
+    reporter). A delivered config that turns one of these reporters on, or sets
+    another Bedrock option such as `include_code_snippets` or `custom_prompt`,
+    which choose what is sent to the model, is refused with
+    `error_type: config_field_denied`. `enabled: false`, and a value equal to the
+    server's, are accepted. A profile that relied on a client turning one of these
+    reporters on sets it in the profile instead.
+
 ### Fixes
 
 - `ash mcp --profile NAME=path/to/ash.yaml` works. The server registered profiles

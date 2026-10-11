@@ -60,7 +60,9 @@ config file outside the scanned tree. A config file inside the scanned tree cann
 them; each one it sets is ignored with a warning. Under the MCP server every
 `cloudwatch-logs` setting is a default `denied_paths` entry
 (`/reporters/cloudwatch-logs/**`), so a config an MCP client delivered that changes any
-of them is refused.
+of them is refused; `enabled: false` is accepted. Where the operator's settings have
+the reporter off, a config file inside the scanned tree does not turn it on (see
+[Settings only the operator can set](index.md#settings-only-the-operator-can-set)).
 
 The reporter is in the `ash_aws_plugins` package, which only the operator can load,
 with `--ash-plugin-modules`, `ASH_PLUGIN_MODULES` or the operator's own config, never

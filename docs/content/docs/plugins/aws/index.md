@@ -59,13 +59,24 @@ reporter's page lists), `--config-overrides`, or a config file outside the scann
 tree. A config file inside the scanned tree cannot set them: each one it sets is
 ignored, with one warning naming them, and the operator's value applies. This holds
 for every spelling of the section ASH reads as that reporter's, such as
-`s3-reporter` or `BedrockSummary`. The reporters' other options, including
-`enabled`, still apply from the tree.
+`s3-reporter` or `BedrockSummary`.
 
-Under the MCP server they are also default `denied_paths` entries, and for
-`cloudwatch-logs` every setting of the section is (`/reporters/cloudwatch-logs/**`).
-A config an MCP client delivered that changes one is refused with
-`error_type: config_field_denied`; one that leaves them at the server's values scans.
+Whether each reporter runs is the operator's too. A config file inside the scanned
+tree may set `enabled: false`. Where the operator's settings have a reporter off, the
+tree's `enabled: true` is ignored with a warning, and a tree config that leaves the
+section out, which would return the reporter to its own default, leaves it off. To
+run a reporter for one scan, set it with `--config-overrides`, such as
+`--config-overrides reporters.s3.enabled=true`, or in a config file outside the tree.
+The reporters' other options still apply from the tree.
+
+Under the MCP server they are also default `denied_paths` entries, and so are
+`enabled` of each reporter and every `bedrock-summary-reporter` option, which
+chooses what is sent to the model. For `cloudwatch-logs` and
+`bedrock-summary-reporter` every setting of the section is
+(`/reporters/cloudwatch-logs/**`, `/reporters/bedrock-summary-reporter/**`). A config
+an MCP client delivered that changes one is refused with
+`error_type: config_field_denied`; one that leaves them at the server's values, or
+sets `enabled: false`, scans.
 See [Configs an MCP client delivered](../../configuration-guide.md#configs-an-mcp-client-delivered).
 
 ## Quick Start

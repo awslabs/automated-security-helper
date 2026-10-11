@@ -36,8 +36,24 @@ are by the default ``denied_paths``: a client's file is checked at resolution,
 before the module that declares them is imported. The file resolves, and the
 value is replaced by the trusted base's, as for a file inside the tree. An
 operator who wants such a file refused lists the option in the profile's own
-``denied_paths``. Other options of these reporters (``enabled``, formatting, model
-parameters) still apply from the tree.
+``denied_paths``.
+
+Whether such a reporter runs at all is the operator's choice too, since each of
+them sends findings off the host when it runs. So ``enabled`` of a built-in AWS
+reporter, and of a reporter a plugin module adds that declares
+``destination_options``, follows the same rule: where the trusted base has the
+reporter off (by its own ``enabled``, or by the reporter's default when it sets
+none), a file inside the tree or one an MCP client delivered does not turn it on,
+whether it writes ``enabled: true`` or leaves the section out while the
+reporter's default is on (a file that replaces the operator's config would
+otherwise return the reporter to that default). ``enabled: false`` only narrows
+what is sent, so it applies from any config (``turns_a_reporter_off``). A reporter that declares no ``destination_options``
+writes only local files, and its ``enabled`` still applies from the tree. Under
+the MCP server the default ``denied_paths`` also refuse a client's file that turns
+a built-in AWS reporter on, and every other option of the Bedrock reporter, which
+chooses what is sent to the model; ``enabled: false`` is accepted there
+(``client_config_policy._writes_a_tightening``). The reporters' other options
+(formatting, model parameters) still apply from the tree.
 """
 
 from __future__ import annotations
@@ -54,6 +70,8 @@ from typing import (
     Sequence,
     Tuple,
 )
+
+from pydantic import BaseModel
 
 from automated_security_helper.config.config_sources import describe_config_path
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -78,7 +96,45 @@ REPORTER_DESTINATION_OPTIONS: Dict[str, Tuple[str, ...]] = {
     "s3": ("aws_region", "aws_profile", "bucket_name", "key_prefix"),
 }
 
+#: Each built-in reporter's own default for ``enabled``, for the reporters whose
+#: ``enabled`` is the operator's choice: those in ``REPORTER_DESTINATION_OPTIONS``.
+#: It is what a reporter gets when no config section sets ``enabled``. Listed
+#: here because the reporters' models are in a plugin package that
+#: ``resolve_config`` does not import;
+#: tests/unit/config/test_reporter_destinations_from_repo_config.py holds each
+#: value equal to the reporter's config model.
+REPORTER_ENABLED_DEFAULTS: Dict[str, bool] = {
+    "aws-security-hub": True,
+    "bedrock-summary-reporter": True,
+    "cloudwatch-logs": True,
+    "s3": True,
+}
+
 _MISSING = object()
+
+
+def turns_a_reporter_off(value: Any) -> bool:
+    """Whether ``enabled: value``, written in an untrusted config, only turns a reporter off.
+
+    Only ``false`` itself. A value pydantic would also read as false (``0``,
+    ``"no"``) is not taken as one here, so it is confined like ``true``.
+    """
+    return value is False
+
+
+def _reads_as_off(value: Any) -> bool:
+    """Whether the reporter reads ``enabled: value`` as off, as its config model does.
+
+    For the trusted base's value, which the operator may have written in any
+    form the reporter's model accepts (``"no"``, ``0``). A value the model would
+    refuse counts as on, so it confines nothing.
+    """
+    from pydantic import TypeAdapter, ValidationError
+
+    try:
+        return TypeAdapter(bool).validate_python(value) is False
+    except ValidationError:
+        return False
 
 
 def _as_dict(section: Any) -> Optional[Dict[str, Any]]:
@@ -123,7 +179,13 @@ def confine_reporter_destinations(
         trusted_config = apply_config_overrides(trusted_config, reporter_overrides)
     config._in_tree_config_files = tuple(in_tree)
     config._trusted_reporter_base = trusted_config
-    _confine(config, trusted_config, REPORTER_DESTINATION_OPTIONS, in_tree)
+    _confine(
+        config,
+        trusted_config,
+        REPORTER_DESTINATION_OPTIONS,
+        REPORTER_ENABLED_DEFAULTS,
+        in_tree,
+    )
 
 
 def confine_declared_reporter_destinations(
@@ -131,9 +193,10 @@ def confine_declared_reporter_destinations(
 ) -> None:
     """Apply ``confine_reporter_destinations`` to the options loaded reporters declare.
 
-    For the reporters a plugin module adds, which ``resolve_config`` cannot see.
-    Call it once the plugin modules are imported and before any reporter is built.
-    Does nothing for a config with no file inside the tree, and repeats nothing
+    For the reporters a plugin module adds, which ``resolve_config`` cannot see:
+    their declared options, and ``enabled`` of each that declares any. Call it
+    once the plugin modules are imported and before any reporter is built. Does
+    nothing for a config with no file inside the tree, and repeats nothing
     already done for a built-in reporter: its options already hold the trusted
     base's values.
 
@@ -148,10 +211,12 @@ def confine_declared_reporter_destinations(
     trusted_config = config._trusted_reporter_base
     if trusted_config is None:
         return
+    reporter_classes = list(reporter_classes)
     _confine(
         config,
         trusted_config,
         declared_destination_options(reporter_classes),
+        declared_enabled_defaults(reporter_classes),
         config._in_tree_config_files,
     )
 
@@ -185,32 +250,67 @@ def declared_destination_options(
     return found
 
 
-def _aliases(reporter_class: type, option: str) -> List[str]:
-    """The aliases of field ``option`` in any options model of ``reporter_class``'s config."""
+def declared_enabled_defaults(reporter_classes: Iterable[type]) -> Dict[str, bool]:
+    """Each reporter's default for ``enabled``, by the name its config is under.
+
+    Only the reporters that declare ``destination_options``: one that declares
+    none writes only local files, so whether it runs is not a choice of where
+    findings go. The default is the one the reporter's own config model gives
+    (the most derived of the models its ``config`` field accepts, which is the
+    one a reporter built with no config section gets), and true when there is
+    none, as for ``ReporterPluginConfigBase``.
+    """
+    from automated_security_helper.base.plugin_config import plugin_config_key
+
+    found: Dict[str, bool] = {}
+    for reporter_class in reporter_classes:
+        if not declared_destination_options([reporter_class]):
+            continue
+        default = True
+        models = [
+            model
+            for model in _config_models(reporter_class)
+            if "enabled" in model.model_fields
+        ]
+        if models:
+            own = max(models, key=lambda model: len(model.__mro__))
+            field = own.model_fields["enabled"]
+            default = field.get_default(call_default_factory=True) is not False
+        found[plugin_config_key(reporter_class)] = default
+    return found
+
+
+def _models(annotation: Any) -> List[type[BaseModel]]:
+    """The pydantic models ``annotation`` names, through any Union or Optional."""
     import typing
 
-    from pydantic import AliasChoices, BaseModel
+    found: List[type[BaseModel]] = []
+    pending: List[Any] = [annotation]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, type) and issubclass(item, BaseModel):
+            found.append(item)
+        else:
+            pending.extend(typing.get_args(item))
+    return found
 
-    def models(annotation: Any) -> List[type[BaseModel]]:
-        found: List[type[BaseModel]] = []
-        pending: List[Any] = [annotation]
-        while pending:
-            item = pending.pop()
-            if isinstance(item, type) and issubclass(item, BaseModel):
-                found.append(item)
-            else:
-                pending.extend(typing.get_args(item))
-        return found
 
+def _config_models(reporter_class: type) -> List[type[BaseModel]]:
+    """The config models of ``reporter_class``'s ``config`` field."""
     config_field = (getattr(reporter_class, "model_fields", None) or {}).get("config")
-    if config_field is None:
-        return []
+    return [] if config_field is None else _models(config_field.annotation)
+
+
+def _aliases(reporter_class: type, option: str) -> List[str]:
+    """The aliases of field ``option`` in any options model of ``reporter_class``'s config."""
+    from pydantic import AliasChoices
+
     aliases: List[str] = []
-    for config_model in models(config_field.annotation):
+    for config_model in _config_models(reporter_class):
         options_field = config_model.model_fields.get("options")
         if options_field is None:
             continue
-        for options_model in models(options_field.annotation):
+        for options_model in _models(options_field.annotation):
             field = options_model.model_fields.get(option)
             if field is None:
                 continue
@@ -229,25 +329,54 @@ def _confine(
     config: "AshConfig",
     trusted_config: "AshConfig",
     destinations: Mapping[str, Sequence[str]],
+    enabled_defaults: Mapping[str, bool],
     in_tree: Sequence[Path],
 ) -> None:
-    """Set each reporter's ``destinations`` options to the trusted base's, with one warning."""
+    """Set each reporter's ``destinations`` options, and ``enabled`` where the
+    trusted base turns it off, to the trusted base's, with one warning."""
+    ignored = _confine_options(config, trusted_config, destinations)
+    ignored.extend(_confine_enabled(config, trusted_config, enabled_defaults))
+    if not ignored:
+        return
+    files = ", ".join(describe_config_path(path) for path in in_tree)
+    ASH_LOGGER.warning(
+        f"Ignoring {', '.join(ignored)} from {files}: that config is inside the "
+        "scanned tree or was delivered by an MCP client, and these options choose "
+        "whether findings are sent, where they are sent or written, and which "
+        "credentials send them. Set them with --config-overrides or a config file "
+        "outside the tree."
+    )
+
+
+def _sections_of(config: "AshConfig", plugin: str) -> List[str]:
+    """The keys of ``config``'s reporter sections that ``plugin``'s lookup reads."""
     from automated_security_helper.config.ash_config import (
         plugin_key_lookup_names,
         reduced_plugin_name,
     )
 
+    reduced = reduced_plugin_name(plugin)
+    extras = config.reporters.__pydantic_extra__ or {}
+    return [key for key in extras if reduced in plugin_key_lookup_names(key)]
+
+
+def _confine_options(
+    config: "AshConfig",
+    trusted_config: "AshConfig",
+    destinations: Mapping[str, Sequence[str]],
+) -> List[str]:
+    """Set each reporter's ``destinations`` options to the trusted base's.
+
+    Returns the options the config set that were not kept, as dotted keys.
+    """
     extras = config.reporters.__pydantic_extra__
-    if not extras:
-        return
     ignored: List[str] = []
+    if not extras:
+        return ignored
     for plugin, option_names in destinations.items():
         trusted_section = _as_dict(trusted_config.get_plugin_config("reporter", plugin))
         trusted_options = dict((trusted_section or {}).get("options") or {})
-        reduced = reduced_plugin_name(plugin)
-        for key in list(extras):
-            if reduced not in plugin_key_lookup_names(key):
-                continue
+        for key in _sections_of(config, plugin):
             section = _as_dict(extras[key])
             if section is None:
                 continue
@@ -268,12 +397,47 @@ def _confine(
             if changed:
                 section["options"] = options
                 extras[key] = section
-    if not ignored:
-        return
-    files = ", ".join(describe_config_path(path) for path in in_tree)
-    ASH_LOGGER.warning(
-        f"Ignoring {', '.join(ignored)} from {files}: that config is inside the "
-        "scanned tree or was delivered by an MCP client, and these options choose "
-        "where findings are sent or written and which credentials send them. Set "
-        "them with --config-overrides or a config file outside the tree."
-    )
+    return ignored
+
+
+def _confine_enabled(
+    config: "AshConfig",
+    trusted_config: "AshConfig",
+    enabled_defaults: Mapping[str, bool],
+) -> List[str]:
+    """Turn off each reporter of ``enabled_defaults`` that the trusted base has off.
+
+    A section's value is its ``enabled``, or the reporter's default when it sets
+    none. Where the trusted base's value is off, each of ``config``'s sections
+    the lookup reads whose value is not ``false`` gets ``enabled: false``, and
+    the key of each that wrote a value is returned. A config with no section for
+    the reporter gets one that turns it off, unless the reporter's default
+    already does. Nothing changes where the trusted base has the reporter on.
+    """
+    extras = config.reporters.__pydantic_extra__
+    ignored: List[str] = []
+    if extras is None:
+        return ignored
+    for plugin, default in enabled_defaults.items():
+        trusted_section = _as_dict(trusted_config.get_plugin_config("reporter", plugin))
+        if not _reads_as_off((trusted_section or {}).get("enabled", default)):
+            continue
+        keys = _sections_of(config, plugin)
+        if not keys:
+            if not _reads_as_off(default):
+                extras[plugin] = {"enabled": False}
+            continue
+        for key in keys:
+            section = _as_dict(extras[key])
+            if section is None:
+                continue
+            current = section.get("enabled", _MISSING)
+            if turns_a_reporter_off(current) or (
+                current is _MISSING and _reads_as_off(default)
+            ):
+                continue
+            if current is not _MISSING:
+                ignored.append(f"reporters.{key}.enabled")
+            section["enabled"] = False
+            extras[key] = section
+    return ignored

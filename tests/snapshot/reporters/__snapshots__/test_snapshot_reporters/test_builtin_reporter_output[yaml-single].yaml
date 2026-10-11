@@ -209,6 +209,9 @@ ash_config:
         - /reporters/s3/options/aws_profile
         - /reporters/s3/options/bucket_name
         - /reporters/s3/options/key_prefix
+        - /reporters/aws-security-hub/enabled
+        - /reporters/s3/enabled
+        - /reporters/bedrock-summary-reporter/**
         - /reporters/gitlab-sast/options/exclude_suppressed
         denied_value_patterns: {}
         enabled: false

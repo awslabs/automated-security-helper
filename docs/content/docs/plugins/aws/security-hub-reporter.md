@@ -59,6 +59,12 @@ one an MCP client delivered, cannot set them: from the tree they are ignored wit
 warning, and under the MCP server they are default `denied_paths` entries, so a
 delivered config that changes one is refused.
 
+Whether the reporter runs is the operator's too: where the operator's settings have
+it off, a config file inside the scanned tree does not turn it on, and under the MCP
+server `/reporters/aws-security-hub/enabled` is a default `denied_paths` entry, so a delivered
+config that turns it on is refused. `enabled: false` applies from any config. See
+[Settings only the operator can set](index.md#settings-only-the-operator-can-set).
+
 The reporter is in the `ash_aws_plugins` package, which only the operator can load,
 with `--ash-plugin-modules`, `ASH_PLUGIN_MODULES` or the operator's own config, never
 a repository's. See [Loading the plugins](index.md#loading-the-plugins).
