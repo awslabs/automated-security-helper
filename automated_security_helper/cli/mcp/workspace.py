@@ -274,14 +274,42 @@ def _error_response(
 # ---------------------------------------------------------------------------
 
 
+class ProjectsOutsideTheRootsError(MCPResourceError):
+    """A workspace was refused because a project lies outside the permitted roots.
+
+    Raised from inside resolution, before any project's config is read, and
+    reported as the confinement refusal it carries.
+    """
+
+
+def _project_gate(
+    workspace_file: str, session_id: Optional[str]
+) -> Callable[[Sequence[Tuple[str, Path]]], None]:
+    """The confinement check resolution runs before it reads any project config."""
+
+    def gate(projects: Sequence[Tuple[str, Path]]) -> None:
+        refusal = _refuse_project_paths_outside_the_permitted_roots(
+            projects, workspace_file, session_id
+        )
+        if refusal is not None:
+            raise ProjectsOutsideTheRootsError(str(refusal), context=refusal.context)
+
+    return gate
+
+
 def _resolve(
     workspace_file: str,
     workspace_config: Optional[str],
     allow_missing_projects: bool,
     config_overrides: Optional[Sequence[str]],
     default_config: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> WorkspacePlan:
     """Resolve the workspace, or raise.
+
+    Project confinement runs inside resolution, before any project's own config
+    is read (:func:`_project_gate`), so a config outside the permitted roots is
+    never parsed; a refusal raises :class:`ProjectsOutsideTheRootsError`.
 
     ``workspace_config`` is passed through as given rather than defaulted to a
     search when it is absent: ``resolve_workspace`` refuses a named policy file
@@ -303,6 +331,7 @@ def _resolve(
         ),
         config_overrides=tuple(config_overrides or ()),
         default_config=Path(default_config) if default_config else None,
+        project_gate=_project_gate(workspace_file, session_id),
     )
 
 
@@ -353,9 +382,10 @@ def _refuse_config_inputs_outside_the_permitted_roots(
 
     Only these two. The per-project ``.ash.yaml`` files a workspace pulls in are
     not caller-named -- each is found inside a project directory that project
-    confinement has already accepted -- so gating them here would re-check a
-    decision already made and would refuse a legitimate in-tree config on a
-    deployment that granted the tree but not its own path as a config root.
+    confinement accepted before resolution read it (:func:`_project_gate`) --
+    so gating them here would re-check a decision already made and would refuse
+    a legitimate in-tree config on a deployment that granted the tree but not
+    its own path as a config root.
     """
 
     from automated_security_helper.cli.mcp.sandbox import validate_config_input
@@ -407,7 +437,23 @@ def _refuse_projects_outside_the_permitted_roots(
     plan: WorkspacePlan,
     session_id: Optional[str] = None,
 ) -> Optional[MCPResourceError]:
+    """Validate every project that will be scanned; refuse the whole workspace if any fails."""
+    return _refuse_project_paths_outside_the_permitted_roots(
+        [(project.key, project.path) for project in plan.active_projects],
+        plan.workspace_file,
+        session_id,
+    )
+
+
+def _refuse_project_paths_outside_the_permitted_roots(
+    projects: Sequence[Tuple[str, Any]],
+    workspace_file: str,
+    session_id: Optional[str] = None,
+) -> Optional[MCPResourceError]:
     """Validate every project that will be scanned; refuse the whole workspace if any fails.
+
+    Run inside resolution, from the definition alone, before any project's own
+    config is read, and again on the resolved plan before a scan.
 
     Only the active projects. A skipped project is never read from and never
     written to, so refusing a workspace on its account would decline work the
@@ -425,16 +471,16 @@ def _refuse_projects_outside_the_permitted_roots(
     all of them.
     """
     offending: List[Tuple[str, MCPResourceError]] = []
-    for project in plan.active_projects:
+    for key, path in projects:
         # The session id is passed for the reason run_ash_scan passes it: this
         # session's own sandbox counts as a permitted root, so a workspace whose
         # projects live inside a tree the client delivered over the protocol is
         # scannable. Without it every such project is refused by the boundary
         # that exists to permit it, because no operator lists a directory the
         # server invented per connection.
-        refusal = validate_scan_target(project.path, session_id=session_id)
+        refusal = validate_scan_target(path, session_id=session_id)
         if refusal is not None:
-            offending.append((project.key, refusal))
+            offending.append((key, refusal))
 
     if not offending:
         return None
@@ -444,7 +490,7 @@ def _refuse_projects_outside_the_permitted_roots(
     }
     detail = "; ".join(f"{key} at {path}" for key, path in refused_paths.items())
     return MCPResourceError(
-        f"Workspace scan refused: {len(offending)} of {len(plan.active_projects)} "
+        f"Workspace scan refused: {len(offending)} of {len(projects)} "
         f"project(s) resolve outside the permitted roots, so none was scanned: "
         f"{detail}. Scanning the rest and reporting success would report a clean "
         f"result for code that was never examined. Set "
@@ -452,7 +498,7 @@ def _refuse_projects_outside_the_permitted_roots(
         f"or drop those folders from the workspace definition.",
         context={
             "error_category": ErrorCategory.INVALID_PATH.value,
-            "workspace_file": plan.workspace_file,
+            "workspace_file": workspace_file,
             "refused_projects": sorted(refused_paths),
             "refused_project_paths": refused_paths,
             "suggestions": [
@@ -1093,6 +1139,13 @@ async def mcp_resolve_workspace(
             allow_missing_projects,
             config_overrides,
             default_config=session_config,
+            session_id=session_id,
+        )
+    except ProjectsOutsideTheRootsError as exc:
+        return _error_response(
+            exc,
+            "resolve_workspace",
+            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
         )
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "resolve_workspace")
@@ -1246,6 +1299,13 @@ async def mcp_scan_workspace(
             # Same value the settings builder gets below. They must agree; see
             # ``_resolve`` and ``ProjectScanSettings.default_config_path``.
             default_config=session_config,
+            session_id=session_id,
+        )
+    except ProjectsOutsideTheRootsError as exc:
+        return _error_response(
+            exc,
+            "scan_workspace",
+            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
         )
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "scan_workspace")

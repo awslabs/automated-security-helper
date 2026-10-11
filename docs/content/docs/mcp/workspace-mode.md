@@ -89,7 +89,7 @@ The denominator is projects and not scanners on purpose. ASH's per-scanner progr
 
 ## Allowed roots govern the projects, not the workspace file
 
-`ASH_MCP_ALLOWED_ROOTS` is the setting that bounds what the MCP server may scan. It applies to a workspace scan project by project: every project directory the workspace resolves to is checked against it.
+`ASH_MCP_ALLOWED_ROOTS` is the setting that bounds what the MCP server may scan. It applies to a workspace project by project, for `resolve_ash_workspace` and `run_ash_workspace_scan` alike: every project directory the workspace resolves to is checked against it, before any project's own `.ash.yaml` is read.
 
 That is a wider reach than the single-directory tools have, arrived at indirectly. `run_ash_scan` is handed one directory by the client. A workspace scan is handed one *file* and gets N directories out of it, none of which the client stated — so checking the workspace root alone would be worse than useless, since the resolver already guarantees every project sits below the root and one allowlisted root would then authorize the whole tree beneath it.
 
@@ -116,11 +116,13 @@ Say this plainly, because it is easy to assume otherwise: leaving the variable u
 
 That list is a safety net, not a security boundary. It declines the handful of directories that hold host configuration and kernel interfaces rather than source code, and it says nothing about the rest of the filesystem. A `.code-workspace` file can list any folder below its own root, so on a server with the variable unset, a workspace definition is free to point the scanner at essentially any tree the server process can read. If you need the surface actually bounded, set `ASH_MCP_ALLOWED_ROOTS`; nothing else here does that job. Setting it replaces the default list rather than adding to it, which is also how a deliberate scan of a system directory is arranged.
 
-## Ordering: resolve, then confine, then scan
+## Ordering: read the definition, confine, then read project configs and scan
 
 The order is forced by what each step needs, and it shows up in the errors you get.
 
-Confinement cannot run first, because it needs the resolved project directories and only resolution produces them. So a workspace file that is both malformed and outside the permitted roots reports the malformation — a folder nobody cloned, say — rather than the confinement refusal. That is the right way round: the malformation is the part you can act on, and reporting the refusal would send you to edit an environment variable when the real problem is a line in the workspace file.
+Confinement needs the project directories, which come from the workspace definition, so the definition is read and checked first. A workspace file that is both malformed and outside the permitted roots reports the malformation — a folder nobody cloned, say — rather than the confinement refusal. That is the right way round: the malformation is the part you can act on, and reporting the refusal would send you to edit an environment variable when the real problem is a line in the workspace file.
+
+Confinement then runs before any project's own config is read. A project outside the permitted roots refuses the workspace, with exit code 4, without its `.ash.yaml` being opened, so neither tool reports anything from a config the server may not read: not its label, scanners or threshold in a plan, and not its parse errors.
 
 Every filesystem write happens after the confinement check, including the `clean_output` deletion and the creation of each project's output directory. A refused workspace leaves nothing behind.
 

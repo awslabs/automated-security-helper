@@ -126,7 +126,7 @@ from __future__ import annotations
 import os
 from itertools import combinations
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.resolve_config import (
@@ -708,6 +708,7 @@ def resolve_workspace(
     workspace_config: Optional[PathLike] = None,
     config_overrides: Tuple[str, ...] = (),
     default_config: Optional[PathLike] = None,
+    project_gate: Optional[Callable[[Sequence[Tuple[str, Path]]], None]] = None,
 ) -> WorkspacePlan:
     """Resolve and validate a workspace, returning an inspectable plan.
 
@@ -739,6 +740,11 @@ def resolve_workspace(
             bound with ``select_profile``; see
             :func:`_resolve_project_config` on why the same value has to reach
             ``ProjectScanSettings.default_config_path`` as well.
+        project_gate: Called with ``(key, resolved directory)`` for every
+            project that will be scanned, after the definition's own checks and
+            before any project's config is read; it raises to refuse the
+            workspace. The MCP server passes its scan-root confinement here, so
+            a config outside the permitted roots is never read.
 
     Returns:
         A :class:`~automated_security_helper.workspace.plan.WorkspacePlan` with
@@ -766,6 +772,9 @@ def resolve_workspace(
             f"scan: every folder it lists was skipped. Exiting 0 here would "
             f"report a clean result for a workspace nothing examined."
         )
+
+    if project_gate is not None:
+        project_gate([(c.key, c.resolved) for c in candidates if not c.skipped])
 
     projects: List[ProjectPlan] = []
     for candidate in candidates:
