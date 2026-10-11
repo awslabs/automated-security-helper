@@ -12,7 +12,8 @@ copies its install command should get main.
 
 So when mike builds `main`, this builds each of the manager's target pages under
 docs_dir from its template with the manager's branch renderer, which turns
-`@v{{VERSION}}` into `@main`. When mike builds a release, it renders the template with
+`@v{{VERSION}}` into `@main` and `{{RELEASE}}` into the current release number (what
+an install of main reports). When mike builds a release, it renders the template with
 that release's version, as the manager does at bump time; at a release tag that is the
 committed page. Any other build, such as a pull request's or `mkdocs serve`, is left
 alone: the committed pages are what the docs checks and the docs-example runner read,
@@ -84,6 +85,7 @@ def on_files(files, config):
     root = _root(config)
     manager = _load(root, MANAGER).VersionTemplateManager(root)
     docs_dir = Path(config.docs_dir).resolve()
+    release = manager.packaged_release()
     for target in manager.target_files:
         page = (root / target).resolve()
         if not page.is_relative_to(docs_dir):
@@ -99,7 +101,7 @@ def on_files(files, config):
             )
         text = template.read_text(encoding="utf-8")
         file.content_string = (
-            manager.render_for_branch(text, version)
+            manager.render_for_branch(text, version, release)
             if kind == "branch"
             else manager.render(text, version)
         )

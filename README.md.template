@@ -56,7 +56,7 @@ ash --version
 ```
 
 ```text
-awslabs/automated-security-helper v{{VERSION}}
+awslabs/automated-security-helper v{{RELEASE}}
 ```
 
 This README and the documentation describe the `main` branch, which can have changes that

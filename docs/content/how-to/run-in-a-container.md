@@ -143,7 +143,7 @@ set run that image with `ash scan --mode container --no-build`, and the runtime 
 when it is not present.
 
 To build without ASH installed, build the Dockerfile from a clone. The clone is the build
-context, so the image contains exactly that tag:
+context, so the image contains exactly the ref it cloned:
 
 <!-- doctest: illustrative reason="needs a container runtime and network access" -->
 ```bash

@@ -612,20 +612,25 @@ def pinned_pages(repo: Path, site: SiteConfig) -> tuple[Any, list[str]]:
     return manager, urls
 
 
-def _page_text(content: bytes) -> str:
-    """A built page as a reader sees it: no tags, so a highlighted token is whole."""
+_TABLE = re.compile(r"<table\b.*?</table>", re.DOTALL)
+_TEXT_SAMPLE = re.compile(
+    r'<div class="language-text\b[^"]*"[^>]*>.*?</div>', re.DOTALL
+)
+
+
+def page_text(content: bytes, *, commands_only: bool = False) -> str:
+    """A built page as a reader sees it: no tags, so a highlighted token is whole.
+
+    With commands_only, without its tables and `text` samples: a template may name the
+    current release there with {{RELEASE}} (scripts/docs_checks.py
+    check_release_placeholders), so they are not where an install command is read.
+    """
     import html
 
-    return html.unescape(re.sub(r"<[^>]+>", "", content.decode("utf-8", "replace")))
-
-
-def release_pins(manager: Any, text: str) -> set[str]:
-    """The release numbers that install references in text pin, by the manager's patterns."""
-    pins = set()
-    for pattern, _replacement in manager.find_version_references(text):
-        for match in re.finditer(pattern, text):
-            pins.add(match[0][len(match[1]) :])
-    return pins
+    markup = content.decode("utf-8", "replace")
+    if commands_only:
+        markup = _TEXT_SAMPLE.sub("", _TABLE.sub("", markup))
+    return html.unescape(re.sub(r"<[^>]+>", "", markup))
 
 
 def _read_branch(repo: Path, branch: str) -> dict[str, tuple[str, bytes]]:
@@ -833,36 +838,54 @@ def check_published(
     if urlsplit(urljoin(root_url, f"{LATEST}/")).path not in not_found:
         problems.append(f"the root 404.html does not link to /{LATEST}/")
 
-    # The version-pinned pages: a release pins itself, and main pins no release and
-    # installs main (docs/hooks/install_refs.py). The committed pages pin the current
-    # version, which is neither 0.0.1 nor 0.0.0, so a pass means the pages were
-    # rendered for the version being built.
+    # The version-pinned pages (docs/hooks/install_refs.py). A release pins itself
+    # everywhere, tables and text samples included. The main version's install
+    # commands pin no release, and every install-command form a page uses in the
+    # newest release names main on that page in the main version. The committed pages
+    # pin the current version, which is neither 0.0.1 nor 0.0.0, so a pass means every
+    # build rendered the pages from their templates.
     manager, urls = pinned
     for directory, wanted in (
         (CHECK_NEWEST, {CHECK_NEWEST}),
         (CHECK_OLDER, {CHECK_OLDER}),
-        (DEV_VERSION, set()),
     ):
         pins: set[str] = set()
-        installs_main = 0
         for url in urls:
             built = files.get(f"{directory}/{url}index.html")
             if built is None:
                 problems.append(f"{directory}/ has no page {url}")
                 continue
-            text = _page_text(built[1])
-            pins |= release_pins(manager, text)
-            installs_main += text.count(f"@{DEV_VERSION}")
+            pins |= manager.release_pins(page_text(built[1]))
         if urls and pins != wanted:
             problems.append(
-                f"the version-pinned pages of {directory}/ pin "
-                f"{sorted(pins) or 'no release'}, not {sorted(wanted) or 'no release'} "
-                "(docs/hooks/install_refs.py renders them from their templates)"
+                f"the version-pinned pages of {directory}/ pin {sorted(pins)}, not "
+                f"{sorted(wanted)} (docs/hooks/install_refs.py renders them from their "
+                "templates)"
             )
-        if urls and directory == DEV_VERSION and not installs_main:
-            problems.append(
-                f"no version-pinned page of {DEV_VERSION}/ installs @{DEV_VERSION}"
-            )
+    main_pins: set[str] = set()
+    for url in urls:
+        built = files.get(f"{DEV_VERSION}/{url}index.html")
+        release = files.get(f"{CHECK_NEWEST}/{url}index.html")
+        if built is None or release is None:
+            problems.append(f"{DEV_VERSION}/ has no page {url}")
+            continue
+        commands = page_text(built[1], commands_only=True)
+        main_pins |= manager.release_pins(commands)
+        for form in manager.forms_pinning_a_release(
+            page_text(release[1], commands_only=True)
+        ):
+            if not manager.branch_ref_pattern(form, DEV_VERSION).search(commands):
+                problems.append(
+                    f"{DEV_VERSION}/{url} has no {form} install command naming "
+                    f"{DEV_VERSION}, though {CHECK_NEWEST}/{url} has one naming a release"
+                )
+    if urls and main_pins:
+        problems.append(
+            f"the install commands of the version-pinned pages of {DEV_VERSION}/ pin "
+            f"{sorted(main_pins)}, not no release (docs/hooks/install_refs.py renders "
+            "them from their templates, where an install command names its ref with "
+            "v{{VERSION}}, never with {{RELEASE}})"
+        )
 
     summary = (
         f"{len(listed)} versions, {page_count} pages checked, "

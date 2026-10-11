@@ -2,7 +2,7 @@
 
 In this tutorial you add a workflow that scans every pull request with ASH, fails the check
 when ASH finds something, and shows the findings on the pull request and in GitHub code
-scanning. It uses the reusable workflows that ASH ships, pinned to release v{{VERSION}}.
+scanning. It uses the reusable workflows that ASH ships, pinned to `v{{VERSION}}`.
 
 ## Before you start
 
@@ -10,7 +10,7 @@ scanning. It uses the reusable workflows that ASH ships, pinned to release v{{VE
   request.
 - For step 4, code scanning: any public repository, or a private one with a GitHub Code
   Security license. Without it, skip step 4; the other steps work the same.
-- git, to look up the commit of the release in step 1.
+- git, to look up the commit of `v{{VERSION}}` in step 1.
 
 Nothing else has to be installed on your machine. Using another CI service? See
 [Run ASH in GitLab CI](../how-to/ci/gitlab-ci.md) or
@@ -69,7 +69,7 @@ If your default branch is not `main`, change the branch name.
 Now pin the `uses:` line to a commit. ASH's zizmor scanner reports a `uses:` line that names
 a tag as `zizmor/unpinned-uses` at HIGH, because a tag can be moved and a commit cannot, so
 until you pin it every scan of this repository fails on this file. Look up the commit that
-the release tag points to:
+`v{{VERSION}}` points to:
 
 <!-- doctest: illustrative reason="queries GitHub over the network" -->
 ```bash
@@ -79,7 +79,7 @@ git ls-remote https://github.com/awslabs/automated-security-helper refs/tags/v{{
 In the `uses:` line, replace the `v{{VERSION}}` after the `@` with the 40-character SHA that
 the command prints, and add the comment `# v{{VERSION}}` at the end of the line. Leave
 `ash-version: v{{VERSION}}` as it is: zizmor does not check it, and it has to name the same
-release.
+version as the workflow.
 
 ## 2. Open a pull request and watch the scan
 

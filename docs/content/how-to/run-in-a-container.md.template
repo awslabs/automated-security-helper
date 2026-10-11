@@ -81,7 +81,7 @@ The image installs ASH from source, chosen from how ASH was installed on the hos
 
 | Host install | Source of the image |
 |---|---|
-| From a git URL with a tag, such as `@v{{VERSION}}` | That tag, cloned from GitHub when the image builds. |
+| From a git URL with a tag, such as `@v{{RELEASE}}` | That tag, cloned from GitHub when the image builds. |
 | From a git URL with a branch, such as `@main` | The tip of that branch when the image builds, which can differ from the commit installed on the host. |
 | From a git URL with no ref | The installed commit ID. The build clones with `git clone --branch`, which cannot check out a commit ID, so the build fails; pass `--ash-revision-to-install` with a tag or branch. |
 | A clone of the ASH repository, or a local path | The local source tree. Run ASH from inside that clone. |
@@ -143,7 +143,7 @@ set run that image with `ash scan --mode container --no-build`, and the runtime 
 when it is not present.
 
 To build without ASH installed, build the Dockerfile from a clone. The clone is the build
-context, so the image contains exactly that tag:
+context, so the image contains exactly the ref it cloned:
 
 <!-- doctest: illustrative reason="needs a container runtime and network access" -->
 ```bash

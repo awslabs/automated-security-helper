@@ -40,7 +40,7 @@ prints a version number.
 uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
 ```
 
-This installs the `v3.7.0` release from GitHub, with the `cdk` extra that the
+This installs ASH `v3.7.0` from GitHub, with the `cdk` extra that the
 cdk-nag scanner needs, into its own environment. `--python 3.12` keeps uv from
 choosing a Python newer than ASH's dependencies support; uv downloads 3.12 if you do
 not have it. ASH is not published on PyPI: a package named

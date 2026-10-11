@@ -86,7 +86,7 @@ repos:
 
 These are the `cdk` extra in ASH's
 [pyproject.toml](https://github.com/awslabs/automated-security-helper/blob/main/pyproject.toml);
-check them against that file at the release you pin when you change `rev`. The environment
+check them against that file at the version you pin when you change `rev`. The environment
 is about three times the size, and the first run takes longer.
 
 Do not use `--no-fail-on-incomplete-scanners` to get past the MISSING scanners. With it, a

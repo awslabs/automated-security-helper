@@ -29,7 +29,7 @@ Run it from the root of the checkout. The reports land in `.ash/ash_output/repor
   [Tools inside the scanned directory](../../docs/advanced-usage.md#tools-inside-the-scanned-directory).
 - Run `ash dependencies install` outside the checkout too, as the empty directory does here,
   so a config in the repository cannot change what it installs. It downloads the tool
-  versions that this ASH release pins, checks each against its pinned SHA256, and installs
+  versions that this ASH version pins, checks each against its pinned SHA256, and installs
   it into `~/.ash/bin`, where the scan finds it. A binary that is already there and matches
   is not downloaded again, so `~/.ash/bin` and `~/.ash/share` are safe to cache between
   builds. cfn-nag is the exception: it is a Ruby gem, not a pinned binary, and it is

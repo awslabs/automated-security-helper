@@ -75,7 +75,7 @@ ash --version
 ```
 
 ```text
-awslabs/automated-security-helper v{{VERSION}}
+awslabs/automated-security-helper v{{RELEASE}}
 ```
 
 The install provides three names for the same program: `ash`, `ashv3`, and
@@ -178,7 +178,7 @@ the install needs a C compiler.
 
 | Reference | What you get |
 |---|---|
-| `@v{{VERSION}}` | That release. The release process creates each version tag once and moves only the `v3` tag. |
+| `@v{{RELEASE}}` | That release. The release process creates each version tag once and moves only the `v3` tag. |
 | a full commit SHA | That commit. The only reference that cannot change. |
 | `@v3` | The latest 3.x release. It moves with each release. |
 | `@main` | The current development state. |
@@ -194,8 +194,7 @@ release notes before upgrading a `v3` or `<4` pin.
 
 ### Install from main
 
-These docs describe `main`. To use a feature documented here before the next release
-includes it, install from `main`:
+To use a feature that is on `main` before a release includes it, install from `main`:
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash

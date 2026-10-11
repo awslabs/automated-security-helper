@@ -47,7 +47,7 @@ jobs:
 
 Three things in this file are required, not optional:
 
-- Pin `ash-version` to the same release as the `uses:` lines. The `uses:` ref selects the
+- Pin `ash-version` to the same version as the `uses:` lines. The `uses:` ref selects the
   workflow file; `ash-version` selects the ASH that the workflow installs, and it defaults
   to `main`. Both accept a tag, a branch, or a commit SHA.
 - Grant the scan job `contents: read`, `checks: write`, and `pull-requests: write`. The
@@ -61,9 +61,9 @@ Three things in this file are required, not optional:
 ASH's zizmor scanner reports each `uses:` line that names a tag as `zizmor/unpinned-uses` at
 HIGH, so a scan of a repository that holds this file fails until you pin both lines to a
 commit. `git ls-remote https://github.com/awslabs/automated-security-helper refs/tags/v3.7.0`
-prints the commit of the release. Replace the `v3.7.0` after each `@` with that SHA and
-end each line with the comment `# v3.7.0`. Leave `ash-version` at the tag; zizmor does
-not check it.
+prints the commit that `v3.7.0` names. Replace the `v3.7.0` after each `@` with
+that SHA and end each line with the comment `# v3.7.0`. Leave `ash-version` as it
+is; zizmor does not check it.
 
 A pull request scan reads the configuration in the branch it scans, so the branch can change
 the gate. The workflow passes the `fail-on-findings` choice on the command line, and the
@@ -320,8 +320,8 @@ the install and scan steps of the job above:
 
 Keep `ash dependencies install` after the restore. It checks each binary it finds against
 the pinned SHA256, skips the ones that match, and installs again over any that do not, so a
-restored cache cannot substitute a different tool. Key the tool cache on the ASH release,
-because each release pins its own tool versions. cfn-nag is the exception: it is a Ruby gem,
+restored cache cannot substitute a different tool. Key the tool cache on the ASH version,
+because each version pins its own tool versions. cfn-nag is the exception: it is a Ruby gem,
 not a pinned binary, so it is installed again on every run.
 
 The save steps are separate because the combined `actions/cache` action saves only when the

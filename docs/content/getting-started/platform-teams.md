@@ -13,7 +13,7 @@ step 3 creates a small repository to test the gate on.
 
 ## 1. Build the image and push it to your registry
 
-ASH publishes no prebuilt image. Build one from a release tag, name it for your registry,
+ASH publishes no prebuilt image. Build one from `v3.7.0`, name it for your registry,
 and push it:
 
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->

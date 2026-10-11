@@ -217,7 +217,7 @@ so it passes `--fail-on-findings` and `--fail-on-incomplete-scanners`, and the s
 `--no-allow-stale-content-db`. The thresholds and suppressions still come from the branch; to
 keep those yours, run the shards with `--config` and a file outside the checkout. Each
 shard installs every tool, because which scanners land on which shard depends on the
-scanner list at that release. Every shard must load the same plugin modules, or the merge
+scanner list of the ASH it installs. Every shard must load the same plugin modules, or the merge
 refuses them.
 
 What sharding does not do:

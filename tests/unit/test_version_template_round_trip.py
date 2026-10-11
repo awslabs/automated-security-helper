@@ -32,8 +32,11 @@ edit away.
 
 What this asserts, and what it deliberately does not
 ----------------------------------------------------
-It asserts the round trip: ``template`` with ``{{VERSION}}`` replaced by the packaged
-version is byte-identical to the committed doc. That is the whole invariant
+It asserts the round trip: ``template`` with ``{{VERSION}}`` and ``{{RELEASE}}`` replaced
+by the packaged version is byte-identical to the committed doc. The two placeholders
+differ only on the docs site's main version (``{{VERSION}}`` renders as ``main`` there, see
+docs/hooks/install_refs.py); a release and ``generate`` render both as the version, which
+is why rendering goes through ``VersionTemplateManager.render``. That is the whole invariant
 ``generate`` establishes, so checking it on every pull request means a doc-only edit
 fails here instead of at the next release.
 
@@ -72,7 +75,9 @@ else:  # pragma: no cover - exercised only on 3.10
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "version_template_manager.py"
-PLACEHOLDER = "{{VERSION}}"
+#: Both placeholders the manager renders. Kept here as well as in the manager so a
+#: rename in one place fails test_the_manager_renders_these_placeholders.
+PLACEHOLDERS = ("{{VERSION}}", "{{RELEASE}}")
 
 # Floor for the positive control. The manager names ten targets today; a floor rather
 # than an equality so adding an eleventh templated doc does not need an edit here,
@@ -111,7 +116,7 @@ def _targets() -> list[str]:
 
 
 def _render(template_text: str) -> str:
-    return template_text.replace(PLACEHOLDER, _packaged_version())
+    return VersionTemplateManager(REPO_ROOT).render(template_text, _packaged_version())
 
 
 class TestTemplatesRenderToTheCommittedDocs:
@@ -190,27 +195,57 @@ class TestTheRoundTripCheckCanFail:
             "than failing."
         )
 
-    def test_the_placeholder_is_actually_substituted_somewhere(self):
+    def test_the_manager_renders_these_placeholders(self):
+        manager = VersionTemplateManager(REPO_ROOT)
+        assert (
+            manager.version_placeholder,
+            manager.release_placeholder,
+        ) == PLACEHOLDERS
+
+    @pytest.mark.parametrize("placeholder", PLACEHOLDERS)
+    def test_the_placeholder_is_actually_substituted_somewhere(self, placeholder: str):
         """Otherwise the comparison degenerates into "two identical files are equal".
 
-        If ``{{VERSION}}`` appeared in no template, ``_render`` would be the identity
-        function and every case above would pass without exercising substitution at
-        all -- so a renamed placeholder would read as success while `generate` quietly
-        stopped inserting the version.
+        If a placeholder appeared in no template, ``_render`` would not exercise it, and
+        every case above would pass while `generate` quietly stopped inserting the
+        version for it.
         """
         with_placeholder = [
             relative
             for relative in _targets()
             if (REPO_ROOT / f"{relative}.template").is_file()
-            and PLACEHOLDER
+            and placeholder
             in (REPO_ROOT / f"{relative}.template").read_text(encoding="utf-8")
         ]
 
         assert with_placeholder, (
-            f"No template contains {PLACEHOLDER}. Either the placeholder was renamed "
-            "-- in which case VersionTemplateManager.version_placeholder and this file "
-            "disagree -- or the templates no longer carry a version at all."
+            f"No template contains {placeholder}. Either the placeholder was renamed "
+            "-- in which case VersionTemplateManager and this file disagree -- or the "
+            "templates no longer carry it at all."
         )
+
+    def test_no_placeholder_survives_rendering(self):
+        """A misspelled placeholder, such as ``{{RELASE}}``, would render as itself.
+
+        The round trip cannot see it: the committed doc, generated from the same
+        template, carries the same text. So every rendered template must be free of
+        anything shaped like a placeholder.
+        """
+        import re
+
+        survivors = {
+            relative: sorted(set(re.findall(r"\{\{[A-Z_]+\}\}", _render(text))))
+            for relative in _targets()
+            if (REPO_ROOT / f"{relative}.template").is_file()
+            for text in [
+                (REPO_ROOT / f"{relative}.template").read_text(encoding="utf-8")
+            ]
+        }
+        survivors = {relative: names for relative, names in survivors.items() if names}
+        assert not survivors, (
+            f"These placeholders are not ones the manager renders: {survivors}"
+        )
+        assert re.findall(r"\{\{[A-Z_]+\}\}", _render("{{RELASE}}")) == ["{{RELASE}}"]
 
     def test_a_mutated_template_is_detected(self):
         """The check must fail on drift, demonstrated rather than asserted.

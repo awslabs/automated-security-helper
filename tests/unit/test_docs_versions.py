@@ -160,8 +160,9 @@ REPO_URL = "https://github.com/awslabs/automated-security-" + "helper"
 
 #: A version-pinned page, as scripts/version_template_manager.py keeps one: a template
 #: at one of the manager's target paths, and the page rendered from it with the
-#: current version, COMMITTED_VERSION. The template uses every form of placeholder the
-#: real templates use.
+#: current version, COMMITTED_VERSION. The template uses every install-command form the
+#: manager lists, a bare {{VERSION}}, and {{RELEASE}} where it is allowed: in a text
+#: sample, in a sentence that is not a command, and in a table.
 PINNED_PAGE = "docs/content/how-to/install.md"
 COMMITTED_VERSION = "9.9.9"
 INSTALL_TEMPLATE = f"""# Install
@@ -180,7 +181,27 @@ repos:
     rev: v{{{{VERSION}}}}
 ```
 
-The image is tagged `ash:{{{{VERSION}}}}`.
+```bash
+export ASH_NIX_FLAKE_REF=github:awslabs/{REPO_URL.rsplit("/", 1)[1]}/v{{{{VERSION}}}}
+ash build-image --ash-revision-to-install v{{{{VERSION}}}}
+```
+
+```yaml
+with:
+  ash-version: v{{{{VERSION}}}}
+```
+
+The image is tagged `ash:{{{{VERSION}}}}`, and `ash --version` prints:
+
+```text
+awslabs/automated-security-helper v{{{{RELEASE}}}}
+```
+
+Each file pins ASH v{{{{RELEASE}}}}, the release these files were generated for.
+
+| Reference | What you get |
+|---|---|
+| `@v{{{{RELEASE}}}}` | That release. |
 """
 
 #: A pin on a page without a template, which no build may change.
@@ -213,13 +234,17 @@ def _site(
     mkdocs: str = MKDOCS,
     template: str | None = None,
     manager: str | None = None,
+    install_template: str = INSTALL_TEMPLATE,
 ) -> Path:
     repo = tmp_path / "site"
     pinned = {
-        PINNED_PAGE + ".template": INSTALL_TEMPLATE,
-        PINNED_PAGE: _manager().render(INSTALL_TEMPLATE, COMMITTED_VERSION),
+        PINNED_PAGE + ".template": install_template,
+        PINNED_PAGE: _manager().render(install_template, COMMITTED_VERSION),
     }
-    for rel, text in {**PAGES, **pinned, "mkdocs.yml": mkdocs}.items():
+    pyproject = {
+        "pyproject.toml": f'[tool.commitizen]\nversion = "{COMMITTED_VERSION}"\n'
+    }
+    for rel, text in {**PAGES, **pinned, **pyproject, "mkdocs.yml": mkdocs}.items():
         path = repo / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
@@ -277,6 +302,16 @@ def _without(text: str, line: str) -> str:
     return text.replace(line, "")
 
 
+def _patched(text: str, old: str, new: str) -> str:
+    """text with old replaced, failing at collection if old is not there to replace.
+
+    A planted defect whose replacement matches nothing plants nothing, and the check
+    then passes for a reason that has nothing to do with it.
+    """
+    assert text.count(old) == 1, old
+    return text.replace(old, new)
+
+
 DEFECTS = [
     (
         "no version provider",
@@ -328,19 +363,44 @@ DEFECTS = [
     (
         "the branch renderer keeps the release",
         {
-            "manager": MANAGER_SCRIPT.read_text(encoding="utf-8").replace(
-                "def render_for_branch(self, content: str, branch: str) -> str:",
-                "def render_for_branch(self, content: str, branch: str) -> str:\n"
+            "manager": _patched(
+                MANAGER_SCRIPT.read_text(encoding="utf-8"),
+                "def render_for_branch(self, content: str, branch: str, release: str) -> str:",
+                "def render_for_branch(self, content: str, branch: str, release: str) -> str:\n"
                 f"        return self.render(content, {COMMITTED_VERSION!r})\n\n"
-                "    def _unused(self, content: str, branch: str) -> str:",
+                "    def _unused(self, content: str, branch: str, release: str) -> str:",
             )
         },
         f"the version-pinned pages of main/ pin ['{COMMITTED_VERSION}'], not no release",
     ),
     (
+        "a release number in an install command",
+        {
+            "install_template": _patched(
+                INSTALL_TEMPLATE, "rev: v{{VERSION}}", "rev: v{{RELEASE}}"
+            )
+        },
+        (
+            f"the install commands of the version-pinned pages of main/ pin "
+            f"['{COMMITTED_VERSION}'], not no release"
+        ),
+    ),
+    (
+        "the branch renderer leaves the tag lookup",
+        {
+            "manager": _patched(
+                MANAGER_SCRIPT.read_text(encoding="utf-8"),
+                'content.replace("refs/tags/" + tag, "refs/heads/" + branch)',
+                "content",
+            )
+        },
+        "main/how-to/install/ has no refs/tags/ (git ls-remote) install command naming main",
+    ),
+    (
         "a release keeps the committed pin",
         {
-            "manager": MANAGER_SCRIPT.read_text(encoding="utf-8").replace(
+            "manager": _patched(
+                MANAGER_SCRIPT.read_text(encoding="utf-8"),
                 "def render(self, content: str, version: str) -> str:",
                 "def render(self, content: str, version: str) -> str:\n"
                 f"        version = {COMMITTED_VERSION!r}\n"
@@ -527,13 +587,24 @@ def _build(repo: Path, tmp_path: Path, version: str | None) -> Path:
 
 
 def _text(out: Path, page: str) -> str:
-    return dv._page_text((out / page / "index.html").read_bytes())
+    return dv.page_text((out / page / "index.html").read_bytes())
 
 
 def test_the_main_build_installs_main(tmp_path):
     repo = _site(tmp_path)
-    text = _text(_build(repo, tmp_path, "main"), "how-to/install")
-    assert dv.release_pins(_manager(), text) == set(), text
+    out = _build(repo, tmp_path, "main")
+    text = _text(out, "how-to/install")
+    commands = dv.page_text(
+        (out / "how-to/install/index.html").read_bytes(), commands_only=True
+    )
+    assert _manager().release_pins(commands) == set(), commands
+    for form, *_ in _install_forms():
+        assert _manager().branch_ref_pattern(form, "main").search(commands), form
+    # The release number stays where {{RELEASE}} put it: the version sample, a
+    # sentence, and the table.
+    assert f"automated-security-helper v{COMMITTED_VERSION}" in text
+    assert f"Each file pins ASH v{COMMITTED_VERSION}" in text
+    assert _manager().release_pins(text) == {COMMITTED_VERSION}
     assert f"git+{REPO_URL}.git@main" in text
     assert f"--branch main {REPO_URL}" in text
     assert "rev: main" in text
@@ -544,10 +615,22 @@ def test_the_main_build_installs_main(tmp_path):
     assert "The install commands in this version of the docs install main" in notice
 
 
+def _install_forms():
+    return dv._load_by_path(MANAGER_SCRIPT, "_test_forms").INSTALL_REF_FORMS
+
+
+def test_the_template_uses_every_install_form():
+    """Positive control for the tests below: they cover each form the manager lists."""
+    rendered = _manager().render(INSTALL_TEMPLATE, "1.2.3")
+    used = _manager().forms_pinning_a_release(rendered)
+    assert used == [form for form, *_ in _install_forms()], used
+
+
 def test_a_release_build_pins_that_release(tmp_path):
     repo = _site(tmp_path)
     text = _text(_build(repo, tmp_path, "1.2.3"), "how-to/install")
-    assert dv.release_pins(_manager(), text) == {"1.2.3"}, text
+    assert _manager().release_pins(text) == {"1.2.3"}, text
+    assert "automated-security-helper v1.2.3" in text
     assert f"git ls-remote {REPO_URL} refs/tags/v1.2.3" in text
     assert "install commands in this version" not in text
 
@@ -555,7 +638,7 @@ def test_a_release_build_pins_that_release(tmp_path):
 def test_any_other_build_uses_the_committed_page(tmp_path):
     repo = _site(tmp_path)
     text = _text(_build(repo, tmp_path, None), "how-to/install")
-    assert dv.release_pins(_manager(), text) == {COMMITTED_VERSION}, text
+    assert _manager().release_pins(text) == {COMMITTED_VERSION}, text
     assert "install commands in this version" not in text
 
 

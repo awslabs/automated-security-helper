@@ -194,8 +194,7 @@ release notes before upgrading a `v3` or `<4` pin.
 
 ### Install from main
 
-These docs describe `main`. To use a feature documented here before the next release
-includes it, install from `main`:
+To use a feature that is on `main` before a release includes it, install from `main`:
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
