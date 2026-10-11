@@ -53,7 +53,8 @@ nav:
       - Python API: reference/python-api.md
   - Plugins:
       - Plugins: plugins/index.md
-      - Built-in scanner pages: "docs/plugins/builtin/*.md"
+      - Built-in scanner pages:
+          - "docs/plugins/builtin/*.md"
       - Community plugins:
           - Community plugins: docs/plugins/community/index.md
           - "docs/plugins/community/*.md"
