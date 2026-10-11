@@ -204,6 +204,15 @@ ash --mode local --offline
 Copy the cache directories to the air-gapped host and export the same two variables
 there. Repeat the download at least every 30 days, or the scan fails as stale.
 
+Under `--sandbox`, the sandbox mounts the directory each variable names read-only for
+its scanner, wherever it is, including under `$HOME`, which the sandbox otherwise
+hides. Only the variable in ASH's own environment grants it: a rules path in a
+scanner's options, which the scanned repository can set, is not mounted, and an
+empty variable grants nothing. A variable naming `/`, `$HOME` or a directory that
+holds `$HOME` is not mounted either, with a warning; point it at the rules directory
+itself. If semgrep or opengrep still cannot read its rules, it exits 7 and is recorded
+`ERROR`, and the scan exits 1.
+
 ## Customizing Scan Phases
 
 ASH v3 executes scans in phases:

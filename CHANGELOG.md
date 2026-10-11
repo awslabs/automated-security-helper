@@ -95,6 +95,15 @@
   from, say) and the spawn's own private uv cache. That holds for checkov and
   ferret-scan too, which run from the filesystem root.
 
+  An offline sandboxed semgrep or opengrep scan reads its rules from the directory
+  `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` names: the sandbox mounts it
+  read-only for that scanner, wherever it is (the documented `$HOME/.cache/ash/...`
+  included), and not executable. Before, no grant covered it, so semgrep exited 7
+  ("unable to find a config") behind ASH's own cache check, which had already passed.
+  Only the variable in ASH's environment grants it; a rules path in the scanner's
+  options does not, an empty variable grants nothing, and one naming `/`, `$HOME` or a
+  directory above `$HOME` is not mounted.
+
   If a sandbox was requested and cannot be provided, the scanner is recorded
   `MISSING` with the reason and the scan exits 1. ASH never falls back to running it
   unsandboxed. `auto` picks bubblewrap, then firejail, then Landlock on Linux, and

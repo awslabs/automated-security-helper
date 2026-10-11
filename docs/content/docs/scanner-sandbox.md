@@ -103,6 +103,12 @@ it needs.
   are read-only. Inside `$HOME` only `PATH` entries named `bin`, `sbin` or `Scripts`
   are mounted, and a tool's install prefix only when it is deeper than a directory
   directly under `$HOME` (`~/.nvm/versions/node/v22` yes, `~/.cargo` no).
+- The offline rule cache of semgrep and opengrep, the directory
+  `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` names, is mounted read-only
+  for that scanner wherever it is, `$HOME` included, and is not executable. Only the
+  variable in ASH's own environment grants it, never a path in the scanner's options;
+  an empty variable grants nothing, and one naming `/`, `$HOME` or a directory above
+  `$HOME` is not mounted, with a warning.
 - The environment is filtered to an allowlist: locale, `PATH`, TLS and proxy settings,
   ASH's and uv's own variables, and the prefixes the scanner declares (`GRYPE_`,
   `SEMGREP_`, ...). Within those, a name containing `TOKEN`, `PASSWORD`, `SECRET`,
@@ -152,8 +158,8 @@ it needs.
 |---------|--------------------|--------|---------|
 | bandit | no | uv cache | uv-managed Python |
 | checkov | no | uv cache | uv-managed Python |
-| semgrep | yes (registry rules, `p/ci`) | uv cache, `~/.semgrep` | uv-managed Python |
-| opengrep | yes (registry rules) | `~/.opengrep` | single binary; on macOS it unpacks itself into a private directory per spawn |
+| semgrep | yes (registry rules, `p/ci`) | uv cache, `~/.semgrep`; `$SEMGREP_RULES_CACHE_DIR` read-only | uv-managed Python |
+| opengrep | yes (registry rules) | `~/.opengrep`; `$OPENGREP_RULES_CACHE_DIR` read-only | single binary; on macOS it unpacks itself into a private directory per spawn |
 | grype | yes (database update) | grype database cache (read-only, or a throwaway overlay under bwrap) | single binary |
 | syft | no | syft cache | single binary |
 | trivy-repo | yes (database update) | trivy cache (read-only, or a throwaway overlay under bwrap) | single binary |
@@ -207,6 +213,11 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
         read_paths_require_grant=False,
         # The same for env_prefixes and env_names, with sandbox.env_scanners.
         env_requires_grant=False,
+        # Variables in ASH's own environment naming a directory the tool reads
+        # (semgrep's SEMGREP_RULES_CACHE_DIR): mounted read-only, not executable.
+        # An unset or empty variable, or one naming /, $HOME or a directory above
+        # it, grants nothing.
+        read_path_env=("MYTOOL_RULES_DIR",),
     )
 ```
 

@@ -91,6 +91,13 @@ class SandboxRequirements:
         env_requires_grant: ``env_prefixes`` and ``env_names`` follow the
             scanner's options (a token for an online check, for example). They are
             passed only when ``sandbox.env_scanners`` names the scanner.
+        read_path_env: Variables in ASH's own environment that name a directory
+            the tool reads, mounted read-only: semgrep's offline rule cache,
+            ``SEMGREP_RULES_CACHE_DIR``. Read from ASH's process environment when
+            the policy is built, never from the scanner's options, which the
+            scanned repository can write, so no grant is needed. An unset or empty
+            variable, a relative path, and a directory as broad as a filesystem
+            root, ``$HOME`` or a directory holding ``$HOME`` grant nothing.
     """
 
     network: bool = False
@@ -105,6 +112,7 @@ class SandboxRequirements:
     unpack_dir_env: Optional[str] = None
     read_paths_require_grant: bool = False
     env_requires_grant: bool = False
+    read_path_env: Tuple[str, ...] = ()
 
 
 #: The baseline environment allowlist. Exact names, then prefixes. Anything else in
@@ -439,6 +447,34 @@ def _broader_than_a_tool(path: Path) -> bool:
     )
 
 
+def _env_named_read_paths(names: Sequence[str]) -> List[Path]:
+    """The directories ``names`` name in ASH's own environment, as read grants.
+
+    See ``SandboxRequirements.read_path_env``. A value that would expose far more
+    than one directory -- a filesystem root, ``$HOME``, or a directory holding
+    ``$HOME`` -- is refused with a warning, so the tool then finds nothing there and
+    says so, rather than reading the whole home directory.
+    """
+    real_home = Path(os.path.realpath(Path.home()))
+    granted: List[Path] = []
+    for name in names:
+        value = os.environ.get(name, "")
+        if not value or not os.path.isabs(value):
+            continue
+        real = Path(os.path.realpath(value))
+        if real == Path(real.anchor) or real == real_home or real in real_home.parents:
+            from automated_security_helper.utils.log import ASH_LOGGER
+
+            ASH_LOGGER.warning(
+                f"${name}={value} is not mounted in the scanner sandbox: it would "
+                "expose far more than one directory. Point it at the directory "
+                "itself."
+            )
+            continue
+        granted.append(Path(value))
+    return granted
+
+
 def _symlink_hops(path: Path) -> List[Path]:
     """``path`` and every path its symlink chain passes through, as spelled.
 
@@ -711,6 +747,8 @@ def build_scanner_policy(
     if offline:
         network = False
 
+    # Data the tool reads, like the scan's own: readable, never executable.
+    env_named_reads = _env_named_read_paths(requirements.read_path_env)
     read_only = _existing(
         [Path(p) for p in SYSTEM_READ_PATHS]
         + _path_directories(real_home)
@@ -718,6 +756,7 @@ def build_scanner_policy(
         + _ash_paths()
         + _executable_prefix(argv0)
         + [_expand(p) for p in declared_read]
+        + env_named_reads
         + [_expand(p) for p in extra_read_paths]
         + [source_dir, output_dir, scan_target, _readable_cwd(cwd)]
     )
@@ -746,7 +785,10 @@ def build_scanner_policy(
     # (checkov and ferret-scan run from one so that they read no config file from
     # the scanned tree) is not the scan's data.
     scan_data = _existing([source_dir, output_dir, scan_target, _readable_cwd(cwd)])
-    not_programs = {os.path.realpath(p) for p in [*scan_data, *_DATA_SYSTEM_PATHS]}
+    not_programs = {
+        os.path.realpath(p)
+        for p in [*scan_data, *_DATA_SYSTEM_PATHS, *_existing(env_named_reads)]
+    }
     executable = [p for p in read_only if os.path.realpath(p) not in not_programs]
 
     extra_env: Dict[str, str] = {}
