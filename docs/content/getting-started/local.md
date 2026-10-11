@@ -11,7 +11,7 @@ For native Windows, see [Install ASH](../how-to/install.md).
 
 You need:
 
-- git
+- curl and git
 - Node.js, which npm-audit and cdk-nag use
 - Ruby with a C compiler, to install cfn-nag
 - network access: the first install and the first scan download scanner tools,
@@ -41,8 +41,9 @@ uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://gith
 ```
 
 This installs the `v3.7.0` release from GitHub, with the `cdk` extra that the
-cdk-nag scanner needs, into its own environment on Python 3.12 (uv downloads that
-Python if you do not have it). ASH is not published on PyPI: a package named
+cdk-nag scanner needs, into its own environment. `--python 3.12` keeps uv from
+choosing a Python newer than ASH's dependencies support; uv downloads 3.12 if you do
+not have it. ASH is not published on PyPI: a package named
 `automated-security-helper` on PyPI belongs to someone else, so never install ASH by
 that name. [Install ASH](../how-to/install.md) covers the other install methods and
 pins.
@@ -88,11 +89,13 @@ how ASH finds it.
 
 ## 4. Create a project to scan
 
-Create a directory with one Python file that has two problems in it:
+Create a directory with one Python file that has two problems in it, and a
+`.gitignore` that keeps ASH's output out of version control:
 
 ```bash
 mkdir ash-tutorial
 cd ash-tutorial
+echo '.ash/ash_output/' > .gitignore
 cat > app.py <<'EOF'
 import hashlib
 import subprocess
@@ -111,6 +114,11 @@ EOF
 `cache_key` uses MD5, which scanners flag as a weak hash, but here it only names cache
 entries. `archive` passes its argument to a shell, so a directory name such as
 `x; touch injected` would run a second command.
+
+Do the same in your own projects before you scan them: the scan results can contain
+the values of secrets that scanners detect, so `.ash/ash_output/` must not be
+committed. Add it to `.gitignore`, or run `ash config init`, which writes a
+`.gitignore` inside `.ash/`.
 
 ## 5. Run the scan
 
@@ -173,9 +181,7 @@ is, and 1 when the scan is incomplete or ASH hit an error. An incomplete scan ex
 even when it also has findings. See [Exit codes](../reference/exit-codes.md).
 
 The results are in `.ash/ash_output/`. The `reports/` directory there holds an HTML
-report, Markdown and text summaries, SARIF, and other formats. Keep
-`.ash/ash_output/` out of version control, for example by adding it to your
-`.gitignore`.
+report, Markdown and text summaries, SARIF, and other formats.
 
 ### If a scanner shows MISSING
 
@@ -226,8 +232,9 @@ Code Snippet:
      return hashlib.md5(data).hexdigest()
 ```
 
-Finding 2 is B602, `subprocess call with shell=True`, at `app.py:11`. To browse the
-findings interactively, run `ash inspect findings`, or open
+Finding 2 is B602, `subprocess call with shell=True`, at `app.py:11`. The Rule ID is
+what a suppression names in the next step. To browse the findings interactively, run
+`ash inspect findings`, which shows the same value in its Rule ID column, or open
 `.ash/ash_output/reports/ash.html` in a browser.
 
 ## 7. Suppress the false positive
@@ -248,7 +255,9 @@ global_settings:
 `rule_id` and `path` select the findings to suppress. `reason` is required.
 `expiration` is optional: from that date the suppression stops applying and the
 finding counts again, so set it to a date a few months from today, when you want
-to look at the decision again. [Suppress findings](../how-to/suppress-findings.md)
+to look at the decision again. Keep the date in quotes: unquoted, YAML reads it as a
+date rather than text, and ASH rejects the whole file with exit code 3. A date in the
+past is accepted, and the suppression then does nothing. [Suppress findings](../how-to/suppress-findings.md)
 covers line ranges, symbols, and inline comments.
 
 ## 8. Scan again

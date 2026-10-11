@@ -42,7 +42,15 @@ dependency that does not support it yet.
 
 ## Install with uv
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/). Its installer
+needs curl:
+
+<!-- doctest: illustrative reason="downloads and runs the uv installer from the network" -->
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Open a new terminal so that uv's directory is on your `PATH`, then install ASH:
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
@@ -83,7 +91,10 @@ alias ash='uvx --python 3.12 --from git+https://github.com/awslabs/automated-sec
 pipx install --python python3.12 git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
 ```
 
-pipx needs the named Python on your `PATH`.
+Install pipx itself from your package manager, for example `apt install pipx` on
+Ubuntu, or with `uv tool install pipx`. On systems whose Python is marked as
+externally managed, such as Ubuntu 24.04, pip refuses to install pipx outside a
+virtual environment. pipx needs the named Python on your `PATH`.
 
 ASH installs bandit, checkov, semgrep, cfn-lint and zizmor with uv, and it looks for
 the `uv` command on your `PATH`. pipx does not put the `uv` that ASH depends on
@@ -91,7 +102,10 @@ there, so install uv as well. Without it those five scanners show as MISSING.
 
 ## Install with pip
 
-Create a virtual environment outside the projects you will scan, and install into it:
+Create a virtual environment outside the projects you will scan, and install into it.
+Use any Python 3.10 to 3.14 in place of `python3.12`. On systems whose Python is
+marked as externally managed, such as Ubuntu 24.04, pip installs only into a virtual
+environment.
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
@@ -154,11 +168,12 @@ release notes before upgrading a `v3` or `<4` pin.
 ### Install from main
 
 These docs describe `main`. To use a feature documented here before the next release
-includes it, install from `main`:
+includes it, install from `main`, with the `cdk` extra as in
+[Extras](#extras):
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-uv tool install --python 3.12 git+https://github.com/awslabs/automated-security-helper.git@main
+uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main'
 ```
 
 `main` reports the same version number as the latest release until the next release

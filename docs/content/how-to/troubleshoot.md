@@ -135,7 +135,8 @@ global_settings.fail_on_findings
 ```
 
 Cause: the configuration file has a key ASH does not know, or a value of the wrong type,
-below the top level.
+below the top level. A common case is an unquoted `expiration` date in a suppression:
+YAML reads it as a date, and ASH expects text. Quote it, as in `"2027-04-30"`.
 
 Fix: correct the key or value that the message names. `ash config get` loads and checks
 the file the way a scan does. The message suggests `ash config lint`, but `lint` does
@@ -155,6 +156,8 @@ Cause: one of these:
   the top level.
 - ASH found a different file first. `ash config get` prints the configuration a scan
   would use.
+- A suppression's `expiration` date has passed. ASH accepts a past date, and the
+  suppression then matches nothing.
 - The setting is one a repository's file may not set; see the next entry.
 
 Fix: run `ash config validate`, which reports YAML errors and unknown top-level keys,
@@ -286,7 +289,14 @@ Cause: uv chose Python 3.15, which some of ASH's dependencies do not support yet
 Fix: pass a supported Python version, as in `uv tool install --python 3.12`. See
 [Install ASH](install.md).
 
-### The install fails with `Git executable not found`
+### The install fails because git is missing
+
+Symptom: uv stops with an error whose causes end in:
+
+```text
+  cause: Git operation failed
+  cause: Git executable not found. Ensure that Git is installed and available.
+```
 
 Cause: uv and pip fetch ASH from its git repository, which needs git.
 
