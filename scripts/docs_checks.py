@@ -1683,6 +1683,9 @@ def _github_action_uses(document: Any, root: Path) -> list[str]:
         ) and not uses.lower().startswith(GITHUB_REPO_SLUG + "@"):
             continue
         path = uses.split("@", 1)[0][len(GITHUB_REPO_SLUG) :].strip("/")
+        if path.startswith(".github/workflows/") and path.endswith((".yml", ".yaml")):
+            problems += _reusable_workflow_call_problems(step, uses, path, root)
+            continue
         action = next(
             (
                 root / path / name
@@ -1707,6 +1710,61 @@ def _github_action_uses(document: Any, root: Path) -> list[str]:
                 problems.append(
                     f"uses: {uses} has no input '{name}'; it declares {sorted(declared)}"
                 )
+    return problems
+
+
+def _reusable_workflow_call_problems(
+    job: dict, uses: str, path: str, root: Path
+) -> list[str]:
+    """A job that calls this repository's reusable workflow: the workflow must exist
+    and be callable, the job's with: keys must be inputs it declares under
+    on.workflow_call, every required input must be passed, and secrets: must name
+    declared secrets (or be inherit)."""
+    import yaml
+
+    workflow = root / path
+    if not workflow.is_file():
+        return [
+            f"uses: {uses} names no workflow: there is no {path} in this repository"
+        ]
+    document = yaml.safe_load(workflow.read_text(encoding="utf-8")) or {}
+    # PyYAML reads the key on: as the boolean true.
+    triggers = (
+        document.get("on", document.get(True)) if isinstance(document, dict) else None
+    )
+    if not (isinstance(triggers, dict) and "workflow_call" in triggers):
+        return [
+            (
+                f"uses: {uses} calls {path}, which declares no on.workflow_call, so "
+                "it cannot be called from another workflow"
+            )
+        ]
+    call = (
+        triggers["workflow_call"] if isinstance(triggers["workflow_call"], dict) else {}
+    )
+    inputs = call.get("inputs") if isinstance(call.get("inputs"), dict) else {}
+    secrets = call.get("secrets") if isinstance(call.get("secrets"), dict) else {}
+    passed = job.get("with") if isinstance(job.get("with"), dict) else {}
+    problems = [
+        f"uses: {uses} has no input '{name}'; {path} declares {sorted(inputs)}"
+        for name in passed
+        if name not in inputs
+    ]
+    problems += [
+        f"uses: {uses} does not pass its required input '{name}'"
+        for name, spec in inputs.items()
+        if isinstance(spec, dict)
+        and spec.get("required") is True
+        and "default" not in spec
+        and name not in passed
+    ]
+    given = job.get("secrets")
+    if isinstance(given, dict):
+        problems += [
+            f"uses: {uses} has no secret '{name}'; {path} declares {sorted(secrets)}"
+            for name in given
+            if name not in secrets
+        ]
     return problems
 
 
@@ -4723,12 +4781,24 @@ def _docs_path_problem(
     *,
     fetched: bool,
 ) -> str | None:
-    """Why a docs path the code names does not exist in the docs root."""
+    """Why a docs path the code names does not exist in the docs root.
+
+    A path that is not a file of the repository may be a site page named by its path
+    under docs_dir (help text saying "See docs/config-overrides.md"). That resolves
+    the way the page's URL does: to a page, or through docs/redirects.yml to one, with
+    the fragment checked on the final page. A fetched file (raw GitHub) does not
+    follow a redirect, so this applies only to paths shown to a reader.
+    """
     path = site.root / rel
     if path.is_file():
         if fragment and path.suffix == ".md" and fragment not in _page_ids(path, site):
             return f"{shown}: {rel} has no heading or anchor '#{fragment}'"
         return None
+    if not fetched and rel.endswith(".md"):
+        url_path = _redirect_url(rel, site)
+        page, _redirect_fragment, via = site_target(url_path, site, redirects)
+        if page is not None or via is not None:
+            return site_url_problem(shown, url_path, fragment, site, redirects)
     docs_rel = rel_path(site.root / rel, site.docs_dir)
     moved = redirects.get(docs_rel)
     if moved:

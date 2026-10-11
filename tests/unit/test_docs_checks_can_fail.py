@@ -499,6 +499,85 @@ def test_cli_check_can_fail(cli_root, case, text, expected, line):
     _assert_reports(dc.check_cli([page], cli_root), expected, line)
 
 
+REUSABLE_WORKFLOW = """name: scan
+on:
+  workflow_call:
+    inputs:
+      ash-version: {type: string, default: main}
+      token-name: {type: string, required: true}
+    secrets:
+      api-token: {required: false}
+jobs: {}
+"""
+
+
+def _calling(body: str, path: str = ".github/workflows/scan.yml") -> str:
+    """A docs page whose CI block calls this repository's reusable workflow."""
+    return (
+        f"<!-- doctest: config kind=github-actions -->\n{FENCE}yaml\njobs:\n  ash:\n"
+        f"    uses: awslabs/automated-security-helper/{path}@v3.7.0\n{body}{FENCE}\n"
+    )
+
+
+@pytest.fixture
+def workflow_code(tmp_path):
+    code = tmp_path / "code"
+    _write(code, ".github/workflows/scan.yml", REUSABLE_WORKFLOW)
+    _write(code, ".github/workflows/push-only.yml", "on: push\njobs: {}\n")
+    return code
+
+
+def test_a_reusable_workflow_call_passes_with_declared_inputs(tmp_path, workflow_code):
+    calls = {
+        "clean.md": "    with:\n      ash-version: v3.7.0\n      token-name: x\n"
+        "    secrets:\n      api-token: ${{ secrets.TOKEN }}\n",
+        "inherit.md": "    with:\n      token-name: x\n    secrets: inherit\n",
+    }
+    pages = [
+        _write(tmp_path, f"docs/{name}", _calling(body)) for name, body in calls.items()
+    ]
+    assert dc.check_cli(pages, tmp_path, code=workflow_code) == []
+
+
+REUSABLE_DEFECTS = [
+    (
+        "misspelled input",
+        _calling("    with:\n      ash-verison: v3\n      token-name: x\n"),
+        "has no input 'ash-verison'",
+    ),
+    (
+        "required input not passed",
+        _calling("    with:\n      ash-version: v3\n"),
+        "does not pass its required input 'token-name'",
+    ),
+    (
+        "undeclared secret",
+        _calling("    with:\n      token-name: x\n    secrets:\n      nope: y\n"),
+        "has no secret 'nope'",
+    ),
+    (
+        "missing workflow",
+        _calling("    with:\n      token-name: x\n", path=".github/workflows/nope.yml"),
+        "names no workflow: there is no .github/workflows/nope.yml",
+    ),
+    (
+        "workflow that cannot be called",
+        _calling("", path=".github/workflows/push-only.yml"),
+        "declares no on.workflow_call",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "case,text,expected", REUSABLE_DEFECTS, ids=[c[0] for c in REUSABLE_DEFECTS]
+)
+def test_a_reusable_workflow_call_can_fail(
+    tmp_path, workflow_code, case, text, expected
+):
+    page = _write(tmp_path, "docs/page.md", text)
+    _assert_reports(dc.check_cli([page], tmp_path, code=workflow_code), expected)
+
+
 def test_cli_model_is_the_real_click_tree():
     """The check reads typer's own conversion, so a renamed option cannot hide in a copy."""
     import typer
@@ -2720,6 +2799,63 @@ def test_code_links_check_can_fail(tmp_path, case, source, expected):
     findings = dc.check_code_links(root, _package(tmp_path, source))
     _assert_reports(findings, expected)
     assert all(f.path == "automated_security_helper/module.py" for f in findings)
+
+
+SITE_RELATIVE_REDIRECTS = SITE_REDIRECTS + (
+    "  docs/old-guide.md: b.md\n  docs/old-part.md: b.md#section-two\n"
+    "  docs/broken.md: gone.md\n"
+)
+
+
+def _site_relative(tmp_path: Path) -> Path:
+    pages = {**CLEAN_PAGES, "docs/content/docs/kept.md": "# Kept\n\n## A part\n"}
+    return _site(tmp_path, pages, redirects=SITE_RELATIVE_REDIRECTS)
+
+
+def test_a_site_relative_docs_path_in_code_resolves_like_its_url(tmp_path):
+    """Help text names site pages by their path under docs_dir ("See
+    docs/config-overrides.md"). Such a path resolves the way its URL does: to a page,
+    or through docs/redirects.yml to a page, with the fragment on the final page."""
+    root = _site_relative(tmp_path)
+    source = (
+        'HELP = "See docs/kept.md, docs/kept.md#a-part, docs/old-guide.md, '
+        'docs/old-guide.md#section-two and docs/old-part.md."\n'
+    )
+    assert dc.check_code_links(root, _package(tmp_path, source)) == []
+
+
+SITE_RELATIVE_DEFECTS = [
+    (
+        "no page and no redirect",
+        'HELP = "See docs/never-was.md."\n',
+        "docs/never-was.md: docs/never-was.md does not exist in the docs",
+    ),
+    (
+        "anchor missing after the redirect",
+        'HELP = "See docs/old-guide.md#nope."\n',
+        "(through the redirect from docs/old-guide.md) has no anchor '#nope'",
+    ),
+    (
+        "redirect to a page that does not exist",
+        'HELP = "See docs/broken.md."\n',
+        "the redirect from docs/broken.md ends at a page that does not exist",
+    ),
+    (
+        "anchor missing on the page",
+        'HELP = "See docs/kept.md#nope."\n',
+        "has no anchor '#nope'",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "case,source,expected",
+    SITE_RELATIVE_DEFECTS,
+    ids=[c[0] for c in SITE_RELATIVE_DEFECTS],
+)
+def test_a_site_relative_docs_path_in_code_can_fail(tmp_path, case, source, expected):
+    root = _site_relative(tmp_path)
+    _assert_reports(dc.check_code_links(root, _package(tmp_path, source)), expected)
 
 
 def test_a_docs_link_through_a_redirect_needs_the_anchor_on_the_new_page(tmp_path):
