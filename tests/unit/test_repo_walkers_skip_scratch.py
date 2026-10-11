@@ -29,11 +29,14 @@ than a third individual fix:
 
    No filter on the output can prevent that, because there is no output.
 
-   Seen on one leg of a run whose other legs passed. Whether that is a pathlib
-   version difference or simply which worker lost the race is **not** established:
-   an attempt to reproduce the raise synthetically on 3.11 and 3.13 failed to hit
-   the window on either. So the leg it appeared on is a sample, not the affected
-   set, and the fix is not scoped to an interpreter.
+   Seen on one leg of a run whose other legs passed. An attempt to reproduce it
+   by racing a real teardown failed to hit the window on 3.11 and 3.13. Measured
+   since, deterministically: removing the directory at the moment ``rglob`` lists it, through an audit hook
+   on ``os.scandir``, raises FileNotFoundError on 3.10 and 3.11, and on 3.12, 3.13
+   and 3.14 the directory is skipped without an error. A newer interpreter still
+   descends into the scratch tree and returns whatever is there, so the race is not
+   gone there, only quieter. The fix is not scoped
+   to an interpreter.
 
 Fixing (1) does not fix (2). That is not a hypothetical: the first fix landed and
 a second walker failed the same way three hours later, on a leg that had just been
@@ -99,6 +102,7 @@ from tests.utils.walk_guard import (
     Private,
     Source,
     Sweep,
+    node_modules_dirs,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -333,6 +337,7 @@ class TestTheDetector:
             import ast, os, shutil
             from pathlib import Path
             REPO = Path(__file__).resolve().parents[2]
+            REPO_ROOT = Path(__file__).resolve().parents[2]
             TESTS = REPO / "tests"
             PKG = REPO / "automated_security_helper"
 
@@ -351,6 +356,7 @@ class TestTheDetector:
             def n(): return _helper(REPO)
             def o(tmp_path): return _helper(tmp_path)
             def _helper(root): return list(root.rglob("*"))
+            def p(): return REPO_ROOT.rglob("*")
             """,
         )
         flagged = _flagged(test)
@@ -362,6 +368,7 @@ class TestTheDetector:
             ("e", "REPO"),
             ("m", "where"),
             ("_helper", "root"),
+            ("p", "REPO_ROOT"),
         }, flagged
         assert "holds tests/pytest-temp/" in flagged[("b", "TESTS")][0]
         assert "cannot be resolved" in flagged[("m", "where")][0]
@@ -440,6 +447,21 @@ class TestTheDetector:
             ),
         )
         assert _flagged(on_tmp_only, scripts=(docs, orphans)) == {}
+
+    def test_node_modules_is_per_run_only_beside_a_package_json_outside_tests(self):
+        """npm installs beside a project's package.json; a fixture's is test data."""
+        found = node_modules_dirs(
+            [
+                "package.json",
+                "deploy/cdk/package.json",
+                "tests/test_data/scanners/guarddog/fixture_repo/npm_clean/package.json",
+                "docs/not-a-package.json",
+            ]
+        )
+        assert found == {
+            PurePosixPath("node_modules"),
+            PurePosixPath("deploy/cdk/node_modules"),
+        }
 
     def test_prose_about_the_hazard_is_not_counted_as_the_hazard(self):
         """``helpers.py`` quotes the traceback; an AST check must not see it.

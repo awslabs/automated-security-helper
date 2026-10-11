@@ -8,8 +8,9 @@ Why this exists
 ``tests/pytest-temp`` is the tests' scratch tree, inside the checkout. Under
 ``pytest -n`` other workers create and remove directories there all the time, so a
 walk that descends into it races them: ``rglob`` raises FileNotFoundError from inside
-its own descent on Python 3.10 to 3.12, and every walker returns whatever the other
-workers happened to have written. See tests/unit/test_repo_walkers_skip_scratch.py
+its own descent on Python 3.10 and 3.11 (3.12 and later skip the vanished directory
+silently), and every walker returns whatever the other workers happened to have
+written. See tests/unit/test_repo_walkers_skip_scratch.py
 for the history.
 
 The first guard matched ``REPO_ROOT.rglob`` and ``repo_root.glob`` by name, in tests/
@@ -77,7 +78,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: Per-run directories, relative to the checkout: the tests' scratch tree, the scan
 #: output ASH writes by default, and the project's virtual environment.
-#: ``per_run_dirs()`` adds a ``node_modules`` beside every tracked package.json.
+#: ``per_run_dirs()`` adds a ``node_modules`` beside every tracked package.json outside
+#: tests/, where a package.json is a fixture.
 PER_RUN_DIRS = ("tests/pytest-temp", ".ash/ash_output", ".venv")
 
 #: Fixture and parameter names whose value is a directory private to one test.
@@ -924,19 +926,29 @@ def walks_in(evaluator: Evaluator, source: Source) -> Iterator[Walk]:
                 yield Walk(source, node, receiver, pattern=pattern)
 
 
+def node_modules_dirs(package_jsons: Iterable[str]) -> Set[PurePosixPath]:
+    """Where npm would install, beside each tracked package.json outside tests/.
+
+    A package.json under tests/ is test data: a fixture project a scanner is pointed
+    at, which nothing installs into, so the node_modules beside it is not a per-run
+    directory and a walk of the fixture does not race anything.
+    """
+    out: Set[PurePosixPath] = set()
+    for entry in package_jsons:
+        rel = PurePosixPath(entry)
+        if rel.name == "package.json" and rel.parts[:1] != ("tests",):
+            out.add(rel.parent / "node_modules")
+    return out
+
+
 def per_run_dirs(root: Path = REPO_ROOT) -> Tuple[PurePosixPath, ...]:
     listing = subprocess.run(
         ["git", "-C", str(root), "ls-files", "-z", "--", "*package.json"],
         capture_output=True,
         check=True,
     )
-    node_modules = {
-        PurePosixPath(entry.decode()).parent / "node_modules"
-        for entry in listing.stdout.split(b"\0")
-        if entry and entry.decode().endswith("/package.json")
-    }
-    if listing.stdout.split(b"\0")[0] == b"package.json":
-        node_modules.add(PurePosixPath("node_modules"))
+    tracked = [entry.decode() for entry in listing.stdout.split(b"\0") if entry]
+    node_modules = node_modules_dirs(tracked)
     return tuple(sorted({PurePosixPath(d) for d in PER_RUN_DIRS} | node_modules))
 
 

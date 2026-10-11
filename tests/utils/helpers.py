@@ -77,12 +77,12 @@ def iter_repo_files(
         rglob listed the directory, another worker's ash_temp_path teardown
         removed it, and rglob then tried to descend into it.
 
-        Observed on py3.11 and not on the other legs of the same run. Whether that
-        is a pathlib version difference or just which worker lost the race is NOT
-        established -- an attempt to reproduce the raise synthetically on 3.11 and
-        3.13 failed to hit the window on either, so treat the leg it appeared on as
-        a sample rather than as the affected set, and do not assume a newer
-        interpreter is immune.
+        Observed on py3.11 and not on the other legs of the same run. Measured
+        since, deterministically, by removing the directory at the moment rglob
+        lists it through an audit hook on os.scandir: 3.10 and 3.11 raise
+        FileNotFoundError, and 3.12, 3.13 and 3.14 skip the directory without an
+        error. A newer interpreter still descends into the scratch tree and
+        returns whatever is there, so it is not immune to the race, only quieter.
 
     ``os.walk`` can be pruned, which removes the race rather than tolerating it:
     mutating ``dirnames`` in place stops the descent from ever happening.
