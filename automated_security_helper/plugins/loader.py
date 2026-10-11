@@ -18,10 +18,12 @@ from automated_security_helper.utils.log import ASH_LOGGER
 #: module, which is what puts the loss in front of the completeness gate instead
 #: of in a WARNING nobody reads.
 #:
-#: Accumulated rather than reset per call: ``load_internal_plugins`` runs once per
-#: ``ScanExecutionEngine`` and ``importlib`` caches imports, so a second call
-#: re-imports nothing and would otherwise report a clean set for a process whose
-#: first call lost a group.
+#: Not reset per call, because ``importlib`` caches imports and a later call would
+#: otherwise report a clean set for a process whose first call lost a group. Each
+#: call does ask the package to import its failed groups again
+#: (``ash_builtin.retry_failed_plugin_groups``), and drops an entry once its group
+#: has loaded, so a group lost only to import order is not reported missing after
+#: it has been recovered.
 _PLUGIN_LOAD_ERRORS: Dict[str, str] = {}
 
 
@@ -46,6 +48,19 @@ def load_internal_plugins():
             # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
             module = importlib.import_module(module_name)
             ASH_LOGGER.debug(f"Loaded internal plugin module: {module_name}")
+
+            # Before the lists are read: a group lost to the order the process
+            # imported ASH's modules in loads now (see retry_failed_plugin_groups).
+            retry = getattr(module, "retry_failed_plugin_groups", None)
+            if callable(retry):
+                retry()
+            for recorded in [
+                name
+                for name in _PLUGIN_LOAD_ERRORS
+                if name == module_name or name.startswith(f"{module_name}.")
+            ]:
+                if recorded not in getattr(module, "ASH_PLUGIN_LOAD_ERRORS", {}):
+                    del _PLUGIN_LOAD_ERRORS[recorded]
 
             # Track loaded plugins - these should already be auto-registered via decorators
             if hasattr(module, "ASH_CONVERTERS"):

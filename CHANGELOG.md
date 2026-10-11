@@ -1247,6 +1247,18 @@
 
 ### Fixes
 
+- **Every built-in plugin group registers, whichever ASH module a process imports
+  first.** Importing the results model loads the built-in plugins, and those import
+  core modules back. When one of those core modules was the first ASH module
+  imported, it was still empty when its plugins imported it, and the whole group was
+  dropped for the rest of the process. Measured over the package's 211 modules, seven
+  orders lost a group: `from automated_security_helper.interactions.run_ash_scan
+  import run_ash_scan` as a script's first import ran scans with no reporters (0 of
+  15), and `utils.suppression_matcher` first lost every group. `load_internal_plugins`
+  now imports a failed group again once that first import has finished; a group that
+  fails for another reason, such as a missing optional dependency, still fails and is
+  still reported MISSING.
+
 - **A scanner that turns out MISSING while it runs stays MISSING.** A scanner whose
   scan finds a dependency unavailable (its `scan()` returns False, or its sandbox
   cannot be set up) is recorded MISSING per target. Consolidating the results then
