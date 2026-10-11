@@ -1,0 +1,146 @@
+# Run ASH in GitLab CI
+
+This page adds an ASH job to `.gitlab-ci.yml` that publishes ASH's findings as a GitLab SAST
+report and its JUnit file as a test report, and a second job that fails the pipeline when
+ASH found something.
+
+Prerequisites:
+
+- A runner with the Docker executor, or any runner where the job image has Python 3.10 or
+  later and git.
+- Network access from the job to GitHub, PyPI and the scanners' download sites.
+
+GitLab reads the SAST report on every tier, and offers it as a download. Showing the
+findings in the merge request widget, the vulnerability report and the security dashboard
+needs GitLab Ultimate.
+
+## Add the jobs
+
+<!-- doctest: config kind=gitlab-ci -->
+```yaml
+ash-scan:
+  stage: test
+  image: python:3.12
+  variables:
+    INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}"
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends nodejs npm ruby ruby-dev
+    - python -m venv /opt/ash
+    - /opt/ash/bin/pip install --quiet "$INSTALL_SPEC"
+    - export PATH="/opt/ash/bin:$PATH"
+    - >-
+      ash dependencies install
+      --tool grype --tool syft --tool opengrep --tool cfn-nag
+      --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy
+  script:
+    - ash_exit=0
+    - ash scan --mode local --no-progress || ash_exit=$?
+    - echo "$ash_exit" > ash-exit-code.txt
+  artifacts:
+    when: always
+    paths:
+      - .ash/ash_output/
+      - ash-exit-code.txt
+    reports:
+      sast: .ash/ash_output/reports/ash.gl-sast-report.json
+      junit: .ash/ash_output/reports/ash.junit.xml
+
+ash-gate:
+  stage: test
+  image: python:3.12
+  needs: [ash-scan]
+  script:
+    - exit "$(cat ash-exit-code.txt)"
+```
+
+Why two jobs: GitLab always uploads report artifacts, but it ingests a security report's
+findings only when the job that produced it succeeds. A failed job does not count, even with
+`allow_failure`. So `ash-scan` records ASH's exit code and succeeds, and `ash-gate` reads the
+code and fails with it: 2 for actionable findings, 1 for a scan that did not complete. The
+[exit codes](../../reference/exit-codes.md) page lists them all.
+
+What the `before_script` does:
+
+- Installs Node.js and npm, which cdk-nag and npm-audit need, and Ruby with its headers,
+  which `ash dependencies install` needs to build cfn-nag.
+- Installs ASH into a virtual environment at `/opt/ash`, outside the checkout. ASH does not
+  run tools it finds inside the directory it scans, and the virtual environment carries the
+  `uv` that ASH uses to install bandit, checkov, semgrep, cfn-lint and zizmor during the scan.
+- Installs the binary scanner tools at the versions that ASH pins, checking each download
+  against its pinned SHA256.
+
+To skip a scanner instead of installing what it needs, drop it from the install list and
+name it in `--exclude-scanners` on `ash scan`, for example
+`ash scan --mode local --no-progress --exclude-scanners cfn-nag`.
+
+## The report files
+
+| File in `.ash/ash_output/reports/` | GitLab keyword | What GitLab does with it |
+|---|---|---|
+| `ash.gl-sast-report.json` | `artifacts:reports:sast` | SAST findings (schema 15.2.2) |
+| `ash.junit.xml` | `artifacts:reports:junit` | Test summary in the merge request and the pipeline's **Tests** tab, one failed test per actionable finding |
+| `ash.gl-dependency-scanning-report.cdx.json` | `artifacts:reports:cyclonedx` | Dependency list (Ultimate); built from syft's SBOM, so it is empty when syft did not run |
+
+The SAST report keeps suppressed findings at severity Info, with the reason in their
+`solution` field. [Export reports](../export-reports.md#gitlab) shows how to leave them out
+and how the other formats map to other tools.
+
+`--output-formats` cannot name the GitLab reporters, and any list you pass turns them off.
+Leave the option out, or produce the file afterward with `ash report`; see
+[Choose which reports to write](../export-reports.md#formats).
+
+## Use your own ASH image
+
+Instead of installing ASH in every job, build ASH's container image once, push it to your
+registry and use it as the job image. The image has every scanner tool, so the job only runs
+the scan. Build the `ci` target, which runs as root like most job images, and see
+[Build and host your own image](../run-in-a-container.md#own-image):
+
+<!-- doctest: config kind=gitlab-ci -->
+```yaml
+ash-scan:
+  stage: test
+  image: registry.example.com/security/automated-security-helper:ci
+  script:
+    - ash_exit=0
+    - ash scan --mode local --no-progress || ash_exit=$?
+    - echo "$ash_exit" > ash-exit-code.txt
+  artifacts:
+    when: always
+    paths:
+      - .ash/ash_output/
+      - ash-exit-code.txt
+    reports:
+      sast: .ash/ash_output/reports/ash.gl-sast-report.json
+      junit: .ash/ash_output/reports/ash.junit.xml
+```
+
+Keep the `ash-gate` job from the first example. The scanners download their vulnerability
+databases during the scan, as they do in the first example. An image built for offline use
+carries the databases instead, and has to be rebuilt within their age limits; see
+[Refresh cadence](../run-offline.md#refresh).
+
+## Scan only what a merge request changes
+
+`--changed-files-only` keeps only the findings in files changed since the merge base with
+`--base-ref`. GitLab clones 20 commits by default, which may not reach the merge base, and
+ASH then scans everything and logs a warning. In a merge request pipeline, clone the full
+history and pass GitLab's diff base, which is that merge base. Add this to the `ash-scan`
+job:
+
+<!-- doctest: config kind=gitlab-ci -->
+```yaml
+ash-scan:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    GIT_DEPTH: "0"
+  script:
+    - ash_exit=0
+    - ash scan --mode local --no-progress --changed-files-only --base-ref "$CI_MERGE_REQUEST_DIFF_BASE_SHA" || ash_exit=$?
+    - echo "$ash_exit" > ash-exit-code.txt
+```
+
+The option filters `ash.sarif` and the exit code, not `ash.gl-sast-report.json`, so the
+SAST report still lists findings in unchanged files.
+[Scan large repositories](../scale-large-repos.md#changed-files) has the details.

@@ -1,0 +1,195 @@
+# Run ASH as a pre-commit hook
+
+ASH's repository defines hooks for the [pre-commit](https://pre-commit.com/) framework.
+This page sets up the one that works, says what it scans, and what it costs per commit.
+
+Prerequisites:
+
+- pre-commit, running on Python 3.10 or later, or a `language_version` as shown
+  [below](#python-version).
+- A git repository with a `.pre-commit-config.yaml`.
+- Network access to GitHub and PyPI the first time the hook runs.
+
+## Add the hook {#add}
+
+<!-- doctest: config kind=pre-commit -->
+```yaml
+repos:
+  - repo: https://github.com/awslabs/automated-security-helper
+    rev: v{{VERSION}}
+    hooks:
+      - id: ash
+        args: [--exclude-scanners, cdk-nag, --exclude-scanners, npm-audit]
+```
+
+Then install the git hook and run it once on every file:
+
+<!-- doctest: illustrative reason="installs the hook environment from GitHub" -->
+```bash
+pre-commit install
+pre-commit run ash --all-files
+```
+
+The first run builds the hook's environment and installs bandit and checkov, so it takes
+longer than later runs. When the hook finds something, pre-commit prints `Failed` with
+ASH's summary and `- exit code: 2`, and the commit stops. Exit code 1 means a scanner did not
+run.
+
+Ignore ASH's output directory in git, so the reports are not committed and ASH does not scan
+its own previous output. `ash config init` writes a `.ash/.gitignore` that does this, or add
+the line yourself:
+
+```text
+.ash/ash_output/
+```
+
+Do not ignore all of `.ash/`: ASH reads its configuration from `.ash/.ash.yaml`.
+
+## What the hook runs {#behavior}
+
+The `ash` hook runs `ashv3 --mode=precommit` with your `args`. Precommit mode:
+
+- runs five scanners: bandit, detect-secrets, checkov, cdk-nag and npm-audit. `--scanners`
+  can add others but cannot remove these; `--exclude-scanners` removes them.
+- scans the whole repository on every run, not only the staged files. A commit that touches
+  one file is still blocked by a finding in a file committed earlier.
+- prints simplified output and writes the usual reports to `.ash/ash_output/`.
+
+The `args` above leave out cdk-nag and npm-audit, because the stock hook cannot run them:
+
+- cdk-nag needs ASH's `cdk` extra, which the hook's environment does not install, and
+  Node.js.
+- npm-audit needs npm on `PATH`.
+
+Without those `args`, ASH reports both scanners MISSING and the hook fails with exit code 1
+on every commit, whatever the code contains. `ash-simple-scan` is the same hook under
+another name.
+
+### Run all five scanners {#all-scanners}
+
+With Node.js and npm on your `PATH`, give the hook environment the `cdk` extra's
+packages instead of excluding the scanners:
+
+<!-- doctest: config kind=pre-commit -->
+```yaml
+repos:
+  - repo: https://github.com/awslabs/automated-security-helper
+    rev: v{{VERSION}}
+    hooks:
+      - id: ash
+        additional_dependencies:
+          - "aws-cdk-lib>=2.273.0,<3.0.0"
+          - "cdk-nag>=3.0,<4.0.0"
+          - "constructs>=10.8,<11.0.0"
+```
+
+These are the `cdk` extra in ASH's
+[pyproject.toml](https://github.com/awslabs/automated-security-helper/blob/main/pyproject.toml);
+check them against that file at the release you pin when you change `rev`. The environment
+is about three times the size, and the first run takes longer.
+
+Do not use `--no-fail-on-incomplete-scanners` to get past the MISSING scanners. With it, a
+commit passes while two of the five scanners never ran, and the output says only `Passed`.
+
+## When the hook runs {#stages}
+
+The hook has no `stages` setting, so it runs on every commit. To run it less often, set one:
+
+<!-- doctest: config kind=pre-commit -->
+```yaml
+repos:
+  - repo: https://github.com/awslabs/automated-security-helper
+    rev: v{{VERSION}}
+    hooks:
+      - id: ash
+        args: [--exclude-scanners, cdk-nag, --exclude-scanners, npm-audit]
+        stages: [pre-push]
+```
+
+With `stages: [pre-push]`, install that hook type with
+`pre-commit install --hook-type pre-push`, and a failing scan blocks `git push`. With
+`stages: [manual]`, the hook runs only when you ask:
+`pre-commit run --hook-stage manual ash`.
+
+## What it costs {#cost}
+
+Measured on a repository of four files:
+
+| Run | Time |
+|---|---|
+| First run, with the hook environment and scanner installs | about 50 seconds |
+| Later runs | 15 to 20 seconds |
+| First run with the `cdk` packages | about 60 seconds |
+
+Most of a later run passes before the first scanner starts, while ASH checks its scanner
+installs; checkov is the slowest scanner. Scan time grows with the size of the repository, because every run
+scans all of it. The hook environment and bandit and checkov take about 700 MB under
+`~/.cache/pre-commit` and `~/.local/share/uv`, and the `cdk` packages add about 400 MB.
+
+## Use an ASH you already installed {#local-hook}
+
+If ASH is installed with `uv tool install` or in a virtual environment outside the
+repository, a local hook runs that installation instead of building one per repository:
+
+<!-- doctest: config kind=pre-commit -->
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: ash
+        name: ASH
+        entry: ash --mode precommit
+        language: system
+        pass_filenames: false
+```
+
+`ash` and `uv` must both be on `PATH` when git runs the hook: ASH installs bandit and checkov
+with `uv`, and reports them MISSING when it cannot find it. `pass_filenames: false` is
+required. Without it, pre-commit appends the staged file names, ASH reads the first one as a
+command name and exits 2, the same code as a finding. This hook uses the extras and tools of
+that installation, so cdk-nag runs if it has the `cdk` extra and Node.js is on `PATH`.
+
+## Pre-commit on Python 3.9 {#python-version}
+
+If pre-commit itself runs on Python 3.9, building the hook environment fails with
+`No matching distribution found for hatchling`. Point the hook at a newer Python that is on
+your `PATH`:
+
+<!-- doctest: config kind=pre-commit -->
+```yaml
+repos:
+  - repo: https://github.com/awslabs/automated-security-helper
+    rev: v{{VERSION}}
+    hooks:
+      - id: ash
+        language_version: python3.12
+        args: [--exclude-scanners, cdk-nag, --exclude-scanners, npm-audit]
+```
+
+`default_language_version` at the top of the file does the same for every Python hook.
+
+## A frozen rev is flagged as a secret {#frozen-rev}
+
+`pre-commit autoupdate --freeze` replaces the tag with a 40-character commit SHA, and
+detect-secrets reports that line of `.pre-commit-config.yaml` as a high-entropy string,
+which fails the hook. Suppress that finding for that file, with the reason:
+
+<!-- doctest: config kind=ash -->
+```yaml
+global_settings:
+  suppressions:
+    - path: .pre-commit-config.yaml
+      rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      reason: pre-commit autoupdate --freeze pins hooks to commit SHAs
+```
+
+Put it in `.ash/.ash.yaml`. [Suppress a finding](suppress-findings.md) covers expiry dates
+and narrower matches.
+
+## The ash-full-scan hook {#full-scan}
+
+`.pre-commit-hooks.yaml` also defines `ash-full-scan`, described as a container-mode scan.
+It cannot run: it is a `language: script` hook, so pre-commit looks for an `ashv3` file in
+the root of ASH's repository, finds none, and fails with ``Executable `.../ashv3` not
+found`` before ASH starts. For a full scan before you push, run
+`ash scan --mode container` yourself; see [Run ASH in a container](run-in-a-container.md).
