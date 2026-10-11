@@ -64,7 +64,7 @@ Source delivery, a bound profile and the scan registry all belong to a session, 
 | Transport | The caller's session |
 | --- | --- |
 | stdio | the single local client (`__default__`), with local trust |
-| sse | the session the server issued for the event stream; an `Mcp-Session-Id` header on a message is ignored |
+| sse | the session the server issued for the event stream, named once in the message URL's `session_id`; an `Mcp-Session-Id` header on a message is ignored, and a URL that names `session_id` twice names no session |
 | streamable-HTTP, stateful | the `Mcp-Session-Id` the server issued at `initialize`; a value it did not issue is ignored |
 | streamable-HTTP, `--stateless-http` | none: the server issues no session and the header is client-chosen |
 | streamable-HTTP, `--stateless-http --trust-upstream-session-id` | the `Mcp-Session-Id` header, which the operator declares a platform in front of ASH issues and authenticates |
@@ -120,7 +120,7 @@ Sessions do not share a binding, and re-binding replaces the previous one for th
 
 A streamable-HTTP client typically does not share a filesystem with the server, so the source tree to scan must arrive over the protocol. ASH offers two paths (Track 10.2).
 
-Both land the tree in the calling session's own workspace and record it as that session's `source_dir`. The session is the one the transport identifies (see [Session identity](#session-identity)), not a tool argument and not a header the server did not issue, so a client cannot name someone else's session. On stdio there is a single client, so everything resolves to one default session.
+Both land the tree in the calling session's own workspace and record it as that session's `source_dir`. The session is the one the transport identifies (see [Session identity](#session-identity)), not a tool argument and not a header the server did not issue, so a client cannot choose a session it was not given. A session id is still a bearer value: anyone holding another session's id can act as that session, so keep ids out of logs and URLs others can read. On stdio there is a single client, so everything resolves to one default session.
 
 Having delivered a tree, call `run_ash_scan` with **no** `source_dir`:
 

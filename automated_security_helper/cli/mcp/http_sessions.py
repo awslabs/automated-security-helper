@@ -135,11 +135,17 @@ def _canonical_sse_session(raw: Optional[str]) -> Optional[str]:
 
 
 def _query_value(scope: Scope, name: str) -> Optional[str]:
+    """The one value of ``name`` in the query, or None if it is absent or repeated.
+
+    Repeated is refused rather than resolved: the SDK routes an sse message by
+    the last ``session_id`` and this module would read one of them, so any
+    choice can disagree with the SDK about which session a call belongs to.
+    """
     from urllib.parse import parse_qs
 
     raw = scope.get("query_string") or b""
-    values = parse_qs(raw.decode("latin-1")).get(name)
-    return values[0] if values else None
+    values = parse_qs(raw.decode("latin-1"), keep_blank_values=True).get(name)
+    return values[0] if values and len(values) == 1 else None
 
 
 #: How long a session workspace may go unused before the sweep removes it, by
