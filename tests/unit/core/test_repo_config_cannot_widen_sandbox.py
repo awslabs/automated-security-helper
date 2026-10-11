@@ -299,6 +299,64 @@ def test_ash_config_keeps_its_own_grants_when_its_base_is_in_a_checkout(
     assert sandbox.env_scanners == []
 
 
+def test_a_base_the_repository_links_elsewhere_is_judged_by_its_link(tmp_path, caplog):
+    # The operator's config extends the repository's config, and the repository
+    # makes that file a symlink to another config the operator keeps beside theirs.
+    # Judged by the file it reaches, the base would be outside every checkout and
+    # its grants would apply: the repository would choose which operator file
+    # grants. Judged by the path the extends entry names, it is in the checkout.
+    source = tmp_path / "repo"
+    (source / ".git").mkdir(parents=True)
+    (source / ".ash").mkdir()
+    other = tmp_path / "other.yaml"
+    other.write_text(BASE_GRANTS)
+    _symlink(source / ".ash" / ".ash.yaml", other)
+    operator = tmp_path / "ash.yaml"
+    operator.write_text("project_name: operator\nextends: repo/.ash/.ash.yaml\n")
+    caplog.set_level("WARNING")
+    sandbox = resolve_config(config_path=operator, source_dir=source).sandbox
+    assert sandbox.extra_read_paths == []
+    assert sandbox.env_scanners == []
+    (warning,) = _grant_warnings(caplog)
+    assert _ignored_keys(warning) == {
+        "sandbox.extra_read_paths",
+        "sandbox.env_scanners",
+    }
+
+
+def test_an_operator_section_spelled_with_dashes_keeps_its_grants(tmp_path):
+    # Merging the chain spells a key the way the base does; the operator's own
+    # section is read the same way, so a dashed key is the same setting.
+    source = _checkout_with_base(
+        tmp_path, "project_name: scanned\nsandbox:\n  network_scanners: []\n"
+    )
+    operator = tmp_path / "ash.yaml"
+    operator.write_text(
+        "project_name: operator\nextends: repo/.ash/base.yaml\n"
+        "sandbox:\n  network-scanners: [checkov]\n"
+    )
+    sandbox = resolve_config(config_path=operator, source_dir=source).sandbox
+    assert sandbox.network_scanners == ["checkov"]
+
+
+def test_an_operator_configs_own_mode_off_is_not_raised_by_ash_config(
+    tmp_path, monkeypatch
+):
+    # Without the extends, the --config file replaces ASH_CONFIG and its mode is
+    # off; extending the repository's config does not change whose mode that is.
+    source = _checkout_with_base(tmp_path)
+    floor = tmp_path / "floor.yaml"
+    floor.write_text(TRUSTED_BWRAP)
+    monkeypatch.setenv("ASH_CONFIG", str(floor))
+    operator = tmp_path / "ash.yaml"
+    operator.write_text(
+        "project_name: operator\nextends: repo/.ash/base.yaml\n"
+        "sandbox:\n  mode: 'off'\n"
+    )
+    sandbox = resolve_config(config_path=operator, source_dir=source).sandbox
+    assert sandbox.mode == "off"
+
+
 def test_an_operator_config_in_a_checkout_keeps_no_grants_of_its_own(tmp_path):
     # The rule above is for a file that may grant: one inside a checkout may not,
     # whatever its base is.

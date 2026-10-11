@@ -277,8 +277,10 @@ def confine_sandbox_grants(
     if ignored:
         files = ", ".join(describe_config_path(path) for path in in_tree)
         ASH_LOGGER.warning(
-            f"Ignoring {', '.join(ignored)} from {files}: {reason}, and it cannot "
-            "grant sandbox access. A "
+            f"Ignoring {', '.join(ignored)} from the config built on {files}: "
+            f"{reason}, and it cannot grant sandbox access. Of the files the config "
+            "was built from, only the sandbox settings a file outside every git "
+            "checkout and the scanned directory writes itself are kept. A "
             "network_scanners list there still removes network from scanners it "
             "does not name, and a sandbox mode there still applies when nothing "
             "else turns the sandbox on. To grant access, pass the setting with "

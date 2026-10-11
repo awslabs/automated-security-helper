@@ -71,7 +71,9 @@
   warning naming the file and the setting, and have to be passed with
   `--config-overrides`. A config file outside every checkout that extends one inside
   it, such as an operator's `--config` built on the repository's own config, keeps
-  the sandbox settings it writes itself and loses only what it inherits. For a
+  the sandbox settings it writes itself, `mode` included, and loses what it inherits
+  from any base and what it changes with `patch`. An `extends` base is judged by the
+  path its entry names as well as by the file it resolves to. For a
   scanned directory outside any checkout, a config file
   inside that directory cannot set them either. Such a file's `network_scanners` can
   still remove network. `sandbox.mode` is a floor: when `--sandbox`, `ASH_CONFIG` or
@@ -661,7 +663,7 @@
 
   **Which database is checked.** ASH resolves each tool's cache directory the way the
   tool does on the host: `GRYPE_DB_CACHE_DIR` or `TRIVY_CACHE_DIR`, else
-  `$XDG_CACHE_HOME` when it is an absolute path (trivy ignores it on macOS), else
+  `$XDG_CACHE_HOME` when it is an absolute path (trivy reads it only on Linux), else
   `~/.cache` on Linux, `~/Library/Caches` on macOS and the local application-data
   directory on Windows. In every run, sandboxed or not, it names that one directory
   to the scan, to the age check and to the database update it runs before a

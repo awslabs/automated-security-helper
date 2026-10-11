@@ -318,7 +318,7 @@ Under `--sandbox`, a scanner gets no network, or cannot read a path listed in
 `sandbox.extra_read_paths`, and the log has a warning like:
 
 ```
-Ignoring sandbox.network_scanners from /home/me/dotfiles/ash.yaml: the file is inside a git checkout or the scanned directory, so someone other than the operator may have written it, and it cannot grant sandbox access. ...
+Ignoring sandbox.network_scanners from the config built on /home/me/dotfiles/ash.yaml: the file is inside a git checkout or the scanned directory, so someone other than the operator may have written it, and it cannot grant sandbox access. ...
 ```
 
 **Cause**
@@ -343,7 +343,8 @@ ash --sandbox auto --config-overrides 'sandbox.network_scanners=[grype,trivy-rep
 Or move the config file somewhere outside every git checkout and outside the
 scanned directory, and pass it with `--config`. Such a file can extend the
 repository's own config: it keeps the sandbox settings it writes itself, and the
-warning then names only the repository's file and what that file set.
+warning then names the repository's file. What the file inherits from its bases,
+or changes with `patch`, is dropped, so write each grant in the file itself.
 
 ## A Plugin Module From a Config File Is Not Imported
 

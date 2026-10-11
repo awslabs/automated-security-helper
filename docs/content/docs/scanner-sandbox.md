@@ -76,7 +76,8 @@ it needs.
   be read-only outside a sandbox too, when it is shared or baked into an image.
 - The cache directory is the one grype or trivy itself uses on the host:
   `GRYPE_DB_CACHE_DIR` or `TRIVY_CACHE_DIR` when set, else `$XDG_CACHE_HOME` when it
-  is an absolute path (for trivy, not on macOS), else `~/.cache` on Linux,
+  is an absolute path (trivy reads it only on Linux, and a relative one makes it use
+  `$TMPDIR/trivy`), else `~/.cache` on Linux,
   `~/Library/Caches` on macOS, and `%LOCALAPPDATA%\cache` (grype) or
   `%LocalAppData%` (trivy) on Windows. grype keeps its database in `grype/db` under
   it and trivy in `trivy`. The sandbox does not pass `XDG_CACHE_HOME`, so in every
@@ -236,13 +237,14 @@ resolved path, or the shell's working directory (`$PWD`).
 When any file the config was built from can't grant (the discovered `.ash/.ash.yaml`,
 a `--config` path, an `extends` base, or the file `ASH_CONFIG` names), the four
 settings are taken from the files that can: in workspace mode the operator's
-default config, else `ASH_CONFIG`'s file, else the defaults, plus
-`--config-overrides`. A file that can grant itself but extends a base that can't
-keeps the settings its own `sandbox` section writes. For example, a `--config`
-outside every checkout that extends the scanned repository's config keeps the grants
-it sets, and loses what it inherits from the repository's file or changes with
-`patch`. ASH logs a warning that names the files that can't grant and the settings it
-dropped. A `network_scanners` list in such a file still takes network away: a scanner
+default config (under the MCP server, the session's bound profile), else
+`ASH_CONFIG`'s file, else the defaults, plus `--config-overrides`. A file that can
+grant itself but extends a base that can't keeps the settings its own `sandbox`
+section writes, `mode` included. For example, a `--config` outside every checkout
+that extends the scanned repository's config keeps the grants it sets, and loses
+what it inherits from any base, even one outside every checkout, and what it changes
+with `patch`. ASH logs a warning that names the files that can't grant and the
+settings it dropped. A `network_scanners` list in such a file still takes network away: a scanner
 it doesn't name gets none, so a repository can keep its own scan offline with
 `network_scanners: []`.
 
@@ -274,7 +276,9 @@ warning, and the candidates the baseline would have marked are reported.
 
 A config file is judged by the name it was found under as well as by the file it
 resolves to, so a `.ash/.ash.yaml` that is a symlink out of the scanned directory
-still counts as inside it. An `extends` base is judged by the file it resolves to.
+still counts as inside it. An `extends` base is judged the same way, by the path its
+`extends` entry names as well as by the file it resolves to, so a base the repository
+turns into a symlink to some other file still counts as inside the checkout.
 Tool config files that scanner options name, and plugin modules, are judged by the
 same rule; see
 [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose).

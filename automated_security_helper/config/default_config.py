@@ -19,6 +19,19 @@ def get_default_config():
     return AshConfig()
 
 
+def default_config_names() -> List[Path]:
+    """default_config_chain()'s files by the paths that named them; see
+    ``ResolvedConfigDocument.named``."""
+    from automated_security_helper.config.config_sources import (
+        resolve_config_document,
+    )
+
+    config_env_var = os.environ.get("ASH_CONFIG", None)
+    if not (config_env_var and Path(config_env_var).exists()):
+        return []
+    return list(resolve_config_document(Path(config_env_var)).named)
+
+
 def default_config_chain() -> List[Path]:
     """The files get_default_config() reads: ASH_CONFIG and its extends bases, or none."""
     from automated_security_helper.config.config_sources import (

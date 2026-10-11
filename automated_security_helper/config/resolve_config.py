@@ -8,6 +8,7 @@ import yaml
 from automated_security_helper.config.ash_config import AshConfig, SandboxConfig
 from automated_security_helper.config.config_sources import (
     _resolve_dict_key,
+    deep_merge,
     default_confinement_root,
     describe_config_path,
     discover_config_source,
@@ -17,6 +18,7 @@ from automated_security_helper.config.config_sources import (
 )
 from automated_security_helper.config.default_config import (
     default_config_chain,
+    default_config_names,
     get_default_config,
 )
 from automated_security_helper.config.plugin_module_trust import (
@@ -242,6 +244,7 @@ def resolve_config(
     """
     chain: List[Path] = []
     named: List[Path] = []
+    spelled: List[Path] = []
     config = _resolve_config(
         config_path,
         source_dir,
@@ -250,6 +253,7 @@ def resolve_config(
         permit_base,
         chain,
         named,
+        spelled,
     )
     if config is None:
         return config
@@ -258,24 +262,30 @@ def resolve_config(
     root = Path(scanned_root)
     ash_config = os.environ.get("ASH_CONFIG")
     ash_config_named = [Path(ash_config)] if ash_config else []
+    # Every file of a chain is judged by its resolved path and by the names that
+    # reached it, the bases' extends entries included (ResolvedConfigDocument.named).
+    default_spelled = [*ash_config_named, *default_config_names()]
     if chain:
-        in_tree = repository_written(chain, root, named, all_untrusted=untrusted_config)
+        in_tree = repository_written(
+            chain, root, [*named, *spelled], all_untrusted=untrusted_config
+        )
         if not in_tree:
             return config
         default_in_tree = repository_written(
-            default_config_chain(), root, ash_config_named
+            default_config_chain(), root, default_spelled
         )
     else:
         # With no config file, the config is get_default_config(): ASH_CONFIG's
         # file when that variable names one, which can be untrusted too.
         in_tree = default_in_tree = repository_written(
-            default_config_chain(), root, ash_config_named
+            default_config_chain(), root, default_spelled
         )
         if not in_tree:
             return config
     operator = _load_operator_config(trusted_config_path, source_dir, permit_base)
+    own_mode = False
     if operator is not None and not repository_written(
-        operator[1], root, [Path(trusted_config_path)]
+        operator[1], root, [Path(trusted_config_path), *operator[2]]
     ):
         trusted = operator[0]
     else:
@@ -283,21 +293,25 @@ def resolve_config(
         # A file that may grant, made untrusted only by a base it extends, keeps
         # the sandbox settings it writes itself.
         if default_in_tree and default_config_chain():
-            trusted = _with_own_sandbox(
+            trusted, wrote_mode = _with_own_sandbox(
                 trusted, default_config_chain()[-1], root, ash_config_named
             )
+            own_mode = own_mode or wrote_mode
         if operator is not None:
-            trusted = _with_own_sandbox(
+            trusted, wrote_mode = _with_own_sandbox(
                 trusted, operator[1][-1], root, [Path(trusted_config_path)]
             )
+            own_mode = own_mode or wrote_mode
     # The same for the config file the scan selected: an operator's --config
     # outside every checkout that extends a base inside one.
     if chain and not untrusted_config:
-        trusted = _with_own_sandbox(trusted, chain[-1], root, named)
+        trusted, wrote_mode = _with_own_sandbox(trusted, chain[-1], root, named)
+        own_mode = own_mode or wrote_mode
     # The operator's mode is a floor wherever its file lives: a mode other than off
     # grants nothing, so an operator file in the tree may still turn the sandbox on.
-    # Before the overrides, so `--sandbox off` still turns it off.
-    if trusted.sandbox.mode == "off":
+    # Before the overrides, so `--sandbox off` still turns it off. A mode a file
+    # that may grant writes itself is the operator's choice, `off` included.
+    if trusted.sandbox.mode == "off" and not own_mode:
         trusted.sandbox.mode = (
             operator[0].sandbox.mode
             if operator is not None
@@ -341,7 +355,7 @@ def _own_sandbox_settings(path: Path) -> Dict[str, Any]:
 
 def _with_own_sandbox(
     trusted: AshConfig, path: Path, scan_root: Path, lexical: List[Path]
-) -> AshConfig:
+) -> Tuple[AshConfig, bool]:
     """``trusted`` with the sandbox settings ``path`` writes, when ``path`` may grant.
 
     ``path`` is one file of a chain that ``repository_written`` found untrusted
@@ -349,25 +363,36 @@ def _with_own_sandbox(
     inside. Its own settings are the operator's, and the base's are not, so only
     the file's own ``sandbox`` section joins the trusted settings. Judged by its
     resolved path and by ``lexical``, the names it was given.
+
+    Returns the settings and whether the file wrote its own ``mode``. A section
+    that does not validate on its own (one the file's ``patch`` repairs, say) adds
+    nothing, so the file then keeps no grants, as before this rule.
     """
     if repository_written([path], scan_root, lexical):
-        return trusted
+        return trusted, False
     own = _own_sandbox_settings(path)
     if not own:
-        return trusted
+        return trusted, False
+    current = trusted.sandbox.model_dump()
+    try:
+        # deep_merge spells each key the way the trusted settings do, as merging
+        # the chain did (`network-scanners` is `network_scanners`).
+        sandbox = SandboxConfig.model_validate(deep_merge(current, own), strict=True)
+    except ValidationError:
+        return trusted, False
+    keys = dict.fromkeys(current)
+    wrote_mode = any(_resolve_dict_key(keys, key) == "mode" for key in own)
     updated = trusted.model_copy()
-    updated.sandbox = SandboxConfig.model_validate(
-        {**trusted.sandbox.model_dump(), **own}, strict=True
-    )
-    return updated
+    updated.sandbox = sandbox
+    return updated, wrote_mode
 
 
 def _load_operator_config(
     trusted_config_path: Path | str | None,
     source_dir: Path | str | None,
     permit_base: Optional[Callable[[Path], bool]],
-) -> Optional[Tuple[AshConfig, List[Path]]]:
-    """The operator's config file and the files it was built from, or None.
+) -> Optional[Tuple[AshConfig, List[Path], List[Path]]]:
+    """The operator's config file, the files it was built from, and their names.
 
     Loaded the way _resolve_config loads a config file, and refused the same way
     when it does not validate.
@@ -387,7 +412,7 @@ def _load_operator_config(
             f"Configuration validation failed for '{describe_config_path(path)}': "
             f"{str(e)}. Run 'ash config lint' to identify and fix issues."
         ) from e
-    return config, list(document.chain)
+    return config, list(document.chain), list(document.named)
 
 
 def _resolve_config(
@@ -398,11 +423,13 @@ def _resolve_config(
     permit_base: Optional[Callable[[Path], bool]],
     chain: List[Path],
     named: List[Path],
+    spelled: List[Path],
 ) -> AshConfig:
     """resolve_config without the sandbox confinement.
 
-    Appends every file read to ``chain``, resolved, and the root config file's path
-    as it was named (passed or discovered) to ``named``.
+    Appends every file read to ``chain``, resolved, the root config file's path as
+    it was named (passed or discovered) to ``named``, and every file read by the
+    path that named it (``ResolvedConfigDocument.named``) to ``spelled``.
     """
     try:
         # Start with default config
@@ -494,6 +521,7 @@ def _resolve_config(
             config = AshConfig.model_validate(document.data, strict=True)
             chain.extend(document.chain)
             named.append(Path(config_path))
+            spelled.extend(document.named)
             ASH_LOGGER.debug(f"Loaded config from file: {config_path}")
 
             # Apply config overrides if provided

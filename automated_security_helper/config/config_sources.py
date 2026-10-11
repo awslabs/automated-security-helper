@@ -476,12 +476,18 @@ class ResolvedConfigDocument:
 
     ``chain`` lists every file read, in merge order: bases before the files that
     extend them, the root config last. A file reached on two branches appears
-    twice, because it was merged twice.
+    twice, because it was merged twice. ``named`` lists the same files, in the same
+    order, by the path that named them before any symlink was followed: the root
+    as the caller gave it, and each base as its ``extends`` entry spells it from
+    the file that extends it. A base that is a symlink is judged by that name too
+    (``config/sandbox_grants.py``), since whoever can write the link chooses the
+    file it reaches.
     """
 
     data: Any
     chain: List[Path] = field(default_factory=list)
     root: Optional[Path] = None
+    named: List[Path] = field(default_factory=list)
 
 
 @dataclass
@@ -490,6 +496,7 @@ class _ChainState:
     permit_base: Optional[PermitBase] = None
     files_read: int = 0
     order: List[Path] = field(default_factory=list)
+    named: List[Path] = field(default_factory=list)
 
 
 def _format_chain(paths: Tuple[Path, ...]) -> str:
@@ -666,8 +673,10 @@ def _resolve(
     stack: Tuple[Path, ...],
     state: _ChainState,
     ref: Optional[str] = None,
+    named: Optional[Path] = None,
 ) -> Any:
     real = path.resolve()
+    named = path if named is None else named
     if real in stack:
         raise ASHConfigSourceError(
             f"Config '{EXTENDS_KEY}' cycle: {_format_chain(stack + (real,))}"
@@ -716,6 +725,7 @@ def _resolve(
         EXTENDS_KEY not in data and PATCH_KEY not in data
     ):
         state.order.append(real)
+        state.named.append(named)
         return data
 
     try:
@@ -727,8 +737,13 @@ def _resolve(
             base_path = _resolve_base_path(
                 base_ref, real, state.root, state.permit_base
             )
+            # The base as its entry spells it, before any symlink is followed:
+            # relative to the resolved file that extends it, as base_path is.
+            spelled = Path(base_ref)
+            base_named = spelled if spelled.is_absolute() else real.parent / spelled
             merged = deep_merge(
-                merged, _resolve(base_path, stack + (real,), state, base_ref)
+                merged,
+                _resolve(base_path, stack + (real,), state, base_ref, base_named),
             )
         merged = deep_merge(merged, own)
         if ops is not None:
@@ -745,6 +760,7 @@ def _resolve(
             f"{describe_config_path(real)}: {type(exc).__name__}: {exc}"
         ) from exc
     state.order.append(real)
+    state.named.append(named)
     return merged
 
 
@@ -767,7 +783,9 @@ def resolve_config_document(
     )
     state = _ChainState(root=root, permit_base=permit_base)
     data = _resolve(config_path, (), state)
-    return ResolvedConfigDocument(data=data, chain=state.order, root=root)
+    return ResolvedConfigDocument(
+        data=data, chain=state.order, root=root, named=state.named
+    )
 
 
 def load_config_document(
