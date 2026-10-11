@@ -43,7 +43,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
-from automated_security_helper.utils.ash_install import ash_git_requirement
+from automated_security_helper.utils.ash_install import ash_reinstall_command
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -57,16 +57,15 @@ def _missing_library_reason() -> str:
 
     Built once per scanner and used for both the recorded reason and the log
     line, so the two cannot drift. A function rather than a module constant
-    because the reinstall it names is pinned to the running ASH version.
+    because the reinstall it names is where the running ASH was installed from.
     """
-    # The reinstall names ASH's git source. It used to read
-    # "pip install --force-reinstall automated-security-helper", and PyPI
-    # resolves that name to an unrelated project, so following it replaced ASH.
+    # It used to read "pip install --force-reinstall automated-security-helper",
+    # and PyPI resolves that name to an unrelated project, so following it
+    # replaced ASH.
     return (
         "detect-secrets is not importable, so the detect-secrets scanner cannot run. "
-        "It ships as a dependency of ASH; reinstall ASH (`pip install "
-        f"--force-reinstall '{ash_git_requirement()}'`) or install the library "
-        "directly with `pip install detect-secrets`."
+        f"It ships as a dependency of ASH; reinstall ASH (`{ash_reinstall_command()}`) "
+        "or install the library directly with `pip install detect-secrets`."
     )
 
 

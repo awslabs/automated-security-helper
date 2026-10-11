@@ -170,21 +170,33 @@ method of `Deployer`, or at module level, is still reported.
 
 Symbol suppressions parse source files with
 [tree-sitter](https://tree-sitter.github.io/), which ASH installs as an optional
-extra. ASH installs from git, so the extra goes on a git requirement pinned to the
-release you run:
+extra. When the extra is missing, the scan warning and `ash config lint` print a
+pip command that installs the extra's packages, read from the metadata of the ASH
+you run, so it fits that ASH whatever its version or source. Into the environment
+ASH runs in, that command is:
 
 ```bash
-pip install "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
-# or, for ASH installed as a uv tool
-uv tool install "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
-# or, for the uvx alias from the installation guide
+pip install 'tree-sitter>=0.26,<0.27' 'tree-sitter-java>=0.23.5,<0.24' 'tree-sitter-javascript>=0.25,<0.26' 'tree-sitter-python>=0.25,<0.26' 'tree-sitter-typescript>=0.23.2,<0.24'
+```
+
+An ASH installed as a tool lives in an environment of its own, so reinstall it
+from the source you installed it from with `[symbols]` added. For the release
+these docs describe:
+
+```bash
+# ASH installed with uv tool install
+uv tool install --force "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+# ASH installed with pipx install
+pipx install --force "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+# the uvx alias from the installation guide
 alias ash="uvx --from 'automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0' ash"
 ```
 
-Keep the `@ git+...` part. ASH is not published on PyPI, and the PyPI project with
-ASH's name is unrelated and has no `symbols` extra, so asking for the extra by the
-bare name installs that project instead. `ash config lint` and the scan warning
-print the same requirement for the version you run.
+For a checkout or a commit, put that source after the `@` instead
+(`automated-security-helper[symbols] @ file:///path/to/checkout`, or `@ git+...@<commit>`).
+Keep the `@` and the source. ASH is not published on PyPI, and the PyPI project
+with ASH's name is unrelated and has no `symbols` extra, so asking for the extra by
+the bare name installs that project instead.
 
 The ASH container image includes the extra. Without it, an entry that sets `symbol`
 matches nothing: the findings it names stay visible, the scan logs a warning

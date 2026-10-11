@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Annotated, List, Optional
 import typer
 from rich.console import Console
+from rich.markup import escape
 
 from automated_security_helper.cli.mcp.profile_registry import (
     register_profiles,
@@ -27,7 +28,7 @@ from automated_security_helper.cli.mcp.profile_registry import (
 )
 from automated_security_helper.core.enums import AshLogLevel
 from automated_security_helper.core.exceptions import ScannerError, ASHValidationError
-from automated_security_helper.utils.ash_install import ash_git_requirement
+from automated_security_helper.utils.ash_install import ash_reinstall_command
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import set_environ
 
@@ -478,16 +479,17 @@ def mcp_command(
         _stderr.print(
             "MCP support is included by default in ASH v3. Try reinstalling ASH:"
         )
-        # Reinstall from git, which is how ASH is distributed, at the tag of the
-        # running version. This hint used to read "pip install --force-reinstall
-        # automated-security-helper", which is an unrelated project's name on
-        # PyPI -- so following it replaced the user's working ASH install with a
-        # stranger's package. The requirement carries no extra, so it holds no
-        # "[" for rich to read as markup. soft_wrap keeps the command on one line:
-        # stderr is rarely a terminal here, rich then wraps at 80 columns, and a
-        # command split before its URL is a pip install with no requirement.
+        # Reinstall from where the running ASH was installed from: its git
+        # commit, its checkout, or its archive. This hint used to read "pip
+        # install --force-reinstall automated-security-helper", which is an
+        # unrelated project's name on PyPI -- so following it replaced the
+        # user's working ASH install with a stranger's package. The command is
+        # escaped because a path can hold a "[" that rich would read as markup.
+        # soft_wrap keeps it on one line: stderr is rarely a terminal here, rich
+        # then wraps at 80 columns, and a command split before its source is a
+        # pip install with no requirement.
         _stderr.print(
-            f"  [cyan]pip install --force-reinstall '{ash_git_requirement()}'[/cyan]",
+            f"  [cyan]{escape(ash_reinstall_command())}[/cyan]",
             soft_wrap=True,
         )
         _stderr.print("  [cyan]uv sync --reinstall[/cyan]")

@@ -20,8 +20,9 @@ Why these tests fake importlib.metadata rather than build a real distribution
 Installing a second distribution that shadows ASH's own top-level package inside
 a test run would change what every other test imports. The two functions the
 resolver calls, ``packages_distributions`` and ``requires``, are the entire
-interface to that metadata, so patching them at the module boundary reproduces
-each shape exactly and cannot leak.
+interface to that metadata, so patching them at the boundary of the module that
+reads them (``utils/ash_install.py``, which the cdk scanner's read delegates to)
+reproduces each shape exactly and cannot leak.
 
 The ``[None]`` case is not hypothetical. A ``*.dist-info`` carrying a
 ``top_level.txt`` but no ``METADATA`` makes the real
@@ -44,6 +45,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scann
     _CDK_EXTRA_FALLBACK_REQUIREMENTS,
     _cdk_extra_requirements,
 )
+from automated_security_helper.utils import ash_install
 
 #: The top-level package the resolver asks about. Derived the same way the
 #: resolver derives it, so a package rename cannot make these tests stale while
@@ -119,9 +121,9 @@ def fake_metadata(monkeypatch):
 
     def _install(dist_names, requires_by_name):
         monkeypatch.setattr(
-            cdk_nag_scanner, "packages_distributions", lambda: {ROOT: dist_names}
+            ash_install, "packages_distributions", lambda: {ROOT: dist_names}
         )
-        monkeypatch.setattr(cdk_nag_scanner, "distributions", list)
+        monkeypatch.setattr(ash_install, "distributions", list)
 
         def _fake_requires(name):
             outcome = requires_by_name[name]
@@ -129,7 +131,7 @@ def fake_metadata(monkeypatch):
                 raise outcome
             return outcome
 
-        monkeypatch.setattr(cdk_nag_scanner, "requires", _fake_requires)
+        monkeypatch.setattr(ash_install, "requires", _fake_requires)
 
     return _install
 
@@ -243,8 +245,8 @@ class TestUnreadableMetadata:
         it from ``direct_url.json``. Without this the test would receive real
         metadata while asserting the fallback.
         """
-        monkeypatch.setattr(cdk_nag_scanner, "packages_distributions", dict)
-        monkeypatch.setattr(cdk_nag_scanner, "distributions", list)
+        monkeypatch.setattr(ash_install, "packages_distributions", dict)
+        monkeypatch.setattr(ash_install, "distributions", list)
         assert _cdk_extra_requirements() == list(_CDK_EXTRA_FALLBACK_REQUIREMENTS)
 
     def test_requires_returning_none_falls_back(self, fake_metadata) -> None:

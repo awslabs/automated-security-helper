@@ -117,16 +117,42 @@ def test_dependencies_are_always_satisfied_because_the_import_succeeded(scanner)
     assert scanner.validate_plugin_dependencies() is True
 
 
+_COMMIT = "0123456789abcdef0123456789abcdef01234567"
+
+
+@pytest.mark.parametrize(
+    "direct_url, reinstall",
+    [
+        (
+            {
+                "url": "https://github.com/awslabs/automated-security-helper.git",
+                "vcs_info": {"vcs": "git", "commit_id": _COMMIT},
+            },
+            "git+https://github.com/awslabs/automated-security-helper.git@" + _COMMIT,
+        ),
+        (
+            {"url": Path("/work/ash").as_uri(), "dir_info": {"editable": True}},
+            "-e " + str(Path("/work/ash")),
+        ),
+        (None, f"git+{ASH_REPO_URL}.git@v{{version}}"),
+    ],
+    ids=["git-install-pins-its-commit", "editable-names-its-directory", "no-record"],
+)
 def test_missing_library_reason_names_installs_that_resolve_to_ash(
-    plugin_context, monkeypatch
+    plugin_context, monkeypatch, direct_url, reinstall
 ):
     """Without the library, the recorded reason's install advice resolves to ASH.
 
     PyPI resolves the bare name ``automated-security-helper`` to an unrelated
     project, so "pip install --force-reinstall automated-security-helper" would
-    replace ASH with that project. Reinstalling ASH has to name its git source,
-    pinned to the running version; installing detect-secrets by name is fine.
+    replace ASH with that project. The reinstall names where the running ASH was
+    installed from: a git install's commit, an editable install's directory, and
+    the release tag only when the install left no record. Installing
+    detect-secrets by name is fine.
     """
+    from automated_security_helper.utils import ash_install
+
+    monkeypatch.setattr(ash_install, "_direct_url", lambda: direct_url)
     # A None entry in sys.modules makes `from detect_secrets import ...` raise
     # ImportError, which is what an environment without the library does.
     monkeypatch.setitem(sys.modules, "detect_secrets", None)
@@ -137,12 +163,10 @@ def test_missing_library_reason_names_installs_that_resolve_to_ash(
 
     assert "detect-secrets is not importable" in reason
     assert find_bare_installs(reason) == []
-    if re.search(r"reinstall", reason, re.IGNORECASE) and "ASH" in reason:
-        pinned = re.compile(
-            rf"git\+{re.escape(ASH_REPO_URL)}(?:\.git)?@v{re.escape(get_ash_version())}"
-            r"(?![\w.+-])"
-        )
-        assert pinned.search(reason), reason
+    expected = "pip install --force-reinstall " + reinstall.format(
+        version=get_ash_version()
+    )
+    assert f"`{expected}`" in reason, reason
 
 
 def test_default_config_enables_every_detect_secrets_plugin(scanner):
@@ -457,8 +481,6 @@ def test_an_invalid_exclude_pattern_is_warned_about_and_skipped(caplog):
 
 
 def test_file_exclusions_filter_the_matching_paths():
-    import re
-
     files = ["src/app.py", "tests/test_app.py", "docs/index.md"]
 
     kept = DetectSecretsScanner._apply_file_exclusions(files, [re.compile(r"^tests/")])

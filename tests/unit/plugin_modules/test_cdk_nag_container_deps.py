@@ -36,6 +36,7 @@ from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     cdk_nag_scanner as cdk_nag_scanner_module,
 )
+from automated_security_helper.utils import ash_install as ash_install_module
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
     _CDK_EXTRA_FALLBACK_REQUIREMENTS,
     CdkNagScanner,
@@ -369,16 +370,14 @@ class TestCdkExtraResolution:
         malformed.metadata = {"Name": "malformed"}
 
         with (
+            patch.object(ash_install_module, "packages_distributions", return_value={}),
             patch.object(
-                cdk_nag_scanner_module, "packages_distributions", return_value={}
-            ),
-            patch.object(
-                cdk_nag_scanner_module,
+                ash_install_module,
                 "distributions",
                 return_value=[broken, nameless, remote, malformed],
             ),
         ):
-            located = cdk_nag_scanner_module._distributions_declaring_this_module(
+            located = ash_install_module._distributions_declaring_this_module(
                 "automated_security_helper"
             )
             # Inside the patches deliberately: outside them the real distribution
@@ -399,9 +398,9 @@ class TestCdkExtraResolution:
         direct_url.json that records the directory this module was installed from.
         """
         with patch.object(
-            cdk_nag_scanner_module, "packages_distributions", return_value={}
+            ash_install_module, "packages_distributions", return_value={}
         ):
-            located = cdk_nag_scanner_module._distributions_declaring_this_module(
+            located = ash_install_module._distributions_declaring_this_module(
                 "automated_security_helper"
             )
             derived = _cdk_extra_requirements_from_metadata()
@@ -431,10 +430,8 @@ class TestCdkExtraResolution:
         genuinely finding nothing, which is what an uninstalled checkout is.
         """
         with (
-            patch.object(
-                cdk_nag_scanner_module, "packages_distributions", return_value={}
-            ),
-            patch.object(cdk_nag_scanner_module, "distributions", return_value=[]),
+            patch.object(ash_install_module, "packages_distributions", return_value={}),
+            patch.object(ash_install_module, "distributions", return_value=[]),
         ):
             assert _cdk_extra_requirements() == _CDK_EXTRA_FALLBACK_REQUIREMENTS
             assert _cdk_extra_requirements_from_metadata() is None, (
@@ -461,9 +458,9 @@ class TestCdkExtraResolution:
         """
         with (
             patch.object(
-                cdk_nag_scanner_module, "packages_distributions", side_effect=raised
+                ash_install_module, "packages_distributions", side_effect=raised
             ),
-            patch.object(cdk_nag_scanner_module, "distributions", return_value=[]),
+            patch.object(ash_install_module, "distributions", return_value=[]),
         ):
             assert _cdk_extra_requirements() == _CDK_EXTRA_FALLBACK_REQUIREMENTS
 
@@ -476,7 +473,7 @@ class TestCdkExtraResolution:
         perfectly readable and should still be tried.
         """
         with patch.object(
-            cdk_nag_scanner_module,
+            ash_install_module,
             "packages_distributions",
             side_effect=OSError("unreadable sys.path entry"),
         ):
@@ -503,12 +500,10 @@ class TestCdkExtraResolution:
         or any ancestor of this module; a conversion correct at only one depth
         would still be wrong.
         """
-        here = Path(cdk_nag_scanner_module.__file__).resolve()
+        here = Path(ash_install_module.__file__).resolve()
 
         for directory in (here.parent, here.parents[3]):
-            recovered = cdk_nag_scanner_module._local_path_from_file_url(
-                directory.as_uri()
-            )
+            recovered = ash_install_module._local_path_from_file_url(directory.as_uri())
             assert recovered == directory, (
                 f"{directory.as_uri()} did not read back as {directory}, so a "
                 f"distribution installed from there cannot be recognized as the "
@@ -524,10 +519,8 @@ class TestCdkExtraResolution:
         above, which passes on POSIX before and after the fix, would be the only
         thing standing behind it.
         """
-        with patch.object(
-            cdk_nag_scanner_module, "url2pathname", _windows_url2pathname()
-        ):
-            recovered = cdk_nag_scanner_module._local_path_from_file_url(
+        with patch.object(ash_install_module, "url2pathname", _windows_url2pathname()):
+            recovered = ash_install_module._local_path_from_file_url(
                 "file:///D:/a/project"
             )
 
@@ -551,7 +544,7 @@ class TestCdkExtraResolution:
         for a checkout path to supply it, which is what lets this fail on the
         runner that is actually available.
         """
-        ancestor = Path(cdk_nag_scanner_module.__file__).resolve().parent
+        ancestor = Path(ash_install_module.__file__).resolve().parent
         head, _, tail = ancestor.as_uri().rpartition("/")
         # Escape every byte of the last segment. quote() leaves ordinary
         # characters alone, which would make this fixture identical to the plain
@@ -567,12 +560,10 @@ class TestCdkExtraResolution:
         dist.metadata = {"Name": "installed-from-an-escaped-path"}
 
         with (
-            patch.object(
-                cdk_nag_scanner_module, "packages_distributions", return_value={}
-            ),
-            patch.object(cdk_nag_scanner_module, "distributions", return_value=[dist]),
+            patch.object(ash_install_module, "packages_distributions", return_value={}),
+            patch.object(ash_install_module, "distributions", return_value=[dist]),
         ):
-            located = cdk_nag_scanner_module._distributions_declaring_this_module(
+            located = ash_install_module._distributions_declaring_this_module(
                 "automated_security_helper"
             )
 
@@ -605,10 +596,8 @@ class TestCdkExtraResolution:
         ``localhost`` is the one authority that means *this* host and names no
         path of its own, so it has to reduce to the empty-authority form.
         """
-        share = cdk_nag_scanner_module._local_path_from_file_url(
-            "file://build-share/proj"
-        )
-        local = cdk_nag_scanner_module._local_path_from_file_url("file:///proj")
+        share = ash_install_module._local_path_from_file_url("file://build-share/proj")
+        local = ash_install_module._local_path_from_file_url("file:///proj")
         assert local is not None, (
             "the empty-authority URL stopped resolving, so this test can no "
             "longer tell a dropped authority from a kept one"
@@ -618,10 +607,8 @@ class TestCdkExtraResolution:
             f"directory /proj: {share}"
         )
 
-        with patch.object(
-            cdk_nag_scanner_module, "url2pathname", _windows_url2pathname()
-        ):
-            unc = cdk_nag_scanner_module._local_path_from_file_url(
+        with patch.object(ash_install_module, "url2pathname", _windows_url2pathname()):
+            unc = ash_install_module._local_path_from_file_url(
                 "file://build-share/proj"
             )
         assert unc is not None
@@ -631,9 +618,9 @@ class TestCdkExtraResolution:
             f"local directory /proj: {unc}"
         )
 
-        assert cdk_nag_scanner_module._local_path_from_file_url(
+        assert ash_install_module._local_path_from_file_url(
             "file://localhost/proj"
-        ) == cdk_nag_scanner_module._local_path_from_file_url("file:///proj")
+        ) == ash_install_module._local_path_from_file_url("file:///proj")
 
         # The assertion above cannot see who did the collapsing. From 3.12 the
         # stdlib reduces "//localhost/proj" to "/proj" by itself, so it holds on
@@ -645,10 +632,10 @@ class TestCdkExtraResolution:
         # is precisely what POSIX url2pathname did through 3.13 -- puts the
         # collapsing back in ASH's hands, so this observes ASH's own line on
         # every supported version rather than the stdlib's behavior.
-        with patch.object(cdk_nag_scanner_module, "url2pathname", unquote):
-            assert cdk_nag_scanner_module._local_path_from_file_url(
+        with patch.object(ash_install_module, "url2pathname", unquote):
+            assert ash_install_module._local_path_from_file_url(
                 "file://localhost/proj"
-            ) == cdk_nag_scanner_module._local_path_from_file_url("file:///proj"), (
+            ) == ash_install_module._local_path_from_file_url("file:///proj"), (
                 "localhost was not reduced to the empty-authority form by ASH "
                 "itself, so on an interpreter whose url2pathname does not "
                 "collapse it, a distribution installed from this host would read "
@@ -664,24 +651,20 @@ class TestCdkExtraResolution:
         one is injected because only nturl2path raises for a drive specifier it
         cannot parse, and that code does not run on this runner.
         """
-        assert cdk_nag_scanner_module._local_path_from_file_url(None) is None
-        assert cdk_nag_scanner_module._local_path_from_file_url({"url": 1}) is None
+        assert ash_install_module._local_path_from_file_url(None) is None
+        assert ash_install_module._local_path_from_file_url({"url": 1}) is None
         assert (
-            cdk_nag_scanner_module._local_path_from_file_url(
+            ash_install_module._local_path_from_file_url(
                 "https://example.invalid/x.whl"
             )
             is None
         )
-        assert (
-            cdk_nag_scanner_module._local_path_from_file_url("file://[::1/proj") is None
-        )
+        assert ash_install_module._local_path_from_file_url("file://[::1/proj") is None
 
         with patch.object(
-            cdk_nag_scanner_module, "url2pathname", side_effect=OSError("Bad URL")
+            ash_install_module, "url2pathname", side_effect=OSError("Bad URL")
         ):
-            assert (
-                cdk_nag_scanner_module._local_path_from_file_url("file:///proj") is None
-            )
+            assert ash_install_module._local_path_from_file_url("file:///proj") is None
 
     def test_falls_back_when_no_distribution_declares_the_extra(self) -> None:
         """Readable metadata with no cdk extra falls back; it does not return [].
@@ -704,12 +687,12 @@ class TestCdkExtraResolution:
         ``test_fallback_matches_installed_metadata``.
         """
         with patch.object(
-            cdk_nag_scanner_module,
+            ash_install_module,
             "packages_distributions",
             return_value={"automated_security_helper": ["automated-security-helper"]},
         ):
             with patch.object(
-                cdk_nag_scanner_module, "requires", return_value=["requests>=2.28.0"]
+                ash_install_module, "requires", return_value=["requests>=2.28.0"]
             ):
                 assert _cdk_extra_requirements() == _CDK_EXTRA_FALLBACK_REQUIREMENTS
 
@@ -722,12 +705,12 @@ class TestCdkExtraResolution:
         extra.
         """
         with patch.object(
-            cdk_nag_scanner_module,
+            ash_install_module,
             "packages_distributions",
             return_value={"automated_security_helper": ["ghost-dist", "real-dist"]},
         ):
             with patch.object(
-                cdk_nag_scanner_module,
+                ash_install_module,
                 "requires",
                 side_effect=[None, ["cdk-nag>=3.0.2,<4.0.0; extra == 'cdk'"]],
             ):

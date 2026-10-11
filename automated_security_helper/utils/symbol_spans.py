@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
-from automated_security_helper.utils.ash_install import ash_git_requirement
+from automated_security_helper.utils.ash_install import extra_install_command
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
 #: The optional-dependency extra that provides tree-sitter and its grammars.
@@ -55,16 +55,18 @@ SYMBOLS_EXTRA = "symbols"
 
 
 def symbols_extra_install_command() -> str:
-    """The pip command that installs the symbols extra.
+    """The pip command that installs the symbols extra's packages.
 
     Used by the scan warning and by the config lint, so ``ash config lint`` and
-    a scan never name different installs. pipx and uv take the same
-    requirement; the suppressions docs page shows those forms.
+    a scan never name different installs. The packages are read from the
+    running distribution's metadata, so the command matches this ASH whatever
+    its version or source.
     """
-    # Names ASH's git source pinned to the running version. This hint used to
-    # read "install automated-security-helper[symbols]", which PyPI resolves to
-    # an unrelated project that has no such extra.
-    return f"pip install '{ash_git_requirement(SYMBOLS_EXTRA)}'"
+    # This hint used to read "install automated-security-helper[symbols]",
+    # which PyPI resolves to an unrelated project that has no such extra. A git
+    # requirement pinned to v<version> replaced it and was wrong too: main
+    # reports the last release's version, and v3.7.0 has no symbols extra.
+    return extra_install_command(SYMBOLS_EXTRA)
 
 
 #: One identifier. ``\w`` is Unicode-aware, so non-ASCII Python identifiers are
