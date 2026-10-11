@@ -47,10 +47,7 @@ none), a file inside the tree or one an MCP client delivered does not turn it on
 whether it writes ``enabled: true`` or leaves the section out while the
 reporter's default is on (a file that replaces the operator's config would
 otherwise return the reporter to that default). ``enabled: false`` only narrows
-what is sent, so it applies from any config (``turns_a_reporter_off``), except
-the config a shard recorded: ``ash merge`` takes ``enabled`` from the operator
-alone, in both directions (``UntrustedSource.enabled_from_trusted_only``), so a
-scanned repository cannot stop a destination the operator chose. A reporter that declares no ``destination_options``
+what is sent, so it applies from any config (``turns_a_reporter_off``). A reporter that declares no ``destination_options``
 writes only local files, and its ``enabled`` still applies from the tree. Under
 the MCP server the default ``denied_paths`` also refuse a client's file that turns
 a built-in AWS reporter on, and every other option of the Bedrock reporter, which
