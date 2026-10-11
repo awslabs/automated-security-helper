@@ -7,7 +7,7 @@ scanner's tool, version and options, and [Choose scanners](../how-to/choose-scan
 shows how to turn them on and off.
 
 Community plugins run only when you load their module with `ash_plugin_modules` or
-`--ash-plugin-modules`; see [Community plugins](../plugins/community.md).
+`--ash-plugin-modules`; see [Community plugins](../docs/plugins/community/index.md).
 
 ## By stack {#by-stack}
 
