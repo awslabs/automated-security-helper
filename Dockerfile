@@ -454,12 +454,16 @@ RUN set -ue; mkdir -p "${TRIVY_CACHE_DIR}" && chmod 777 "${TRIVY_CACHE_DIR}"; \
 # utils/tool_downloads.py) and installed here as root, mode 0755/0644, so the scan
 # user cannot rewrite the rules a later scan trusts. `ash dependencies install`
 # below finds the bundle already in place, by its manifest, and leaves it alone.
+# Under /usr/share rather than /deps, whose cache directories stay writable for the
+# scanners: the bundle and every directory above it are root's and writable by no one
+# else, which `--assert-root-only` checks here and again in the final stage.
 ARG CFN_GUARD_VERSION="3.2.1"
-ENV ASH_CFN_GUARD_RULES_DIR="/deps/cfn-guard-rules"
+ENV ASH_CFN_GUARD_RULES_DIR="/usr/share/ash/cfn-guard-rules"
 RUN with-retry 'install-pinned-tool cfn-guard -b /usr/local/bin' && \
     with-retry "install-pinned-tool aws-guard-rules-registry --rules-bundle -d ${ASH_CFN_GUARD_RULES_DIR}"
 RUN cfn-guard --version && \
-    test -s "${ASH_CFN_GUARD_RULES_DIR}/aws-guard-rules-registry-1.0.2/wa-Security-Pillar.guard"
+    test -s "${ASH_CFN_GUARD_RULES_DIR}/aws-guard-rules-registry-1.0.2/wa-Security-Pillar.guard" && \
+    install-pinned-tool --assert-root-only "${ASH_CFN_GUARD_RULES_DIR}"
 
 # opengrep has no release archive for install-pinned-tool to read license files from:
 # it is a bare executable that `ash dependencies install` puts in place below. So its
@@ -606,6 +610,9 @@ RUN adduser --disabled-password --disabled-login \
 # user by default.
 RUN chown -R ${UID}:${GID} ${ASHUSER_HOME} /src /out && \
     chmod 750 -R ${ASHUSER_HOME} /src /out
+
+# The rules bundle a scan trusts is still root's after every change above.
+RUN install-pinned-tool --assert-root-only "${ASH_CFN_GUARD_RULES_DIR}"
 
 USER ${UID}:${GID}
 

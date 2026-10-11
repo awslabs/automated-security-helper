@@ -1662,3 +1662,75 @@ class TestUvToolPins:
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.split() == installer.uv_tool_pins(pins)
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX ownership and modes")
+class TestAssertRootOnly:
+    """`--assert-root-only`: nobody but the owner can change the path or move it.
+
+    The tests trust their own uid, since they cannot create files owned by root.
+    """
+
+    def _tree(self, tmp_path, parent_mode):
+        parent = tmp_path / "shared"
+        rules = parent / "rules" / "bundle"
+        rules.mkdir(parents=True)
+        (rules / "a.guard").write_text("rule a { }\n")
+        for path in (rules.parent, rules):
+            path.chmod(0o755)
+        (rules / "a.guard").chmod(0o644)
+        parent.chmod(parent_mode)
+        return rules.parent
+
+    def _problems(self, path):
+        return installer.root_only_problems([path], (0, os.getuid()))
+
+    def test_a_root_only_tree_passes(self, tmp_path):
+        assert self._problems(self._tree(tmp_path, 0o755)) == []
+
+    def test_a_world_writable_parent_without_the_sticky_bit_fails(self, tmp_path):
+        """In a directory anyone can write, the rules directory could be renamed."""
+        target = self._tree(tmp_path, 0o777)
+        problems = self._problems(target)
+        assert any(str(target.parent) in p and "write" in p for p in problems)
+
+    def test_a_sticky_world_writable_parent_passes(self, tmp_path):
+        assert self._problems(self._tree(tmp_path, 0o1777)) == []
+
+    def test_a_writable_file_inside_fails(self, tmp_path):
+        target = self._tree(tmp_path, 0o755)
+        (target / "bundle" / "a.guard").chmod(0o666)
+        assert any("a.guard" in p for p in self._problems(target))
+
+    def test_a_sticky_directory_inside_still_fails(self, tmp_path):
+        """Inside the target, sticky is no excuse: the content itself must be root's."""
+        target = self._tree(tmp_path, 0o755)
+        (target / "bundle").chmod(0o1777)
+        assert any("bundle" in p for p in self._problems(target))
+
+    def test_an_owner_that_is_not_trusted_fails(self, tmp_path):
+        target = self._tree(tmp_path, 0o755)
+        problems = installer.root_only_problems([target], (0,))
+        assert any(f"owned by uid {os.getuid()}" in p for p in problems)
+
+    def test_the_mode_exits_nonzero_and_names_the_path(self, tmp_path):
+        target = self._tree(tmp_path, 0o777)
+        result = subprocess.run(  # nosec B603 - fixed interpreter and script path
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                str(SCRIPT),
+                "--assert-root-only",
+                str(target),
+                "--trusted-uid",
+                str(os.getuid()),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode == 1
+        assert str(target.parent) in result.stderr
+        target.parent.chmod(0o755)

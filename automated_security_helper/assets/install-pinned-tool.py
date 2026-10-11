@@ -1086,8 +1086,93 @@ def third_party_main(argv: "list[str]") -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Root-only install targets
+#
+# The image installs content a later scan trusts (the cfn-guard rules bundle) as
+# root, so the scan user cannot change it. A file's own mode is not enough: in a
+# directory the scan user can write, it can rename the file or its directory away
+# and put another in its place, which the sticky bit is what prevents. So the
+# check covers every ancestor up to "/" as well as everything under the target.
+# ---------------------------------------------------------------------------
+
+_ASSERT_ROOT_ONLY = "--assert-root-only"
+
+
+def root_only_problems(
+    paths: "list[Path]", trusted_uids: "tuple[int, ...]" = (0,)
+) -> "list[str]":
+    """Why each of ``paths`` could be changed by a user other than its owner.
+
+    A path passes when it and everything under it is owned by a trusted uid and
+    writable by neither group nor others, and when every ancestor up to "/" is
+    owned by a trusted uid and either writable by neither group nor others, or a
+    directory with the sticky bit (a user who can write it still cannot rename or
+    remove what someone else owns, which is what /tmp relies on). Symlinks are not
+    followed: each name is checked where it is.
+    """
+    import stat
+
+    problems: "list[str]" = []
+
+    def check(path: Path, allow_sticky: bool) -> None:
+        try:
+            info = os.lstat(path)
+        except OSError as exc:
+            problems.append(f"{path}: {exc.strerror or exc}")
+            return
+        if info.st_uid not in trusted_uids:
+            problems.append(f"{path}: owned by uid {info.st_uid}")
+        writable = info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+        sticky_dir = stat.S_ISDIR(info.st_mode) and info.st_mode & stat.S_ISVTX
+        if writable and not (allow_sticky and sticky_dir):
+            problems.append(
+                f"{path}: mode {stat.filemode(info.st_mode)} lets group or others "
+                "write it"
+            )
+
+    for given in paths:
+        target = Path(os.path.abspath(given))
+        for ancestor in reversed(target.parents):
+            check(ancestor, allow_sticky=True)
+        check(target, allow_sticky=False)
+        if target.is_dir() and not target.is_symlink():
+            for root, dirs, files in os.walk(target):
+                for name in sorted(dirs) + sorted(files):
+                    check(Path(root) / name, allow_sticky=False)
+    return problems
+
+
+def assert_root_only_main(argv: "list[str]") -> int:
+    parser = argparse.ArgumentParser(
+        prog=f"install-pinned-tool {_ASSERT_ROOT_ONLY}",
+        description=(
+            "Fail unless each PATH, everything under it and every ancestor is "
+            "owned by root and cannot be changed by any other user."
+        ),
+    )
+    parser.add_argument("paths", nargs="+", metavar="PATH")
+    parser.add_argument(
+        "--trusted-uid",
+        type=int,
+        action="append",
+        default=[],
+        help="another owner to accept besides root (repeatable; for tests)",
+    )
+    args = parser.parse_args(argv)
+    problems = root_only_problems([Path(p) for p in args.paths], (0, *args.trusted_uid))
+    for problem in problems:
+        print(f"root-only check: {problem}", file=sys.stderr)
+    if problems:
+        return 1
+    print(f"Root-only: {', '.join(args.paths)}")
+    return 0
+
+
 def main(argv: "list[str] | None" = None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == _ASSERT_ROOT_ONLY:
+        return assert_root_only_main(argv[1:])
     if argv and argv[0] in _THIRD_PARTY_MODES:
         return third_party_main(argv)
     parser = argparse.ArgumentParser(
