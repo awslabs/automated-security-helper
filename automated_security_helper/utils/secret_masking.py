@@ -114,9 +114,10 @@ def _mask_secret_value(secret: str) -> str:
 #   occurs as a whole token in any string of any result.
 #
 # A secret finding is one from a secrets scanner (``utils/scanner_tool_types.py``),
-# one tagged ``secret`` or ``secrets``, one of the rules listed in
-# ``_SECRET_RULE_IDS`` / ``_SECRET_RULE_PREFIXES``, one whose rule metadata is
-# tagged secret, or one whose message quotes a value as above.
+# one tagged ``secret``, ``secrets`` or a hard-coded credential CWE (798, 259,
+# 321), one of the rules listed in ``_SECRET_RULE_IDS`` / ``_SECRET_RULE_PREFIXES``
+# or with a ``secrets`` segment in its id (``generic.secrets.*``), one whose rule
+# metadata carries such a tag, or one whose message quotes a value as above.
 #
 # The masking is idempotent: a masked line no longer matches anything, and a
 # masked value no longer equals the value. Lines that are not at a secret
@@ -130,6 +131,20 @@ _SECRET_RULE_IDS = frozenset({"B105", "B106", "B107"})
 #: checkov's secrets framework.
 _SECRET_RULE_PREFIXES = ("CKV_SECRET_",)
 _SECRET_TAGS = frozenset({"secret", "secrets"})
+#: The hard-coded credential CWEs, in every spelling scanners tag them with:
+#: semgrep and opengrep write "CWE-798: Use of Hard-coded Credentials", bandit
+#: "external/cwe/cwe-259". 798 is credentials, 259 a password, 321 a key.
+_SECRET_CWE = re.compile(r"(?i)(?:^|[^0-9a-z])cwe-(?:798|259|321)(?![0-9])")
+#: A ``secrets`` segment in a rule id: semgrep's and opengrep's
+#: ``generic.secrets.*`` rules, which the default p/ci ruleset holds.
+_SECRET_RULE_ID = re.compile(r"(?i)(?:^|\.)secrets?\.")
+
+
+def _is_secret_tag(tag: Any) -> bool:
+    return isinstance(tag, str) and (
+        tag.lower() in _SECRET_TAGS or bool(_SECRET_CWE.search(tag))
+    )
+
 
 #: Messages that quote the value a finding matched.
 _VALUE_IN_MESSAGE = (
@@ -177,8 +192,13 @@ def _physical_locations_of(result: Any) -> Iterable[Any]:
             yield physical
 
 
-def _secret_rule_ids_from_metadata(sarif_report: Any) -> Set[str]:
-    """IDs of rules a tool's rule metadata tags as secret rules (trivy's, for one)."""
+def secret_rule_ids(sarif_report: Any) -> Set[str]:
+    """IDs of rules a tool's rule metadata marks as secret rules.
+
+    A rule is a secret rule when its tags include ``secret``/``secrets`` (trivy's)
+    or a hard-coded credential CWE (``_SECRET_CWE``: semgrep's and opengrep's
+    ``generic.secrets.*`` rules, whose results carry no tags of their own).
+    """
     found: Set[str] = set()
     for run in getattr(sarif_report, "runs", None) or []:
         tool = getattr(run, "tool", None)
@@ -187,9 +207,7 @@ def _secret_rule_ids_from_metadata(sarif_report: Any) -> Set[str]:
         for component in components:
             for rule in getattr(component, "rules", None) or []:
                 tags = getattr(getattr(rule, "properties", None), "tags", None) or []
-                if any(
-                    isinstance(tag, str) and tag.lower() in _SECRET_TAGS for tag in tags
-                ):
+                if any(_is_secret_tag(tag) for tag in tags):
                     if getattr(rule, "id", None):
                         found.add(rule.id)
     return found
@@ -206,9 +224,9 @@ def is_secret_finding(result: Any, secret_rule_ids: Set[str] = frozenset()) -> b
     rule_id = getattr(result, "ruleId", None) or ""
     if rule_id in _SECRET_RULE_IDS or rule_id in secret_rule_ids:
         return True
-    if rule_id.startswith(_SECRET_RULE_PREFIXES):
+    if rule_id.startswith(_SECRET_RULE_PREFIXES) or _SECRET_RULE_ID.search(rule_id):
         return True
-    if any(tag.lower() in _SECRET_TAGS for tag in result_tags(result)):
+    if any(_is_secret_tag(tag) for tag in result_tags(result)):
         return True
     if SECRETS_TOOL_TYPE in result_tool_types(result):
         return True
@@ -301,9 +319,9 @@ def _mask_message_values(text: str) -> str:
 
 def _index_secrets(sarif_report: Any) -> _SecretIndex:
     index = _SecretIndex()
-    secret_rule_ids = _secret_rule_ids_from_metadata(sarif_report)
+    rule_ids = secret_rule_ids(sarif_report)
     for result in sarif_report.get_all_results() or []:
-        if not is_secret_finding(result, secret_rule_ids):
+        if not is_secret_finding(result, rule_ids):
             continue
         for physical in _physical_locations_of(result):
             uri = _normalized_uri(

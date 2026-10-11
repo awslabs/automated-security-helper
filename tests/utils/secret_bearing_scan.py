@@ -658,3 +658,138 @@ def results_without_masking(source_dir: Path, output_dir: Path):
     model.sarif.merge_sarif_report(bandit)
     model.sarif.merge_sarif_report(detect_secrets_report(source_dir, output_dir))
     return model
+
+
+#: The two p/ci secret rules whose results ``tests/test_data/scanners/semgrep/
+#: semgrep.src.json`` holds, as opengrep 1.30.2 writes them in its SARIF. Captured
+#: once by running opengrep offline on ``FIXTURE_FILES`` with those rules (their
+#: ids, messages and metadata copied from that file, and semgrep-rules' published
+#: patterns); semgrep writes the same SARIF. The rule metadata holds no value.
+_PCI_SECRET_RULES: List[Tuple[str, str, str]] = [
+    (
+        (
+            "generic.secrets.security.detected-aws-access-key-id-value."
+            "detected-aws-access-key-id-value"
+        ),
+        (
+            "AWS Access Key ID Value detected. This is a sensitive credential and "
+            "should not be hardcoded here. Instead, read this value from an "
+            "environment variable or keep it in a separate, private file."
+        ),
+        "settings.py",
+    ),
+    (
+        (
+            "generic.secrets.security.detected-aws-secret-access-key."
+            "detected-aws-secret-access-key"
+        ),
+        "AWS Secret Access Key detected",
+        "creds.py",
+    ),
+]
+
+
+def opengrep_secret_sarif(
+    driver_name: str = "Opengrep OSS", version: str = "1.30.2"
+) -> Dict[str, Any]:
+    """The SARIF opengrep (or semgrep) writes for the fixture's two AWS values.
+
+    The rules carry ``CWE-798: Use of Hard-coded Credentials`` in their tags and no
+    ``secret`` tag, and the results carry no tags at all, which is how these
+    scanners report a secret. Each snippet is the matched line, rebuilt from the
+    file text; the fingerprint is computed here so this source holds no long hex.
+    """
+    rules = []
+    results = []
+    for rule_id, message, name in _PCI_SECRET_RULES:
+        help_markdown = (
+            f"{message}\n\n<b>References:</b>\n"
+            f" - [Rule](https://semgrep.dev/r/{rule_id})\n"
+            " - [https://owasp.org/Top10/A07_2021-Identification_and_Authentication"
+            "_Failures](https://owasp.org/Top10/A07_2021-Identification_and_"
+            "Authentication_Failures)\n"
+        )
+        rules.append(
+            {
+                "defaultConfiguration": {"level": "error"},
+                "fullDescription": {"text": message},
+                "help": {"markdown": help_markdown, "text": message},
+                "helpUri": f"https://semgrep.dev/r/{rule_id}",
+                "id": rule_id,
+                "name": rule_id,
+                "properties": {
+                    "precision": "very-high",
+                    "tags": [
+                        "CWE-798: Use of Hard-coded Credentials",
+                        "LOW CONFIDENCE",
+                        "OWASP-A07:2021 - Identification and Authentication Failures",
+                        "security",
+                    ],
+                },
+                "shortDescription": {
+                    "text": f"{driver_name.split()[0]} Finding: {rule_id}"
+                },
+            }
+        )
+        lines = _lines(name)
+        line_number = next(
+            number
+            for number, text in enumerate(lines, start=1)
+            if SECRETS.key_id in text or SECRETS.long_key in text
+        )
+        line = lines[line_number - 1].rstrip("\n")
+        value = SECRETS.key_id if SECRETS.key_id in line else SECRETS.long_key
+        start = line.index(value) + 1 if value == SECRETS.key_id else 1
+        end = start + len(value) if value == SECRETS.key_id else len(line) + 1
+        results.append(
+            {
+                "fingerprints": {
+                    "matchBasedId/v1": hashlib.sha512(
+                        f"{rule_id}:{line}".encode()
+                    ).hexdigest()
+                    + "_0"
+                },
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {
+                                "uri": f"src/{name}",
+                                "uriBaseId": "%SRCROOT%",
+                            },
+                            "region": {
+                                "endColumn": end,
+                                "endLine": line_number,
+                                "snippet": {"text": line},
+                                "startColumn": start,
+                                "startLine": line_number,
+                            },
+                        }
+                    }
+                ],
+                "message": {"text": message},
+                "properties": {},
+                "ruleId": rule_id,
+            }
+        )
+    return {
+        "version": "2.1.0",
+        "$schema": (
+            "https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/schemas/"
+            "sarif-schema-2.1.0.json"
+        ),
+        "runs": [
+            {
+                "invocations": [
+                    {"executionSuccessful": True, "toolExecutionNotifications": []}
+                ],
+                "results": results,
+                "tool": {
+                    "driver": {
+                        "name": driver_name,
+                        "rules": rules,
+                        "semanticVersion": version,
+                    }
+                },
+            }
+        ],
+    }

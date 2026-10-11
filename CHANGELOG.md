@@ -1746,7 +1746,9 @@
   snippet line at a line a secret finding reports) and by value (each value a
   secret finding's message quotes, wherever it recurs). Snippets without a secret
   are unchanged. The B105-B107 message is now masked in every output, not only the
-  flat model's `description`. See "Secret values in reports" in
+  flat model's `description`. Secret findings include semgrep's and opengrep's
+  `generic.secrets.*` rules, recognized by the CWE-798, CWE-259 or CWE-321 tag their
+  rules carry or by the `secrets` segment in their id. See "Secret values in reports" in
   docs/content/docs/output-formats.md.
 
 - **Stored results are masked when they are read back.** `ash report`,

@@ -430,8 +430,10 @@ above, the Bedrock summary and MCP responses get the masked results:
 
 A secret finding is one from a secrets scanner (detect-secrets, ferret-scan, or a
 result tagged `tool_type::SECRETS`), one tagged `secret` or `secrets`, a bandit
-B105, B106 or B107, a checkov `CKV_SECRET_*` rule, or a rule a tool's own rule
-metadata tags as a secret rule. Snippets with no secret in them are left as they
+B105, B106 or B107, a checkov `CKV_SECRET_*` rule, a rule with a `secrets` segment
+in its id (semgrep's and opengrep's `generic.secrets.*`), or a rule whose tags, in
+the tool's rule metadata or on the result, carry `secret`, `secrets` or a
+hard-coded credential CWE: CWE-798, CWE-259 or CWE-321. Snippets with no secret in them are left as they
 were.
 
 Results that are read back from an existing `ash_aggregated_results.json` are
