@@ -63,7 +63,7 @@ Path hashes let clients detect that the operator rotated a profile file undernea
 
 `patch_ops` and `override_yaml` are mutually exclusive, and the parameter is `profile_name` — a profile must be named in every mode, including override.
 
-Every later call in the session that does not name a config of its own runs under the bound one: `run_ash_scan`, `resolve_ash_workspace` and `run_ash_workspace_scan`. A `config_path` passed on the call still wins, because naming one is the more specific statement. In workspace mode the bound config is the fallback for a project that declares no `.ash.yaml` of its own; a project with one keeps it, which is what lets a single workspace span differently-configured repositories.
+Every later call in the session that does not name a config of its own runs under the bound one: `run_ash_scan`, `resolve_ash_workspace` and `run_ash_workspace_scan`. A `config_path` passed on the call still wins, because naming one is the more specific statement. In workspace mode the bound profile is the operator's config for every project: each field the profile sets is final, a project's own `.ash.yaml` fills only the fields it leaves unset, and a project with no `.ash.yaml` runs under the bound config alone. A copy the client patched is not layered over a project's own config. See [Which config each project gets](workspace-mode.md#which-config-each-project-gets).
 
 ```python
 await mcp__ash__select_profile(profile_name="strict")
@@ -73,7 +73,7 @@ await mcp__ash__run_ash_scan()  # runs under "strict"
 
 The returned `config_path` names a file the server materialized inside your session's own workspace. That is how the binding reaches the scan: the scan entry point takes a config path rather than a config object, so the resolved config is written out and the path passed down. The file is inside the session sandbox, so this session may read it and another session may not. `clear_source` removes it along with the rest of the session workspace, after which calls fall back to ordinary config discovery.
 
-Where the file is depends on the mode. The profile as registered is always written to the session's `config/ash.yaml`, and a static binding (or one with an empty `patch_ops`) returns that path. A binding with a non-empty `patch_ops`, or with `override_yaml`, returns `client-config/ash.yaml`, which holds the profile after your change and counts as your config, not the operator's; see [A patched value is the client's](#a-patched-value-is-the-clients). Binding again without a patch removes `client-config/ash.yaml`.
+Where the file is depends on the mode. The profile as registered is always written to the session's `config/ash.yaml`, holding only the fields the profile sets (so it can be layered over a workspace project's own config), and a static binding (or one with an empty `patch_ops`) returns that path. A binding with a non-empty `patch_ops`, or with `override_yaml`, returns `client-config/ash.yaml`, which holds the profile after your change and counts as your config, not the operator's; see [A patched value is the client's](#a-patched-value-is-the-clients). Binding again without a patch removes `client-config/ash.yaml`.
 
 Sessions do not share a binding, and re-binding replaces the previous one for that session only.
 

@@ -36,9 +36,15 @@ resolve_ash_workspace(
 The response carries:
 
 - `plan` — the rendered plan, the same text `ash --workspace ... --dry-run` prints. Written for a human to read; its layout is not a contract.
-- `projects` — the same decisions as structured data. Read this if you need to branch on a threshold or a scanner list.
+- `projects` — the same decisions as structured data. Read this if you need to branch on a threshold or a scanner list. Each entry's `config_source` is the project's own config file, or the session's profile for a project with none, and `operator_config` is the profile layered over a project's own config, or `null`. See [Which config each project gets](#which-config-each-project-gets).
 - `skipped_projects` — one entry per dropped project, with a reason.
 - `exit_code` — `0` on success. See [Exit codes](#exit-codes).
+
+### Which config each project gets
+
+The session's profile (the one `select_profile` bound, or the one the call names with `profile`) is the operator's config, as `--config` is on the CLI (see [The operator's config](../cli-reference.md#the-operators-config)). Every field the profile sets is final for every project, and a project's own `.ash.yaml` fills only the fields the profile leaves unset. A project without a config of its own runs under the session's config alone.
+
+What is layered over a project's own config is the profile as the operator registered it, not a copy the client patched with `patch_ops` or `override_yaml`. A value the client patched in is never final over a project's own config: it applies only to a project with no config of its own, and there it is limited as a config the client delivered is (see [A patched value is the client's](streamable-http.md#a-patched-value-is-the-clients)).
 
 ## run_ash_workspace_scan
 

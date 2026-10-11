@@ -785,6 +785,41 @@
 
 ### Breaking changes
 
+- **In workspace mode, every field the operator's `--config` (or `ASH_CONFIG`)
+  sets is final for every project.** Before, `ash --workspace ... --config <file>`
+  used the file only for a project with no config of its own, and a project's own
+  `.ash.yaml` replaced it, apart from the sandbox grants, plugin modules, scanner
+  config files and reporter destinations, which already came from the operator's
+  file. Now the operator's file is layered over each project's own config, by the `extends`
+  merge rules with the operator's file as the child: a key present in it, or in a
+  base it `extends`, wins whatever its value, mappings merge key by key, and a
+  list it sets replaces the project's list whole (an operator
+  `global_settings.suppressions` list drops each project's own suppressions). The
+  project's config fills only the fields the operator's file leaves unset, a
+  project with no config uses the operator's file alone, and
+  `--config-overrides`, the CLI flags and the workspace policy apply after it, as
+  before. So `fail_on_findings` and `fail_on_incomplete_scanners` set in the
+  operator's file can no longer be turned off by a project. To keep a project's
+  own value for a field, leave the field out of `--config`.
+
+  - `--dry-run` and the plan now use `--config` too. They did not before, so they
+    could report a threshold the scan did not run with. The plan names the
+    layered file in a new `operator_config` field and an `operator:` line.
+  - The MCP workspace tools do the same with the session's profile, the one
+    `select_profile` bound or the call's `profile`. What is layered is the profile
+    as the operator registered it, never a copy the client patched with
+    `patch_ops` or `override_yaml`, so a client's value is never final over a
+    project's own config. `resolve_ash_workspace`'s `projects` entries carry
+    `operator_config`. The session's `config/ash.yaml` now holds only the fields
+    the profile sets; it loads as the same values as before.
+  - Rejected: ignoring every project's own config when `--config` is given, which
+    loses the per-project settings a workspace exists to keep; and taking the
+    operator's file as the base with the project's merged over it, which would
+    still let a project turn off `fail_on_findings` or
+    `fail_on_incomplete_scanners` that the operator set.
+  - A single-directory scan is unchanged: there `--config` replaces discovery, and
+    the repository's own config is not read.
+
 - **MCP scans can now end in a new terminal status, `incomplete`.** Clients
   should treat it as terminal with partial coverage: the run finished and its
   results are readable, but at least one selected scanner did not complete

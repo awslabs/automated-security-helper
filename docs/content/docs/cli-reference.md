@@ -201,6 +201,22 @@ Folder paths are relative to the directory holding the workspace file, which bec
 
 `--dry-run` resolves and validates the workspace, prints the resulting plan, and exits 0 without scanning anything. Without it, the same plan is what gets scanned — resolved once, so what you inspect is what runs.
 
+#### The operator's config
+
+`--config` (or `ASH_CONFIG`) in workspace mode is the operator's config for every project. Every field it sets is final, and a project's own config fills only the fields it leaves unset:
+
+- A project with a config of its own uses that file with the operator's file layered over it. "Sets" means the key is present in the operator's file or in a base it `extends`, whatever its value: `fail_on_findings: true` in the operator's file holds for every project even though `true` is the default.
+- The layering follows the [`extends` merge rules](configuration-guide.md#extending-another-configuration), with the operator's file as the child. Mappings merge key by key, so the operator's `scanners.bandit.enabled` and a project's `scanners.bandit.options` both apply. A list the operator sets replaces the project's list whole: an operator `global_settings.suppressions` list drops each project's own suppressions. The operator's file is resolved on its own first, its `extends` and `patch` included, so its `patch` operations change only its own settings and never reach a project's.
+- A project without a config of its own uses the operator's file alone.
+- `--config-overrides` and the CLI flags (`--fail-on-findings`, `--sandbox` and the others) apply after both, so they win over the operator's file and over every project.
+- A workspace policy file applies after all of this, as described below.
+
+To leave a field to each project, leave it out of `--config`. `--dry-run` prints an `operator:` line under each project the file was layered over, and the threshold and scanners it prints are the layered result.
+
+The settings a repository's config cannot choose ([Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)) are still limited for a project's own file. A value the operator's file sets is the operator's and is kept; a value only the project's file sets is limited as before.
+
+In a single-directory scan, `--config` replaces discovery instead: the repository's own config is not read at all.
+
 #### Workspace policy
 
 Each project is judged against its own configuration, so there is nowhere in a project's config to say something about the workspace as a whole. That goes in a workspace policy file, which ASH looks for at `ash-workspace.yaml` (or `.yml`/`.json`) in the workspace root or its `.ash` directory. Having none is not an error.
@@ -244,7 +260,7 @@ Scanners in `additional_scanners` that a project already enables run under that 
 
 #### What each project gets
 
-Each project is scanned in its own scope: its own directory as the scan root, its own configuration, its own suppressions, and its own severity threshold. A project's findings and its pass/fail verdict are the same as `ash --source-dir <that project>` would produce. A suppression written in one project's config does not apply to another, even for the same rule at the same relative path.
+Each project is scanned in its own scope: its own directory as the scan root, its own configuration (with the fields the operator's `--config` sets taken from that file, see [The operator's config](#the-operators-config)), its own suppressions, and its own severity threshold. Without `--config`, a project's findings and its pass/fail verdict are the same as `ash --source-dir <that project>` would produce. A suppression written in one project's config does not apply to another, even for the same rule at the same relative path.
 
 Output is laid out per project, with a workspace-level roll-up beside it:
 

@@ -54,6 +54,12 @@ You can also specify a custom configuration file path using the `--config` optio
 ash --config /path/to/my-config.yaml
 ```
 
+In a single-directory scan, that file replaces discovery, so the repository's own
+config is not read. In workspace mode (`ash --workspace`) it is layered over each
+project's own config instead: every field it sets is final for every project, and
+a project's config fills only the fields it leaves unset. See
+[The operator's config](cli-reference.md#the-operators-config).
+
 ### Configuring ASH in pyproject.toml
 
 `[tool.ash]` holds the same settings as `.ash.yaml`, written as TOML, and is
