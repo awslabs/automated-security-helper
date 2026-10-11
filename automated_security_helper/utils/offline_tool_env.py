@@ -69,6 +69,9 @@ OFFLINE_TOOL_ENVIRONMENT: Mapping[str, str] = {
     # The Go toolchain syft or grype may run: no module proxy, no toolchain download.
     "GOPROXY": "off",
     "GOTOOLCHAIN": "local",
+    # git run by a tool (trivy's Terraform module sources, syft's vcpkg registries)
+    # reaches no remote; only local paths are allowed.
+    "GIT_ALLOW_PROTOCOL": "file",
 }
 
 

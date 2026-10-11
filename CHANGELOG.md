@@ -162,6 +162,16 @@
   offline a pnpm project is skipped with a warning naming the lockfile, as yarn 2 and
   later already were.
 
+- **Offline, trivy-repo does not run trivy's Terraform checks.** trivy downloads the
+  source of every `module` block in the scanned Terraform, from the registry, with the
+  host's `git` and its credentials, or over HTTPS, whatever offline flags it is given;
+  in an offline scan with the trivy plugin enabled that was the only request left.
+  Offline, ASH now passes `--misconfig-scanners` with the installed trivy's default
+  list minus `terraform` (or, when that list cannot be read, leaves `misconfig` out),
+  and logs a warning. checkov still checks Terraform. Any `git` a scanner tool runs
+  offline gets `GIT_ALLOW_PROTOCOL=file`. See
+  [What offline mode turns off](docs/content/docs/advanced-usage.md#what-offline-mode-turns-off).
+
 - **detect-secrets verifies secrets only when the operator turns it on, and never
   offline.** Verification sends each candidate secret to the service that issued it;
   for an AWS key that is a request to `sts.amazonaws.com` signed with the key pair

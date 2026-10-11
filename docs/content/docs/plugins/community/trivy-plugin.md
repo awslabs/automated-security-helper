@@ -1498,6 +1498,14 @@ also passes `--config`: `TRIVY_CONFIG` when that names a file outside the scanne
 otherwise an empty config, so a `trivy.yaml` in the scanned repository is not read
 offline. Online, trivy reads a `trivy.yaml` from the source directory as before.
 
+Offline, trivy's Terraform checks do not run. trivy downloads the source of every
+`module` block it evaluates (a registry module from registry.terraform.io, a `git::`
+source with the host's `git`, an `https://` archive), whatever offline flags it is
+given, so ASH passes `--misconfig-scanners` with the installed trivy's default list
+minus `terraform`, read from `trivy repository --help`. When that list cannot be read,
+the `misconfig` scanner is left out of the offline scan, with a warning. checkov
+still checks Terraform offline.
+
 The copied database has to be current. After the scan ASH reads its `UpdatedAt`
 (from `trivy version --format json`) and exits 1 once it is more than 24 hours old,
 which is trivy's own rule: the published database sets `NextUpdate` 24 hours after

@@ -189,6 +189,13 @@ over the network on their own:
   outside the scanned tree, or an empty config otherwise. A `trivy.yaml` in the scanned
   repository is not read offline, because its settings can reach the network (a VEX
   repository, client/server mode). Online, trivy still reads it.
+- trivy-repo does not run trivy's Terraform checks offline. trivy downloads the source
+  of every `module` block a `.tf` file names (from the Terraform registry, with the
+  host's `git`, or over HTTPS), and has no setting that stops it, so ASH passes
+  `--misconfig-scanners` with trivy's own default list minus `terraform`. If that list
+  cannot be read from `trivy repository --help`, trivy's misconfiguration checks are
+  skipped offline. checkov still checks Terraform. Any `git` a tool runs offline gets
+  `GIT_ALLOW_PROTOCOL=file`, so it reaches no remote.
 - syft runs from outside the scanned tree and is not given a `.syft.yaml` from it; a
   `config_file` outside the tree is still passed. Online, syft still uses the tree's
   `.syft.yaml`.

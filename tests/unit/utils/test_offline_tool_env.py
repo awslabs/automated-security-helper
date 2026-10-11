@@ -67,6 +67,7 @@ EXPECTED_OFFLINE_ENVIRONMENT = {
     "GRYPE_EXTERNAL_SOURCES_ENABLE": "false",
     "GOPROXY": "off",
     "GOTOOLCHAIN": "local",
+    "GIT_ALLOW_PROTOCOL": "file",
 }
 
 
