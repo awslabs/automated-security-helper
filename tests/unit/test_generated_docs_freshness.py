@@ -1080,7 +1080,10 @@ def test_mcp_notes_match_the_server() -> None:
     source_dir = next(r for r in scan.splitlines() if r.startswith("| `source_dir` |"))
     assert "refused" in source_dir and "working directory" in source_dir
     config = next(r for r in scan.splitlines() if r.startswith("| `config_path` |"))
-    assert "`select_profile`" in config
+    # `ash mcp` registers no profiles (its wrapper does not pass --profile on), so the
+    # select_profile fallback in run_ash_scan cannot fire and the note leaves it out.
+    assert "discovers in the source directory" in config and "`ASH_CONFIG`" in config
+    assert "select_profile" not in config
     clean = next(r for r in scan.splitlines() if r.startswith("| `clean_output` |"))
     assert "`ash_aggregated_results.json`" in clean and "reports" not in clean.lower()
     git = _section(text, "## set_source_git")
