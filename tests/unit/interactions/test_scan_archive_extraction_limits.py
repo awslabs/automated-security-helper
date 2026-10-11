@@ -128,7 +128,7 @@ def scan(tmp_path_factory):
         cwd=base,
     )
     # A precondition of every test below rather than a test of its own. The exit
-    # code is not asserted: what a refusal does to it is reported, not fixed, here.
+    # code is asserted in test_scan_archive_refusal_exit_status.py, not here.
     results_file = output / "ash_aggregated_results.json"
     assert results_file.is_file(), (
         f"exit {completed.returncode}\n"

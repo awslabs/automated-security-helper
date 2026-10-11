@@ -166,6 +166,11 @@ UNREADABLE = [
         gzip.compress(b'{"a": 1}\n' * 200)[:-30],
         id="damaged-plain-gzip",
     ),
+    pytest.param(
+        "crc.json.gz",
+        gzip.compress(b'{"a": 1}\n' * 200)[:-8] + b"\x00" * 4 + struct.pack("<I", 1800),
+        id="plain-gzip-bad-crc",
+    ),
     pytest.param("empty.zip", b"", id="empty-file"),
     pytest.param("noise.tar.gz", b"\x1f\x8b" + b"\x00" * 64, id="damaged-gzip"),
     pytest.param(

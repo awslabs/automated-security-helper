@@ -719,12 +719,11 @@ def _decompress_plain_gzip(
         0o644,
     )
     with gzip.GzipFile(fileobj=handle, mode="rb") as source, os.fdopen(fd, "wb") as out:
+        # A copy that stops short of room + 1 bytes stopped because the stream
+        # ended, and GzipFile checks the CRC and length before it reports the end,
+        # so a damaged stream or a bad CRC has raised by then.
         _copy_at_most(source, out, room + 1)
         written = out.tell()
-        if written <= room:
-            # Read to the end, so a damaged stream or a bad CRC raises here.
-            if source.read(1):
-                written += 1
     budget.admit(name, written)
 
 
@@ -825,11 +824,6 @@ class ArchiveConverterConfig(ConverterPluginConfigBase):
 @ash_converter_plugin
 class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
     """Converter implementation for Archive file extraction."""
-
-    def model_post_init(self, context):
-        if self.config is None:
-            self.config = ArchiveConverterConfig()
-        return super().model_post_init(context)
 
     @staticmethod
     def _open_tar(
