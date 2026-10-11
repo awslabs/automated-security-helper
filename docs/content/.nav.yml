@@ -11,14 +11,14 @@ nav:
       - Manage scanner tools: docs/advanced-usage.md
       - Configure ASH: how-to/configure.md
       - Choose scanners: how-to/choose-scanners.md
-      - Set the pass/fail gate: how-to/set-the-gate.md
+      - Set the gate: how-to/set-the-gate.md
       - Suppress findings: how-to/suppress-findings.md
-      - Read the results: how-to/read-results.md
+      - Read scan results: how-to/read-results.md
       - Export reports: how-to/export-reports.md
-      - Sandbox scanners: docs/scanner-sandbox.md
+      - Enable the scanner sandbox: docs/scanner-sandbox.md
       - Run in a container: how-to/run-in-a-container.md
       - Run offline: how-to/run-offline.md
-      - Use pre-commit: how-to/pre-commit.md
+      - Run ASH with pre-commit: how-to/pre-commit.md
       - CI systems:
           - GitHub Actions: how-to/ci/github-actions.md
           - GitLab CI: how-to/ci/gitlab-ci.md
@@ -26,7 +26,7 @@ nav:
       - Scale to large repositories: how-to/scale-large-repos.md
       - Run the MCP server: how-to/mcp-server.md
       - Install an agent plugin: how-to/agent-plugins.md
-      - Guide for AI agents: docs/genai-steering-guide.md
+      - ASH GenAI integration guide: docs/genai-steering-guide.md
       - Deploy on AWS: how-to/deploy-on-aws.md
       - Troubleshoot: how-to/troubleshoot.md
       - Migrate from v2: how-to/migrate-from-v2.md
@@ -34,7 +34,7 @@ nav:
       - How ASH works: concepts/how-ash-works.md
       - Trust model: concepts/trust-model.md
       - Scanning untrusted code: concepts/scanning-untrusted-code.md
-      - Sandbox: concepts/sandbox.md
+      - Scanner sandbox: concepts/sandbox.md
       - Content databases: concepts/content-databases.md
       - Suppressions: concepts/suppressions.md
       - Glossary: concepts/glossary.md
