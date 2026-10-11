@@ -625,6 +625,13 @@
   longer graded. A results file whose SARIF ASH's schema rejects is affected too: its
   findings were dropped silently, and the scanner is now `ERROR` and says so.
 
+  A scanner whose tool reports that its content database does not exist (grype's
+  `database does not exist`, trivy with no `VulnerabilityDB`, an offline rules
+  directory with no rules files) is `ERROR` too, under `content_db_staleness: fail`
+  and `warn` alike. Measured: grype with an empty cache was `PASSED` with 0 findings,
+  and with `--allow-stale-content-db` the scan exited 0. `warn` relaxes the age bound
+  for a database that exists; it no longer makes a missing one acceptable.
+
   **A scan that exited 0 can now exit 1.** That is a scanner whose tool was failing
   all along. With `fail_on_incomplete_scanners: false` the `ERROR` row does not fail
   the scan and the exit code comes from the findings alone, so such a scan still

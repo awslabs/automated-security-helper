@@ -186,7 +186,8 @@ that file is not read. The accepted codes per scanner are in
 [Scanner exit codes](troubleshooting.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
 A results file ASH cannot read as SARIF is `ERROR` too, whatever the exit code, as is
 a scanner result that carries nothing to grade; neither can show that the target is
-clean.
+clean. So is a scanner whose tool reports that its content database does not exist;
+see [Failing on a stale content database](#failing-on-a-stale-content-database).
 
 With the key off, an `ERROR` scanner no longer fails the scan: the exit code comes from
 the findings alone, so a scan whose only problem is a failed scanner exits 0, the same
@@ -239,6 +240,12 @@ how to refresh it. This happens in online and offline mode alike.
 
 A database whose build time cannot be read is treated as stale, because an
 unmeasurable database is not evidence of a fresh one.
+
+A database the tool reports does not exist at all (grype's `database does not
+exist`, no `VulnerabilityDB` from trivy, no rules files in the offline rules
+directory) also makes that scanner `ERROR`, under `fail` and `warn` alike: the scan had
+nothing to match against, so its zero findings are not a result. `warn` relaxes the
+age bound for a database that exists.
 
 To let one scan run against a stale database, pass `--allow-stale-content-db`, or
 set:

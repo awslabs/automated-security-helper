@@ -377,7 +377,8 @@ class TestMeasurement:
         assert record.built == built.replace(microsecond=0)
         assert "grype db status" in record.measured_by
 
-    def test_trivy_without_a_database_is_unknown_and_counts_as_stale(self, tmp_path):
+    def test_trivy_without_a_database_is_absent_and_counts_as_stale(self, tmp_path):
+        """No database at all is more than an unread age: the record says absent."""
         exe = fake_trivy(tmp_path, None)
         record = staleness.measure(
             cdb.get("trivy-db"),
@@ -385,7 +386,53 @@ class TestMeasurement:
             cdb.STALENESS_FAIL,
         )
         assert record.built is None and record.stale and record.enforced
-        assert "could not be read" in record.message()
+        assert record.absent
+        assert "does not exist" in record.message()
+        assert staleness.ContentDbAgeRecord.from_dict(record.to_dict()).absent
+
+    def test_grype_reporting_no_database_is_absent(self, tmp_path):
+        status = {
+            "schemaVersion": "",
+            "path": str(tmp_path / "cache" / "6" / "vulnerability.db"),
+            "valid": False,
+            "error": "database does not exist",
+        }
+        exe = _executable(
+            tmp_path,
+            "grype",
+            f"import sys\nprint({json.dumps(status)!r})\nsys.exit(1)\n",
+        )
+        record = staleness.measure(
+            cdb.get("grype-db"),
+            staleness.ProbeContext(env=dict(os.environ), executable=str(exe)),
+            cdb.STALENESS_WARN,
+        )
+        assert record.absent and record.stale
+        assert "does not exist" in record.message()
+
+    def test_a_database_grype_cannot_date_but_that_exists_is_not_absent(self, tmp_path):
+        """Unreadable is stale, not absent: the file is there and grype says why not."""
+        database = tmp_path / "cache" / "6" / "vulnerability.db"
+        database.parent.mkdir(parents=True)
+        database.write_bytes(b"not sqlite")
+        status = {
+            "schemaVersion": "",
+            "path": str(database),
+            "valid": False,
+            "error": "unable to open database: file is not a database",
+        }
+        exe = _executable(
+            tmp_path,
+            "grype",
+            f"import sys\nprint({json.dumps(status)!r})\nsys.exit(1)\n",
+        )
+        record = staleness.measure(
+            cdb.get("grype-db"),
+            staleness.ProbeContext(env=dict(os.environ), executable=str(exe)),
+            cdb.STALENESS_WARN,
+        )
+        assert record.stale and not record.absent
+        assert "absent" not in record.to_dict()
 
     def test_a_missing_executable_is_unknown_not_fresh(self):
         record = staleness.measure(

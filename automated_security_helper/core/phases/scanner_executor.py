@@ -264,13 +264,15 @@ class ScannerExecutor:
         """Forward to the injected process function, or no-op if not wired."""
         return self._process_fn(results, aggregated_results)
 
-    def _assess_content_databases(self, scanner_plugin: Any, raw_results: Any) -> None:
+    def _assess_content_databases(self, scanner_plugin: Any, raw_results: Any) -> list:
         """Hold the scanner's content databases to their declared age bounds.
 
         Here, at the one place every scanner's result passes through, rather than in each
         scanner's ``scan()``: trivy overrides ``scan()`` entirely, and a check that lived in
         the base template would silently skip it. Only a SARIF result is assessed; see
         ``utils/content_db_staleness.py`` for what is measured and where it is recorded.
+
+        Returns the records, so the caller can tell a database that does not exist.
         """
         from automated_security_helper.schemas.sarif_schema_model import SarifReport
         from automated_security_helper.utils.content_db_staleness import (
@@ -280,9 +282,9 @@ class ScannerExecutor:
         )
 
         if not isinstance(raw_results, SarifReport):
-            return
+            return []
         config = getattr(self.plugin_context, "config", None)
-        assess_scanner(
+        return assess_scanner(
             scanner_plugin,
             raw_results,
             resolve_policy(config),
@@ -327,6 +329,9 @@ class ScannerExecutor:
                 )
 
                 raw_results: Any = None
+                # Set when the scanner's tool reports that a content database it
+                # matches against does not exist; see below.
+                databases_absent: List[str] = []
                 scanner_config_name: str = (
                     str(scanner_config.name)
                     if scanner_config
@@ -420,9 +425,14 @@ class ScannerExecutor:
                                 # Inside the scope: this runs the scanner's own
                                 # binary (`grype db status`), which is that
                                 # scanner's code like any other spawn of it.
-                                self._assess_content_databases(
+                                records = self._assess_content_databases(
                                     scanner_plugin, raw_results
                                 )
+                                databases_absent = [
+                                    record.message()
+                                    for record in records or []
+                                    if getattr(record, "absent", False)
+                                ]
                             if sandbox is not None:
                                 # Again after the scan, for anything a process that
                                 # outlived its spawn left behind, before the results
@@ -648,6 +658,16 @@ class ScannerExecutor:
                     container.targets_failed = _non_negative_int_attr(
                         scanner_plugin, "targets_failed"
                     )
+
+                    # A scan with no database had nothing to match against, so its
+                    # zero findings are not a result. ERROR whatever the staleness
+                    # policy: content_db_staleness relaxes the age bound of a database
+                    # that exists. The SARIF and its records are kept, so the stale
+                    # database is reported as well.
+                    if databases_absent:
+                        container.status = ScannerStatus.ERROR
+                        for message in databases_absent:
+                            container.add_error(message)
 
                     if container.status not in _TERMINAL_SCANNER_STATUSES:
                         container.status = container.determine_status(

@@ -119,6 +119,12 @@ The grype config at .grype.yaml sets db.cache-dir, which ASH does not use: grype
 
 To keep the database somewhere else, set `GRYPE_DB_CACHE_DIR` instead.
 
+A grype run with no database at all is recorded `ERROR`, not `PASSED` with no
+findings: grype exits 1 when it cannot load its database, and ASH also asks grype for
+the database's status after the scan. When grype reports `database does not exist`,
+the scanner is `ERROR` whatever `content_db_staleness` or `--allow-stale-content-db`
+says, and its error says how to create the database.
+
 ## A Scanner Is ERROR With an Exit Code It Does Not Accept
 
 **Symptom**
