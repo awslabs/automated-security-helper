@@ -42,6 +42,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScannerConfig,
     DetectSecretsScannerConfigOptions,
 )
+from automated_security_helper.utils.offline_tool_env import OFFLINE_TOOL_ENVIRONMENT
 from tests.utils.refusing_proxy import (
     RecordingProxy,
     route_through,
@@ -78,8 +79,18 @@ def _plant(directory: Path, *names: str) -> None:
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    """None of these baselines verifies; any request would reach only this."""
+    """None of these baselines verifies; any request would reach only this.
+
+    The in-process scan below also probes every scanner tool's version through
+    ``uv tool run`` and the tool itself, online. uv revalidates its index and checkov
+    asks PyPI for a newer release whenever their caches are cold, which depends on
+    what ran earlier in the process. Those probes are kept off the network the way
+    offline mode keeps them off, so a request here can only come from detect-secrets.
+    """
     scrub_cloud_credentials(monkeypatch)
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    for name, value in OFFLINE_TOOL_ENVIRONMENT.items():
+        monkeypatch.setenv(name, value)
     proxy = RecordingProxy()
     route_through(monkeypatch, proxy)
     yield proxy

@@ -150,6 +150,18 @@
 
 ### Behavior changes
 
+- **Offline, trivy-repo and syft read no config file from the scanned tree, and pnpm
+  projects are not audited.** A `trivy.yaml` in the scanned repository could turn on a
+  VEX repository download or client/server mode, and a `.syft.yaml` remote license and
+  package lookups; both reached the network with every offline flag ASH passed.
+  Offline, trivy now gets `--config` naming `TRIVY_CONFIG` when that is outside the
+  tree, or an empty config, and syft runs from outside the tree without the tree's
+  `.syft.yaml` (a `config_file` outside the tree still applies). So an offline scan of
+  a repository with either file can report differently from an online one, which still
+  reads them. `pnpm audit --offline` sends the dependency list to the registry, so
+  offline a pnpm project is skipped with a warning naming the lockfile, as yarn 2 and
+  later already were.
+
 - **detect-secrets verifies secrets only when the operator turns it on, and never
   offline.** Verification sends each candidate secret to the service that issued it;
   for an AWS key that is a request to `sts.amazonaws.com` signed with the key pair
@@ -1100,6 +1112,18 @@
   states coverage it does not have.
 
 ### Fixes
+
+- **Offline mode turns off the scanner tools' own update, version and telemetry
+  checks.** Measured with a refusing proxy and empty tool caches, an `--offline` scan
+  still contacted check.trivy.dev (trivy's version check; `--skip-check-update` only
+  skips the checks bundle), semgrep.dev (semgrep's version check, in `semgrep scan` and
+  in the `semgrep --version` probe), pypi.org (checkov's update check, which runs on
+  every checkov command) and registry.npmjs.org (npm's update notifier, with
+  `--offline`). Offline, every process ASH starts now gets the variables that turn
+  those checks off, and the syft and grype settings that look things up over the
+  network; trivy-repo also gets `--skip-version-check` and `--disable-telemetry`
+  whatever `disable_telemetry` says, and npm `--no-update-notifier`. See
+  [What offline mode turns off](docs/content/docs/advanced-usage.md#what-offline-mode-turns-off).
 
 - **detect-secrets finds its baseline in the source directory.** A relative
   `scanners.detect-secrets.options.baseline_file`, and the default

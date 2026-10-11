@@ -27,6 +27,7 @@ from typing import (
 
 from automated_security_helper.core.constants import ASH_BIN_PATH
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.offline_tool_env import offline_tool_environment
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.scanned_tree import is_inside_tree
@@ -52,8 +53,16 @@ def _spawn_env(env: Optional[Dict[str, str]]) -> Dict[str, str]:
     ``[Errno 14] Bad address``. A copy is built into a fresh ``envp`` that no other
     thread can touch, and the child sees the same variables. See
     ``utils/process_env.py``.
+
+    In offline mode the variables that turn off each tool's own update, version
+    and telemetry checks are set over it (``utils/offline_tool_env.py``), so a
+    version probe or any other spawn of a tool stays off the network as its scan
+    does.
     """
     env = env if env is not None else snapshot_environ()
+    offline = offline_tool_environment()
+    if offline:
+        env = {**env, **offline}
     scope = _TREE_SCOPE.get()
     if scope is not None:
         env = _without_in_tree_path_entries(env, scope)

@@ -253,12 +253,19 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             )
 
         if self._scanner_offline():
-            for flag in (
+            # --skip-check-update only skips the checks bundle. trivy's version
+            # check and its telemetry both contact check.trivy.dev, so offline both
+            # are off whatever disable_telemetry says (measured with trivy 0.75.0).
+            offline_flags = [
                 "--skip-db-update",
                 "--skip-java-db-update",
                 "--offline-scan",
                 "--skip-check-update",
-            ):
+                "--skip-version-check",
+            ]
+            if not self.config.options.disable_telemetry:
+                offline_flags.append("--disable-telemetry")
+            for flag in offline_flags:
                 self.args.extra_args.append(ToolExtraArg(key=flag, value=None))
 
             from automated_security_helper.utils.offline_mode_validator import (
@@ -275,6 +282,45 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             )
 
         return super()._process_config_options()
+
+    def _offline_config_file(self) -> str:
+        """The trivy config file (``--config``) for an offline scan.
+
+        Without the flag trivy reads ``trivy.yaml`` from its working directory, the
+        source directory. A trivy.yaml in the scanned repository could turn on a VEX
+        repository download or client/server mode, and both reach the network
+        whatever offline flags ASH passes (measured with trivy 0.75.0). Offline,
+        trivy gets ``TRIVY_CONFIG`` when that names a file outside the scanned tree
+        (config/path_trust.py), and otherwise the null device, an empty config.
+        Online, trivy still reads the tree's trivy.yaml.
+        """
+        source_dir = Path(self.context.source_dir)
+        configured = os.environ.get("TRIVY_CONFIG")
+        if configured:
+            path = honored_path(
+                configured,
+                source_dir=source_dir,
+                key="TRIVY_CONFIG",
+                config=getattr(self.context, "config", None),
+            )
+            if path is not None:
+                if not path.is_file():
+                    raise ScannerError(
+                        f"TRIVY_CONFIG is {configured!r}, which is not a file "
+                        f"(resolved to {path.as_posix()}). Fix the path or unset it; "
+                        "trivy is not run without it."
+                    )
+                return path.as_posix()
+        in_tree = source_dir / "trivy.yaml"
+        if in_tree.is_file() and in_tree.as_posix() not in self._warned_inputs:
+            self._warned_inputs.add(in_tree.as_posix())
+            self._plugin_log(
+                f"Ignoring {in_tree.as_posix()} in offline mode: it is inside the "
+                "scanned tree, and its settings can reach the network. Set "
+                "TRIVY_CONFIG to a file outside the tree to use one.",
+                level=logging.WARNING,
+            )
+        return os.devnull
 
     def _ignore_file(self) -> str:
         """The file trivy reads finding IDs to ignore from (``--ignorefile``)."""
@@ -547,6 +593,11 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 f"--ignorefile={self._ignore_file()}",
                 f"--secret-config={self._secret_config_file()}",
                 f"--cache-dir={cache.as_posix()}",
+                *(
+                    [f"--config={self._offline_config_file()}"]
+                    if self._scanner_offline()
+                    else []
+                ),
             ]
             cache_flags: List[str] = []
             if sandboxed_online(self._scanner_offline()):

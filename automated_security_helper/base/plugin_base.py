@@ -17,6 +17,9 @@ from automated_security_helper.core.exceptions import (
     ToolNotProvisionableError,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.offline_tool_env import (
+    with_offline_tool_environment,
+)
 
 
 class PluginDependency(BaseModel):
@@ -432,6 +435,15 @@ class PluginBase(UVToolMixin, BaseModel):
         try:
             # Use provided cwd or fall back to context.source_dir
             working_dir = cwd if cwd is not None else Path(self.context.source_dir)
+
+            # Offline, the tool's own update, version and telemetry checks are
+            # turned off in the environment it gets (utils/offline_tool_env.py).
+            # Asked of the scanner, so a scanner whose own `offline` option is set
+            # gets them while the rest of the run is online.
+            scanner_offline = getattr(self, "_scanner_offline", None)
+            env = with_offline_tool_environment(
+                env, scanner_offline() if callable(scanner_offline) else None
+            )
 
             # Attempt UV tool execution if enabled
             if self.use_uv_tool and self.command and len(command) > 0:

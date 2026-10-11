@@ -171,6 +171,27 @@ otherwise undo the flag.
 Besides the database and rule downloads, offline mode turns off what the scanners do
 over the network on their own:
 
+- Every process ASH starts, the version probes of its dependency check included, gets
+  environment variables that turn off each tool's update, version and telemetry
+  checks: semgrep's version check and metrics (`SEMGREP_ENABLE_VERSION_CHECK=0`,
+  `SEMGREP_SEND_METRICS=off`), checkov's PyPI update check
+  (`CKV_SKIP_PACKAGE_UPDATE_CHECK=true`), npm's update notifier
+  (`npm_config_update_notifier=false`), trivy's version check and telemetry
+  (`TRIVY_SKIP_VERSION_CHECK`, `TRIVY_DISABLE_TELEMETRY`), and the update checks of
+  syft and grype. They also turn off the lookups a tool's own config file can enable:
+  syft's remote license searches, maven lookups and vcpkg git clones, and grype's
+  external sources. The full list is in `automated_security_helper/utils/offline_tool_env.py`.
+- trivy-repo also gets `--skip-version-check` and `--disable-telemetry`, whatever
+  `disable_telemetry` says, and `--config` naming `TRIVY_CONFIG` when that is a file
+  outside the scanned tree, or an empty config otherwise. A `trivy.yaml` in the scanned
+  repository is not read offline, because its settings can reach the network (a VEX
+  repository, client/server mode). Online, trivy still reads it.
+- syft runs from outside the scanned tree and is not given a `.syft.yaml` from it; a
+  `config_file` outside the tree is still passed. Online, syft still uses the tree's
+  `.syft.yaml`.
+- npm-audit passes `--no-update-notifier` to npm. A pnpm project is not audited:
+  `pnpm audit --offline` sends the dependency list to the registry anyway, so ASH
+  skips it and logs a warning naming the lockfile, as it does for yarn 2 and later.
 - detect-secrets does not verify candidate secrets with their issuers, whatever the
   scanned repository's `.secrets.baseline` or any config says. See
   [Secret verification](configuration-guide.md#secret-verification).

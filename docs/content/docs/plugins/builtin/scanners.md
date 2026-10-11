@@ -222,6 +222,11 @@ scanners:
 - Severity-based filtering
 - Fix recommendations
 
+In offline mode npm runs with `--offline --no-update-notifier`, and a project with a
+`pnpm-lock.yaml` is not audited: `pnpm audit --offline` still sends the dependency
+list to the registry. See
+[What offline mode turns off](../../advanced-usage.md#what-offline-mode-turns-off).
+
 **Dependencies**: Node.js, npm
 
 ---
@@ -300,6 +305,10 @@ scanners:
       exclude: []                          # Paths to skip, matched as regular expressions
       offline: false                       # Skip update checks
 ```
+
+In offline mode syft runs from outside the scanned tree and is not given a `.syft.yaml`
+from it, because such a file can turn on remote license and package lookups. A
+`config_file` outside the tree is still used.
 
 **Key Features**:
 - Package discovery across multiple ecosystems

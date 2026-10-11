@@ -69,7 +69,13 @@ def _scanner(context, *, offline: bool):
 
 
 def _run_scan(scanner, tmp_path):
-    """Drive scan() over one pnpm project and return the recorded kwargs.
+    """Drive scan() over one npm project and return the recorded kwargs.
+
+    An npm project, because offline npm-audit still runs npm, and the environment
+    it builds is the same for every package manager. A pnpm project is not audited
+    offline at all (``pnpm audit --offline`` sends the dependency list to the
+    registry anyway; see test_offline_scanner_network_checks.py), so it starts no
+    process to inspect.
 
     ``fake_run`` takes ``**kwargs`` deliberately. Pinning the real signature here
     would make this test fail whenever _run_subprocess gains an argument, which
@@ -80,7 +86,7 @@ def _run_scan(scanner, tmp_path):
     nested = root / "packages" / "sub"
     nested.mkdir(parents=True)
     (nested / "package.json").write_text('{"name":"sub"}')
-    (nested / "pnpm-lock.yaml").write_text("")
+    (nested / "package-lock.json").write_text("{}")
     scanner.context.source_dir = root
 
     captured = []
@@ -92,7 +98,7 @@ def _run_scan(scanner, tmp_path):
     with (
         patch(
             "automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner.find_executable",
-            return_value="/usr/local/bin/pnpm",
+            return_value="/usr/local/bin/npm",
         ),
         patch(
             "automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner.scan_set",

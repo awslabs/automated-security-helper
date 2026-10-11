@@ -480,7 +480,15 @@ def test_offline_mode_adds_the_offline_flag_and_disables_corepack_network(
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     kwargs = audit_calls(subprocess_double)[-1].kwargs
-    assert kwargs["command"] == ["npm", "audit", "--json", "--offline"]
+    # --no-update-notifier: npm asks the registry for a newer npm even with
+    # --offline.
+    assert kwargs["command"] == [
+        "npm",
+        "audit",
+        "--json",
+        "--offline",
+        "--no-update-notifier",
+    ]
     assert kwargs["env"]["COREPACK_ENABLE_NETWORK"] == "0"
 
 
@@ -507,7 +515,15 @@ def test_offline_flag_set_after_config_built_reaches_npm(
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     kwargs = audit_calls(subprocess_double)[-1].kwargs
-    assert kwargs["command"] == ["npm", "audit", "--json", "--offline"]
+    # --no-update-notifier: npm asks the registry for a newer npm even with
+    # --offline.
+    assert kwargs["command"] == [
+        "npm",
+        "audit",
+        "--json",
+        "--offline",
+        "--no-update-notifier",
+    ]
     assert kwargs["env"]["COREPACK_ENABLE_NETWORK"] == "0"
 
 

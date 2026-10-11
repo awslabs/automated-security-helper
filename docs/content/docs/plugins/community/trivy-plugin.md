@@ -1490,6 +1490,14 @@ export TRIVY_OFFLINE_SCAN=true
 ash --scanners trivy-repo
 ```
 
+In offline mode (`--offline`, `ASH_OFFLINE`, or `options.offline: true`) ASH passes
+`--skip-db-update`, `--skip-java-db-update`, `--offline-scan`, `--skip-check-update`,
+`--skip-version-check` and `--disable-telemetry`; trivy's version check and telemetry
+contact check.trivy.dev, and `--skip-check-update` covers only the checks bundle. It
+also passes `--config`: `TRIVY_CONFIG` when that names a file outside the scanned tree,
+otherwise an empty config, so a `trivy.yaml` in the scanned repository is not read
+offline. Online, trivy reads a `trivy.yaml` from the source directory as before.
+
 The copied database has to be current. After the scan ASH reads its `UpdatedAt`
 (from `trivy version --format json`) and exits 1 once it is more than 24 hours old,
 which is trivy's own rule: the published database sets `NextUpdate` 24 hours after

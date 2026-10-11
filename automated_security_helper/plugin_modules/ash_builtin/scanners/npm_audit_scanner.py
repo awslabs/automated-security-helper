@@ -1123,6 +1123,19 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         else:
                             binary = "npm"
 
+                        if binary == "pnpm" and self._scanner_offline():
+                            # `pnpm audit --offline` still sends the dependency
+                            # list to the registry's advisory endpoint (measured
+                            # with pnpm 12.6.0): pnpm has no offline audit.
+                            # Offline, that is an audit that cannot run, as for
+                            # `yarn npm audit` below.
+                            audit_failures.append(
+                                f"{lock_file}: pnpm audit sends the dependency "
+                                "list to the registry even with --offline, so it "
+                                "was not run"
+                            )
+                            continue
+
                         # Check that the binary is installed before
                         # attempting to run it (#180).  npm is already
                         # validated in validate_plugin_dependencies, but
@@ -1199,9 +1212,14 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 # it. Without it yarn checks direct deps only.
                                 cmd = [binary, "npm", "audit", "--json", "--recursive"]
 
-                        # Add offline mode if enabled
+                        # Add offline mode if enabled. npm's update notifier
+                        # asks registry.npmjs.org for a newer npm even with
+                        # --offline (measured with npm 10.9.4), so it is turned
+                        # off as well.
                         if self._scanner_offline():
                             cmd.append("--offline")
+                            if binary == "npm":
+                                cmd.append("--no-update-notifier")
                             ASH_LOGGER.info(
                                 f"🔄 Running {binary} audit in offline mode"
                             )
