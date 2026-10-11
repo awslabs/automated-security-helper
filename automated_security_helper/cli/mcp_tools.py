@@ -274,6 +274,17 @@ def _client_config_denial(
         )
     except (ASHConfigFieldDeniedError, ASHConfigPolicyUnreadableError) as exc:
         return _denied_response(exc, operation)
+    except Exception as exc:  # noqa: BLE001 -- a check that cannot finish refuses
+        # Not left to the scan: the check is what decides whether the client's
+        # file may be used, so one that cannot finish stops the scan here, as a
+        # refusal the caller can read rather than an exception out of the tool.
+        _logger.warning(f"Config policy check failed before the scan: {exc}")
+        response = create_error_response(error=exc, operation=operation)
+        response["error"] = (
+            "The config could not be checked against this session's "
+            f"runtime-override policy: {exc}"
+        )
+        return response
     return None
 
 
@@ -1732,22 +1743,18 @@ def _validated_document_denials(
         return [
             {"field": "", "message": rules.unreadable, "type": CONFIG_POLICY_UNREADABLE}
         ]
-    found: List[Tuple[str, str]] = []
+    if config_content is not None and not checked:
+        return []
+    # Reading is kept apart from checking. A file or chain that cannot be read is
+    # reported by the validator already, so it adds nothing here; a check that
+    # cannot finish on what was read makes the config invalid, because passing it
+    # would report a client's config as one the policy accepts.
     try:
         if config_content is not None:
-            if not checked:
-                return []
-            # The same check a scan of a delivered file gets, the restrict-only
-            # settings included.
-            found = [
-                (denial.key, denial.reason)
-                for _file, denials in client_file_denials(
-                    {Path("config_content"): _yaml.safe_load(config_content)},
-                    rules,
-                    all_delivered=True,
-                )
-                for denial in denials
-            ]
+            documents: Dict[Path, Any] = {
+                Path("config_content"): _yaml.safe_load(config_content)
+            }
+            names = None
         elif config_path is not None:
             path = Path(config_path)
             # Read as the validator reads it, so an `extends` whose value !ENV
@@ -1758,20 +1765,42 @@ def _validated_document_denials(
                 permit_base=config_base_gate(session_id),
                 refuse_env=env_refused_for(caller_is_remote(session_id), session_id),
             )
+            documents, names = document.documents, document.names
+        else:
+            return []
+    except Exception:  # noqa: BLE001 -- a read or chain error is reported already
+        return []
+    found: List[Tuple[str, str]]
+    try:
+        if config_content is not None:
+            # The same check a scan of a delivered file gets, the restrict-only
+            # settings included.
+            found = [
+                (denial.key, denial.reason)
+                for _file, denials in client_file_denials(
+                    documents, rules, all_delivered=True
+                )
+                for denial in denials
+            ]
+        else:
             # A named path the client chose counts as delivered, every file of
             # its chain with it, as resolve_config(untrusted_config=True) does.
             found = [
                 (denial.key, f"{denial.reason}, in {file.name}")
                 for file, denials in client_file_denials(
-                    document.documents,
-                    rules,
-                    all_delivered=checked,
-                    names=document.names,
+                    documents, rules, all_delivered=checked, names=names
                 )
                 for denial in denials
             ]
-    except Exception:  # noqa: BLE001 -- a read or chain error is reported already
-        return []
+    except Exception as exc:  # noqa: BLE001 -- a check that cannot finish refuses
+        return [
+            {
+                "field": "",
+                "message": "The config could not be checked against this "
+                f"session's runtime-override policy: {exc}",
+                "type": "validation_error",
+            }
+        ]
     return [
         {
             "field": key,

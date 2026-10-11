@@ -150,7 +150,9 @@
   another sandbox mode, a module inside the tree or one that sends findings off
   the host) is refused, where before the extra was left out with a warning. A
   file that changes a denied field is refused with the field named
-  (`error_type: config_field_denied`), and `validate_config` reports it. A config
+  (`error_type: config_field_denied`), and `validate_config` reports it. If that
+  check cannot finish on a client's file, `validate_config` reports the file
+  invalid and `run_ash_scan` does not start the scan. A config
   path a client names counts as the client's unless it is in a directory
   `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or is a profile file the server writes in
   the session's own `config/` directory (`ash.yaml` or `call-profile.yaml`), so a

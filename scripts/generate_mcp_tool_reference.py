@@ -420,7 +420,10 @@ TOOL_NOTES: dict[str, dict] = {
                 "A `${VAR}` or `${VAR:default}` reference at the start of a plain value, "
                 "or an `!ENV` tag, is an error of type `config_env_not_resolved` "
                 "anywhere in a remote caller's client config, and for a stdio caller "
-                "only in a file a client delivered."
+                "only in a file a client delivered. A policy check that cannot finish on "
+                "the client's config makes it invalid, with an error of type "
+                "`validation_error` that starts `The config could not be checked against "
+                "this session's runtime-override policy`."
             ),
         ],
     },

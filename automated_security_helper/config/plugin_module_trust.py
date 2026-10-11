@@ -122,10 +122,22 @@ def off_host_package(name: str) -> Optional[str]:
     return None
 
 
-def split_plugin_modules(entries: Optional[Iterable[object]]) -> List[str]:
-    """Entries split on commas and stripped, the way ScanExecutionEngine reads them."""
+def split_plugin_modules(entries: object) -> List[str]:
+    """Entries split on commas and stripped, the way ScanExecutionEngine reads them.
+
+    A value that is not a list, which a raw document a client delivered can hold
+    (``ash_plugin_modules: 5``, or a bare string), is read as one entry, so a
+    check on the document reports the module it names instead of raising.
+    """
+    items: Iterable[object]
+    if entries is None:
+        items = ()
+    elif isinstance(entries, (list, tuple, set, frozenset)):
+        items = entries
+    else:
+        items = (entries,)
     names: List[str] = []
-    for entry in entries or []:
+    for entry in items:
         if entry is None:
             continue
         for part in str(entry).split(","):
