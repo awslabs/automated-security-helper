@@ -16,6 +16,7 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.atomic_write import write_text_atomically
+from automated_security_helper.utils.inner_run_outcome import record_reports_written
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_path_links import (
     ensure_reports_dir,
@@ -385,6 +386,8 @@ class ReportPhase(EnginePhase):
 
         # Directly invoke each reporter plugin
         results = []
+        # The report files written below, recorded in the results at the end.
+        written_files: List[str] = []
         if enabled_reporters:
             ASH_LOGGER.debug(
                 f"Processing {len(enabled_reporters)} enabled reporter classes"
@@ -469,6 +472,7 @@ class ReportPhase(EnginePhase):
                         write_text_atomically(output_file, report_result)
 
                         results.append(report_result)
+                        written_files.append(output_filename)
 
                         # Update reporter task to 100%
                         self.progress_display.update_task(
@@ -636,5 +640,10 @@ class ReportPhase(EnginePhase):
 
         # Add summary row
         self.add_summary("Complete", f"Generated {len(results)} reports")
+
+        # So the exit code is counted from reports/ash.sarif only when this run
+        # wrote it: --use-existing keeps reports/, and with no SARIF reporter
+        # selected the file there is an earlier run's (utils/inner_run_outcome.py).
+        record_reports_written(aggregated_results, written_files)
 
         return aggregated_results

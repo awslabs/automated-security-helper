@@ -814,6 +814,16 @@
   such a name before any project is scanned, for a reporter that writes only
   per-project reports too.
 
+- **The exit code counts `reports/ash.sarif` only when the run wrote it.**
+  `--use-existing` keeps `reports/`, so when no SARIF reporter is selected the
+  `ash.sarif` there is an earlier run's, and its findings, or its lack of them,
+  used to decide the exit code: a clean earlier report made a run with actionable
+  findings exit 0. The report phase now lists the report files it wrote, as a
+  `reports_written` validation checkpoint, and only a listed `ash.sarif` is
+  counted; otherwise the results' own findings are. The `--changed-files-only`
+  rewrite no longer overwrites such a file either. `ash merge` counts its verdict
+  the same way.
+
 - **Container and nix mode read the inner run's results back only when that run
   completed.** The outer process gives the inner run an ID (`ASH_OUTER_RUN_ID`).
   The inner run writes it into `ash_aggregated_results.json` as a `run_completed`

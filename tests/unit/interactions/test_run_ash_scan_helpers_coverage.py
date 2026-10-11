@@ -870,6 +870,35 @@ class TestChangedFilesSarifRewriteIsNotWrittenThroughALink:
         assert pointed_at.read_text(encoding="utf-8") == "unchanged"
 
 
+class TestChangedFilesRewriteLeavesAnEarlierRunsSarif:
+    def test_a_sarif_report_this_run_did_not_write_is_not_rewritten(
+        self, local_orchestrator, logger, monkeypatch, tmp_path
+    ):
+        """--use-existing with no SARIF reporter: reports/ash.sarif is an earlier run's."""
+        from automated_security_helper.utils import get_scan_set
+
+        monkeypatch.setattr(
+            get_scan_set, "get_changed_files", lambda base_ref, cwd: ["changed.py"]
+        )
+        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: tmp_path)
+        output_dir = tmp_path / "out"
+        (output_dir / "reports").mkdir(parents=True)
+        sarif = output_dir / "reports" / "ash.sarif"
+        sarif.write_text("an earlier run's report", encoding="utf-8")
+        results = AshAggregatedResults(
+            sarif=_sarif_with_uris("changed.py", "untouched.py")
+        )
+        results.validation_checkpoints.append(
+            {"type": "reports_written", "metadata": {"files": ["ash.csv"]}}
+        )
+        local_orchestrator(results=results)
+        opts = _opts(tmp_path, output_dir, changed_files_only=True)
+
+        _run_local_mode(opts, logger)
+
+        assert sarif.read_text(encoding="utf-8") == "an earlier run's report"
+
+
 class TestChangedFilesSarifRewriteIsNotSkippedSilently:
     def test_a_sarif_report_the_rewrite_may_not_write_refuses_the_run(
         self, local_orchestrator, logger, monkeypatch, tmp_path

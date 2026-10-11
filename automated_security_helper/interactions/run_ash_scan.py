@@ -99,6 +99,7 @@ from automated_security_helper.utils.inner_run_outcome import (
     take_outer_run_id,
     read_back_outcome,
     record_report_refusal,
+    report_written_this_run,
     refusal_record,
     write_refusal_results,
 )
@@ -2260,7 +2261,12 @@ def _run_local_mode(
                     "cannot replace it",
                     REMEDY,
                 )
-            if sarif_path.exists() and results.sarif:
+            # Not an earlier run's report, which --use-existing keeps in reports/.
+            if (
+                sarif_path.exists()
+                and results.sarif
+                and report_written_this_run(results, "ash.sarif")
+            ):
                 # Replaced atomically for the same reason as the aggregated file
                 # below: ash.sarif already exists, so a reader waiting on it would
                 # otherwise open it mid-rewrite.
@@ -2972,8 +2978,11 @@ def _compute_exit_code(
     # input too. No validated config route produces one -- global_settings is a
     # Literal and ScannerOptionsBase.severity_threshold is Literal | None whose None
     # means "defer to global" -- so this is parity rather than a new behaviour.
+    # Only a SARIF report this run wrote. --use-existing keeps reports/, so with no
+    # SARIF reporter selected the file there is an earlier run's, and counting it
+    # would let that run's findings decide this run's exit code.
     sarif_file = Path(opts.output_dir).joinpath("reports", "ash.sarif")
-    if sarif_file.exists():
+    if sarif_file.exists() and report_written_this_run(results, "ash.sarif"):
         try:
             with open(sarif_file, encoding="utf-8") as f:
                 sarif_json = json.load(f)  # nosec

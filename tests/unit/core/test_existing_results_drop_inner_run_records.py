@@ -36,6 +36,7 @@ def test_reports_from_existing_results_do_not_carry_an_earlier_runs_records(
             "metadata": {"run_id": "0" * 32},
         },
         {"type": "run_completed", "metadata": {"run_id": "1" * 32}},
+        {"type": "reports_written", "metadata": {"files": ["EARLIER-REPORT-MARKER"]}},
         {
             "type": "config_warning",
             "severity": "warning",
@@ -60,3 +61,4 @@ def test_reports_from_existing_results_do_not_carry_an_earlier_runs_records(
     assert "OTHER-CHECKPOINT-MARKER" in report
     assert "EARLIER-REFUSAL-MARKER" not in report
     assert "run_completed" not in report
+    assert "EARLIER-REPORT-MARKER" not in report

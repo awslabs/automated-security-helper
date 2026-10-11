@@ -68,7 +68,15 @@ RUN_COMPLETED_CHECKPOINT = "run_completed"
 #: ``type`` of the checkpoint that records that the inner run's reports were refused.
 REPORT_PATH_REFUSED_CHECKPOINT = "report_path_refused"
 
-_RUN_RECORD_TYPES = (RUN_COMPLETED_CHECKPOINT, REPORT_PATH_REFUSED_CHECKPOINT)
+#: ``type`` of the checkpoint in which the report phase lists the report files it
+#: wrote, so the exit code is not counted from a ``reports/ash.sarif`` an earlier
+#: run left (``report_written_this_run``).
+REPORTS_WRITTEN_CHECKPOINT = "reports_written"
+
+#: The records that say how one run ended: replaced when the run ends.
+_OUTCOME_TYPES = (RUN_COMPLETED_CHECKPOINT, REPORT_PATH_REFUSED_CHECKPOINT)
+#: Every record about one run: dropped when another run reads the results back.
+_RUN_RECORD_TYPES = (*_OUTCOME_TYPES, REPORTS_WRITTEN_CHECKPOINT)
 _RUN_ID = re.compile(r"[0-9a-f]{32}")
 
 
@@ -111,8 +119,62 @@ def _run_id_of(checkpoint: Dict[str, Any]) -> Optional[str]:
 
 
 def without_run_records(checkpoints: Iterable[Any]) -> List[Any]:
-    """``checkpoints`` without any run's completion marker or refusal record."""
+    """``checkpoints`` without any record about the run that wrote them.
+
+    For results another run reads back (``--use-existing``, ``ash merge``): the
+    completion marker, the refusal record and the list of reports written.
+    """
     return [checkpoint for checkpoint in checkpoints if not _is_run_record(checkpoint)]
+
+
+def _without_outcome_records(checkpoints: Iterable[Any]) -> List[Any]:
+    return [
+        checkpoint
+        for checkpoint in checkpoints
+        if not (
+            isinstance(checkpoint, dict) and checkpoint.get("type") in _OUTCOME_TYPES
+        )
+    ]
+
+
+def record_reports_written(results: object, files: Iterable[str]) -> None:
+    """List in ``results`` the report files this run's report phase wrote."""
+    if results is None:
+        return
+    checkpoints = [
+        checkpoint
+        for checkpoint in getattr(results, "validation_checkpoints", None) or []
+        if not (
+            isinstance(checkpoint, dict)
+            and checkpoint.get("type") == REPORTS_WRITTEN_CHECKPOINT
+        )
+    ]
+    checkpoints.append(
+        {
+            "type": REPORTS_WRITTEN_CHECKPOINT,
+            "severity": "info",
+            "message": "The report files this run wrote.",
+            "metadata": {"files": sorted(set(files))},
+        }
+    )
+    setattr(results, "validation_checkpoints", checkpoints)
+
+
+def report_written_this_run(results: object, name: str) -> bool:
+    """Whether this run wrote the report file ``name``, as far as ``results`` says.
+
+    True when no report phase recorded what it wrote, as for results that predate
+    the record, so such a file is read as before.
+    """
+    for checkpoint in getattr(results, "validation_checkpoints", None) or []:
+        if (
+            isinstance(checkpoint, dict)
+            and checkpoint.get("type") == REPORTS_WRITTEN_CHECKPOINT
+        ):
+            metadata = checkpoint.get("metadata")
+            files = metadata.get("files") if isinstance(metadata, dict) else None
+            return isinstance(files, list) and name in files
+    return True
 
 
 def completion_marker(run_id: str) -> Dict[str, Any]:
@@ -134,7 +196,7 @@ def mark_run_completed(results: object, run_id: Optional[str]) -> None:
     if results is None:
         return
     checkpoints = list(getattr(results, "validation_checkpoints", None) or [])
-    kept = without_run_records(checkpoints)
+    kept = _without_outcome_records(checkpoints)
     if run_id is None and len(kept) == len(checkpoints):
         return
     if run_id is not None:
@@ -176,7 +238,9 @@ def record_report_refusal(
             return False
         checkpoints = document.get("validation_checkpoints")
         document["validation_checkpoints"] = [
-            *without_run_records(checkpoints if isinstance(checkpoints, list) else []),
+            *_without_outcome_records(
+                checkpoints if isinstance(checkpoints, list) else []
+            ),
             refusal_record(message, run_id, output_dir),
         ]
         write_text_atomically(path, json.dumps(document, indent=2))
@@ -232,7 +296,9 @@ def read_back_outcome(results: object, run_id: str) -> InnerRunOutcome:
     another_run = False
     older_ash = False
     for checkpoint in getattr(results, "validation_checkpoints", None) or []:
-        if not _is_run_record(checkpoint):
+        if not (
+            isinstance(checkpoint, dict) and checkpoint.get("type") in _OUTCOME_TYPES
+        ):
             continue
         recorded_id = _run_id_of(checkpoint)
         if recorded_id is None:
