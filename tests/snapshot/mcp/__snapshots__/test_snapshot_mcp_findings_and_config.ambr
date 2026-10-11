@@ -938,6 +938,7 @@
           'name': 'zizmor',
           'options': dict({
             'config_file': None,
+            'honor_inline_ignores': False,
             'install_timeout': 300,
             'online_audits': False,
             'persona': 'regular',
@@ -1412,6 +1413,7 @@
           'name': 'zizmor',
           'options': dict({
             'config_file': None,
+            'honor_inline_ignores': False,
             'install_timeout': 300,
             'online_audits': False,
             'persona': 'regular',
@@ -1886,6 +1888,7 @@
           'name': 'zizmor',
           'options': dict({
             'config_file': None,
+            'honor_inline_ignores': False,
             'install_timeout': 300,
             'online_audits': False,
             'persona': 'regular',

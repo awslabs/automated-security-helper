@@ -335,6 +335,8 @@ ASH Scanners
 │                │         │                      │                        │ "regular",            │
 │                │         │                      │                        │     "online_audits":  │
 │                │         │                      │                        │ false,                │
+│                │         │                      │                        │     "honor_inline_ig… │
+│                │         │                      │                        │ false,                │
 │                │         │                      │                        │     "tool_version":   │
 │                │         │                      │                        │ ">=1.29.0,<2.0.0",    │
 │                │         │                      │                        │     "install_timeout… │

@@ -213,6 +213,7 @@ scanners:
       config_file: null
       persona: regular
       online_audits: false
+      honor_inline_ignores: false
       tool_version: '>=1.29.0,<2.0.0'
       install_timeout: 300
 reporters:

@@ -46,6 +46,7 @@ scanners:
       persona: regular        # regular, pedantic or auditor
       config_file: null       # zizmor config; relative to the source dir, or absolute
       online_audits: false    # see "Network access and tokens"
+      honor_inline_ignores: false  # see "Suppressions"
       tool_version: ">=1.29.0,<2.0.0"
       install_timeout: 300
       scan_timeout: 1800
@@ -68,6 +69,9 @@ scanners:
   offending text of a config it cannot parse in its error, and that error reaches
   ASH's log and the scanner's stderr log, so do not point this at a file holding
   anything else.
+- `honor_inline_ignores`: when true, zizmor applies its own `# zizmor: ignore[...]`
+  comments and the `ignore` rules of an operator's `config_file`. Off by default;
+  see "Suppressions". Honored only when the operator sets it.
 - `tool_version`: the pip-style constraint for installing zizmor. A value that is
   not a valid constraint is ignored with a warning and the default is used.
 - `install_timeout`: seconds allowed for `uv tool install` of zizmor.
@@ -137,9 +141,14 @@ global_settings:
 ```
 
 zizmor's own [ignore comments](https://docs.zizmor.sh/usage/#ignoring-results)
-(`# zizmor: ignore[template-injection]`) are honored as well, and so are the rules
-of an operator's `config_file`; a `zizmor.yml` in the scanned repository is not
-read. Package-scoped and symbol-scoped suppressions do not apply: zizmor reports
+(`# zizmor: ignore[template-injection]`) are not honored by default. Such a comment
+makes zizmor drop the finding before ASH sees it, so it would be neither reported
+nor counted as suppressed; ASH runs zizmor with `--no-ignores`, which also turns off
+the `ignore` rules of an operator's `config_file` (its other settings still apply).
+To honor both, the operator sets `honor_inline_ignores: true` with
+`--config-overrides` or in an ASH config file outside the scanned tree; set by an
+ASH config inside the scanned tree, it is ignored with a warning. A `zizmor.yml` in
+the scanned repository is never read. Package-scoped and symbol-scoped suppressions do not apply: zizmor reports
 no packages, and a workflow has no functions or classes.
 
 ## Installation

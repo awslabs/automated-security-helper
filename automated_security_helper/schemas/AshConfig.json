@@ -682,6 +682,7 @@
               "name": "zizmor",
               "options": {
                 "config_file": null,
+                "honor_inline_ignores": false,
                 "install_timeout": 300,
                 "online_audits": false,
                 "persona": "regular",
@@ -4112,6 +4113,7 @@
             "name": "zizmor",
             "options": {
               "config_file": null,
+              "honor_inline_ignores": false,
               "install_timeout": 300,
               "online_audits": false,
               "persona": "regular",
@@ -5199,6 +5201,7 @@
           "$ref": "#/$defs/ZizmorScannerConfigOptions",
           "default": {
             "config_file": null,
+            "honor_inline_ignores": false,
             "install_timeout": 300,
             "online_audits": false,
             "persona": "regular",
@@ -5231,6 +5234,12 @@
           "default": null,
           "description": "Path to a zizmor configuration file, passed as `--config`. Relative paths are resolved against the source directory; absolute paths are used as given. Honored only when set by --config-overrides or a config file outside the scanned tree; otherwise it runs `zizmor --no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned repository is not read.",
           "title": "Config File"
+        },
+        "honor_inline_ignores": {
+          "default": false,
+          "description": "Honor zizmor's inline `# zizmor: ignore[...]` comments and the `ignore` rules of the operator's `config_file`. Off by default: zizmor runs with `--no-ignores`, so every finding reaches ASH, where suppressions are reported and counted. Honored only when set by --config-overrides or a config file outside the scanned tree; from a config in the scanned tree it is ignored with a warning.",
+          "title": "Honor Inline Ignores",
+          "type": "boolean"
         },
         "install_timeout": {
           "default": 300,

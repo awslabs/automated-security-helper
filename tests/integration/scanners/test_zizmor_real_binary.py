@@ -22,10 +22,13 @@ import yaml
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
     ZizmorScanner,
     ZizmorScannerConfig,
+    ZizmorScannerConfigOptions,
 )
+from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
 pytestmark = pytest.mark.integration
@@ -233,3 +236,43 @@ def test_ash_scan_with_zizmor_applies_rule_path_and_line_suppressions(source):
     assert by_key[
         ("zizmor/template-injection", ".github/workflows/vulnerable.yml")
     ] == {False}
+
+
+@pytest.mark.parametrize("honored", [False, True])
+def test_an_inline_ignore_comment_applies_only_when_the_operator_turns_it_on(
+    source, honored
+):
+    """zizmor honors ``# zizmor: ignore[...]`` unless given ``--no-ignores``."""
+    workflow = source / ".github" / "workflows" / "vulnerable.yml"
+    text = workflow.read_text()
+    injected = 'run: echo "${{ github.event.issue.title }}"'
+    assert text.count(injected) == 1
+    workflow.write_text(
+        text.replace(injected, f"{injected}  # zizmor: ignore[template-injection]")
+    )
+    config = get_default_config()
+    record_provenance(config, in_tree=[], trusted=AshConfig())
+    output_dir = source / ".ash" / "ash_output"
+    scanner = ZizmorScanner(
+        context=PluginContext(
+            source_dir=source,
+            output_dir=output_dir,
+            work_dir=output_dir / "converted",
+            config=config,
+        ),
+        config=ZizmorScannerConfig(
+            enabled=True,
+            options=ZizmorScannerConfigOptions(honor_inline_ignores=honored),
+        ),
+    )
+    assert scanner.validate_plugin_dependencies() is True
+    report = scanner.scan(source, "source", [])
+    found = {(rule, uri) for rule, uri, _ in _findings(report)}
+
+    reported = (
+        "zizmor/template-injection",
+        ".github/workflows/vulnerable.yml",
+    ) in found
+    assert reported is not honored, found
+    # The composite action's injection carries no comment and is reported either way.
+    assert ("zizmor/template-injection", "actions/greet/action.yml") in found

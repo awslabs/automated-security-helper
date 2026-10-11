@@ -509,6 +509,32 @@ def test_online_audits_from_the_scanned_tree_stay_offline_without_a_token(
     assert "scanners.zizmor.options.online_audits" in caplog.text
 
 
+def test_inline_ignore_comments_are_off_by_default(repo):
+    """``# zizmor: ignore[...]`` in the scanned tree would drop a finding before ASH
+    sees it, so it would be neither reported nor counted as suppressed."""
+    final_args, _, _ = _argv_and_env(_scanner(repo), repo)
+    assert "--no-ignores" in final_args[: final_args.index("--")]
+
+
+def test_the_operator_may_honor_inline_ignore_comments(repo):
+    final_args, _, _ = _argv_and_env(
+        _scanner(repo, operator=True, honor_inline_ignores=True), repo
+    )
+    assert "--no-ignores" not in final_args
+
+
+@pytest.mark.parametrize("operator", [False, None])
+def test_inline_ignores_turned_on_from_the_scanned_tree_stay_off(
+    repo, caplog, operator
+):
+    with caplog.at_level("WARNING"):
+        final_args, _, _ = _argv_and_env(
+            _scanner(repo, operator=operator, honor_inline_ignores=True), repo
+        )
+    assert "--no-ignores" in final_args[: final_args.index("--")]
+    assert "scanners.zizmor.options.honor_inline_ignores" in caplog.text
+
+
 def test_ash_offline_mode_overrides_online_audits(repo, monkeypatch):
     monkeypatch.setenv("ASH_OFFLINE", "true")
     monkeypatch.setenv("GITHUB_TOKEN", "token-value")

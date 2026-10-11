@@ -485,6 +485,7 @@ ash_config:
       name: zizmor
       options:
         config_file: null
+        honor_inline_ignores: false
         install_timeout: 300
         online_audits: false
         persona: regular

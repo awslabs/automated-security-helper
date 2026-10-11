@@ -55,8 +55,13 @@ operator set ``options.config_file`` (``--config-overrides`` or a config file
 outside the scanned tree, ``utils/config_trust.py``), in which case that file is
 passed as ``--config``. A ``config_file`` set by a config in the scanned tree is
 ignored with a warning, and a ``zizmor.yml`` in the tree with a note; findings are
-tuned with ASH suppressions, which are reported and counted. zizmor's inline
-``# zizmor: ignore[...]`` comments still apply.
+tuned with ASH suppressions, which are reported and counted.
+
+zizmor's inline ``# zizmor: ignore[...]`` comments drop a finding the same way,
+so ASH also passes ``--no-ignores``, which turns off those comments and the
+``ignore`` rules of a config. ``options.honor_inline_ignores: true`` turns them back
+on; it is honored only when the operator set it, and from a config in the
+scanned tree it is ignored with a warning.
 
 Severity mapping
 ----------------
@@ -404,6 +409,20 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
             ),
         ),
     ] = False
+    honor_inline_ignores: Annotated[
+        bool,
+        Field(
+            description=(
+                "Honor zizmor's inline `# zizmor: ignore[...]` comments and the "
+                "`ignore` rules of the operator's `config_file`. Off by default: "
+                "zizmor runs with `--no-ignores`, so every finding reaches ASH, "
+                "where suppressions are reported and counted. Honored only when "
+                "set by --config-overrides or a config file outside the scanned "
+                "tree; from a config in the scanned tree it is ignored with a "
+                "warning."
+            ),
+        ),
+    ] = False
     tool_version: Annotated[
         str | None,
         tool_version_constraint("scanners.zizmor.options.tool_version"),
@@ -446,6 +465,8 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     _last_inputs: List[Path] = PrivateAttr(default_factory=list)
     # Whether the tree-set online_audits refusal was already logged.
     _online_refusal_logged: bool = PrivateAttr(default=False)
+    # Whether the tree-set honor_inline_ignores refusal was already logged.
+    _ignores_refusal_logged: bool = PrivateAttr(default=False)
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -630,6 +651,33 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             )
             return False
         return True
+
+    def _honor_inline_ignores(self) -> bool:
+        """Whether zizmor may apply its own ignore comments and config ignore rules.
+
+        Off unless the operator turned it on: an ignore comment in the scanned tree
+        drops a finding before ASH sees it, so it would be neither reported nor
+        counted as suppressed.
+        """
+        if not self._options.honor_inline_ignores:
+            return False
+        if set_by_operator(
+            self._plugin_context.config,
+            "scanners.zizmor.options.honor_inline_ignores",
+            True,
+        ):
+            return True
+        if not self._ignores_refusal_logged:
+            self._ignores_refusal_logged = True
+            self._plugin_log(
+                "scanners.zizmor.options.honor_inline_ignores is true in a config "
+                "in the scanned tree or from an MCP client, so it is ignored: zizmor "
+                "runs with --no-ignores and its ignore comments do not apply. Set "
+                "it with --config-overrides or a config file outside the scanned "
+                "tree, or suppress findings with ASH suppressions.",
+                level=logging.WARNING,
+            )
+        return False
 
     def _child_env(self, online: bool) -> Dict[str, str]:
         """The process environment minus what must not reach zizmor."""
@@ -890,6 +938,8 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             final_args.append(f"--config={config_file}")
         else:
             final_args.append("--no-config")
+        if not self._honor_inline_ignores():
+            final_args.append("--no-ignores")
         # "--" so an input whose path starts with "-" is never read as a flag.
         final_args.append("--")
         final_args.extend(self._input_argument(path) for path in inputs)

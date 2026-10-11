@@ -232,8 +232,9 @@
   when the operator sets them. With `rules_paths` ignored and `rule_sets` empty,
   cfn-guard falls back to `wa-Security-Pillar`. In an operator's rules directory, a
   rules file that resolves outside it through a symlink is refused, and cfn-guard
-  is given copies of the files ASH read. Inline comments (`gitleaks:allow`,
-  `# zizmor: ignore[...]`) still apply. Tool output quoted in a scanner's error
+  is given copies of the files ASH read. Inline `gitleaks:allow` comments still
+  apply. zizmor runs with `--no-ignores`, so `# zizmor: ignore[...]` comments do
+  not, unless the operator sets `scanners.zizmor.options.honor_inline_ignores`. Tool output quoted in a scanner's error
   has terminal escape sequences removed and other control characters escaped.
 - **trivy-repo names its own config file and modules directory.** It always passes
   `--config` and `--module-dir`: by default an empty config file and an empty
