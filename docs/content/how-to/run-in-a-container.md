@@ -196,7 +196,9 @@ covers actionlint, cfn-guard and the AWS Guard Rules Registry rules it reads, gi
 grype, hadolint, opengrep, syft, trivy, and uv; the Python scanners bandit, checkov,
 cfn-lint, GuardDog, semgrep, and zizmor; and pygit2, which GuardDog depends on, with the
 libgit2, libssh2, OpenSSL, and PCRE libraries its wheel bundles, and the OpenSSL 1.1 that
-the yara-python wheel bundles.
+the yara-python wheel bundles. hadolint and GuardDog status: pending licensing review;
+[Community plugins](../docs/plugins/community/index.md) says which components the review
+covers.
 
 Beside each program's files, a `SOURCE` file names the upstream repository, release tag,
 and commit. For the copyleft components, hadolint (GPL-3.0), opengrep and semgrep
