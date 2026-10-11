@@ -191,8 +191,9 @@ def _warnings_when_discovered(
     names = {*ASH_CONFIG_FILE_NAMES, *ASH_RC_FILE_NAMES, ASH_PYPROJECT_FILE_NAME}
     if config_path.name not in names:
         return []
+    # Both sides resolved: a .ash that is a symbolic link resolves to its target.
     root = source_dir.resolve()
-    if config_path.parent.resolve() not in (root, root / ".ash"):
+    if config_path.parent.resolve() not in (root, (root / ".ash").resolve()):
         return []
     try:
         discovery = discover_config_source(source_dir, permit=permit_base)

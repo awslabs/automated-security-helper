@@ -261,6 +261,27 @@ class TestIgnoredSourcesAreResolutionWarnings:
 
         assert [".ashrc.toml" in w for w in config._resolution_warnings] == [True]
 
+    def test_a_file_in_a_linked_ash_directory_records_it_when_passed_by_path(
+        self, tmp_path
+    ):
+        """``.ash`` linked to a shared directory is still where discovery looked."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        (shared / ".ash.yaml").write_text("project_name: used\n", encoding="utf-8")
+        (repo / ".ash").symlink_to(shared)
+        (repo / ".ashrc.toml").write_text(
+            'project_name = "ignored"\n', encoding="utf-8"
+        )
+
+        config = resolve_config(
+            config_path=repo / ".ash" / ".ash.yaml", source_dir=repo
+        )
+
+        assert config.project_name == "used"
+        assert [".ashrc.toml" in w for w in config._resolution_warnings] == [True]
+
     def test_the_warning_survives_config_overrides(self, tmp_path):
         """An override rebuilds the config object; the warning is added after it."""
         _two_sources(tmp_path)
