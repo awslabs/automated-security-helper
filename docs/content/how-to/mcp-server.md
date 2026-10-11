@@ -148,7 +148,7 @@ ASH applies its rules for remote clients to every call:
   and source delivered over MCP. With the variable unset, it can scan only delivered source.
 - A client can name config files (`config_path`, every base an `extends` chain names, and
   workspace files) only in `ASH_MCP_ALLOWED_CONFIG_ROOTS`, the scan roots, and its session's
-  config directory. The workspace tools use a workspace policy file only from
+  `config/` directory. The workspace tools use a workspace policy file only from
   `ASH_MCP_ALLOWED_CONFIG_ROOTS`, on every transport
   ([Workspace scans over MCP](scale-large-repos.md#workspaces-mcp)).
 
@@ -203,7 +203,7 @@ not `--stateless-http`. Use it only for a client that cannot use streamable HTTP
 |----------|------------|--------|
 | `ASH_MCP_TRANSPORT` | Not set by `ash mcp`. | Set it to exactly `streamable-http` or `sse` to apply the remote-client rules above to every call. |
 | `ASH_MCP_ALLOWED_ROOTS` | Local clients: everything outside the system directories, the filesystem root, and other sessions' workspaces. Remote clients: only delivered source. | Directories, and their subdirectories, that clients may scan and read results from. |
-| `ASH_MCP_ALLOWED_CONFIG_ROOTS` | Remote clients may read config only from the scan roots and their session's config directory. | Extra directories remote clients may read config files from, such as a shared policy file. A config file a client names there counts as yours, not the client's, unless a client delivered it. |
+| `ASH_MCP_ALLOWED_CONFIG_ROOTS` | A remote client may read config only from the scan roots and its session's `config/` directory. | Extra directories remote clients may read config files from, such as a shared policy file. A config file a client names there counts as yours, not the client's, unless a client delivered it. |
 | `ASH_MCP_WORKSPACE_ROOT` | `$XDG_CACHE_HOME/ash-mcp`, or `~/.cache/ash-mcp` | Where each session's workspace lives: delivered source, uploads, and session configs. |
 | `ASH_CONFIG` | The built-in defaults. | The server's own config. Its `global_settings.mcp.runtime_overrides` section is the policy that delivered configs are checked against. Check that the file exists: when it does not, ASH uses the built-in defaults without a warning. Keep it outside every git checkout: inside one, its sandbox grants and other restricted settings do not count. |
 
@@ -245,7 +245,7 @@ limit on a scan.
 
 A config file inside delivered source is an MCP-client file. So is a config file a client
 names as `config_path` to `run_ash_scan`, `get_config`, or `validate_config`, wherever it is,
-unless it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or in a session's `config/`
+unless it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or in its session's `config/`
 directory, which only the server writes: a config in another checkout the server may scan is
 that checkout's, not yours. ASH judges a config path a client names by where it sits as well as
 by the file it reaches, so a symbolic link a client names is the client's wherever it points. A config file that ASH finds by
@@ -366,7 +366,7 @@ removed, and every entry in it applies as written. While it keeps the default's
 `/global_settings/suppressions` and `/global_settings/ignore_paths` entries, delivered
 suppressions and ignore paths are refused. While it keeps the `/sandbox` and
 `/ash_plugin_modules` entries, a delivered config that sets either to any value other than the
-server's is refused, even a tighter one. If your list leaves those two entries out, ASH does not
+server's is refused, even a tighter one. If your list leaves the `/sandbox` and `/ash_plugin_modules` entries out, ASH does not
 refuse a delivered file that asks for more: it drops the grants and modules instead, as it does
 for a repository's config.
 

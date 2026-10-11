@@ -282,7 +282,7 @@ or put it in a config file outside every git checkout and the scanned directory.
 The console shows the same warning with `[grype]` missing from the example. For a config
 file an MCP client names as a scan's `config_path`, outside the directories
 `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, the reason reads `an MCP client supplied the file, not the
-operator`. Under the MCP server's default policy, a delivered file whose own `sandbox` section gives a scanner a network or a read path the server's settings do not, or replaces a sandbox mode the server sets, is refused instead ([What a delivered config cannot set](../how-to/mcp-server.md#what-a-delivered-config-cannot-set)); its other grants are dropped the same way.
+operator`. Under the MCP server's default policy, a delivered file whose own `sandbox` section gives a scanner a network or an `extra_read_paths` entry the server's settings do not, or changes a sandbox mode other than `off` that the server sets, is refused instead ([What a delivered config cannot set](../how-to/mcp-server.md#what-a-delivered-config-cannot-set)); its other grants are dropped the same way.
 
 So a repository can take a network away from its own scan, but cannot add one. The rule
 also covers your own files: a config kept in a checkout of its own, such as an ops or

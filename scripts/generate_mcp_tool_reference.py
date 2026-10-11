@@ -415,18 +415,22 @@ TOOL_NOTES: dict[str, dict] = {
     "resolve_ash_workspace": {
         "caveats": [
             (
-                "A workspace policy file, named or found beside the workspace file, is "
-                "used only when it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` "
-                "names; any other refuses the workspace with exit code 4."
+                "A workspace policy file, named or found in the workspace file's "
+                "directory or its `.ash` directory, is used only when it is in a "
+                "directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names; any other refuses the "
+                "workspace with exit code 4, or with exit code 3 when a client "
+                "delivered it and it sets a field the server's policy denies."
             ),
         ],
     },
     "run_ash_workspace_scan": {
         "caveats": [
             (
-                "A workspace policy file, named or found beside the workspace file, is "
-                "used only when it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` "
-                "names; any other refuses the workspace with exit code 4."
+                "A workspace policy file, named or found in the workspace file's "
+                "directory or its `.ash` directory, is used only when it is in a "
+                "directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names; any other refuses the "
+                "workspace with exit code 4, or with exit code 3 when a client "
+                "delivered it and it sets a field the server's policy denies."
             ),
         ],
     },
@@ -440,7 +444,7 @@ TOOL_NOTES: dict[str, dict] = {
             (
                 "`config_content` counts as the client's config, and so does a "
                 "`config_path` that a client delivered or that is outside the "
-                "directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names and the session's "
+                "directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names and its session's "
                 "`config/` directory. Each field such a config may not set under the "
                 "server's runtime-override policy is an error of type "
                 "`denied_by_runtime_policy`, and a policy the server cannot read is one "
