@@ -1106,6 +1106,30 @@ def _chain_placements(resolved: Path, destination: str) -> List[Tuple[Path, str]
     return placements
 
 
+def _refuse_bases_inside_the_source(
+    config: Path, bases: List[Tuple[Path, str]], source: Path
+) -> None:
+    """Refuse a chain kept outside the source directory that extends a file inside it.
+
+    Such a chain may reach any file under the outside config's own directory
+    (``config_sources.default_confinement_root``), the operator's. A base inside the
+    source directory belongs to the repository being scanned, so its ``extends``
+    entries would decide which of the operator's files there are mounted into a
+    container that runs the repository's code.
+    """
+    from automated_security_helper.config.sandbox_grants import is_within
+
+    for base, _ in bases:
+        if is_within(base, source):
+            raise ContainerInputError(
+                f"The config file {config} is outside the source directory {source}, "
+                f"but its extends chain includes {base}, which is inside it. ASH does "
+                "not mount files a config of the repository being scanned chooses. "
+                "Keep the chain outside the repository, or put the config inside the "
+                "source directory, where its whole chain stays there too."
+            )
+
+
 def _host_file_in_container(
     host_path: str, source_dir: Path, mount_root: str, *, follow_extends: bool
 ) -> Tuple[List[str], str, List[Path]]:
@@ -1152,6 +1176,7 @@ def _host_file_in_container(
             ASH_LOGGER.debug(
                 f"Mounting {resolved} alone: its chain did not resolve: {e}"
             )
+        _refuse_bases_inside_the_source(resolved, placements[1:], source)
 
     mounts: List[str] = []
     for file, destination in placements:

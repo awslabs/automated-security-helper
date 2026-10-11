@@ -212,7 +212,11 @@ entry anywhere in the chain that names its base by absolute path: inside the con
 that path is not the same file. A `--config` named inside the scanned tree that is a link,
 or is reached through one, to a file outside that tree is refused with exit 3 too, since
 mounting the link's target would put a host file the repository chose into the
-container; so is a config file ASH cannot read itself. A config the scanned
+container; so is a config file ASH cannot read itself. A config outside
+`--source-dir` whose `extends` chain includes a file inside it is refused with exit 3
+as well: that base belongs to the repository being scanned, and its own `extends`
+entries would choose which files under the config's directory are mounted into the
+container. A config the scanned
 repository wrote keeps the limits a local scan gives it (see
 [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)):
 when the config or a file it extends is inside the outermost git checkout at or above
