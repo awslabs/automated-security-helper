@@ -76,6 +76,12 @@ Failure modes and known limitations
   ``models.workspace``: a finding is a certainty and must not be suppressed by
   anything weaker. No reporter shipped here declares ``UNSUPPORTED``; the path is
   built and tested so the enum member is a mechanism rather than a comment.
+* A per-project reporter that ASH's default config leaves off (the AWS reporters)
+  is listed with the per-project artefacts that exist on disk, because the
+  projects' own configs decided whether it ran. Only the projects that wrote one
+  are listed, and none is reported missing: the step cannot tell a project whose
+  config left the reporter off from one whose report phase failed. With no
+  artefact on disk it is recorded as ``skipped: disabled``.
 * The per-project artefact paths in the manifest are derived from each reporter's
   configured ``extension``, which is how ``ReportPhase`` derives the filename it
   writes. A reporter that writes extra files under its own steam -- as
@@ -269,6 +275,14 @@ def _per_project_artifacts(
         if not (output_dir / relative).is_file():
             missing.append(project.key)
     return entries, missing
+
+
+def _present_per_project_artifacts(
+    plan: WorkspacePlan, output_dir: Path, filename: str
+) -> List[Dict[str, str]]:
+    """The per-project artefacts of ``filename`` that exist on disk, in plan order."""
+    entries, missing = _per_project_artifacts(plan, output_dir, filename)
+    return [entry for entry in entries if entry["project"] not in missing]
 
 
 def _default_reporter_classes() -> List[type]:
@@ -537,6 +551,27 @@ def emit_workspace_reports(
             "missing_per_project_artifacts": [],
         }
         manifest_reporters[name] = entry
+
+        if (
+            skipped == SKIP_DISABLED
+            and behaviour is ReporterWorkspaceBehaviour.PER_PROJECT
+        ):
+            # Disabled by ASH's default config, which is what this step reads, but
+            # each project's scan read its own config. A per-project reporter the
+            # default leaves off -- the AWS reporters -- may have run in the
+            # projects whose config enabled it, so list what they wrote rather
+            # than call it disabled. A project with no artefact is not missing
+            # one: its config may simply leave the reporter off.
+            present = _present_per_project_artifacts(plan, output_dir, filename)
+            if present:
+                per_project.append(name)
+                entry["considered"] = True
+                entry["per_project_artifacts"] = present
+                ASH_LOGGER.verbose(
+                    f"Reporter {name} is off in the default config but per-project; "
+                    f"{len(present)} project(s) wrote its artefact."
+                )
+                continue
 
         if skipped is not None:
             # Recorded rather than omitted. Six of the nineteen shipped reporters

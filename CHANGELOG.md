@@ -172,6 +172,10 @@
     workspace level.
   - `ash report --format <aws reporter>` refuses a reporter that is not enabled and
     exits 1, instead of sending the stored findings.
+  - A workspace scan's `reports/workspace-reports.json` lists the per-project
+    reports of a per-project reporter that ASH's default config leaves off (S3,
+    CloudWatch Logs) wherever a project's config enabled it, instead of recording
+    it as `skipped: disabled`.
   - The AWS reporters read `AWS_REGION`, `AWS_PROFILE` and Bedrock's
     `ASH_BEDROCK_*` variables when their config is built, not when the module is
     imported, so a process whose environment changes after the import (an MCP

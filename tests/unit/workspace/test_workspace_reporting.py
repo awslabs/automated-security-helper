@@ -432,6 +432,99 @@ class TestPerProjectReporters:
         assert entry["missing_per_project_artifacts"] == ["web"]
 
 
+class _DefaultOffPerProjectConfig(ReporterPluginConfigBase):
+    name: str = "fake-default-off-per-project"
+    # The fixture writes ash.cdx.json in both projects' reports.
+    extension: str = "cdx.json"
+    enabled: bool = False
+
+
+class FakeDefaultOffPerProjectReporter(ReporterPluginBase[_DefaultOffPerProjectConfig]):
+    """A per-project reporter that ASH's default config leaves off, as the AWS ones."""
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _DefaultOffPerProjectConfig()
+        return super().model_post_init(context)
+
+    def report(self, model) -> str:  # pragma: no cover - must never be reached
+        raise AssertionError("a PER_PROJECT reporter was invoked at workspace level")
+
+
+class TestPerProjectReportersTheDefaultConfigLeavesOff:
+    """Each project's scan reads its own config; the workspace step reads ASH's default.
+
+    A per-project reporter that the default leaves off, such as the AWS
+    reporters, can still have run in every project whose operator config enabled
+    it. Recording it as "skipped: disabled" sent the operator to edit a config
+    that already enables it. The manifest lists the artefacts its projects
+    wrote instead.
+    """
+
+    def test_the_artefacts_its_projects_wrote_are_listed(self, workspace):
+        _, output_dir, _ = workspace
+        outcome = _emit(workspace, FakeDefaultOffPerProjectReporter)
+
+        entry = _manifest(output_dir)["reporters"]["fake-default-off-per-project"]
+        assert "skipped" not in entry
+        assert entry["behaviour"] == "per-project"
+        assert entry["workspace_artifact"] is None
+        assert entry["per_project_artifacts"] == [
+            {"project": "api", "path": "projects/api/reports/ash.cdx.json"},
+            {"project": "web", "path": "projects/web/reports/ash.cdx.json"},
+        ]
+        assert entry["missing_per_project_artifacts"] == []
+        assert outcome.per_project_reporters == ("fake-default-off-per-project",)
+
+    def test_only_the_projects_that_wrote_one_are_listed(self, workspace):
+        """A project whose config left the reporter off is not missing anything."""
+        _, output_dir, _ = workspace
+        (output_dir / "projects" / "web" / REPORTS_DIR_NAME / "ash.cdx.json").unlink()
+
+        _emit(workspace, FakeDefaultOffPerProjectReporter)
+
+        entry = _manifest(output_dir)["reporters"]["fake-default-off-per-project"]
+        assert entry["per_project_artifacts"] == [
+            {"project": "api", "path": "projects/api/reports/ash.cdx.json"},
+        ]
+        assert entry["missing_per_project_artifacts"] == []
+
+    def test_with_no_artefact_on_disk_it_stays_skipped_as_disabled(self, workspace):
+        _, output_dir, _ = workspace
+        for project in ("api", "web"):
+            (
+                output_dir / "projects" / project / REPORTS_DIR_NAME / "ash.cdx.json"
+            ).unlink()
+
+        outcome = _emit(workspace, FakeDefaultOffPerProjectReporter)
+
+        entry = _manifest(output_dir)["reporters"]["fake-default-off-per-project"]
+        assert entry["skipped"] == "disabled"
+        assert entry["considered"] is False
+        assert entry["per_project_artifacts"] == []
+        assert outcome.per_project_reporters == ()
+
+    def test_the_s3_reporter_a_project_enabled_is_listed(self, workspace):
+        """The case the AWS reporters' default-off made common: S3 is per-project."""
+        from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import (
+            S3Reporter,
+        )
+
+        _, output_dir, _ = workspace
+        receipt = output_dir / "projects" / "api" / REPORTS_DIR_NAME / "ash.s3.json"
+        receipt.write_text("{}", encoding="utf-8")
+
+        _emit(workspace, S3Reporter)
+
+        entry = _manifest(output_dir)["reporters"]["s3"]
+        assert "skipped" not in entry
+        assert entry["per_project_artifacts"] == [
+            {"project": "api", "path": "projects/api/reports/ash.s3.json"},
+        ]
+
+
 class TestWorkspaceScopedReporters:
     def test_a_workspace_scoped_reporter_writes_a_workspace_artefact(self, workspace):
         _, output_dir, _ = workspace
