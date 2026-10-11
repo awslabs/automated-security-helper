@@ -323,11 +323,16 @@ _GIT_SSH_COMMAND = " ".join(
     ]
 )
 
-#: ``-c`` options on every git invocation of a delivery. An empty
-#: ``credential.helper`` resets the helper list, so no configured helper runs;
-#: only the https and ssh protocols are allowed, for submodules and anything
-#: else git might reach as well as for the clone itself; and an http redirect
-#: is not followed, so an allowed host cannot send git to one that is not.
+#: ``-c`` options on every git invocation of a delivery, placed before the
+#: subcommand so they outrank the repository's config and are not written into
+#: the clone's ``.git/config``. An empty ``credential.helper`` resets the helper
+#: list, so no configured helper runs; only the https and ssh protocols are
+#: allowed, for submodules and anything else git might reach as well as for the
+#: clone itself; an http redirect is not followed, so an allowed host cannot send
+#: git to one that is not. ``core.fsmonitor=false`` and
+#: ``core.hooksPath=/dev/null`` keep git from starting the fsmonitor command or a
+#: hook (the clone's post-checkout, the checkout's, a fetch's ref-update hooks),
+#: wherever they were configured.
 _GIT_CONFIG = (
     "-c",
     "credential.helper=",
@@ -341,6 +346,10 @@ _GIT_CONFIG = (
     "protocol.ssh.allow=always",
     "-c",
     "http.followRedirects=false",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.hooksPath=/dev/null",
 )
 
 #: The program a delivery runs as git. A tuple so a test can name a stand-in.
