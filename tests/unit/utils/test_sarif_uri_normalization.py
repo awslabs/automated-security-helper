@@ -1,5 +1,7 @@
 """Tests for SARIF URI normalization in suppression matching."""
 
+from pathlib import Path
+
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -17,7 +19,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Region,
 )
-from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
+from automated_security_helper.utils.sarif_utils import (
+    apply_suppressions_to_sarif,
+    sanitize_sarif_paths,
+)
 
 
 def _make_sarif_with_uri(uri: str, rule_id: str = "B108") -> SarifReport:
@@ -250,3 +255,41 @@ class TestUriNormalizationSynthetic:
         assert result == uri_normalized, (
             f"URI {uri!r} should NOT be stripped (different root)"
         )
+
+
+class TestScannerReportedPathForms:
+    """Each form a scanner reports a location in reaches the matcher
+    source-relative (#770).
+
+    Same order as ``scan_result_processor``: ``sanitize_sarif_paths``, then
+    ``apply_suppressions_to_sarif``. detect-secrets reports a path relative to
+    the scan root and bandit an absolute ``file://`` URI; the suppression is
+    written as ``tests/**`` and has to match both.
+    """
+
+    def _run(self, uri, source_dir, output_dir):
+        sarif = _make_sarif_with_uri(uri, rule_id="SECRET-AWS-ACCESS-KEY")
+        ctx = _make_context(source_dir, output_dir, "tests/**", rule_id="SECRET-*")
+        sanitized = sanitize_sarif_paths(sarif, source_dir)
+        result = apply_suppressions_to_sarif(sanitized, ctx).runs[0].results[0]
+        location = result.locations[0].physicalLocation.root.artifactLocation.uri
+        return location, bool(result.suppressions)
+
+    def test_source_relative_path_is_kept_and_matches(
+        self, test_source_dir, test_output_dir
+    ):
+        uri, suppressed = self._run(
+            "tests/fixture_creds.py", test_source_dir, test_output_dir
+        )
+        assert uri == "tests/fixture_creds.py"
+        assert suppressed
+
+    def test_absolute_file_uri_is_made_source_relative_and_matches(
+        self, test_source_dir, test_output_dir
+    ):
+        file_uri = (
+            Path(test_source_dir).resolve() / "tests" / "fixture_creds.py"
+        ).as_uri()
+        uri, suppressed = self._run(file_uri, test_source_dir, test_output_dir)
+        assert uri == "tests/fixture_creds.py"
+        assert suppressed
