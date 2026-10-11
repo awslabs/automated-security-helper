@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from pydantic import ValidationError
 import yaml
@@ -280,18 +280,18 @@ def resolve_config(
         scanned_root = source_dir if source_dir is not None else Path.cwd()
     trees = scanned_trees(Path(scanned_root))
     if chain:
-        in_tree = list(chain) if untrusted_config else files_inside(chain, trees)
+        in_tree = list(chain) if untrusted_config else _not_the_operators(chain, trees)
         if not in_tree:
             return config
-        default_in_tree = files_inside(default_config_chain(), trees)
+        default_in_tree = _not_the_operators(default_config_chain(), trees)
     else:
         # With no config file, the config is get_default_config(): ASH_CONFIG's
         # file when that variable names one, which can be inside the tree too.
-        in_tree = default_in_tree = files_inside(default_config_chain(), trees)
+        in_tree = default_in_tree = _not_the_operators(default_config_chain(), trees)
         if not in_tree:
             return config
     operator = _load_operator_config(trusted_config_path, source_dir, permit_base)
-    if operator is not None and not files_inside(operator[1], trees):
+    if operator is not None and not _not_the_operators(operator[1], trees):
         trusted = operator[0]
     else:
         trusted = AshConfig() if default_in_tree else get_default_config()
@@ -329,6 +329,23 @@ def resolve_config(
     confine_reporter_destinations(config, trusted, operator_overrides, in_tree)
     confine_scanner_config_files(config, trusted, operator_overrides, in_tree)
     return config
+
+
+def _not_the_operators(paths: Iterable[Path], trees: Iterable[Path]) -> List[Path]:
+    """The files of ``paths`` that are not the operator's.
+
+    Those inside a scanned tree, which the repository wrote, and those an MCP
+    client delivered (``cli/mcp/sandbox.config_is_client_supplied``), whoever
+    names them: a ``--config`` or ``ASH_CONFIG`` under the MCP workspace root is
+    a client's file even on the CLI, scanning another directory.
+    """
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+
+    paths = list(paths)
+    inside = files_inside(paths, trees)
+    return inside + [
+        path for path in paths if path not in inside and config_is_client_supplied(path)
+    ]
 
 
 def _load_operator_config(

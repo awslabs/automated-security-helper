@@ -498,7 +498,10 @@ on which:
   `config/` directory: a config in another checkout the server may scan is that
   checkout's, not the operator's. A path is judged where it sits as well as by
   the file it reaches, so a link a client delivered is the client's wherever it
-  points. The table above applies, and so does the session's runtime-override
+  points. A file under the MCP workspace root is a client's whoever names it: a
+  `--config` or `ASH_CONFIG` naming one, on the CLI as well, gets the limits of a
+  config inside the scanned tree, and the server's runtime-override policy is
+  never read from it (the built-in defaults apply instead). The table above applies, and so does the session's runtime-override
   policy, `global_settings.mcp.runtime_overrides`:
 
   - The file may not change a field that `denied_paths` or

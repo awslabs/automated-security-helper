@@ -235,7 +235,10 @@
   file any MCP client delivered (under the MCP workspace root, except each session's
   `config/` directory) counts as inside the scanned tree for these checks, as
   does a config path a client names outside the directories
-  `ASH_MCP_ALLOWED_CONFIG_ROOTS` names. The workspace tools' `config_overrides` are checked against the session config's
+  `ASH_MCP_ALLOWED_CONFIG_ROOTS` names. So does a `--config` or `ASH_CONFIG`
+  naming a file under the MCP workspace root on the CLI, while scanning any
+  directory, and the runtime-override policy is never read from such an
+  `ASH_CONFIG`: the built-in defaults are the trusted config instead. The workspace tools' `config_overrides` are checked against the session config's
   `runtime_overrides` allowlist, as `select_profile`'s `patch_ops` and
   `override_yaml` are, and are refused while runtime overrides are off (the
   default). Each override is checked by the key it names, so one whose value the

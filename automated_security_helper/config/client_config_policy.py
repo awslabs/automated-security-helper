@@ -827,7 +827,6 @@ def _trusted_config(
     An operator config a client delivered is not one, and falls back to the default.
     """
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
-    from automated_security_helper.config.default_config import get_default_config
     from automated_security_helper.config.resolve_config import _load_operator_config
 
     operator = _load_operator_config(trusted_config_path, source_dir, permit_base)
@@ -835,4 +834,30 @@ def _trusted_config(
         config_is_client_supplied(path) for path in operator[1]
     ):
         return operator[0]
+    return trusted_default_config()
+
+
+def trusted_default_config() -> AshConfig:
+    """The server's default config, unless ``ASH_CONFIG`` names a client's file.
+
+    ``get_default_config`` reads ``ASH_CONFIG``. A file under the MCP workspace
+    root is a client's wherever it is named from (``config_is_client_supplied``),
+    so when ``ASH_CONFIG`` or a base it extends is one, the built-in defaults are
+    the trusted config instead, and the policy is not read from it.
+    """
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.default_config import (
+        default_config_chain,
+        get_default_config,
+    )
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    chain = default_config_chain()
+    if any(config_is_client_supplied(path) for path in chain):
+        ASH_LOGGER.warning(
+            "ASH_CONFIG names a file under the MCP workspace root, which an MCP "
+            "client delivered, so ASH's built-in defaults are the trusted config "
+            "instead. Keep the server's config outside the MCP workspace root."
+        )
+        return AshConfig()
     return get_default_config()

@@ -444,13 +444,13 @@ def session_client_rules(
     """
     from automated_security_helper.config.client_config_policy import (
         rules_from,
+        trusted_default_config,
         unreadable_rules,
     )
-    from automated_security_helper.config.default_config import get_default_config
 
     try:
         entry = session_profile_entry(session_id, profile)
-        trusted = entry.config if entry is not None else get_default_config()
+        trusted = entry.config if entry is not None else trusted_default_config()
     except Exception as exc:  # noqa: BLE001 -- held, and raised only where it applies
         return unreadable_rules(
             f"the trusted config could not be loaded: {type(exc).__name__}: {exc}"
