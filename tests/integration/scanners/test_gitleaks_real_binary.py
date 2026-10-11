@@ -323,6 +323,115 @@ def test_an_entry_spelled_with_a_dot_slash_adds_no_duplicate(
     assert _findings(report) == REPORTED
 
 
+def _plant_token(path: Path, line: int = 1) -> None:
+    """Write a fabricated github-pat at ``line`` of ``path``."""
+    token = fabricated_tokens()["settings_github_pat"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n" * (line - 1) + f"url = https://x:{token}@github.com/o/r.git\n",
+        encoding="utf-8",
+    )
+
+
+def _gitleaks_alone(cwd: Path, scan: str, report: Path, *extra: str) -> set:
+    """``gitleaks dir`` run directly, for a control: its (rule, uri, line)s."""
+    subprocess.run(
+        [
+            "gitleaks",
+            "dir",
+            "--report-format=sarif",
+            f"--report-path={report}",
+            "--redact=100",
+            "--exit-code=0",
+            "--no-banner",
+            f"--gitleaks-ignore-path={report.parent}",
+            *extra,
+            "--",
+            scan,
+        ],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        timeout=120,
+    )
+    return _raw_findings(json.loads(report.read_text(encoding="utf-8")))
+
+
+@pytest.mark.parametrize("named", [".git/config", "vendor/lib/.git/config"])
+def test_an_entry_under_a_dot_git_directory_adds_nothing(
+    tmp_path, path_with_gitleaks, named
+):
+    """gitleaks' default allowlist skips every directory named .git, so the
+    directory scan never reads a file there and an entry naming one hid nothing.
+    gitleaks given the file on its own reads it, which is the control."""
+    source = tmp_path / "src"
+    _plant_token(source / named, line=2)
+    (source / "app.py").write_text("x = 1\n", encoding="utf-8")
+    assert _gitleaks_alone(source, named, tmp_path / "alone.sarif") == {
+        ("github-pat", named, 2)
+    }
+    _, plain = _scan_direct(source, tmp_path / "out-plain")
+    assert _findings(plain) == set()
+
+    (source / ".gitleaksignore").write_text(f"{named}:github-pat:2\n")
+    _, report = _scan_direct(source, tmp_path / "out")
+    assert _findings(report) == set()
+
+
+def test_an_operator_config_that_reads_dot_git_has_its_drops_added_back(
+    tmp_path, path_with_gitleaks
+):
+    """The directory rules are the active config's: one with no allowlist reads
+    .git, so there the tree's .gitleaksignore does hide a finding, and ASH adds it
+    back."""
+    source = tmp_path / "src"
+    _plant_token(source / ".git" / "config", line=2)
+    operator_config = tmp_path / "operator.toml"
+    operator_config.write_text(
+        "[[rules]]\nid = \"github-pat\"\nregex = '''ghp_[0-9a-zA-Z]{36}'''\n",
+        encoding="utf-8",
+    )
+    _, plain = _scan_direct(
+        source, tmp_path / "out-plain", config_file=str(operator_config)
+    )
+    assert _findings(plain) == {("github-pat", ".git/config", 2)}
+
+    (source / ".gitleaksignore").write_text(".git/config:github-pat:2\n")
+    _, report = _scan_direct(source, tmp_path / "out", config_file=str(operator_config))
+    assert _findings(report) == {("github-pat", ".git/config", 2)}
+
+
+def test_an_entry_through_a_symlinked_directory_adds_nothing(
+    tmp_path, path_with_gitleaks
+):
+    """gitleaks follows no symlink, a symlinked directory included, so the
+    directory scan never read linked/one.py; the file it points at is reported
+    once, under its own path."""
+    source = tmp_path / "src"
+    _plant_token(source / "app" / "one.py")
+    try:
+        (source / "linked").symlink_to("app", target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+    (source / ".gitleaksignore").write_text("linked/one.py:github-pat:1\n")
+    _, report = _scan_direct(source, tmp_path / "out")
+    assert _findings(report) == {("github-pat", "app/one.py", 1)}
+
+
+def test_a_secret_in_the_gitleaksignore_it_hides_is_added_back(
+    tmp_path, path_with_gitleaks
+):
+    """The ignore file is scanned like any file, and may name itself."""
+    source = tmp_path / "src"
+    token = fabricated_tokens()["settings_github_pat"]
+    (source).mkdir()
+    (source / ".gitleaksignore").write_text(
+        f".gitleaksignore:github-pat:2\n# {token}\n", encoding="utf-8"
+    )
+    _, report = _scan_direct(source, tmp_path / "out")
+    assert _findings(report) == {("github-pat", ".gitleaksignore", 2)}
+
+
 def test_an_operator_config_file_still_applies(tmp_path, path_with_gitleaks):
     source = _copy_fixture(tmp_path)
     operator_config = tmp_path / "operator.toml"

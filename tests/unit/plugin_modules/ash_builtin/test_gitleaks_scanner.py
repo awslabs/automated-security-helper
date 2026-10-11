@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+import stat
 import sys
 from pathlib import Path
 
@@ -681,21 +683,65 @@ def _report(*results: dict) -> dict:
     }
 
 
-def _rescan_harness(tmp_path, monkeypatch, per_file: dict, code: int = LEAKS_EXIT_CODE):
-    """A scanner whose re-scans write ``per_file[<scan path>]`` as their report."""
-    scanner = _scanner(tmp_path)
+def _rescan_harness(
+    tmp_path,
+    monkeypatch,
+    per_file: dict,
+    code: int = LEAKS_EXIT_CODE,
+    operator: bool | None = None,
+    **options,
+):
+    """A scanner whose re-scans stand in for gitleaks over ASH's copies.
+
+    Each run reports ``per_file[<path>]`` for every file under its working
+    directory, or for the one file it is given, with the URI gitleaks would write:
+    the path relative to that directory. ``calls`` records each run's argv,
+    working directory, and the files it found there with their bytes.
+    """
+    scanner = _scanner(tmp_path, operator=operator, **options)
     calls = []
 
-    def fake_run(command, results_dir=None, timeout=None, **kwargs):
-        calls.append(list(command))
+    def fake_run(command, results_dir=None, timeout=None, cwd=None, **kwargs):
+        root = Path(cwd)
+        scan = command[-1]
+        if scan == ".":
+            files = sorted(
+                p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()
+            )
+        else:
+            files = [scan]
+        calls.append(
+            {
+                "argv": list(command),
+                "cwd": root,
+                "files": files,
+                "contents": {name: (root / name).read_bytes() for name in files},
+                "env": kwargs.get("env"),
+            }
+        )
+        found = []
+        for name in files:
+            for result in per_file.get(name, []):
+                result = copy.deepcopy(result)
+                result["locations"][0]["physicalLocation"]["artifactLocation"][
+                    "uri"
+                ] = name
+                found.append(result)
         report = next(
             a.split("=", 1)[1] for a in command if a.startswith("--report-path=")
         )
-        Path(report).write_text(json.dumps(_report(*per_file.get(command[-1], []))))
+        Path(report).write_text(json.dumps(_report(*found)))
         return {"returncode": code}
 
     monkeypatch.setattr(scanner, "_run_subprocess", fake_run)
     return scanner, calls
+
+
+def _write(source: Path, name: str, text: str = "x") -> Path:
+    path = source / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
 
 
 def test_findings_the_trees_gitleaksignore_drops_are_added_back(tmp_path, monkeypatch):
@@ -708,9 +754,9 @@ def test_findings_the_trees_gitleaksignore_drops_are_added_back(tmp_path, monkey
         {"app/settings.py": [kept, dropped], "docs/example.md": [other]},
     )
     source = Path(scanner.context.source_dir)
-    for name in ("app/settings.py", "docs/example.md"):
-        (source / name).parent.mkdir(parents=True, exist_ok=True)
-        (source / name).write_text("x")
+    _write(source, "app/settings.py", "settings")
+    _write(source, "docs/example.md", "example")
+    _write(source, "app/unnamed.py", "not named")
     (source / ".gitleaksignore").write_text(
         "# a comment\n"
         "app/settings.py:github-pat:4\n"
@@ -736,17 +782,23 @@ def test_findings_the_trees_gitleaksignore_drops_are_added_back(tmp_path, monkey
         ("app/settings.py", "github-pat"),
         ("docs/example.md", "github-pat"),
     }
-    # One run per named file inside the target, each with its own report, the same
-    # flags as the first run, and the file after "--".
-    assert [c[-2:] for c in calls] == [
-        ["--", "app/settings.py"],
-        ["--", "docs/example.md"],
-    ]
-    for call in calls:
-        assert call[:-1] != main_args[:-1]
-        assert [a for a in call if not a.startswith("--report-path=")][:-1] == [
-            a for a in main_args if not a.startswith("--report-path=")
-        ][:-1]
+    # One run, over copies of the named files inside the target at their tree
+    # paths, with the first run's flags and its own report, scanned as ".".
+    [call] = calls
+    assert call["files"] == ["app/settings.py", "docs/example.md"]
+    assert call["contents"] == {
+        "app/settings.py": b"settings",
+        "docs/example.md": b"example",
+    }
+    assert call["argv"][-2:] == ["--", "."]
+    assert call["argv"][:-1] != main_args[:-1]
+    assert [a for a in call["argv"] if not a.startswith("--report-path=")][:-1] == [
+        a for a in main_args if not a.startswith("--report-path=")
+    ][:-1]
+    rescan_dir = results_file.parent / "gitleaksignore-rescan"
+    assert call["cwd"] == rescan_dir / "tree"
+    # The copies hold the tree's secrets: none is left behind.
+    assert not call["cwd"].exists()
 
 
 def test_without_a_gitleaksignore_nothing_is_re_scanned(tmp_path, monkeypatch):
@@ -763,18 +815,19 @@ def test_without_a_gitleaksignore_nothing_is_re_scanned(tmp_path, monkeypatch):
 @pytest.mark.parametrize("code", [1, 126])
 def test_a_failed_re_scan_fails_the_scan(tmp_path, monkeypatch, code):
     """Reporting the first run alone would hide what the ignore file dropped."""
-    scanner, _ = _rescan_harness(tmp_path, monkeypatch, {}, code=code)
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, {}, code=code)
     source = Path(scanner.context.source_dir)
     (source / "a.py").write_text("x")
     (source / ".gitleaksignore").write_text("a.py:github-pat:1\n")
     results_file = tmp_path / "gitleaks.sarif"
-    with pytest.raises(ScannerError, match="re-scanning a.py"):
+    with pytest.raises(ScannerError, match="re-scanning the files"):
         scanner._add_back_gitleaksignore_drops(
             _report(),
             source,
             scanner._build_arguments(source, results_file),
             results_file,
         )
+    assert calls and not calls[0]["cwd"].exists()
 
 
 def _add_back(scanner, source: Path, raw: dict, tmp_path: Path) -> list:
@@ -805,8 +858,7 @@ def test_two_secrets_of_one_rule_on_one_line_are_both_added_back(tmp_path, monke
         tmp_path, monkeypatch, {"app/two.py": [first, second]}
     )
     source = Path(scanner.context.source_dir)
-    (source / "app").mkdir()
-    (source / "app" / "two.py").write_text("x")
+    _write(source, "app/two.py")
     (source / ".gitleaksignore").write_text("app/two.py:github-pat:1\n")
 
     assert _add_back(scanner, source, _report(), tmp_path) == [
@@ -823,8 +875,7 @@ def test_a_finding_the_first_run_kept_is_not_added_twice(tmp_path, monkeypatch):
     kept = _result("app/two.py", "github-pat", 1, column=54)
     scanner, _ = _rescan_harness(tmp_path, monkeypatch, {"app/two.py": [hidden, kept]})
     source = Path(scanner.context.source_dir)
-    (source / "app").mkdir()
-    (source / "app" / "two.py").write_text("x")
+    _write(source, "app/two.py")
     (source / ".gitleaksignore").write_text("app/two.py:github-pat:1\n")
 
     assert _add_back(scanner, source, _report(copy.deepcopy(kept)), tmp_path) == [
@@ -833,57 +884,155 @@ def test_a_finding_the_first_run_kept_is_not_added_twice(tmp_path, monkeypatch):
     ]
 
 
-def _as_gitleaks_reports(*results: dict) -> dict:
-    """``per_file`` for ``_rescan_harness``: each result under every spelling of its
-    file, reported back in the spelling it was scanned under, as gitleaks does."""
-    per_file: dict = {}
-    for result in results:
-        uri = result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
-        for spelling in (uri, f"./{uri}"):
-            respelled = copy.deepcopy(result)
-            location = respelled["locations"][0]["physicalLocation"]
-            location["artifactLocation"]["uri"] = spelling
-            per_file.setdefault(spelling, []).append(respelled)
-    return per_file
-
-
 @pytest.mark.parametrize(
     "entry",
     [
         "./app/settings.py:github-pat:4",
         "app//settings.py:github-pat:4",
         "app/../app/settings.py:github-pat:4",
+        "{source}/app/settings.py:github-pat:4",
     ],
 )
 def test_an_entry_spelled_another_way_adds_no_duplicate(tmp_path, monkeypatch, entry):
-    """gitleaks reports a file in the spelling it was given. The re-scan names each
-    file the way the directory scan reports it, so its findings match the first
+    """gitleaks reports a file in the spelling it was given. The re-scan reaches
+    each file by the path the directory scan does, so its findings match the first
     run's and none is added twice."""
     found = _result("app/settings.py", "github-pat", 4, column=18)
-    scanner, calls = _rescan_harness(tmp_path, monkeypatch, _as_gitleaks_reports(found))
+    scanner, calls = _rescan_harness(
+        tmp_path, monkeypatch, {"app/settings.py": [found]}
+    )
     source = Path(scanner.context.source_dir)
-    (source / "app").mkdir()
-    (source / "app" / "settings.py").write_text("x")
+    _write(source, "app/settings.py")
+    entry = entry.format(source=source.absolute().as_posix())
     (source / ".gitleaksignore").write_text(entry + "\n")
 
     assert _add_back(scanner, source, _report(copy.deepcopy(found)), tmp_path) == [
         ("app/settings.py", "github-pat", 4, 18)
     ]
-    assert [call[-1] for call in calls] == ["app/settings.py"]
+    assert [call["files"] for call in calls] == [["app/settings.py"]]
 
 
-def test_an_absolute_entry_inside_the_tree_is_re_scanned_as_reported(
+def test_what_the_directory_scan_does_not_read_is_not_re_scanned(tmp_path, monkeypatch):
+    """gitleaks follows no symlink, at the file or a parent; skips a FIFO and an
+    empty file; and does not scan its own baseline. ASH's output directory is
+    read but dropped. None of those is copied; a hard-linked file is."""
+    scanner, calls = _rescan_harness(
+        tmp_path, monkeypatch, {}, operator=True, baseline_path="baseline.json"
+    )
+    source = Path(scanner.context.source_dir)
+    _write(source, "app/real.py")
+    _write(source, "app/hard.py", "hard")
+    _write(source, "baseline.json", "[]")
+    _write(source, ".ash/ash_output/converted/x.py")
+    (source / "app" / "empty.py").write_text("")
+    entries = [
+        "app/real.py",
+        "app/link.py",
+        "linked/real.py",
+        "app/hardlink.py",
+        "app/empty.py",
+        "baseline.json",
+        ".ash/ash_output/converted/x.py",
+    ]
+    try:
+        (source / "app" / "link.py").symlink_to("real.py")
+        (source / "linked").symlink_to("app", target_is_directory=True)
+        os.link(source / "app" / "hard.py", source / "app" / "hardlink.py")
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"links unavailable on this platform: {exc}")
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(source / "app" / "fifo")
+        entries.append("app/fifo")
+    (source / ".gitleaksignore").write_text(
+        "".join(f"{name}:github-pat:1\n" for name in entries)
+    )
+    results_file = tmp_path / "res" / "gitleaks.sarif"
+    results_file.parent.mkdir()
+    main_args = scanner._build_arguments(source, results_file)
+    assert any(a.startswith("--baseline-path=") for a in main_args)
+
+    scanner._add_back_gitleaksignore_drops(_report(), source, main_args, results_file)
+
+    assert [call["files"] for call in calls] == [["app/hardlink.py", "app/real.py"]]
+
+
+def test_a_gitleaksignore_that_names_itself_is_re_scanned_as_a_file(
     tmp_path, monkeypatch
 ):
-    found = _result("app/settings.py", "github-pat", 4, column=18)
-    scanner, calls = _rescan_harness(tmp_path, monkeypatch, _as_gitleaks_reports(found))
+    """At the copies' root it would be read as their ignore file, so it is copied
+    alone and scanned as a file, which reads none."""
+    hidden = _result(".gitleaksignore", "github-pat", 2)
+    other = _result("app/x.py", "github-pat", 1)
+    scanner, calls = _rescan_harness(
+        tmp_path, monkeypatch, {".gitleaksignore": [hidden], "app/x.py": [other]}
+    )
     source = Path(scanner.context.source_dir)
-    (source / "app").mkdir()
-    (source / "app" / "settings.py").write_text("x")
-    absolute = (source / "app" / "settings.py").absolute().as_posix()
-    (source / ".gitleaksignore").write_text(f"{absolute}:github-pat:4\n")
+    _write(source, "app/x.py")
+    (source / ".gitleaksignore").write_text(
+        ".gitleaksignore:github-pat:2\napp/x.py:github-pat:1\n"
+    )
 
-    assert _add_back(scanner, source, _report(copy.deepcopy(found)), tmp_path) == [
-        ("app/settings.py", "github-pat", 4, 18)
+    assert _add_back(scanner, source, _report(), tmp_path) == [
+        (".gitleaksignore", "github-pat", 2, None),
+        ("app/x.py", "github-pat", 1, None),
     ]
-    assert [call[-1] for call in calls] == ["app/settings.py"]
+    tree, itself = calls
+    assert tree["files"] == ["app/x.py"]
+    assert itself["argv"][-2:] == ["--", ".gitleaksignore"]
+    assert not (itself["cwd"] / ".gitleaksignore").exists()
+    assert itself["cwd"] != tree["cwd"]
+
+
+def test_the_converted_targets_re_scan_reports_absolute_uris(tmp_path, monkeypatch):
+    """The converted target is scanned by its absolute path, so its first run's
+    URIs are absolute, and the re-scan's are made so to compare with them."""
+    scanner, calls = _rescan_harness(
+        tmp_path, monkeypatch, {"a/x.py": [_result("a/x.py", "github-pat", 1)]}
+    )
+    work = Path(scanner.context.work_dir)
+    _write(work, "a/x.py")
+    (work / ".gitleaksignore").write_text("a/x.py:github-pat:1\n")
+
+    assert _add_back(scanner, work, _report(), tmp_path) == [
+        ((work / "a" / "x.py").absolute().as_posix(), "github-pat", 1, None)
+    ]
+    assert calls[0]["files"] == ["a/x.py"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
+def test_the_copies_are_private_to_their_owner(tmp_path, monkeypatch):
+    scanner, _ = _rescan_harness(tmp_path, monkeypatch, {})
+    modes = []
+
+    def spy(command, cwd=None, **kwargs):
+        modes.append(stat.S_IMODE(os.stat(Path(cwd) / "app" / "x.py").st_mode))
+        report = next(
+            a.split("=", 1)[1] for a in command if a.startswith("--report-path=")
+        )
+        Path(report).write_text(json.dumps(_report()))
+        return {"returncode": 0}
+
+    monkeypatch.setattr(scanner, "_run_subprocess", spy)
+    source = Path(scanner.context.source_dir)
+    _write(source, "app/x.py")
+    (source / ".gitleaksignore").write_text("app/x.py:github-pat:1\n")
+    _add_back(scanner, source, _report(), tmp_path)
+    assert modes == [0o600]
+
+
+def test_a_relative_gitleaks_config_variable_is_resolved_from_the_source(
+    tmp_path, monkeypatch
+):
+    """The first run resolves it from the source directory, its working
+    directory; the re-scan runs from the copies, so it is given the same file."""
+    monkeypatch.setenv("GITLEAKS_CONFIG", "rules/gl.toml")
+    monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, {})
+    source = Path(scanner.context.source_dir)
+    _write(source, "app/x.py")
+    (source / ".gitleaksignore").write_text("app/x.py:github-pat:1\n")
+    _add_back(scanner, source, _report(), tmp_path)
+    assert not any(a.startswith("--config=") for a in calls[0]["argv"])
+    assert calls[0]["env"]["GITLEAKS_CONFIG"] == (
+        (source / "rules" / "gl.toml").absolute().as_posix()
+    )

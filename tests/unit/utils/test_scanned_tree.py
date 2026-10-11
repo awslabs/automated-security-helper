@@ -199,6 +199,29 @@ class TestSymlinks:
             assert handle.read() == IN_TREE
         assert refused(tree / "hard.txt", tree).reason == REASON_HARDLINK
 
+    @pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links")
+    def test_allowing_hard_links_still_follows_no_symlink(self, walk, layout):
+        """For a reader standing in for a directory walk: a hard-linked file is
+        read, and a symlink, at the file or a parent, is still refused."""
+        tree, host = layout
+        os.link(tree / "top.txt", tree / "hard.txt")
+        with open_in_scanned_tree(
+            tree / "hard.txt", tree, allow_hardlinks=True
+        ) as handle:
+            assert handle.read() == IN_TREE
+        (tree / "inside-link.txt").symlink_to(tree / "top.txt")
+        (tree / "linked-dir").symlink_to(tree / "real", target_is_directory=True)
+        for path, reason in (
+            (tree / "inside-link.txt", REASON_SYMLINK),
+            (tree / "linked-dir" / "deep" / "ok.txt", None),
+        ):
+            with pytest.raises(TreeInputRefused) as excinfo:
+                open_in_scanned_tree(path, tree, allow_hardlinks=True)
+            if reason is not None:
+                assert excinfo.value.reason == reason
+            else:
+                assert "linked-dir" in excinfo.value.reason
+
     def test_refusal_reason_agrees_with_the_open(self, walk, layout):
         tree, host = layout
         (tree / "link.txt").symlink_to(host / "secret.txt")
