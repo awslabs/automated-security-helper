@@ -75,7 +75,7 @@ Every caller on a network transport is remote, whatever headers it sends: it is 
 
 A caller with no session can still use the tools that take a path, inside the operator's grants. The tools that need a session refuse it with `error_type: session_identity_required` and an error naming `--trust-upstream-session-id`: `set_source_git`, `set_source_zip_chunk`, `set_source_zip_finalize`, `clear_source`, `select_profile`, `list_active_scans`, `get_scan_progress`, `cancel_scan`, and `run_ash_scan` without `source_dir`. A stateless server behind a plain load balancer therefore scans named, granted directories and reads results by path; source delivery needs a stateful server or a platform that issues the session header.
 
-With `--trust-upstream-session-id`, isolation between two callers is exactly as strong as the platform makes the header: ASH cannot tell a header the platform set from one a client set. The reserved values `__default__` and `__unidentified__` are refused. The flag is refused with any transport other than `streamable-http --stateless-http`, where the server issues its own sessions.
+With `--trust-upstream-session-id`, isolation between two callers is exactly as strong as the platform makes the header: ASH cannot tell a header the platform set from one a client set. The names ASH keeps under the workspace root for itself, `__default__`, `__unidentified__` and `.stdio-servers`, are refused in any letter case, because a case-insensitive filesystem opens `__DEFAULT__` as the same directory as `__default__`. The flag is refused with any transport other than `streamable-http --stateless-http`, where the server issues its own sessions.
 
 ## Config profiles
 

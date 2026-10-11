@@ -118,7 +118,21 @@ class TestDeclaredUpstreamSessions:
 
         assert result.get("success") is False, result
 
-    @pytest.mark.parametrize("reserved", ["__default__", "__unidentified__"])
+    @pytest.mark.parametrize(
+        "reserved",
+        [
+            "__default__",
+            "__unidentified__",
+            # A case-insensitive filesystem (macOS, Windows) opens the same
+            # directory for these spellings.
+            "__DEFAULT__",
+            "__Default__",
+            "__UNIDENTIFIED__",
+            # The stdio servers' presence registry under the workspace root.
+            ".stdio-servers",
+            ".STDIO-SERVERS",
+        ],
+    )
     def test_a_reserved_id_is_refused(self, declared, reserved) -> None:
         _issued, headers = declared.open_session({"Mcp-Session-Id": reserved})
 
@@ -126,6 +140,21 @@ class TestDeclaredUpstreamSessions:
 
         assert result.get("success") is False, result
         assert result.get("error_type") == "invalid_session_id", result
+
+    def test_a_header_cannot_name_the_stdio_presence_registry(
+        self, declared, workspace
+    ) -> None:
+        presence = workspace / ".stdio-servers"
+        presence.mkdir()
+        entry = presence / "4242"
+        entry.write_text("")
+        _issued, headers = declared.open_session({"Mcp-Session-Id": ".stdio-servers"})
+
+        declared.call_tool("clear_source", {}, headers)
+        _deliver(declared, headers)
+
+        assert entry.is_file(), "a header removed the stdio presence registry"
+        assert sorted(p.name for p in presence.iterdir()) == ["4242"]
 
     def test_a_missing_header_still_has_no_session(self, declared) -> None:
         _issued, headers = declared.open_session()

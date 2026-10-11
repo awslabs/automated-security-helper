@@ -174,12 +174,22 @@ def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
     return validate_path_component(candidate, MCP_SESSION_ID_HEADER)
 
 
-def _reserved_session_ids() -> tuple:
+def is_reserved_session_id(value: str) -> bool:
+    """True if ``value`` names a directory under the workspace root ASH owns.
+
+    Those are stdio's workspace (``DEFAULT_SESSION_ID``), the unidentified
+    sentinel, and the stdio servers' presence registry. Compared casefolded: on a
+    case-insensitive filesystem (the macOS and Windows defaults) ``__DEFAULT__``
+    opens the same directory as ``__default__``.
+    """
+
     from automated_security_helper.cli.mcp.profile_registry import (
         DEFAULT_SESSION_ID,
     )
+    from automated_security_helper.cli.mcp.sessions import STDIO_SERVERS_DIR
 
-    return (DEFAULT_SESSION_ID, UNIDENTIFIED_SESSION_ID)
+    reserved = (DEFAULT_SESSION_ID, UNIDENTIFIED_SESSION_ID, STDIO_SERVERS_DIR)
+    return value.casefold() in {name.casefold() for name in reserved}
 
 
 def _is_sdk_context(ctx: object) -> bool:
@@ -236,7 +246,7 @@ def resolve_caller_session_id(ctx: object) -> str:
     candidate = caller.session_id.strip()
     if not candidate:
         return UNIDENTIFIED_SESSION_ID
-    if candidate in _reserved_session_ids():
+    if is_reserved_session_id(candidate):
         raise ValueError(
             f"{MCP_SESSION_ID_HEADER} {candidate!r} is reserved and cannot name a "
             f"session"
@@ -271,6 +281,7 @@ __all__ = [
     "MCP_SESSION_ID_HEADER",
     "SESSION_IDENTITY_REQUIRED",
     "UNIDENTIFIED_SESSION_ID",
+    "is_reserved_session_id",
     "resolve_caller_session_id",
     "resolve_session_id",
     "session_identity_refusal",

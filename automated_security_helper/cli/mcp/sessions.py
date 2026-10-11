@@ -337,7 +337,7 @@ def finish_ended_session(session_id: Optional[str]) -> None:
 #: Directory under the workspace root holding one entry per live stdio server.
 #: Not a session workspace: its name is not a valid session id component that
 #: ASH ever issues, and it carries no session marker.
-_STDIO_SERVERS_DIR = ".stdio-servers"
+STDIO_SERVERS_DIR = ".stdio-servers"
 _STDIO_SERVERS_LOCK = ".lock"
 
 
@@ -399,7 +399,7 @@ class StdioServerPresence:
             resolve_workspace_root,
         )
 
-        return resolve_workspace_root() / _STDIO_SERVERS_DIR
+        return resolve_workspace_root() / STDIO_SERVERS_DIR
 
     def __enter__(self) -> Self:
         import uuid
@@ -515,18 +515,19 @@ def sweep_stale_workspaces(
     "Used" is the newest modification time of the sandbox directory and its
     direct children; every HTTP request that names a session refreshes it
     (:func:`touch_session_workspace`), and every delivery writes there. A
-    session whose scan is running is skipped, and so is the stdio session,
-    which its own server removes when it exits. Entries that are not
-    directories, are symlinks, or do not name a single directory are left
-    alone.
+    session whose scan is running is skipped, and so is every name
+    ``session_identity.is_reserved_session_id`` reserves: the stdio session,
+    which the last stdio server removes when it exits, and the stdio servers'
+    presence registry. Entries that are not directories, are symlinks, or do
+    not name a single directory are left alone.
 
     Returns:
         The session ids whose workspaces were removed.
     """
     import time
 
-    from automated_security_helper.cli.mcp.profile_registry import (
-        DEFAULT_SESSION_ID,
+    from automated_security_helper.cli.mcp.session_identity import (
+        is_reserved_session_id,
     )
     from automated_security_helper.cli.mcp.source_delivery import (
         resolve_workspace_root,
@@ -541,7 +542,7 @@ def sweep_stale_workspaces(
     removed: List[str] = []
     for entry in entries:
         session_id = entry.name
-        if session_id in (DEFAULT_SESSION_ID, _STDIO_SERVERS_DIR):
+        if is_reserved_session_id(session_id):
             continue
         try:
             validated_path_component(session_id)

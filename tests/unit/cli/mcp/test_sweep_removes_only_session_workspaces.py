@@ -76,3 +76,19 @@ def test_every_way_a_workspace_is_created_marks_it(root, how) -> None:
 
     assert removed == [session_id], removed
     assert not (root / session_id).exists()
+
+
+@pytest.mark.parametrize(
+    "name", ["__default__", "__DEFAULT__", ".stdio-servers", ".Stdio-Servers"]
+)
+def test_names_ash_reserves_survive_in_any_case(root, name) -> None:
+    """On a case-insensitive filesystem each spelling is stdio's own directory."""
+    reserved = root / name
+    reserved.mkdir()
+    (reserved / ".ash-mcp-session").write_text("")
+    _age(reserved)
+
+    removed = sessions.sweep_stale_workspaces(24 * 3600)
+
+    assert removed == [], removed
+    assert reserved.is_dir()
