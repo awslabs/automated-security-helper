@@ -196,7 +196,9 @@
   updates it, it stays root's. A `non-root` image started under another UID than it
   was built with can therefore no longer update grype's database, and grype reports
   ERROR, failing the scan, where it used to write the shared cache. `/src` and `/out` stay
-  writable by every user in the `ci` stage, now with the sticky bit. See
+  writable by every user in the `ci` stage, now with the sticky bit. Files an
+  installer left writable by every user elsewhere in the image (uv's lock files at 666,
+  some gems' files under `/var/lib/gems` at 777) lose group and other write too. See
   [Who can write to the image's directories](docs/content/docs/building-your-own-image.md#who-can-write-to-the-images-directories).
 - **`--log-level` is passed to the scan inside the container.** It was dropped; only
   the levels the host also expresses as `--debug`, `--verbose` or `--simple` got

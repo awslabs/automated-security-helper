@@ -80,6 +80,12 @@ The image keeps what a scan trusts out of reach of other users in the container:
 | `/deps/.grype` (grype's database) | the user the image runs as: root in `ci`, the unprivileged user in `non-root`; root in an offline image | grype's database update writes it at scan time; an offline image never updates it |
 | `/src`, `/out` | writable by every user, with the sticky bit (`ci`); the unprivileged user (`non-root`) | A run mounts the source and the output here; without those mounts, the `ci` image may be started under any UID |
 
+Outside `/src`, `/out` and the sticky scratch directories (`/tmp`, `/var/tmp`,
+`/run/lock`), nothing in the image is writable by every user. Each stage ends by
+clearing group and other write on anything an installer left that way, such as the
+lock files uv creates mode 666 in its cache and tool directories and the files some
+gems ship mode 777 under `/var/lib/gems`.
+
 Earlier images made `/deps`, its caches and `/.ash/bin` writable by every user. An image
 you extend with `--custom-containerfile` keeps these modes unless your Dockerfile
 changes them.

@@ -250,11 +250,16 @@ ARG BUNDLER_VERSION="2.4.22"
 # carried it -- keeping all three steps in one layer means it never lands at all.
 #
 # apt-get update runs again because the base layer clears the package lists.
+#
+# Some gems ship files mode 777 (lightly, which cfn-nag pulls in, does), and gem
+# install keeps the modes the gem was packed with. The chmod clears group and other
+# write in the same layer, so those modes never reach the image.
 RUN echo "gem: --no-document" >> /etc/gemrc && \
     apt-get update && \
     apt-get install -y --no-install-recommends build-essential=12.9 ruby-dev=1:3.1 && \
     with-retry 'gem install bundler -v ${BUNDLER_VERSION}' && \
     with-retry 'bundle install --jobs=4' && \
+    chmod -R go-w /var/lib/gems && \
     apt-get purge -y --auto-remove build-essential ruby-dev && \
     rm -rf /var/lib/apt/lists/*
 
@@ -499,6 +504,21 @@ RUN with-retry 'install-pinned-tool --licenses-only bandit checkov semgrep'
 RUN install-pinned-tool --verify-third-party
 
 #
+# Nothing in the image is writable by every user outside the sticky directories.
+# Not every installer honors the umask: uv creates the lock files in its cache and
+# tool directories mode 666. This clears group and other write on whatever an
+# install step left writable by everyone, after the last one in this stage. It stays
+# on the image's own filesystem (-xdev) and skips the sticky scratch directories,
+# whose files belong to whoever wrote them; it changes only the files it finds, so
+# this layer holds only those. The non-root stage repeats it after its own install.
+# tests/snapshot/container/runtime/test_container_image_permissions.py checks the
+# built image with the same find.
+#
+RUN find / -xdev \( -path /proc -o -path /sys -o -path /dev -o -path /tmp \
+        -o -path /var/tmp -o -path /run/lock \) -prune -o \
+        ! -type l -perm -0002 ! -perm -1000 -exec chmod go-w {} +
+
+#
 # Flag ASH as running in container to prevent ProgressBar panel from showing (causes output blocking)
 #
 ENV ASH_IN_CONTAINER="YES"
@@ -588,9 +608,13 @@ RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}
 
 # ASH_BIN_PATH back to root, readable and executable by this user but not writable:
-# nothing writes there at scan time.
+# nothing writes there at scan time. Then the core stage's sweep again, for the lock
+# files uv left mode 666 under this user's home.
 USER root
-RUN chown -R root:root ${ASH_BIN_PATH} && chmod -R u=rwX,go=rX ${ASH_BIN_PATH}
+RUN chown -R root:root ${ASH_BIN_PATH} && chmod -R u=rwX,go=rX ${ASH_BIN_PATH} && \
+    find / -xdev \( -path /proc -o -path /sys -o -path /dev -o -path /tmp \
+        -o -path /var/tmp -o -path /run/lock \) -prune -o \
+        ! -type l -perm -0002 ! -perm -1000 -exec chmod go-w {} +
 USER ${UID}:${GID}
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \

@@ -28,6 +28,10 @@ What each directory gets instead, and why:
   by every user, because the ``ci`` stage is for platforms that start the container
   under a UID they choose, with the sticky bit so one user cannot remove or replace
   another's files. These two are the only directories allowed that mode.
+- Everything else in the image: not writable by every user either. Not every
+  installer honors the umask (uv's lock files are mode 666, some gems ship files
+  mode 777), so the gem install clears group and other write where it installs, and
+  each stage ends with a find that clears it on whatever is left.
 
 These are static assertions over the Dockerfile text: building the image needs
 minutes and an OCI runtime the unit suite does not have. CI builds it, and
@@ -366,3 +370,53 @@ def test_the_parser_sees_every_way_to_set_a_mode(dockerfile, path):
     assert [
         (change.paths, _grants_write_to_others(change.mode)) for change in found
     ] == [([path], True)]
+
+
+def _runs(instructions, stage: str) -> List[str]:
+    return [i.text for i in instructions if i.stage == stage and i.keyword == "RUN"]
+
+
+def test_the_gem_files_lose_group_and_other_write_where_they_are_installed(
+    instructions, env
+):
+    """Some gems ship files mode 777 (lightly does); cleared in the same layer."""
+    bundle = [text for text in _runs(instructions, "core") if "bundle install" in text]
+
+    assert len(bundle) == 1, bundle
+    changes = [
+        chmod
+        for chmod in _chmods(
+            [Instruction("core", "RUN", bundle[0])],
+            env,
+        )
+        if "/var/lib/gems" in chmod.paths
+    ]
+    assert [chmod.mode for chmod in changes] == ["go-w"]
+    text = bundle[0]
+    assert text.index("bundle install") < text.index("chmod -R go-w /var/lib/gems")
+
+
+#: The sweep each stage ends with: anything left writable by every user, outside the
+#: sticky directories, loses group and other write. Installers such as uv leave
+#: lock files mode 666 in their caches.
+SWEEP = re.compile(
+    r"find / -xdev .*-prune -o ! -type l -perm -0002 ! -perm -1000 "
+    r"-exec chmod go-w \{\} \+"
+)
+
+
+@pytest.mark.parametrize("stage", ["core", "non-root"])
+def test_each_stage_ends_by_clearing_what_installers_left_writable(stage, instructions):
+    runs = _runs(instructions, stage)
+    installs = [
+        index
+        for index, text in enumerate(runs)
+        if "ash dependencies install" in text or "uv pip install" in text
+    ]
+    sweeps = [index for index, text in enumerate(runs) if SWEEP.search(text)]
+
+    assert installs, f"the {stage} stage no longer installs anything"
+    assert sweeps, f"the {stage} stage has no sweep"
+    assert sweeps[-1] > installs[-1]
+    for path in ("/proc", "/sys", "/dev", "/tmp", "/var/tmp", "/run/lock"):
+        assert f"-path {path} " in runs[sweeps[-1]]

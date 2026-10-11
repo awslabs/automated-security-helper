@@ -13,8 +13,14 @@ with ``--run-container-snapshots``. Locally, with an image already built:
         pytest tests/snapshot/container/runtime/test_container_image_permissions.py \\
         --run-container-snapshots --no-cov -n 0
 
-The rule, per directory:
+The rule:
 
+- Nothing on the image's filesystem is writable by every user, except a directory
+  with the sticky bit. The find starts at ``/`` and stays on that filesystem
+  (``-xdev``), skipping /proc, /sys and /dev, and the sticky scratch directories
+  /tmp, /var/tmp and /run/lock with what is in them, whose files belong to whoever
+  wrote them. tests/unit/test_container_permissions_probe_covers_the_image.py runs
+  the same find against a small tree.
 - /deps, the semgrep and opengrep rule caches, /ash, /.ash and ASH_BIN_PATH
   (/.ash/bin): owned by root, not writable by group or others, and nothing in them
   writable by others either.
@@ -53,6 +59,26 @@ ROOT_OWNED = (
     "/.ash/bin",
 )
 
+#: Left out of the search for files every user may write: the kernel's and the
+#: runner's filesystems, and the sticky scratch directories with what is in them.
+PRUNED = ("/proc", "/sys", "/dev", "/tmp", "/var/tmp", "/run/lock")
+
+
+def open_files_find(root: str = "/") -> str:
+    """The find that prints ``open <path>`` for each file every user may write.
+
+    Symbolic links are left out (their mode is always 777 and means nothing), and
+    so are directories with the sticky bit. ``root`` is ``/`` in the image; the
+    unit test passes a temporary tree.
+    """
+    base = root.rstrip("/")
+    prune = " -o ".join(f"-path {shlex.quote(base + path)}" for path in PRUNED)
+    return (
+        f"find {shlex.quote(root)} -xdev \\( {prune} \\) -prune -o "
+        "! -type l -perm -0002 ! -perm -1000 -printf 'open %p\\n'"
+    )
+
+
 _PROBE = r"""
 set -eu
 echo "uid $(id -u)"
@@ -61,29 +87,46 @@ for d in /deps /deps/.grype /deps/.semgrep /deps/.opengrep /ash /.ash /.ash/bin 
          ${TRIVY_CACHE_DIR:-}; do
   if [ -e "$d" ]; then stat -c 'dir %n %u %a' "$d"; fi
 done
-find /deps /ash /.ash /src /out -xdev ! -type l -perm -0002 ! -perm -1000 \
-  -printf 'open %p\n'
 find /ash /.ash /deps/.semgrep /deps/.opengrep -xdev ! -type l ! -uid 0 \
   -printf 'owner %p\n'
 """
 
 
-@pytest.fixture(scope="module")
-def probe() -> Dict[str, List[str]]:
-    result = subprocess.run(  # nosec B603 - runner and image come from the CI leg
-        [*RUNNER_PREFIX, "run", "--rm", IMAGE, "sh", "-c", _PROBE],
+def _run_in_image(script: str, *, as_root: bool = False) -> subprocess.CompletedProcess:
+    user = ["--user", "0:0"] if as_root else []
+    return subprocess.run(  # nosec B603 - runner and image come from the CI leg
+        [*RUNNER_PREFIX, "run", "--rm", *user, IMAGE, "sh", "-c", script],
         capture_output=True,
         text=True,
         encoding="utf-8",
         timeout=300,
         check=False,
     )
+
+
+def list_open_files() -> List[str]:
+    """Each file in the image every user may write, outside the pruned paths.
+
+    Run as root: the image's own user cannot list directories such as /root, and
+    find would fail on them rather than look inside.
+    """
+    result = _run_in_image(open_files_find(), as_root=True)
+    assert result.returncode == 0, result.stderr
+    return [
+        line.partition(" ")[2]
+        for line in result.stdout.splitlines()
+        if line.startswith("open ")
+    ]
+
+
+@pytest.fixture(scope="module")
+def probe() -> Dict[str, List[str]]:
+    result = _run_in_image(_PROBE)
     assert result.returncode == 0, result.stderr
     lines: Dict[str, List[str]] = {
         "uid": [],
         "offline": [],
         "dir": [],
-        "open": [],
         "owner": [],
     }
     for line in result.stdout.splitlines():
@@ -102,8 +145,8 @@ def _dirs(probe) -> Dict[str, tuple]:
     return found
 
 
-def test_nothing_is_writable_by_every_user_without_the_sticky_bit(probe):
-    assert probe["open"] == []
+def test_nothing_is_writable_by_every_user_without_the_sticky_bit():
+    assert list_open_files() == []
 
 
 def test_the_root_owned_directories_are_roots_and_closed(probe):
