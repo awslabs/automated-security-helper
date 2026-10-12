@@ -208,7 +208,9 @@
     two selected rule sets is reported once.
   - gitleaks 8.30.1 (`gitleaks dir`, working tree only),
     CRITICAL findings with values redacted (`--redact=100`), beside detect-secrets,
-    which stays on and unchanged. An operator's `options.config_file` and
+    which stays on and unchanged. gitleaks is a secrets scanner, so its findings
+    are secret findings: the lines they report are masked in every report, and the
+    Bedrock summary reporter counts them rather than sending them. An operator's `options.config_file` and
     `options.baseline_path` apply. gitleaks runs with `--ignore-gitleaks-allow`,
     so a `gitleaks:allow` comment in the scanned tree hides nothing unless the
     operator sets `options.honor_inline_ignores`. `options.max_target_megabytes`

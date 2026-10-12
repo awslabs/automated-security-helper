@@ -123,19 +123,25 @@ from typing import FrozenSet, Mapping
 #: tests/unit/utils/test_scanner_tool_types.py checks each entry against the
 #: scanner's own ``tool_type``. Kept sorted so a diff adding one is a single line.
 SCANNER_TOOL_TYPES: Mapping[str, str] = {
+    "actionlint": "IAC",
     "bandit": "SAST",
     "cdk-nag": "IAC",
+    "cfn-guard": "IAC",
+    "cfn-lint": "IAC",
     "cfn-nag": "IAC",
     "checkov": "IAC",
     "detect-secrets": "SECRETS",
     "ferret-scan": "SECRETS",
+    "gitleaks": "SECRETS",
     "grype": "SCA",
     "npm-audit": "SCA",
     "opengrep": "SAST",
     "semgrep": "SAST",
     "snyk-code": "SAST",
     "syft": "SBOM",
+    "trivy": "SCA",
     "trivy-repo": "SAST",
+    "zizmor": "SAST",
 }
 
 #: Scanner config names for every scanner ASH ships, as they appear in SARIF

@@ -503,8 +503,8 @@ above, the Bedrock summary and MCP responses get the masked results:
   another file, where only masking by location applies. The masked form keeps at
   most the first two and the last character, for example `hu*************t`.
 
-A secret finding is one from a secrets scanner (detect-secrets, ferret-scan, or a
-result tagged `tool_type::SECRETS`), one tagged `secret` or `secrets`, a bandit
+A secret finding is one from a secrets scanner (detect-secrets, ferret-scan,
+gitleaks, or a result tagged `tool_type::SECRETS`), one tagged `secret` or `secrets`, a bandit
 B105, B106 or B107, a checkov `CKV_SECRET_*` rule, a rule with a `secrets` segment
 in its id (semgrep's and opengrep's `generic.secrets.*`), or a rule whose tags, in
 the tool's rule metadata or on the result, carry `secret`, `secrets` or a

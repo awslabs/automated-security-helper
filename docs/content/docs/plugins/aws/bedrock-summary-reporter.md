@@ -62,8 +62,8 @@ expose are masked in every snippet and message before any reporter runs (see
 - **Findings from secrets scanners are counted, not sent.** `exclude_scanner_types`
   (default `["SECRET"]`) names scanner tool types whose findings go into the
   prompts only as a count ("Secret findings: N"). A finding's type is its scanner's
-  tool type, looked up from the scanner's name (detect-secrets and ferret-scan are
-  `SECRETS`), or a `tool_type::` tag on the finding. `SECRET` and `SECRETS` both
+  tool type, looked up from the scanner's name (detect-secrets, ferret-scan and
+  gitleaks are `SECRETS`), or a `tool_type::` tag on the finding. `SECRET` and `SECRETS` both
   name the secrets type. With the secrets type excluded, a finding from any rule
   that detects a credential or key is counted too: semgrep's and opengrep's
   `generic.secrets.*` rules, checkov's `CKV_SECRET_*`, and rules tagged `secret`,

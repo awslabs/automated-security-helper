@@ -65,6 +65,8 @@ gitleaks reports no severity of its own. ASH rates every gitleaks finding CRITIC
 
 ASH always runs `gitleaks --redact=100`, so gitleaks writes `REDACTED` in place of each secret in its report and its log. ASH also overwrites any report snippet that is not `REDACTED` before the result is stored, so the value cannot appear in `ash_aggregated_results.json`, the SARIF, or any other report.
 
+gitleaks is a secrets scanner (tool type `SECRETS`), so a gitleaks finding is a secret finding: the lines it reports are masked in every other finding's snippet as well (see "Secret values in reports" in the output formats page), and the Bedrock summary reporter counts gitleaks findings rather than sending them to the model.
+
 gitleaks' log repeats each line of a `.gitleaksignore` it cannot parse. ASH cuts those lines short in the log it keeps (`GitleaksScanner.stderr.log`), and does not quote gitleaks' log in error messages; an error names the log file instead.
 
 ## Suppressing findings
