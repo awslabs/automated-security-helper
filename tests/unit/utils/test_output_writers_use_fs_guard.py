@@ -1,6 +1,7 @@
 """Every file ASH writes below an output directory goes through ``fs_guard``.
 
-``fs_guard.open_for_write`` and ``atomic_write.write_text_atomically`` never follow a
+``fs_guard.open_for_write``, ``fs_guard.open_for_atomic_write`` and its caller
+``atomic_write.write_text_atomically`` never follow a
 symlink below a registered output directory and refuse a file another name refers
 to. A plain ``open(path, "w")``, ``Path.write_text`` or ``logging.FileHandler`` does
 neither, and the default output directory is inside the scanned tree.
@@ -145,8 +146,9 @@ _INSTALLS = "the standalone tool installer: the install and staging directories"
 _CONFIG = "the config file the operator names or ASH resolved"
 _DOWNLOADS = "tool installs, download staging and the asset cache under ASH's home"
 _ATOMIC = (
-    "write_text_atomically itself: below an output directory it writes through "
-    "open_parent_beneath, and these calls are that path and the one outside"
+    "fs_guard.open_for_atomic_write itself, which write_text_atomically calls: a "
+    "staging file it created exclusively, renamed over the target, relative to the "
+    "guarded directory's descriptor below an output directory and by name outside"
 )
 _FS_GUARD = "fs_guard itself: open() only for a path below no registered root"
 _MCP_SESSIONS = (
@@ -246,9 +248,14 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         "pyproject.toml in the source checkout, a release step",
     ),
     (f"{_ASH}/utils/atomic_write.py", "_replace", "os.replace"): (1, _ATOMIC),
-    (f"{_ASH}/utils/atomic_write.py", "_write_beneath", "os.fdopen"): (1, _ATOMIC),
-    (f"{_ASH}/utils/atomic_write.py", "_write_beneath", "os.replace"): (1, _ATOMIC),
-    (f"{_ASH}/utils/atomic_write.py", "write_text_atomically", "open"): (1, _ATOMIC),
+    (f"{_ASH}/utils/sandbox/fs_guard.py", "open_for_atomic_write", "os.fdopen"): (
+        1,
+        _ATOMIC,
+    ),
+    (f"{_ASH}/utils/sandbox/fs_guard.py", "open_for_atomic_write", "os.replace"): (
+        1,
+        _ATOMIC,
+    ),
     (f"{_ASH}/utils/sandbox/fs_guard.py", "open_for_write", "open"): (1, _FS_GUARD),
     (f"{_ASH}/utils/sandbox/fs_guard.py", "open_for_write", "os.fdopen"): (
         2,
@@ -395,7 +402,8 @@ def test_every_write_in_the_package_is_guarded_or_listed():
 
     assert not unlisted, (
         "These calls write a file without fs_guard. Write them with "
-        "fs_guard.open_for_write or write_text_atomically, or, if one writes "
+        "fs_guard.open_for_write, fs_guard.open_for_atomic_write or "
+        "write_text_atomically, or, if one writes "
         "outside every output directory, add it to "
         f"WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY with where it writes: {unlisted}"
     )

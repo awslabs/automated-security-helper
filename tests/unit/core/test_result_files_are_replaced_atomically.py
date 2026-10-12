@@ -105,7 +105,7 @@ def test_a_failed_report_write_leaves_the_previous_report_intact(tmp_path):
         "would have seen it truncated."
     )
     # The output directory is guarded, so the rename names the report relative to
-    # its directory's descriptor (fs_guard.open_parent_beneath).
+    # its directory's descriptor (fs_guard.open_for_atomic_write).
     assert [Path(target).name for target in intercepted] == [report.name], (
         "The report write never reached a rename, so it is not atomic."
     )

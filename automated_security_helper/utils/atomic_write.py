@@ -21,9 +21,7 @@ from __future__ import annotations
 import os
 import sys
 import time
-import uuid
 from pathlib import Path
-from typing import Optional
 
 # Windows refuses to replace a file another process or thread has open, and a progress
 # poll holds the aggregated file open for the length of one JSON parse. Retrying for a
@@ -36,11 +34,12 @@ _REPLACE_BACKOFF_SECONDS = 0.05
 def write_text_atomically(path: Path, content: str, encoding: str = "utf-8") -> None:
     """Write ``content`` to ``path`` so that readers see the old file or the new one.
 
-    The staging file is created in the target's own directory, because ``os.replace``
-    is only atomic within one filesystem. It is created exclusively rather than with
-    ``tempfile.mkstemp`` so it gets the same umask-derived mode a plain write would:
-    ``mkstemp`` creates 0600, which would stop a host user reading results a
-    container wrote.
+    fs_guard.open_for_atomic_write does the writing: a staging file created
+    exclusively in the target's own directory, because ``os.replace`` is only atomic
+    within one filesystem, then renamed over ``path``. Created exclusively rather
+    than with ``tempfile.mkstemp`` so it gets the same umask-derived mode a plain
+    write would: ``mkstemp`` creates 0600, which would stop a host user reading
+    results a container wrote.
 
     Below a registered output directory (``fs_guard``), the directory is opened
     without following a link at any component, and the staging file is created and
@@ -48,65 +47,11 @@ def write_text_atomically(path: Path, content: str, encoding: str = "utf-8") -> 
     ``path`` itself, raises ``OutputLinkRefused``, and a file at ``path`` that
     another name refers to raises ``OutputHardLinkRefused``.
     """
-    from automated_security_helper.utils.sandbox.fs_guard import open_parent_beneath
-
-    path = Path(path)
-    guarded = open_parent_beneath(path)
-    if guarded is not None:
-        _write_beneath(*guarded, content=content, encoding=encoding, target=path)
-        return
-    staging = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    try:
-        with open(staging, mode="x", encoding=encoding) as handle:
-            handle.write(content)
-        _replace(staging, path)
-    except BaseException:
-        staging.unlink(missing_ok=True)
-        raise
-
-
-def _write_beneath(
-    dir_fd: int,
-    name: str,
-    *,
-    content: str,
-    encoding: str,
-    target: Optional[Path] = None,
-) -> None:
-    """Write ``name`` in ``dir_fd`` through a staging file renamed over it.
-
-    The name is checked again just before the rename, as open_parent_beneath checked
-    it when it opened the directory: a link there, or a file another name refers to,
-    raises rather than being replaced, and the staging file is removed. ``target``
-    is the path to name in the error.
-    """
     # Not at the top: fs_guard imports the sandbox package. Do not hoist.
-    from automated_security_helper.utils.sandbox.fs_guard import _refuse_link_at
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
 
-    shown = target if target is not None else Path(name)
-    staging = f".{name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
-    flags = (
-        os.O_WRONLY
-        | os.O_CREAT
-        | os.O_EXCL
-        | getattr(os, "O_NOFOLLOW", 0)
-        | getattr(os, "O_BINARY", 0)
-    )
-    try:
-        fd = os.open(staging, flags, 0o666, dir_fd=dir_fd)
-        try:
-            with os.fdopen(fd, "w", encoding=encoding) as handle:
-                handle.write(content)
-            _refuse_link_at(name, dir_fd, shown)
-            os.replace(staging, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
-        except BaseException:
-            try:
-                os.unlink(staging, dir_fd=dir_fd)
-            except FileNotFoundError:
-                pass
-            raise
-    finally:
-        os.close(dir_fd)
+    with open_for_atomic_write(path, encoding=encoding) as handle:
+        handle.write(content)
 
 
 def read_text_of_replaced_file(path: Path, encoding: str = "utf-8") -> str:
@@ -136,6 +81,11 @@ def read_text_of_replaced_file(path: Path, encoding: str = "utf-8") -> str:
 
 
 def _replace(staging: Path, target: Path) -> None:
+    """Rename ``staging`` over ``target`` by name; fs_guard's rename without a dir_fd.
+
+    On Windows a ``PermissionError`` from a reader holding ``target`` open is
+    retried for the bounded time above.
+    """
     for attempt in range(_REPLACE_ATTEMPTS):
         try:
             os.replace(staging, target)

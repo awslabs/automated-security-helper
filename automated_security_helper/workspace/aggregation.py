@@ -847,12 +847,15 @@ class WorkspaceAggregator:
         # The project key is a path-derived value with separators already
         # replaced by dashes, so it is safe as a filename by construction.
         spool_path = self.spool_dir / f"{outcome.project}.run.json"
-        from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+        from automated_security_helper.utils.sandbox.fs_guard import (
+            open_for_atomic_write,
+        )
 
         # Guarded below the workspace output directory whether or not a
         # PluginContext registered it: a link at the spool or at the file name is
-        # refused rather than written through.
-        with open_for_write(spool_path, root=self.output_dir) as handle:
+        # refused rather than written through. Renamed into place, so write()
+        # never copies a spool file that is still being written.
+        with open_for_atomic_write(spool_path, root=self.output_dir) as handle:
             json.dump(rebased, handle)
         self._spooled[outcome.project] = spool_path
 
@@ -1016,10 +1019,15 @@ class WorkspaceAggregator:
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
         target = self.output_dir / RESULTS_FILENAME
-        from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+        from automated_security_helper.utils.sandbox.fs_guard import (
+            open_for_atomic_write,
+        )
 
         try:
-            with open_for_write(target, root=self.output_dir) as handle:
+            # Streamed into a staging file renamed over the target at the end: the
+            # MCP progress reader parses this file while the scan runs, and sees the
+            # previous complete file until the new one is.
+            with open_for_atomic_write(target, root=self.output_dir) as handle:
                 handle.write("{\n")
                 handle.writelines(
                     f"{json.dumps(key)}: {json.dumps(value)},\n"

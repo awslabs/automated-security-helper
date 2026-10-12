@@ -14,7 +14,9 @@ that:
   and refuses a link at any of them, the file name included, with
   :class:`OutputLinkRefused`. The link is left where it is. A file that another
   name also refers to (a hard link) is refused with :class:`OutputHardLinkRefused`
-  before it is truncated.
+  before it is truncated. :func:`open_for_atomic_write` is the same guard for a
+  file a reader may open while it is written: it writes a staging file and renames
+  it over the name, and ``atomic_write.write_text_atomically`` calls it.
 * :func:`sweep_writable` runs after every sandboxed spawn and removes every entry
   under the writable directories that is not a regular file or a directory.
 
@@ -556,34 +558,103 @@ def replace_without_following(
         raise
 
 
-def open_parent_beneath(path: Union[str, Path]) -> Optional[Tuple[int, str]]:
-    """``(directory descriptor, file name)`` for ``path``, or None when not guarded.
+#: A staging file: created, never opened if anything is already at its name.
+_STAGING_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _BINARY
 
-    For a writer that creates its own file in ``path``'s directory, such as a
-    staging file renamed over ``path``. Below a registered root every directory
-    component is opened without following a link and created when missing; a link
-    at one, or at the file name, raises OutputLinkRefused, and a file at the name
-    that another name refers to raises OutputHardLinkRefused. The caller closes the
-    descriptor. None when ``path`` is below no registered root, and the caller
-    writes as it otherwise would. None as well on a platform without directory
-    descriptors (Windows), after the same refusals were checked by name
-    (_check_beneath_by_name).
+
+@contextmanager
+def open_for_atomic_write(
+    path: Union[str, Path],
+    encoding: Optional[str] = "utf-8",
+    errors: Optional[str] = "strict",
+    *,
+    binary: bool = False,
+    newline: Optional[str] = None,
+    root: Optional[Union[str, Path]] = None,
+) -> Iterator[IO]:
+    """Write ``path`` through a staging file that replaces it when the block ends.
+
+    ``with open_for_atomic_write(path) as handle:`` yields a handle, text unless
+    ``binary``, on a new file created exclusively in ``path``'s directory, with the
+    permissions a plain open gives (0o666 less the umask). When the block ends
+    without an exception the file is renamed over ``path``, so a reader of ``path``
+    opens the old complete file or the new complete one and never a partial write.
+    When the block raises, the staging file is removed and ``path`` is left as it
+    was. The staging file is in the same directory because a rename is only atomic
+    within one filesystem.
+
+    Guarded as open_for_write is: below a registered root, or below ``root`` when
+    the caller names one, each directory component is opened without following a
+    link and created when missing; a link at any of them, or at the file name,
+    raises OutputLinkRefused, and a file at the name that another name refers to
+    raises OutputHardLinkRefused. The name is checked again just before the rename,
+    so a link made there while the block ran is refused and left in place rather
+    than replaced. The staging file is created and renamed relative to the
+    directory's descriptor. Outside every root the rename replaces whatever entry
+    is at the name, a link included, without following it.
+
+    On a platform without directory descriptors (Windows) the components below a
+    root are checked by name before the staging file is created and again before
+    the rename, and the rename is retried for a bounded time while a reader holds
+    the file open (atomic_write._replace).
     """
+    import uuid
+
+    # Not at the top: atomic_write imports this module when it writes.
+    from automated_security_helper.utils.atomic_write import _replace
+
+    open_mode = "wb" if binary else "w"
+    text = (
+        {} if binary else {"encoding": encoding, "errors": errors, "newline": newline}
+    )
     path = Path(os.path.abspath(path))
-    root = _writable_root_for(path)
-    if root is None:
-        return None
-    relative = path.relative_to(root).parts
-    if not _HAS_DIR_FD:
-        _check_beneath_by_name(root, relative, path)
-        return None
-    dir_fd = _open_dir_beneath(root, relative[:-1], path)
+    guard = _guard_root(path, root)
+    relative = path.relative_to(guard).parts if guard is not None else ()
+    staging = f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    dir_fd: Optional[int] = None
+    if guard is not None and _HAS_DIR_FD:
+        dir_fd = _open_dir_beneath(guard, relative[:-1], path)
+
+    def refuse_a_link_at_the_name() -> None:
+        if dir_fd is not None:
+            _refuse_link_at(path.name, dir_fd, path)
+        elif guard is not None:
+            _check_beneath_by_name(guard, relative, path)
+
+    def remove_staging() -> None:
+        try:
+            if dir_fd is not None:
+                os.unlink(staging, dir_fd=dir_fd)
+            else:
+                os.unlink(path.parent / staging)
+        except FileNotFoundError:
+            pass
+
     try:
-        _refuse_link_at(relative[-1], dir_fd, path)
-    except BaseException:
-        os.close(dir_fd)
-        raise
-    return dir_fd, relative[-1]
+        refuse_a_link_at_the_name()
+        if dir_fd is not None:
+            fd = os.open(staging, _STAGING_FLAGS, 0o666, dir_fd=dir_fd)
+        else:
+            fd = os.open(path.parent / staging, _STAGING_FLAGS, 0o666)
+        try:
+            try:
+                handle = os.fdopen(fd, open_mode, **text)
+            except BaseException:
+                os.close(fd)
+                raise
+            with handle:
+                yield handle
+            refuse_a_link_at_the_name()
+            if dir_fd is not None:
+                os.replace(staging, path.name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+            else:
+                _replace(path.parent / staging, path)
+        except BaseException:
+            remove_staging()
+            raise
+    finally:
+        if dir_fd is not None:
+            os.close(dir_fd)
 
 
 def open_for_write(

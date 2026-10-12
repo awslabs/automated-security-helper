@@ -922,6 +922,41 @@ class TestAggregatorOutput:
 
         assert list(elsewhere.iterdir()) == []
 
+    def test_a_reader_sees_the_previous_unified_file_while_it_is_written(
+        self, tmp_path, monkeypatch
+    ):
+        """The MCP progress reader parses the file while a workspace scan rewrites it."""
+        import shutil
+
+        from automated_security_helper.workspace import aggregation
+
+        plan = _plan(tmp_path, "api", "web")
+        output = tmp_path / "out"
+        output.mkdir()
+        target = output / "ash_aggregated_results.json"
+        previous = '{"previous": "complete"}\n'
+        target.write_text(previous, encoding="utf-8")
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=output)
+        for index, key in enumerate(("api", "web")):
+            aggregator.add(self._outcome(key), _run(_result()), plan.projects[index])
+        seen = []
+        copy = shutil.copyfileobj
+
+        def read_then_copy(source, destination, *args, **kwargs):
+            destination.flush()
+            seen.append(target.read_text(encoding="utf-8"))
+            return copy(source, destination, *args, **kwargs)
+
+        monkeypatch.setattr(aggregation.shutil, "copyfileobj", read_then_copy)
+
+        path = aggregator.write(exit_code=0, wall_clock_seconds=1.0)
+
+        assert seen == [previous, previous]
+        assert len(json.loads(path.read_text(encoding="utf-8"))["sarif"]["runs"]) == 2
+        assert sorted(p.name for p in output.iterdir() if p.is_file()) == [
+            target.name
+        ], "a staging file was left behind"
+
     def test_the_unified_file_parses_as_json(self, tmp_path):
         """The writer streams rather than dumping one object, so this is not free."""
         plan = _plan(tmp_path, "api", "web")

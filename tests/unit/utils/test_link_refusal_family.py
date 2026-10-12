@@ -283,45 +283,231 @@ class TestARootThatIsALink:
             assert root in fs_guard.registered_roots()
 
 
-@needs_symlinks
-class TestTheAtomicRename:
-    """write_text_atomically's rename does not replace a link at the target."""
+def _entries(directory: Path) -> list:
+    return sorted(p.name for p in directory.iterdir())
 
+
+class TestTheAtomicStreamingWriter:
+    """``open_for_atomic_write``: a staging file renamed over the name when the block ends.
+
+    A reader of the name sees the old complete file or the new complete one, never
+    a partial write; below a root, a link at any component or at the name is
+    refused, whether it is there when the block starts or appears while it runs.
+    """
+
+    @pytest.mark.parametrize("guarded", [True, False], ids=["guarded", "unguarded"])
+    def test_a_reader_sees_the_old_file_until_the_block_ends(self, output, guarded):
+        target = output / "ash_aggregated_results.json"
+        target.write_text('{"old": true}\n')
+        seen = []
+
+        with fs_guard.open_for_atomic_write(
+            target, root=output if guarded else None
+        ) as handle:
+            handle.write('{"new": ')
+            handle.flush()
+            seen.append(target.read_text())
+            handle.write("true}\n")
+
+        assert seen == ['{"old": true}\n']
+        assert target.read_text() == '{"new": true}\n'
+        assert _entries(output) == [target.name]
+
+    @pytest.mark.parametrize("guarded", [True, False], ids=["guarded", "unguarded"])
+    def test_a_block_that_raises_keeps_the_old_file_and_no_staging_file(
+        self, output, guarded
+    ):
+        target = output / "ash_aggregated_results.json"
+        target.write_text("old\n")
+
+        with pytest.raises(RuntimeError, match="stopped"):
+            with fs_guard.open_for_atomic_write(
+                target, root=output if guarded else None
+            ) as handle:
+                handle.write("partial")
+                raise RuntimeError("stopped")
+
+        assert target.read_text() == "old\n"
+        assert _entries(output) == [target.name]
+
+    def test_a_new_file_is_created_with_the_default_permissions(self, output):
+        import os
+
+        target = output / "reports" / "ash.sarif"
+        umask = os.umask(0)
+        os.umask(umask)
+
+        with fs_guard.open_for_atomic_write(target, root=output) as handle:
+            handle.write("{}")
+
+        assert target.read_text() == "{}"
+        if sys.platform != "win32":
+            assert target.stat().st_mode & 0o777 == 0o666 & ~umask
+
+    def test_binary_content_is_written_as_given(self, output):
+        target = output / "a.bin"
+
+        with fs_guard.open_for_atomic_write(target, binary=True, root=output) as handle:
+            handle.write(b"\x00\r\n")
+
+        assert target.read_bytes() == b"\x00\r\n"
+
+    def test_a_path_outside_the_root_is_not_opened(self, output, tmp_path):
+        with pytest.raises(ValueError, match="is not below"):
+            with fs_guard.open_for_atomic_write(
+                tmp_path / "elsewhere.txt", root=output
+            ):
+                pass
+
+        assert not (tmp_path / "elsewhere.txt").exists()
+
+    @needs_symlinks
+    def test_a_link_at_the_name_is_refused_and_kept(self, output, victim):
+        target = output / "ash_aggregated_results.json"
+        target.symlink_to(victim)
+
+        with pytest.raises(OutputLinkRefused):
+            with fs_guard.open_for_atomic_write(target, root=output) as handle:
+                handle.write("{}")
+
+        assert target.is_symlink(), "the link was replaced"
+        assert victim.read_text() == ORIGINAL
+        assert _entries(output) == [target.name], "the staging file was left behind"
+
+    @needs_symlinks
     def test_a_link_at_the_name_when_it_renames_is_refused_and_kept(
         self, output, victim
     ):
         """The link appears after the directory was opened; the rename checks again."""
-        import os
-
-        from automated_security_helper.utils.atomic_write import _write_beneath
-
         target = output / "ash_aggregated_results.json"
-        target.symlink_to(victim)
-        dir_fd = os.open(output, os.O_RDONLY)
+        target.write_text("old\n")
 
         with pytest.raises(OutputLinkRefused):
-            _write_beneath(dir_fd, target.name, content="{}", encoding="utf-8")
+            with fs_guard.open_for_atomic_write(target, root=output) as handle:
+                handle.write("{}")
+                target.unlink()
+                target.symlink_to(victim)
 
         assert target.is_symlink(), "the link was replaced"
         assert victim.read_text() == ORIGINAL
-        assert [p.name for p in output.iterdir()] == [target.name], (
-            "the staging file was left behind"
-        )
+        assert _entries(output) == [target.name], "the staging file was left behind"
 
-    def test_a_regular_file_there_is_replaced(self, output):
-        """Control."""
+    @needs_symlinks
+    def test_a_link_on_the_way_is_refused(self, output, victim):
+        (output / "reports").symlink_to(victim.parent, target_is_directory=True)
+
+        with pytest.raises(OutputLinkRefused):
+            with fs_guard.open_for_atomic_write(
+                output / "reports" / "victim.txt", root=output
+            ) as handle:
+                handle.write("{}")
+
+        assert victim.read_text() == ORIGINAL
+        assert _entries(victim.parent) == [victim.name]
+
+    @needs_symlinks
+    def test_a_file_another_name_refers_to_is_refused(self, output, victim):
         import os
 
-        from automated_security_helper.utils.atomic_write import _write_beneath
-
         target = output / "ash_aggregated_results.json"
-        target.write_text("old")
+        os.link(victim, target)
 
-        _write_beneath(
-            os.open(output, os.O_RDONLY), target.name, content="new", encoding="utf-8"
-        )
+        with pytest.raises(OutputHardLinkRefused):
+            with fs_guard.open_for_atomic_write(target, root=output) as handle:
+                handle.write("{}")
 
-        assert target.read_text() == "new"
+        assert victim.read_text() == ORIGINAL
+
+    @needs_symlinks
+    def test_a_registered_root_guards_it_without_a_named_root(self, tmp_path, victim):
+        registered = tmp_path / "registered"
+        registered.mkdir()
+        target = registered / "ash_aggregated_results.json"
+        target.symlink_to(victim)
+
+        with fs_guard.writable_root(registered):
+            with pytest.raises(OutputLinkRefused):
+                with fs_guard.open_for_atomic_write(target) as handle:
+                    handle.write("{}")
+
+        assert victim.read_text() == ORIGINAL
+
+    @needs_symlinks
+    def test_outside_every_root_a_link_at_the_name_is_replaced_not_followed(
+        self, output, victim
+    ):
+        """Control: unguarded, the rename replaces the link entry itself."""
+        target = output / "merged.json"
+        target.symlink_to(victim)
+
+        with fs_guard.open_for_atomic_write(target) as handle:
+            handle.write("merged\n")
+
+        assert not target.is_symlink()
+        assert target.read_text() == "merged\n"
+        assert victim.read_text() == ORIGINAL
+
+
+@needs_symlinks
+class TestTheAtomicWriterWithoutDirectoryDescriptors:
+    """Without directory descriptors (Windows) the root is checked by name."""
+
+    @pytest.fixture(autouse=True)
+    def _no_directory_descriptors(self, monkeypatch):
+        monkeypatch.setattr(fs_guard, "_HAS_DIR_FD", False)
+
+    def test_a_link_at_the_name_is_refused_and_kept(self, output, victim):
+        target = output / "ash_aggregated_results.json"
+        target.symlink_to(victim)
+
+        with pytest.raises(OutputLinkRefused):
+            with fs_guard.open_for_atomic_write(target, root=output) as handle:
+                handle.write("{}")
+
+        assert target.is_symlink()
+        assert victim.read_text() == ORIGINAL
+        assert _entries(output) == [target.name]
+
+    def test_a_link_at_the_name_when_it_renames_is_refused_and_kept(
+        self, output, victim
+    ):
+        target = output / "ash_aggregated_results.json"
+        target.write_text("old\n")
+
+        with pytest.raises(OutputLinkRefused):
+            with fs_guard.open_for_atomic_write(target, root=output) as handle:
+                handle.write("{}")
+                target.unlink()
+                target.symlink_to(victim)
+
+        assert target.is_symlink()
+        assert victim.read_text() == ORIGINAL
+        assert _entries(output) == [target.name]
+
+    def test_a_link_on_the_way_is_refused(self, output, victim):
+        (output / "reports").symlink_to(victim.parent, target_is_directory=True)
+
+        with pytest.raises(OutputLinkRefused):
+            with fs_guard.open_for_atomic_write(
+                output / "reports" / "victim.txt", root=output
+            ) as handle:
+                handle.write("{}")
+
+        assert victim.read_text() == ORIGINAL
+
+    def test_a_regular_file_is_replaced_and_a_reader_sees_old_or_new(self, output):
+        target = output / "ash_aggregated_results.json"
+        target.write_text("old\n")
+        seen = []
+
+        with fs_guard.open_for_atomic_write(target, root=output) as handle:
+            handle.write("new\n")
+            handle.flush()
+            seen.append(target.read_text())
+
+        assert seen == ["old\n"]
+        assert target.read_text() == "new\n"
+        assert _entries(output) == [target.name]
 
 
 @needs_symlinks
