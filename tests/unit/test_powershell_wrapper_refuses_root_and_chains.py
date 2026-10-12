@@ -15,10 +15,11 @@ utils/ash_helpers.ps1, matching ``ash --mode container`` and ``./ash``:
 - Every refusal sets ``$LASTEXITCODE`` to its code (3, or 1 without a runner) and
   throws; nothing in the helpers calls ``exit``. A script that dot-sources them can
   catch the error and carry on, and a session started with ``-NoExit`` stays open.
-  A CI step that needs the code wraps the call, ``try { Invoke-ASH ... } catch {
-  ...; exit $LASTEXITCODE }``; uncaught, ``pwsh -File`` exits 1, as PowerShell does
-  for any uncaught error. Any other error Invoke-ASH raises leaves ``$LASTEXITCODE``
-  non-zero too, so that wrapper cannot turn it into exit 0.
+  A CI step that needs the code wraps the call in the one form the help and docs
+  give (``CATCH`` below) and runs under ``shell: pwsh -File {0}``; uncaught,
+  ``pwsh -File`` exits 1, as PowerShell does for any uncaught error. Any other error
+  Invoke-ASH raises leaves ``$LASTEXITCODE`` non-zero too, so that wrapper cannot
+  turn it into exit 0.
 
 The text tests run everywhere. The ones that run the script need ``pwsh``: they
 skip on a developer machine without it and fail in CI, as
@@ -82,30 +83,75 @@ def test_a_refusal_sets_the_code_and_throws():
     ]
 
 
-def test_the_scan_test_step_exits_with_the_refusal_code():
-    """The powershell legs of run-scan-test call Invoke-ASH inside the wrapper, so a
-    refusal ends the step with its code, not PowerShell's 1."""
+#: The one catch block every mention of the CI form uses: it prints the error record
+#: once, and exits with the refusal's code, or 1 for an error raised before
+#: Invoke-ASH sets one.
+CATCH = (
+    "catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; "
+    "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }"
+)
+#: Where the form is written for people: the help, the CLI reference, the CHANGELOG.
+DOCUMENTED = (
+    HELPERS,
+    REPO_ROOT / "docs" / "content" / "docs" / "cli-reference.md",
+    REPO_ROOT / "CHANGELOG.md",
+)
+SCAN_TEST_ACTION = REPO_ROOT / ".github" / "actions" / "run-scan-test" / "action.yml"
+
+
+def _workflow_steps_calling_invoke_ash() -> list:
+    """Every workflow and action step whose script calls Invoke-ASH."""
     import yaml
 
-    action = REPO_ROOT / ".github" / "actions" / "run-scan-test" / "action.yml"
-    steps = yaml.safe_load(action.read_text(encoding="utf-8"))["runs"]["steps"]
-    (run,) = [
-        step["run"]
-        for step in steps
-        if step.get("shell") == "pwsh" and "Invoke-ASH -" in step.get("run", "")
-    ]
-    lines = run.splitlines()
-    calls = [
-        i for i, line in enumerate(lines) if line.strip().startswith("Invoke-ASH ")
-    ]
-    opened = next(i for i, line in enumerate(lines) if line.strip() == "try {")
-    caught = next(i for i, line in enumerate(lines) if line.strip() == "catch {")
+    found = []
+    for path in sorted((REPO_ROOT / ".github").rglob("*.y*ml")):
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            continue
+        groups = [(data.get("runs") or {}).get("steps") or []]
+        groups += [
+            job.get("steps") or []
+            for job in (data.get("jobs") or {}).values()
+            if isinstance(job, dict)
+        ]
+        for steps in groups:
+            for step in steps:
+                run = str(step.get("run", ""))
+                if any(
+                    line.strip().startswith("Invoke-ASH ") for line in run.splitlines()
+                ):
+                    found.append((path, step))
+    return found
 
-    assert len(calls) == 2
-    assert all(opened < i < caught for i in calls)
-    assert "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 })" in "\n".join(
-        lines[caught:]
-    )
+
+def test_the_documented_catch_is_the_one_form():
+    for path in DOCUMENTED:
+        text = path.read_text(encoding="utf-8")
+        assert CATCH in text, path
+        assert "[Console]::Error.WriteLine($_.Exception.Message)" not in text, path
+
+
+def test_every_step_calling_invoke_ash_wraps_it_under_pwsh_file():
+    """``shell: pwsh`` runs ``pwsh -command ". '<script>'"``, which reports every
+    non-zero ``exit`` as 1, so a refusal's 3 needs ``pwsh -File {0}``. That custom
+    shell drops what the built-in one adds, so the step sets Stop itself and ends with
+    the scan's own code."""
+    steps = _workflow_steps_calling_invoke_ash()
+
+    assert [path for path, _ in steps] == [SCAN_TEST_ACTION]
+    for _, step in steps:
+        lines = [line.strip() for line in step["run"].splitlines()]
+        calls = [i for i, line in enumerate(lines) if line.startswith("Invoke-ASH ")]
+        opened = lines.index("try {")
+        caught = lines.index("} " + CATCH)
+
+        assert step["shell"] == "pwsh -File {0}"
+        assert lines[0] == "$ErrorActionPreference = 'Stop'"
+        assert len(calls) == 2
+        assert all(opened < i < caught for i in calls)
+        assert lines[-1] == (
+            "if ((Test-Path -LiteralPath variable:\\LASTEXITCODE)) { exit $LASTEXITCODE }"
+        )
 
 
 def test_the_session_detection_is_gone():
@@ -170,11 +216,12 @@ REFUSED = (
     "Invoke-ASH -OCIRunner absent-runner-name -NoBuild -SourceDir src -OutputDir 'a,b'"
 )
 REFUSAL_TEXT = "cannot be handed to the container runner"
-#: The form docs/content/docs/cli-reference.md gives a CI step that needs the code.
-WRAPPED = (
-    "try {{ {call} }} catch {{ [Console]::Error.WriteLine($_.Exception.Message); "
-    "exit $(if ($LASTEXITCODE) {{ $LASTEXITCODE }} else {{ 1 }}) }}"
-)
+
+
+def _wrapped(call: str) -> str:
+    """*call* in the form the help and docs/content/docs/cli-reference.md give a CI
+    step that needs the code."""
+    return f"try {{ {call} }} {CATCH}"
 
 
 @pytest.fixture
@@ -204,7 +251,7 @@ def test_the_wrapped_call_exits_with_the_refusal_code(pwsh, src, tmp_path):
     result = _pwsh_script(
         pwsh,
         tmp_path,
-        "$ErrorActionPreference = 'Stop'\n" + WRAPPED.format(call=REFUSED),
+        "$ErrorActionPreference = 'Stop'\n" + _wrapped(REFUSED),
     )
 
     assert result.returncode == 3, result.stdout + result.stderr
@@ -255,8 +302,11 @@ def test_another_error_leaves_the_code_non_zero(pwsh, src, tmp_path):
     os.name == "nt", reason="the stand-in runner is a POSIX shell script"
 )
 def test_another_error_in_the_run_leaves_the_code_non_zero(pwsh, src, tmp_path):
-    """The same once the run has started: the runner probe leaves $LASTEXITCODE at 0,
-    then a malformed ASH_BASE_OCI_LAYOUT stops the build before it runs."""
+    """The same once the run has started: ``id -u`` leaves $LASTEXITCODE at 0, then a
+    malformed ASH_BASE_OCI_LAYOUT stops the build before any runner command.
+
+    Invoke-ASH keeps only the runner's name and runs it from PATH, so the stand-in
+    goes first on PATH: no real runner is reached even if that ever changes."""
     runner = tmp_path / "bin" / "docker"
     runner.parent.mkdir()
     runner.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -265,8 +315,10 @@ def test_another_error_in_the_run_leaves_the_code_non_zero(pwsh, src, tmp_path):
         pwsh,
         tmp_path,
         "$ErrorActionPreference = 'Stop'\n"
+        f"$env:PATH = '{runner.parent.as_posix()}' + "
+        "[System.IO.Path]::PathSeparator + $env:PATH\n"
         "$env:ASH_BASE_OCI_LAYOUT = 'not-a-layout'\n"
-        f"try {{ Invoke-ASH -OCIRunner '{runner.as_posix()}' -BuildTarget ci "
+        "try { Invoke-ASH -OCIRunner docker -BuildTarget ci "
         '-SourceDir src -OutputDir out } catch { "code $LASTEXITCODE" }',
     )
 
@@ -309,7 +361,7 @@ def host(tmp_path, pwsh):
         call = f"Invoke-ASH -OCIRunner docker -SourceDir src -OutputDir out {arguments}"
         script = (
             f"$ErrorActionPreference = 'Stop'; . '{HELPERS.as_posix()}'; "
-            f"{WRAPPED.format(call=call)}; "
+            f"{_wrapped(call)}; "
             "exit [int]$LASTEXITCODE"
         )
         env = {k: v for k, v in os.environ.items() if k not in ("PATH", "ASH_CONFIG")}

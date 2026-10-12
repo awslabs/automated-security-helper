@@ -284,21 +284,25 @@ you type into, or one started with `-NoExit`, stays open. Any other error it rai
 leaves `$LASTEXITCODE` non-zero as well. Uncaught, the error ends `pwsh -File` and
 `pwsh -Command` with exit 1, as PowerShell does for any uncaught error, whatever the
 code. A CI step that needs the code wraps the call, also under
-`$ErrorActionPreference = 'Stop'` (the default of a `pwsh` step on GitHub Actions):
+`$ErrorActionPreference = 'Stop'`:
 
 ```powershell
+$ErrorActionPreference = 'Stop'
+. ./utils/ash_helpers.ps1
 try {
     Invoke-ASH -SourceDir . -OutputDir ./.ash/ash_output
-}
-catch {
-    [Console]::Error.WriteLine($_.Exception.Message)
-    exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 })
-}
+} catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }
 ```
 
-The `catch` block prints the reason, which the error carries, and exits with the code.
-The `else { 1 }` covers an error raised before `Invoke-ASH` runs, such as a parameter it
-cannot bind, which sets no code. It runs the runner through
+The `catch` block writes the error record once and exits with the code. The
+`else { 1 }` covers an error raised before `Invoke-ASH` sets one, such as a parameter
+it cannot bind. On GitHub Actions, run such a step with `shell: pwsh -File {0}`. The
+built-in `shell: pwsh` runs the script as `pwsh -command ". '<script>'"`, which reports
+every non-zero `exit` as 1; it also adds `$ErrorActionPreference = 'stop'` before the
+script and an `exit $LASTEXITCODE` after it, which `pwsh -File {0}` does not, so set
+the first yourself, as above, and end the script with
+`if ((Test-Path -LiteralPath variable:\LASTEXITCODE)) { exit $LASTEXITCODE }` to keep
+the scan's own exit code. It runs the runner through
 `Invoke-Expression`, and passes each path and value it was given by name, so PowerShell
 reads a directory named `a$(...)` as that name. Three inputs are still parsed as
 PowerShell: the arguments after the named parameters, which are passed through to `ash`

@@ -246,10 +246,10 @@ def test_powershell_wrapper_without_a_runner(snapshot, in_tmp):
     (in_tmp / "src").mkdir()
     env = {**_wrapper_env(), "ASH_OCI_RUNNER": "no-such-oci-runner"}
     # The refusal throws with $LASTEXITCODE set; this is the wrapper the CLI reference
-    # gives a CI step, which prints the reason and exits with the code.
+    # gives a CI step, which prints the error record and exits with the code.
     result = _pwsh(
         "try { Invoke-ASH -NoBuild -SourceDir src -OutputDir out } catch { "
-        "[Console]::Error.WriteLine($_.Exception.Message); "
+        "Write-Error -ErrorRecord $_ -ErrorAction Continue; "
         "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }",
         in_tmp,
         env,

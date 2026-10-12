@@ -6,9 +6,10 @@
 utils/ash_helpers.ps1:
 
 - Each refusal sets ``$LASTEXITCODE`` to 3 (or 1) and throws. A CI step wraps the
-  call, ``try { Invoke-ASH ... } catch { ...; exit $LASTEXITCODE }``, and these
-  tests run it that way, under ``$ErrorActionPreference = 'Stop'``, which GitHub
-  Actions sets for every ``pwsh`` step. ``Write-Error`` would not do for a refusal:
+  call, ``try { Invoke-ASH ... } catch { Write-Error -ErrorRecord $_ -ErrorAction
+  Continue; exit ... }``, and these tests run it that way, under
+  ``$ErrorActionPreference = 'Stop'``, which GitHub Actions sets for every ``pwsh``
+  step. ``Write-Error`` would not do for a refusal:
   under ``Stop`` it is a terminating error raised before the code is set.
 - The build and run commands are strings run by ``Invoke-Expression``, which parses
   them as PowerShell. Every path and value the operator gives is written into them
@@ -168,7 +169,7 @@ def _invoke(pwsh, tmp_path: Path, bin_dir: Path, arguments: str):
     script = (
         f"$ErrorActionPreference = 'Stop'; . '{HELPERS.as_posix()}'; "
         f"try {{ Invoke-ASH -OCIRunner docker -NoBuild {arguments} }} "
-        "catch { [Console]::Error.WriteLine($_.Exception.Message); "
+        "catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; "
         "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }; "
         "exit [int]$LASTEXITCODE"
     )

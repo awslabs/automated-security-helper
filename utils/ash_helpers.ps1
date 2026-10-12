@@ -79,9 +79,13 @@ function Invoke-ASH {
     Get-Help Invoke-ASH
 
     .EXAMPLE
-    try { Invoke-ASH -SourceDir . } catch { [Console]::Error.WriteLine($_.Exception.Message); exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }
+    try { Invoke-ASH -SourceDir . } catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }
 
-    As a CI step that needs the refusal's code: prints the reason and exits with it.
+    As a CI step that needs the refusal's code: writes the error record once and
+    exits with the code, or with 1 for an error raised before Invoke-ASH sets one.
+    On GitHub Actions run it with `shell: pwsh -File {0}`: the built-in `shell: pwsh`
+    runs the script as `pwsh -command ". '<script>'"`, which reports every non-zero
+    exit as 1.
 
     .NOTES
     A refusal throws, with $LASTEXITCODE set to its code: 3 for an input Invoke-ASH
@@ -166,8 +170,9 @@ function Invoke-ASH {
     begin {
         # A refusal (Stop-AshRefusal) sets $LASTEXITCODE before it throws. Any other
         # error raised here, such as an output directory that cannot be created under
-        # Stop, leaves it at 1 when it is 0, so `catch { exit $LASTEXITCODE }` in a CI
-        # step never exits 0 after a failure. `break` rethrows the error unchanged.
+        # Stop, leaves it at 1 when it is 0, so a CI step's catch block, which exits
+        # with $LASTEXITCODE (see .EXAMPLE), never exits 0 after a failure. `break`
+        # rethrows the error unchanged.
         trap { if (-not $global:LASTEXITCODE) { $global:LASTEXITCODE = 1 }; break }
         # ValidateSet and -eq ignore case, and so does the build: -BuildTarget NON-ROOT
         # is non-root. Lower-cased once, so the --target value and the image tag are too.
@@ -698,8 +703,8 @@ function Stop-AshRefusal {
     script, so its caller could neither handle the refusal nor go on. The thrown
     error carries the message; a caller that catches it reads the code from
     $LASTEXITCODE, and a CI step that needs the code exits with it:
-    `try { Invoke-ASH ... } catch { [Console]::Error.WriteLine($_.Exception.Message); exit $LASTEXITCODE }`.
-    Uncaught, `pwsh -File` and `pwsh -Command` exit 1, as PowerShell does for any
+    `try { Invoke-ASH ... } catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }`,
+    under `shell: pwsh -File {0}` on GitHub Actions. Uncaught, `pwsh -File` and `pwsh -Command` exit 1, as PowerShell does for any
     uncaught error. The code is set first, before anything else can raise.
     #>
     param([int]$ExitCode, [string]$Message)

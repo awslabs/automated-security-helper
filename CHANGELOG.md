@@ -536,8 +536,10 @@
   catch the error and go on, and a `-NoExit` session stays open. Any other error
   `Invoke-ASH` raises leaves `$LASTEXITCODE` non-zero too. Uncaught, `pwsh -File`
   exits 1, as PowerShell does for any uncaught error, so a CI step that needs exit 3
-  wraps the call: `try { Invoke-ASH ... } catch { [Console]::Error.WriteLine($_.Exception.Message); exit $LASTEXITCODE }`
-  (the CLI reference gives the full form). This repository's run-scan-test action does.
+  wraps the call: `try { Invoke-ASH ... } catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }`,
+  and on GitHub Actions runs with `shell: pwsh -File {0}`, since the built-in
+  `shell: pwsh` reports every non-zero exit as 1 (the CLI reference gives the full
+  step). This repository's run-scan-test action does.
   It refuses a non-root build when it runs as root (`id -u` is 0) without
   `-ContainerUID`, or with `-ContainerUID 0` or `-ContainerGID 0`, exit 3, naming
   `-BuildTarget ci`; a `-ContainerUID` or `-ContainerGID` that is not a number, exit 3;
