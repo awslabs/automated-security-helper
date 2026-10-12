@@ -10,7 +10,10 @@ cfn-lint and cfn-guard need the same answer cfn-nag already gives: a template is
 CloudFormation. Two scanners that disagree about which files are templates would report
 coverage nobody could reconcile -- a file linted by one and silently skipped by the
 other. So the selection is written once here, as a copy of the loop in
-``CfnNagScanner.scan``, and the two new scanners call it.
+``CfnNagScanner.scan``, and the two new scanners call it. Their
+``nothing_to_scan_reason`` answers from it too
+(:func:`cloudformation_templates_nothing_to_scan_reason`), so whether there is
+anything to scan is decided by the selection the scan makes.
 
 cfn-nag does not call this. Its loop is left exactly as it is; changing cfn-nag was out
 of scope for adding the new scanners. ``tests/unit/utils/test_cfn_template_discovery.py``
@@ -38,7 +41,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Literal, Tuple
+from typing import TYPE_CHECKING, List, Literal, Optional, Tuple
 
 from automated_security_helper.utils.cfn_template_model import (
     CloudFormationTemplateModelError,
@@ -46,12 +49,17 @@ from automated_security_helper.utils.cfn_template_model import (
 )
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.scan_targets import scan_targets
 from automated_security_helper.utils.scanned_tree import TreeInputRefused
 
 if TYPE_CHECKING:
     from automated_security_helper.base.plugin_context import PluginContext
 
 _TEMPLATE_SUFFIXES = (".json", ".yaml", ".yml")
+
+#: The reason cfn-lint and cfn-guard give when no tree holds a template; see
+#: :func:`cloudformation_templates_nothing_to_scan_reason`.
+NO_CLOUDFORMATION_TEMPLATE = "no CloudFormation template in the scanned files"
 
 
 @dataclass
@@ -115,6 +123,25 @@ def discover_templates(
             continue
         result.templates.append(path)
     return result
+
+
+def cloudformation_templates_nothing_to_scan_reason(
+    context: "PluginContext",
+) -> Optional[str]:
+    """``nothing_to_scan_reason`` for cfn-lint and cfn-guard, or None.
+
+    From :func:`discover_templates`, the selection both scanners' ``scan()`` makes,
+    over every tree a scan hands them (``utils/scan_targets.py``). A template is
+    something to scan, and so is a CloudFormation file the model rejects, which
+    both scanners count as a target that failed. A file that is not CloudFormation
+    and one the scanned-tree rule refuses are not: ``scan()`` skips both, with its
+    tool or without it.
+    """
+    for target_type, _ in scan_targets(context):
+        found = discover_templates(context, target_type)
+        if found.templates or found.unmodelable:
+            return None
+    return NO_CLOUDFORMATION_TEMPLATE
 
 
 def display_path(path: Path, source_dir: Path) -> str:

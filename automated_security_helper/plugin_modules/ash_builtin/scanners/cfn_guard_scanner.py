@@ -97,6 +97,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils.cfn_template_discovery import (
+    cloudformation_templates_nothing_to_scan_reason,
     discover_templates,
     display_path,
 )
@@ -535,6 +536,17 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             self._record_unavailable(str(exc))
             return False
         return True
+
+    def nothing_to_scan_reason(self) -> Optional[str]:
+        """None when either tree holds a template cfn-guard evaluates; see the base class.
+
+        From the selection ``scan()`` makes, which cfn-lint shares
+        (``cloudformation_templates_nothing_to_scan_reason``). Asked when the
+        binary or the rules are missing: neither costs a scan with no template.
+        """
+        if self.context is None:
+            return None
+        return cloudformation_templates_nothing_to_scan_reason(self.context)
 
     def _record_unavailable(self, reason: str) -> None:
         self.dependency_unavailable_reason = reason

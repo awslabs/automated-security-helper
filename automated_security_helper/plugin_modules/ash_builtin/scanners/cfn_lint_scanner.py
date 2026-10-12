@@ -120,6 +120,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils.cfn_template_discovery import (
+    cloudformation_templates_nothing_to_scan_reason,
     discover_templates,
     display_path,
 )
@@ -516,6 +517,16 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 level=logging.WARNING,
             )
         return get_uv_tool_command(_COMMAND) is not None
+
+    def nothing_to_scan_reason(self) -> Optional[str]:
+        """None when either tree holds a template cfn-lint lints; see the base class.
+
+        From the selection ``scan()`` makes, which cfn-guard shares
+        (``cloudformation_templates_nothing_to_scan_reason``).
+        """
+        if self.context is None:
+            return None
+        return cloudformation_templates_nothing_to_scan_reason(self.context)
 
     def _option_args(self, results_dir: Path) -> List[str]:
         """Arguments from config, each as one ``--flag=value`` token.
