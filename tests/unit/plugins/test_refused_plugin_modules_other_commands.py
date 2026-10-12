@@ -8,7 +8,10 @@ import the plugin modules their config names through ``load_plugins``. A name
 outside ASH's plugin namespace (see ``plugins/loader.py``) refuses each of them
 with exit code 3, as it refuses a scan, before anything is imported or written:
 ``ash merge`` checks the config carried by the shard results before it writes the
-merged results file.
+merged results file. It imports only the entries of that config which the
+operator's own config also names (``config/plugin_module_trust.py``), so a merge
+test that needs a module imported names it in both, as an operator merging the
+shards would; a name outside the namespace is refused whichever config names it.
 
 The refused package sits on ``sys.path`` and its ``__init__`` would set a flag, so
 ``sys.modules`` afterwards shows whether it was imported. The package and the config
@@ -207,7 +210,13 @@ class TestCommandsExitThreeForANameThatDoesNotImport:
         shards = build_shards(3)
         for shard in shards:
             shard.ash_config.ash_plugin_modules = [NOT_INSTALLED]
-        args = ["merge", "--output-dir", str(tmp_path / "merged")]
+        args = [
+            "merge",
+            "--output-dir",
+            str(tmp_path / "merged"),
+            "--config",
+            str(_config_file(tmp_path, NOT_INSTALLED)),
+        ]
         for path in write_shards(tmp_path / "artifacts", shards):
             args += ["--results", path]
 
@@ -292,10 +301,17 @@ class TestCommandsExitThree:
         monkeypatch.setattr(
             "automated_security_helper.cli.merge.ash_plugin_manager", reporters
         )
+        joined = f"{ACCEPTED}, {ACCEPTED_TOO}"
         shards = build_shards(3)
         for shard in shards:
-            shard.ash_config.ash_plugin_modules = [f"{ACCEPTED}, {ACCEPTED_TOO}"]
-        args = ["merge", "--output-dir", str(tmp_path / "merged")]
+            shard.ash_config.ash_plugin_modules = [joined]
+        args = [
+            "merge",
+            "--output-dir",
+            str(tmp_path / "merged"),
+            "--config",
+            str(_config_file(tmp_path, joined)),
+        ]
         for path in write_shards(tmp_path / "artifacts", shards):
             args += ["--results", path]
 

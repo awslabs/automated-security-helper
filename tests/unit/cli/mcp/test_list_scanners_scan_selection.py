@@ -244,6 +244,11 @@ class _Sequence:
         self.log = tmp_path / "fake-tools.log"
         self.workdir = tmp_path / "cwd"
         self.workdir.mkdir()
+        # The directory the operator sets aside for its own config files. A
+        # config an MCP client names elsewhere is the client's, and the server
+        # refuses the scanner settings this harness writes into one.
+        self.operator = tmp_path / "operator"
+        self.operator.mkdir()
 
     def _env(self) -> Dict[str, str]:
         env = without_inherited_aws(
@@ -271,6 +276,7 @@ class _Sequence:
                 "USERPROFILE": str(self.home),
                 "SELECTION_FAKE_TOOL_LOG": str(self.log),
                 "ASH_MCP_ALLOWED_ROOTS": str(self.root),
+                "ASH_MCP_ALLOWED_CONFIG_ROOTS": str(self.operator),
                 "PYTHONIOENCODING": "utf-8",
                 **isolated_tool_env(self.root / "tool-env"),
             }
@@ -407,7 +413,7 @@ class TestListScannersDoesNotSelectScanners:
                 {
                     "op": "mcp_scan",
                     "source_dir": str(tree),
-                    "config": str(tmp_path / "operator.yaml"),
+                    "config": str(seq.operator / "operator.yaml"),
                 },
             ]
         )

@@ -290,6 +290,11 @@ class _Run:
         self.tree = tmp_path / "tree"
         self.tree.mkdir()
         (self.tree / "app.py").write_text("x = 1\n", encoding="utf-8")
+        # The directory the operator sets aside for its own config files, for the
+        # MCP scan. A config an MCP client names elsewhere is the client's, and
+        # the server refuses the scanner settings the probe writes into one.
+        self.operator = tmp_path / "operator"
+        self.operator.mkdir()
 
     def env(self, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         env = without_inherited_aws(
@@ -311,6 +316,7 @@ class _Run:
                 "USERPROFILE": str(self.home),
                 _MARKER_ENV: str(self.markers),
                 "ASH_MCP_ALLOWED_ROOTS": str(self.root),
+                "ASH_MCP_ALLOWED_CONFIG_ROOTS": str(self.operator),
                 "PYTHONIOENCODING": "utf-8",
                 **isolated_tool_env(self.root / "tool-env"),
             }
@@ -478,7 +484,7 @@ class TestARefusedModuleRefusesTheScan:
             "mcp",
             {
                 "source_dir": str(run.tree),
-                "config": str(tmp_path / "operator.yaml"),
+                "config": str(run.operator / "operator.yaml"),
                 "modules": [REFUSED],
             },
         )
