@@ -7,7 +7,15 @@ from __future__ import annotations
 
 import fnmatch
 from typing import Any, Dict, List, Annotated, Optional, TYPE_CHECKING
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 from datetime import datetime, date
 
 from automated_security_helper.utils.path_matching import (
@@ -70,7 +78,9 @@ class IgnoreFileExclusions(BaseModel):
             description=(
                 "Whether the scanned repository's .gitignore and .ignore files "
                 "decided which files were scanned. False when the operator set "
-                "honor_ignore_files: false or passed --no-honor-ignore-files."
+                "honor_ignore_files: false or passed --no-honor-ignore-files. In "
+                "merged results (a workspace scan's, or ash merge's), True only "
+                "when every merged scan honored them; see honored_scan_count."
             )
         ),
     ]
@@ -82,7 +92,9 @@ class IgnoreFileExclusions(BaseModel):
                 "How many files the ignore files removed from the scan set: the sum "
                 "of by_ignore_file. Files ASH leaves out on its own (.git, CDK "
                 "assets, the bundled aws-cdk tree, its own output directory) are "
-                "not counted. 0 when the ignore files were not honored."
+                "not counted. When the scanned repository's ignore files were not "
+                "honored, only ignore files the caller named are counted, which is "
+                "none for ash scan."
             ),
         ),
     ] = 0
@@ -116,10 +128,71 @@ class IgnoreFileExclusions(BaseModel):
         ),
     ] = 0
 
+    honored_scan_count: Annotated[
+        Optional[int],
+        Field(
+            ge=0,
+            description=(
+                "In merged results (a workspace scan's, or ash merge's) whose "
+                "scans did not agree, how many of the scan_count merged scans "
+                "honored the ignore files; honored is then False. Absent for a "
+                "single scan, and when every merged scan agreed."
+            ),
+        ),
+    ] = None
+    scan_count: Annotated[
+        Optional[int],
+        Field(
+            ge=0,
+            description=(
+                "With honored_scan_count: how many scans the merged record covers "
+                "(the projects or shards that recorded one)."
+            ),
+        ),
+    ] = None
+
+    @model_validator(mode="after")
+    def _counts_only_for_a_disagreement(self) -> "IgnoreFileExclusions":
+        """Keep the two counts only as a pair that says the merged scans disagreed.
+
+        Anything else (one count without the other, every scan or none honoring)
+        is not a disagreement, and is read as if the counts were absent, so a
+        stored record with stray values renders the sentence its other fields say.
+        """
+        h, n = self.honored_scan_count, self.scan_count
+        if h is None or n is None or not 0 < h < n:
+            self.honored_scan_count = None
+            self.scan_count = None
+        else:
+            self.honored = False
+        return self
+
+    @model_serializer(mode="wrap")
+    def _leave_out_absent_counts(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> Dict[str, Any]:
+        # A single scan's record is written as it was before the counts existed.
+        data = handler(self)
+        if isinstance(data, dict) and self.scan_count is None:
+            data.pop("honored_scan_count", None)
+            data.pop("scan_count", None)
+        return data
+
     def summary_text(self) -> str:
         """The sentence the text and markdown summaries print for this record."""
         files = "file" if self.excluded_file_count == 1 else "files"
-        if self.honored:
+        if self.scan_count is not None and self.honored_scan_count is not None:
+            # Merged scans that disagreed. Neither one-scan sentence is true of
+            # them: some scan sets were cut by the repository's ignore files and
+            # some were not, and the count cannot be split between the two.
+            honored, total = self.honored_scan_count, self.scan_count
+            text = (
+                f"honored by {honored} of {total} merged scans and not by the other "
+                f"{total - honored} (honor_ignore_files: false); the ignore files "
+                f"that were applied excluded {self.excluded_file_count} {files} "
+                "from ASH's scan sets"
+            )
+        elif self.honored:
             text = (
                 "the scanned repository's .gitignore and .ignore files excluded "
                 f"{self.excluded_file_count} {files} from ASH's scan set"

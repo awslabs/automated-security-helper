@@ -220,6 +220,130 @@ class TestTheWorkspaceAggregate:
     def test_no_record_at_all_gives_none(self):
         assert workspace_ignore_file_exclusions([_outcome("api", "api")]) is None
 
+    @pytest.mark.parametrize(
+        "records, expected",
+        [
+            (
+                [HONORED, HONORED],
+                (
+                    "the scanned repository's .gitignore and .ignore files excluded "
+                    "14 files from ASH's scan set"
+                ),
+            ),
+            (
+                [NOT_HONORED, NOT_HONORED],
+                (
+                    "not honored for this scan (honor_ignore_files: false), so the "
+                    "scanned repository's .gitignore and .ignore files excluded no "
+                    "files from ASH's scan set"
+                ),
+            ),
+            (
+                [HONORED, NOT_HONORED],
+                (
+                    "honored by 1 of 2 merged scans and not by the other 1 "
+                    "(honor_ignore_files: false); the ignore files that were "
+                    "applied excluded 7 files from ASH's scan sets"
+                ),
+            ),
+            (
+                [NOT_HONORED, HONORED, NOT_HONORED],
+                (
+                    "honored by 1 of 3 merged scans and not by the other 2 "
+                    "(honor_ignore_files: false); the ignore files that were "
+                    "applied excluded 7 files from ASH's scan sets"
+                ),
+            ),
+        ],
+        ids=["every-project", "no-project", "one-of-two", "one-of-three"],
+    )
+    def test_the_workspace_sentence_is_true_for_every_combination(
+        self, records, expected
+    ):
+        """A mixed workspace read "excluded no files" next to a count of 7."""
+        aggregate = workspace_ignore_file_exclusions(
+            [
+                _outcome(f"p{index}", f"p{index}", record)
+                for index, record in enumerate(records)
+            ]
+        )
+
+        assert IgnoreFileExclusions.model_validate(aggregate).summary_text() == expected
+
+    def test_a_mixed_workspace_prints_the_mixed_sentence(self, tmp_path, text_reporter):
+        projects = [
+            ProjectPlan(
+                key=key,
+                relative_path=key,
+                path=(tmp_path / key).as_posix(),
+                label=key,
+                display_label=key,
+                severity_threshold="MEDIUM",
+            )
+            for key in ("api", "web")
+        ]
+        plan = WorkspacePlan(
+            workspace_file=(tmp_path / "w.code-workspace").as_posix(),
+            workspace_root=tmp_path.as_posix(),
+            projects=projects,
+        )
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
+        aggregator.add(_outcome("api", "api", HONORED), None, projects[0])
+        aggregator.add(_outcome("web", "web", NOT_HONORED), None, projects[1])
+        path = aggregator.write(exit_code=0, wall_clock_seconds=1.0)
+        model = AshAggregatedResults.model_validate_json(
+            path.read_text(encoding="utf-8")
+        )
+
+        assert _lines(text_reporter.report(model)) == [
+            (
+                "Ignore files: honored by 1 of 2 merged scans and not by the other 1 "
+                "(honor_ignore_files: false); the ignore files that were applied "
+                "excluded 7 files from ASH's scan sets"
+            )
+        ]
+
+
+class TestTheRecordsScanCounts:
+    def test_a_record_of_one_scan_serializes_as_before(self):
+        """The counts are written only for merged scans that disagreed."""
+        assert set(HONORED.model_dump()) == {
+            "honored",
+            "excluded_file_count",
+            "by_ignore_file",
+            "output_dir_file_count",
+        }
+
+    def test_a_mixed_record_keeps_its_counts_through_json(self):
+        record = IgnoreFileExclusions(
+            honored=False,
+            excluded_file_count=2,
+            by_ignore_file={".gitignore": 2},
+            honored_scan_count=1,
+            scan_count=2,
+        )
+
+        stored = IgnoreFileExclusions.model_validate_json(record.model_dump_json())
+
+        assert stored == record
+        assert stored.summary_text().startswith("honored by 1 of 2 merged scans")
+
+    @pytest.mark.parametrize(
+        "honored_scan_count, scan_count",
+        [(2, 2), (0, 2), (1, None), (None, 2), (3, 2)],
+    )
+    def test_counts_that_do_not_describe_a_disagreement_are_dropped(
+        self, honored_scan_count, scan_count
+    ):
+        record = IgnoreFileExclusions(
+            honored=False,
+            honored_scan_count=honored_scan_count,
+            scan_count=scan_count,
+        )
+
+        assert record.honored_scan_count is None and record.scan_count is None
+        assert record.summary_text().startswith("not honored for this scan")
+
     def test_the_merged_results_file_carries_it(self, tmp_path):
         plan = WorkspacePlan(
             workspace_file=(tmp_path / "w.code-workspace").as_posix(),

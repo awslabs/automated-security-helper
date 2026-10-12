@@ -8857,15 +8857,29 @@
         },
         "excluded_file_count": {
           "default": 0,
-          "description": "How many files the ignore files removed from the scan set: the sum of by_ignore_file. Files ASH leaves out on its own (.git, CDK assets, the bundled aws-cdk tree, its own output directory) are not counted. 0 when the ignore files were not honored.",
+          "description": "How many files the ignore files removed from the scan set: the sum of by_ignore_file. Files ASH leaves out on its own (.git, CDK assets, the bundled aws-cdk tree, its own output directory) are not counted. When the scanned repository's ignore files were not honored, only ignore files the caller named are counted, which is none for ash scan.",
           "minimum": 0,
           "title": "Excluded File Count",
           "type": "integer"
         },
         "honored": {
-          "description": "Whether the scanned repository's .gitignore and .ignore files decided which files were scanned. False when the operator set honor_ignore_files: false or passed --no-honor-ignore-files.",
+          "description": "Whether the scanned repository's .gitignore and .ignore files decided which files were scanned. False when the operator set honor_ignore_files: false or passed --no-honor-ignore-files. In merged results (a workspace scan's, or ash merge's), True only when every merged scan honored them; see honored_scan_count.",
           "title": "Honored",
           "type": "boolean"
+        },
+        "honored_scan_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "In merged results (a workspace scan's, or ash merge's) whose scans did not agree, how many of the scan_count merged scans honored the ignore files; honored is then False. Absent for a single scan, and when every merged scan agreed.",
+          "title": "Honored Scan Count"
         },
         "output_dir_file_count": {
           "default": 0,
@@ -8873,6 +8887,20 @@
           "minimum": 0,
           "title": "Output Dir File Count",
           "type": "integer"
+        },
+        "scan_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "With honored_scan_count: how many scans the merged record covers (the projects or shards that recorded one).",
+          "title": "Scan Count"
         }
       },
       "required": [

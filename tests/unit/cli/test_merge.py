@@ -2770,6 +2770,63 @@ class TestScanSetRecordsAcrossShards:
         )
         assert merged.metadata.inputs_not_scanned == self._not_scanned("x.py")
 
+    @pytest.mark.parametrize(
+        "honored, expected",
+        [
+            (
+                [True, True],
+                (
+                    "the scanned repository's .gitignore and .ignore files excluded "
+                    "2 files from ASH's scan set"
+                ),
+            ),
+            (
+                [False, False],
+                (
+                    "not honored for this scan (honor_ignore_files: false), so the "
+                    "scanned repository's .gitignore and .ignore files excluded no "
+                    "files from ASH's scan set"
+                ),
+            ),
+            (
+                [True, False],
+                (
+                    "honored by 1 of 2 merged scans and not by the other 1 "
+                    "(honor_ignore_files: false); the ignore files that were "
+                    "applied excluded 2 files from ASH's scan sets"
+                ),
+            ),
+            (
+                [False, True, True],
+                (
+                    "honored by 2 of 3 merged scans and not by the other 1 "
+                    "(honor_ignore_files: false); the ignore files that were "
+                    "applied excluded 2 files from ASH's scan sets"
+                ),
+            ),
+        ],
+        ids=["every-shard", "no-shard", "one-of-two", "two-of-three"],
+    )
+    def test_the_merged_summary_sentence_is_true_for_every_combination(
+        self, honored, expected
+    ):
+        """Mixed shards said "excluded no files" and "named by the caller": both false."""
+        shards = build_shards(len(honored))
+        for shard, honors in zip(shards, honored):
+            shard.metadata.ignore_file_exclusions = (
+                self._exclusions(by={".gitignore": 2})
+                if honors
+                else self._exclusions(honored=False)
+            )
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        record = merged.metadata.ignore_file_exclusions
+        assert record.summary_text() == expected
+        # The stored results file says the same when a report is built from it.
+        stored = AshAggregatedResults.model_validate_json(merged.model_dump_json())
+        assert stored.metadata.ignore_file_exclusions.summary_text() == expected
+
     def test_the_merge_does_not_depend_on_the_order_shards_are_given(self):
         def shards():
             built = build_shards(3)

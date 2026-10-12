@@ -467,7 +467,12 @@ stored results. The MCP `get_scan_summary` tool returns the record under
 `metadata.ignore_file_exclusions`. In a workspace scan, each project's record is in
 `workspace.projects[].ignore_file_exclusions`, and the merged results and summaries
 carry the workspace total, with each ignore file keyed by its path relative to the
-workspace root. The log names every ignore file and its count at INFO level, and
+workspace root. When the merged scans disagree (some projects, or some `ash merge`
+shards, honored the ignore files and some did not), the record also carries
+`honored_scan_count` and `scan_count`, `honored` is false, and the summaries say,
+for example, `honored by 1 of 2 merged scans and not by the other 1
+(honor_ignore_files: false); the ignore files that were applied excluded 7 files from
+ASH's scan sets`. The log names every ignore file and its count at INFO level, and
 `ash-ignore-report.txt` in the output directory holds the rules that were applied.
 
 ### Global Settings

@@ -731,8 +731,10 @@ def workspace_ignore_file_exclusions(
     project-relative key), so two projects' root ``.gitignore`` files stay apart.
     ``honored`` is True only when every project that built a scan set honored its
     ignore files; the switch is the operator's, so the projects agree unless their
-    configs were resolved from different operator sources. None when no project
-    built a scan set.
+    configs were resolved from different operator sources. When they disagree,
+    ``honored_scan_count`` and ``scan_count`` say how many did, and the summaries
+    print that instead of either one-scan sentence. None when no project built a
+    scan set.
     """
     recorded = [
         outcome for outcome in outcomes if outcome.ignore_file_exclusions is not None
@@ -745,8 +747,11 @@ def workspace_ignore_file_exclusions(
         for path, count in outcome.ignore_file_exclusions.by_ignore_file.items():
             key = path if str(prefix) == "." else (prefix / path).as_posix()
             by_ignore_file[key] = by_ignore_file.get(key, 0) + count
-    return {
-        "honored": all(outcome.ignore_file_exclusions.honored for outcome in recorded),
+    honored_count = sum(
+        1 for outcome in recorded if outcome.ignore_file_exclusions.honored
+    )
+    aggregate: Dict[str, Any] = {
+        "honored": honored_count == len(recorded),
         "excluded_file_count": sum(
             outcome.ignore_file_exclusions.excluded_file_count for outcome in recorded
         ),
@@ -755,6 +760,12 @@ def workspace_ignore_file_exclusions(
             outcome.ignore_file_exclusions.output_dir_file_count for outcome in recorded
         ),
     }
+    # Projects that disagree get their own sentence: neither "excluded N files" nor
+    # "excluded no files" is true of the workspace (IgnoreFileExclusions.summary_text).
+    if 0 < honored_count < len(recorded):
+        aggregate["honored_scan_count"] = honored_count
+        aggregate["scan_count"] = len(recorded)
+    return aggregate
 
 
 class WorkspaceAggregator:

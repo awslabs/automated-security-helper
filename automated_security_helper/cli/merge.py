@@ -1088,8 +1088,10 @@ def _merge_scan_set_records(
       most any shard says it removed; ``excluded_file_count`` the sum of those, or
       the largest shard count when that is more (a shard that did not honor the
       ignore files can count files the caller's ignore files removed without
-      naming them); ``output_dir_file_count`` the largest. None when no shard
-      recorded one.
+      naming them); ``output_dir_file_count`` the largest; and, when some shards
+      honored the ignore files and some did not, ``honored_scan_count`` and
+      ``scan_count``, so the summaries say that instead of either one-scan
+      sentence. None when no shard recorded one.
 
     Shards are visited in index order, so the result does not depend on the order
     they were passed in. No shard is modified.
@@ -1114,15 +1116,25 @@ def _merge_scan_set_records(
     for record in records:
         for path, count in record.by_ignore_file.items():
             by_ignore_file[path] = max(by_ignore_file.get(path, 0), count)
+    honored_count = sum(1 for record in records if record.honored)
     merged.metadata.ignore_file_exclusions = IgnoreFileExclusions(
-        honored=all(record.honored for record in records),
+        honored=honored_count == len(records),
         excluded_file_count=max(
             sum(by_ignore_file.values()),
             max(record.excluded_file_count for record in records),
         ),
         by_ignore_file=by_ignore_file,
         output_dir_file_count=max(record.output_dir_file_count for record in records),
+        # Set only when the shards disagree; see IgnoreFileExclusions.
+        **_disagreement_counts(honored_count, len(records)),
     )
+
+
+def _disagreement_counts(honored_count: int, total: int) -> Dict[str, int]:
+    """``honored_scan_count`` and ``scan_count`` when some, not all, honored."""
+    if 0 < honored_count < total:
+        return {"honored_scan_count": honored_count, "scan_count": total}
+    return {}
 
 
 def _merge_converter_rows(
