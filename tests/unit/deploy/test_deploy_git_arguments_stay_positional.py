@@ -18,18 +18,31 @@ What the deploy targets do now:
 
 * the image builds pass ``--`` before the repository, so the URL is always the
   repository and the ref is always a refspec;
+* the cdk-constructs buildspecs install ASH with ``pip install
+  "git+<repository>@$ASH_VERSION"``. pip hands the ref to ``git checkout -q <ref>`` as
+  an argument of its own, where ``--`` would make it a path, so the install phase
+  first checks that ``ASH_VERSION`` is a plain git ref and stops the build otherwise;
 * the gates pass ``--`` before the repository they clone, and check that both commit
   ids in the event are full hex object ids before any git call. ``git checkout``
   reads whatever follows ``--`` as paths, and git before 2.44 keeps
   ``--end-of-options`` in checkout's arguments rather than consuming it, so neither
   terminator can carry a commit there.
 
-The image-build tests run the committed commands: the Terraform buildspec, rendered as
-``templatefile`` renders it, and the image build of every committed CDK template.
-They run against a local repository, with ``--upload-pack=<script>`` as the value; the
-script creates a marker file and then serves the fetch, so the marker shows whether
-git ran it. Each command also fetches a tag and a commit, so a command that no longer
-fetches anything cannot pass.
+The fetch tests run the committed commands: the Terraform buildspec, rendered as
+``templatefile`` renders it, the image build of every committed CDK template, and the
+install phase of every committed cdk-constructs buildspec. They run against a local
+repository with two values that start with ``-``:
+
+* ``--upload-pack=<script>``, where the script creates a marker file and then serves
+  the fetch, so the marker shows whether git ran it;
+* ``-f``, which ``git checkout`` takes as ``--force``: before the install-phase check,
+  pip's checkout succeeded with it and the default branch was built.
+
+The install phase's ``pip`` is a stand-in that makes the git calls pip makes for a
+``git+`` requirement (measured with pip 25.0.1 and 21.3.1): a clone, then
+``git checkout -q <ref>``. pip itself is not a dependency of the test environment.
+Each command also fetches a tag, a branch with a slash and a commit, so a command that
+no longer fetches the ref it names cannot pass.
 """
 
 from __future__ import annotations
@@ -79,6 +92,29 @@ TERRAFORM_GATE = (
 #: What identifies the fetch command in each image build.
 TERRAFORM_FETCH_MARKER = "git fetch"
 CDK_FETCH_MARKER = "git init -q ash-src"
+
+CONSTRUCTS = REPO_ROOT / "deploy" / "cdk-constructs"
+#: The repository the cdk-constructs buildspecs install ASH from.
+CONSTRUCTS_REPOSITORY = "https://github.com/awslabs/automated-security-helper.git"
+
+#: Stands in for `python3 -m pip install ... "git+<repository>@<ref>"` in the
+#: cdk-constructs install phase. It makes the git calls pip makes for that
+#: requirement, as measured with pip 25.0.1 and 21.3.1: a clone, then
+#: `git checkout -q <ref>` with the ref as an argument of its own. It clones the
+#: local stand-in remote named by ASH_TEST_UPSTREAM, and refuses any repository
+#: other than the one the buildspecs name.
+PIP_STAND_IN = f"""#!/bin/sh
+for requirement in "$@"; do :; done
+spec="${{requirement#git+}}"
+repository="${{spec%@*}}"
+ref="${{spec##*@}}"
+if [ "$repository" != "{CONSTRUCTS_REPOSITORY}" ]; then
+  echo "unexpected repository: $repository" >&2
+  exit 2
+fi
+git clone -q "$ASH_TEST_UPSTREAM" ash-src || exit 1
+cd ash-src && exec git checkout -q "$ref"
+"""
 
 #: How the CDK image build writes the gate handler into the image.
 CDK_GATE_HEREDOC = "ASH_CDK_EOF"
@@ -132,7 +168,8 @@ def _git(cwd: pathlib.Path, home: pathlib.Path, *args: str) -> str:
 
 @pytest.fixture(scope="module")
 def upstream(tmp_path_factory: pytest.TempPathFactory) -> SimpleNamespace:
-    """A bare repository with a tagged commit and an untagged older one."""
+    """A bare repository: an untagged older commit, a tagged one on main (the
+    default branch), and a branch with a slash in its name on a commit of its own."""
     root = tmp_path_factory.mktemp("ash-upstream")
     work = root / "work"
     work.mkdir()
@@ -145,12 +182,19 @@ def upstream(tmp_path_factory: pytest.TempPathFactory) -> SimpleNamespace:
     _git(work, root, "commit", "-q", "-am", "two")
     _git(work, root, "tag", "v9.9.9")
     tagged = _git(work, root, "rev-parse", "HEAD")
+    _git(work, root, "checkout", "-q", "-b", "release/v3.8")
+    (work / "marker.txt").write_text("three\n", encoding="utf-8")
+    _git(work, root, "commit", "-q", "-am", "three")
+    branch_tip = _git(work, root, "rev-parse", "HEAD")
+    _git(work, root, "checkout", "-q", "main")
     remote = root / "ash.git"
     _git(root, root, "clone", "-q", "--bare", str(work), str(remote))
     # A hosted remote serves a fetch by commit id; a bare local one does not unless
     # told to, so this makes the stand-in behave like the real remote.
     _git(remote, root, "config", "uploadpack.allowAnySHA1InWant", "true")
-    return SimpleNamespace(url=f"file://{remote}", tagged=tagged, older=older)
+    return SimpleNamespace(
+        url=f"file://{remote}", tagged=tagged, older=older, branch_tip=branch_tip
+    )
 
 
 @pytest.fixture
@@ -238,16 +282,39 @@ def _fetch_commands() -> dict[str, str]:
         commands[f"cdk:{name}"] = sole_command_containing(
             spec, "pre_build", CDK_FETCH_MARKER
         )
+    commands.update(_constructs_install_phases())
     return commands
 
 
+def _constructs_install_phases() -> dict[str, str]:
+    """Each committed cdk-constructs install phase, as one script.
+
+    The script stops at the first failing command, as CodeBuild stops a phase.
+    """
+    phases: dict[str, str] = {}
+    for path in sorted(CONSTRUCTS.glob("buildspec*.yml")):
+        spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+        commands = phase_commands(spec, "install")
+        assert any(
+            f"git+{CONSTRUCTS_REPOSITORY}@$ASH_VERSION" in c for c in commands
+        ), f"{path.name} no longer installs ASH from {CONSTRUCTS_REPOSITORY}"
+        phases[f"constructs:{path.name}"] = "\n".join(
+            f'{command}\nash_rc=$?; [ "$ash_rc" -eq 0 ] || exit "$ash_rc"'
+            for command in commands
+        )
+    return phases
+
+
 FETCH_COMMANDS = _fetch_commands()
+
+#: Targets whose fetch is git on the shell command line; the rest go through pip.
+SHELL_GIT_TARGETS = sorted(t for t in FETCH_COMMANDS if not t.startswith("constructs:"))
 
 
 def _run_fetch(
     target: str, workdir: pathlib.Path, ref: str, url: str
 ) -> subprocess.CompletedProcess:
-    """Run one image build's fetch command the way CodeBuild runs it."""
+    """Run one target's fetch the way CodeBuild runs it."""
     env = _git_env(workdir)
     # Each target names the two variables its own way; setting both names lets
     # one runner serve every target.
@@ -258,6 +325,16 @@ def _run_fetch(
             "ASH_REPOSITORY_URL": url,
         }
     )
+    if target.startswith("constructs:"):
+        # The cdk-constructs buildspecs name their repository; the pip stand-in
+        # clones the local remote in its place.
+        bin_dir = workdir.parent / "installer-bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        stand_in = bin_dir / "python3"
+        stand_in.write_text(PIP_STAND_IN, encoding="utf-8")
+        stand_in.chmod(0o755)
+        env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+        env["ASH_TEST_UPSTREAM"] = url
     workdir.mkdir(parents=True, exist_ok=True)
     return subprocess.run(
         [posix_shell(env), "-c", FETCH_COMMANDS[target]],
@@ -313,9 +390,14 @@ def test_every_image_build_fetch_was_found():
         ]
     )
     assert "terraform:ash-image-pipeline" in FETCH_COMMANDS
+    assert sorted(t for t in FETCH_COMMANDS if t.startswith("constructs:")) == [
+        "constructs:buildspec-merge.yml",
+        "constructs:buildspec-shard.yml",
+        "constructs:buildspec.yml",
+    ]
 
 
-@pytest.mark.parametrize("target", sorted(FETCH_COMMANDS))
+@pytest.mark.parametrize("target", SHELL_GIT_TARGETS)
 def test_git_options_end_before_every_variable_argument(target):
     """Every git call in the fetch has `--` before its first `$VARIABLE` argument."""
     checked = 0
@@ -332,31 +414,41 @@ def test_git_options_end_before_every_variable_argument(target):
 
 
 @pytest.mark.parametrize("target", sorted(FETCH_COMMANDS))
-@pytest.mark.parametrize("which", ["tag", "commit"])
+@pytest.mark.parametrize("which", ["tag", "branch", "commit"])
 def test_control_the_fetch_checks_out_the_ref_it_names(
     target, which, upstream, tmp_path
 ):
-    ref = "v9.9.9" if which == "tag" else upstream.older
-    expected = upstream.tagged if which == "tag" else upstream.older
+    ref, expected = {
+        "tag": ("v9.9.9", upstream.tagged),
+        "branch": ("release/v3.8", upstream.branch_tip),
+        "commit": (upstream.older, upstream.older),
+    }[which]
     result = _run_fetch(target, tmp_path / "build", ref, upstream.url)
     assert result.returncode == 0, f"{target}: {result.stderr[-2000:]}"
     assert _head(tmp_path / "build") == expected
 
 
 @pytest.mark.parametrize("target", sorted(FETCH_COMMANDS))
-def test_a_ref_starting_with_a_dash_is_fetched_as_a_ref(
-    target, upstream, upload_pack_probe, tmp_path
+@pytest.mark.parametrize("value", ["upload-pack", "force"])
+def test_a_ref_starting_with_a_dash_never_reaches_git_as_an_option(
+    target, value, upstream, upload_pack_probe, tmp_path
 ):
-    result = _run_fetch(
-        target, tmp_path / "build", upload_pack_probe.value, upstream.url
-    )
+    """Fetched as a ref, or refused before the installer: never an option.
+
+    `-f` is the value that shows the difference for an installer that checks out
+    the ref: `git checkout -q -f` succeeds and leaves the default branch checked out.
+    """
+    ref = upload_pack_probe.value if value == "upload-pack" else "-f"
+    result = _run_fetch(target, tmp_path / "build", ref, upstream.url)
     assert not upload_pack_probe.marker.exists(), (
-        f"{target}: git read the ref {upload_pack_probe.value!r} as an option and ran "
-        "the program it names"
+        f"{target}: git read the ref {ref!r} as an option and ran the program it names"
     )
-    assert result.returncode != 0, f"{target}: a ref that names no ref was checked out"
-    assert upload_pack_probe.value in result.stderr, (
-        f"{target}: git did not report the value as a ref: {result.stderr[-2000:]}"
+    assert result.returncode != 0, (
+        f"{target}: the ref {ref!r} names no ref, and the fetch succeeded with "
+        f"{_head(tmp_path / 'build')} checked out"
+    )
+    assert ref in result.stderr, (
+        f"{target}: the failure does not name the value: {result.stderr[-2000:]}"
     )
 
 
