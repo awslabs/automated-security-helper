@@ -36,9 +36,10 @@ reporters:
   s3:
     enabled: true
     options:
-      # Use environment variables to insert the bucket name. The braces and the
-      # default are both required: `!ENV ASH_S3_BUCKET_NAME` resolves to the
-      # literal string "ASH_S3_BUCKET_NAME", and so does `${ASH_S3_BUCKET_NAME}`.
+      # Use environment variables to insert the bucket name. The braces are
+      # required: `!ENV ASH_S3_BUCKET_NAME` resolves to the literal string
+      # "ASH_S3_BUCKET_NAME". With no default, `${ASH_S3_BUCKET_NAME}` refuses
+      # the configuration when the variable is not set; `:None` allows it.
       bucket_name: !ENV ${ASH_S3_BUCKET_NAME:None}
       aws_region: !ENV ${AWS_REGION:None}
       aws_profile: !ENV ${AWS_PROFILE:None}

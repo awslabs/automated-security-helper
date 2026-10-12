@@ -18,9 +18,11 @@ quotes the path the operator gave, with its control characters escaped, so a
 name holding a newline or a terminal escape cannot start a line of its own or
 restyle the output.
 
-An unset environment reference. A YAML, TOML or pyproject config whose
-``${VAR}`` names an unset variable with no default is handled by ``ash merge
---config`` as ``ash scan --config`` handles it; each case runs both and compares.
+An environment reference with no default. In a YAML, TOML or pyproject config,
+``${VAR}`` is read when ``VAR`` is set, and when it is unset ``ash scan --config``
+and ``ash merge --config`` both refuse the file with exit 3, naming the variable.
+``${VAR:default}`` takes the default, as it did. Each case runs both commands, and
+the reference is a plugin module name, so the marker shows which value was used.
 
 Every merge runs in a child process, so the only plugin modules registered are the
 ones that merge imports, and the marker package's import is seen in a file it
@@ -148,7 +150,13 @@ class _Child:
         )
         return env
 
-    def run(self, command: str, args: List[str], watch: Optional[Path] = None):
+    def run(
+        self,
+        command: str,
+        args: List[str],
+        watch: Optional[Path] = None,
+        extra_env: Optional[Dict[str, str]] = None,
+    ):
         spec = {
             "command": command,
             "args": args,
@@ -157,7 +165,7 @@ class _Child:
         completed = subprocess.run(
             [sys.executable, "-c", _CHILD, json.dumps(spec)],
             cwd=self.workdir,
-            env=self.env(),
+            env={**self.env(), **(extra_env or {})},
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -170,11 +178,17 @@ class _Child:
         report["output"] = lines[0] + completed.stderr
         return report
 
-    def merge(self, shard_paths: List[str], *args: str, watch: Optional[Path] = None):
+    def merge(
+        self,
+        shard_paths: List[str],
+        *args: str,
+        watch: Optional[Path] = None,
+        extra_env: Optional[Dict[str, str]] = None,
+    ):
         argv = ["--output-dir", str(self.output_dir)]
         for path in shard_paths:
             argv += ["--results", path]
-        return self.run("merge", argv + list(args), watch=watch)
+        return self.run("merge", argv + list(args), watch=watch, extra_env=extra_env)
 
     def merged(self) -> bool:
         return (self.output_dir / RESULTS_FILE_NAME).exists()
@@ -387,40 +401,54 @@ def test_control_a_usable_operator_config_merges(tmp_path):
     assert result["opens"] == 1, result
 
 
-# ------------------------------------------------------------ unset env references
+# --------------------------------------------------------------- env references
 
-ENV_UNSET = {
-    "yaml": (
-        "operator-config.yaml",
-        "project_name: !ENV ${" + UNSET_VARIABLE + "}\n",
-    ),
-    "toml": ("operator-config.toml", 'project_name = "${' + UNSET_VARIABLE + '}"\n'),
-    "pyproject": (
-        "pyproject.toml",
-        '[tool.ash]\nproject_name = "${' + UNSET_VARIABLE + '}"\n',
-    ),
-}
+#: Set to the marker package's name in the tests that set it.
+SET_VARIABLE = "ASH_TEST_MERGE_MODULE"
 
 
-@pytest.mark.parametrize("kind", sorted(ENV_UNSET))
-def test_an_unset_env_reference_is_handled_as_ash_scan_handles_it(kind, tmp_path):
-    """Whatever ``ash scan --config`` does with the file, ``ash merge --config`` does."""
-    name, content = ENV_UNSET[kind]
-    child = _Child(tmp_path)
-    config = child.operator / name
-    config.write_text(content, encoding="utf-8")
-    tree = tmp_path / "tree"
-    tree.mkdir()
+def _env_config(kind: str, directory: Path, reference: str) -> Path:
+    """An operator config of ``kind`` whose one plugin module is ``reference``.
+
+    The module the reference resolves to is what both commands import, so the
+    marker shows whether the value was read.
+    """
+    if kind == "yaml":
+        path = directory / "operator-config.yaml"
+        path.write_text(
+            f"project_name: operator\nash_plugin_modules:\n  - !ENV {reference}\n",
+            encoding="utf-8",
+        )
+    elif kind == "toml":
+        path = directory / "operator-config.toml"
+        path.write_text(
+            f'project_name = "operator"\nash_plugin_modules = ["{reference}"]\n',
+            encoding="utf-8",
+        )
+    else:
+        path = directory / "pyproject.toml"
+        path.write_text(
+            "[tool.ash]\n"
+            f'project_name = "operator"\nash_plugin_modules = ["{reference}"]\n',
+            encoding="utf-8",
+        )
+    return path
+
+
+ENV_KINDS = ("yaml", "toml", "pyproject")
+
+
+def _scan(child: _Child, config: Path, extra_env: Optional[Dict[str, str]] = None):
+    tree = child.root / "tree"
+    tree.mkdir(exist_ok=True)
     (tree / "app.py").write_text("x = 1\n", encoding="utf-8")
-    shard_paths = child.shards()
-
-    scan = child.run(
+    return child.run(
         "scan",
         [
             "--source-dir",
             str(tree),
             "--output-dir",
-            str(tmp_path / "scanned"),
+            str(child.root / "scanned"),
             "--mode",
             "local",
             "--scanners",
@@ -431,17 +459,64 @@ def test_an_unset_env_reference_is_handled_as_ash_scan_handles_it(kind, tmp_path
             "--config",
             str(config),
         ],
+        extra_env=extra_env,
     )
-    merge = child.merge(shard_paths, "--config", str(config))
 
-    unset = _flat(f"Environment variable {UNSET_VARIABLE} not set")
-    if scan["exit_code"] == INVALID_CONFIG_EXIT:
-        assert merge["exit_code"] == INVALID_CONFIG_EXIT, merge["output"]
-        assert not child.output_dir.exists(), merge["output"]
-    else:
-        assert merge["exit_code"] != INVALID_CONFIG_EXIT, merge["output"]
-        assert child.merged(), merge["output"]
-        assert (unset in _flat(scan["output"])) == (unset in _flat(merge["output"])), (
-            scan["output"][-2000:],
-            merge["output"][-2000:],
-        )
+
+@pytest.mark.parametrize("kind", ENV_KINDS)
+def test_an_unset_variable_with_no_default_refuses_scan_and_merge(kind, tmp_path):
+    """``${VAR}`` names an unset variable: exit 3, nothing written, the variable named."""
+    child = _Child(tmp_path)
+    config = _env_config(kind, child.operator, "${" + UNSET_VARIABLE + "}")
+
+    scan = _scan(child, config)
+    merge = child.merge(child.shards(), "--config", str(config))
+
+    assert scan["exit_code"] == INVALID_CONFIG_EXIT, scan["output"]
+    assert not (child.root / "scanned" / RESULTS_FILE_NAME).exists(), scan["output"]
+    assert merge["exit_code"] == INVALID_CONFIG_EXIT, merge["output"]
+    assert not child.output_dir.exists(), merge["output"]
+    for result in (scan, merge):
+        assert UNSET_VARIABLE in _flat(result["output"]), result["output"]
+        assert _flat("using default value of") not in _flat(result["output"])
+        assert "Traceback" not in result["output"], result["output"]
+    assert not child.imported()
+
+
+@pytest.mark.parametrize("kind", ENV_KINDS)
+def test_a_set_variable_with_no_default_is_read(kind, tmp_path):
+    """``${VAR}`` names a set variable: both commands use its value."""
+    child = _Child(tmp_path)
+    config = _env_config(kind, child.operator, "${" + SET_VARIABLE + "}")
+    env = {SET_VARIABLE: MARKER_PACKAGE}
+
+    scan = _scan(child, config, extra_env=env)
+    assert child.imported(), scan["output"]
+    assert scan["exit_code"] != INVALID_CONFIG_EXIT, scan["output"]
+    child.marker.unlink()
+    merge = child.merge(child.shards(), "--config", str(config), extra_env=env)
+
+    assert child.imported(), merge["output"]
+    assert child.merged(), merge["output"]
+
+
+@pytest.mark.parametrize("kind", ENV_KINDS)
+def test_an_unset_variable_with_a_default_takes_the_default(kind, tmp_path):
+    """``${VAR:default}`` behaves as it did: the default, and a warning naming it."""
+    child = _Child(tmp_path)
+    config = _env_config(
+        kind, child.operator, "${" + UNSET_VARIABLE + ":" + MARKER_PACKAGE + "}"
+    )
+
+    scan = _scan(child, config)
+    assert child.imported(), scan["output"]
+    child.marker.unlink()
+    merge = child.merge(child.shards(), "--config", str(config))
+
+    assert child.imported(), merge["output"]
+    assert child.merged(), merge["output"]
+    for result in (scan, merge):
+        assert _flat(
+            f"Environment variable {UNSET_VARIABLE} not set, using default value of "
+            f"{MARKER_PACKAGE}"
+        ) in _flat(result["output"]), result["output"]

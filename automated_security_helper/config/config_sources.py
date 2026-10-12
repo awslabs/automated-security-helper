@@ -248,6 +248,7 @@ from automated_security_helper.core.exceptions import (
     ASHConfigFileNotFoundError,
     ASHConfigInputNotPermittedError,
     ASHConfigSourceError,
+    ASHConfigUnsetVariableError,
 )
 from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.utils.link_locations import link_locations
@@ -952,7 +953,10 @@ def read_config_file(
             if key is not None:
                 raise _env_not_resolved(path, f"key {key}")
             return document
-        return _resolve_toml_env(document)
+        try:
+            return _resolve_toml_env(document)
+        except ASHConfigUnsetVariableError as exc:
+            raise _unset_variable_in(path, exc) from None
     try:
         return load_yaml_config(
             named_text_stream(
@@ -962,6 +966,20 @@ def read_config_file(
         )
     except EnvReferenceNotResolved as exc:
         raise _env_not_resolved(path, f"line {exc.line}") from exc
+    except ASHConfigUnsetVariableError as exc:
+        raise _unset_variable_in(path, exc) from None
+
+
+def _unset_variable_in(
+    path: Path, exc: ASHConfigUnsetVariableError
+) -> ASHConfigUnsetVariableError:
+    """``exc``, naming ``path`` as the file that references the unset variable."""
+    return ASHConfigUnsetVariableError(
+        f"{describe_config_path(path)}: {exc.detail}",
+        variable=exc.variable,
+        config_file=path,
+        detail=exc.detail,
+    )
 
 
 def named_text_stream(text: str, path: Path) -> io.StringIO:
@@ -1463,6 +1481,16 @@ def _resolve(
             data = read_config_file(
                 real, expect=expect, refuse_env=_env_rule(env_refused)
             )
+        except ASHConfigUnsetVariableError as exc:
+            # A base can be named through an environment variable, so its path
+            # is not quoted: the chain's root is, and the variable as written.
+            raise ASHConfigUnsetVariableError(
+                f"A config file in the extends chain of "
+                f"{describe_config_path(stack[0])}: {exc.detail}",
+                variable=exc.variable,
+                config_file=real,
+                detail=exc.detail,
+            ) from None
         except ASHConfigSourceError:
             raise
         except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as exc:

@@ -223,9 +223,12 @@ ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
   To reference a variable of your own, give it an `ASH_` prefix — `ASH_MY_BUCKET`
   rather than `MY_BUCKET` — and set it under that name wherever you run ASH.
 
-  A reference with no default, `${VAR_NAME}`, has never resolved and still does
-  not; write `${VAR_NAME:default_value}`. A reference must also be the whole
-  value, not part of a longer string.
+  A reference with no default, `${VAR_NAME}`, reads the variable too. When the
+  variable is not set, the configuration is refused with exit code 3 and the
+  error names the variable, since there is no value to use; write
+  `${VAR_NAME:None}`, or another default, for a variable that may be unset. This
+  holds in YAML, TOML and `pyproject.toml` alike. A reference must also be the
+  whole value, not part of a longer string.
 
   Under the MCP server, a configuration file an MCP client delivered may not use
   `!ENV` at all, whatever the name, and for a remote client neither may any other

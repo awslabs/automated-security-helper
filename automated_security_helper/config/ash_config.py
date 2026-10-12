@@ -32,6 +32,7 @@ from automated_security_helper.core.constants import (
     ASH_CONFIG_ENV_VAR_PREFIX,
     ASH_DEFAULT_SEVERITY_LEVEL,
 )
+from automated_security_helper.core.exceptions import ASHConfigUnsetVariableError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import IgnorePathWithReason, AshSuppression
 from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
@@ -146,65 +147,80 @@ def config_env_var_is_interpolatable(var_name: str) -> bool:
     )
 
 
-ENV_REFERENCE_PATTERN = re.compile(r"^\${(\w+):?(.*)?}")
+# Group 2 captures the colon itself, so that ``${VAR}`` and ``${VAR:}`` can be
+# told apart; the strings the pattern matches are the same as without it.
+ENV_REFERENCE_PATTERN = re.compile(r"^\${(\w+)(:?)(.*)?}")
 
 
 def resolve_env_references(value: str) -> Optional[str]:
-    """Resolve the ``${VAR:default}`` reference a config scalar starts with.
+    """Resolve the ``${VAR}`` or ``${VAR:default}`` reference a config scalar starts with.
 
     This is the body of the YAML ``!ENV`` constructor, shared so that a TOML
     config source resolves references by exactly the same rule. Only names
     ``config_env_var_is_interpolatable`` admits are read; any other reference is
-    left as written.
+    left as written, and that check comes before the environment is consulted.
+
+    ``${VAR:default}`` falls back to ``default`` when ``VAR`` is unset (the
+    default ``None`` and an empty default both resolve to ``None``). ``${VAR}``
+    has no fallback, so an unset ``VAR`` raises ``ASHConfigUnsetVariableError``
+    naming it: substituting nothing would read as the variable being set to
+    nothing, and the literal ``${VAR}`` would reach a reporter as a bucket or
+    region name.
+
+    The bare form did not resolve before. The text to replace was rebuilt as
+    ``":".join(groups)``, which appended a colon the bare form had not written,
+    so the replacement never matched and ``${VAR}`` stayed as written whatever
+    the environment held. The text replaced is now the text the pattern matched.
     """
-    pattern = ENV_REFERENCE_PATTERN
-    match = pattern.findall(value)  # to find all env variables in line
-    if match:
-        full_value = value
-        for g in match:
-            ASH_LOGGER.debug(f"Evaluating env var match: {g}")
-            var_name = g[0] if isinstance(g, tuple) else g
-            if not config_env_var_is_interpolatable(var_name):
-                # Left exactly as written rather than replaced
-                # with its default. A literal that still reads
-                # as a reference is visible in the artifact and
-                # refused by any typed field, whereas the
-                # default is indistinguishable from the variable
-                # simply not being set. See
-                # ASH_CONFIG_ENV_VAR_ALLOWLIST in
-                # core/constants.py for which names resolve.
-                ASH_LOGGER.warning(
-                    f"Not reading environment variable {var_name} "
-                    "into the configuration. A configuration file "
-                    "may reference names beginning with "
-                    f"{ASH_CONFIG_ENV_VAR_PREFIX} and these names: "
-                    f"{', '.join(ASH_CONFIG_ENV_VAR_ALLOWLIST)}. "
-                    "The reference is left as written."
-                )
-                continue
-            default_val = g[1] if isinstance(g, tuple) else None
-            if default_val == "None":
-                default_val = None
-            resolved_var = os.environ.get(var_name, None)
-            if resolved_var is None:
-                ASH_LOGGER.warning(
-                    f"Environment variable {var_name} not set"
-                    + (
-                        f", using default value of {default_val}"
-                        if isinstance(g, tuple)
-                        else ""
-                    )
-                )
-                if default_val is None:
-                    resolved_var = ""
-                else:
-                    resolved_var = default_val
-            rep_val = ":".join(g) if isinstance(g, tuple) else g
-            full_value = full_value.replace(f"${{{rep_val}}}", resolved_var)
-        if full_value.strip() == "":
-            return None
-        return full_value.strip()
-    return value
+    match = ENV_REFERENCE_PATTERN.match(value)
+    if not match:
+        return value
+    var_name, colon, default_text = match.group(1), match.group(2), match.group(3)
+    default_text = default_text or ""
+    ASH_LOGGER.debug(f"Evaluating env var match: {match.group(0)}")
+    if not config_env_var_is_interpolatable(var_name):
+        # Left exactly as written rather than replaced with its default. A
+        # literal that still reads as a reference is visible in the artifact
+        # and refused by any typed field, whereas the default is
+        # indistinguishable from the variable simply not being set. See
+        # ASH_CONFIG_ENV_VAR_ALLOWLIST in core/constants.py for which names
+        # resolve.
+        ASH_LOGGER.warning(
+            f"Not reading environment variable {var_name} "
+            "into the configuration. A configuration file "
+            "may reference names beginning with "
+            f"{ASH_CONFIG_ENV_VAR_PREFIX} and these names: "
+            f"{', '.join(ASH_CONFIG_ENV_VAR_ALLOWLIST)}. "
+            "The reference is left as written."
+        )
+        return value.strip()
+    if not colon and default_text:
+        # No colon but more text before the closing brace, as in ``${VAR}x}``
+        # or ``${A}/${B}``: not a reference this function resolves, so it is
+        # left as written, as it always was.
+        return value.strip()
+    resolved_var = os.environ.get(var_name, None)
+    if resolved_var is None:
+        if not colon:
+            raise ASHConfigUnsetVariableError(
+                f"Environment variable {var_name} is not set, and the "
+                f"configuration references it as ${{{var_name}}}, which has no "
+                f"default. Set {var_name}, or write ${{{var_name}:None}} (or "
+                "another default after the colon) to allow it to be unset.",
+                variable=var_name,
+            )
+        default_val: Optional[str] = default_text
+        if default_val == "None":
+            default_val = None
+        ASH_LOGGER.warning(
+            f"Environment variable {var_name} not set, using default value of "
+            f"{default_val}"
+        )
+        resolved_var = "" if default_val is None else default_val
+    full_value = resolved_var + value[match.end() :]
+    if full_value.strip() == "":
+        return None
+    return full_value.strip()
 
 
 class _NoAliasSafeLoader(yaml.SafeLoader):

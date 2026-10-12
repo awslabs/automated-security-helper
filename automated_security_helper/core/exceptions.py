@@ -1,3 +1,7 @@
+from pathlib import Path
+from typing import Optional
+
+
 class ScannerError(Exception):
     """Exception raised when scanner execution fails."""
 
@@ -65,6 +69,34 @@ class ASHConfigPolicyUnreadableError(ASHConfigValidationError):
     being resolved has a client-delivered file in its chain, so a scan that reads
     no such file is unaffected.
     """
+
+
+class ASHConfigUnsetVariableError(ASHConfigSourceError):
+    """A config file references ``${VAR}``, with no default, and ``VAR`` is unset.
+
+    Its text names the variable, as the file writes it, and the file that holds
+    the reference once the reader that opened it has said so; with ``VAR`` unset
+    there is no value to quote. A subclass of ``ASHConfigSourceError``, so every
+    caller that refuses a config that did not load refuses this one with exit 3.
+
+    ``variable`` is the name. ``config_file`` is the file holding the reference,
+    or None before a reader has named it. ``detail`` is the message without the
+    file, for a reader that names the file another way (the ``extends`` reader,
+    which does not quote a base's path).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        variable: str,
+        config_file: Optional[Path] = None,
+        detail: Optional[str] = None,
+    ):
+        super().__init__(message)
+        self.variable = variable
+        self.config_file = config_file
+        self.detail = message if detail is None else detail
 
 
 class ASHConfigEnvNotResolvedError(ASHConfigSourceError):

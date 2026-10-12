@@ -198,6 +198,22 @@
   record which tree was scanned either: a merge run beside such a directory with
   `--config <that directory>/.ash/.ash.yaml` uploaded to the repository's bucket.
 
+- **A `${VAR}` reference with no default now reads the variable, and a
+  configuration that references an unset one is refused with exit code 3.** This
+  applies to both spellings, a bare `${ASH_MY_BUCKET}` and `!ENV ${ASH_MY_BUCKET}`,
+  in a YAML, TOML or `pyproject.toml` config. Such a reference was never read: it
+  loaded as the literal text `${ASH_MY_BUCKET}` whether or not the variable was
+  set, and when it was unset ASH also logged "Environment variable ASH_MY_BUCKET
+  not set, using default value of" and still used that text. The reference now
+  resolves to the variable's value. When the variable is not set, `ash scan
+  --config`, `ash merge --config` and every other reader of the file refuse it
+  instead, with an error that names the variable and, for the file itself, the
+  file; for a reference in a file it `extends`, the error names the chain's root
+  and not the base. Write `${VAR:None}`, or another default, for a variable that
+  may be unset: a reference with a default behaves as before. Which variables a
+  config may read is unchanged: names beginning with `ASH_`, plus `AWS_REGION`,
+  `AWS_DEFAULT_REGION` and `AWS_PROFILE`. A reference to any other name, with or
+  without a default, is still left as written and never read.
 - **`--mode container` and `--mode nix` refuse an unusable config before anything
   starts.** The config file the scan inside the image or Nix shell will use (`--config`,
   the file `ASH_CONFIG` names, or the one found in the source directory) is read on the
