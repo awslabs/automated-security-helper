@@ -48,10 +48,12 @@ from typing import (
     Optional,
     Tuple,
     TypeVar,
+    get_args,
 )
 from typing_extensions import Self
 
 from pydantic import (
+    BaseModel,
     Field,
     ValidationInfo,
     ValidatorFunctionWrapHandler,
@@ -204,6 +206,28 @@ def write_report_file(report_dir: Path, filename: str, content: str) -> Optional
 T = TypeVar("T", bound=ReporterPluginConfigBase)
 
 
+def declared_config_model(
+    reporter_class: type,
+) -> Optional[type[ReporterPluginConfigBase]]:
+    """The config model a reporter declares with ``ReporterPluginBase[XConfig]``.
+
+    Read from the ``config`` field's resolved annotation,
+    ``Union[XConfig, ReporterPluginConfigBase, None]``. None for a reporter that
+    declares no model, or declares ``ReporterPluginConfigBase`` itself.
+    """
+    field = (getattr(reporter_class, "model_fields", None) or {}).get("config")
+    if field is None:
+        return None
+    for candidate in get_args(field.annotation):
+        if (
+            isinstance(candidate, type)
+            and issubclass(candidate, ReporterPluginConfigBase)
+            and candidate is not ReporterPluginConfigBase
+        ):
+            return candidate
+    return None
+
+
 def reporter_format_name(instance: "ReporterPluginBase") -> str | None:
     """The name ``--output-formats`` selects this reporter by.
 
@@ -338,6 +362,31 @@ class ReporterPluginBase(PluginBase, Generic[T]):
     #: for the same reason as ``workspace_behaviour``: it is read from the class,
     #: after the plugin modules are imported and before any reporter is built.
     destination_options: ClassVar[Tuple[str, ...]] = ()
+
+    @field_validator("config", mode="wrap")
+    @classmethod
+    def _config_is_validated_by_the_declared_model(
+        cls, value: Any, handler: ValidatorFunctionWrapHandler
+    ) -> Any:
+        """A reporter that declares a config model is configured by that model.
+
+        Pydantic tries each type in ``config``'s union in turn. Given a section
+        the declared model refuses, such as an AWS reporter's ``max_delay`` over
+        its 60-second cap, it built ``ReporterPluginConfigBase`` from it and
+        raised nothing, so every validator on the declared model and its options
+        was skipped. So a value that is not already the declared model is
+        validated by it, and the ValidationError reaches the caller:
+        ``ReportPhase`` and the workspace report step log it, with the option and
+        the limit, and go on without this reporter. A config of another class is
+        validated by the fields it set. A reporter that declares no model of its
+        own takes any reporter config, as before.
+        """
+        declared = declared_config_model(cls)
+        if declared is None or value is None or isinstance(value, declared):
+            return handler(value)
+        if isinstance(value, BaseModel):
+            value = value.model_dump(exclude_unset=True)
+        return declared.model_validate(value)
 
     @model_validator(mode="after")
     def setup_paths(self) -> Self:

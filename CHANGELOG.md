@@ -1230,6 +1230,13 @@
     source they are now capped: `max_retries` at most 10, `max_delay` at most 60
     seconds, and `base_delay` at most `max_delay`; a larger value is a validation
     error naming the option and its limit.
+  - A reporter's section is validated by that reporter's own config model when the
+    scan, `ash report` or a workspace report builds the reporter. A section the
+    model refuses, such as a retry option over its cap or an S3 `file_format`
+    other than `json` or `yaml`, is logged as an error naming the option and the
+    limit, and that reporter does not run; the others do. Before, the reporter was
+    built from the generic reporter config instead, with the refused value in it
+    and nothing logged.
   - `enabled: false` for one of these reporters is accepted the same way through
     `select_profile`'s `patch_ops` and `override_yaml` and the MCP workspace tools'
     `config_overrides`, under the entries that cover it; `enabled: true`, and
