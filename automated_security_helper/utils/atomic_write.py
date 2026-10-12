@@ -23,6 +23,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from typing import Optional
 
 # Windows refuses to replace a file another process or thread has open, and a progress
 # poll holds the aggregated file open for the length of one JSON parse. Retrying for a
@@ -52,7 +53,7 @@ def write_text_atomically(path: Path, content: str, encoding: str = "utf-8") -> 
     path = Path(path)
     guarded = open_parent_beneath(path)
     if guarded is not None:
-        _write_beneath(*guarded, content=content, encoding=encoding)
+        _write_beneath(*guarded, content=content, encoding=encoding, target=path)
         return
     staging = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     try:
@@ -64,8 +65,25 @@ def write_text_atomically(path: Path, content: str, encoding: str = "utf-8") -> 
         raise
 
 
-def _write_beneath(dir_fd: int, name: str, *, content: str, encoding: str) -> None:
-    """Write ``name`` in ``dir_fd`` through a staging file renamed over it."""
+def _write_beneath(
+    dir_fd: int,
+    name: str,
+    *,
+    content: str,
+    encoding: str,
+    target: Optional[Path] = None,
+) -> None:
+    """Write ``name`` in ``dir_fd`` through a staging file renamed over it.
+
+    The name is checked again just before the rename, as open_parent_beneath checked
+    it when it opened the directory: a link there, or a file another name refers to,
+    raises rather than being replaced, and the staging file is removed. ``target``
+    is the path to name in the error.
+    """
+    # Not at the top: fs_guard imports the sandbox package. Do not hoist.
+    from automated_security_helper.utils.sandbox.fs_guard import _refuse_link_at
+
+    shown = target if target is not None else Path(name)
     staging = f".{name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
     flags = (
         os.O_WRONLY
@@ -79,6 +97,7 @@ def _write_beneath(dir_fd: int, name: str, *, content: str, encoding: str) -> No
         try:
             with os.fdopen(fd, "w", encoding=encoding) as handle:
                 handle.write(content)
+            _refuse_link_at(name, dir_fd, shown)
             os.replace(staging, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
         except BaseException:
             try:

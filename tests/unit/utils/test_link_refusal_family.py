@@ -284,6 +284,47 @@ class TestARootThatIsALink:
 
 
 @needs_symlinks
+class TestTheAtomicRename:
+    """write_text_atomically's rename does not replace a link at the target."""
+
+    def test_a_link_at_the_name_when_it_renames_is_refused_and_kept(
+        self, output, victim
+    ):
+        """The link appears after the directory was opened; the rename checks again."""
+        import os
+
+        from automated_security_helper.utils.atomic_write import _write_beneath
+
+        target = output / "ash_aggregated_results.json"
+        target.symlink_to(victim)
+        dir_fd = os.open(output, os.O_RDONLY)
+
+        with pytest.raises(OutputLinkRefused):
+            _write_beneath(dir_fd, target.name, content="{}", encoding="utf-8")
+
+        assert target.is_symlink(), "the link was replaced"
+        assert victim.read_text() == ORIGINAL
+        assert [p.name for p in output.iterdir()] == [target.name], (
+            "the staging file was left behind"
+        )
+
+    def test_a_regular_file_there_is_replaced(self, output):
+        """Control."""
+        import os
+
+        from automated_security_helper.utils.atomic_write import _write_beneath
+
+        target = output / "ash_aggregated_results.json"
+        target.write_text("old")
+
+        _write_beneath(
+            os.open(output, os.O_RDONLY), target.name, content="new", encoding="utf-8"
+        )
+
+        assert target.read_text() == "new"
+
+
+@needs_symlinks
 class TestThePackageManagerCopies:
     """npm's and pnpm's private copies are made below the scanner's results directory."""
 
