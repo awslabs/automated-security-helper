@@ -291,13 +291,65 @@ function Invoke-ASH {
             catch {
                 Stop-AshRefusal 3 "Config file cannot be read: $Config. ASH does not hand the container runner a file it cannot read itself."
             }
-            $configFull = (Get-Item -LiteralPath $Config).FullName
-            Assert-Mountable 'config file' $configFull
+            # The path with every link on the way followed, which is what the runner
+            # mounts. Component by component, so a link to a directory higher up is
+            # followed too; bounded, so a cycle of links ends.
+            function Get-AshRealPath([string]$Path, [int]$Depth = 0) {
+                $full = [System.IO.Path]::GetFullPath($Path)
+                if ($Depth -gt 40) { return $full }
+                $root = [System.IO.Path]::GetPathRoot($full)
+                $current = $root
+                foreach ($part in $full.Substring($root.Length).Split([char[]]@('/', '\'), [System.StringSplitOptions]::RemoveEmptyEntries)) {
+                    $current = Join-Path $current $part
+                    $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+                    if ($item -and $item.LinkType -and $item.Target) {
+                        $target = [string]@($item.Target)[0]
+                        if (-not [System.IO.Path]::IsPathRooted($target)) {
+                            $target = Join-Path (Split-Path -Parent $current) $target
+                        }
+                        $current = Get-AshRealPath $target ($Depth + 1)
+                    }
+                }
+                return $current
+            }
             $separators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
-            $sourcePrefix = $sourceDirFull.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
             $pathComparison = if ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
-            if ($configFull.StartsWith($sourcePrefix, $pathComparison)) {
-                $configInner = "/src/" + $configFull.Substring($sourcePrefix.Length).Replace('\', '/')
+            function Test-AshUnder([string]$Path, [string]$Root) {
+                $Root = $Root.TrimEnd($separators)
+                return $Path.StartsWith($Root + [System.IO.Path]::DirectorySeparatorChar, $pathComparison)
+            }
+            # The config as named, and the real file the runner would mount.
+            $configNamed = (Get-Item -LiteralPath $Config).FullName
+            $configFull = Get-AshRealPath $configNamed
+            Assert-Mountable 'config file' $configFull
+            $sourceReal = Get-AshRealPath $sourceDirFull
+            # The scanned tree, as a local scan defines it: the outermost directory at
+            # or above SourceDir holding a .git entry, found from SourceDir's name and
+            # from its real path, each under both names.
+            $trees = @()
+            foreach ($start in @($sourceDirFull, $sourceReal)) {
+                $checkout = $start
+                $dir = Get-Item -LiteralPath $start
+                while ($null -ne $dir) {
+                    if (Test-Path -LiteralPath (Join-Path $dir.FullName '.git')) {
+                        $checkout = $dir.FullName
+                    }
+                    $dir = $dir.Parent
+                }
+                $trees += $checkout
+                $trees += (Get-AshRealPath $checkout)
+            }
+            $namedInTree = @($trees | Where-Object { Test-AshUnder $configNamed $_ }).Count -gt 0
+            $realInTree = @($trees | Where-Object { Test-AshUnder $configFull $_ }).Count -gt 0
+            # A config named inside the scanned tree is used only when its real path,
+            # every link on the way followed, is inside the tree too, wherever in the
+            # tree it is named: otherwise the repository being scanned would choose
+            # which host file is read. A link that stays inside the tree is followed.
+            if ($namedInTree -and -not $realInTree) {
+                Stop-AshRefusal 3 "The config file '$Config' is inside the scanned tree but is a link, or is reached through one, to '$configFull', which is outside it. ASH does not mount a file the repository being scanned points it at."
+            }
+            if (Test-AshUnder $configFull $sourceReal) {
+                $configInner = "/src/" + $configFull.Substring($sourceReal.TrimEnd($separators).Length + 1).Replace('\', '/')
             }
             else {
                 # Mounted on its own, without the files it extends, so a config with an
@@ -315,23 +367,13 @@ function Invoke-ASH {
                 }
                 $configInner = "/ash-config/" + (Split-Path -Leaf $configFull)
                 $configMountArg = '--mount "type=bind,source=$configFull,destination=$configInner,readonly"'
-                # A config elsewhere in the scanned checkout -- the outermost directory
-                # at or above SourceDir holding a .git entry, as a local scan defines
-                # it -- was written by the repository being scanned. The scan inside
-                # sees it only at /ash-config, outside its own tree, so it is told.
-                $checkout = $sourceDirFull
-                $dir = Get-Item -LiteralPath $sourceDirFull
-                while ($null -ne $dir) {
-                    if (Test-Path -LiteralPath (Join-Path $dir.FullName '.git')) {
-                        $checkout = $dir.FullName
-                    }
-                    $dir = $dir.Parent
-                }
-                $checkoutPrefix = $checkout.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
-                $configFromRepository = $configFull.StartsWith($checkoutPrefix, $pathComparison)
+                # A config elsewhere in the scanned tree was written by the repository
+                # being scanned. The scan inside sees it only at /ash-config, outside its
+                # own tree, so it is told.
+                $configFromRepository = $realInTree
                 # A config inside any other git checkout is one a local scan counts as
                 # repository-written too (config/sandbox_grants.repository_written), so
-                # it is marked; the link check below stays with the scanned checkout.
+                # it is marked; the link check above stays with the scanned tree.
                 $dir = Get-Item -LiteralPath (Split-Path -Parent $configFull)
                 while ($null -ne $dir) {
                     if (Test-Path -LiteralPath (Join-Path $dir.FullName '.git')) {
@@ -339,18 +381,6 @@ function Invoke-ASH {
                         break
                     }
                     $dir = $dir.Parent
-                }
-                # The runner resolves links when it mounts. A config inside the scanned
-                # checkout is mounted only when neither the file nor a directory on the
-                # way to it is a link; otherwise the run is refused.
-                if ($configFromRepository) {
-                    $item = Get-Item -LiteralPath $configFull
-                    while ($null -ne $item -and $item.FullName.StartsWith($checkoutPrefix, $pathComparison)) {
-                        if ($item.LinkType) {
-                            Stop-AshRefusal 3 "The config file '$Config' is inside the scanned tree and is reached through a link ('$($item.FullName)'). ASH does not mount a file the repository being scanned points it at."
-                        }
-                        $item = Get-Item -LiteralPath (Split-Path -Parent $item.FullName)
-                    }
                 }
             }
             $ashCmdArgs.Add("--config")

@@ -249,6 +249,102 @@ def test_a_source_and_output_named_with_wildcard_characters_are_those_names(
     assert (tmp_path / "out[1]").is_dir()
 
 
+def _recorded(tmp_path: Path) -> List[str]:
+    log = tmp_path / "docker-args.txt"
+    return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+
+def _mount_destinations(args: List[str]) -> List[str]:
+    return [
+        part.partition("=")[2]
+        for i, arg in enumerate(args[:-1])
+        if arg == "--mount"
+        for part in args[i + 1].split(",")
+        if part.startswith("destination=")
+    ]
+
+
+@pytest.fixture
+def checkout(tmp_path) -> Path:
+    """repo/.git, repo/svc (the source), repo/ci, and an operator dir outside."""
+    root = tmp_path / "repo"
+    (root / ".git").mkdir(parents=True)
+    (root / "svc").mkdir()
+    (root / "ci").mkdir()
+    (tmp_path / "operator").mkdir()
+    return root
+
+
+_POSIX_ONLY = pytest.mark.skipif(
+    os.name == "nt",
+    reason="the recording runner is a POSIX shell script; Windows gets a .cmd stub",
+)
+
+
+@_POSIX_ONLY
+def test_a_source_named_through_a_link_still_finds_its_checkout(
+    pwsh, recording_docker, checkout, tmp_path
+):
+    """The checkout is found from the source's real path too, as ./ash finds it."""
+    (checkout / "ci" / "ash.yaml").write_text("project_name: p\n", encoding="utf-8")
+    (tmp_path / "alias").symlink_to(checkout / "svc", target_is_directory=True)
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        f"-SourceDir alias -OutputDir out -Config '{checkout / 'ci' / 'ash.yaml'}'",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "--config-from-scanned-repository" in _recorded(tmp_path)
+
+
+@_POSIX_ONLY
+def test_a_config_in_the_source_linked_out_of_the_tree_is_refused(
+    pwsh, recording_docker, checkout, tmp_path
+):
+    (tmp_path / "operator" / "ash.yaml").write_text(
+        "project_name: p\n", encoding="utf-8"
+    )
+    (checkout / "svc" / "ash.yaml").symlink_to(tmp_path / "operator" / "ash.yaml")
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir repo/svc -OutputDir out -Config repo/svc/ash.yaml",
+    )
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert _recorded(tmp_path) == []
+    assert "link" in result.stderr
+
+
+@_POSIX_ONLY
+def test_a_config_in_the_source_linked_inside_it_is_read_through_src(
+    pwsh, recording_docker, checkout, tmp_path
+):
+    """Control: a link that stays inside the source names its target under /src."""
+    (checkout / "svc" / "conf").mkdir()
+    (checkout / "svc" / "conf" / "real.yaml").write_text(
+        "project_name: p\n", encoding="utf-8"
+    )
+    (checkout / "svc" / "ash.yaml").symlink_to("conf/real.yaml")
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir repo/svc -OutputDir out -Config repo/svc/ash.yaml",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = _recorded(tmp_path)
+    assert args[args.index("--config") + 1] == "/src/conf/real.yaml"
+    assert sorted(_mount_destinations(args)) == ["/out", "/src"]
+
+
 def test_an_output_directory_inside_the_source_runs(pwsh, recording_docker, tmp_path):
     """Control: the default .ash/ash_output is inside the source."""
     (tmp_path / "src").mkdir()
