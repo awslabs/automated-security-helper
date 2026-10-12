@@ -1074,6 +1074,20 @@ VERDICT_DISAGREEMENTS = [
         {"content_db_staleness": "warn"},
         {"content_db_staleness": "fail"},
     ),
+    (
+        "content_db_staleness_overrides",
+        {
+            "content_db_staleness_overrides": [
+                {
+                    "database": "grype-db",
+                    "policy": "warn",
+                    "expiration": "2099-01-01",
+                    "reason": "upstream paused",
+                }
+            ]
+        },
+        {"content_db_staleness_overrides": []},
+    ),
 ]
 
 
