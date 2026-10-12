@@ -164,16 +164,16 @@ def _scan(source: Path, cli: List[str] | None = None, **resolve: Any) -> Dict[st
     return {"source": str(source), "cli": cli or [], "resolve": resolve}
 
 
-def _engines(
+def _engines_process(
     site: Path, scans: List[Dict[str, Any]], env: Dict[str, str] | None = None
-) -> List[Dict[str, Any]]:
-    """What each of ``scans`` selected, built one after another in one process."""
+) -> subprocess.CompletedProcess:
+    """The subprocess that builds each of ``scans`` one after another."""
     environment = {k: v for k, v in os.environ.items() if k not in _AMBIENT}
     environment.update(env or {})
     environment["PYTHONPATH"] = os.pathsep.join(
         [str(site), *filter(None, [os.environ.get("PYTHONPATH")])]
     )
-    result = subprocess.run(
+    return subprocess.run(
         [sys.executable, "-c", _ENGINE, json.dumps(scans)],
         cwd=site.parent,
         env=environment,
@@ -181,6 +181,13 @@ def _engines(
         text=True,
         timeout=300,
     )
+
+
+def _engines(
+    site: Path, scans: List[Dict[str, Any]], env: Dict[str, str] | None = None
+) -> List[Dict[str, Any]]:
+    """What each of ``scans`` selected, built one after another in one process."""
+    result = _engines_process(site, scans, env)
     assert result.returncode == 0, result.stderr[-4000:]
     return json.loads(result.stdout.strip().splitlines()[-1])
 
@@ -287,14 +294,20 @@ def test_the_command_line_naming_an_off_host_module_selects_only_its_class(
 def test_a_name_that_only_starts_like_the_package_trusts_none_of_its_classes(
     tmp_path, site
 ):
-    """``ash_aws`` is a prefix of ``ash_aws_plugins``'s name, not a package around it."""
+    """``ash_aws`` is a prefix of ``ash_aws_plugins``'s name, not a package around it.
+
+    No module has that name, so naming it refuses the scan as an invalid
+    configuration before any scan engine exists, and no class of either off-host
+    package is selected.
+    """
     prefix = AWS.removesuffix("_plugins")
 
-    result = _engine(site, _tree(tmp_path, [PACKAGE]), cli=[prefix])
+    result = _engines_process(site, [_scan(_tree(tmp_path, [PACKAGE]), [prefix])])
 
-    assert not set(OFF_HOST_REPORTERS) & set(result["reporters"]), result
-    assert not set(OFF_HOST_SCANNERS) & set(result["scanners"]), result
-    assert _dropped(result["warnings"], "S3Reporter"), result["warnings"]
+    assert result.returncode != 0, result.stdout[-2000:]
+    assert "PluginModuleImportError" in result.stderr, result.stderr[-4000:]
+    assert repr(prefix) in result.stderr, result.stderr[-4000:]
+    assert result.stdout.strip() == "", result.stdout[-2000:]
 
 
 def test_a_delivered_config_naming_the_package_does_not_select_them(tmp_path, site):
@@ -359,11 +372,9 @@ def test_a_later_scan_in_the_same_process_selects_only_what_it_loads(
     config, and names neither package; the one after it names the Snyk package on
     the command line.
 
-    After the tree's config loaded them, the next scan is not offered them at
-    all (``AshPluginManager.plugins_loaded_by``), as in a fresh process, so the
-    off-host check has nothing to drop or warn about. After the operator's config
-    loaded them they stay in the registry for every scan, and the off-host check
-    drops them with its warning.
+    Whichever config loaded them, the next scan names neither package, so it is
+    not offered their classes at all, as in a fresh process, and the off-host
+    check has nothing to drop or warn about.
     """
     source = tmp_path / "repo"
     if first == "tree":
@@ -383,11 +394,7 @@ def test_a_later_scan_in_the_same_process_selects_only_what_it_loads(
     assert not set(later["reporters"]) & set(OFF_HOST_REPORTERS), later
     assert "BanditScanner" in later["scanners"], later
     dropped = [w for w in later["warnings"] if "not selected" in w]
-    if first == "tree":
-        assert dropped == [], dropped
-    else:
-        [warning] = dropped
-        assert SNYK in warning and AWS in warning, warning
+    assert dropped == [], dropped
     assert "SnykCodeScanner" in named["scanners"], named
     assert not set(named["reporters"]) & set(OFF_HOST_REPORTERS), named
 

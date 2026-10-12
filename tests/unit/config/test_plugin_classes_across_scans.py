@@ -1,18 +1,21 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A plugin class one scan's untrusted config loaded is not offered to the next scan.
+"""A plugin class one scan loaded is not offered to the next scan unless that scan names it.
 
 Plugin registration lasts for the rest of the process, and the MCP server and a
 workspace run build several scans in one process. A config inside the scanned
-tree, or one an MCP client delivered, may name an installed plugin package in
+tree, one an MCP client delivered, an operator's config or
+``--ash-plugin-modules`` may name an installed plugin package in
 ``ash_plugin_modules``; importing it registers the package's classes. A later
-scan in the same process that does not load that package must not select them:
+scan in the same process that does not name that package must not select them:
 a fresh process would not.
 
-What stays: classes from a module the operator loaded (``--ash-plugin-modules``,
-or a config file outside the tree, even when the tree's config names the same
-module), and classes embedding code registers through the registry directly.
+That holds whoever named the package first, the operator included: on the MCP
+server each session's profile is the operator's config, and one session's
+profile must not add plugins to another session's scans. A class embedding code
+registers through the registry directly is used only by a scan that names its
+module.
 
 Each test builds its scans one after another in one subprocess, because
 importing a plugin package registers its plugins for the rest of the process.
@@ -35,7 +38,7 @@ import yaml
 CARRY = "carry_ash_plugins"
 KEPT = "kept_ash_plugins"
 TRIVY = "automated_security_helper.plugin_modules.ash_trivy_plugins"
-EMBEDDING = "embedding_host_plugins"
+EMBEDDING = "embedding_host_ash_plugins"
 
 _SCANNER = """
 from typing import Annotated, Any, Literal
@@ -262,7 +265,7 @@ def site(tmp_path: Path) -> Path:
     """Installed packages outside every scanned tree.
 
     ``carry_ash_plugins`` defines a scanner and a reporter that refuses workspace
-    mode, ``kept_ash_plugins`` a scanner, and ``embedding_host_plugins`` a
+    mode, ``kept_ash_plugins`` a scanner, and ``embedding_host_ash_plugins`` a
     scanner that registers only when embedding code registers it.
     """
     path = tmp_path / "site"
@@ -392,12 +395,15 @@ def test_a_later_scan_whose_own_config_names_the_package_selects_it(tmp_path, si
 
 
 @pytest.mark.parametrize("operator", ["command_line", "operator_config"])
-def test_a_module_the_operator_loaded_stays_available(tmp_path, site, operator):
+def test_a_module_the_operator_loaded_takes_no_part_in_a_later_scan(
+    tmp_path, site, operator
+):
     """In the same first scan, the tree's config names both packages.
 
     The operator names ``kept_ash_plugins`` too, on the command line or in its
-    config file outside the tree, so that package is the operator's even though
-    the tree's config also names it. ``carry_ash_plugins`` only the tree names.
+    config file outside the tree, and ``carry_ash_plugins`` only the tree names.
+    The next scan names neither, so it selects neither, as a fresh process's scan
+    would: an operator's module belongs to the scan the operator named it for.
     """
     source = _tree(tmp_path, "repo", [CARRY, KEPT])
     if operator == "command_line":
@@ -415,16 +421,17 @@ def test_a_module_the_operator_loaded_stays_available(tmp_path, site, operator):
     loaded, later = _run(site, [first, _scan(_tree(tmp_path, "plain"))])
 
     assert {"CarriedScanner", "KeptScanner"} <= set(loaded["scanners"]), loaded
-    assert "KeptScanner" in later["scanners"], later
+    assert "KeptScanner" not in later["scanners"], later
     assert "CarriedScanner" not in later["scanners"], later
+    assert "BanditScanner" in later["scanners"], later
 
 
-def test_a_module_becomes_the_operators_once_the_operator_names_it(tmp_path, site):
-    """The order the two sources loaded it in does not decide what later scans get.
+def test_each_scan_selects_the_package_only_while_it_names_it(tmp_path, site):
+    """Which source loaded the package before does not decide what a scan gets.
 
     Loaded first for a tree's config, the package is left out of the next scan.
-    Once a scan's command line names it, it is the operator's, as it would have
-    been had the operator loaded it first, and later scans keep it.
+    A scan whose command line names it selects it, and the scan after that, which
+    names it nowhere, leaves it out again.
     """
     plain = _tree(tmp_path, "plain")
 
@@ -441,23 +448,33 @@ def test_a_module_becomes_the_operators_once_the_operator_names_it(tmp_path, sit
     assert "CarriedScanner" in first["scanners"], first
     assert "CarriedScanner" not in before["scanners"], before
     assert "CarriedScanner" in named["scanners"], named
-    assert "CarriedScanner" in after["scanners"], after
+    assert "CarriedScanner" not in after["scanners"], after
 
 
-def test_a_class_registered_directly_is_unaffected(tmp_path, site):
-    """Embedding code that registers a class itself keeps it for every scan."""
-    registered, first, later = _run(
+def test_a_class_registered_directly_is_used_only_by_a_scan_naming_its_module(
+    tmp_path, site
+):
+    """Embedding code registers a class itself, from a plugin-namespace module.
+
+    A scan that names another package, and one that names nothing, leave the
+    class out; a scan that names its module selects it.
+    """
+    plain = _tree(tmp_path, "plain")
+    registered, other, unnamed, named = _run(
         site,
         [
             {"kind": "register", "module": EMBEDDING, "class": "EmbeddedScanner"},
             _scan(_tree(tmp_path, "repo", [CARRY])),
-            _scan(_tree(tmp_path, "plain")),
+            _scan(plain),
+            _scan(plain, cli=[EMBEDDING]),
         ],
     )
 
-    assert {"EmbeddedScanner", "CarriedScanner"} <= set(first["scanners"]), first
-    assert "EmbeddedScanner" in later["scanners"], later
-    assert "CarriedScanner" not in later["scanners"], later
+    assert "CarriedScanner" in other["scanners"], other
+    assert "EmbeddedScanner" not in other["scanners"], other
+    assert "EmbeddedScanner" not in unnamed["scanners"], unnamed
+    assert "CarriedScanner" not in unnamed["scanners"], unnamed
+    assert "EmbeddedScanner" in named["scanners"], named
 
 
 def test_listing_the_scanners_adds_none_to_a_later_scan(tmp_path, site):
