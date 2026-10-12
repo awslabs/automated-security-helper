@@ -63,6 +63,27 @@ def mark_inner_run_completed(results_file: Path, run_id: str) -> bool:
     return True
 
 
+def builtin_reporter_classes() -> list:
+    """Every built-in reporter class, from the reporters package itself.
+
+    Not ``ash_builtin.ASH_REPORTERS``, which is empty in a process whose first ASH
+    import was ``interactions.run_ash_scan``: that import reaches the built-in
+    plugin package through ``config.ash_config`` while
+    ``core.scanner_statistics_calculator`` is still initializing, and the reporter
+    group fails to load.
+    """
+    from automated_security_helper.base.reporter_plugin import ReporterPluginBase
+    from automated_security_helper.plugin_modules.ash_builtin import reporters
+
+    return [
+        value
+        for value in vars(reporters).values()
+        if isinstance(value, type)
+        and issubclass(value, ReporterPluginBase)
+        and value is not ReporterPluginBase
+    ]
+
+
 def results_of_a_scan():
     """Results that hold a scan: one scanner's entry, as a scan phase records it.
 

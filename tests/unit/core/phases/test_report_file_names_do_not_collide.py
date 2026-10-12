@@ -207,25 +207,14 @@ def test_the_shipped_reporters_do_not_collide(tmp_path):
         ASH_REPORTERS as AWS_REPORTERS,
     )
     from automated_security_helper.workspace.reporting import MANIFEST_FILENAME
-
-    from automated_security_helper.plugin_modules.ash_builtin import (
-        reporters as builtin_reporters,
-    )
+    from tests.utils.helpers import builtin_reporter_classes
 
     context = PluginContext(
         source_dir=Path("unused"), output_dir=Path("unused"), config=AshConfig()
     )
-    # From the reporters package rather than ASH_REPORTERS, which is empty in a
-    # process whose first ASH import was run_ash_scan (an import cycle through
-    # config.ash_config leaves the built-in reporter group unloaded).
-    builtin = [
-        value
-        for value in vars(builtin_reporters).values()
-        if isinstance(value, type)
-        and issubclass(value, ReporterPluginBase)
-        and value is not ReporterPluginBase
+    instances = [
+        cls(context=context) for cls in (*builtin_reporter_classes(), *AWS_REPORTERS)
     ]
-    instances = [cls(context=context) for cls in (*builtin, *AWS_REPORTERS)]
     assert len(instances) >= 19
 
     refuse_colliding_report_names(
