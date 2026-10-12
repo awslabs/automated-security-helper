@@ -250,7 +250,9 @@ def analyze_sarif_fields(
 
     # Write CSV output for included fields
     csv_path = os.path.join(output_dir, "sarif_fields.csv")
-    with open_for_write(csv_path, encoding=None, errors=None, newline="") as f:
+    # UTF-8, as the JSON files are: a field name can hold any character, and the
+    # locale's encoding (ASCII under the C locale) cannot write every one.
+    with open_for_write(csv_path, encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["field", "scanners"])
 
@@ -260,7 +262,7 @@ def analyze_sarif_fields(
 
     # Write CSV output for excluded fields
     excluded_csv_path = os.path.join(output_dir, "sarif_excluded_fields.csv")
-    with open_for_write(excluded_csv_path, encoding=None, errors=None, newline="") as f:
+    with open_for_write(excluded_csv_path, encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["field", "scanners", "reason"])
 
