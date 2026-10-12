@@ -45,6 +45,7 @@ from automated_security_helper.utils.download_utils import (
 from automated_security_helper.utils.log import get_logger
 from automated_security_helper.utils.process_env import set_environ
 from automated_security_helper.utils.python_child import (
+    empty_directory,
     python_child,
     runs_module_or_code,
 )
@@ -217,11 +218,15 @@ def get_architecture() -> str:
 def run_command(args: List[str], shell: bool = False):
     """Run a command and return the exit code.
 
-    A command that starts ASH's interpreter with ``-m`` or ``-c`` (``python -m pip
-    install``, the pinned-tool install script) starts in an empty directory of its
-    own, with ``-P`` where Python has it. Run from the current directory, which this
-    command treats as the source tree, it would import a ``pip/`` or
-    ``automated_security_helper/`` found there; see ``utils/python_child.py``.
+    Every command starts in an empty directory of its own, not the current
+    directory, which this command treats as the source tree. Run from there, a
+    package manager read the repository's settings: npm its ``.npmrc``, ``gem
+    install -g`` its Gemfile, Bundler its ``.bundle/config``. The user's own
+    settings still apply. A command that starts ASH's interpreter with ``-m`` or
+    ``-c`` (``python -m pip install``, the pinned-tool install script) also gets
+    ``-P`` where Python has it, so it imports no ``pip/`` or
+    ``automated_security_helper/`` from where it starts; see
+    ``utils/python_child.py``.
     """
     from automated_security_helper.utils.subprocess_utils import run_command as run_cmd
 
@@ -235,9 +240,14 @@ def run_command(args: List[str], shell: bool = False):
                     log_level=logging.INFO,
                 )
         else:
-            result = run_cmd(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
-                args=args, shell=shell, check=False, log_level=logging.INFO
-            )
+            with empty_directory() as start:
+                result = run_cmd(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
+                    args=args,
+                    cwd=start,
+                    shell=shell,
+                    check=False,
+                    log_level=logging.INFO,
+                )
         # The child's output is not markup. pip alone prints `[notice]` lines and
         # echoes extras such as `ash[sarif,toml]`, which rich would otherwise
         # consume as tags and delete from the log.

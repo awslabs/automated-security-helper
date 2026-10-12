@@ -25,6 +25,13 @@ user site-packages directory, which an install of ASH may depend on.
 A child that changes directory after it starts should not rely on this: under 3.10
 its ``''`` entry follows it. ``utils/cdk_nag_worker.py`` removes that entry itself
 for that reason.
+
+:func:`empty_directory` is the start directory on its own, for a child that is not
+Python. ``ash dependencies install`` starts every install command in one, so a
+package manager that reads settings from its working directory (npm's project
+``.npmrc``, the Gemfile ``gem install -g`` reads, Bundler's ``.bundle/config``) does
+not read the scanned repository's. The user's own settings, in HOME or set
+globally, still apply.
 """
 
 from __future__ import annotations
@@ -50,24 +57,34 @@ class PythonChild:
 
 
 @contextmanager
+def empty_directory(parent: Optional[Path] = None) -> Iterator[Path]:
+    """A new, empty directory for a child to start in, removed when the block ends.
+
+    Created under ``parent`` when given (a sandboxed child can only see the
+    directories its policy grants, so a caller under a sandbox passes one it can
+    see), otherwise in the system's temporary directory.
+    """
+    directory = Path(
+        tempfile.mkdtemp(prefix="ash-child-", dir=str(parent) if parent else None)
+    ).absolute()
+    try:
+        yield directory
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+@contextmanager
 def python_child(*args: str, parent: Optional[Path] = None) -> Iterator[PythonChild]:
     """ASH's interpreter with ``args``, and an empty directory to start it in.
 
     ``args`` is everything after the interpreter, such as ``"-m", "pip", "install"``.
-    Spawn ``child.argv`` with ``cwd=child.cwd``. The directory is created under
-    ``parent`` when given (a sandboxed child can only see the directories its policy
-    grants, so a caller under a sandbox passes one it can see) and removed when the
-    block ends.
+    Spawn ``child.argv`` with ``cwd=child.cwd``. ``parent`` is as for
+    :func:`empty_directory`.
     """
-    directory = Path(
-        tempfile.mkdtemp(prefix="ash-python-", dir=str(parent) if parent else None)
-    ).absolute()
-    try:
+    with empty_directory(parent) as directory:
         yield PythonChild(
             argv=[sys.executable, *_SAFE_PATH_FLAGS, *args], cwd=directory
         )
-    finally:
-        shutil.rmtree(directory, ignore_errors=True)
 
 
 def runs_module_or_code(argv: Sequence[str]) -> bool:
