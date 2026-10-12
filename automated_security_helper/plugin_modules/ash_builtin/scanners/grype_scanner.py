@@ -1,7 +1,6 @@
 """Module containing the Grype security scanner implementation."""
 
 import logging
-import os
 import re
 from pathlib import Path
 from typing import Annotated, ClassVar, Final, List, Literal, Mapping
@@ -365,7 +364,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         # silently override their file.
         offline = self._scanner_offline()
         if not offline:
-            self.extra_env.update(_declared_grype_db_bound(os.environ, resolved_config))
+            self.extra_env.update(
+                _declared_grype_db_bound(snapshot_environ(), resolved_config)
+            )
 
         # Handle offline mode. Stash offline-mode env vars on the instance
         # rather than writing to os.environ — scanners run concurrently

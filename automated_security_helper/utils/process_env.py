@@ -19,7 +19,13 @@ The fix has two halves and needs both:
 * Every runtime mutation goes through this module, under ``ENVIRON_LOCK``, so a
   snapshot is never taken halfway through someone else's change. Copying
   ``os.environ`` reads the key list and then each value, so a concurrent ``pop``
-  between the two raises ``KeyError`` in the copying thread.
+  between the two raises ``KeyError`` in the copying thread, and a copy taken
+  during a multi-variable override gets some of its values and not others.
+  So every copy goes through ``snapshot_environ()`` too, not only a spawn's:
+  ``tests/unit/utils/test_environ_mutations_are_locked.py`` refuses a write
+  outside this module and ``test_environ_copies_are_locked.py`` any read of the
+  whole mapping (a copy, ``**`` or ``|``, iteration, ``env=os.environ``, an
+  alias, or the mapping handed to a function).
 
 The lock is held only while variables are written or copied, never across the
 work done with them. ``cdk_nag_wrapper`` keeps its own lock to serialize whole

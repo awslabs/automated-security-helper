@@ -165,7 +165,9 @@ def default_cache_dir(
         directory, once, so the refresh, the scan and the check, which run from
         different directories, still name one cache.
     """
-    env = os.environ if env is None else env
+    # A locked copy, not the live mapping: another thread may be changing it
+    # (utils/process_env.py).
+    env = snapshot_environ() if env is None else env
     platform = sys.platform if platform is None else platform
     windows = platform == "win32"
     isabs = ntpath.isabs if windows else posixpath.isabs

@@ -207,9 +207,10 @@ def run_ash_nix(
     inner_args = rewrite_mode_args(list(argv if argv is not None else sys.argv[1:]))
     cmd = build_nix_command(resolved_ref, inner_args, nix_executable)
 
-    # The environment every child of a scan gets: no PATH entry inside the scanned
-    # tree unless the operator allowed in-tree tools. nix develop prepends the
-    # shell's packages to this PATH.
+    # The environment every child of a scan gets, copied under ENVIRON_LOCK
+    # (utils/process_env.snapshot_environ, through child_environ): no PATH entry
+    # inside the scanned tree unless the operator allowed in-tree tools. nix
+    # develop prepends the shell's packages to this PATH.
     env = child_environ()
     env[ASH_IN_NIX_ENV_VAR] = "1"
     # The flake already supplies every scanner, so stop the thirteen scanners that prefer
