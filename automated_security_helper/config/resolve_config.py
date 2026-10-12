@@ -409,6 +409,23 @@ def _parse_config_value(value: str) -> Any:
             return value
 
 
+def split_config_override(override: str) -> Tuple[str, str]:
+    """``override`` as ``(key path, value)``, split at its first ``=``.
+
+    Raises:
+        ASHConfigValidationError: There is no ``=``, or nothing but blanks before
+            it. The one check ``--config-overrides`` and the MCP workspace tools'
+            ``config_overrides`` share, so both report it as the same invalid
+            config.
+    """
+    key_path, separator, value = override.partition("=")
+    if not separator or not key_path.strip():
+        raise ASHConfigValidationError(
+            f"Invalid config override: '{override}'. Expected format: key.path=value"
+        )
+    return key_path, value
+
+
 def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> AshConfig:
     """
     Apply configuration overrides to an AshConfig object.
@@ -434,12 +451,7 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
 
     # Apply each override
     for override in config_overrides:
-        key_path, separator, value = override.partition("=")
-        if not separator or not key_path.strip():
-            raise ASHConfigValidationError(
-                f"Invalid config override: '{override}'. "
-                "Expected format: key.path=value"
-            )
+        key_path, value = split_config_override(override)
         try:
             _apply_config_override(config_dict, key_path, value)
         except Exception as e:

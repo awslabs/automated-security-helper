@@ -659,7 +659,9 @@ def _gate_client_overrides(
 
     Raises:
         RuntimePatchDeniedError: An override is not allowed.
-        ASHConfigValidationError: An override cannot be applied.
+        ASHConfigValidationError: An override is not ``key=value``
+            (``resolve_config.split_config_override``, as for ``--config-overrides``)
+            or cannot be applied.
     """
     if not config_overrides:
         return
@@ -671,9 +673,9 @@ def _gate_client_overrides(
         _parse_config_value,
         apply_config_overrides,
         load_config_file,
+        split_config_override,
     )
     from automated_security_helper.config.runtime_patch import (
-        RuntimePatchDeniedError,
         apply_runtime_override,
         check_runtime_ops,
     )
@@ -699,9 +701,9 @@ def _gate_client_overrides(
     # their own (runtime_patch._denial_spellings).
     base_dump = base.model_dump()
     for override in config_overrides:
-        key, separator, raw = str(override).partition("=")
-        if not separator or not key.strip():
-            raise RuntimePatchDeniedError(None, f"invalid config override {override!r}")
+        # Not key=value: the same invalid config --config-overrides reports (exit
+        # 3), not a denial, since it asks to change nothing the policy could judge.
+        key, raw = split_config_override(str(override))
         append = key.endswith("+")
         resolved = _resolve_override_key(
             base_dump, (key[:-1] if append else key).split(".")
