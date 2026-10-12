@@ -1397,6 +1397,9 @@ jobs:
           ash --scanners trivy-repo --reporters sarif,html
       
       - name: Upload Results
+        # Also when ASH exits non-zero on findings: without a status function
+        # GitHub skips this step after any failed step.
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v3
         with:
           name: security-results

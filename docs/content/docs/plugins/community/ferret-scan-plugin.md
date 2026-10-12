@@ -608,6 +608,9 @@ jobs:
           uv run ash --scanners ferret-scan --output-format sarif \
             --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_ferret_plugins\"]"
       - name: Upload SARIF results
+        # Also when ASH exits non-zero on findings: without a status function
+        # GitHub skips this step after any failed step.
+        if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@v2
         with:
           sarif_file: .ash/ash_output/reports/ash.sarif

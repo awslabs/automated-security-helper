@@ -23,7 +23,9 @@ What this asserts
    ``job.status`` against anything other than ``'success'`` calls a status function.
 2. A step that uploads results, SARIF or a test report after a step that runs ASH in
    the same job has an ``if:`` with a status function, so a scan that fails on findings
-   still leaves its results.
+   still leaves its results. The same holds for the GitHub Actions examples in the docs
+   and package READMEs, which users copy. A scan run with ``--no-fail-on-findings``
+   cannot fail on findings, so an upload after it needs no status function.
 3. The model applies the implicit ``success()``: a condition without a status function
    is false after a failure, ``!cancelled() && ...`` is not, and a job's status comes
    from the results of the jobs it needs.
@@ -100,20 +102,32 @@ def lacks_status_after_failure(condition: Any) -> bool:
     )
 
 
-def uploads_after_ash_without_status(steps: list) -> list[str]:
-    """Upload steps that follow a step running ASH but would be skipped after it fails."""
-    found, ash_ran = [], False
+def scan_can_fail(step: dict[str, Any]) -> bool:
+    """A step that runs ASH and can fail on findings (no `--no-fail-on-findings`)."""
+    run = str(step.get("run") or "")
+    runs_ash = RUNS_ASH.search(run) or RUNS_ASH.search(str(step.get("uses") or ""))
+    return bool(runs_ash) and "--no-fail-on-findings" not in run
+
+
+def _uploads_after_scan(steps: list) -> list[dict[str, Any]]:
+    """The upload steps that follow a step that runs ASH and can fail."""
+    found, armed = [], False
     for step in steps:
         if not isinstance(step, dict):
             continue
-        if ash_ran and UPLOADS.search(str(step.get("uses") or "")):
-            if not STATUS_CALL.search(_condition_text(step.get("if"))):
-                found.append(str(step.get("name") or step.get("uses")))
-        if RUNS_ASH.search(str(step.get("run") or "")) or RUNS_ASH.search(
-            str(step.get("uses") or "")
-        ):
-            ash_ran = True
+        if armed and UPLOADS.search(str(step.get("uses") or "")):
+            found.append(step)
+        armed = armed or scan_can_fail(step)
     return found
+
+
+def uploads_after_ash_without_status(steps: list) -> list[str]:
+    """Upload steps that follow a step running ASH but would be skipped after it fails."""
+    return [
+        str(step.get("name") or step.get("uses"))
+        for step in _uploads_after_scan(steps)
+        if not STATUS_CALL.search(_condition_text(step.get("if")))
+    ]
 
 
 def _scan() -> tuple[int, list[str], list[str], list[str]]:
@@ -135,17 +149,36 @@ def _scan() -> tuple[int, list[str], list[str], list[str]]:
             uploads += [
                 f"{where}: {name}: {u}" for u in uploads_after_ash_without_status(steps)
             ]
-            ash_ran = False
-            for step in steps:
-                if not isinstance(step, dict):
-                    continue
-                if ash_ran and UPLOADS.search(str(step.get("uses") or "")):
-                    found_uploads.append(f"{where}: {name}: {step.get('name')}")
-                if RUNS_ASH.search(str(step.get("run") or "")) or RUNS_ASH.search(
-                    str(step.get("uses") or "")
-                ):
-                    ash_ran = True
+            found_uploads += [
+                f"{where}: {name}: {s.get('name')}" for s in _uploads_after_scan(steps)
+            ]
     return conditions, missing_status, uploads, found_uploads
+
+
+def docs_example_jobs() -> Iterator[tuple[str, str, list]]:
+    """(file:line, job id, steps) for each GitHub Actions job in a docs YAML example."""
+    sources = {
+        *(REPO_ROOT / "docs" / "content").rglob("*.md"),
+        *(REPO_ROOT / "docs" / "content").rglob("*.template"),
+        *(REPO_ROOT / "automated_security_helper").rglob("README.md"),
+        REPO_ROOT / "README.md",
+    }
+    for path in sorted(sources):
+        text = path.read_text(encoding="utf-8")
+        for block in re.finditer(r"```ya?ml\n(.*?)```", text, re.DOTALL):
+            if "steps:" not in block.group(1):
+                continue
+            try:
+                data = yaml.safe_load(block.group(1))
+            except yaml.YAMLError:
+                continue
+            if not isinstance(data, dict) or not isinstance(data.get("jobs"), dict):
+                continue
+            line = text[: block.start()].count("\n") + 1
+            where = f"{path.relative_to(REPO_ROOT)}:{line}"
+            for job_id, job in data["jobs"].items():
+                if isinstance(job, dict):
+                    yield where, str(job_id), list(job.get("steps") or [])
 
 
 def test_a_condition_on_a_failed_outcome_calls_a_status_function():
@@ -170,6 +203,22 @@ def test_an_upload_after_the_scan_runs_when_the_scan_fails():
     assert not uploads, (
         "these uploads follow a step that runs ASH but would be skipped when the scan "
         "fails on findings:\n" + "\n".join(uploads)
+    )
+
+
+def test_an_upload_after_the_scan_in_a_docs_example_runs_when_the_scan_fails():
+    found, missing = [], []
+    for where, job_id, steps in docs_example_jobs():
+        found += [f"{where} {job_id}" for _ in _uploads_after_scan(steps)]
+        missing += [
+            f"{where}: job {job_id}: {name}"
+            for name in uploads_after_ash_without_status(steps)
+        ]
+    assert len(found) >= 7, f"found only {len(found)} uploads after a scan: {found}"
+    assert not missing, (
+        "these docs examples upload results after an ASH step that fails on findings, "
+        "with no status function, so a copy of the example uploads nothing when it "
+        "finds something:\n" + "\n".join(missing)
     )
 
 
@@ -214,6 +263,16 @@ def test_the_upload_checker_flags_an_upload_skipped_after_a_failed_scan():
     assert (
         uploads_after_ash_without_status(
             [{"run": "bash scripts/x.sh"}, {"uses": "actions/upload-artifact@v4"}]
+        )
+        == []
+    )
+    # A scan that cannot fail on findings does not need the upload to outlast it.
+    assert (
+        uploads_after_ash_without_status(
+            [
+                {"run": "ash scan --no-fail-on-findings"},
+                {"uses": "actions/upload-artifact@v4"},
+            ]
         )
         == []
     )

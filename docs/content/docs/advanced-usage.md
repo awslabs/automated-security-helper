@@ -458,6 +458,9 @@ jobs:
       - name: Run ASH scan
         run: ash --mode local
       - name: Upload scan results
+        # Also when ASH exits non-zero on findings: without a status function
+        # GitHub skips this step after any failed step.
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v3
         with:
           name: ash-results

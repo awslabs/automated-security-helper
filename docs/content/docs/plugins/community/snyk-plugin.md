@@ -278,6 +278,9 @@ jobs:
         run: |
           uv run ash --scanners snyk-code --output-format sarif
       - name: Upload SARIF results
+        # Also when ASH exits non-zero on findings: without a status function
+        # GitHub skips this step after any failed step.
+        if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@v2
         with:
           sarif_file: .ash/ash_output/reports/ash.sarif
