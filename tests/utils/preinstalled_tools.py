@@ -5,12 +5,13 @@
 
 Why this exists
 ---------------
-ash-unified-ci.yml's integration-test job installs bandit with
-``ash dependencies install --tool bandit`` before the integration suite starts, so the
-suite runs the scanner against the install users make. If that install stops reaching
-the suite (a changed tool directory, a HOME the tests move, a PATH the step drops), the
-scanner's own ``uv tool install`` installs bandit again from inside the suite and every
-test still passes, so nothing shows that the pre-install no longer does anything.
+ash-unified-ci.yml's integration-test job installs bandit, actionlint, cfn-lint,
+cfn-guard and gitleaks with ``ash dependencies install --tool ...`` before the
+integration suite starts, so the suite runs the scanners against the install users
+make. If that install stops reaching the suite (a changed tool directory, a HOME the
+tests move, a PATH the step drops), bandit's scanner ``uv tool install``s bandit again
+from inside the suite and every test still passes, so nothing shows that the
+pre-install no longer does anything.
 
 ``ASH_REQUIRE_PREINSTALLED_TOOLS`` (comma separated) names the tools a run must find
 already installed. tests/integration/conftest.py reads it, the way
@@ -18,9 +19,13 @@ already installed. tests/integration/conftest.py reads it, the way
 failure there:
 
 * at session start, each named tool must already be available the way the scanner
-  looks for it (``UVToolRunner.get_tool_installation_info``);
+  looks for it (``UVToolRunner.get_tool_installation_info``: ``uv tool list``, then
+  PATH). That finds the pinned binaries too (actionlint, cfn-guard, gitleaks), which
+  are on PATH and never in ``uv tool list``;
 * during the run, a ``UVToolRunner.install_tool_with_version`` call for a named tool
-  fails the test that made it.
+  fails the test that made it. Only the uv tools are installed that way; a scanner
+  whose pinned binary is missing names ``ash dependencies install`` instead, so for
+  those the session check is what fails a run the pre-install did not reach.
 
 Unset, nothing changes, so a developer machine without the tools still installs them.
 """

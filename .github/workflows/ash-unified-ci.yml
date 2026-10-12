@@ -1385,10 +1385,11 @@ jobs:
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
       # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan,
       # ASH_REQUIRE_ACTIONLINT for the actionlint tests, and ASH_REQUIRE_GITLEAKS for the
-      # tests that run gitleaks from PATH. ASH_REQUIRE_PREINSTALLED_TOOLS names the uv
-      # tools the step above installed: the suite fails at start if it cannot find them,
-      # and a test fails if it installs one, so a pre-install that stops reaching the
-      # scanner shows up instead of being redone.
+      # tests that run gitleaks from PATH. ASH_REQUIRE_PREINSTALLED_TOOLS names every
+      # tool the step above installed: the suite fails at start if it cannot find one the
+      # way its scanner looks (the uv tools by `uv tool list` or PATH, the pinned
+      # binaries on PATH), and a test fails if it `uv tool install`s one, so a
+      # pre-install that stops reaching the scanner shows up instead of being redone.
       #
       # The installs above put the pinned binaries in ~/.ash/bin and the uv tools in
       # ~/.local/bin. PATH gains both for this step only, not through GITHUB_PATH, so no
@@ -1400,7 +1401,7 @@ jobs:
           ASH_REQUIRE_CFN_TOOLS: "1"
           ASH_REQUIRE_GITLEAKS: "1"
           ASH_REQUIRE_SYMBOLS_EXTRA: "1"
-          ASH_REQUIRE_PREINSTALLED_TOOLS: bandit
+          ASH_REQUIRE_PREINSTALLED_TOOLS: bandit,actionlint,cfn-lint,cfn-guard,gitleaks
         run: |
           export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
           uv run pytest \
