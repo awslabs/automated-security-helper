@@ -274,6 +274,32 @@ _EXEMPT = {
         "The installed cdk-nag distribution, found through importlib.util.find_spec; "
         "no test creates or removes anything in it."
     ),
+    ("tests/utils/gitleaks_fixture.py", "materialize", "dest"): (
+        "The copy of the gitleaks fixture repository that materialize itself just "
+        "made with shutil.copytree; every caller passes a path under its own "
+        "tmp_path, and copytree refuses one that exists."
+    ),
+    ("tests/utils/trivy_fixture.py", "materialize", "dest"): (
+        "The copy of the trivy fixture repository that materialize itself just made "
+        "with shutil.copytree, under the caller's tmp_path."
+    ),
+    (
+        "tests/integration/scanners/test_gitleaks_real_binary.py",
+        "test_ash_scan_reports_critical_findings_and_writes_no_secret",
+        "output",
+    ): (
+        "The output directory of the scan this test ran, inside its copy of the "
+        "fixture under tmp_path."
+    ),
+    (
+        "tests/unit/plugin_modules/ash_builtin/test_gitleaks_scanner.py",
+        "fake_run",
+        "root",
+    ): (
+        "The working directory the gitleaks scanner under test hands its re-scan: "
+        "a directory of ASH's copies under the scanner's results directory, which "
+        "the test puts under tmp_path."
+    ),
 }
 
 
