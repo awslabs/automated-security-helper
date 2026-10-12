@@ -377,7 +377,7 @@ license and package lookups. A `config_file` outside the tree is still used.
 
 ### zizmor
 
-**Purpose**: Static analysis of GitHub Actions workflows and composite actions, run with `--offline`; GitHub tokens are withheld unless the operator sets `options.online_audits` (`--config-overrides` or a config outside the scanned tree).
+**Purpose**: Static analysis of GitHub Actions workflows and composite actions, run with `--offline`; GitHub tokens are withheld unless the operator sets `options.online_audits` (`--config-overrides` or a config outside every git checkout and the scanned directory).
 
 **Dependencies**: `zizmor` (uv tool). See [zizmor](zizmor.md).
 

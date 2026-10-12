@@ -71,6 +71,72 @@ def test_a_config_file_outside_the_tree_is_the_operators(repo, tmp_path):
     assert set_by_operator(config, KEY, "sh") is True
 
 
+def test_a_config_file_in_another_git_checkout_is_not_the_operators(repo, tmp_path):
+    """Repository-written, as for the sandbox grants: inside any git checkout.
+
+    A trusted config kept in an ops or dotfiles checkout outside the scanned tree
+    counts too; the operator passes such a value with --config-overrides.
+    """
+    ops = tmp_path / "ops"
+    (ops / ".git").mkdir(parents=True)
+    operator = ops / "ash.yaml"
+    operator.write_text(_config_text())
+
+    config = resolve_config(config_path=operator, source_dir=repo)
+    overridden = resolve_config(
+        config_path=operator, source_dir=repo, config_overrides=[f"{KEY}=sh"]
+    )
+
+    assert config.scanners.actionlint.options.shellcheck == "sh"
+    assert set_by_operator(config, KEY, "sh") is False
+    assert set_by_operator(overridden, KEY, "sh") is True
+
+
+def test_an_operator_file_that_extends_a_repository_written_base_vouches_for_nothing(
+    repo, tmp_path
+):
+    """Judged as a whole: even the value the operator's own file writes."""
+    base = repo / ".ash" / "base.yaml"
+    base.parent.mkdir()
+    base.write_text(yaml.safe_dump({"project_name": "base"}))
+    operator = tmp_path / "operator.yaml"
+    operator.write_text(
+        yaml.safe_dump(
+            {
+                "extends": base.as_posix(),
+                "project_name": "operator",
+                "scanners": {"actionlint": {"options": {"shellcheck": "sh"}}},
+            }
+        )
+    )
+
+    config = resolve_config(
+        config_path=operator, source_dir=repo, permit_base=lambda path: True
+    )
+
+    assert config.scanners.actionlint.options.shellcheck == "sh"
+    assert set_by_operator(config, KEY, "sh") is False
+
+
+def test_a_config_inside_a_scanned_directory_outside_every_checkout_is_not_the_operators(
+    tmp_path,
+):
+    """With no checkout around the scan, the scanned directory is the tree."""
+    scanned = tmp_path / "scanned"
+    (scanned / ".ash").mkdir(parents=True)
+    (scanned / ".ash" / ".ash.yaml").write_text(_config_text())
+    outside = tmp_path / "operator.yaml"
+    outside.write_text(_config_text())
+
+    assert set_by_operator(resolve_config(source_dir=scanned), KEY, "sh") is False
+    assert (
+        set_by_operator(
+            resolve_config(config_path=outside, source_dir=scanned), KEY, "sh"
+        )
+        is True
+    )
+
+
 def test_a_config_above_the_scan_root_but_inside_the_checkout_is_the_trees(repo):
     """Scanning a subdirectory: the repository still wrote its root config."""
     scan_root = repo / "services" / "api"

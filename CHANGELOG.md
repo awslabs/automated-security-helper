@@ -218,7 +218,7 @@
     is honored only from the operator, as `config_file` is.
   - zizmor (`>=1.29.0,<2.0.0`) on workflows and composite
     actions, run with `--offline`; GitHub tokens are withheld unless the operator
-    sets `options.online_audits` (a config in the scanned tree cannot). A workflow
+    sets `options.online_audits` (a repository-written config cannot). A workflow
     or action that resolves outside the scan root, or is a broken symlink, is
     skipped with a warning.
   - trivy: `trivy fs` (0.75.0), `vuln` only by default, held to
@@ -226,7 +226,7 @@
     reason. A scanner-level `severity_threshold` gates the verdict as for every
     scanner, and lower findings are still reported; it is not passed to trivy as
     `--severity`, and neither is trivy-repo's any longer. `scanners.trivy.options.scanners`
-    is honored only from the operator; set by a config in the scanned tree, any set
+    is honored only from the operator; set by a repository-written config, any set
     but the default `[vuln]` is ignored with a warning. trivy and trivy-repo share trivy's cache and run at the same time, so
     online ASH updates the database once per scan, under a lock in that cache, and
     both scanners then run with `--skip-db-update` and `--skip-java-db-update` (and
@@ -267,16 +267,21 @@
     Terraform checks as trivy-repo does (see "Offline, trivy-repo does not run
     trivy's Terraform checks" under Behavior changes).
 
-  Options that name something a tool executes or loads are not taken from a config
-  file inside the scanned tree: actionlint's `shellcheck` and `pyflakes` accept only
-  their own names there, and cfn-lint's and trivy's `config_file` (a `.cfnlintrc`
-  can import Python rules, a `trivy.yaml` can load WASM modules) are honored only
-  from `--config-overrides` or a config file outside the tree, for a file outside
-  it. cfn-lint's and zizmor's `tool_version` must be a version constraint.
+  Options that name something a tool executes or loads are not taken from a
+  repository-written config (defined under "A repository-written config file can
+  no longer choose what ASH installs" in Behavior changes): a config file inside any
+  git checkout or the scanned directory, or one with an `extends` base there.
+  actionlint's `shellcheck` and
+  `pyflakes` accept only their own names there, and cfn-lint's and trivy's
+  `config_file` (a `.cfnlintrc` can import Python rules, a `trivy.yaml` can load
+  WASM modules) are honored only from `--config-overrides` or a config file outside
+  every checkout and the scanned directory, for a file outside the scanned tree.
+  cfn-lint's and zizmor's `tool_version` must be a version constraint.
   zizmor's and cfn-lint's `tool_version`, which pick the release that is installed
   and accepted, cfn-lint's `ignore_checks` and cfn-guard's `rule_sets`, which narrow
-  what is reported, are honored only from the operator; from a config in the scanned
-  tree each is ignored with a warning and the default applies.
+  what is reported, are honored only from the operator; from a repository-written
+  config each is ignored with a warning and the default applies. An MCP client's
+  `config_overrides` are the client's, not the operator's, for every one of these.
 
   None of the six reads its tool's own config from the scanned repository: see
   "The scanned repository's own scanner configs are not read" under Behavior
@@ -1231,7 +1236,8 @@
   committed to the repository can drop findings before ASH sees them, so they would
   be neither reported nor counted as suppressed. Tune findings with ASH
   suppressions, which are both. Unless the operator names a config, through
-  `--config-overrides` or an ASH config file outside the scanned tree:
+  `--config-overrides` or an ASH config file outside every git checkout and the
+  scanned directory:
   - actionlint runs with an empty config ASH writes, not `.github/actionlint.yaml`;
   - cfn-lint runs with an empty config ASH writes, not a `.cfnlintrc` in the
     repository or the home directory, and in a new, empty, private directory
@@ -1247,9 +1253,9 @@
     `trivy.yaml`, `.trivyignore` or `trivy-secret.yaml`.
 
   Each of those scanners' `config_file` options and gitleaks' `baseline_path`, set
-  by an ASH config inside the scanned tree, are ignored with a warning (a config
-  an MCP client delivered that sets one is refused, as a default `denied_paths`
-  entry), and so are trivy's and trivy-repo's `ignore_file` and
+  by a repository-written ASH config, are ignored with a warning (a config an MCP
+  client delivered that sets one is refused, as a default `denied_paths` entry),
+  and so are trivy's and trivy-repo's `ignore_file` and
   `secret_config_file` and cfn-guard's `rules_paths` (cfn-guard prints a rules
   file it cannot parse, so a path the repository chose could put any readable file
   into the report); `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG` still apply, for a

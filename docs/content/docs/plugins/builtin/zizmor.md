@@ -65,16 +65,19 @@ scanners:
   `regular` has the fewest false positives, `pedantic` adds code-smell findings,
   and `auditor` reports everything.
 - `config_file`: passed as `zizmor --config`, when the operator set it: from
-  `--config-overrides`, or an ASH config file outside the scanned tree. A relative
-  path is taken from the directory of the ASH config file that sets it, or from the
-  working directory for `--config-overrides`, not from the source directory (see
+  `--config-overrides`, or an ASH config file outside every git checkout and the
+  scanned directory (one that is not
+  [repository-written](../../configuration-guide.md#settings-a-repositorys-config-cannot-choose)).
+  A relative path is taken from the directory of the ASH config file that sets it,
+  or from the working directory for `--config-overrides`, not from the source
+  directory (see
   [Relative paths in the operator's settings](../../configuration-guide.md#relative-paths-in-the-operators-settings));
   an absolute path is used as given. Without it, ASH runs
   `zizmor --no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned
   repository is not read: a config there can disable audits or ignore findings,
   which zizmor then never reports, so they would be neither in ASH's results nor
-  counted as suppressed. `config_file` set by an ASH config inside the scanned tree
-  is ignored with a warning. A configured file that
+  counted as suppressed. `config_file` set by an ASH config inside a git checkout
+  or the scanned directory, or by an MCP client, is ignored with a warning. A configured file that
   does not exist fails the scan rather than being ignored. The file may be inside
   the scanned tree, but the scanned repository decides what is at such a path, so
   one there that leads out of the tree through a symbolic link fails the scan with
@@ -89,8 +92,9 @@ scanners:
   not a valid constraint is ignored with a warning and the default is used. It
   decides which zizmor is installed and which one on `PATH` is accepted, so a value
   other than the default is honored only when the operator sets it
-  (`--config-overrides`, or an ASH config file outside the scanned tree); set by an
-  ASH config inside the scanned tree, it is ignored with a warning.
+  (`--config-overrides`, or an ASH config file outside every git checkout and the
+  scanned directory); set by an ASH config inside one, it is ignored with a
+  warning.
 - `install_timeout`: seconds allowed for `uv tool install` of zizmor.
 - `scan_timeout`: seconds zizmor may run; past it zizmor is killed and the scanner
   reports `ERROR`.
@@ -107,10 +111,11 @@ variables from zizmor's environment.
 `online_audits: true` drops `zizmor --offline` and lets those variables reach zizmor
 unchanged, which enables the audits that query the GitHub API (for example
 known-vulnerable actions and impostor commits). It is honored only when the
-operator sets it, with `--config-overrides` or an ASH config file outside the
-scanned tree; set by a config in the scanned tree, it is ignored with a warning
-and zizmor runs offline without the tokens, and a config an MCP client
-delivered that sets it is refused, since it is a default `denied_paths` entry. ASH never
+operator sets it, with `--config-overrides` or an ASH config file outside every
+git checkout and the scanned directory; set by a config inside one, it is ignored
+with a warning and zizmor runs offline without the tokens, and a config an MCP
+client delivered that sets it is refused, since it is a default `denied_paths`
+entry. ASH never
 reads, copies or logs the token and never puts it on zizmor's command line.
 ASH's own offline mode (`ASH_OFFLINE=true` or `ash scan --offline`) overrides
 `online_audits`. Under `--sandbox`, zizmor never gets the token: the sandbox
@@ -164,8 +169,8 @@ makes zizmor drop the finding before ASH sees it, so it would be neither reporte
 nor counted as suppressed; ASH runs `zizmor --no-ignores`, which also turns off
 the `ignore` rules of an operator's `config_file` (its other settings still apply).
 To honor both, the operator sets `honor_inline_ignores: true` with
-`--config-overrides` or in an ASH config file outside the scanned tree; set by an
-ASH config inside the scanned tree, it is ignored with a warning. A `zizmor.yml` in
+`--config-overrides` or in an ASH config file outside every git checkout and the
+scanned directory; set by an ASH config inside one, it is ignored with a warning. A `zizmor.yml` in
 the scanned repository is never read. Package-scoped and symbol-scoped suppressions do not apply: zizmor reports
 no packages, and a workflow has no functions or classes.
 

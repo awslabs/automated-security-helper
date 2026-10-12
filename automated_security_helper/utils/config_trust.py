@@ -39,12 +39,14 @@ shared implementation can replace this one behind it.
 How the answer is reached
 -------------------------
 ``resolve_config`` records a ``ConfigProvenance`` on the config it returns. It uses
-the same facts ``config/sandbox_grants.py`` uses for the sandbox's grants: the
-scanned tree is the outermost enclosing checkout (``scanned_trees``), a config file is in it when
-it or any ``extends`` base is (``files_inside``), and the operator's values are those
-of the trusted base plus ``--config-overrides``. A value is the operator's when the
-config was not built from a file in the tree, or when resolving the trusted base plus
-the overrides gives the same value. Comparing resolutions, not override key names,
+the same facts ``config/sandbox_grants.py`` uses for the sandbox's grants: a config
+is not the operator's when any file it was built from, an ``extends`` base
+included, is repository-written (``sandbox_grants.repository_written``: inside any
+git checkout, or inside the scanned directory when that is outside every checkout,
+or delivered by an MCP client), and the operator's values are those of the trusted
+base plus ``--config-overrides``. A value is the operator's when the config was
+built from no repository-written file, or when resolving the trusted base plus the
+overrides gives the same value. ("In the tree" below means repository-written.) Comparing resolutions, not override key names,
 makes ``key+=``, the dashed scanner spelling and a whole-section override count the
 same as ``key=value``.
 
@@ -82,9 +84,9 @@ class ConfigProvenance:
     """Where a resolved config came from.
 
     Attributes:
-        in_tree: The config files it was built from that are inside the scanned
-            tree. Empty, with no ``client_overrides``, means the operator's: a file
-            outside the tree, or none.
+        in_tree: The config files it was built from that are repository-written
+            (``sandbox_grants.repository_written``). Empty, with no
+            ``client_overrides``, means the operator's: a file that is not, or none.
         trusted: The config the operator's values come from when ``in_tree`` or
             ``client_overrides`` is not empty: the trusted base, before the
             overrides below. With only ``client_overrides``, the config as the
@@ -249,8 +251,9 @@ def scan_root(config: Any, source_dir: PathLike) -> Path:
 
 #: Why ``operator_path`` refused a value the operator did not set.
 NOT_THE_OPERATORS = (
-    "it came from a config file in the scanned tree or from an MCP client; set it "
-    "with --config-overrides or a config file outside the tree"
+    "it came from a config file inside a git checkout or the scanned directory, or "
+    "from an MCP client; set it with --config-overrides or a config file outside "
+    "every git checkout and the scanned directory"
 )
 
 #: Why ``operator_path`` refused a path inside the scanned tree.
