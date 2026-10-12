@@ -17,7 +17,9 @@ In container mode the host mounts that file at ``/ash-config`` and passes
 the workspace at ``/src`` and the config in no checkout, treats the marked config
 and the files it extends as repository-written for as long as it runs. These
 tests resolve each project's config both ways and compare what every confinement
-leaves, and the warnings.
+leaves, and the warnings. They compare the config as it resolves: the scan inside
+a container then runs with ``sandbox.mode=off``, the last override run_ash_scan
+hands it, because the container is the boundary, so no file's mode applies there.
 """
 
 from __future__ import annotations

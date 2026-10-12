@@ -1437,9 +1437,10 @@ def _host_ash_config() -> str | None:
 
     A local scan reads that file first, whatever else names a config
     (``default_config.get_default_config``): it is the base the settings a
-    repository-written config may not choose come from, and the sandbox mode's
-    floor. The scan inside the container sees neither the host's environment nor
-    the file, so container mode mounts the file's chain under
+    repository-written config may not choose come from (and, in a local scan, the
+    sandbox mode's floor; the scan inside a container runs with ``sandbox.mode=off``
+    as its last override). The scan inside the container sees neither the host's
+    environment nor the file, so container mode mounts the file's chain under
     CONTAINER_ENV_CONFIG_ROOT and passes its path there with
     ASH_CONFIG_FROM_HOST_FLAG. A value ``default_config._ash_config_file`` refuses
     (only whitespace, or a path that does not exist) is refused here with its

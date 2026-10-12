@@ -587,8 +587,10 @@
   `ash --mode container --workspace` now marks a config in another git checkout, such
   as an ops repository beside the workspace, and the workspace scan inside treats it,
   and every file it extends, as repository-written for every project and for the
-  plan, as a local workspace scan does: the same five confinements, the same
-  warnings, and its `sandbox.mode` still sets the floor. In a one-directory scan and a
+  plan, as a local workspace scan does: the same five confinements and the same
+  warnings. No file's `sandbox.mode` applies inside: container mode runs the scan
+  there with `sandbox.mode=off` as the last override, because the container is the
+  boundary. In a one-directory scan and a
   workspace scan alike, the scan inside holds that verdict as a mark on the mounted
   files, so its warnings call the file repository-written, as the host's do. A config
   in the checkout around the workspace root, or reached through a link there, is
