@@ -38,6 +38,7 @@ from typing import Dict, List
 import pytest
 
 from automated_security_helper.cli import dependencies as dependencies_module
+from tests.utils.helpers import bound_run_command
 
 #: Variables through which the operator's environment could set the same settings,
 #: cleared so the planted file and the user file are the only sources.
@@ -93,6 +94,7 @@ def _through_the_installer(argv: List[str], repo: Path, monkeypatch) -> str:
         lambda *a, **_k: printed.append(" ".join(map(str, a))),
     )
     monkeypatch.chdir(repo)
+    bound_run_command(monkeypatch)
     dependencies_module.run_command(argv)
     return "\n".join(printed)
 

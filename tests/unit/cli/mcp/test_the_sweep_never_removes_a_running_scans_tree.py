@@ -31,6 +31,7 @@ import pytest
 from automated_security_helper.cli.mcp import sessions
 from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.cli.mcp.session_paths import mark_session_workspace
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, KillAfter
 
 DAY = 24 * 3600
 
@@ -153,13 +154,21 @@ def _scan_in_another_process(root: Path, session_id: str):
         env=env,
     )
     try:
-        line = child.stdout.readline()
-        assert line.strip() == "held", child.stderr.read()
-        yield
+        # readline() and read() block until the child writes or exits; the kill
+        # ends one that does neither.
+        with KillAfter(child, "the process holding the scan presence"):
+            line = child.stdout.readline()
+            assert line.strip() == "held", child.stderr.read()
+            yield
     finally:
         if child.stdin:
             child.stdin.close()
-        child.wait(timeout=60)
+        try:
+            child.wait(timeout=CHILD_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=CHILD_TIMEOUT_SECONDS)
+            raise
 
 
 def test_a_scan_in_another_server_keeps_its_tree(root) -> None:

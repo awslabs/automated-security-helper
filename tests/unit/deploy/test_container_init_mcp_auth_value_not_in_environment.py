@@ -50,6 +50,8 @@ from typing import Dict, Iterator, List, Optional
 
 import pytest
 
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FILES = REPO_ROOT / "deploy" / "terraform" / "modules" / "ash-image-pipeline" / "files"
 INIT = FILES / "ash-container-init"
@@ -137,7 +139,8 @@ def _wait_for_port(process: subprocess.Popen, port: int, timeout: float = 90.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            out, err = process.communicate()
+            # Bounded: a child it left behind can hold the pipes after it exits.
+            out, err = process.communicate(timeout=CHILD_TIMEOUT_SECONDS)
             raise AssertionError(
                 f"the server exited {process.returncode} before it listened:\n"
                 f"{out.decode(errors='replace')}\n{err.decode(errors='replace')}"
@@ -233,7 +236,7 @@ def served(child_env, tmp_path) -> Iterator:
                 process.communicate(timeout=30)
             except subprocess.TimeoutExpired:
                 process.kill()
-                process.communicate()
+                process.communicate(timeout=CHILD_TIMEOUT_SECONDS)
 
 
 def _stop(process: subprocess.Popen) -> bytes:

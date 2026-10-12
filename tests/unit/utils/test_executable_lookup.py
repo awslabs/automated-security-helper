@@ -52,6 +52,7 @@ from automated_security_helper.utils.subprocess_utils import (
     scanning_tree,
     spawn_run,
 )
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 WINDOWS = sys.platform == "win32"
 posix_only = pytest.mark.skipif(WINDOWS, reason="starts a POSIX shell script")
@@ -204,7 +205,7 @@ class TestInstalledToolsAreFound:
         tool = fake_tool(installs / "usr/local/bin", ran=ran)
         monkeypatch.setenv("PATH", str(tool.parent))
 
-        result = run_command(["tool"], cwd=repo)
+        result = run_command(["tool"], cwd=repo, timeout=CHILD_TIMEOUT_SECONDS)
 
         assert result.returncode == 0
         assert ran.exists()
@@ -262,7 +263,7 @@ class TestNothingIsFoundThroughTheWorkingDirectory:
         empty.mkdir(parents=True)
         monkeypatch.setenv("PATH", os.pathsep.join(["bin", str(empty)]))
 
-        result = run_command(["tool"], cwd=repo)
+        result = run_command(["tool"], cwd=repo, timeout=CHILD_TIMEOUT_SECONDS)
 
         assert result.returncode == 127
         assert str(repo / "bin" / "tool") in result.stderr
@@ -280,7 +281,7 @@ class TestNothingIsFoundThroughTheWorkingDirectory:
         monkeypatch.chdir(elsewhere)
         monkeypatch.setenv("PATH", "bin")
 
-        result = run_command(["tool"], cwd=repo)
+        result = run_command(["tool"], cwd=repo, timeout=CHILD_TIMEOUT_SECONDS)
 
         assert result.returncode == 127
         assert not ran.exists()
@@ -564,7 +565,7 @@ class TestSpawnsRefuseInTreePrograms:
         monkeypatch.setenv("PATH", str(in_tree.parent))
 
         with scanning_tree(repo):
-            result = run_command(["tool"], cwd=repo)
+            result = run_command(["tool"], cwd=repo, timeout=CHILD_TIMEOUT_SECONDS)
 
         assert result.returncode == 0
         assert ran.exists()

@@ -64,7 +64,7 @@ from tests.utils.bare_install_names import (
     find_bare_installs,
     find_in_file,
 )
-from tests.utils.helpers import iter_repo_files
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, iter_repo_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -108,6 +108,7 @@ def _tracked_files(root: Path) -> list[Path] | None:
             capture_output=True,
             text=True,
             check=True,
+            timeout=CHILD_TIMEOUT_SECONDS,
         ).stdout.strip()
         if not top or Path(top).resolve() != root.resolve():
             return None
@@ -124,6 +125,7 @@ def _tracked_files(root: Path) -> list[Path] | None:
             ],
             capture_output=True,
             check=True,
+            timeout=CHILD_TIMEOUT_SECONDS,
         ).stdout.decode("utf-8")
     except (OSError, subprocess.CalledProcessError):
         return None
@@ -700,6 +702,7 @@ def _git(root: Path, *args: str) -> None:
         check=True,
         capture_output=True,
         env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"},
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
 
 

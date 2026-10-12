@@ -29,6 +29,7 @@ from automated_security_helper.utils.offline_tool_env import (
     offline_tool_environment,
     with_offline_tool_environment,
 )
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 
 @pytest.fixture
@@ -110,6 +111,7 @@ def test_every_spawn_gets_them_offline(offline, tmp_path):
         stderr_preference="return",
         cwd=tmp_path,
         env={"PATH": os.environ.get("PATH", "")},
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
 
     seen = json.loads(response["stdout"])
@@ -127,6 +129,7 @@ def test_spawn_run_gets_them_offline(offline, tmp_path):
         capture_output=True,
         text=True,
         cwd=tmp_path,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
 
     assert json.loads(result.stdout) == EXPECTED_OFFLINE_ENVIRONMENT
@@ -142,6 +145,7 @@ def test_spawns_are_unchanged_online(online, tmp_path):
         capture_output=True,
         text=True,
         cwd=tmp_path,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
 
     assert result.stdout.strip() == "None"

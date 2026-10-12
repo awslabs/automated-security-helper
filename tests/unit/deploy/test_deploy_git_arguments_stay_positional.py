@@ -72,6 +72,7 @@ from tests.unit.deploy.buildspec_extraction import (
     posix_shell,
     sole_command_containing,
 )
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 pytestmark = pytest.mark.skipif(
     os.name == "nt",
@@ -161,6 +162,7 @@ def _git(cwd: pathlib.Path, home: pathlib.Path, *args: str) -> str:
         capture_output=True,
         text=True,
         check=False,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     assert result.returncode == 0, f"git {' '.join(args)} failed: {result.stderr}"
     return result.stdout.strip()
@@ -343,6 +345,7 @@ def _run_fetch(
         capture_output=True,
         text=True,
         check=False,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
 
 
@@ -353,6 +356,7 @@ def _head(workdir: pathlib.Path) -> str | None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     return result.stdout.strip() if result.returncode == 0 else None
 
@@ -469,6 +473,7 @@ def test_a_repository_url_starting_with_a_dash_is_the_terraform_remote_url(
         capture_output=True,
         text=True,
         check=False,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     assert url.stdout.strip() == upload_pack_probe.value, (
         f"{target}: `git remote add` did not take the value as the URL: "

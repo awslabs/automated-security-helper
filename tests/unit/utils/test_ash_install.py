@@ -47,6 +47,7 @@ from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.utils import ash_install
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from tests.utils.bare_install_names import find_bare_installs, normalize
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
@@ -631,6 +632,7 @@ class TestTheSymbolsHint:
             text=True,
             env={**os.environ, "UV_OFFLINE": "1"},
             check=False,
+            timeout=CHILD_TIMEOUT_SECONDS,
         )
         assert result.returncode == 0, result.stderr
         assert "Would make no changes" in result.stderr, result.stderr

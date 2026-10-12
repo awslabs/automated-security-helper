@@ -49,6 +49,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "verify_docs_freshness.py"
 
@@ -217,6 +219,7 @@ def test_reporter_check_passes_on_the_generated_table():
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     failures = json.loads(result.stdout.strip().splitlines()[-1])

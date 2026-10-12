@@ -41,6 +41,7 @@ from automated_security_helper.utils.download_utils import (
     create_pinned_tool_install_command,
     current_bin_path,
 )
+from tests.utils.helpers import bound_run_command
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PACKAGE = REPO_ROOT / "automated_security_helper"
@@ -106,6 +107,7 @@ def test_the_installer_runs_python_commands_outside_the_current_directory(
     _plant(repo, package, marker)
     monkeypatch.delenv("PYTHONSAFEPATH", raising=False)
     monkeypatch.chdir(repo)
+    bound_run_command(monkeypatch)
     dependencies_module.run_command(argv(tmp_path))
     assert not marker.exists(), marker.read_text(encoding="utf-8")
 

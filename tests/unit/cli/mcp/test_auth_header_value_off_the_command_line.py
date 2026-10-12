@@ -40,6 +40,7 @@ import typer
 from rich.console import Console
 
 from automated_security_helper.cli.mcp import mcp_command
+from tests.utils.helpers import KillAfter
 
 POSIX = pytest.mark.skipif(os.name == "nt", reason="POSIX file modes and fifos")
 PROC = pytest.mark.skipif(
@@ -398,13 +399,14 @@ def _run(form: str, value: str, tmp_path: Path) -> Dict[str, object]:
     if read_end is not None:
         os.close(read_end)
     try:
-        port = _listening_port(server)
-        _wait_for(port)
-        on_a_command_line = any(value.encode() in line for line in _command_lines())
-        return {
-            "statuses": _statuses(port, value),
-            "on_a_command_line": on_a_command_line,
-        }
+        # Reading the server's stderr for its listening line blocks until it
+        # writes one or exits; the kill ends a server that does neither.
+        with KillAfter(server, "the ash mcp server"):
+            port = _listening_port(server)
+            _wait_for(port)
+            on_a_command_line = any(value.encode() in line for line in _command_lines())
+            statuses = _statuses(port, value)
+        return {"statuses": statuses, "on_a_command_line": on_a_command_line}
     finally:
         server.terminate()
         try:

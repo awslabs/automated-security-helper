@@ -92,6 +92,8 @@ import subprocess  # nosec B404 — a fresh interpreter is the property under te
 import sys
 import textwrap
 
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
+
 # Exit code for "the premise is gone", kept distinct from the 1 that an
 # unresolved forward reference produces so the two are never confused.
 _PREMISE_LOST_EXIT = 3
@@ -146,6 +148,7 @@ def test_deserialization_works_when_run_ash_scan_is_imported_first():
         # The non-zero exit IS the finding here, so it must not raise: the
         # assertions below report it with the subprocess stderr attached.
         check=False,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
 
     # First, because every other check below is meaningless if this one is wrong.

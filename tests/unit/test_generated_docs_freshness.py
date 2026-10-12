@@ -56,6 +56,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPO_ROOT / "automated_security_helper"
 SCRIPTS = REPO_ROOT / "scripts"
@@ -248,6 +250,7 @@ def test_reporter_docs_are_current() -> None:
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     assert result.returncode == 0, (
         "Reporter documentation is stale relative to the registered reporter set.\n"
@@ -271,6 +274,7 @@ def test_mcp_tool_reference_is_current() -> None:
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     assert result.returncode == 0, (
         "The MCP tool reference is stale relative to the registered tool set.\n"

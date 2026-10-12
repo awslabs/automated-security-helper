@@ -23,6 +23,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScannerConfig,
     DetectSecretsScanSettingsFiltersUsed,
 )
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 from tests.utils.refusing_proxy import (
     RecordingProxy,
     route_through,
@@ -72,6 +73,7 @@ def test_worker_reports_the_collection_the_in_process_scan_builds(tmp_path):
         ],
         check=True,
         cwd=tmp_path,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     from_worker = {
         key: sorted(json.dumps(s, sort_keys=True) for s in secrets)
@@ -152,6 +154,7 @@ def _verifying_worker_run(tmp_path, verify):
         ],
         check=True,
         cwd=tmp_path,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     return json.loads(output.read_text(encoding="utf-8"))
 
@@ -340,6 +343,7 @@ def test_importing_the_worker_module_in_ash_refuses_nothing(tmp_path):
         check=True,
         cwd=tmp_path,
         env={**os.environ, REFUSE_HTTP_ENV: "1"},
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
 
     assert result.stdout.strip() == "send", result.stdout

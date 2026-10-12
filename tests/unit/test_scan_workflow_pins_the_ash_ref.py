@@ -48,6 +48,7 @@ from typing import Any
 import pytest
 
 from tests.utils import github_actions as ga
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 pytestmark = pytest.mark.skipif(
     os.name == "nt" or shutil.which("bash") is None or shutil.which("git") is None,
@@ -76,6 +77,7 @@ def _git(*args: str, cwd: Path) -> str:
         capture_output=True,
         text=True,
         check=False,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     assert proc.returncode == 0, f"git {' '.join(args)}: {proc.stderr}"
     return proc.stdout.strip()

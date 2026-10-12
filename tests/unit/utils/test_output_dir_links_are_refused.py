@@ -31,6 +31,7 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.sandbox import fs_guard
 from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.backends import SpawnPlan
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
@@ -314,6 +315,7 @@ class TestStreamLogs:
             results_dir=results,
             class_name="Probe",
             stdout_preference="write",
+            timeout=CHILD_TIMEOUT_SECONDS,
         )
 
         assert target.read_text() == ORIGINAL
@@ -335,6 +337,7 @@ class TestStreamLogs:
             results_dir=results,
             class_name="Probe",
             stdout_preference="write",
+            timeout=CHILD_TIMEOUT_SECONDS,
         )
 
         assert target.read_bytes() == ORIGINAL.encode()
@@ -356,6 +359,7 @@ class TestStreamLogs:
             results_dir=results,
             class_name="Probe",
             stdout_preference="write",
+            timeout=CHILD_TIMEOUT_SECONDS,
         )
 
         assert response["returncode"] == 0, response

@@ -34,6 +34,7 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.backends import SpawnPlan
 from automated_security_helper.utils.subprocess_utils import run_command
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
@@ -56,6 +57,7 @@ def _spawn(stage: str) -> None:
             str(marker),
         ],
         log_level=10,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
 
 

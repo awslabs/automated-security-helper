@@ -28,6 +28,7 @@ from automated_security_helper.utils.process_env import (
     restore_environ,
     snapshot_environ,
 )
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 # The same three variables cdk_nag_wrapper sets around every evaluation.
 _JSII_OVERRIDES = {
@@ -79,12 +80,17 @@ def _trivial_command() -> list:
     "spawn",
     [
         pytest.param(
-            lambda cmd: subprocess_utils.run_command(cmd, log_level=5),
+            lambda cmd: subprocess_utils.run_command(
+                cmd, log_level=5, timeout=CHILD_TIMEOUT_SECONDS
+            ),
             id="run_command",
         ),
         pytest.param(
             lambda cmd: subprocess_utils.run_command_with_output_handling(
-                cmd, stdout_preference="return", stderr_preference="return"
+                cmd,
+                stdout_preference="return",
+                stderr_preference="return",
+                timeout=CHILD_TIMEOUT_SECONDS,
             ),
             id="run_command_with_output_handling",
         ),

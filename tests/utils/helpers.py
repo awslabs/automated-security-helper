@@ -5,6 +5,8 @@ import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
+from typing_extensions import Self
+
 #: Set in the CI job that installs every scanner (sandbox-scanner-parity in
 #: ash-unified-ci.yml), so the tests that run a real scanner fail there when the
 #: tool is missing instead of skipping, as ASH_REQUIRE_SYMBOLS_EXTRA does for the
@@ -44,6 +46,90 @@ ASH_TEST_TEMP_ROOT = Path(__file__).parent.parent / "pytest-temp"
 
 #: The checkout these tests belong to.
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: How long a test waits for a child process it starts before giving up on it.
+#:
+#: Every test that starts a real child (``subprocess.run``, ``Popen`` and its
+#: ``communicate``/``wait``, or ASH's ``run_command``,
+#: ``run_command_with_output_handling``, ``spawn_run`` and ``_run_subprocess``)
+#: passes this, unless it needs a bound of its own. Without one, a child that never
+#: exits stalls its xdist worker and the whole run with it, and the run ends at the
+#: outer CI timeout with no word of which test it was. That happened once to
+#: ``test_base_plugins.py::TestScannerPlugin::test_run_subprocess_with_stdout_stderr``
+#: in a ``tests/unit -n 32`` run. With it, the child is killed and the test fails
+#: naming the command. Generous because the children here (git, python, sh) take
+#: seconds even on a loaded runner; the bound is for a hang, not a slow child.
+CHILD_TIMEOUT_SECONDS = 120
+
+
+class KillAfter:
+    """Kill a child still running after ``seconds``, and fail the test saying so.
+
+    For a ``Popen`` child the test reads from, where no call takes a timeout: a read
+    on its pipes blocks until it writes or exits. Killing it ends the read with EOF.
+    Whatever that EOF trips first, leaving the block then raises an
+    ``AssertionError`` that names the child and the bound.
+
+        with KillAfter(server, "the stdio server"):
+            line = server.stdout.readline()
+    """
+
+    def __init__(
+        self, child, what: str, seconds: float = CHILD_TIMEOUT_SECONDS
+    ) -> None:
+        import threading
+
+        self._child = child
+        self._what = what
+        self._seconds = seconds
+        self.fired = False
+        self._timer = threading.Timer(seconds, self._fire)
+        self._timer.daemon = True
+
+    def _fire(self) -> None:
+        if self._child.poll() is None:
+            self.fired = True
+            self._child.kill()
+
+    def __enter__(self) -> Self:
+        self._timer.start()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        self._timer.cancel()
+        if self.fired:
+            raise AssertionError(
+                f"{self._what} was still running after {self._seconds}s and was killed"
+            ) from exc
+        return False
+
+
+def bound_run_command(monkeypatch, seconds: float = CHILD_TIMEOUT_SECONDS) -> None:
+    """Give ``subprocess_utils.run_command`` a timeout when its caller passes none.
+
+    For a test that reaches a child through ASH code with no timeout argument of its
+    own, such as the installer's ``dependencies.run_command``. A child still running
+    after ``seconds`` is killed and the test fails naming it. ``pytest.fail``, not an
+    ``AssertionError``, because the installer catches ``Exception`` and would report
+    the timeout as one more failed command.
+    """
+    import pytest
+
+    from automated_security_helper.utils import subprocess_utils
+
+    original = subprocess_utils.run_command
+
+    def run_command(*args, **kwargs):
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = seconds
+        result = original(*args, **kwargs)
+        if isinstance(result, subprocess_utils.TimedOutProcess):
+            pytest.fail(
+                f"{result.args!r} was still running after {seconds}s and was killed"
+            )
+        return result
+
+    monkeypatch.setattr(subprocess_utils, "run_command", run_command)
 
 
 def importing_this_checkout(driver: str) -> str:

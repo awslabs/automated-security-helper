@@ -37,6 +37,7 @@ import pytest
 import yaml
 
 from tests.unit.deploy.buildspec_extraction import REPO_ROOT, posix_shell
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 pytestmark = pytest.mark.skipif(
     os.name == "nt",
@@ -111,6 +112,7 @@ def _run_install(
         capture_output=True,
         text=True,
         check=False,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     calls: list[list[str]] = []
     if log.exists():

@@ -27,6 +27,7 @@ import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.cli.mcp_tools import mcp_set_source_git
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 _RECORDER = """\
 import json
@@ -92,6 +93,7 @@ def _host_ssh_dials(destination: str) -> str:
         text=True,
         check=False,
         env={k: v for k, v in os.environ.items() if k != "SSH_AUTH_SOCK"},
+        timeout=CHILD_TIMEOUT_SECONDS,
     ).stdout
     for line in printed.splitlines():
         key, _, value = line.partition(" ")

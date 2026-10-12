@@ -27,6 +27,7 @@ from typing import Dict
 
 
 from automated_security_helper.cli.mcp import sessions
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, KillAfter
 
 
 def _zip() -> bytes:
@@ -89,6 +90,7 @@ def _close(proc: subprocess.Popen) -> int:
 def test_a_second_stdio_server_exiting_leaves_the_first_ones_tree(tmp_path) -> None:
     root = tmp_path / "ws"
     data = _zip()
+    second = None
     with (tmp_path / "stderr").open("w") as stderr:
         first = _server(root, stderr)
         watchdog = threading.Timer(240, first.kill)
@@ -125,17 +127,20 @@ def test_a_second_stdio_server_exiting_leaves_the_first_ones_tree(tmp_path) -> N
             assert tree.is_dir()
 
             second = _server(root, stderr)
-            _initialize(second)
-            assert _close(second) == 0
+            # The watchdog above kills only the first server; reading the second
+            # one's stdout blocks the same way.
+            with KillAfter(second, "the second stdio server"):
+                _initialize(second)
+                assert _close(second) == 0
 
             still_there = tree.is_dir()
             assert _close(first) == 0
         finally:
             watchdog.cancel()
-            for proc in (first,):
-                if proc.returncode is None:
+            for proc in (first, second):
+                if proc is not None and proc.returncode is None:
                     proc.kill()
-                    proc.wait()
+                    proc.wait(timeout=CHILD_TIMEOUT_SECONDS)
 
     assert still_there, "a sibling stdio server's exit removed this server's tree"
     assert not (root / "__default__").exists(), "the last server's exit left the tree"
