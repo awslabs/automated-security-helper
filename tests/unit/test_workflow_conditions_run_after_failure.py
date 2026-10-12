@@ -24,13 +24,16 @@ What this asserts
 2. A step that uploads results, SARIF or a test report after a step that runs ASH in
    the same job has an ``if:`` with a status function, so a scan that fails on findings
    still leaves its results. The same holds for the GitHub Actions examples in the docs
-   and package READMEs, which users copy. A scan run with ``--no-fail-on-findings``
-   cannot fail on findings, so an upload after it needs no status function.
+   and package READMEs, which users copy, whether a YAML block is a whole workflow or a
+   bare list of steps. A scan run with ``--no-fail-on-findings`` cannot fail on
+   findings, so an upload after it needs no status function.
 3. The model applies the implicit ``success()``: a condition without a status function
    is false after a failure, ``!cancelled() && ...`` is not, and a job's status comes
    from the results of the jobs it needs.
 4. Negative controls for both rules, and the scan finds the conditions and uploads it is
-   about, so it cannot pass by reading nothing.
+   about, so it cannot pass by reading nothing. For the docs, the reader must flag both
+   shapes in a synthetic example, and must find at least one real upload; it does not
+   count pages, which change with every docs rewrite.
 """
 
 from __future__ import annotations
@@ -155,6 +158,39 @@ def _scan() -> tuple[int, list[str], list[str], list[str]]:
     return conditions, missing_status, uploads, found_uploads
 
 
+#: The job id given to a snippet that is a list of steps with no `jobs:` around it.
+STEP_LIST = "(steps)"
+
+
+def is_step_list(data: Any) -> bool:
+    """A YAML list whose every item is a step: a mapping with `uses` or `run`."""
+    return (
+        isinstance(data, list)
+        and bool(data)
+        and all(isinstance(s, dict) and ("uses" in s or "run" in s) for s in data)
+    )
+
+
+def yaml_example_jobs(text: str) -> Iterator[tuple[int, str, list]]:
+    """(line, job id, steps) for each GitHub Actions job in a markdown text's YAML blocks.
+
+    A block that is a list of steps with no `jobs:` (a snippet showing the steps to
+    add to a job, as on a how-to page) is read as one job named STEP_LIST.
+    """
+    for block in re.finditer(r"```ya?ml\n(.*?)```", text, re.DOTALL):
+        try:
+            data = yaml.safe_load(block.group(1))
+        except yaml.YAMLError:
+            continue
+        line = text[: block.start()].count("\n") + 1
+        if isinstance(data, dict) and isinstance(data.get("jobs"), dict):
+            for job_id, job in data["jobs"].items():
+                if isinstance(job, dict):
+                    yield line, str(job_id), list(job.get("steps") or [])
+        elif is_step_list(data):
+            yield line, STEP_LIST, list(data)
+
+
 def docs_example_jobs() -> Iterator[tuple[str, str, list]]:
     """(file:line, job id, steps) for each GitHub Actions job in a docs YAML example."""
     sources = {
@@ -165,20 +201,46 @@ def docs_example_jobs() -> Iterator[tuple[str, str, list]]:
     }
     for path in sorted(sources):
         text = path.read_text(encoding="utf-8")
-        for block in re.finditer(r"```ya?ml\n(.*?)```", text, re.DOTALL):
-            if "steps:" not in block.group(1):
-                continue
-            try:
-                data = yaml.safe_load(block.group(1))
-            except yaml.YAMLError:
-                continue
-            if not isinstance(data, dict) or not isinstance(data.get("jobs"), dict):
-                continue
-            line = text[: block.start()].count("\n") + 1
-            where = f"{path.relative_to(REPO_ROOT)}:{line}"
-            for job_id, job in data["jobs"].items():
-                if isinstance(job, dict):
-                    yield where, str(job_id), list(job.get("steps") or [])
+        for line, job_id, steps in yaml_example_jobs(text):
+            yield f"{path.relative_to(REPO_ROOT)}:{line}", job_id, steps
+
+
+#: Docs-shaped examples the reader must find and flag: an upload with no `if:` after an
+#: ASH step that can fail, once in a full workflow and once as a bare list of steps.
+SYNTHETIC_DOCS_EXAMPLES = """
+A workflow:
+
+```yaml
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - run: ash --mode local
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          path: .ash/ash_output/reports
+```
+
+The steps to add to your job:
+
+```yaml
+- name: Run ASH
+  run: uvx --from automated-security-helper ash --mode local
+- name: Upload SARIF
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: .ash/ash_output/reports/ash.ghas.sarif
+```
+
+Not GitHub Actions, so not read:
+
+```yaml
+reporters:
+  sarif:
+    enabled: true
+```
+"""
 
 
 def test_a_condition_on_a_failed_outcome_calls_a_status_function():
@@ -214,12 +276,26 @@ def test_an_upload_after_the_scan_in_a_docs_example_runs_when_the_scan_fails():
             f"{where}: job {job_id}: {name}"
             for name in uploads_after_ash_without_status(steps)
         ]
-    assert len(found) >= 7, f"found only {len(found)} uploads after a scan: {found}"
+    # The reader is held to SYNTHETIC_DOCS_EXAMPLES below; this only makes sure the
+    # real pages gave it something to check, without counting pages.
+    assert found, (
+        "no docs example uploads results after an ASH step, so this checked nothing: "
+        "the examples moved, or the reader no longer reads them"
+    )
     assert not missing, (
         "these docs examples upload results after an ASH step that fails on findings, "
         "with no status function, so a copy of the example uploads nothing when it "
         "finds something:\n" + "\n".join(missing)
     )
+
+
+def test_the_docs_reader_flags_an_upload_with_no_status_function():
+    flagged = [
+        (job_id, name)
+        for _, job_id, steps in yaml_example_jobs(SYNTHETIC_DOCS_EXAMPLES)
+        for name in uploads_after_ash_without_status(steps)
+    ]
+    assert flagged == [("scan", "Upload results"), (STEP_LIST, "Upload SARIF")], flagged
 
 
 @pytest.mark.parametrize(
