@@ -15,6 +15,8 @@ scanner would report.
 import hashlib
 import string
 
+import pytest
+
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.secret_masking import (
@@ -151,6 +153,164 @@ class TestMaskingByLocation:
         mask_secrets_in_results(model)
 
         assert region.snippet.binary is None
+
+
+#: Characters ``str.splitlines`` breaks at besides ``\n``, ``\r\n`` and ``\r``.
+#: Scanners number lines by those three only, so a snippet holding one of these
+#: cannot be placed line by line.
+OTHER_LINE_SEPARATORS = {
+    "vertical-tab": "\v",
+    "form-feed": "\f",
+    "file-separator": "\x1c",
+    "group-separator": "\x1d",
+    "record-separator": "\x1e",
+    "next-line": "\x85",
+    "line-separator": chr(0x2028),
+    "paragraph-separator": chr(0x2029),
+}
+
+
+def _secret_on_line_3():
+    return _result(
+        "SECRET-KEYWORD",
+        "app.py",
+        3,
+        "Secret of type 'Keyword' detected",
+        scanner="detect-secrets",
+    )
+
+
+class TestLineSeparators:
+    """Snippets are split into lines the way scanners count them.
+
+    A neighbor's context over lines 1-3 holds the secret on line 3. Split with
+    ``str.splitlines``, a form feed or a Unicode line separator on line 2 made it
+    "line 4", so line 4 was masked and the secret line was written in clear.
+    """
+
+    @pytest.mark.parametrize(
+        "separator",
+        list(OTHER_LINE_SEPARATORS.values()),
+        ids=list(OTHER_LINE_SEPARATORS),
+    )
+    def test_a_snippet_holding_another_separator_is_masked_whole(self, separator):
+        context = OTHER_LINE + "# section " + separator + "\n" + ASSIGN_LINE
+        model = _results(
+            _secret_on_line_3(),
+            _result(
+                "B404",
+                "app.py",
+                1,
+                "import",
+                snippet=OTHER_LINE,
+                context=(1, context),
+                scanner="bandit",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        masked = _region_text(model.sarif.runs[0].results[1], "contextRegion")
+        assert VALUE not in masked
+        assert masked == (MASKED_LINE + "\n") * 3
+
+    def test_a_snippet_with_a_lone_carriage_return_is_masked_whole(self):
+        """Scanners disagree on a lone ``\\r``, so its line numbers are not trusted."""
+        context = OTHER_LINE + "# section\r" + ASSIGN_LINE
+        model = _results(
+            _secret_on_line_3(),
+            _result(
+                "B404",
+                "app.py",
+                1,
+                "import",
+                snippet=OTHER_LINE,
+                context=(1, context),
+                scanner="bandit",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        masked = _region_text(model.sarif.runs[0].results[1], "contextRegion")
+        assert VALUE not in masked
+        assert OTHER_LINE.strip() not in masked
+
+    def test_windows_line_endings_are_placed_line_by_line(self):
+        """Control: ``\\r\\n`` is one line break, and only the secret line is masked."""
+        context = "import os\r\n# section\r\n" + ASSIGN_LINE.replace("\n", "\r\n")
+        model = _results(
+            _secret_on_line_3(),
+            _result(
+                "B404",
+                "app.py",
+                1,
+                "import",
+                snippet="import os\r\n",
+                context=(1, context),
+                scanner="bandit",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        masked = _region_text(model.sarif.runs[0].results[1], "contextRegion")
+        assert masked == "import os\r\n# section\r\n" + MASKED_LINE + "\r\n"
+
+    @pytest.mark.parametrize(
+        "separator",
+        list(OTHER_LINE_SEPARATORS.values()),
+        ids=list(OTHER_LINE_SEPARATORS),
+    )
+    def test_a_separator_in_another_file_changes_nothing(self, separator):
+        """Only snippets of a file with a secret finding are masked whole."""
+        context = OTHER_LINE + "# section " + separator + "\n" + REUSE_LINE
+        model = _results(
+            _secret_on_line_3(),
+            _result(
+                "B602",
+                "deploy.py",
+                1,
+                "subprocess call",
+                snippet=OTHER_LINE,
+                context=(1, context),
+                scanner="bandit",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _region_text(model.sarif.runs[0].results[1], "contextRegion") == context
+
+    def test_a_value_is_recovered_from_a_context_holding_a_form_feed(self):
+        """The B105's own line is found by the scanners' line count too.
+
+        Its message holds the value already masked, so the value is read back from
+        the finding's own line in its context; with ``splitlines`` the form feed
+        put a different line there and the value's reuse elsewhere stayed in clear.
+        """
+        model = _results(
+            _result(
+                "B105",
+                "app.py",
+                3,
+                HARDCODED + "'" + _mask_secret_value(VALUE) + "'",
+                context=(1, OTHER_LINE + "# section \f\n" + ASSIGN_LINE),
+                scanner="bandit",
+            ),
+            _result(
+                "B602",
+                "deploy.py",
+                5,
+                "subprocess call",
+                snippet=REUSE_LINE,
+                scanner="bandit",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert VALUE not in _region_text(model.sarif.runs[0].results[1])
 
 
 class TestMaskingByValue:

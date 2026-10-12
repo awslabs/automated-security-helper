@@ -176,6 +176,30 @@ _SKIPPED_FIELDS = frozenset(
 
 _WORD_CHARACTER = re.compile(r"\w")
 
+#: The line breaks scanners number lines by: universal newlines.
+_LINE_BREAK = re.compile(r"\r\n|\n|\r")
+#: What makes a snippet's line numbers untrustworthy: a character
+#: ``str.splitlines`` also breaks at (vertical tab, form feed, the information
+#: separators, NEL, U+2028, U+2029), which scanners do not count as a line
+#: break, or a lone carriage return, which some count and some do not.
+_UNCOUNTED_LINE_BREAK = re.compile(
+    r"[\v\f\x1c\x1d\x1e\x85\N{LINE SEPARATOR}\N{PARAGRAPH SEPARATOR}]|\r(?!\n)"
+)
+
+
+def _split_lines(text: str, keepends: bool = False) -> List[str]:
+    """``text`` split at ``\\r\\n``, ``\\n`` and ``\\r`` only, like ``str.splitlines``
+    otherwise: no empty last line for a trailing break.
+    """
+    lines = []
+    start = 0
+    for match in _LINE_BREAK.finditer(text):
+        lines.append(text[start : match.end() if keepends else match.start()])
+        start = match.end()
+    if start < len(text):
+        lines.append(text[start:])
+    return lines
+
 
 def _text_of(message: Any) -> Optional[str]:
     root = getattr(message, "root", message)
@@ -428,17 +452,23 @@ def _own_snippet_lines(result: Any) -> List[str]:
         end = getattr(region, "endLine", None) or start
         text = getattr(getattr(region, "snippet", None), "text", None)
         if isinstance(text, str):
-            lines.extend(text.splitlines())
+            lines.extend(_split_lines(text))
         context = getattr(physical, "contextRegion", None)
         context_start = getattr(context, "startLine", None)
         context_text = getattr(getattr(context, "snippet", None), "text", None)
-        if not (
-            isinstance(context_text, str)
-            and isinstance(start, int)
-            and isinstance(context_start, int)
-        ):
+        if not isinstance(context_text, str):
             continue
-        for offset, line in enumerate(context_text.splitlines()):
+        context_lines = _split_lines(context_text)
+        if (
+            not isinstance(start, int)
+            or not isinstance(context_start, int)
+            or _UNCOUNTED_LINE_BREAK.search(context_text)
+        ):
+            # The region's lines cannot be placed in the context, so every line is
+            # a candidate; a candidate must still mask to exactly the quoted shape.
+            lines.extend(context_lines)
+            continue
+        for offset, line in enumerate(context_lines):
             if start <= context_start + offset <= end:
                 lines.append(line)
     return lines
@@ -449,11 +479,15 @@ def _mask_lines(
 ) -> str:
     """``text`` with each line at a reported line number replaced by ``MASKED_LINE``.
 
-    A snippet whose first line number is unknown cannot be placed, so in a file
-    with secret findings every line of it is replaced.
+    Lines are counted the way scanners count them (``_split_lines``). A snippet
+    that cannot be placed -- its first line number is unknown, or it holds a
+    character only some line counts break at (``_UNCOUNTED_LINE_BREAK``) -- is in
+    a file with secret findings, so every line of it is replaced.
     """
+    if _UNCOUNTED_LINE_BREAK.search(text):
+        whole = True
     out = []
-    for offset, line in enumerate(text.splitlines(keepends=True)):
+    for offset, line in enumerate(_split_lines(text, keepends=True)):
         number = first_line + offset if isinstance(first_line, int) else None
         if whole or number is None or number in lines:
             body = line.rstrip("\r\n")
