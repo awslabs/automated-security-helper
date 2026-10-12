@@ -84,9 +84,9 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "A trivy config file (trivy.yaml), passed as trivy --config. Honored "
-                "only when set by --config-overrides or a config file outside the "
-                "scanned tree, for a file outside that tree; otherwise ignored with a "
-                "warning. A relative path is taken from the directory of the config "
+                "only when set by --config-overrides or a config file outside every "
+                "git checkout and the scanned directory, for a file outside the "
+                "scanned tree; otherwise ignored with a warning. A relative path is taken from the directory of the config "
                 "file that sets it, or from the working directory for "
                 "--config-overrides, not from the source directory. Unset or "
                 "ignored, ASH passes TRIVY_CONFIG when that names a file outside the "

@@ -1293,8 +1293,8 @@
   the run ends, so trivy does not load a `trivy.yaml` from the scanned repository.
   New options `scanners.trivy-repo.options.config_file` and
   `module_dir` name others; they are honored when set through `--config-overrides`
-  or a config file outside the scanned tree, for paths outside that tree, and are
-  ignored with a warning otherwise.
+  or a config file outside every git checkout and the scanned directory, for paths
+  outside the scanned tree, and are ignored with a warning otherwise.
 
 - **A repository-written config file can no longer choose where ASH installs a
   tool from, what it imports, or what it hands a scanner as its own

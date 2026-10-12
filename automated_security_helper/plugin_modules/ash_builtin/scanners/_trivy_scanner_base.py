@@ -559,8 +559,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         trivy reads a ``trivy.yaml`` that can name a directory of WASM modules
         (``module.dir``) and load them, and ``--module-dir`` names one directly. So
         a path for either is used only when the operator set the option
-        (``--config-overrides`` or a config file outside the scanned tree, see
-        ``utils/config_trust.py``) and it resolves outside that tree, without a
+        (``--config-overrides`` or a config file outside every git checkout and the
+        scanned directory, see ``utils/config_trust.py``) and it resolves outside the
+        scanned tree, without a
         symbolic link in the tree leading it there. Otherwise this logs ``why``
         and returns None, and the caller uses ASH's own.
         """

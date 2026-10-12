@@ -32,9 +32,9 @@ own data:
   nobody asked for.
 
 Any of the four can be turned on with ``scanners.trivy.options.scanners``, by the
-operator: ``--config-overrides`` or a config file outside the scanned tree
-(``utils/config_trust.set_by_operator``). Set from a config in the scanned tree,
-any set but the default is ignored with a warning, and trivy runs ``vuln``: a
+operator: ``--config-overrides`` or a config file outside every git checkout and the
+scanned directory (``utils/config_trust.set_by_operator``). Set from a config inside
+a git checkout or the scanned directory, any set but the default is ignored with a warning, and trivy runs ``vuln``: a
 repository could otherwise turn ``vuln`` off (``scanners: [license]``) and its
 vulnerability findings, and the database check, would vanish with nothing in the
 report saying so.
@@ -229,9 +229,9 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
                 "misconfigurations (checkov, cfn-nag, cdk-nag), and license findings "
                 "are a compliance question. Add secret, misconfig or license to run "
                 "trivy's checks for them as well. Honored only when set by "
-                "--config-overrides or a config file outside the scanned tree; set "
-                "by a config in the tree, any set but the default is ignored with a "
-                "warning."
+                "--config-overrides or a config file outside every git checkout and "
+                "the scanned directory; set by a config inside one, any set but the "
+                "default is ignored with a warning."
             ),
             min_length=1,
         ),
@@ -266,9 +266,9 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "A trivy config file (trivy.yaml), passed as trivy --config. Honored "
-                "only when set by --config-overrides or a config file outside the "
-                "scanned tree, for a file outside that tree; otherwise ignored with a "
-                "warning. A relative path is taken from the directory of the config "
+                "only when set by --config-overrides or a config file outside every "
+                "git checkout and the scanned directory, for a file outside the "
+                "scanned tree; otherwise ignored with a warning. A relative path is taken from the directory of the config "
                 "file that sets it, or from the working directory for "
                 "--config-overrides, not from the source directory. Unset or "
                 "ignored, ASH passes TRIVY_CONFIG when that names a file outside the "
@@ -285,8 +285,8 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "A trivy ignore file, passed as trivy --ignorefile. Honored only when set "
-                "by --config-overrides or a config file outside the scanned tree, "
-                "for a file outside that tree; a relative path is taken from the "
+                "by --config-overrides or a config file outside every git checkout and "
+                "the scanned directory, for a file outside the scanned tree; a relative path is taken from the "
                 "directory of the config file that sets it, or from the working "
                 "directory for --config-overrides and the environment variable. "
                 "Otherwise TRIVY_IGNOREFILE is used, for a file "

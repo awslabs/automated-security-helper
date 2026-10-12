@@ -302,8 +302,9 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
                 "gives cfn-lint an empty configuration, so a .cfnlintrc in the scanned "
                 "repository or the home directory is NOT read: such a file can load "
                 "Python rules (append_rules) and switch checks off. Honored only when "
-                "set by --config-overrides or a config file outside the scanned tree, "
-                "and only for a file outside the scanned tree; otherwise "
+                "set by --config-overrides or a config file outside every git "
+                "checkout and the scanned directory, and only for a file outside the "
+                "scanned tree; otherwise "
                 "it is ignored with a warning."
             ),
         ),
@@ -327,8 +328,8 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
                 "cfn-lint rule ids or prefixes to skip, e.g. ['W2001', 'W3']. Prefer "
                 "ASH suppressions for individual findings; this removes the rule from "
                 "every template. Honored only when set by --config-overrides or a "
-                "config file outside the scanned tree; otherwise it is ignored with "
-                "a warning."
+                "config file outside every git checkout and the scanned directory; "
+                "otherwise it is ignored with a warning."
             ),
         ),
     ] = []
@@ -359,9 +360,9 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
                 "that sets merge_configs fails the scan. On, each template is "
                 "linted by a cfn-lint run of its own, so its settings reach no "
                 "other template; that adds a cfn-lint start-up per template. "
-                "Honored only when set by "
-                "--config-overrides or a config file outside the scanned tree; from "
-                "a config in the scanned tree it is ignored with a warning."
+                "Honored only when set by --config-overrides or a config file "
+                "outside every git checkout and the scanned directory; from a config "
+                "inside one it is ignored with a warning."
             ),
         ),
     ] = False
@@ -379,8 +380,8 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
                 "Version constraint for the cfn-lint installation, in pip requirement "
                 "syntax. The default is the range the scanner's SARIF handling was "
                 "verified against. Honored only when set by --config-overrides or a "
-                "config file outside the scanned tree; otherwise it is ignored with "
-                "a warning."
+                "config file outside every git checkout and the scanned directory; "
+                "otherwise it is ignored with a warning."
             )
         ),
     ] = ">=1.43.3,<2.0.0"
@@ -464,7 +465,8 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         findings before ASH sees them, so they are neither reported nor counted as
         suppressed (measured: ``ignore_checks: [E, W]`` in the scanned tree's
         ``.ash/.ash.yaml`` turned 3 findings into a PASSED scan). A value from a
-        config in the scanned tree or from an MCP client is ignored with a warning,
+        config inside a git checkout or the scanned directory, or from an MCP client,
+        is ignored with a warning,
         once per scanner, as ``config_file`` is; a value equal to the default is
         used silently, since using it changes nothing. ``tool_version``, which
         chooses the release uv installs, is held to the operator's value when the
@@ -558,8 +560,9 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
 
         The ASH config usually comes from the scanned repository too, so
         ``config_file`` is honored only when the operator set it (through
-        ``--config-overrides`` or a config file outside the scanned tree, see
-        ``utils/config_trust.py``) and it resolves outside the scanned tree.
+        ``--config-overrides`` or a config file outside every git checkout and the
+        scanned directory, see ``utils/config_trust.py``) and it resolves outside the
+        scanned tree.
         Otherwise it is ignored with a warning and the empty configuration is used.
         """
         options = self._options()

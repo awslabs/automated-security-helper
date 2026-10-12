@@ -52,10 +52,10 @@ Decisions, and why
    Both options name the program actionlint pipes each ``run:`` script to, and
    ASH's config usually comes from the scanned repository (``.ash/.ash.yaml``), so
    ``shellcheck: sh`` there would execute the repository's scripts. From a config
-   in the scanned tree, each option accepts only its own name (``shellcheck``,
-   ``pyflakes``), looked up on PATH and ASH's bin directory. The operator, through
-   ``--config-overrides`` or a config file outside the scanned tree
-   (``utils/config_trust.py``), may name another program or a path, absolute or
+   inside a git checkout or the scanned directory, each option accepts only its own
+   name (``shellcheck``, ``pyflakes``), looked up on PATH and ASH's bin directory.
+   The operator, through ``--config-overrides`` or a config file outside every git
+   checkout and the scanned directory (``utils/config_trust.py``), may name another program or a path, absolute or
    relative to the source directory, checked by ``config_trust.operator_path``.
    Whoever sets it, a program that resolves inside the scanned tree is
    refused, and so is a path in the tree that a symbolic link there leads out of
@@ -78,9 +78,10 @@ Decisions, and why
    which actionlint drops before ASH sees them: they are neither reported nor
    counted as suppressed. So ASH passes ``-config-file`` every time: an empty config
    it writes outside the scanned tree for this run, unless the operator set
-   ``options.config_file`` (``--config-overrides`` or a config file outside the
-   scanned tree, ``utils/config_trust.py``). A ``config_file`` set by a config in
-   the scanned tree is ignored with a warning, and a ``.github/actionlint.yaml`` or
+   ``options.config_file`` (``--config-overrides`` or a config file outside every
+   git checkout and the scanned directory, ``utils/config_trust.py``). A
+   ``config_file`` set by a config inside a git checkout or the scanned directory
+   is ignored with a warning, and a ``.github/actionlint.yaml`` or
    ``.github/actionlint.yml`` in the tree is ignored with a note; findings are tuned
    with ASH suppressions, which are reported and counted. An operator's file that
    does not exist is an error, not a silent fallback, and one whose ``paths``
@@ -556,7 +557,8 @@ class ActionlintScannerConfigOptions(ScannerOptionsBase):
                 "directory of the config file that sets it, or from the working "
                 "directory for --config-overrides, not from the source directory. "
                 "Honored only when set by --config-overrides or a config file outside "
-                "the scanned tree; otherwise actionlint runs with an empty config, and "
+                "every git checkout and the scanned directory; otherwise actionlint "
+                "runs with an empty config, and "
                 "a .github/actionlint.yaml in the scanned repository is not read. A "
                 "path set here that does not exist fails the scan."
             ),
@@ -569,9 +571,10 @@ class ActionlintScannerConfigOptions(ScannerOptionsBase):
                 "Command name or path of shellcheck, which actionlint runs "
                 "on every run: script. Unset (the default) disables the integration so "
                 "results do not depend on what is installed on the host. A config file "
-                "in the scanned tree may set only 'shellcheck', looked up on PATH; "
-                "another program, or a path that resolves outside the scanned "
-                "tree, needs --config-overrides or a config file outside the tree. "
+                "inside a git checkout or the scanned directory may set only "
+                "'shellcheck', looked up on PATH; another program, or a path that "
+                "resolves outside the scanned tree, needs --config-overrides or a "
+                "config file outside every git checkout and the scanned directory. "
                 "Anything else is ignored with a warning. When set and not "
                 "found, the scanner reports MISSING."
             ),
@@ -583,7 +586,8 @@ class ActionlintScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "Command name or path of pyflakes, which actionlint runs on "
                 "'shell: python' steps. Unset (the default) disables the integration. "
-                "Accepted as for shellcheck: from the scanned tree only 'pyflakes'. "
+                "Accepted as for shellcheck: from a config inside a git checkout or "
+                "the scanned directory only 'pyflakes'. "
                 "When set and not found, the scanner reports MISSING."
             ),
         ),
@@ -686,11 +690,12 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
 
         actionlint pipes every ``run:`` script (or ``shell: python`` step) to this
         program, so choosing it is choosing what runs the repository's scripts:
-        ``shellcheck: sh`` would execute them. A value from the scanned tree's config
-        is therefore accepted only when it is the flag's own name, looked up on
-        PATH's absolute entries (``find_absolute_executable``). The operator
-        (``--config-overrides`` or a config file outside the tree) may name another
-        program or an absolute path. Either way, the program must not resolve
+        ``shellcheck: sh`` would execute them. A value from a config inside a git
+        checkout or the scanned directory is therefore accepted only when it is the
+        flag's own name, looked up on PATH's absolute entries
+        (``find_absolute_executable``). The operator (``--config-overrides`` or a
+        config file outside every git checkout and the scanned directory) may name
+        another program or an absolute path. Either way, the program must not resolve
         inside the scanned tree: an absolute PATH entry inside it would otherwise
         find one the repository committed. actionlint is always handed an absolute
         path, so it never looks the program up itself.
@@ -705,9 +710,10 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             context_config, f"scanners.actionlint.options.{flag}", configured
         ):
             raise _RefusedIntegration(
-                f"a config file in the scanned tree may set only {flag!r} itself, or "
-                "an empty value to keep it off; name another program with "
-                "--config-overrides or a config file outside the scanned tree"
+                "a config file inside a git checkout or the scanned directory may "
+                f"set only {flag!r} itself, or an empty value to keep it off; name "
+                "another program with --config-overrides or a config file outside "
+                "every git checkout and the scanned directory"
             )
         if not any(sep and sep in configured for sep in ("/", os.sep, os.altsep)):
             found = find_absolute_executable(configured)
@@ -951,8 +957,8 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 f"{', '.join(present)} in the scanned tree is not read: actionlint "
                 "runs with an empty config, so its findings are reported and tuned "
                 "with ASH suppressions. Set scanners.actionlint.options.config_file "
-                "with --config-overrides or a config file outside the scanned tree "
-                "to use an actionlint config.",
+                "with --config-overrides or a config file outside every git checkout "
+                "and the scanned directory to use an actionlint config.",
                 level=logging.INFO,
             )
         # Outside the scanned tree, new for this run and removed when it ends

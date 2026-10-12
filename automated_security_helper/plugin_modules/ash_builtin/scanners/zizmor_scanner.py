@@ -30,9 +30,10 @@ Builtin, enabled by default
 Network and credentials
 -----------------------
 Always ``--offline`` unless the operator set ``options.online_audits`` to true
-(``--config-overrides`` or a config file outside the scanned tree,
-``utils/config_trust.py``); set by a config in the scanned tree, or by an MCP
-client, it is ignored with a warning. zizmor reads a
+(``--config-overrides`` or a config file outside every git checkout and the
+scanned directory, ``utils/config_trust.py``); set by a config inside a git
+checkout or the scanned directory, or by an MCP client, it is ignored with a
+warning. zizmor reads a
 GitHub token from ``GH_TOKEN``, ``GITHUB_TOKEN`` or ``ZIZMOR_GITHUB_TOKEN`` on
 its own, so those variables are removed from the child environment while
 offline: a token in the environment of a CI job that runs ASH is not consent to
@@ -52,9 +53,9 @@ in its working directory, measured on 1.30.1), and a config there can disable
 audits or ignore findings, which zizmor then never reports: they are neither in
 ASH's results nor counted as suppressed. ASH passes ``--no-config`` unless the
 operator set ``options.config_file`` (``--config-overrides`` or a config file
-outside the scanned tree, ``utils/config_trust.py``), in which case that file is
-passed as ``--config``. A ``config_file`` set by a config in the scanned tree is
-ignored with a warning, and a ``zizmor.yml`` in the tree with a note; findings are
+outside every git checkout and the scanned directory, ``utils/config_trust.py``),
+in which case that file is passed as ``--config``. A ``config_file`` set by a
+config inside a git checkout or the scanned directory is ignored with a warning, and a ``zizmor.yml`` in the tree with a note; findings are
 tuned with ASH suppressions, which are reported and counted. The operator's file
 may be inside the scanned tree, but one there that resolves outside the tree
 through a symbolic link fails the scan without running zizmor: zizmor quotes a
@@ -64,12 +65,12 @@ path leads to.
 zizmor's inline ``# zizmor: ignore[...]`` comments drop a finding the same way,
 so ASH also passes ``--no-ignores``, which turns off those comments and the
 ``ignore`` rules of a config. ``options.honor_inline_ignores: true`` turns them back
-on; it is honored only when the operator set it, and from a config in the
-scanned tree it is ignored with a warning.
+on; it is honored only when the operator set it, and from a config inside a git
+checkout or the scanned directory it is ignored with a warning.
 
 ``options.tool_version`` picks which zizmor is installed and which one on PATH is
 accepted. It is the operator's: ``resolve_config`` replaces a value from a config
-in the scanned tree, or one an MCP client delivered, with the operator's value or
+inside a git checkout or the scanned directory, or one an MCP client delivered, with the operator's value or
 the default constraint, and names it in a warning
 (``config/tool_config_trust.confine_tool_versions``).
 
@@ -398,8 +399,8 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
                 "A relative path is taken from the directory of the config file "
                 "that sets it, or from the working directory for --config-overrides, "
                 "not from the source directory; an absolute path is used as given. "
-                "Honored only when set by "
-                "--config-overrides or a config file outside the scanned tree; "
+                "Honored only when set by --config-overrides or a config file "
+                "outside every git checkout and the scanned directory; "
                 "otherwise it runs `zizmor --no-config`, so a `zizmor.yml` or "
                 "`.github/zizmor.yml` in the scanned repository is not read."
             ),
@@ -426,8 +427,8 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
                 "unchanged, and zizmor may "
                 "call the GitHub API with the token. ASH never reads or logs the "
                 "token. Honored only when set by --config-overrides or a config "
-                "file outside the scanned tree, and ignored, with a warning, when "
-                "ASH runs in offline mode."
+                "file outside every git checkout and the scanned directory, and "
+                "ignored, with a warning, when ASH runs in offline mode."
             ),
         ),
     ] = False
@@ -439,9 +440,9 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
                 "`ignore` rules of the operator's `config_file`. Off by default: "
                 "ASH runs `zizmor --no-ignores`, so every finding reaches ASH, "
                 "where suppressions are reported and counted. Honored only when "
-                "set by --config-overrides or a config file outside the scanned "
-                "tree; from a config in the scanned tree it is ignored with a "
-                "warning."
+                "set by --config-overrides or a config file outside every git "
+                "checkout and the scanned directory; from a config inside one it "
+                "is ignored with a warning."
             ),
         ),
     ] = False
@@ -453,8 +454,9 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
                 "Version constraint for zizmor installation, in pip requirement "
                 "syntax. The default below is the constraint the scanner enforces. "
                 "Another value is honored only when set by --config-overrides or a "
-                "config file outside the scanned tree; from a config in the scanned "
-                "tree it is ignored with a warning and the default applies."
+                "config file outside every git checkout and the scanned directory; "
+                "from a config inside one it is ignored with a warning and the "
+                "default applies."
             )
         ),
     ] = ZIZMOR_DEFAULT_VERSION_CONSTRAINT
@@ -548,8 +550,8 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         """``tool_version``, which only the operator sets.
 
         The constraint chooses which zizmor ``uv tool install`` fetches and which
-        one already on PATH is accepted, so a config in the scanned tree could pin a
-        release that lacks audits or that ASH's output handling was never checked
+        one already on PATH is accepted, so a config inside a git checkout or the
+        scanned directory could pin a release that lacks audits or that ASH's output handling was never checked
         against. ``resolve_config`` replaces a value from such a config with the
         operator's or the default (``config/tool_config_trust.confine_tool_versions``),
         so this reads the option as every uv-installed scanner does.
@@ -675,11 +677,12 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             if not self._online_refusal_logged:
                 self._online_refusal_logged = True
                 self._plugin_log(
-                    "scanners.zizmor.options.online_audits is true in a config in "
-                    "the scanned tree or from an MCP client, so it is ignored: zizmor "
-                    "runs with --offline and without the GitHub token variables. Set "
-                    "it with --config-overrides or a config file outside the scanned "
-                    "tree.",
+                    "scanners.zizmor.options.online_audits is true in a config inside "
+                    "a git checkout or the scanned directory, or from an MCP client, "
+                    "so it is ignored: zizmor runs with --offline and without the "
+                    "GitHub token variables. Set it with --config-overrides or a "
+                    "config file outside every git checkout and the scanned "
+                    "directory.",
                     level=logging.WARNING,
                 )
             return False
@@ -711,10 +714,11 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             self._ignores_refusal_logged = True
             self._plugin_log(
                 "scanners.zizmor.options.honor_inline_ignores is true in a config "
-                "in the scanned tree or from an MCP client, so it is ignored: zizmor "
-                "runs with --no-ignores and its ignore comments do not apply. Set "
-                "it with --config-overrides or a config file outside the scanned "
-                "tree, or suppress findings with ASH suppressions.",
+                "inside a git checkout or the scanned directory, or from an MCP "
+                "client, so it is ignored: zizmor runs with --no-ignores and its "
+                "ignore comments do not apply. Set it with --config-overrides or a "
+                "config file outside every git checkout and the scanned directory, "
+                "or suppress findings with ASH suppressions.",
                 level=logging.WARNING,
             )
         return False
@@ -894,8 +898,8 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 f"{', '.join(present)} in the scanned tree is not read: zizmor runs "
                 "with --no-config, so its findings are reported and tuned with ASH "
                 "suppressions. Set scanners.zizmor.options.config_file with "
-                "--config-overrides or a config file outside the scanned tree to "
-                "use a zizmor config.",
+                "--config-overrides or a config file outside every git checkout "
+                "and the scanned directory to use a zizmor config.",
                 level=logging.INFO,
             )
         return None

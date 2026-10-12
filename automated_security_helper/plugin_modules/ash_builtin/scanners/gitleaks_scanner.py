@@ -45,14 +45,14 @@ reported nor counted as suppressed. Findings are tuned with ASH suppressions,
 which are both, so the scanned tree does not configure gitleaks:
 
 * The config is the operator's ``options.config_file`` (set by
-  ``--config-overrides`` or a config file outside the scanned tree,
-  ``utils/config_trust.py``), else ``GITLEAKS_CONFIG`` or ``GITLEAKS_CONFIG_TOML``
+  ``--config-overrides`` or a config file outside every git checkout and the
+  scanned directory, ``utils/config_trust.py``), else ``GITLEAKS_CONFIG`` or ``GITLEAKS_CONFIG_TOML``
   from the operator's environment (outside the scanner sandbox, which does not
   pass them in), else a config ASH writes that extends gitleaks' default rules and
   adds nothing. It is always passed as ``--config`` except in the environment
   case, so gitleaks never falls through to ``<target>/.gitleaks.toml``. A
-  ``config_file`` or ``baseline_path`` set by a config in the scanned tree is
-  ignored with a warning, and a ``.gitleaks.toml`` or ``.ash/.gitleaks.toml`` in
+  ``config_file`` or ``baseline_path`` set by a config inside a git checkout or the
+  scanned directory is ignored with a warning, and a ``.gitleaks.toml`` or ``.ash/.gitleaks.toml`` in
   the tree with a note. An operator's file that does not exist fails the scan
   rather than falling back to the default rules.
 * ``.gitleaksignore``: gitleaks reads ``<scan path>/.gitleaksignore`` whatever
@@ -73,8 +73,8 @@ which are both, so the scanned tree does not configure gitleaks:
   makes the scan incomplete.
 * Inline ``gitleaks:allow`` comments drop a finding the same way, so ASH passes
   ``--ignore-gitleaks-allow``. ``options.honor_inline_ignores: true`` turns them
-  back on; it is honored only when the operator set it, and from a config in the
-  scanned tree it is ignored with a warning.
+  back on; it is honored only when the operator set it, and from a config inside a
+  git checkout or the scanned directory it is ignored with a warning.
 * A ``.gitleaksignore`` that is a symlink, not a regular file, or hard-linked
   stops the scanner before gitleaks runs (``_read_tree_ignore_file``): gitleaks
   opens the name, follows the link, and logs each line it cannot parse. ASH reads
@@ -345,7 +345,8 @@ class GitleaksScannerConfigOptions(ScannerOptionsBase):
                 "directory for --config-overrides, not from the source directory. "
                 "Its rules and [[allowlists]] apply on top of ASH suppressions. "
                 "Honored only when set by --config-overrides or a config file "
-                "outside the scanned tree. Unset, gitleaks uses GITLEAKS_CONFIG or "
+                "outside every git checkout and the scanned directory. Unset, "
+                "gitleaks uses GITLEAKS_CONFIG or "
                 "GITLEAKS_CONFIG_TOML from the environment if one is set, else its "
                 "default rules; a .gitleaks.toml in the scanned repository is not "
                 "read. A path that does not exist fails the scan."
@@ -359,8 +360,8 @@ class GitleaksScannerConfigOptions(ScannerOptionsBase):
                 "Path to a gitleaks JSON report whose findings gitleaks ignores "
                 "(gitleaks --baseline-path). A relative path is taken as for "
                 "config_file. Honored only when set by --config-overrides or a "
-                "config file outside the scanned tree. A path that does not exist "
-                "fails the scan."
+                "config file outside every git checkout and the scanned directory. "
+                "A path that does not exist fails the scan."
             ),
         ),
     ] = None
@@ -371,9 +372,9 @@ class GitleaksScannerConfigOptions(ScannerOptionsBase):
                 "Honor gitleaks' inline `gitleaks:allow` comments. Off by default: "
                 "ASH runs `gitleaks --ignore-gitleaks-allow`, so every finding "
                 "reaches ASH, where suppressions are reported and counted. Honored "
-                "only when set by --config-overrides or a config file outside the "
-                "scanned tree; from a config in the scanned tree it is ignored "
-                "with a warning."
+                "only when set by --config-overrides or a config file outside every "
+                "git checkout and the scanned directory; from a config inside one "
+                "it is ignored with a warning."
             ),
         ),
     ] = False
@@ -383,9 +384,9 @@ class GitleaksScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "Skip files larger than this many megabytes (gitleaks "
                 "--max-target-megabytes). Unset scans every file. Honored only "
-                "when set by --config-overrides or a config file outside the "
-                "scanned tree; from a config in the scanned tree it is ignored "
-                "with a warning."
+                "when set by --config-overrides or a config file outside every git "
+                "checkout and the scanned directory; from a config inside one it is "
+                "ignored with a warning."
             ),
             ge=1,
         ),
@@ -536,11 +537,11 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             self._ignores_refusal_logged = True
             self._plugin_log(
                 "scanners.gitleaks.options.honor_inline_ignores is true in a config "
-                "in the scanned tree or from an MCP client, so it is ignored: "
-                "gitleaks runs with --ignore-gitleaks-allow and gitleaks:allow "
-                "comments do not apply. Set it with --config-overrides or a config "
-                "file outside the scanned tree, or suppress findings with ASH "
-                "suppressions.",
+                "inside a git checkout or the scanned directory, or from an MCP "
+                "client, so it is ignored: gitleaks runs with --ignore-gitleaks-allow "
+                "and gitleaks:allow comments do not apply. Set it with "
+                "--config-overrides or a config file outside every git checkout and "
+                "the scanned directory, or suppress findings with ASH suppressions.",
                 level=logging.WARNING,
             )
         return False
@@ -548,8 +549,8 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     def _max_target_megabytes(self) -> Optional[int]:
         """The size above which gitleaks skips a file, when the operator set one.
 
-        From a config in the scanned tree it is ignored: a tree that set it could
-        have gitleaks skip any file it holds, unreported.
+        From a config inside a git checkout or the scanned directory it is ignored:
+        a tree that set it could have gitleaks skip any file it holds, unreported.
         """
         value = self._options().max_target_megabytes
         if not value:
@@ -563,9 +564,10 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             self._size_refusal_logged = True
             self._plugin_log(
                 f"scanners.gitleaks.options.max_target_megabytes ({value}) is set "
-                "in a config in the scanned tree or from an MCP client, so it is "
-                "ignored and gitleaks scans files of every size. Set it with "
-                "--config-overrides or a config file outside the scanned tree.",
+                "in a config inside a git checkout or the scanned directory, or "
+                "from an MCP client, so it is ignored and gitleaks scans files of "
+                "every size. Set it with --config-overrides or a config file "
+                "outside every git checkout and the scanned directory.",
                 level=logging.WARNING,
             )
         return None
@@ -600,8 +602,8 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 f"{', '.join(present)} in the scanned tree is not read: gitleaks runs "
                 "with its default rules, so its findings are reported and tuned "
                 "with ASH suppressions. Set scanners.gitleaks.options.config_file "
-                "with --config-overrides or a config file outside the scanned tree "
-                "to use a gitleaks config.",
+                "with --config-overrides or a config file outside every git checkout "
+                "and the scanned directory to use a gitleaks config.",
                 level=logging.INFO,
             )
         # Outside the scanned tree, new for this run and removed when it ends

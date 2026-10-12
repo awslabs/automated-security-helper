@@ -29,8 +29,8 @@ An operator's own rules
 -----------------------
 cfn-guard prints a rules file it cannot parse, whole, and follows a symlinked file in
 a rules directory. So ``rules_paths`` is honored only from the operator
-(``utils/config_trust.operator_paths``); from a config in the scanned tree it is
-ignored with a warning, and an empty ``rule_sets`` then falls back to the default
+(``utils/config_trust.operator_paths``); from a config inside a git checkout or the
+scanned directory it is ignored with a warning, and an empty ``rule_sets`` then falls back to the default
 set rather than leaving nothing to evaluate. ASH expands a directory itself, as
 cfn-guard would (``.guard`` and ``.ruleset`` files at any depth), refuses a file that
 resolves outside the directory the operator named, reads each one through
@@ -182,8 +182,9 @@ class CfnGuardScannerConfigOptions(ScannerOptionsBase):
                 "['wa-Security-Pillar', 'cis-aws-benchmark-level-1']. Defaults to the "
                 "Well-Architected Security Pillar set. Set to [] to evaluate only "
                 "rules_paths. Honored only when set by --config-overrides or a "
-                "config file outside the scanned tree; otherwise it is ignored with "
-                "a warning and the default set is evaluated."
+                "config file outside every git checkout and the scanned directory; "
+                "otherwise it is ignored with a warning and the default set is "
+                "evaluated."
             ),
         ),
     ] = [DEFAULT_RULE_SET]
@@ -196,7 +197,8 @@ class CfnGuardScannerConfigOptions(ScannerOptionsBase):
                 "sets it, or from the working directory for --config-overrides, not "
                 "from the source directory. Evaluated in addition to "
                 "rule_sets. Honored only when set by --config-overrides or a config "
-                "file outside the scanned tree: cfn-guard prints a rules file it "
+                "file outside every git checkout and the scanned directory: "
+                "cfn-guard prints a rules file it "
                 "cannot parse, so a path the scanned repository chose could put any "
                 "file the scan can read into the report. Set elsewhere, it is "
                 "ignored with a warning, and an empty rule_sets falls back to "
@@ -301,8 +303,9 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         (measured with 3.2.1: a file that is not rules, given as ``--rules``, came
         back whole on stderr), and that error reaches the scan's results. So the list is
         used only when the operator set it (``config_trust.operator_paths``; the
-        operator may keep rules in the tree). A list from a config in the scanned
-        tree, or from an MCP client, is ignored with a warning, and the second
+        operator may keep rules in the tree). A list from a config inside a git
+        checkout or the scanned directory, or from an MCP client, is ignored with a
+        warning, and the second
         value is True so ``_selected_rules`` can fall back to the default set.
 
         A named file is read as is. A directory is walked as cfn-guard walks one,
@@ -475,8 +478,8 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         reported nor counted as suppressed: ``rule_sets: [wa-Reliability-Pillar]``
         in the scanned tree's ``.ash/.ash.yaml`` turned 24 findings on the fixture
         into 9, losing every S3 public-access, encryption and logging finding. A
-        value from a config in the scanned tree or from an MCP client is ignored
-        with a warning, as ``rules_paths`` is; one equal to the default is used.
+        value from a config inside a git checkout or the scanned directory, or from
+        an MCP client, is ignored with a warning, as ``rules_paths`` is; one equal to the default is used.
         """
         value = list(self._options().rule_sets)
         if value == [DEFAULT_RULE_SET] or set_by_operator(
