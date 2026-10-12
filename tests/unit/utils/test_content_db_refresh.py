@@ -862,7 +862,13 @@ def _grype_scanner(context):
 
 
 def _trivy_scanner(context, monkeypatch):
-    """trivy-repo with its run replaced: what is asserted is the command it builds."""
+    """trivy-repo with its run replaced: what is asserted is the command it builds.
+
+    The spawn under TrivyScannerBase._run_subprocess is what is replaced, as in
+    TestScannersUseThePreparedDatabase: trivy and trivy-repo add the database
+    update, its skip flags, the cache directory and the scan cache's backend there.
+    """
+    from automated_security_helper.base.scanner_plugin import ScannerPluginBase
     from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
         TrivyRepoScanner,
         TrivyRepoScannerConfig,
@@ -873,9 +879,9 @@ def _trivy_scanner(context, monkeypatch):
     monkeypatch.setattr(scanner, "validate_plugin_dependencies", lambda: True)
     commands = []
     monkeypatch.setattr(
-        scanner,
+        ScannerPluginBase,
         "_run_subprocess",
-        lambda command, **kwargs: commands.append(list(command)) or {},
+        lambda self, command, **kwargs: commands.append(list(command)) or {},
     )
     return scanner, commands
 
