@@ -139,18 +139,32 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
 
     # Env vars ASH layers onto trivy's subprocess, kept on the instance so
     # concurrent scanners do not race on os.environ. Nothing fills it from config;
-    # the database update reads only the host's environment (_shared_update_flags).
+    # the cache directory comes from the host's environment only (_trivy_cache_dir).
     extra_env: Annotated[Dict[str, str], Field(default_factory=dict)]
 
     # The in-tree trivy input files already reported as ignored.
     _warned_inputs: Set[str] = PrivateAttr(default_factory=set)
 
-    # The cache directory the last online scan was pointed at (--cache-dir), so
-    # the staleness probe reads the same one (content_database_probe_context).
-    _pinned_cache_dir: Optional[str] = PrivateAttr(default=None)
-    # The --config file the last scan passed trivy (_trivy_config_file), for the
-    # same reason: a trivy.yaml can name the cache (``cache.dir``).
+    # The cache directory a scan is pointed at (--cache-dir) is kept in the base
+    # class's _content_db_cache_dir, so the staleness probe reads the same one
+    # (content_database_probe_context). The --config file the last scan passed
+    # trivy (_trivy_config_file) is kept for the same reason: a trivy.yaml can name
+    # the cache (``cache.dir``).
     _scan_config_file: Optional[str] = PrivateAttr(default=None)
+
+    def _trivy_cache_dir(self) -> Path:
+        """trivy's cache directory, resolved as trivy resolves it on this host.
+
+        ``content_db_refresh.default_cache_dir`` (``TRIVY_CACHE_DIR``, else
+        ``XDG_CACHE_HOME`` on Linux, else the platform default), from the host's
+        environment only: the database update runs unsandboxed, so nothing a
+        scanner layers on (``extra_env``) may choose where it writes, and the scan
+        and the probe read where the update wrote. Named to every scan, online and
+        offline (``_run_subprocess``), and to the staleness probe: the sandbox does
+        not pass ``XDG_CACHE_HOME``, and a sandboxed trivy left to its own default
+        would read another cache.
+        """
+        return Path(os.path.abspath(default_cache_dir("trivy", snapshot_environ())))
 
     def _trivy_config_file(self) -> str:
         """The trivy config file a scan passes as ``--config``, online and offline.
@@ -314,7 +328,8 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         """Bring trivy's shared caches up to date first, then run ``command``.
 
         ``command`` gains, in place so the invocation ASH records is the one that
-        ran, the flags that skip the update, the cache directory the update wrote,
+        ran, the flags that skip the update (online), the cache directory
+        (``_trivy_cache_dir``, online and offline, the one the update wrote),
         ``--cache-backend=memory`` and ``--exit-code=0``. trivy keeps its scan cache
         (``fanal/fanal.db``) in the cache directory unless told otherwise, ``trivy
         repository`` included, and a sandbox may mount that directory read-only:
@@ -330,6 +345,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         ``trivy-repo`` records the exit code in its SARIF invocation.
         """
         flags = self._shared_update_flags(command)
+        cache = self._trivy_cache_dir()
+        self._content_db_cache_dir = cache
+        flags.append(f"--cache-dir={cache.as_posix()}")
         if not any(a.startswith("--cache-backend") for a in command):
             flags.append("--cache-backend=memory")
         flags.append("--exit-code=0")
@@ -360,8 +378,8 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         skip it: ``--skip-db-update``, ``--skip-check-update`` when ``misconfig``
         needs the checks bundle, and ``--skip-java-db-update``, since fs and
         repository scans never open the Java database (trivy 0.75). It is pointed
-        at the cache the update wrote (``--cache-dir``), which is also the one the
-        sandbox mounts. The scan-time staleness check
+        at the cache the update wrote (``--cache-dir``, ``_trivy_cache_dir``), which
+        is also the one the sandbox mounts. The scan-time staleness check
         (``utils/content_db_staleness.py``) still measures the database after.
         An update the operator's own trivy settings turn off (``TRIVY_SKIP_DB_UPDATE``,
         or ``db.skip-update`` in the operator's config file) is left out, with a
@@ -376,9 +394,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")
         options: Any = self.config.options  # type: ignore[union-attr]
         wants_checks = "misconfig" in (options.scanners or [])
-        # From the host's environment only: the update runs unsandboxed, so nothing
-        # a scanner layers on (extra_env) may choose where it writes.
-        cache = default_cache_dir("trivy", snapshot_environ())
+        cache = self._trivy_cache_dir()
         # The operator's trivy.yaml (options.config_file or TRIVY_CONFIG), under the
         # rule the scan's --config follows (_trivy_config_file), so a database
         # mirror it names applies to the update; otherwise prepare_content_db
@@ -399,27 +415,28 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             executable=find_executable(command[0]),
             config_file=operator_config,
         )
-        self._pinned_cache_dir = Path(os.path.abspath(cache)).as_posix()
         return [
             "--skip-db-update",
             "--skip-java-db-update",
             *(["--skip-check-update"] if wants_checks else []),
-            f"--cache-dir={self._pinned_cache_dir}",
         ]
 
     def content_database_probe_context(self):  # type: ignore[no-untyped-def]
         """The base's probe context, pointed at the cache the scan read.
 
-        An online scan is given ``--cache-dir`` (``_shared_update_flags``), which is
-        not where trivy looks on its own on every platform: on Windows trivy's
-        default is ``%LocalAppData%\\trivy``. The post-scan ``trivy version`` probe
-        runs without that flag, so it gets ``TRIVY_CACHE_DIR`` set to the same
-        directory instead. Offline nothing is pinned and both use trivy's default.
+        Every scan is given ``--cache-dir`` (``_run_subprocess``, from
+        ``_trivy_cache_dir``), which is not where a sandboxed trivy looks on its
+        own: the sandbox drops ``XDG_CACHE_HOME``. The ``trivy version`` probe gets
+        the same directory, as ``--cache-dir`` (``content_db_staleness
+        ._built_from_trivy``) and as ``TRIVY_CACHE_DIR``. A probe that runs before
+        any scan, the offline dependency check, gets the directory the scan will
+        be given. It also reads through the config file the scan passed, or the one
+        it will pass.
         """
         context = super().content_database_probe_context()
-        if self._pinned_cache_dir:
-            context.env = {**context.env, "TRIVY_CACHE_DIR": self._pinned_cache_dir}
-            context.cache_dir = self._pinned_cache_dir
+        cache = (self._content_db_cache_dir or self._trivy_cache_dir()).as_posix()
+        context.env = {**context.env, "TRIVY_CACHE_DIR": cache}
+        context.cache_dir = cache
         context.config_file = self._scan_config_file or self._operator_config_file()
         return context
 

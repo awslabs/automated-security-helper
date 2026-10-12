@@ -241,12 +241,12 @@
     `content_db_staleness_offline_image_default: false`, or either form of
     `--allow-stale-content-db`, turns that off (see
     `docs/content/docs/building-your-own-image.md`). The nix shell updates the
-    database on every entry. Online, trivy and trivy-repo keep the database in
-    `TRIVY_CACHE_DIR` when it is set, and otherwise in `~/.cache/trivy`
-    (`~/Library/Caches/trivy` on macOS) on every platform. trivy-repo outside
-    `--sandbox` used trivy's own default before, which is `%LocalAppData%\trivy` on
-    Windows and `$XDG_CACHE_HOME/trivy` when that is set, so there the first online
-    scan downloads the database again; set `TRIVY_CACHE_DIR` to keep one location.
+    database on every entry. trivy and trivy-repo keep the database where trivy
+    itself does on the host (`TRIVY_CACHE_DIR`, else `$XDG_CACHE_HOME/trivy` on
+    Linux, else `~/.cache/trivy`, `~/Library/Caches/trivy` on macOS and
+    `%LocalAppData%\trivy` on Windows), and name it to the update, to every scan
+    with `--cache-dir`, online and offline, and to the post-scan check, so all three
+    read one database, sandboxed or not.
     Both scanners run with `--exit-code=0`, so `TRIVY_EXIT_CODE` or an `exit-code`
     in the operator's trivy.yaml no longer turns a scan with findings into a failure.
     An operator's `TRIVY_SKIP_DB_UPDATE=true` (or `db.skip-update: true` in the

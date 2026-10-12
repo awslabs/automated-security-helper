@@ -1717,15 +1717,25 @@ def test_the_staleness_probe_reads_the_cache_the_scan_was_given(
     assert probe.cache_dir == given
 
 
-def test_an_offline_probe_reads_trivys_own_default(tmp_path, monkeypatch):
-    """Offline nothing is updated or pinned, so the probe is left to trivy."""
+def test_an_offline_probe_reads_the_cache_the_scan_is_given(tmp_path, monkeypatch):
+    """Offline nothing is updated, but the scan is still given the cache, and the
+    probe reads that one: before the scan (the offline dependency check) and
+    after it."""
     _update_env(tmp_path, monkeypatch, _FakeTrivy())
     monkeypatch.delenv("TRIVY_CACHE_DIR")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
     scanner = _scanner(tmp_path, offline=True)
-    scanner._run_subprocess(command=["trivy", "fs", "/t"], results_dir=tmp_path)
-    probe = scanner.content_database_probe_context()
-    assert "TRIVY_CACHE_DIR" not in probe.env
-    assert probe.cache_dir is None
+    expected = refresh.default_cache_dir("trivy").as_posix()
+    before = scanner.content_database_probe_context()
+    command = ["trivy", "fs", "/t"]
+    scanner._run_subprocess(command=command, results_dir=tmp_path)
+    (given,) = [a.split("=", 1)[1] for a in command if a.startswith("--cache-dir=")]
+    after = scanner.content_database_probe_context()
+    assert given == expected
+    for probe in (before, after):
+        assert probe.cache_dir == given
+        assert probe.env["TRIVY_CACHE_DIR"] == given
 
 
 def test_two_concurrent_scanners_never_update_at_the_same_time(tmp_path, monkeypatch):
@@ -1765,7 +1775,18 @@ def test_offline_runs_no_update(tmp_path, monkeypatch):
     scanner._run_subprocess(command=["trivy", "fs", "/t"], results_dir=tmp_path)
 
     assert fake.calls == []
-    assert ran == [["trivy", "fs", "--cache-backend=memory", "--exit-code=0", "/t"]]
+    # Still pointed at the cache: the sandbox drops XDG_CACHE_HOME, so trivy left to
+    # its own default could read another one.
+    assert ran == [
+        [
+            "trivy",
+            "fs",
+            _cache_flag(tmp_path),
+            "--cache-backend=memory",
+            "--exit-code=0",
+            "/t",
+        ]
+    ]
 
 
 @pytest.mark.parametrize("offline", [False, True])

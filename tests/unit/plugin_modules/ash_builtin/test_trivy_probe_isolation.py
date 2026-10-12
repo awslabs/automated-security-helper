@@ -4,28 +4,23 @@
 """The scan, the update and the database probes agree on one cache, and the probes
 read nothing from the scanned tree.
 
-One gap waits on the content-database probe helper in #792 and is marked
-xfail(strict=True): when the helper lands and the trivy scanners use it, it
-passes, strict xfail turns that into a failure, and the mark comes off.
-
-* The scan is given ``--cache-dir`` from ``content_db_refresh.default_cache_dir``,
-  which is ``TRIVY_CACHE_DIR`` or the platform default under ``$HOME``
-  (``~/.cache/trivy``, ``~/Library/Caches/trivy`` on macOS) and leaves out
-  ``XDG_CACHE_HOME``, which the sandbox does not pass. trivy outside a sandbox
-  follows ``XDG_CACHE_HOME``, and the post-scan staleness probe runs ``trivy
-  version`` with no ``--cache-dir``, so the probe can read a different cache from
-  the one the scan read. Offline scans pass no ``--cache-dir`` at all.
-
-The other is closed here. The offline dependency check
-(``TrivyScanner.validate_plugin_dependencies``) and the post-scan staleness probe
-both ran ``trivy version`` from ASH's working directory with no ``--config``. A
-``trivy.yaml`` there was loaded, and its ``cache.dir`` decided which database they
-measured (trivy 0.75.0: a planted ``cache.dir`` with a ``metadata.json`` dated 2099
-was reported as the database; on 2026-10-11 a ``trivy.yaml`` in the working
-directory naming an empty ``cache.dir`` made ``trivy version`` report no database
-while ``--config`` with an empty file reported the real one). Both now run from an
-empty directory with an explicit ``--config``: the file the scan passed trivy,
-or an empty one.
+* Every scan, online and offline, is given ``--cache-dir`` from
+  ``content_db_refresh.default_cache_dir``, which resolves the cache as trivy does
+  on the host: ``TRIVY_CACHE_DIR``, else ``XDG_CACHE_HOME`` on Linux, else the
+  platform default. The sandbox does not pass ``XDG_CACHE_HOME``, so without the
+  flag a sandboxed trivy would read another cache. The staleness probe gets the
+  same directory (``--cache-dir`` and ``TRIVY_CACHE_DIR``), so it measures the
+  database the scan read.
+* The offline dependency check (``TrivyScanner.validate_plugin_dependencies``) and
+  the post-scan staleness probe ran ``trivy version`` from ASH's working directory
+  with no ``--config``. A ``trivy.yaml`` there was loaded, and its ``cache.dir``
+  decided which database they measured (trivy 0.75.0: a planted ``cache.dir`` with
+  a ``metadata.json`` dated 2099 was reported as the database; on 2026-10-11 a
+  ``trivy.yaml`` in the working directory naming an empty ``cache.dir`` made
+  ``trivy version`` report no database while ``--config`` with an empty file
+  reported the real one). Both now run from a directory outside the scanned tree
+  (``ProbeContext.cwd``, or the filesystem root of the temporary directory) with an
+  explicit ``--config``: the file the scan passed trivy, or the empty one ASH ships.
 """
 
 from __future__ import annotations
@@ -52,11 +47,6 @@ from automated_security_helper.utils.config_trust import record_provenance
 
 PluginContext.model_rebuild()
 
-_PENDING = (
-    "waits for the content-database probe helper in #792: the staleness probe given "
-    "the scan's cache dir, and that cache dir used offline too"
-)
-
 
 def _scanner(tmp_path: Path, source: Path, **options) -> TrivyScanner:
     config = AshConfig()
@@ -77,7 +67,6 @@ def _scanner(tmp_path: Path, source: Path, **options) -> TrivyScanner:
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="trivy's XDG rule is Linux's"
 )
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_PENDING)
 @pytest.mark.parametrize("offline", [False, True], ids=["online", "offline"])
 def test_the_scan_and_the_staleness_probe_read_one_cache(
     tmp_path, monkeypatch, offline
