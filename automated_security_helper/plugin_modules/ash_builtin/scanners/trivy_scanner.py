@@ -68,8 +68,10 @@ declared 24h.
   before trivy runs.
 * Online or offline, trivy scans never contact package registries: every scan
   gets ``--offline-scan`` (``SCAN_FLAGS`` in ``_trivy_scanner_base.py``), and the
-  database refresh is the separate step above. Every scan also gets
-  ``--skip-version-check``, so trivy does not ask about new versions either.
+  database refresh is the separate step above. trivy does not ask about new
+  versions either: online every scan gets ``--skip-version-check``
+  (``ONLINE_FLAGS``), and offline ``TRIVY_SKIP_VERSION_CHECK`` in its environment
+  turns that check off (``utils/offline_tool_env.py``).
 
 The database is only read by ``vuln``. With ``vuln`` turned off nothing is
 measured and the offline database check is skipped.

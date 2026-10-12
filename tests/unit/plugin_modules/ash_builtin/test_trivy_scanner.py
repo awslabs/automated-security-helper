@@ -631,13 +631,34 @@ def test_every_scan_is_offline_for_package_registries(tmp_path, offline, kind):
 
 @pytest.mark.parametrize("offline", [False, True])
 @pytest.mark.parametrize("kind", ["trivy", "trivy-repo"])
-def test_every_scan_skips_trivys_version_check(tmp_path, offline, kind):
+def test_every_scan_turns_trivys_version_check_off(
+    tmp_path, monkeypatch, offline, kind
+):
+    """Online by --skip-version-check; offline by TRIVY_SKIP_VERSION_CHECK in trivy's
+    environment (utils/offline_tool_env.py), which a trivy too old to know the flag
+    ignores, where it would refuse the whole command over the flag."""
     if kind == "trivy":
         scanner = _scanner(tmp_path, offline=offline)
     else:
         scanner = _repo_scanner(tmp_path, offline=offline)
     args = scanner._resolve_arguments(target="/t", results_file="/r.sarif")
-    assert args.count("--skip-version-check") == 1
+    assert args.count("--skip-version-check") == (0 if offline else 1)
+    if not offline:
+        return
+    envs = []
+
+    def run(*_args, **kwargs):
+        envs.append(kwargs.get("env") or {})
+        return {"returncode": 0, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(
+        "automated_security_helper.utils.subprocess_utils."
+        "run_command_with_output_handling",
+        run,
+    )
+    scanner._run_subprocess(command=list(args), results_dir=tmp_path / "results")
+    (env,) = envs
+    assert env.get("TRIVY_SKIP_VERSION_CHECK") == "true"
 
 
 def test_a_stale_report_is_removed_before_the_run(tmp_path):
@@ -727,7 +748,8 @@ def test_trivy_repo_records_each_targets_own_exit_code(tmp_path, monkeypatch):
 
 def test_the_community_plugin_command_line_is_unchanged(tmp_path):
     """trivy-repo's flags, in order, as before the shared base existed, plus
-    --offline-scan and --skip-version-check, which every trivy scan gets."""
+    --offline-scan, which every trivy scan gets, and --skip-version-check, which
+    every online one gets."""
     scanner = TrivyRepoScanner(
         context=_context(tmp_path), config=TrivyRepoScannerConfig()
     )
@@ -1163,8 +1185,9 @@ def _repo_scanner(tmp_path: Path, **options) -> TrivyRepoScanner:
 
 def test_the_community_plugin_offline_command_line_is_unchanged(tmp_path):
     """Every flag trivy-repo can emit, in the order it always emitted them, with
-    --offline-scan and --skip-version-check, which every trivy scan gets, ahead of
-    the offline flags."""
+    --offline-scan, which every trivy scan gets, ahead of the offline flags. Offline
+    there is no --skip-version-check: TRIVY_SKIP_VERSION_CHECK turns that check off
+    (test_every_scan_turns_trivys_version_check_off)."""
     scanner = _repo_scanner(tmp_path, offline=True, severity_threshold="MEDIUM")
     args = scanner._resolve_arguments(target="/t", results_file="/r.sarif")
     assert args == [
@@ -1178,7 +1201,6 @@ def test_the_community_plugin_offline_command_line_is_unchanged(tmp_path):
         "--ignore-unfixed",
         "--disable-telemetry",
         "--offline-scan",
-        "--skip-version-check",
         "--skip-db-update",
         "--skip-java-db-update",
         "--skip-check-update",

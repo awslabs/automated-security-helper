@@ -255,8 +255,9 @@
     Both scanners pass `--offline-scan` on every scan, online too: trivy scans never
     contact package registries, and the database refresh is a separate step. Maven
     dependencies are resolved from the scanned tree and `~/.m2/repository` only.
-    Every scan also passes `--skip-version-check`, so trivy does not check for new
-    versions.
+    trivy does not check for new versions either: online every scan passes
+    `--skip-version-check`, and offline `TRIVY_SKIP_VERSION_CHECK=true` turns the
+    same check off.
 
   Options that name something a tool executes or loads are not taken from a config
   file inside the scanned tree: actionlint's `shellcheck` and `pyflakes` accept only

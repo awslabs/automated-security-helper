@@ -85,10 +85,17 @@ C = TypeVar("C", bound=ScannerPluginConfigBase)
 #: pom.xml requested its parent and dependency POMs from the repository the pom.xml
 #: declares and from Maven Central, and with the flag requested nothing. trivy then
 #: resolves Maven dependencies from the scanned tree and the local Maven repository
-#: (``~/.m2/repository``) only. ``trivy --skip-version-check``: without it trivy asks
-#: check.trivy.dev about new versions and announcements (measured through a proxy on
-#: 127.0.0.1, online), which a scan has no use for.
-SCAN_FLAGS = ("--offline-scan", "--skip-version-check")
+#: (``~/.m2/repository``) only.
+SCAN_FLAGS = ("--offline-scan",)
+
+#: The flag an online scan gets so trivy does not check for a new version. Without
+#: it trivy asks check.trivy.dev about new versions and announcements (measured
+#: through a proxy on 127.0.0.1, online), which a scan has no use for. Offline the
+#: same check is turned off by ``TRIVY_SKIP_VERSION_CHECK`` in the environment
+#: instead (``utils/offline_tool_env.py``, applied by ``PluginBase._run_subprocess``):
+#: a trivy too old to know the flag refuses the whole command over it, and ignores
+#: the variable.
+ONLINE_FLAGS = ("--skip-version-check",)
 
 #: The flags that skip trivy's own updates offline. ``trivy --skip-db-update`` makes trivy
 #: use whatever vulnerability database is in its cache, of any age; ASH's scan-time
@@ -554,7 +561,13 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         for flag in SCAN_FLAGS:
             self.args.extra_args.append(ToolExtraArg(key=flag, value=None))
 
-        if self._offline():
+        if not self._offline():
+            for flag in ONLINE_FLAGS:
+                self.args.extra_args.append(ToolExtraArg(key=flag, value=None))
+        else:
+            # trivy's version check and telemetry are turned off by
+            # TRIVY_SKIP_VERSION_CHECK and TRIVY_DISABLE_TELEMETRY, whatever
+            # disable_telemetry says (utils/offline_tool_env.py); see ONLINE_FLAGS.
             for flag in OFFLINE_FLAGS:
                 self.args.extra_args.append(ToolExtraArg(key=flag, value=None))
 
