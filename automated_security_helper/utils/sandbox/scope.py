@@ -20,7 +20,6 @@ from __future__ import annotations
 import contextvars
 import platform
 import threading
-import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,8 +36,8 @@ from automated_security_helper.utils.sandbox.backends import (
 )
 from automated_security_helper.utils.sandbox.fs_guard import (
     register_writable_root,
+    release_with_holder,
     release_writable_root,
-    release_writable_root_later,
     sweep_writable,
 )
 from automated_security_helper.utils.sandbox.policy import (
@@ -284,7 +283,8 @@ def scanner_sandbox_scope(
         read_path_scanners=read_path_scanners,
         env_scanners=env_scanners,
     )
-    weakref.finalize(scope, release_writable_root_later, results_root)
+    # Released when the scope is collected, or when the scan ends (run_roots).
+    release_with_holder(scope, results_root)
     return scope
 
 

@@ -3406,10 +3406,15 @@ def run_ash_scan(
     # Every write this run makes below the output directory, from ash.log on, is
     # guarded (fs_guard). The registration is this run's and is released when it
     # ends, so a process that runs many scans, as the MCP server does, does not
-    # keep guarding every output directory it ever wrote.
-    from automated_security_helper.utils.sandbox.fs_guard import writable_root
+    # keep guarding every output directory it ever wrote. run_roots releases the
+    # roots this run's PluginContexts and sandbox scopes registered at the same
+    # time, rather than whenever the collector reaches them.
+    from automated_security_helper.utils.sandbox.fs_guard import (
+        run_roots,
+        writable_root,
+    )
 
-    with writable_root(opts.output_dir):
+    with writable_root(opts.output_dir), run_roots():
         return _run_with_options(opts, scan_start_time)
 
 

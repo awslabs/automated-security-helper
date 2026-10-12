@@ -30,10 +30,12 @@ skipped them.
 from __future__ import annotations
 
 import collections
+import contextvars
 import errno
 import os
 import stat
 import threading
+import weakref
 
 try:
     import fcntl
@@ -41,7 +43,17 @@ except ImportError:  # Windows, where no sandbox backend exists
     fcntl = None  # type: ignore[assignment]
 from contextlib import contextmanager
 from pathlib import Path
-from typing import IO, Dict, FrozenSet, Iterable, Iterator, Optional, Tuple, Union
+from typing import (
+    IO,
+    Dict,
+    FrozenSet,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.output_dir_links import (
@@ -178,6 +190,44 @@ def release_writable_root_later(root: Path) -> None:
     The next registry call applies it.
     """
     _pending_releases.append(root)
+
+
+#: The releases of the objects that registered a root inside the current
+#: run_roots() block, so the block can make them when it ends. A ContextVar: the
+#: scan phase runs scanners through contextvars.copy_context(), so an object made in
+#: a worker thread is the run's too.
+_RUN_RELEASES: "contextvars.ContextVar[Optional[List[weakref.finalize]]]" = (
+    contextvars.ContextVar("ash_fs_guard_run_releases", default=None)
+)
+
+
+def release_with_holder(holder: object, root: Path) -> None:
+    """Release ``root``'s registration when ``holder`` is gone, or the run ends.
+
+    For a registration an object makes for itself (a PluginContext's output
+    directory, a scanner's sandbox scope). The release is a ``weakref.finalize`` on
+    ``holder``, and inside run_roots() the block makes it when it ends, whether or
+    not ``holder`` has been collected: an object in a reference cycle can outlive
+    its scan until the collector runs. A finalize runs once, so a holder collected
+    later releases nothing twice.
+    """
+    release = weakref.finalize(holder, release_writable_root_later, root)
+    releases = _RUN_RELEASES.get()
+    if releases is not None:
+        releases.append(release)
+
+
+@contextmanager
+def run_roots() -> Iterator[None]:
+    """One scan: every release_with_holder made inside is made when the block ends."""
+    releases: List[weakref.finalize] = []
+    token = _RUN_RELEASES.set(releases)
+    try:
+        yield
+    finally:
+        _RUN_RELEASES.reset(token)
+        for release in releases:
+            release()
 
 
 @contextmanager

@@ -171,6 +171,63 @@ def test_a_spawns_writable_directories_are_released_by_its_cleanup(make_scope):
     assert _holders() == before
 
 
+class TestARunReleasesWhatItsObjectsHeld:
+    """A scan's roots are released when the scan ends, not when collection runs.
+
+    A PluginContext or a scanner's sandbox scope can outlive its scan in a
+    reference cycle the collector has not reached yet. The finalizer is the
+    backstop; run_ash_scan releases them itself.
+    """
+
+    def test_a_context_still_alive_after_the_run_holds_nothing(self, tmp_path):
+        output = (tmp_path / "out").absolute()
+        before = fs_guard.registered_roots()
+
+        with fs_guard.run_roots():
+            context = _context(tmp_path, output)
+            assert output in fs_guard.registered_roots()
+
+        assert context is not None, "kept alive past the run on purpose"
+        assert fs_guard.registered_roots() == before
+
+    def test_two_sequential_scans_leave_only_the_running_one_guarded(
+        self, tmp_path, monkeypatch
+    ):
+        from automated_security_helper.interactions import run_ash_scan as module
+
+        lingering: list = []
+        seen_during: list = []
+
+        def scan(opts, _start):
+            # A context the scan leaves behind, as a reference cycle would.
+            lingering.append(_context(tmp_path, Path(opts.output_dir)))
+            seen_during.append(set(fs_guard.registered_roots()))
+            return None
+
+        monkeypatch.setattr(module, "_refuse_symlinked_output_dir", lambda opts: None)
+        monkeypatch.setattr(module, "_run_with_options", scan)
+        first = (tmp_path / "first").absolute()
+        second = (tmp_path / "second").absolute()
+        before = fs_guard.registered_roots()
+
+        module.run_ash_scan(source_dir=tmp_path, output_dir=first, show_summary=False)
+        module.run_ash_scan(source_dir=tmp_path, output_dir=second, show_summary=False)
+
+        assert first not in seen_during[1], "the first scan's root was still held"
+        assert second in seen_during[1]
+        assert len(lingering) == 2
+        assert fs_guard.registered_roots() == before
+
+
+def _context(source: Path, output: Path) -> PluginContext:
+    return PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=output / ASH_WORK_DIR_NAME,
+        config=AshConfig(project_name="roots"),
+    )
+
+
 @pytest.fixture
 def logger_name():
     """A logger of the test's own, its handlers closed afterwards."""
