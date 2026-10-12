@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -319,6 +320,50 @@ def test_remote_base_of_a_refused_root_is_refused(_server):
 
     _write(_server["other"] / "b.yaml", TAGGED)
     root = _write(_server["other"] / "a.yaml", "extends: b.yaml\n")
+
+    got = mcp_get_config(config_path=str(root), session_id=SESSION)
+    validated = mcp_validate_config(config_path=str(root), session_id=SESSION)
+    entry, outcomes = _scan(_server["target"], root, SESSION)
+
+    assert got.get("error_type") == ENV_REFUSED, got
+    assert ENV_REFUSED in [e["type"] for e in validated["errors"]], validated
+    assert isinstance(outcomes[-1], ASHConfigEnvNotResolvedError), outcomes
+    assert "b.yaml" in str(outcomes[-1])
+    assert not _carries_probe([got, validated, str(outcomes[-1]), entry.to_dict()])
+
+
+@pytest.fixture
+def set_aside_base(_server, monkeypatch) -> Path:
+    """A base using ``!ENV`` in a directory the operator set aside, beside a root that is not.
+
+    The set-aside directory is inside the root's own directory, so the base is
+    inside the confinement root and the only thing that can refuse it is the
+    file that names it.
+    """
+    shared = _server["other"] / "shared"
+    monkeypatch.setenv(
+        "ASH_MCP_ALLOWED_CONFIG_ROOTS",
+        os.pathsep.join([str(_server["operator"]), str(shared)]),
+    )
+    return _write(shared / "b.yaml", TAGGED)
+
+
+def test_remote_set_aside_base_resolves_env_on_its_own(_server, set_aside_base):
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+    got = mcp_get_config(config_path=str(set_aside_base), session_id=SESSION)
+
+    assert got.get("project_name") == PROBE, got
+
+
+def test_remote_set_aside_base_of_a_refused_root_is_refused(_server, set_aside_base):
+    """Every base of a refused file is refused: the file that names a base chose it."""
+    from automated_security_helper.cli.mcp_tools import (
+        mcp_get_config,
+        mcp_validate_config,
+    )
+
+    root = _write(_server["other"] / "a.yaml", "extends: shared/b.yaml\n")
 
     got = mcp_get_config(config_path=str(root), session_id=SESSION)
     validated = mcp_validate_config(config_path=str(root), session_id=SESSION)
