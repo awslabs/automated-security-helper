@@ -706,6 +706,19 @@ TOOL_CONFIG_BASE = (
     "    options:\n"
     "      config_file: /etc/an-operator-path.yaml\n"
 )
+#: A base config naming only relative tool config files, each fetched from the
+#: base commit.
+RELATIVE_TOOL_CONFIG_BASE = (
+    "# the base commit's config, naming relative tool config files\n"
+    "project_name: base\n"
+    "scanners:\n"
+    "  bandit:\n"
+    "    options:\n"
+    "      config_file: .ash/bandit.yaml\n"
+    "  grype:\n"
+    "    options:\n"
+    "      config_file: ./.ash/.grype.yaml\n"
+)
 BASE_BANDIT = "# bandit config at the base commit\nskips: []\n"
 BASE_GRYPE = "# grype config at the base commit\nignore: []\n"
 CHECKOUT_BANDIT = (
@@ -726,10 +739,13 @@ def _scan_config(repo: Repository, context, inputs) -> Path:
 
 
 def _tool_config_paths(config: Path) -> dict[str, Any]:
+    return _tool_config_paths_of(config.read_text(encoding="utf-8"))
+
+
+def _tool_config_paths_of(text: str) -> dict[str, Any]:
     from automated_security_helper.config.ash_config import load_yaml_config
 
-    with open(config, encoding="utf-8") as handle:
-        document = load_yaml_config(handle)
+    document = load_yaml_config(text)
     return {
         name: (section.get("options") or {}).get("config_file")
         for name, section in (document.get("scanners") or {}).items()
@@ -829,10 +845,16 @@ class TestToolConfigFilesComeFromTheBaseCommit:
         assert run is not None and run.proc.returncode != 0, run and run.describe()
         assert "not a regular file" in run.proc.stdout, run.describe()
 
+    @pytest.mark.parametrize("base", ["this-repository", "naming-tool-files"])
     def test_the_rewritten_config_is_the_base_config_apart_from_those_paths(
-        self, tmp_path, monkeypatch
+        self, tmp_path, monkeypatch, base
     ):
-        """This repository's own config, and environment references, survive the rewrite.
+        """A config, and its environment references, survive the rewrite.
+
+        Run on this repository's own config, whatever tool config files it names
+        (none, since a config inside the scanned tree does not choose one), and on
+        a config that names two relative ones, so the paths the rewrite replaces
+        are always exercised.
 
         The probes carry a default (``:dflt``): ASH resolves a reference only when it
         has one, so a probe without a default reads the same resolved or not and could
@@ -841,7 +863,6 @@ class TestToolConfigFilesComeFromTheBaseCommit:
         """
         from automated_security_helper.config.ash_config import load_yaml_config
 
-        real = (ga.REPO_ROOT / CONFIG_PATH).read_text(encoding="utf-8")
         extra = (
             "\nash_env_probe:\n"
             "  explicit: !ENV ${ASH_PROBE_VALUE:dflt}\n"
@@ -849,15 +870,33 @@ class TestToolConfigFilesComeFromTheBaseCommit:
             "  single_quoted: '${ASH_PROBE_VALUE:dflt}'\n"
             '  double_quoted: "${ASH_PROBE_VALUE:dflt}"\n'
         )
-        base_files = {CONFIG_PATH: real + extra}
-        # Every relative tool config file the real config names, read from the tree.
-        named = _tool_config_paths(ga.REPO_ROOT / CONFIG_PATH)
-        relative = sorted(
-            v.removeprefix("./") for v in named.values() if v and not v.startswith("/")
-        )
-        assert relative, "this repository's config names no tool config file"
-        for name in relative:
-            base_files[name] = (ga.REPO_ROOT / name).read_text(encoding="utf-8")
+        if base == "this-repository":
+            real = (ga.REPO_ROOT / CONFIG_PATH).read_text(encoding="utf-8")
+            base_files = {CONFIG_PATH: real + extra}
+            # Every relative tool config file the real config names, from the tree.
+            named = _tool_config_paths(ga.REPO_ROOT / CONFIG_PATH)
+            relative = sorted(
+                v.removeprefix("./")
+                for v in named.values()
+                if v and not v.startswith("/")
+            )
+            for name in relative:
+                base_files[name] = (ga.REPO_ROOT / name).read_text(encoding="utf-8")
+        else:
+            base_files = {
+                CONFIG_PATH: RELATIVE_TOOL_CONFIG_BASE + extra,
+                ".ash/bandit.yaml": BASE_BANDIT,
+                ".ash/.grype.yaml": BASE_GRYPE,
+            }
+            relative = [".ash/.grype.yaml", ".ash/bandit.yaml"]
+            assert (
+                sorted(
+                    v.removeprefix("./")
+                    for v in _tool_config_paths_of(base_files[CONFIG_PATH]).values()
+                    if v
+                )
+                == relative
+            )
         repo = Repository(tmp_path, base_files=base_files)
         context = _pull_request(repo.base_sha, fork=False)
         config = _scan_config(repo, context, _required_inputs(context))
