@@ -156,7 +156,7 @@ a run ASH itself failed to carry out (the scanner's errors name ASH's error).
 | opengrep | 0, 1 | the same values as semgrep (`src/osemgrep/core/Exit_code.ml`) |
 | trivy-repo | 0 | 1: any error (`cmd/trivy/main.go`) |
 | syft | 0 | 1: any error (`cmd/syft/main.go`) |
-| ferret-scan | 0, 3 (coverage cut short under `fail_on_incomplete`) | 1: any error |
+| ferret-scan | 0, 3 (coverage cut short under `fail_on_incomplete`: the findings are reported and the row is `ERROR`, as its target counts as failed) | 1: any error |
 | snyk-code | 0, 1 (issues found) | 2: an error; 3: no supported project (`src/cli/exit-codes.ts`) |
 
 trivy exits 0 for a run with findings unless its `exit-code` setting names another

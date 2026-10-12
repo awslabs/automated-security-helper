@@ -409,9 +409,9 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
             description="Pass '--fail-on-incomplete' so ferret-scan exits 3 when a file "
             "could not be fully scanned (coverage cut short by a timeout/budget, or the "
             "file could not be opened). Findings may be missing in that case. The plugin "
-            "still returns the (partial) SARIF; exit 3 is recorded as an unsuccessful, "
-            "incomplete invocation rather than a hard error. Off by default to match "
-            "ferret-scan, which otherwise only warns on stderr."
+            "still reports the (partial) findings, and counts the target as failed, so "
+            "the scanner's row is ERROR and the completeness gate fails the scan. Off by "
+            "default to match ferret-scan, which otherwise only warns on stderr."
         ),
     ] = False
 
@@ -1123,8 +1123,11 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
-        # Per target; see ScannerPluginBase.scan().
+        # Per target; see ScannerPluginBase.scan(). No target claim unless this run
+        # lost coverage (exit 3, below).
         self.exit_code = 0
+        self.targets_attempted = None
+        self.targets_failed = 0
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or (target.is_dir() and not any(target.iterdir())):
             message = (
@@ -1205,9 +1208,12 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             self._refuse_rejected_exit_code(results_file)
 
             # --fail-on-incomplete makes ferret-scan exit 3 when coverage was cut short.
-            # The SARIF is still valid (partial); surface it as a warning so missing
-            # findings are not silent.
+            # The SARIF is still valid (partial) and is graded, but the target counts
+            # as failed, which the completeness gate reads: the row is ERROR with its
+            # findings, rather than PASSED over files that were not fully scanned.
             if self.exit_code == 3:
+                self.targets_attempted = 1
+                self.targets_failed = 1
                 self._plugin_log(
                     "ferret-scan reported incomplete coverage (exit 3, "
                     "--fail-on-incomplete): some files were not fully scanned and "

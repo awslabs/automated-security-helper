@@ -209,7 +209,7 @@ scanners:
 | `show_match` | bool | `false` | Display matched text in ferret-scan's own output (see [show_match](#show_match) below) |
 | `enable_preprocessors` | bool | `true` | Enable text extraction from documents (PDF, Office) |
 | `finding_limit` | int | `0` | Max findings ferret-scan emits (`--limit`). `0` = unlimited. ASH defaults to `0` because ferret-scan's own default of `200` silently truncates large scans. |
-| `fail_on_incomplete` | bool | `false` | Pass `--fail-on-incomplete` so ferret-scan exits 3 when a file could not be fully scanned; ASH still returns the partial SARIF and records the invocation as unsuccessful/incomplete. |
+| `fail_on_incomplete` | bool | `false` | Pass `--fail-on-incomplete` so ferret-scan exits 3 when a file could not be fully scanned; ASH still reports the partial findings, counts the target as failed, and records the scanner `ERROR`, so the completeness gate fails the scan. |
 | `respect_gitignore` | bool | `false` | Pass `--respect-gitignore` to honor `.gitignore`. Off by default — `.gitignore` often hides high-value files (`.env`, `*.pem`) a sensitive-data scan should see. |
 | `disable_ip_types` | string | `null` | Comma-separated `INTELLECTUAL_PROPERTY` sub-types to skip (`--disable-ip-types`): `copyright,patent,trademark,trade_secret,internal_url`. |
 | `explain` | bool | `false` | Pass `--explain` for an offline per-finding rationale + verdict + drafted suppression reason. No data leaves the host. |

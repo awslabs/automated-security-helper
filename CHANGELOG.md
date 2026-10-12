@@ -1047,7 +1047,11 @@
   into `ERROR`, since that exit cannot be told apart from trivy's own error exit; leave
   it unset. A `trivy.yaml` in the scanned directory is not read. snyk-code, which raised on every non-zero code, now accepts 1 ("issues
   found"), so a snyk run with findings reports them instead of failing, and its row
-  and invocation keep the 1, which snyk-code used to reset to 0.
+  and invocation keep the 1, which snyk-code used to reset to 0. ferret-scan's 3,
+  which it exits with under `fail_on_incomplete` when a file could not be fully
+  scanned, still reports the partial findings, and now counts the target as failed,
+  so the row is `ERROR` and the completeness gate fails the scan, where the run had
+  been graded like a complete one.
 
   More shapes that read as a clean scan are `ERROR` now, even with an accepted exit
   code. An empty results file (or JSON `null`) and SARIF with no run were graded

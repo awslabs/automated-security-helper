@@ -132,6 +132,16 @@ def _rejected(name: str) -> list[int]:
     return sorted(EXIT_CODE_TABLE[name][2] - GRADED_BY_THE_SCANNER.get(name, set()))
 
 
+#: Accepted codes that say the run completed but lost coverage: ferret-scan exits 3
+#: under fail_on_incomplete when a file could not be fully scanned. Its SARIF is
+#: graded, and the target counts as failed, so the row is ERROR with its findings.
+LOST_COVERAGE = {"ferret-scan": {3}}
+
+
+def _accepted_and_complete(name: str) -> list[int]:
+    return sorted(EXIT_CODE_TABLE[name][1] - LOST_COVERAGE.get(name, set()))
+
+
 EMPTY_SARIF = json.dumps(
     {
         "version": "2.1.0",
@@ -317,7 +327,7 @@ def test_a_rejected_exit_code_is_an_error_row(
 
 @pytest.mark.parametrize(
     "name, exit_code",
-    [(name, code) for name in EXECUTED for code in sorted(EXIT_CODE_TABLE[name][1])],
+    [(name, code) for name in EXECUTED for code in _accepted_and_complete(name)],
 )
 def test_an_accepted_exit_code_with_no_findings_is_passed(
     plugin_context, monkeypatch, name, exit_code
@@ -395,6 +405,46 @@ def test_a_rejected_run_quotes_the_errors_its_results_file_reports(
     assert "results_sarif.sarif" in text or "ferret-scan.sarif" in text, (
         "the error names the results file the notifications came from"
     )
+
+
+def test_ferret_scans_lost_coverage_fails_its_target_and_keeps_its_findings(
+    plugin_context, monkeypatch
+):
+    """Exit 3: a file could not be fully scanned, so findings may be missing."""
+    row = _row_with(
+        plugin_context, monkeypatch, "ferret-scan", 3, _one_finding_sarif("app.py")
+    )
+
+    assert (row.targets_attempted, row.targets_failed) == (1, 1)
+    assert row.status == ScannerStatus.ERROR
+    assert row.finding_count == 1, "the partial results are still reported"
+    assert row.exit_code == 3
+
+
+def test_ferret_scan_counts_a_lost_target_only_for_the_run_that_lost_it(
+    plugin_context, monkeypatch
+):
+    """Source exits 3, converted 0: the converted row has no failed target."""
+    rows = _rows(
+        plugin_context,
+        monkeypatch,
+        "ferret-scan",
+        [(3, EMPTY_SARIF), (0, EMPTY_SARIF)],
+    )
+
+    assert rows["source"].targets_failed == 1
+    assert rows["converted"].targets_failed == 0
+    assert rows["converted"].status == ScannerStatus.PASSED
+
+
+def test_ferret_scan_makes_no_target_claim_for_a_complete_run(
+    plugin_context, monkeypatch
+):
+    """Control: exit 0, so nothing is said about targets, as before."""
+    row = _row_with(plugin_context, monkeypatch, "ferret-scan", 0, EMPTY_SARIF)
+
+    assert row.targets_attempted is None
+    assert row.status == ScannerStatus.PASSED
 
 
 def _row_with(plugin_context, monkeypatch, name: str, exit_code: int, content: str):
@@ -477,7 +527,12 @@ def test_a_rejected_exit_code_after_an_accepted_one_is_an_error_row(
         plugin_context, monkeypatch, name, [(accepted, content), (exit_code, content)]
     )
 
-    assert rows["source"].status == ScannerStatus.PASSED, rows["source"].errors
+    expected_source = (
+        ScannerStatus.ERROR
+        if accepted in LOST_COVERAGE.get(name, set())
+        else ScannerStatus.PASSED
+    )
+    assert rows["source"].status == expected_source, rows["source"].errors
     assert rows["converted"].status == ScannerStatus.ERROR, (
         f"{name}'s converted run exited {exit_code}, which it rejects, after a "
         f"source run that exited {accepted}; the row was graded "
