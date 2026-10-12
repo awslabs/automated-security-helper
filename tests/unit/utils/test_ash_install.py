@@ -235,6 +235,84 @@ class TestReinstallNamesWhereThisAshCameFrom:
             REMOTE_WHEEL_INSTALL["url"]
         ]
 
+    @pytest.mark.parametrize(
+        "recorded, printed",
+        [
+            ("https://example.invalid/a.whl", "https://example.invalid/a.whl"),
+            ("http://example.invalid/a.whl", "http://example.invalid/a.whl"),
+            ("https://u:t@example.invalid/a.whl", "https://example.invalid/a.whl"),
+            # A scheme is case-insensitive (RFC 3986, section 3.1), but uv reads
+            # `HTTPS://host/a.whl` as a relative path, so it is printed lowercase.
+            ("HTTPS://example.invalid/a.whl", "https://example.invalid/a.whl"),
+            ("HtTp://example.invalid/a.whl", "http://example.invalid/a.whl"),
+        ],
+        ids=["https", "http", "credentials", "upper-case", "mixed-case"],
+    )
+    def test_a_remote_archive_over_http_is_named_in_a_form_uv_reads(
+        self, monkeypatch, recorded, printed
+    ):
+        _origin(monkeypatch, {"url": recorded, "archive_info": {}}, version="3.9.1")
+        assert _words(ash_install.ash_install_arguments()) == [printed]
+        assert _words(ash_install.ash_install_arguments("symbols")) == [
+            f"automated-security-helper[symbols] @ {printed}"
+        ]
+
+    @pytest.mark.parametrize(
+        "recorded",
+        [
+            "ftp://example.invalid/a.whl",
+            "data:application/zip;base64,UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==",
+            "git+https://example.invalid/a.whl",
+            "//example.invalid/a.whl",
+            "a.whl",
+            "https:///a.whl",
+            "https://example.invalid:99999/a.whl",
+            "https://u:t@example.invalid:99999/a.whl",
+            "https://[::1/a.whl",
+        ],
+        ids=[
+            "ftp",
+            "data",
+            "vcs-scheme",
+            "no-scheme",
+            "relative-path",
+            "no-host",
+            "port-out-of-range",
+            "port-out-of-range-with-credentials",
+            "unterminated-ipv6-host",
+        ],
+    )
+    def test_a_remote_archive_uv_cannot_fetch_falls_back_to_the_release_tag(
+        self, monkeypatch, recorded
+    ):
+        """Only an http or https URL with a host and a valid port is named.
+
+        uv refuses every one of these (measured with uv 0.12.22: a parse error,
+        or the URL read as a relative path), so naming it would print a command
+        that cannot work. None of them may raise either: the hint is built while
+        a scan or ``ash mcp`` reports something else.
+        """
+        _origin(monkeypatch, {"url": recorded, "archive_info": {}}, version="3.9.1")
+        assert _words(ash_install.ash_install_arguments()) == [
+            f"git+{ASH_REPO_URL}.git@v3.9.1"
+        ]
+
+    def test_a_local_archive_url_in_upper_case_is_named_as_this_hosts_file_url(
+        self, monkeypatch, wheel
+    ):
+        """A ``file:`` archive is named by its path here, never as recorded."""
+        recorded = "FILE" + wheel.as_uri()[len("file") :]
+        _origin(monkeypatch, {"url": recorded, "archive_info": {}}, version="3.9.1")
+        assert _words(ash_install.ash_install_arguments()) == [wheel.as_uri()]
+
+    def test_a_local_archive_url_naming_a_directory_falls_back_to_the_release_tag(
+        self, monkeypatch, checkout
+    ):
+        _origin(monkeypatch, _local_wheel(checkout), version="3.9.1")
+        assert _words(ash_install.ash_install_arguments()) == [
+            f"git+{ASH_REPO_URL}.git@v3.9.1"
+        ]
+
     def test_an_install_with_no_record_falls_back_to_the_release_tag(self, monkeypatch):
         _origin(monkeypatch, None, version="3.9.1")
         assert _words(ash_install.ash_install_arguments()) == [
@@ -260,8 +338,18 @@ class TestReinstallNamesWhereThisAshCameFrom:
             {"dir_info": {"editable": True}},
             {"url": "https://example.invalid/dir", "dir_info": {}},
             ["not", "a", "mapping"],
+            {**GIT_INSTALL, "url": "https://u:t@example.invalid:99999/r.git"},
+            {**GIT_INSTALL, "url": "https://[::1/r.git"},
         ],
-        ids=["vcs-without-commit", "url-not-a-string", "no-url", "remote-dir", "list"],
+        ids=[
+            "vcs-without-commit",
+            "url-not-a-string",
+            "no-url",
+            "remote-dir",
+            "list",
+            "vcs-port-out-of-range",
+            "vcs-unterminated-ipv6-host",
+        ],
     )
     def test_an_unusable_record_falls_back_to_the_release_tag(
         self, monkeypatch, record
@@ -269,6 +357,88 @@ class TestReinstallNamesWhereThisAshCameFrom:
         _origin(monkeypatch, record, version="3.9.1")
         assert _words(ash_install.ash_install_arguments()) == [
             f"git+{ASH_REPO_URL}.git@v3.9.1"
+        ]
+
+
+class TestTwoDistributionsProvideThisModule:
+    """The first distribution located for this module decides which record is read.
+
+    Two distributions provide ``automated_security_helper`` when, for example, a
+    fork is installed beside ASH or an older dist-info was left behind. The
+    second one's record describes another install, so naming it could reinstall
+    a different tree. Whatever the first one gives decides: its record, or no
+    record when it has none, when it does not parse, or when it cannot be read,
+    and then the hint falls back to the release tag.
+    """
+
+    SIBLING = json.dumps(GIT_INSTALL)
+
+    @staticmethod
+    def _located(monkeypatch, first):
+        """``first`` and then a sibling with a git record provide this module.
+
+        ``first`` is the text of the first one's direct_url.json, None for no
+        file, or an exception: PackageNotFoundError is raised looking the
+        distribution up, anything else reading the file.
+        """
+        texts = {
+            "first-dist": first,
+            "sibling-dist": TestTwoDistributionsProvideThisModule.SIBLING,
+        }
+
+        class _Distribution:
+            def __init__(self, name):
+                self.name = name
+
+            def read_text(self, filename):
+                assert filename == "direct_url.json", filename
+                text = texts[self.name]
+                if isinstance(text, Exception):
+                    raise text
+                return text
+
+        def lookup(name):
+            if isinstance(texts[name], ash_install.PackageNotFoundError):
+                raise texts[name]
+            return _Distribution(name)
+
+        monkeypatch.setattr(
+            ash_install,
+            "_distributions_declaring_this_module",
+            lambda _root: list(texts),
+        )
+        monkeypatch.setattr(ash_install, "distribution", lookup)
+        monkeypatch.setattr(ash_install, "get_ash_version", lambda: "3.9.1")
+
+    @pytest.mark.parametrize(
+        "first",
+        [
+            None,
+            "",
+            "{not json",
+            ash_install.PackageNotFoundError("first-dist"),
+            PermissionError("direct_url.json"),
+        ],
+        ids=["no-record", "empty-record", "unparsable", "not-found", "unreadable"],
+    )
+    def test_the_first_distribution_without_a_usable_record_gives_none(
+        self, monkeypatch, first
+    ):
+        self._located(monkeypatch, first)
+        assert ash_install._direct_url() is None
+        assert _words(ash_install.ash_install_arguments()) == [
+            f"git+{ASH_REPO_URL}.git@v3.9.1"
+        ]
+
+    def test_the_first_distributions_record_is_read_not_the_siblings(self, monkeypatch):
+        first = {
+            **GIT_INSTALL,
+            "vcs_info": {**GIT_INSTALL["vcs_info"], "commit_id": "f" * 40},
+        }
+        self._located(monkeypatch, json.dumps(first))
+        assert ash_install._direct_url() == first
+        assert _words(ash_install.ash_install_arguments()) == [
+            f"git+{GIT_INSTALL['url']}@{'f' * 40}"
         ]
 
 

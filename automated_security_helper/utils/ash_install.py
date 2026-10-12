@@ -294,33 +294,42 @@ def _direct_url() -> Any:
     """The parsed PEP 610 ``direct_url.json`` of ASH's distribution, or None.
 
     None means the install left no record (an install from an index writes
-    none), the distribution could not be found, or the file does not parse. The
-    first distribution that contains this module decides; its record is not
-    mixed with a sibling's.
+    none), the distribution could not be found or read, or the file does not
+    parse. Only the first distribution located for this module is read. A second
+    one (a fork installed beside ASH, an old dist-info left behind) describes
+    another install, so its record is never used in place of the first one's,
+    even when the first one has none.
     """
-    for name in _distributions_declaring_this_module(_ROOT_PACKAGE):
-        try:
-            raw = distribution(name).read_text("direct_url.json")
-        except (PackageNotFoundError, OSError, ValueError):
-            continue
-        if not raw:
-            return None
-        try:
-            return json.loads(raw)
-        except ValueError:
-            return None
-    return None
+    located = _distributions_declaring_this_module(_ROOT_PACKAGE)
+    if not located:
+        return None
+    try:
+        raw = distribution(located[0]).read_text("direct_url.json")
+    except (PackageNotFoundError, OSError, ValueError):
+        return None
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return None
 
 
-def _without_credentials(url: str) -> str:
-    """``url`` with any user and password removed from its authority.
+def _without_credentials(url: str) -> Optional[str]:
+    """``url`` with any user and password removed from its authority, or None.
 
     PEP 610 tells installers to strip credentials before recording a URL, and
     pip and uv do. A hint is printed into logs, so it does not rely on that.
     ``git@`` with no password is the ssh convention, not a credential, and is
-    kept.
+    kept. None for a URL that does not parse, such as an unterminated IPv6 host
+    or a port outside 0-65535: uv refuses those too, and the hint is built while
+    something else is being reported, so it must not raise.
     """
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return None
     if parts.username is None and parts.password is None:
         return url
     if parts.username == "git" and parts.password is None:
@@ -328,9 +337,25 @@ def _without_credentials(url: str) -> str:
     host = parts.hostname or ""
     if ":" in host:
         host = f"[{host}]"
-    if parts.port is not None:
-        host = f"{host}:{parts.port}"
+    if port is not None:
+        host = f"{host}:{port}"
     return urlunsplit(parts._replace(netloc=host))
+
+
+def _remote_archive(url: str) -> Optional[str]:
+    """The URL to name for an archive installed from ``url``, or None.
+
+    Only http and https with a host: uv reads any other scheme as a relative
+    path or refuses it. A scheme is case-insensitive, but uv reads ``HTTPS://``
+    as a relative path too, so the URL is rebuilt with the scheme in lower case.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return None
+    return _without_credentials(urlunsplit(parts))
 
 
 def _recorded_source(record: Any) -> Optional[Tuple[str, str]]:
@@ -342,7 +367,8 @@ def _recorded_source(record: Any) -> Optional[Tuple[str, str]]:
     with no commit, a directory record whose URL is not a local path) is
     unusable rather than guessed at, and so is a local directory or archive that
     no longer exists: the container image installs ASH from a wheel and then
-    deletes it.
+    deletes it. A URL uv could not fetch is unusable too: a remote archive that is
+    not http or https with a host, or any URL that does not parse.
     """
     if not isinstance(record, dict):
         return None
@@ -356,7 +382,10 @@ def _recorded_source(record: Any) -> Optional[Tuple[str, str]]:
         commit = vcs_info.get("commit_id")
         if not (isinstance(vcs, str) and vcs and isinstance(commit, str) and commit):
             return None
-        source = f"{vcs}+{_without_credentials(url)}@{commit}"
+        remote = _without_credentials(url)
+        if remote is None:
+            return None
+        source = f"{vcs}+{remote}@{commit}"
         subdirectory = record.get("subdirectory")
         if isinstance(subdirectory, str) and subdirectory:
             source = f"{source}#subdirectory={subdirectory}"
@@ -372,8 +401,8 @@ def _recorded_source(record: Any) -> Optional[Tuple[str, str]]:
     if isinstance(record.get("archive_info"), dict):
         if local is not None:
             return ("url", local.as_uri()) if local.is_file() else None
-        if urlsplit(url).scheme in ("http", "https"):
-            return "url", _without_credentials(url)
+        remote = _remote_archive(url)
+        return ("url", remote) if remote is not None else None
     return None
 
 

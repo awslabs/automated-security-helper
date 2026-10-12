@@ -726,6 +726,26 @@ class TestLint:
             == [symbol_spans.symbols_extra_install_command()]
         ), (scan_hints[0], lint_issues[0].message)
 
+    def test_each_message_starts_the_hint_as_its_sentence_needs(
+        self, tmp_path, caplog, monkeypatch
+    ):
+        """The lint message starts the hint as a new sentence, capitalized.
+
+        The scan warning puts the same hint after a colon, where it stays
+        lowercase. Both carry the rest of the hint unchanged.
+        """
+        hint = symbol_spans.symbols_extra_install_hint()
+        assert hint.startswith("install it with `"), hint
+        scan_hints = _missing_extra_scan_hints(tmp_path, caplog, monkeypatch)
+        lint_issues = _symbol_issues(
+            _lint([{"path": "src/app.py", "reason": "r", "symbol": "module_function"}])
+        )
+        assert len(scan_hints) == 1 and len(lint_issues) == 1, (scan_hints, lint_issues)
+        assert lint_issues[0].message.endswith(f"stay visible. I{hint[1:]}"), (
+            lint_issues[0].message
+        )
+        assert f"'{SYMBOLS_EXTRA}' extra: {hint}" in scan_hints[0], scan_hints[0]
+
     def test_the_hint_is_built_once_however_many_files_need_it(
         self, tmp_path, caplog, monkeypatch
     ):
