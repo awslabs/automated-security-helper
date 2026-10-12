@@ -57,6 +57,17 @@ def deferred_tool_version_probes() -> Iterator[None]:
         _DEFER_VERSION_PROBES.reset(token)
 
 
+def _uv_unavailable(runner: Any) -> str:
+    """Why ``runner``'s last availability check failed: absent uv, or a refusal.
+
+    A sandbox scope that refuses the check says nothing about uv; logging that as
+    "UV is not available" sends the operator to install a uv they already have.
+    """
+    reason = getattr(runner, "unavailable_reason", None)
+    text = reason() if callable(reason) else None
+    return text if isinstance(text, str) else "UV is not available"
+
+
 class UVToolMixin:
     """UV tool management methods extracted from PluginBase."""
 
@@ -125,7 +136,7 @@ class UVToolMixin:
 
             if not runner.is_uv_available():
                 self._plugin_log(
-                    f"UV is not available for {tool_name} version detection",
+                    f"{_uv_unavailable(runner)} for {tool_name} version detection",
                     level=logging.WARNING,
                 )
                 return None
@@ -216,7 +227,8 @@ class UVToolMixin:
 
             if not uv_runner.is_uv_available():
                 self._plugin_log(
-                    f"UV is not available, falling back to direct execution for {self.command}",
+                    f"{_uv_unavailable(uv_runner)}, falling back to direct execution "
+                    f"for {self.command}",
                     level=logging.WARNING,
                 )
                 return None
@@ -352,7 +364,8 @@ class UVToolMixin:
 
             if not is_available:
                 self._plugin_log(
-                    f"UV tool execution is required but UV is not available for {self.command}",
+                    f"UV tool execution is required for {self.command}, but: "
+                    f"{_uv_unavailable(runner)}",
                     level=logging.WARNING,
                 )
                 return False
@@ -733,7 +746,8 @@ class UVToolMixin:
 
             if not uv_available:
                 self._plugin_log(
-                    "[INSTALLATION_FAILED] UV is not available for tool installation",
+                    f"[INSTALLATION_FAILED] {_uv_unavailable(runner)} for tool "
+                    "installation",
                     f"UV availability check took {uv_check_time:.3f}s",
                     "Fallback strategy: Scanner will attempt direct tool execution",
                     level=logging.WARNING,

@@ -324,7 +324,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
 
             # Check UV availability
             if not uv_runner.is_uv_available():
-                ASH_LOGGER.debug("UV is not available for nbconvert execution")
+                ASH_LOGGER.debug(
+                    f"{uv_runner.unavailable_reason()} for nbconvert execution"
+                )
                 return False
 
             # Extract jupyter arguments (skip 'jupyter')

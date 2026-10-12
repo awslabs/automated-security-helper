@@ -117,6 +117,36 @@ class TestIsUvAvailable:
             mock_run.return_value = MagicMock(returncode=0)
             assert runner.is_uv_available() is True
 
+    def test_a_sandbox_refusal_is_named_as_the_reason(self, runner):
+        """Not "UV is not available": uv may be installed; the sandbox refused it."""
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+
+        with sandbox_scope(RefusingScope("jupyter", "no bwrap here")):  # type: ignore[arg-type]
+            assert runner.is_uv_available() is False
+            reason = runner.unavailable_reason()
+
+        assert "scanner sandbox refused to run uv" in reason
+        assert "no bwrap here" in reason
+        assert "UV is not available" not in reason
+
+    def test_an_absent_uv_is_named_as_before(self, runner):
+        """Control, and a later check clears an earlier refusal's reason."""
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+
+        with sandbox_scope(RefusingScope("jupyter", "no bwrap here")):  # type: ignore[arg-type]
+            runner.is_uv_available()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1)
+            assert runner.is_uv_available() is False
+
+        assert runner.unavailable_reason() == "UV is not available"
+
 
 class TestListAvailableTools:
     """Tests for list_available_tools."""

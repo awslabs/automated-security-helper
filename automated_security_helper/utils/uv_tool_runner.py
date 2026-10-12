@@ -126,9 +126,31 @@ class UVToolRunner:
         """Initialize UV tool runner."""
         self.uv_executable = uv_executable
         self._uv_available_cache: Optional[bool] = None
+        # The sandbox's refusal of this thread's last check, which was not cached;
+        # see unavailable_reason. Per thread: the runner is shared by the process,
+        # and each scanner's checks run under that scanner's own scope.
+        self._checks = threading.local()
+
+    def unavailable_reason(self) -> str:
+        """Why this thread's last is_uv_available() returned False, for a message.
+
+        "UV is not available", unless the check was refused by the scanner sandbox
+        scope it ran in, which says nothing about uv itself: then the refusal.
+        """
+        refusal = getattr(getattr(self, "_checks", None), "refusal", None)
+        if refusal is not None:
+            return f"The scanner sandbox refused to run uv ({refusal})"
+        return "UV is not available"
+
+    def _check_state(self) -> threading.local:
+        checks = self.__dict__.get("_checks")
+        if checks is None:  # an instance made without __init__, as some tests do
+            checks = self._checks = threading.local()
+        return checks
 
     def is_uv_available(self) -> bool:
         """Check if UV is available on the system."""
+        self._check_state().refusal = None
         if self._uv_available_cache is not None:
             return self._uv_available_cache
 
@@ -148,7 +170,8 @@ class UVToolRunner:
             if _refused_by_sandbox(error):
                 # Refused by the sandbox scope this check ran in, which says nothing
                 # about uv; remembered, it would read as missing for every later
-                # spawn in the process.
+                # spawn in the process. Kept as the reason for the caller's message.
+                self._check_state().refusal = str(error)
                 return False
             self._uv_available_cache = False
 
@@ -157,7 +180,7 @@ class UVToolRunner:
     def list_available_tools(self) -> List[str]:
         """List all available UV tools."""
         if not self.is_uv_available():
-            raise UVToolRunnerError("UV is not available")
+            raise UVToolRunnerError(self.unavailable_reason())
 
         try:
             result = spawn_run(  # nosec B603 — list args, validated uv executable path
@@ -666,7 +689,7 @@ class UVToolRunner:
         )
 
         if not self.is_uv_available():
-            raise UVToolRunnerError("UV is not available")
+            raise UVToolRunnerError(self.unavailable_reason())
 
         if args is None:
             args = []
