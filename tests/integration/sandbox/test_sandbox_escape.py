@@ -598,7 +598,8 @@ def test_an_output_directory_reached_through_a_link_in_the_tree_is_refused(
     assert outcomes is None, (
         f"the scanner ran with a linked output directory: {outcomes}"
     )
-    assert result.returncode == 1, output[-4000:]
+    # 3: an output directory refused for a link, the same code on every path.
+    assert result.returncode == 3, output[-4000:]
     assert "is a symlink" in output, output[-4000:]
     assert _snapshot(target) == before, "the scan wrote into the linked directory"
     assert not listeners.received
@@ -626,7 +627,7 @@ def test_with_the_sandbox_off_a_linked_output_directory_in_the_tree_is_refused_t
         ),
     )
     output = " ".join((result.stdout + result.stderr).split())
-    assert result.returncode != 0, output[-4000:]
+    assert result.returncode == 3, output[-4000:]
     assert "is a symlink" in output, output[-4000:]
     assert _snapshot(target) == before, "the scan changed the link's target"
 
