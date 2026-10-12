@@ -133,6 +133,39 @@ class TestMaskingByLocation:
 
         assert _region_text(model.sarif.runs[0].results[1]) == ASSIGN_LINE
 
+    def test_a_secret_findings_own_snippets_are_masked_whole(self):
+        """No line arithmetic for the secret finding's own excerpt.
+
+        ferret-scan 2.5.3 writes the matched line as ``contextRegion.startLine``
+        but starts the snippet one line earlier, so the matched line was numbered
+        one too high and kept; a value too short to mask by value stayed in it.
+        """
+        short = SHORT + "d"
+        model = _results(
+            _result(
+                "PERSON_NAME",
+                "people.yaml",
+                2,
+                "Person name detected (confidence: 40.0% - LOW). Matched text: '"
+                + short
+                + "'",
+                snippet=f"owner: {short}\n",
+                context=(2, f"card: \nowner: {short}\n"),
+                scanner="ferret-scan",
+            ),
+        )
+        result = model.sarif.runs[0].results[0]
+        result.relatedLocations = [result.locations[0].model_copy(deep=True)]
+        related = result.relatedLocations[0].physicalLocation.root
+        related.region.startLine = 7
+        related.region.snippet.text = f"backup_owner: {short}\n"
+
+        mask_secrets_in_results(model)
+
+        assert _region_text(result) == MASKED_LINE + "\n"
+        assert _region_text(result, "contextRegion") == (MASKED_LINE + "\n") * 2
+        assert related.region.snippet.text == MASKED_LINE + "\n"
+
     def test_a_binary_snippet_at_a_reported_line_is_dropped(self):
         model = _results(
             _result(

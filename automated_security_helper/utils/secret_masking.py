@@ -302,8 +302,12 @@ def _normalized_uri(uri: Any) -> Optional[str]:
     return text or None
 
 
-def _physical_locations_of(result: Any) -> Iterable[Any]:
-    for location in getattr(result, "locations", None) or []:
+def _physical_locations_of(result: Any, related: bool = False) -> Iterable[Any]:
+    """``result``'s physical locations, and its related locations' with ``related``."""
+    locations = list(getattr(result, "locations", None) or [])
+    if related:
+        locations.extend(getattr(result, "relatedLocations", None) or [])
+    for location in locations:
         physical = getattr(location, "physicalLocation", None)
         physical = getattr(physical, "root", physical)
         if physical is not None:
@@ -428,6 +432,8 @@ class _SecretIndex:
         self._by_basename: Dict[str, List[str]] = {}
         self.values: Set[str] = set()
         self.shapes: Set[SecretValueShape] = set()
+        #: The secret findings themselves, whose own snippets are masked whole.
+        self.secret_results: List[Any] = []
         self._pattern: Optional[re.Pattern] = None
 
     def add_values(self, values: Iterable[str]) -> None:
@@ -569,6 +575,7 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
     for result in sarif_report.get_all_results() or []:
         if not is_secret_finding(result, rule_ids):
             continue
+        index.secret_results.append(result)
         for physical in _physical_locations_of(result):
             uri = _normalized_uri(
                 getattr(getattr(physical, "artifactLocation", None), "uri", None)
@@ -810,6 +817,14 @@ def _mask_report(
             masked = _mask_message_values(text)
             if masked != text:
                 root.text = masked
+    # A secret finding's own snippets are its excerpt of the secret, so they are
+    # masked whole rather than by line number: a tool's context can be numbered
+    # one off (ferret-scan's is), and the line arithmetic would keep the secret.
+    whole_file = (True, _LineRanges())
+    for result in index.secret_results:
+        for physical in _physical_locations_of(result, related=True):
+            _mask_region(getattr(physical, "region", None), whole_file)
+            _mask_region(getattr(physical, "contextRegion", None), whole_file)
     if index.lines or index.values or index.shapes:
         seen: Set[int] = set()
         for run in sarif_report.runs:
