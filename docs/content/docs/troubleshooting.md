@@ -154,19 +154,17 @@ a run ASH itself failed to carry out (the scanner's errors name ASH's error).
 | grype | 0, 2 (a match at or above `--fail-on`) | 1: any error, such as a database it cannot load (`cmd/grype/cli/cli.go`) |
 | semgrep | 0, 1 (findings) | 2: fatal; 3 and up: specific failures, 7 for a rule configuration it cannot read (`semgrep/error.py`) |
 | opengrep | 0, 1 | the same values as semgrep (`src/osemgrep/core/Exit_code.ml`) |
-| trivy-repo | 0 | 1: any error (`cmd/trivy/main.go`) |
+| trivy, trivy-repo | 0 | 1: any error (`cmd/trivy/main.go`) |
 | syft | 0 | 1: any error (`cmd/syft/main.go`) |
 | ferret-scan | 0, 3 (coverage cut short under `fail_on_incomplete`: the findings are reported and the row is `ERROR`, as its target counts as failed) | 1: any error |
 | snyk-code | 0, 1 (issues found) | 2: an error; 3: no supported project (`src/cli/exit-codes.ts`) |
 
 trivy exits 0 for a run with findings unless its `exit-code` setting names another
-code. ASH never passes one, but trivy also reads it from the config file
-`TRIVY_CONFIG` names and from `TRIVY_EXIT_CODE`; a `trivy.yaml` in the scanned
-directory is not read. With `exit-code: 1` set in either of those, every trivy-repo
-run that finds something exits 1, and the
-scanner is `ERROR` rather than reporting those findings: ASH cannot tell that exit
-from trivy's own error exit. Remove the setting; ASH decides the scan's exit code
-from the findings itself.
+code. ASH passes `--exit-code=0` to trivy and trivy-repo, which outranks an
+`exit-code` in the operator's trivy config and `TRIVY_EXIT_CODE` (measured with trivy
+0.75.0), and neither scanner reads a `trivy.yaml` from the scanned directory, so a
+run with findings exits 0 and a nonzero exit only ever means trivy failed. ASH
+decides the scan's exit code from the findings itself.
 
 cfn-nag, npm audit, detect-secrets and cdk-nag are not in this table. cfn-nag exits
 with its count of failing violations and is judged per template; npm audit exits 1

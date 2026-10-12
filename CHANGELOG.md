@@ -1863,10 +1863,10 @@
   The same rule now holds for the scanners that run their tool outside the template:
   trivy-repo, syft, ferret-scan and snyk-code. trivy-repo and syft accept only 0, where
   they accepted 0 and 1: neither tool has a "findings found" code, and 1 is how both
-  report an error. As a result, an `exit-code` setting in the config file
-  `TRIVY_CONFIG` names, or in `TRIVY_EXIT_CODE`, turns a trivy-repo run with findings
-  into `ERROR`, since that exit cannot be told apart from trivy's own error exit; leave
-  it unset. A `trivy.yaml` in the scanned directory is not read. snyk-code, which raised on every non-zero code, now accepts 1 ("issues
+  report an error. trivy-repo passes `--exit-code=0` (see trivy under Features), which
+  outranks an `exit-code` setting in the operator's trivy config or in
+  `TRIVY_EXIT_CODE`, and reads no `trivy.yaml` from the scanned directory, so a run
+  with findings still exits 0. snyk-code, which raised on every non-zero code, now accepts 1 ("issues
   found"), so a snyk run with findings reports them instead of failing, and its row
   and invocation keep the 1, which snyk-code used to reset to 0. ferret-scan's 3,
   which it exits with under `fail_on_incomplete` when a file could not be fully
