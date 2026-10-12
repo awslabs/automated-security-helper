@@ -1203,6 +1203,21 @@ Code 4 is distinct from code 2 on purpose. Code 2 means a scan ran and found
 issues; code 4 means the workspace definition could not be used and no project
 was scanned at all.
 
+### Container and nix mode
+
+In container and nix mode ASH runs a second ASH, the inner run, and computes the
+exit code from the results it writes. It reads those results back only when the
+inner run recorded that it completed, with the ID the outer process gave it
+(`ASH_OUTER_RUN_ID`). Otherwise the exit code is `1`, whatever the inner run's own
+status was, and the error says the inner run did not complete and names the
+results file. A container image built from an ASH older than the one running the
+scan records no completion, so a `--no-build` run of such an image, or an image
+built with `--ash-revision-to-install` naming an older release, exits `1` this way;
+rebuild the image from this ASH. When the inner run refused its reports, the exit
+code is `1` with the inner run's own message. A container status that is not a
+verdict (`3`, `4`, or the runner's own, such as `125` or `137`) is returned as is,
+without reading any results back.
+
 ### An incomplete scan is not a clean scan
 
 Zero findings has two causes and they are not the same answer: nothing was wrong,

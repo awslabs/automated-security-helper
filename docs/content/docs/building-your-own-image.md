@@ -56,6 +56,13 @@ Tag with the ASH version you built rather than only `latest`, so a scan result c
 traced back to a specific image. A moving `latest` makes two scans that disagree
 impossible to explain.
 
+The image's ASH must be the same version as the ASH that runs the scan, or later.
+Container mode reads the scan's results back only when the ASH in the image records
+that its run completed, which ASH v3.7.1 and earlier do not do. With an image built
+from an older ASH, every container scan exits 1 with an error saying the inner run
+did not complete. Rebuild and republish the image when you upgrade the ASH that
+runs your scans.
+
 ## Keeping it current
 
 ASH orchestrates external scanners, and their versions are not all pinned. A rebuild
