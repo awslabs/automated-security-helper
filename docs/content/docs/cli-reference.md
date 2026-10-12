@@ -511,7 +511,7 @@ The merged output carries no shard provenance of its own; it records `merged_sha
 | 0    | The shards reconstructed one whole scan and the union has no actionable findings |
 | 1    | The merge was refused, or a scanner in the union did not complete — the scan's findings are unknown, not absent |
 | 2    | The union has findings at or above `--min-severity`                            |
-| 3    | The configuration is invalid: `--config` or a `--config-overrides` value does not validate, or the shards' recorded configurations disagree on a setting the verdict reads |
+| 3    | The configuration is invalid: `--config` (or `ASH_CONFIG`) names a path that is missing, a directory or unreadable, it or a `--config-overrides` value does not validate, or the shards' recorded configurations disagree on a setting the verdict reads |
 
 Codes 1 and 2 are genuinely different situations. Code 2 means the merge succeeded and the union failed the threshold. Code 1 means no verdict was reached at all, which a CI gate must not read as a clean scan.
 

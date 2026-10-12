@@ -185,6 +185,7 @@ from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional, Sequence, Tuple
 
 import typer
+import yaml
 from pydantic import ValidationError
 
 # `print` shadows the builtin on purpose: this is rich's documented import
@@ -224,6 +225,7 @@ from automated_security_helper.core.enums import (
     ScannerStatus,
 )
 from automated_security_helper.core.exceptions import (
+    ASHConfigSourceError,
     ASHConfigValidationError,
     ShardCoverageError,
 )
@@ -1155,6 +1157,40 @@ def apply_aggregated_suppressions(
 # ---------------------------------------------------------------------------
 
 
+def resolve_operator_config(config_path: Optional[str]) -> AshConfig:
+    """The operator's trusted base: the defaults, or ``--config`` (or ``ASH_CONFIG``).
+
+    Resolved the way ``ash report`` resolves its config, except that a
+    ``--config`` naming nothing readable is refused rather than replaced by the
+    defaults: a merge whose operator values silently became the defaults would
+    send its reports somewhere other than the operator chose.
+
+    Raises:
+        ASHConfigSourceError: When the path is not a file, or the file cannot be
+            read or parsed.
+        ASHConfigValidationError: When the file does not validate.
+    """
+    if config_path is None:
+        return resolve_config(config_path=None)
+    path = Path(config_path)
+    if not path.is_file():
+        raise ASHConfigSourceError(
+            f"--config {path.as_posix()} does not exist or is not a file."
+        )
+    try:
+        config = resolve_config(config_path=path, fallback_to_default=False)
+    except ASHConfigValidationError:
+        raise
+    except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError) as exc:
+        # json.JSONDecodeError is a ValueError.
+        raise ASHConfigSourceError(
+            f"--config {path.as_posix()} could not be read: {exc}"
+        ) from exc
+    if config is None:
+        raise ASHConfigSourceError(f"--config {path.as_posix()} could not be read.")
+    return config
+
+
 def apply_operator_overrides(
     loaded: Sequence[Tuple[Path, AshAggregatedResults]],
     config_overrides: Sequence[str],
@@ -1657,7 +1693,7 @@ def merge_command(
         # its config. The overrides are not applied to it here: the confinement
         # below replays them onto it, as resolve_config does for a scan, and
         # applying them twice would repeat an appending override.
-        trusted_config = resolve_config(config_path=config)
+        trusted_config = resolve_operator_config(config)
         loaded = load_shard_results(results)
         apply_operator_overrides(loaded, overrides)
         # Before the completion gate below, which reads one shard's

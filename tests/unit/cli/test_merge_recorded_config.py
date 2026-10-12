@@ -1229,6 +1229,27 @@ class TestVerdictSettings:
         assert not [m for m in harness.warnings if "ash merge's --config sets" in m]
 
 
+class TestAnOperatorConfigThatNamesNothingReadable:
+    """A ``--config`` that is missing, a directory or unparseable exits 3, unmerged."""
+
+    @pytest.mark.parametrize("kind", ["missing", "directory", "unparseable"])
+    def test_the_merge_is_refused(self, harness, kind):
+        target = harness.tmp_path / "operator" / "ash.yaml"
+        if kind == "directory":
+            target.mkdir(parents=True)
+        elif kind == "unparseable":
+            target.parent.mkdir(parents=True)
+            target.write_text("reporters: [unclosed\n", encoding="utf-8")
+        shard_paths = harness.write_shards({"project_name": "test-merge"})
+
+        result = harness.merge(shard_paths, "--config", str(target))
+
+        assert result.exit_code == 3, (result.output, result.exception)
+        console = "".join(re.sub(r"\x1b\[[0-9;]*m", "", result.output).split())
+        assert "".join(target.as_posix().split()) in console, result.output
+        assert not (harness.output_dir / RESULTS_FILE_NAME).exists()
+
+
 class TestOperatorConfigOutsideTheRecordedConfig:
     """``--config`` supplies values for what the shards recorded and adds nothing.
 
