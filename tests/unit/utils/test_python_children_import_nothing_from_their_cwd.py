@@ -41,6 +41,9 @@ from automated_security_helper.utils.download_utils import (
     create_pinned_tool_install_command,
     current_bin_path,
 )
+from automated_security_helper.utils.rules_bundles import (
+    create_rules_bundle_install_command,
+)
 from tests.utils.helpers import bound_run_command
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -75,11 +78,21 @@ def _pinned_install_argv(tmp_path: Path) -> List[str]:
     ).args
 
 
+def _rules_bundle_install_argv(tmp_path: Path) -> List[str]:
+    # A bundle with no pin fails in get_rules_bundle, before any download.
+    return create_rules_bundle_install_command("no-such-bundle").args
+
+
 INSTALL_COMMANDS = [
     ("pip", lambda tmp_path: [sys.executable, "-m", "pip", "--version"]),
     ("automated_security_helper", _pinned_install_argv),
+    ("automated_security_helper", _rules_bundle_install_argv),
 ]
-INSTALL_IDS = ["python -m pip", "pinned-tool install script"]
+INSTALL_IDS = [
+    "python -m pip",
+    "pinned-tool install script",
+    "rules-bundle install script",
+]
 
 
 @pytest.mark.parametrize(("package", "argv"), INSTALL_COMMANDS, ids=INSTALL_IDS)
@@ -282,6 +295,7 @@ RAW_PYTHON_ARGV_ALLOWED = {
     ),
     ("utils/download_utils.py", "create_pinned_tool_install_command"),
     ("utils/download_utils.py", "create_url_download_command"),
+    ("utils/rules_bundles.py", "create_rules_bundle_install_command"),
     (
         "plugin_modules/ash_builtin/scanners/opengrep_scanner.py",
         "_refuse_unverified_install_command",

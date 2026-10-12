@@ -377,7 +377,11 @@ def create_rules_bundle_install_command(name: str) -> "CustomCommand":
     """The CustomCommand that installs rules bundle ``name`` in a subprocess.
 
     The same execution model as ``create_pinned_tool_install_command``: plugins
-    declare commands and ``ash dependencies install`` runs and counts them.
+    declare commands and ``ash dependencies install`` runs and counts them. Run
+    only there, through ``cli.dependencies.run_command``, which starts this
+    ``-c`` argv through ``utils.python_child`` (``-P`` and an empty start
+    directory), so the script imports nothing from the directory ASH runs in.
+    Spawn it any other way and it would.
     """
     import sys
 
