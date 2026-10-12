@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import List
 
 from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
+from automated_security_helper.utils.log import ASH_LOGGER
 
 #: The characters doublestar (the glob library syft, grype and trivy match with)
 #: reads as pattern syntax, each escaped with a backslash to stand for itself.
@@ -70,12 +71,25 @@ def trivy_skip_files(target: str | Path) -> List[str]:
     link's path below ``target`` with glob characters escaped, which trivy matches
     against the whole path: ``x.txt`` left out ``x.txt`` and not ``sub/x.txt``
     (measured). A path with a comma, a double quote or a line break is left out of
-    the option, since trivy reads the value as CSV. None on Windows.
+    the option, since trivy reads the value as CSV, and named in one debug record.
+    None on Windows.
     """
     if os.sep != "/":
         return []
-    return [
-        doublestar_literal(relative)
-        for relative in file_links_leaving_tree(target)
-        if not any(character in _TRIVY_UNSAFE for character in relative)
-    ]
+    values: List[str] = []
+    left_out: List[str] = []
+    for relative in file_links_leaving_tree(target):
+        if any(character in _TRIVY_UNSAFE for character in relative):
+            left_out.append(relative)
+        else:
+            values.append(doublestar_literal(relative))
+    if left_out:
+        ASH_LOGGER.debug(
+            "trivy: %d link(s) leaving %s not given in --skip-files, since a comma, "
+            "a double quote or a line break would change the value (trivy skips "
+            "every link itself): %s",
+            len(left_out),
+            target,
+            ", ".join(repr(relative) for relative in left_out),
+        )
+    return values

@@ -372,7 +372,8 @@ directory, or does not run it on that directory:
 - trivy (the `trivy-repo` scanner) skips every link, inside the tree or not
   (measured with trivy 0.75.0). Each such link is still passed in `--skip-files`,
   glob characters escaped, unless its path holds a comma, a double quote or a line
-  break, which trivy's option cannot carry.
+  break, which trivy's option cannot carry. Such a link is named in a debug log
+  line (`--log-level DEBUG`).
 - semgrep and opengrep skip every link, inside the tree or not (measured with
   semgrep 1.180.0 and opengrep 1.30.2), and get no exclusion for one. Their
   `--exclude` cannot name one path: semgrep matches a pattern against paths below

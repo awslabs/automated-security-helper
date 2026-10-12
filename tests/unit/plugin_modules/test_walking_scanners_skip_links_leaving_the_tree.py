@@ -348,6 +348,46 @@ def test_trivy_is_given_each_link_leaving_its_target_without_a_comma(
     }
 
 
+def test_a_link_trivy_cannot_be_given_is_logged_once(tmp_path):
+    """A link left out of --skip-files is named in one debug record, not dropped silently."""
+    from automated_security_helper.utils import link_exclusions
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    source = _tree(
+        tmp_path,
+        FILES,
+        {
+            "link_out.txt": "outside/requirements.txt",
+            "co,mma.txt": "outside/requirements.txt",
+            'quo"te.txt': "outside/requirements.txt",
+            "line\nbreak.txt": "outside/requirements.txt",
+        },
+    )
+
+    with patch.object(ASH_LOGGER, "debug") as debug:
+        values = link_exclusions.trivy_skip_files(source)
+
+    assert values == ["link_out.txt"]
+    assert debug.call_count == 1
+    args = debug.call_args.args
+    message = args[0] % args[1:]
+    for left_out in ("co,mma.txt", 'quo"te.txt', "line\nbreak.txt"):
+        assert repr(left_out) in message
+    assert "'link_out.txt'" not in message
+
+
+def test_nothing_is_logged_when_every_link_can_be_given_to_trivy(tmp_path):
+    from automated_security_helper.utils import link_exclusions
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    source = _tree(tmp_path, FILES, {"link_out.txt": "outside/requirements.txt"})
+
+    with patch.object(ASH_LOGGER, "debug") as debug:
+        assert link_exclusions.trivy_skip_files(source) == ["link_out.txt"]
+
+    debug.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # semgrep and opengrep
 # ---------------------------------------------------------------------------
