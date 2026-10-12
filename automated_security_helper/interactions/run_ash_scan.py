@@ -1304,20 +1304,23 @@ def _discovered_config_path(
     return discovery.selected.path.as_posix()
 
 
-def _ash_config_fallback(source_dir: Path) -> Optional[str]:
+def _ash_config_fallback(
+    source_dir: Path, permit: Optional[Callable[[Path], bool]] = None
+) -> Optional[str]:
     """``ASH_CONFIG``, when a local scan of *source_dir* with no config named uses it.
 
     A local scan falls back to ``ASH_CONFIG``'s file when it finds no config in the
     source directory (config/default_config.py). The scan inside a container sees
     neither the host's environment nor that file, so container mode names it
     explicitly, in that same case and no other. A discovery error is left to the
-    scan, which reports it.
+    scan, which reports it. ``permit`` is the scan's ``config_base_gate``, so
+    discovery here checks each source against it as the scan's own discovery does.
     """
     env_config = os.environ.get("ASH_CONFIG")
     if not env_config:
         return None
     try:
-        if _discovered_config_path(source_dir) is not None:
+        if _discovered_config_path(source_dir, permit=permit) is not None:
             return None
     except Exception:
         return None
@@ -3306,7 +3309,7 @@ def run_ash_scan(
         # ASH_CONFIG as the CLI hands it over, where it is --config's environment
         # variable: the scan inside sees neither the host's environment nor the file.
         opts.config = (
-            _ash_config_fallback(opts.source_dir)
+            _ash_config_fallback(opts.source_dir, permit=opts.config_base_gate)
             if opts.workspace_plan is None
             else os.environ.get("ASH_CONFIG") or None
         )
