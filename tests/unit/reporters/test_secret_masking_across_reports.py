@@ -344,6 +344,32 @@ class TestWorkspaceScan:
         assert SECRETS.found_in(text) == [], f"{relative} holds a secret value"
 
 
+class TestScanIsolation:
+    def test_the_scan_helpers_keep_tools_out_of_the_real_home(self, tmp_path):
+        """The in-process scans run whatever semgrep and checkov are on PATH.
+
+        Their version checks write under HOME (``~/.cache/semgrep_version``,
+        ``~/.config/.semgrep/settings.yml``, ``~/.cache/checkov``), so the helper
+        that isolates a scan from AWS points HOME and the XDG directories under
+        the test's own directory too.
+        """
+        import os
+        from pathlib import Path
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            isolate_from_aws(monkeypatch, tmp_path)
+
+            for name in (
+                "HOME",
+                "XDG_CONFIG_HOME",
+                "XDG_CACHE_HOME",
+                "XDG_DATA_HOME",
+                "XDG_STATE_HOME",
+            ):
+                assert Path(os.environ[name]).is_relative_to(tmp_path), name
+            assert Path.home().is_relative_to(tmp_path)
+
+
 class TestScanWithoutAReportPhase:
     """``--phases convert --phases scan`` writes the results file with no report phase.
 

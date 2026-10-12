@@ -447,6 +447,9 @@ def isolate_from_aws(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
     the others' STS) unless a test enables it or a regression turns one back on;
     this covers both. Without credentials botocore stops before sending anything;
     the loopback endpoint is a second stop in case some provider still finds one.
+
+    It also points HOME and the XDG directories under ``root``, since the scans'
+    tools write their settings and caches there.
     """
     import os
 
@@ -457,6 +460,19 @@ def isolate_from_aws(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
     monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(root / "no-aws-credentials"))
     monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
     monkeypatch.setenv("AWS_ENDPOINT_URL", "http://127.0.0.1:9")
+    # The scans run whatever semgrep and checkov are on PATH, whose version checks
+    # write under HOME (semgrep's settings and version cache, checkov's update
+    # cache); keep those under the test's own directory.
+    home = root / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    for name, relative in (
+        ("XDG_CONFIG_HOME", ".config"),
+        ("XDG_CACHE_HOME", ".cache"),
+        ("XDG_DATA_HOME", ".local/share"),
+        ("XDG_STATE_HOME", ".local/state"),
+    ):
+        monkeypatch.setenv(name, str(home / relative))
 
 
 #: The operator config the scan runs with, written outside the scanned tree. The
