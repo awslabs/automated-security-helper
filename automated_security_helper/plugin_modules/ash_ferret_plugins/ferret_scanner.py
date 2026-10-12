@@ -40,8 +40,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
     SarifReport,
 )
+from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
+from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
 from automated_security_helper.utils.subprocess_utils import find_executable, spawn_run
 from automated_security_helper.utils.process_env import snapshot_environ
 
@@ -149,6 +151,37 @@ UNSUPPORTED_FERRET_OPTIONS = {
     "pre_commit_mode": "Pre-commit mode is not applicable in ASH integration. ASH manages output formatting and exit codes centrally. Use ASH's own pre-commit hook instead.",
     "list_profiles": "List-profiles mode only prints available profiles and exits; it produces no scan results. Run 'ferret-scan --list-profiles' directly.",
 }
+
+
+#: Characters ferret-scan's ``--exclude`` value cannot carry in a literal path: it is
+#: split on commas and its entries are glob patterns.
+_FERRET_EXCLUDE_UNSAFE = frozenset(",*?[]{}\\")
+
+
+def _link_exclude_patterns(target: Path) -> List[str]:
+    """``--exclude`` patterns for each link to a file whose target leaves ``target``.
+
+    ferret-scan walks the directory it is given. How it treats a link was not
+    measured (it is not installed where this was written), so every link to a file
+    whose target, every link resolved, leaves ``target`` is excluded: found by
+    ``file_links_leaving_tree``, which does not descend links to directories and
+    ignores ignore files, and passed as its path relative to ``target``, the form
+    the configured ``exclude_patterns`` take (``node_modules/**``).
+
+    Raises:
+        ScannerError: Naming the first such link whose path holds a comma or a glob
+            character, which the ``--exclude`` value cannot carry. ferret-scan is
+            then not run on ``target``, rather than read the file it points at.
+    """
+    links = file_links_leaving_tree(target)
+    for relative in links:
+        if any(character in relative for character in _FERRET_EXCLUDE_UNSAFE):
+            raise ScannerError(
+                f"Not running ferret-scan on {Path(target).as_posix()}: {relative!r}: "
+                f"{REASON_LINK_LEAVES_TREE}, and ferret-scan's --exclude cannot carry "
+                "its path, so ferret-scan might read the file it points at."
+            )
+    return links
 
 
 def parse_version(version_str: str) -> Tuple[int, ...]:
@@ -1136,6 +1169,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             for ignore_path in global_ignore_paths:
                 if hasattr(ignore_path, "path"):
                     exclude_patterns.append(str(ignore_path.path))
+            exclude_patterns.extend(_link_exclude_patterns(target))
 
             # Temporarily swap in the extended list for argument resolution
             original_patterns = self.config.options.exclude_patterns

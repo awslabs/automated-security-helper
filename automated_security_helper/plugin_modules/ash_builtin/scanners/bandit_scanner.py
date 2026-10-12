@@ -1,6 +1,7 @@
 """Module containing the Bandit security scanner implementation."""
 
 import logging
+import os
 from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
 
@@ -28,8 +29,10 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
+from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import mask_secrets_in_sarif
+from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 
 
@@ -371,14 +374,73 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         self.config.options.excluded_paths = list(original_excluded_paths) + list(
             global_ignore_paths
         )
+        # Added to the --exclude value for this resolution only, like the paths
+        # above: the entries depend on the target, and extra_args persists across
+        # scan() calls.
+        original_extra_args = list(self.args.extra_args)
+        link_excludes = self._link_excludes(target)
+        if link_excludes:
+            self.args.extra_args = [
+                ToolExtraArg(
+                    key=f"{arg.key},{','.join(link_excludes)}", value=arg.value
+                )
+                if arg.key.startswith("--exclude=")
+                else arg
+                for arg in self.args.extra_args
+            ]
         try:
             final_args = self._resolve_arguments(
                 target=target, results_file=results_file
             )
         finally:
             self.config.options.excluded_paths = original_excluded_paths
+            self.args.extra_args = original_extra_args
 
         return final_args, results_file, None
+
+    def _link_excludes(self, target: Path) -> List[str]:
+        """``--exclude`` entries for each link to a file whose target leaves ``target``.
+
+        bandit reads a link to a file wherever it points: its walk lists the link
+        among the files and opens it by name. The links come from
+        ``file_links_leaving_tree``, which walks as bandit does (``os.walk``, which
+        does not descend links to directories) and ignores ignore files, as bandit
+        does.
+
+        bandit 1.9.4 (``bandit/core/manager.py``) splits ``--exclude`` on commas and
+        leaves out a walked file when an entry matches its path with ``fnmatch`` or
+        is a substring of it. So each entry is the link's path as bandit's walk
+        spells it, ``<target>/<path below it>``, and it is used only when it leaves
+        out that file alone: it holds no comma and no ``*``, ``?`` or ``[``, and no
+        other file's path under ``target`` contains it.
+
+        Raises:
+            ScannerError: Naming the first link that cannot be left out that way,
+                or the first link at all when walked paths are not joined with
+                ``/`` (Windows). bandit is then not run on ``target``, rather than
+                read the file the link points at.
+        """
+        all_files: List[str] = []
+        links = file_links_leaving_tree(target, all_files=all_files)
+        if not links:
+            return []
+        root = Path(target).as_posix()
+        walked = [f"{root}/{relative}" for relative in all_files]
+        entries = []
+        for relative in links:
+            entry = f"{root}/{relative}"
+            if (
+                os.sep != "/"
+                or any(character in entry for character in ",*?[")
+                or any(entry in other for other in walked if other != entry)
+            ):
+                raise ScannerError(
+                    f"Not running bandit on {root}: {relative!r}: "
+                    f"{REASON_LINK_LEAVES_TREE}, and bandit's --exclude cannot leave "
+                    "out that file alone, so bandit would read the file it points at."
+                )
+            entries.append(entry)
+        return entries
 
     def _post_process_sarif(
         self,

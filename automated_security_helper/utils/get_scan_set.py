@@ -264,6 +264,57 @@ def _left_out_as_a_link_leaving_the_tree(
     return True
 
 
+def file_links_leaving_tree(
+    root: str | Path, all_files: Optional[List[str]] = None
+) -> List[str]:
+    """Every link to a file under *root* whose target leaves it, sorted.
+
+    For scanners that hand their tool a directory to walk (bandit, checkov,
+    ferret-scan) and so cannot use the scan set: each passes these to its tool's own
+    exclusion option. The walk is the one those tools make, not the scan set's: it
+    does not descend a link to a directory (``os.walk`` does not, and neither do
+    bandit or checkov 3.3.26), and it honors no ignore file, because the tools walk
+    the directories ignore files leave out as well. A link counts as leaving when its
+    target, every link resolved, is not strictly below *root* (``resolves_inside``),
+    so a dangling link is judged by where it points.
+
+    Args:
+        root: The directory the tool is given.
+        all_files: Filled, when given, with every file the walk found, links
+            included, so a caller can check that an exclusion it builds matches
+            nothing else.
+
+    Returns:
+        Paths below *root*, with ``/`` separators.
+    """
+    links: List[str] = []
+    pending = [(os.fspath(root), "")]
+    while pending:
+        directory, prefix = pending.pop()
+        try:
+            with os.scandir(directory) as entries:
+                listed = list(entries)
+        except OSError:
+            continue
+        for entry in listed:
+            relative = f"{prefix}{entry.name}"
+            try:
+                if entry.is_dir(follow_symlinks=False) and not _is_link_to_directory(
+                    entry.path
+                ):
+                    pending.append((entry.path, f"{relative}/"))
+                    continue
+                if entry.is_symlink() and os.path.isdir(entry.path):
+                    continue
+            except OSError:
+                continue
+            if entry.is_symlink() and not resolves_inside(entry.path, root):
+                links.append(relative)
+            if all_files is not None:
+                all_files.append(relative)
+    return sorted(links)
+
+
 #: The log files the running scan has already opened in its output directory when
 #: the scan set is built. Not counted among the files found there.
 _THIS_RUNS_LOG_FILES = frozenset({"ash.log", "ash.log.jsonl"})

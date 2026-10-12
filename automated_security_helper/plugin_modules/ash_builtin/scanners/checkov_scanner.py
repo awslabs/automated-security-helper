@@ -30,9 +30,12 @@ from automated_security_helper.models.core import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
+from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 
 
@@ -493,6 +496,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             self.args.extra_args.append(
                 ToolExtraArg(key="--skip-path", value=output_skip)
             )
+        for link_skip in self._link_skip_patterns(target):
+            self.args.extra_args.append(
+                ToolExtraArg(key="--skip-path", value=link_skip)
+            )
         try:
             final_args = self._resolve_arguments(
                 target=target,
@@ -503,6 +510,46 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         finally:
             self.args.extra_args = original_extra_args
         return _directory_as_one_token(final_args), results_file, None
+
+    def _link_skip_patterns(self, target: Path) -> List[str]:
+        """One ``--skip-path`` for each link to a file whose target leaves ``target``.
+
+        checkov 3.3.26 reads a link to a file in directory mode, relative or
+        absolute, and reports it at the link's path (measured), so a link the
+        repository committed would have checkov read a file outside the scanned tree.
+        The links come from ``file_links_leaving_tree``, which walks as checkov
+        does: it does not descend links to directories, and it ignores ignore files.
+
+        Built here, for links ASH found, and kept apart from the operator's
+        ``skip_path`` values, which are passed as they are: each is the link's path
+        as checkov walks it (the ``--directory`` value joined with the link's path
+        below it), ``re.escape``d and anchored at both ends, so it matches that path
+        and no other -- ``a/main.tf`` does not also skip ``a/main.tf.json``. checkov
+        applies a value with ``re.search`` and as a substring, and the substring
+        test cannot match a path either, since the value starts with ``^``. Escaped
+        values with parentheses, brackets, braces, spaces, commas, quotes and
+        ``? * + | $ ^ #`` were measured against checkov 3.3.26, including the regex
+        its Terraform module finder builds from every value: each skipped exactly
+        its own link.
+
+        Raises:
+            ScannerError: When there is such a link and checkov's walked paths use
+                a separator other than ``/`` (Windows), where the values cannot
+                match them. checkov is then not run on ``target``, rather than read
+                the file the link points at.
+        """
+        links = file_links_leaving_tree(target)
+        if not links:
+            return []
+        if os.sep != "/":
+            raise ScannerError(
+                f"Not running checkov on {Path(target).as_posix()}: {links[0]!r}: "
+                f"{REASON_LINK_LEAVES_TREE}, and checkov's --skip-path cannot leave "
+                "out a single file on this platform, so checkov would read the file "
+                "it points at."
+            )
+        root = Path(target).as_posix()
+        return [f"^{re.escape(f'{root}/{relative}')}$" for relative in links]
 
     def _subprocess_cwd(self, results_dir: Path) -> Path | None:
         """Run checkov from the filesystem root, outside the scanned tree.
