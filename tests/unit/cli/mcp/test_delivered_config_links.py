@@ -454,6 +454,31 @@ def test_a_validators_own_message_is_reported_by_its_type(_server) -> None:
     assert EXPIRY_CANARY not in str(outcome)
 
 
+#: A key the schema does not have; pydantic's location for it repeats it.
+KEY_CANARY = "canary-key-9d1e"
+
+
+@pytest.mark.usefixtures("host_set_aside")
+def test_a_key_the_schema_does_not_have_is_not_named(_server) -> None:
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
+
+    source = _linked_tree(
+        _server,
+        f"project_name: linked\nglobal_settings:\n  {KEY_CANARY}: 1\n"
+        "  severity_threshold: NOT-A-SEVERITY\n",
+    )
+
+    outcome = _scan_resolution(source)
+
+    assert isinstance(outcome, ASHConfigValidationError), outcome
+    message = str(outcome)
+    assert "global_settings.<key>: Extra inputs are not permitted" in message
+    # A key the schema has is still named, so the location is still useful.
+    assert "global_settings.severity_threshold:" in message
+    assert KEY_CANARY not in message
+    assert "NOT-A-SEVERITY" not in message
+
+
 def test_positive_control_the_validators_message_quotes_the_value(_server) -> None:
     """Without that, the test above could not fail: the operator's file shows it."""
     from automated_security_helper.config.resolve_config import resolve_config

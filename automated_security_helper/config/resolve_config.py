@@ -1,6 +1,20 @@
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from types import UnionType
+from typing import (
+    Annotated,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+    get_args,
+    get_origin,
+)
 
 from pydantic import ValidationError
 import yaml
@@ -521,16 +535,84 @@ def _has_a_client_file(document: Any) -> bool:
 _MESSAGES_THAT_QUOTE = frozenset({"value_error", "assertion_error"})
 
 
-def unquoted_validation_problems(error: ValidationError) -> List[str]:
+#: Stands for a location segment the schema does not name: a key from the file.
+_UNNAMED_KEY = "<key>"
+
+
+def _without_optional(annotation: Any) -> Any:
+    """``annotation`` with ``Optional`` and ``Annotated`` removed, when one type is left."""
+    while True:
+        args = [arg for arg in get_args(annotation) if arg is not type(None)]
+        origin = get_origin(annotation)
+        if origin is Annotated or (origin in (Union, UnionType) and len(args) == 1):
+            annotation = args[0]
+            continue
+        return annotation
+
+
+def _below(annotation: Any, keyed: bool) -> Any:
+    """What one segment below ``annotation`` reaches: a list's item, or a mapping's value."""
+    annotation = _without_optional(annotation)
+    args = get_args(annotation)
+    origin = get_origin(annotation)
+    if origin in (list, tuple, set, frozenset) and not keyed:
+        return args[0] if args else None
+    if origin is dict and keyed:
+        return args[1] if len(args) == 2 else None
+    return None
+
+
+def _schema_location(model: Any, loc: Iterable[Any]) -> str:
+    """``loc`` with each segment the schema does not name replaced by ``<key>``.
+
+    A field name or alias of the model reached so far, and a list index, are the
+    schema's; anything else is a key from the file (a mapping's key, or a key
+    ``extra="forbid"`` refuses), which a client's file may hold without the
+    client having written it.
+    """
+    parts: List[str] = []
+    shape: Any = model
+    for segment in loc:
+        if isinstance(segment, int):
+            parts.append(str(segment))
+            shape = _below(shape, keyed=False)
+            continue
+        current = _without_optional(shape)
+        fields = getattr(current, "model_fields", None)
+        named = None
+        if isinstance(fields, dict):
+            for name, info in fields.items():
+                if segment in (name, info.alias):
+                    named = info
+                    break
+        if named is not None:
+            parts.append(str(segment))
+            shape = named.annotation
+        else:
+            parts.append(_UNNAMED_KEY)
+            shape = _below(shape, keyed=True)
+    return ".".join(parts) or "(top level)"
+
+
+def unquoted_validation_problems(
+    error: ValidationError, model: Any = None
+) -> List[str]:
     """Each problem in ``error`` as its location and pydantic's message, without the value.
 
-    For a validator's own error (``_MESSAGES_THAT_QUOTE``), only its type. Shared
-    with the workspace policy file (``workspace/policy.py``), which a client can
-    supply too.
+    For a validator's own error (``_MESSAGES_THAT_QUOTE``), only its type. With
+    ``model``, the model that was validated, a location segment its schema does
+    not name is shown as ``<key>`` (``_schema_location``). Shared with the
+    workspace policy file (``workspace/policy.py``), which a client can supply
+    too.
     """
     problems = []
     for item in error.errors(include_url=False, include_input=False):
-        where = ".".join(str(part) for part in item.get("loc", ())) or "(top level)"
+        loc = item.get("loc", ())
+        where = (
+            _schema_location(model, loc)
+            if model is not None
+            else ".".join(str(part) for part in loc) or "(top level)"
+        )
         kind = item.get("type", "")
         what = (
             f"invalid value ({kind})" if kind in _MESSAGES_THAT_QUOTE else item["msg"]
@@ -552,7 +634,7 @@ def _client_validation_error(
     and pydantic's message for it, without the value, and for a validator's own
     error (``_MESSAGES_THAT_QUOTE``) only its type.
     """
-    problems = unquoted_validation_problems(error)
+    problems = unquoted_validation_problems(error, AshConfig)
     layered = (
         f" with '{describe_config_path(layered_over)}' layered over it"
         if layered_over is not None

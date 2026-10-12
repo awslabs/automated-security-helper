@@ -188,7 +188,8 @@
   is the path it was found or named at. A refusal names the path the client used,
   not the file the link reaches. A validation error for a config file an MCP
   client delivered or named gives the file and each problem's location without
-  the values in the file, and a client's file that does not parse is reported by
+  the values in the file (a key the schema does not have is shown as `<key>`),
+  and a client's file that does not parse is reported by
   line and column without quoting it. The same holds for a workspace policy file
   a client delivered, and for any policy file under a remote MCP caller.
 

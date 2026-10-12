@@ -388,7 +388,7 @@ def _load_policy(path: Path, named: Path, quote_values: bool) -> AshWorkspaceCon
             unquoted_validation_problems,
         )
 
-        problems = unquoted_validation_problems(exc)
+        problems = unquoted_validation_problems(exc, AshWorkspaceConfig)
         raise _refuse(
             f"{label} is not valid: {len(problems)} problem(s): "
             f"{'; '.join(problems)}. The values are not shown because an MCP "

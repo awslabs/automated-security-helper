@@ -185,10 +185,17 @@ def test_a_policy_linking_out_of_the_roots_is_refused_unread(
             ),
             "expiration: invalid value (value_error)",
         ),
+        (f"workspace:\n  {CANARY}: 1\n", "workspace.<key>: Extra inputs"),
         (f"workspace:\n  suppressions: [{{path: '{CANARY}'\n", "line"),
         (f"- {CANARY}\n", "mapping"),
     ],
-    ids=["invalid value", "validator message", "unparseable", "not a mapping"],
+    ids=[
+        "invalid value",
+        "validator message",
+        "unknown key",
+        "unparseable",
+        "not a mapping",
+    ],
 )
 def test_an_error_about_a_delivered_policy_names_where_not_what(
     _server, text: str, where: str
