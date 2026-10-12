@@ -239,6 +239,8 @@ def test_a_reports_directory_that_is_a_link_refuses_the_scan(tmp_path, target, r
 
     Linked to a directory or dangling, in a fresh scan (which clears ``reports/``
     while setting up its directories) and with ``--use-existing`` (which keeps it).
+    It exits 3, as every output directory refused through a link does
+    (``OUTPUT_DIR_REFUSED_EXIT_CODE``).
     """
     source = tmp_path / "src"
     source.mkdir()
@@ -260,8 +262,8 @@ def test_a_reports_directory_that_is_a_link_refuses_the_scan(tmp_path, target, r
     )
 
     console = _console(completed)
-    assert completed.returncode == 1, console[-4000:]
-    expected = f"reports directory {reports.as_posix()} is a symlink"
+    assert completed.returncode == 3, console[-4000:]
+    expected = f"{reports.as_posix()} is a symlink"
     assert expected in console, console[-4000:]
     assert "Traceback" not in console, console[-4000:]
     assert reports.is_symlink()

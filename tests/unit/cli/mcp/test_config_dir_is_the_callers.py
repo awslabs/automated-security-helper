@@ -328,8 +328,13 @@ def test_the_workspace_knobs_reader_judges_the_config_for_the_caller(
 
 
 # ---------------------------------------------------------------------------
-# The symlinked-output check resolves the config as the scan does
+# The symlinked-output check does not depend on the config
 # ---------------------------------------------------------------------------
+#
+# ASH does not write to, clear or mount its output directory through a link in
+# any sandbox mode, so neither the caller's own profile nor a config the client
+# named, both of which turn the sandbox off here, lets a linked output directory
+# through. Exit 3 (OUTPUT_DIR_REFUSED_EXIT_CODE).
 
 
 def _linked_output(target: Path) -> Path:
@@ -340,8 +345,10 @@ def _linked_output(target: Path) -> Path:
     return link
 
 
-def test_the_output_check_reads_the_callers_own_profile(own, target) -> None:
-    """The profile leaves the sandbox off, so a linked output directory is allowed."""
+def test_the_output_check_refuses_whatever_the_callers_own_profile_says(
+    own, target
+) -> None:
+    """The profile leaves the sandbox off; the linked output directory is refused."""
     from automated_security_helper.cli.mcp.sandbox import config_base_gate
     from automated_security_helper.interactions.run_ash_scan import (
         ScanOptions,
@@ -357,13 +364,16 @@ def test_the_output_check_reads_the_callers_own_profile(own, target) -> None:
         config_base_gate=config_base_gate(MINE),
     )
 
-    _refuse_symlinked_output_dir(opts)
+    with pytest.raises(SystemExit) as exited:
+        _refuse_symlinked_output_dir(opts)
+
+    assert exited.value.code == 3
 
 
-def test_the_output_check_holds_a_client_named_config_to_the_trusted_mode(
+def test_the_output_check_refuses_whatever_a_client_named_config_says(
     _server: Path, target: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A config the client named cannot turn off the sandbox the operator turned on."""
+    """A config the client named turns the sandbox off; the link is refused anyway."""
     from automated_security_helper.cli.mcp.sandbox import config_base_gate
     from automated_security_helper.interactions.run_ash_scan import (
         ScanOptions,
@@ -392,4 +402,4 @@ def test_the_output_check_holds_a_client_named_config_to_the_trusted_mode(
     with pytest.raises(SystemExit) as exited:
         _refuse_symlinked_output_dir(opts)
 
-    assert exited.value.code == 1
+    assert exited.value.code == 3

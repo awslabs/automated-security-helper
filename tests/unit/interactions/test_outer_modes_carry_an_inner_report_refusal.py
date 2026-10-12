@@ -850,14 +850,27 @@ def test_a_workspace_refused_before_any_project_refuses_the_container_run(
 
 
 def test_the_container_output_directory_in_a_refusal_is_given_as_the_hosts(tmp_path):
-    """The container sees the output directory at another path, as /out."""
+    """The container sees the output directory at another path, as /out.
+
+    The inner run writes to its own directory, standing in for the container's
+    view of the mount, and what it wrote then appears in the host's output
+    directory, as through the mount. A real directory rather than a link: ASH
+    refuses to write through a link at its output directory.
+    """
+    import shutil
+
     opts = _opts(tmp_path)
     opts.output_dir.mkdir()
     container_view = tmp_path / "container-out"
-    container_view.symlink_to(opts.output_dir, target_is_directory=True)
+    container_view.mkdir()
+
+    def inner(run_id: str) -> int:
+        status = _inner_run(run_id, container_view, [_Escaping])
+        shutil.copytree(container_view, opts.output_dir, dirs_exist_ok=True)
+        return status
 
     with pytest.raises(SystemExit) as refused:
-        _container(opts, lambda run_id: _inner_run(run_id, container_view, [_Escaping]))
+        _container(opts, inner)
 
     reason = getattr(refused.value, "reason", "")
     assert f"is not a file in {opts.output_dir.as_posix()}/reports" in reason, reason
@@ -914,7 +927,8 @@ def test_ash_scan_in_nix_mode_exits_1_when_the_inner_run_refuses_a_name(tmp_path
     nix = bin_dir / "nix"
     nix.write_text(FAKE_NIX, encoding="utf-8")
     nix.chmod(nix.stat().st_mode | stat.S_IXUSR)
-    plugins = tmp_path / "plugins" / "outer_modes_escaping_plugins"
+    # A top-level package ending in _ash_plugins: a name in ASH's plugin namespace.
+    plugins = tmp_path / "plugins" / "outer_modes_escaping_ash_plugins"
     plugins.mkdir(parents=True)
     (plugins / "__init__.py").write_text(PLUGIN, encoding="utf-8")
     source = tmp_path / "src"
@@ -970,7 +984,7 @@ def test_ash_scan_in_nix_mode_exits_1_when_the_inner_run_refuses_a_name(tmp_path
             cwd=tmp_path,
         )
 
-    refused = scan("--ash-plugin-modules", "outer_modes_escaping_plugins")
+    refused = scan("--ash-plugin-modules", "outer_modes_escaping_ash_plugins")
     console = re.sub(r"\x1b\[[0-9;]*m", "", refused.stdout + refused.stderr)
 
     assert "Nix shell exited with code 1" in console, console[-4000:]

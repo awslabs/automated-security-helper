@@ -1739,7 +1739,10 @@ class TestMergeCli:
     def test_a_reports_directory_that_is_a_link_refuses_the_reports(
         self, tmp_path, target
     ):
-        """A link at ``reports/`` itself, to a directory or dangling, exits 1 naming it."""
+        """A link at ``reports/`` itself, to a directory or dangling, exits 3 naming it.
+
+        3, as for every output directory refused through a link, in a scan too.
+        """
         shard_paths = write_shards(tmp_path / "artifacts", build_shards(3))
         output_dir = tmp_path / "merged"
         output_dir.mkdir()
@@ -1757,10 +1760,10 @@ class TestMergeCli:
 
         result = self._invoke(args)
 
-        assert result.exit_code == 1, result.output
+        assert result.exit_code == 3, result.output
         assert not isinstance(result.exception, OSError), repr(result.exception)
         console = "".join(re.sub(r"\x1b\[[0-9;]*m", "", result.output).split())
-        expected = f"reports directory {reports.as_posix()} is a symlink"
+        expected = f"{reports.as_posix()} is a symlink"
         assert "".join(expected.split()) in console, result.output
         assert reports.is_symlink()
         if target == "a directory":

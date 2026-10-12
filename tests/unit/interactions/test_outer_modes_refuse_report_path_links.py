@@ -197,12 +197,14 @@ def test_the_exit_code_reads_a_regular_sarif_report_as_before(tmp_path):
 @pytest.mark.parametrize("mode", ["container", "nix"])
 @pytest.mark.parametrize("target", ["a directory", "nothing"])
 def test_a_reports_directory_that_is_a_link_is_refused_before_the_inner_run(
-    tmp_path, mode, target
+    tmp_path, capsys, mode, target
 ):
     """Refused before the outer process clears the output directory or starts a run.
 
     Clearing it would rmtree through a link to a directory, which fails, or remove a
-    dangling link without saying so.
+    dangling link without saying so. Container mode called on its own refuses it
+    with the checks of what it mounts, which print the reason; nix mode carries it
+    on the exit.
     """
     opts = _opts(tmp_path)
     opts.output_dir.mkdir(parents=True)
@@ -225,10 +227,14 @@ def test_a_reports_directory_that_is_a_link_is_refused_before_the_inner_run(
     ):
         run_mode(opts, MagicMock())
 
-    assert refused.value.code == 1
-    assert f"reports directory {reports.as_posix()} is a symlink" in getattr(
-        refused.value, "reason", ""
+    # Exit 3, as every output directory refused through a link does.
+    assert refused.value.code == 3
+    said = getattr(refused.value, "reason", "") or "".join(
+        capsys.readouterr().out.split()
     )
+    assert "".join(f"{reports.as_posix()} is a symlink".split()) in "".join(
+        said.split()
+    ), said
     runner.assert_not_called()
     assert reports.is_symlink()
     if target == "a directory":
