@@ -1267,23 +1267,46 @@ def _base_results_file(loaded: Sequence[Tuple[Path, AshAggregatedResults]]) -> P
     return _in_index_order(loaded)[0][0]
 
 
+def _as_written(value: Any) -> Any:
+    """``value`` with each list entry reduced to what a config file writes.
+
+    A suppression or ignore path dumps every field, ``None`` for the ones left
+    out, and ASH's own ``client_supplied`` mark. Neither is part of what was
+    written, so a file that omits them compares equal to a full dump, and an
+    override suggested from them repeats only what the operator wrote.
+    """
+    if not isinstance(value, list):
+        return value
+    return [
+        {
+            key: item_value
+            for key, item_value in item.items()
+            if key != "client_supplied" and item_value is not None
+        }
+        if isinstance(item, dict)
+        else item
+        for item in value
+    ]
+
+
 def _verdict_settings(dumped: Dict[str, Any]) -> Dict[str, Any]:
     """The settings of a dumped config that decide the merged verdict, by override key.
 
     ``dumped`` is ``AshConfig.model_dump(mode="json", by_alias=True)``, with
     ``exclude_unset`` for the settings a file sets. The keys are the
-    ``--config-overrides`` spelling of each setting.
+    ``--config-overrides`` spelling of each setting, and list values are reduced
+    to what a file writes (``_as_written``).
     """
     settings: Dict[str, Any] = {}
     for name, value in dumped.items():
         if name in ("fail_on_findings", "fail_on_incomplete_scanners") or (
             name.startswith("content_db_staleness")
         ):
-            settings[name] = value
+            settings[name] = _as_written(value)
     global_settings = dumped.get("global_settings") or {}
     for name in ("severity_threshold", "suppressions", "ignore_paths"):
         if name in global_settings:
-            settings[f"global_settings.{name}"] = global_settings[name]
+            settings[f"global_settings.{name}"] = _as_written(global_settings[name])
     for scanner, section in (dumped.get("scanners") or {}).items():
         options = section.get("options") if isinstance(section, dict) else None
         if isinstance(options, dict) and "severity_threshold" in options:

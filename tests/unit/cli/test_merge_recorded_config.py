@@ -1190,6 +1190,48 @@ class TestVerdictSettings:
         assert "--config-overrides fail_on_findings=true" in named[0]
         assert "--fail-on-findings" in named[0]
 
+    def test_the_suggested_override_carries_no_internal_marker(self, harness):
+        """The suppression list it suggests is the operator's, without client_supplied."""
+        shard_paths = harness.write_shards({"project_name": "test-merge"})
+        suppression = {"path": "src/**", "reason": "vendored", "rule_id": "X"}
+        operator = _write_yaml(
+            harness.tmp_path / "operator" / "ash.yaml",
+            {"global_settings": {"suppressions": [suppression]}},
+        )
+
+        result = harness.merge(shard_paths, "--config", str(operator))
+
+        _assert_merged(result, harness)
+        named = [
+            m
+            for m in harness.warnings
+            if "ash merge's --config sets global_settings.suppressions" in m
+        ]
+        assert named, harness.warnings
+        assert "client_supplied" not in named[0], named[0]
+        assert '"rule_id": "X"' in named[0], named[0]
+
+    def test_the_same_suppressions_in_the_operators_config_are_not_reported(
+        self, harness
+    ):
+        suppression = {"path": "src/**", "reason": "vendored", "rule_id": "X"}
+        shard_paths = harness.write_shards(
+            {"global_settings": {"suppressions": [suppression]}}
+        )
+        operator = _write_yaml(
+            harness.tmp_path / "operator" / "ash.yaml",
+            {"global_settings": {"suppressions": [suppression]}},
+        )
+
+        result = harness.merge(shard_paths, "--config", str(operator))
+
+        _assert_merged(result, harness)
+        assert not [
+            m
+            for m in harness.warnings
+            if "ash merge's --config sets global_settings.suppressions" in m
+        ], harness.warnings
+
     def test_a_flag_that_decides_the_setting_leaves_no_config_warning(self, harness):
         """--fail-on-findings applies, so the --config value is not reported as ignored."""
         shard_paths = harness.write_shards({"fail_on_findings": False})
