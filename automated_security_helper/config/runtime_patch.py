@@ -232,9 +232,9 @@ _PLUGIN_SECTIONS = frozenset({"scanners", "reporters", "converters"})
 _GLOB_CHARS = frozenset("*?[")
 #: Config keys of the plugins in the packages under
 #: ``automated_security_helper.plugin_modules``, per section. A table rather than
-#: an import: importing a plugin package registers its plugins in the
-#: process-wide ``ash_plugin_manager``, and every later scan in the process then
-#: runs them, including reporters the default config never loads.
+#: an import: importing a plugin package runs its code and registers its
+#: plugins in the process-wide ``ash_plugin_manager`` for the rest of the
+#: process, which checking a patch has no reason to do.
 #: ``tests/unit/config/test_runtime_patch.py`` imports the packages in a
 #: subprocess and checks this table against them.
 _SHIPPED_PLUGIN_KEYS: Dict[str, FrozenSet[str]] = {

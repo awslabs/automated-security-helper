@@ -337,8 +337,10 @@ class ScanExecutionEngine:
 
         # The registry is the process's, so it also holds what an earlier scan's
         # untrusted config loaded, in the MCP server and across a workspace's
-        # projects. This scan takes only the classes its own modules, or the
-        # operator's, bring in; the cached list stays whole for the next scan.
+        # projects. The filter above already took only the classes this scan's
+        # own modules bring in; this second check drops any that only another
+        # scan's untrusted import registered. The cached list stays whole for the
+        # next scan.
         self.plugins = ash_plugin_manager.plugins_loaded_by(
             self.plugins, combined_plugin_modules
         )

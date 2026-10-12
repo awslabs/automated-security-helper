@@ -958,14 +958,15 @@
     workspace-level report step. Neither is one the MCP `list_scanners` tool
     loaded: trivy-repo and ferret-scan used to run in later scans after a client
     listed the scanners. A later scan used to select every class an earlier one
-    had loaded, as a fresh process would not. A module that
-    `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`, `--config-overrides` or a config
-    file outside the tree names stays loaded for every later scan in the process,
-    even when the tree's config also names it.
+    had loaded, as a fresh process would not. The same now holds for a module
+    that `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`, `--config-overrides` or a
+    config file outside the tree names: a later scan that does not name it takes
+    none of its classes or event handlers (see "A scan uses only the plugin
+    modules it names" under Behavior changes).
   - Known limit: the plugin registry is still the process's rather than each
-    scan's, so the classes of a module the operator loaded, and the event
-    handlers any loaded module subscribes, reach every later scan in the process.
-    Scoping the registry to each scan would remove both.
+    scan's. A module any scan loaded stays imported, and an event handler the
+    program running the scans subscribes from outside the plugin namespace is
+    notified in every scan.
   - bandit's, grype's and syft's own config files are the operator's.
     `scanners.bandit.options.config_file`, `scanners.grype.options.config_file`
     and `scanners.syft.options.config_file` from such a file are ignored; ASH no

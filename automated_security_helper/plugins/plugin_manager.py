@@ -321,11 +321,15 @@ class AshPluginManager(BaseModel):
         """Record ``module_names`` as modules the operator loaded.
 
         ``--ash-plugin-modules``, ``ASH_PLUGIN_MODULES``, or the operator's
-        configuration. What their imports registered is the operator's choice
-        and stays selectable by every later scan in the process, even when an
-        untrusted import registered it first: the operator loading a module
-        first would have left it untracked, and the order two scans load a
-        module in does not decide what a later scan is offered.
+        configuration. ``plugins_loaded_by`` does not drop what their imports
+        registered, even when an untrusted import registered it first: the
+        operator loading a module first would have left it untracked, and the
+        order two scans load a module in does not decide what a later scan is
+        offered. That widens nothing a scan selects beyond its own modules: the
+        scan's filter (``plugins.loader.scan_plugin_filter``) runs first and
+        leaves out every module the scan does not name, so a module the
+        operator named for one scan takes no part in a later scan that does not
+        name it.
         """
         with self._provenance_lock:
             self._operator_modules.update(name for name in module_names if name)
