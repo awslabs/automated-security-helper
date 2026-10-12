@@ -448,6 +448,7 @@ class _GuardedFileHandler(logging.FileHandler):
             raise
 
     def _release_root(self) -> None:
+        # Not at the top: fs_guard imports this module. Do not hoist.
         from automated_security_helper.utils.sandbox import fs_guard
 
         root, self._root = self._root, None
@@ -462,6 +463,7 @@ class _GuardedFileHandler(logging.FileHandler):
             self._release_root()
 
     def _open(self):
+        # Not at the top: fs_guard imports this module. Do not hoist.
         from automated_security_helper.utils.sandbox import fs_guard
 
         return fs_guard.open_for_write(
@@ -672,6 +674,7 @@ def _log_file_handler(path: Path, truncate: bool) -> logging.FileHandler:
     get_logger registered, so a link at the name, or a file another name refers to,
     raises before anything is written; see _GuardedFileHandler.
     """
+    # Not at the top: fs_guard imports this module. Do not hoist.
     from automated_security_helper.utils.sandbox import fs_guard
 
     with fs_guard.open_for_write(path, append=not truncate, root=path.parent):

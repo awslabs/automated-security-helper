@@ -17,6 +17,14 @@ that:
   before it is truncated.
 * :func:`sweep_writable` runs after every sandboxed spawn and removes every entry
   under the writable directories that is not a regular file or a directory.
+
+A root itself must not be a link. ``_open_dir_beneath`` opens the root by name and
+follows a link at it, so every check below it would then be made in wherever the
+link points. register_writable_root, and open_for_write for a root its caller
+names, refuse a root that is a symlink or a junction with OutputLinkRefused. The
+output directory checks in ``utils/output_dir_links`` refuse a linked output
+directory before any root is registered; this is the guard for a caller that
+skipped them.
 """
 
 from __future__ import annotations
@@ -36,7 +44,10 @@ from pathlib import Path
 from typing import IO, Dict, FrozenSet, Iterable, Iterator, Optional, Tuple, Union
 
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
+from automated_security_helper.utils.output_dir_links import (
+    OutputDirLinkRefused,
+    is_link,
+)
 
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 # O_BINARY on Windows, so the CRT does not translate newlines a second time under
@@ -140,8 +151,12 @@ def register_writable_root(path: Union[str, Path]) -> Path:
     component below it without following a link, and refuses one. Registrations
     are counted: each holder releases its own with release_writable_root, or uses
     writable_root, and the root stays until the last holder has. Returns the root.
+
+    A root that is a link is refused with OutputLinkRefused and not registered; see
+    the module docstring.
     """
     root = Path(os.path.abspath(path))
+    _refuse_linked_root(root)
     with _roots_lock:
         _apply_pending_releases()
         _writable_roots[root] = _writable_roots.get(root, 0) + 1
@@ -191,6 +206,12 @@ def _writable_root_for(path: Path) -> Optional[Path]:
     return max(inside, key=lambda r: len(r.parts)) if inside else None
 
 
+def _refuse_linked_root(root: Path) -> None:
+    """Raise OutputLinkRefused if ``root`` is a symlink or a junction."""
+    if is_link(root):
+        raise OutputLinkRefused(root, root, where="at a directory it writes below")
+
+
 def _guard_root(path: Path, root: Optional[Union[str, Path]]) -> Optional[Path]:
     """The root open_for_write checks ``path`` below: see its ``root`` argument."""
     registered = _writable_root_for(path)
@@ -199,6 +220,7 @@ def _guard_root(path: Path, root: Optional[Union[str, Path]]) -> Optional[Path]:
     named = Path(os.path.abspath(root))
     if named not in path.parents:
         raise ValueError(f"{path.as_posix()} is not below {named.as_posix()}")
+    _refuse_linked_root(named)
     if registered is not None and len(registered.parts) < len(named.parts):
         return registered
     return named

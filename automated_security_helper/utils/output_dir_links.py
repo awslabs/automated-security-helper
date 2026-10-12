@@ -253,7 +253,8 @@ def open_no_follow(
     regular file (a FIFO, a device) raises OSError. Below a registered root every
     component under that root is checked as well.
     """
-    # Imported here: fs_guard imports this module for the exception family.
+    # Imported here, not at the top: fs_guard imports this module for the
+    # exception family, so a module-level import is a cycle. Do not hoist.
     from automated_security_helper.utils.sandbox import fs_guard
 
     target = Path(os.path.abspath(path))

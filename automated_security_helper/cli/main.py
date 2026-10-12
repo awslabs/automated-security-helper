@@ -252,15 +252,16 @@ def get_genai_guide(
 
     # Write to output file, as a new file renamed over the destination: a symlink
     # there is refused rather than written through (fs_guard).
+    from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
     from automated_security_helper.utils.sandbox.fs_guard import (
-        OutputLinkRefused,
         replace_without_following,
     )
 
     output_file = Path(output_path)
     try:
         replace_without_following(output_file, guide_content)
-    except OutputLinkRefused as refused:
+    except OutputDirLinkRefused as refused:
+        # The family's base, a symlink or a file another name refers to alike.
         typer.echo(f"Error: {refused}", err=True)
         raise typer.Exit(1)
 

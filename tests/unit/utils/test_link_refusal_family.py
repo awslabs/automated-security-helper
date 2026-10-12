@@ -255,6 +255,35 @@ class TestTheNameWithoutDirectoryDescriptors:
 
 
 @needs_symlinks
+class TestARootThatIsALink:
+    """A root is opened by name, so a link at the root itself is refused."""
+
+    def test_registering_it_is_refused(self, tmp_path, victim):
+        linked = tmp_path / "linked-out"
+        linked.symlink_to(victim.parent, target_is_directory=True)
+        before = fs_guard.registered_roots()
+
+        with pytest.raises(OutputLinkRefused, match="linked-out is a symlink"):
+            fs_guard.register_writable_root(linked)
+
+        assert fs_guard.registered_roots() == before
+
+    def test_naming_it_to_open_for_write_is_refused(self, tmp_path, victim):
+        linked = tmp_path / "linked-out"
+        linked.symlink_to(victim.parent, target_is_directory=True)
+
+        with pytest.raises(OutputLinkRefused):
+            fs_guard.open_for_write(linked / "victim.txt", root=linked)
+
+        assert victim.read_text() == ORIGINAL
+
+    def test_a_directory_is_registered(self, output):
+        """Control."""
+        with fs_guard.writable_root(output) as root:
+            assert root in fs_guard.registered_roots()
+
+
+@needs_symlinks
 class TestThePackageManagerCopies:
     """npm's and pnpm's private copies are made below the scanner's results directory."""
 
