@@ -106,7 +106,7 @@ it needs.
   grype config when it sets `db.cache-dir`; a trivy `cache.dir` is overridden
   without one.
 - The config files ASH writes for a scanner's tool (the empty config bandit, grype,
-  syft, ferret-scan, trivy, trivy-repo and actionlint get when you name none, trivy's and
+  syft, ferret-scan, trivy, trivy-repo, actionlint and cfn-lint get when you name none, trivy's and
   trivy-repo's empty ignore file and secret config, and trivy-repo's empty modules
   directory) are in a directory of that scanner run's own, outside the
   scanned tree (normally in the system temporary directory, never under one another

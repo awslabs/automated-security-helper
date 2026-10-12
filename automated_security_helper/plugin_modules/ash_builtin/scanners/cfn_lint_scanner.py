@@ -99,6 +99,7 @@ from automated_security_helper.base.options import (
 from automated_security_helper.config.path_trust import (
     private_cwd_outside_scanned_tree,
 )
+from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -535,7 +536,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             return None
         return cloudformation_templates_nothing_to_scan_reason(self.context)
 
-    def _option_args(self, results_dir: Path) -> List[str]:
+    def _option_args(self) -> List[str]:
         """Arguments from config, each as one ``--flag=value`` token.
 
         The ``=`` form keeps a value from ever being parsed as a flag of its own.
@@ -549,8 +550,8 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         ``.cfnlintrc`` naming it ran on a plain ``cfn-lint -- t.yaml``), and
         ``ignore_checks: [E, W]`` turns every finding off without anything reaching
         ASH's suppression accounting. So the default is an empty configuration ASH
-        writes itself, and a ``.cfnlintrc`` is used only when the ASH config names
-        it in ``config_file``.
+        writes itself, outside the scanned tree (``empty_tool_config``), and a
+        ``.cfnlintrc`` is used only when the ASH config names it in ``config_file``.
 
         The ASH config usually comes from the scanned repository too, so
         ``config_file`` is honored only when the operator set it (through
@@ -566,16 +567,14 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             else None
         )
         if config_file is None:
-            empty = Path(results_dir).joinpath("ash-empty.cfnlintrc")
-            # Unlinked and recreated rather than overwritten, so a symlink left at
-            # this path (the output directory usually sits inside the scanned tree)
-            # is replaced instead of written through. open_for_write also refuses
-            # to follow a link created after the unlink inside a sandbox's
-            # writable directory.
-            if empty.is_symlink() or empty.exists():
-                empty.unlink()
-            with open_for_write(empty) as handle:
-                handle.write("{}\n")
+            # Outside the scanned tree, new for this run and removed when it ends
+            # (config/tool_config_trust.empty_tool_config), so nothing the
+            # repository put at a path of its choosing is written through or read.
+            # It holds no relative path, so cfn-lint's private working directory
+            # (_private_cwd) changes nothing about it.
+            empty = empty_tool_config(
+                "ash-empty.cfnlintrc", "{}\n", context=self.context
+            )
             args.append(f"--config-file={empty.resolve().as_posix()}")
         else:
             args.append(
@@ -1066,7 +1065,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 raise ScannerError("cfn-lint has no results directory")
             results_dir = Path(os.path.abspath(self.results_dir.joinpath(target_type)))
             results_dir.mkdir(parents=True, exist_ok=True)
-            option_args = self._option_args(results_dir)
+            option_args = self._option_args()
             # Absolute, because cfn-lint does not run in the source directory (see
             # _private_cwd). Each maps back to the path ASH reports.
             shown_by_argument = {

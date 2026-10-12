@@ -3,8 +3,8 @@
 
 """The config files ASH writes for a scanner's tool are outside the scanned tree.
 
-bandit, grype, syft, trivy, trivy-repo, ferret-scan and actionlint each get a config
-file ASH writes when the operator names none, one that sets nothing, so the tool does not read one
+bandit, grype, syft, trivy, trivy-repo, ferret-scan, actionlint and cfn-lint each get
+a config file ASH writes when the operator names none, one that sets nothing, so the tool does not read one
 from the tree on its own (``config/tool_config_trust.empty_tool_config``), and
 trivy-repo an empty modules directory (``empty_tool_directory``). The
 output directory defaults to ``<source>/.ash/ash_output``, so the scanner's results
@@ -56,6 +56,12 @@ _EMPTY_SARIF = json.dumps({"version": "2.1.0", "runs": []})
 _WORKFLOW = (
     "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n"
     "    steps:\n      - run: echo hello\n"
+)
+
+#: A CloudFormation template for cfn-lint to find.
+_TEMPLATE = (
+    "AWSTemplateFormatVersion: '2010-09-09'\n"
+    "Resources:\n  Bucket:\n    Type: AWS::S3::Bucket\n"
 )
 
 
@@ -149,6 +155,15 @@ CASES = [
         stdout='{"version":"1.7.12","errors":[]}',
     ),
     Case(
+        "cfn-lint",
+        "--config-file",
+        "source/ash-empty.cfnlintrc",
+        "{}\n",
+        # cfn-lint writes one report per batch of templates; one template, one batch.
+        "source/cfn-lint.0.sarif",
+        files={"template.yaml": _TEMPLATE},
+    ),
+    Case(
         "ferret-scan",
         "--config",
         "ferret-empty-config.yaml",
@@ -219,6 +234,11 @@ def _scanner_class(name: str):
         from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (  # type: ignore[assignment]
             ActionlintScanner as cls,
             ActionlintScannerConfig as config,
+        )
+    elif name == "cfn-lint":
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (  # type: ignore[assignment]
+            CfnLintScanner as cls,
+            CfnLintScannerConfig as config,
         )
     else:
         from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (  # type: ignore[assignment]

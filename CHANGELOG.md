@@ -1303,7 +1303,7 @@
     is not passed to the tool. A link outside the tree, and a path that leaves by
     `..`, are followed as before.
   - The empty config files ASH passes bandit, grype, syft, ferret-scan, trivy,
-    trivy-repo and actionlint when the operator names none, and trivy-repo's empty modules
+    trivy-repo, actionlint and cfn-lint when the operator names none, and trivy-repo's empty modules
     directory, are written in a new directory
     outside the scanned tree, one per scanner run, made with mode 0700 and
     removed when the run ends, instead of in `<output>/scanners/<name>/`, which

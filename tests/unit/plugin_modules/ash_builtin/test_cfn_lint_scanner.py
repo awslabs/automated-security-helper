@@ -47,6 +47,19 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scan
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.utils.config_trust import record_provenance
+from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
+
+
+def _ashs_own(config: Path, repo: Path) -> bool:
+    """Whether ``config`` is the empty config ASH writes for this run's cfn-lint.
+
+    ``config/tool_config_trust.empty_tool_config`` writes it in a directory of the
+    scanner run's own, outside the scanned tree.
+    """
+    return not config.resolve().is_relative_to(repo.resolve()) and any(
+        parent.name.startswith(TOOL_CONFIG_DIR_PREFIX) for parent in config.parents
+    )
+
 
 FIXTURES = (
     Path(__file__).resolve().parents[3] / "test_data" / "scanners" / "cfn_lint_guard"
@@ -293,33 +306,37 @@ class TestOptions:
         missing = tmp_path / "operator" / ".cfnlintrc"
         scanner = _scanner(repo, operator=True, config_file=str(missing))
         with pytest.raises(Exception, match="does not exist"):
-            scanner._option_args(repo)
+            scanner._option_args()
 
     def test_without_config_file_the_repository_cfnlintrc_is_not_read(self, repo):
         """A scanned repo's .cfnlintrc can load Python rules and disable checks."""
         (repo / ".cfnlintrc").write_text("ignore_checks: [E, W]\n")
-        results = repo / "out"
-        results.mkdir()
-        args = _scanner(repo)._option_args(results)
+        args = _scanner(repo)._option_args()
         config_args = [a for a in args if a.startswith("--config-file=")]
         assert len(config_args) == 1
         named = Path(config_args[0].split("=", 1)[1])
-        assert named == (results / "ash-empty.cfnlintrc").resolve()
+        assert named.name == "ash-empty.cfnlintrc" and _ashs_own(named, repo)
         assert named.read_text() == "{}\n"
 
     @pytest.mark.skipif(
         __import__("sys").platform == "win32",
         reason="symlink creation needs privileges",
     )
-    def test_the_empty_config_replaces_a_planted_symlink(self, repo):
+    def test_a_link_where_the_empty_config_was_written_is_neither_followed_nor_used(
+        self, repo
+    ):
+        """The results directory is inside the tree with the default output
+        directory, so a link may already be at the name ASH used to write there."""
         kept = repo / "kept.txt"
         kept.write_text("keep me\n")
         results = repo / "out"
         results.mkdir()
         (results / "ash-empty.cfnlintrc").symlink_to(kept)
-        _scanner(repo)._option_args(results)
+        (arg,) = [
+            a for a in _scanner(repo)._option_args() if a.startswith("--config-file=")
+        ]
         assert kept.read_text() == "keep me\n"
-        assert not (results / "ash-empty.cfnlintrc").is_symlink()
+        assert _ashs_own(Path(arg.split("=", 1)[1]), repo)
 
 
 class TestBuiltin:
@@ -691,11 +708,8 @@ class TestTheScannedTreeCannotLoadRules:
         return rc
 
     @staticmethod
-    def _config_arg(scanner, results: Path) -> str:
-        results.mkdir(exist_ok=True)
-        (arg,) = [
-            a for a in scanner._option_args(results) if a.startswith("--config-file=")
-        ]
+    def _config_arg(scanner) -> str:
+        (arg,) = [a for a in scanner._option_args() if a.startswith("--config-file=")]
         return arg
 
     @pytest.mark.parametrize("spelling", ["relative", "absolute"])
@@ -707,7 +721,7 @@ class TestTheScannedTreeCannotLoadRules:
         scanner = _scanner(repo, config_file=value)
 
         with caplog.at_level("WARNING"):
-            arg = self._config_arg(scanner, repo / "out")
+            arg = self._config_arg(scanner)
 
         assert arg.endswith("/ash-empty.cfnlintrc")
         assert "scanners.cfn-lint.options.config_file" in caplog.text
@@ -716,7 +730,7 @@ class TestTheScannedTreeCannotLoadRules:
         rc = self._plant(repo)
         scanner = _scanner(repo, operator=True, config_file=rc.as_posix())
 
-        assert self._config_arg(scanner, repo / "out").endswith("/ash-empty.cfnlintrc")
+        assert self._config_arg(scanner).endswith("/ash-empty.cfnlintrc")
 
     @pytest.mark.skipif(os.name == "nt", reason="symlinks")
     @pytest.mark.parametrize("shape", ["file", "directory"])
@@ -738,7 +752,7 @@ class TestTheScannedTreeCannotLoadRules:
         scanner = _scanner(repo, operator=True, config_file="ci/.cfnlintrc")
 
         with caplog.at_level("WARNING"):
-            arg = self._config_arg(scanner, repo / "out")
+            arg = self._config_arg(scanner)
 
         assert arg.endswith("/ash-empty.cfnlintrc")
         assert "Ignoring scanners.cfn-lint.options.config_file" in caplog.text
@@ -752,7 +766,7 @@ class TestTheScannedTreeCannotLoadRules:
             config_file=rc.as_posix(),
         )
 
-        assert self._config_arg(scanner, repo / "out").endswith("/ash-empty.cfnlintrc")
+        assert self._config_arg(scanner).endswith("/ash-empty.cfnlintrc")
 
     @pytest.mark.parametrize("key_spelling", ["cfn-lint", "cfn_lint"])
     def test_an_operator_override_outside_the_tree_is_used(
@@ -767,7 +781,7 @@ class TestTheScannedTreeCannotLoadRules:
             config_file=str(operator_rc),
         )
 
-        arg = self._config_arg(scanner, repo / "out")
+        arg = self._config_arg(scanner)
 
         assert arg == f"--config-file={operator_rc.resolve().as_posix()}"
 
@@ -781,9 +795,7 @@ class TestOptionsOnlyTheOperatorMaySet:
 
     @staticmethod
     def _args(scanner, repo: Path) -> list:
-        results = repo / "out"
-        results.mkdir(exist_ok=True)
-        return scanner._option_args(results)
+        return scanner._option_args()
 
     def test_ignore_checks_from_the_scanned_tree_are_ignored(self, repo, caplog):
         scanner = _scanner(repo, ignore_checks=["E", "W"])
@@ -872,9 +884,7 @@ class TestTemplateIgnoresAreOffByDefault:
 
     @staticmethod
     def _args(scanner, repo: Path) -> list:
-        results = repo / "out"
-        results.mkdir(exist_ok=True)
-        return scanner._option_args(results)
+        return scanner._option_args()
 
     def test_with_no_ignores_every_rule_is_mandatory(self, repo):
         mandatory = _mandatory(self._args(_scanner(repo), repo))
@@ -1003,9 +1013,7 @@ class TestTemplateRuleConfigurationIsOffByDefault:
 
     @staticmethod
     def _args(scanner, repo: Path) -> list:
-        results = repo / "out"
-        results.mkdir(exist_ok=True)
-        return scanner._option_args(results)
+        return scanner._option_args()
 
     @staticmethod
     def _rc(tmp_path: Path, text: str) -> Path:
@@ -1160,12 +1168,8 @@ def test_an_outside_cfnlintrc_set_by_the_scanned_tree_is_ignored(repo, tmp_path)
     outside.parent.mkdir()
     outside.write_text("{}\n")
     scanner = _scanner(repo, config_file=str(outside))
-    results = repo / "out"
-    results.mkdir()
 
-    (arg,) = [
-        a for a in scanner._option_args(results) if a.startswith("--config-file=")
-    ]
+    (arg,) = [a for a in scanner._option_args() if a.startswith("--config-file=")]
 
     assert arg.endswith("/ash-empty.cfnlintrc")
 
