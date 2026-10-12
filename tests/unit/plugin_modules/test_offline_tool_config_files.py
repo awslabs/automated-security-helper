@@ -22,6 +22,9 @@ import pytest
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.config.path_trust import reset_path_refusal_warnings
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    _trivy_scanner_base as trivy_base,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
     SyftScanner,
     SyftScannerConfig,
@@ -80,12 +83,20 @@ def context(tmp_path) -> PluginContext:
     return ctx
 
 
+def _no_database_update(monkeypatch) -> None:
+    """Online, trivy and trivy-repo update trivy's database before the scan
+    (TrivyScannerBase._shared_update_flags), which needs trivy itself and the
+    network. These tests read the scan's argv, so the update is replaced."""
+    monkeypatch.setattr(trivy_base, "prepare_content_db", lambda *a, **k: None)
+
+
 @pytest.fixture(params=["online", "offline"])
 def mode(request, monkeypatch):
     if request.param == "offline":
         monkeypatch.setenv("ASH_OFFLINE", "YES")
     else:
         monkeypatch.delenv("ASH_OFFLINE", raising=False)
+        _no_database_update(monkeypatch)
     for name in ("TRIVY_CONFIG", "TRIVY_SKIP_VERSION_CHECK", "TRIVY_DISABLE_TELEMETRY"):
         monkeypatch.delenv(name, raising=False)
     return monkeypatch
@@ -102,6 +113,7 @@ def offline(monkeypatch):
 @pytest.fixture
 def online(monkeypatch):
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    _no_database_update(monkeypatch)
     for name in ("TRIVY_CONFIG", "TRIVY_SKIP_VERSION_CHECK", "TRIVY_DISABLE_TELEMETRY"):
         monkeypatch.delenv(name, raising=False)
     return monkeypatch

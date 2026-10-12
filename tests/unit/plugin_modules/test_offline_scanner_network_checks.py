@@ -63,6 +63,9 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    _trivy_scanner_base as trivy_base,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
     CheckovScanner,
     CheckovScannerConfig,
@@ -179,6 +182,10 @@ def offline(monkeypatch):
 @pytest.fixture
 def online(monkeypatch):
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    # Online, trivy and trivy-repo update trivy's database before the scan
+    # (TrivyScannerBase._shared_update_flags), which needs trivy itself and the
+    # network; these tests read the scan's argv, so the update is replaced.
+    monkeypatch.setattr(trivy_base, "prepare_content_db", lambda *a, **k: None)
     return monkeypatch
 
 

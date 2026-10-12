@@ -96,6 +96,9 @@ def offline(monkeypatch):
 def online(monkeypatch):
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     monkeypatch.delenv("TRIVY_CONFIG", raising=False)
+    # Online, trivy and trivy-repo update trivy's database before the scan, which
+    # needs trivy itself and the network; these tests read the scan's argv.
+    monkeypatch.setattr(trivy_base, "prepare_content_db", lambda *a, **k: None)
     return monkeypatch
 
 
@@ -312,8 +315,6 @@ def test_offline_builtin_trivy_runs_no_misconfig_checks_when_their_list_is_unkno
 
 
 def test_control_online_builtin_trivy_keeps_its_terraform_checks(online, context):
-    # The database update is not what this checks; it needs trivy itself.
-    online.setattr(trivy_base, "prepare_content_db", lambda *args, **kwargs: None)
     scanner = _builtin_trivy(context, ["vuln", "misconfig"])
 
     command = _scan_command(scanner, context, online)
