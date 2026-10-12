@@ -1163,7 +1163,9 @@
   server, where `scan_directory` refuses the file (and an empty `config_path`)
   before starting a scan, including one that parses and does not validate (it
   used to start a scan that then failed), and `get_config` returns an error instead of the default
-  configuration, also with `raw` and when discovery itself refuses. A config
+  configuration, also with `raw` and when discovery itself refuses; `raw` now
+  parses a `.json` file as JSON, as a scan does, where it used to parse it as
+  YAML (a tab-indented file failed, and `1e3` came back as a string). A config
   source that discovery found and ignored is now also reported as a
   `config_warning` in the scan's results and summary, since its settings are not
   applied. **A CI job that set `ASH_CONFIG` to a file it only sometimes writes now

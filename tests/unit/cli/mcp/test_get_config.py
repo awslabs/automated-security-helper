@@ -69,6 +69,32 @@ class TestGetConfigRaw:
         assert result["global_settings"]["severity_threshold"] == "MEDIUM"
         assert result["fail_on_findings"] is True
 
+    def test_raw_parses_a_json_file_as_json(self, tmp_path):
+        """As a scan loads it. Parsed as YAML, a tab-indented file is an error and
+        ``1e3`` is the string "1e3"."""
+        from automated_security_helper.config.config_sources import read_config_file
+
+        config_file = tmp_path / "ash.json"
+        config_file.write_text(
+            '{\n\t"project_name": "tabbed",\n\t"extra": 1e3\n}\n', encoding="utf-8"
+        )
+
+        result = mcp_get_config(config_path=str(config_file), raw=True)
+
+        assert result == {"project_name": "tabbed", "extra": 1000.0}
+        assert result == read_config_file(config_file)
+
+    def test_raw_refuses_a_json_file_that_is_not_json(self, tmp_path):
+        """YAML reads ``{"project_name": }`` as a null value; a scan refuses it."""
+        config_file = tmp_path / "ash.json"
+        config_file.write_text('{"project_name": }\n', encoding="utf-8")
+
+        result = mcp_get_config(config_path=str(config_file), raw=True)
+
+        assert result["success"] is False, result
+        assert result["error_category"] == "invalid_format"
+        assert "ash.json" in result["error"]
+
 
 class TestGetConfigMissingFile:
     def test_missing_explicit_path_is_refused(self, tmp_path):

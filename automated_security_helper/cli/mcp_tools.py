@@ -1397,6 +1397,8 @@ def mcp_get_config(
         with ``error_category`` ``file_not_found`` or ``invalid_format``; the
         default config is returned only when no file is named or found.
     """
+    import json as _json
+
     import yaml as _yaml
     from automated_security_helper.cli.mcp.profile_registry import (
         DEFAULT_SESSION_ID,
@@ -1492,9 +1494,11 @@ def mcp_get_config(
     if raw:
         try:
             check_config_path(path)
-            if path.name.endswith(".toml"):
-                # pyproject.toml yields its [tool.ash] table, as when it is loaded.
+            if path.name.endswith((".toml", ".json")):
+                # Parsed as when it is loaded: pyproject.toml yields its
+                # [tool.ash] table, and JSON is parsed as JSON, not as YAML.
                 return read_config_file(path, expect=checked) or {}
+            # YAML without resolving !ENV, which read_config_file would do.
             text = read_config_bytes(path, expect=checked).decode("utf-8")
             return load_config_yaml(named_text_stream(text, path)) or {}
         except (
@@ -1502,6 +1506,7 @@ def mcp_get_config(
             OSError,
             UnicodeDecodeError,
             _yaml.YAMLError,
+            _json.JSONDecodeError,
         ) as exc:
             return _config_load_failure(exc, path)
 
