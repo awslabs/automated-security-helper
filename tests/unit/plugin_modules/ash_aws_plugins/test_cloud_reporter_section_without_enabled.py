@@ -342,7 +342,7 @@ class TestAWorkspaceRun:
 
 
 class TestMerge:
-    def _merge(self, tmp_path, config):
+    def _merge(self, tmp_path, config, overrides=None):
         import typer
 
         from automated_security_helper.cli.merge import merge_command
@@ -360,6 +360,7 @@ class TestMerge:
                 fail_on_findings=False,
                 fail_on_incomplete_scanners=None,
                 config=str(config),
+                config_overrides=overrides,
                 log_level=AshLogLevel.ERROR,
                 verbose=False,
                 debug=False,
@@ -368,14 +369,53 @@ class TestMerge:
         except typer.Exit:
             pass
 
-    def test_the_operators_section_without_enabled_is_named(
+    def test_the_operators_overrides_without_enabled_are_named(
         self, tmp_path, requests, sessions, warnings_logged
     ):
-        self._merge(tmp_path, _operator_config(tmp_path, _section("s3")))
+        """Overrides that aim S3 and do not enable it: the warning names the key."""
+        plugin_only = tmp_path / "operator" / "plugins.yaml"
+        plugin_only.parent.mkdir(parents=True, exist_ok=True)
+        plugin_only.write_text(
+            f"ash_plugin_modules:\n  - {AWS_PLUGIN_MODULE}\n", encoding="utf-8"
+        )
+
+        self._merge(
+            tmp_path,
+            plugin_only,
+            overrides=[
+                f"reporters.s3.options.bucket_name={BUCKET}",
+                "reporters.s3.options.aws_region=us-east-1",
+            ],
+        )
 
         assert requests == []
         assert sessions == []
         named = _about("s3", warnings_logged)
+        assert len(named) == 1, warnings_logged
+        assert BUCKET not in named[0]
+
+    def test_a_config_file_section_is_named_as_not_the_operators(
+        self, tmp_path, requests, sessions, warnings_logged
+    ):
+        """A --config file's S3 options are ignored, and the warning names the override.
+
+        ``ash merge`` takes an off-host reporter's ``enabled`` and destination from
+        ``--config-overrides`` only (the shards do not record which tree was
+        scanned), so the file's section is named in that warning, by key and not
+        by value, rather than in the one about a missing ``enabled``.
+        """
+        self._merge(tmp_path, _operator_config(tmp_path, _section("s3")))
+
+        assert requests == []
+        assert sessions == []
+        assert _about("s3", warnings_logged) == []
+        named = [
+            m
+            for m in warnings_logged
+            if m.startswith("Ignoring")
+            and "reporters.s3.options.bucket_name" in m
+            and "--config-overrides" in m
+        ]
         assert len(named) == 1, warnings_logged
         assert BUCKET not in named[0]
 

@@ -99,9 +99,23 @@ REPORT_CONFIG_FILE = UntrustedSource(
         "since stored results do not record which tree was scanned"
     ),
     remedy=(
-        "To send findings off the host from ash report, pass the reporter's "
-        "settings with --config-overrides (for example "
-        "--config-overrides reporters.s3.enabled=true)."
+        "To send findings off the host from ash report, pass each of these "
+        "settings with --config-overrides instead."
     ),
     modules_remedy="To load a module, pass it with ash report's --config-overrides.",
+)
+
+#: ``ash merge``'s ``--config`` file, for the reporters that send findings off the
+#: host. The shards do not record which tree was scanned, so the file may be the
+#: scanned tree's own, as for ``REPORT_CONFIG_FILE``.
+MERGE_CONFIG_FILE = UntrustedSource(
+    reason=(
+        "ash merge cannot tell that config from the scanned repository's own, "
+        "since the shards do not record which tree was scanned"
+    ),
+    remedy=(
+        "To send the merged findings off the host, pass each of these settings "
+        "with ash merge's --config-overrides instead."
+    ),
+    modules_remedy="To load a module, pass it with ash merge's --config-overrides.",
 )

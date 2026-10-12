@@ -10,8 +10,11 @@ merge time (``resolve_config.confine_to_trusted_base``): which plugin modules ar
 imported, whether the off-host reporters run, where reporters send findings and
 with which credentials, the sandbox grants and the scanners' own config files. The
 operator's values are the defaults, ``--config`` outside the working directory's
-tree, and ``--config-overrides``. The settings the verdict reads still come from
-the shards, and shards that disagree on one are refused.
+tree, and ``--config-overrides``; for the off-host reporters' ``enabled`` and
+destinations, only the defaults and ``--config-overrides``, since the shards do
+not record which tree was scanned and ``--config`` may be that tree's own file.
+The settings the verdict reads still come from the shards, and shards that
+disagree on one are refused.
 
 Shards are written by ``AshAggregatedResults.save_model``, the scan's own writer,
 and carry the config ``resolve_config`` returns for a config file outside any
@@ -564,15 +567,43 @@ class TestRecordedPluginModules:
         assert not [m for m in harness.ignoring() if "ash_plugin_modules" in m]
 
 
+def _reporter_overrides(document: Dict[str, Any]) -> List[str]:
+    """``document``'s reporter sections as ``--config-overrides`` arguments, flag included.
+
+    Each section's options go in as one JSON object, which the override parser
+    reads as JSON, so an account id stays a string (a bare ``123456789012`` would
+    be read as a number).
+    """
+    args: List[str] = []
+    for key, section in document["reporters"].items():
+        args += [
+            "--config-overrides",
+            f"reporters.{key}.enabled={json.dumps(section['enabled'])}",
+            "--config-overrides",
+            f"reporters.{key}.options={json.dumps(section['options'])}",
+        ]
+    return args
+
+
 class TestTheOperatorsBase:
     def test_a_recorded_config_repeating_the_operators_values_merges_without_a_warning(
         self, harness
     ):
-        """Positive control: the operator's own values are kept, with no warning."""
-        shard_paths = harness.write_shards(SHARD_CONFIG)
-        operator = _write_yaml(harness.tmp_path / "operator" / "ash.yaml", SHARD_CONFIG)
+        """Positive control: the operator's own values are kept, with no warning.
 
-        result = harness.merge(shard_paths, "--config", str(operator))
+        The operator's values for the off-host reporters are overrides: a
+        --config file does not choose them (``test_the_config_files_off_host_
+        values_are_named_and_not_used``).
+        """
+        shard_paths = harness.write_shards(SHARD_CONFIG)
+        operator = _write_yaml(
+            harness.tmp_path / "operator" / "ash.yaml",
+            {key: value for key, value in SHARD_CONFIG.items() if key != "reporters"},
+        )
+
+        result = harness.merge(
+            shard_paths, "--config", str(operator), *_reporter_overrides(SHARD_CONFIG)
+        )
 
         _assert_merged(result, harness)
         assert harness.ignoring() == []
@@ -586,6 +617,45 @@ class TestTheOperatorsBase:
         assert harness.options(harness.BedrockSummaryReporter)["model_id"] == (
             "shard-model"
         )
+
+    def test_the_config_files_off_host_values_are_named_and_not_used(self, harness):
+        """--config does not turn the off-host reporters on or aim them.
+
+        The shards do not record which tree was scanned, so the file may be that
+        tree's own. Its enabled and destination options for these reporters are
+        named in one warning with the remedy, and none reaches a reporter.
+        """
+        shard_paths = harness.write_shards(SHARD_CONFIG)
+        operator = _write_yaml(harness.tmp_path / "operator" / "ash.yaml", SHARD_CONFIG)
+
+        result = harness.merge(shard_paths, "--config", str(operator))
+
+        _assert_merged(result, harness)
+        named = [
+            m
+            for m in harness.ignoring()
+            if str(operator) in m and "ash merge's --config-overrides instead" in m
+        ]
+        assert len(named) == 1, harness.warnings
+        for key in (
+            "reporters.s3.enabled",
+            "reporters.s3.options.bucket_name",
+            "reporters.aws-security-hub.options.account_id",
+            "reporters.bedrock-summary-reporter.options.model_id",
+        ):
+            assert key in named[0], named[0]
+        assert harness.reported == []
+        built = [
+            harness.options(reporter_class)
+            for reporter_class in (
+                harness.S3Reporter,
+                harness.SecurityHubReporter,
+                harness.BedrockSummaryReporter,
+            )
+            if harness.built_of(reporter_class)
+        ]
+        for value in SHARD_VALUES:
+            assert value not in json.dumps(built), (value, built)
 
     def test_a_merge_with_no_off_host_settings_warns_about_nothing(self, harness):
         """Control: a recorded config that sets no confined option changes nothing."""
@@ -818,36 +888,41 @@ class TestEnablementIsTheOperators:
         assert "ash_plugin_modules" in ignored
         assert "reporters.s3.options.bucket_name" in ignored
 
-    def test_a_shard_does_not_turn_off_s3_the_operators_config_turns_on(self, harness):
-        """The operator enables S3 with its bucket; a shard records it off. It runs."""
+    def test_a_shard_does_not_turn_off_s3_the_operators_overrides_turn_on(
+        self, harness
+    ):
+        """The operator enables S3 with its bucket; a shard records it off. It runs.
+
+        The operator's choice is --config-overrides: a --config file does not turn
+        an off-host reporter on (``TestTheOperatorsBase``).
+        """
         harness.satisfy(harness.S3Reporter)
         shard_paths = harness.write_shards(
             {"ash_plugin_modules": [AWS], "reporters": {"s3": {"enabled": False}}}
         )
         operator = _write_yaml(
-            harness.tmp_path / "operator" / "ash.yaml",
-            {
-                "ash_plugin_modules": [AWS],
-                "reporters": {
-                    "s3": {
-                        "enabled": True,
-                        "options": {
-                            "bucket_name": "operator-bucket",
-                            "aws_region": "us-east-2",
-                        },
-                    }
-                },
-            },
+            harness.tmp_path / "operator" / "ash.yaml", {"ash_plugin_modules": [AWS]}
         )
 
-        result = harness.merge(shard_paths, "--config", str(operator))
+        result = harness.merge(
+            shard_paths,
+            "--config",
+            str(operator),
+            "--config-overrides",
+            "reporters.s3.enabled=true",
+            "--config-overrides",
+            "reporters.s3.options.bucket_name=operator-bucket",
+            "--config-overrides",
+            "reporters.s3.options.aws_region=us-east-2",
+        )
 
         _assert_merged(result, harness)
         assert "S3Reporter" in harness.reported
         assert [upload["Bucket"] for upload in harness.uploads] == ["operator-bucket"]
-        named = [m for m in harness.ignoring() if "reporters.s3.enabled" in m]
-        assert named, harness.warnings
-        assert "ash merge's --config-overrides or --config" in named[0]
+        # The overrides apply over each shard's recorded config before anything
+        # reads it, so the merged results record the operator's value, not the
+        # shard's, and there is no recorded value left to name in a warning.
+        assert harness.merged_section(harness.S3Reporter)["enabled"] is True
 
     def test_a_shard_does_not_turn_on_a_reporter_the_operator_leaves_off_by_default(
         self, harness
@@ -1432,8 +1507,10 @@ class TestOperatorConfigOutsideTheRecordedConfig:
     A plugin module the file names that the shards did not record is not imported,
     so it is named in a warning with the override that would add it. A reporter
     that sends findings off the host is the operator's to turn on, in a merge as in
-    a scan, so its section in ``--config`` applies whether or not the shards
-    recorded one; it runs once its module is loaded.
+    a scan, so its section in ``--config`` applies to the merged results' recorded
+    config whether or not the shards recorded one. Whether it runs, and where it
+    sends, come from ``--config-overrides``: the shards do not record which tree
+    was scanned, so the file may be that tree's own (``TestTheOperatorsBase``).
     """
 
     OPERATOR = {
@@ -1502,7 +1579,12 @@ class TestOperatorConfigOutsideTheRecordedConfig:
         assert named, harness.warnings
 
     def test_values_the_recorded_config_takes_are_not_named(self, harness):
-        """Control: the shards record the module and an S3 section, so all of it applies."""
+        """Control: the shards record the module and an S3 section, so all of it applies.
+
+        The merged results record the file's S3 values. The reporter itself is
+        enabled by the operator's override, and the file's bucket does not aim it:
+        where it sends comes from --config-overrides (``TestTheOperatorsBase``).
+        """
         shard_paths = harness.write_shards(
             {"ash_plugin_modules": [AWS], "reporters": {"s3": {"enabled": True}}}
         )
@@ -1510,11 +1592,20 @@ class TestOperatorConfigOutsideTheRecordedConfig:
             harness.tmp_path / "operator" / "ash.yaml", self.OPERATOR
         )
 
-        result = harness.merge(shard_paths, "--config", str(operator))
+        result = harness.merge(
+            shard_paths,
+            "--config",
+            str(operator),
+            "--config-overrides",
+            "reporters.s3.enabled=true",
+        )
 
         _assert_merged(result, harness)
         assert harness.loaded_modules == [[AWS]]
-        assert harness.options(harness.S3Reporter)["bucket_name"] == "operator-bucket"
+        assert harness.merged_section(harness.S3Reporter)["options"]["bucket_name"] == (
+            "operator-bucket"
+        )
+        assert harness.options(harness.S3Reporter)["bucket_name"] != "operator-bucket"
         assert not [m for m in harness.warnings if "does not apply" in m], (
             harness.warnings
         )

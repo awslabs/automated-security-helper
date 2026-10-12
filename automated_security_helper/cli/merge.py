@@ -216,6 +216,7 @@ from automated_security_helper.config.reporter_trust import (
     REPORTER_DESTINATION_OPTIONS,
     REPORTER_ENABLED_DEFAULTS,
     confine_declared_reporter_destinations,
+    confine_off_host_reporters_to_overrides,
     declared_destination_options,
     declared_enabled_defaults,
 )
@@ -2079,17 +2080,28 @@ def merge_command(
 
     # The plugins were loaded above, before anything was written.
     # A reporter that sends findings off the host runs only when the operator
-    # enables it, with --config or --config-overrides. The configuration the
-    # shards carried came from whatever config each shard's scan read, a file in
-    # the scanned repository included, and the reporter would send the merged
-    # findings with this host's credentials; so that configuration decides nothing
-    # for it, in either direction. Nor does a config file found on this host: only
-    # what the operator named here counts.
+    # enables it, with --config-overrides. The configuration the shards carried
+    # came from whatever config each shard's scan read, a file in the scanned
+    # repository included, and the reporter would send the merged findings with
+    # this host's credentials; so that configuration decides nothing for it, in
+    # either direction. Nor does a config file found on this host. Nor does
+    # --config: the shards do not record which tree was scanned, so that file may
+    # be the scanned tree's own (a directory beside this one, in no git checkout),
+    # and its enabled and destination options for these reporters are replaced
+    # with the defaults and the overrides (reporter_trust).
     operator_config: Optional[AshConfig] = None
     if config or overrides:
         operator_config = apply_config_overrides(
             trusted_config if config else AshConfig(), overrides
         )
+        if config:
+            from automated_security_helper.config.untrusted_source import (
+                MERGE_CONFIG_FILE,
+            )
+
+            confine_off_host_reporters_to_overrides(
+                operator_config, [Path(config)], overrides, MERGE_CONFIG_FILE
+            )
     local_reporters, off_host_reporters, notices = select_merge_reporters(
         reporter_plugins,
         shard_config=merged.ash_config,

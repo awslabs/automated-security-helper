@@ -70,8 +70,10 @@ reporters.<name>.enabled=true`.
   do not record which tree was scanned, so a `--config` or `ASH_CONFIG` file may
   be the scanned repository's own, and its values for these reporters are ignored
   with a warning ([ash report](../../cli-reference.md#report-options)).
-- `ash merge` runs an AWS reporter only when the operator's own `--config`
-  enables it, whatever the shards' recorded config says, in either direction.
+- `ash merge` runs an AWS reporter only when the operator's `--config-overrides`
+  enable it, whatever the shards' recorded config says, in either direction. Its
+  `--config` file does not enable or aim one, for the reason `ash report`'s does
+  not.
 - A reporter plugin that sends findings off the host declares
   `sends_off_host = True` on its class. ASH then runs it only when its section of
   the config sets `enabled: true`, whatever its own default is.

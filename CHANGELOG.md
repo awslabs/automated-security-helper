@@ -194,7 +194,9 @@
   other settings, such as a local reporter's options, still apply. An operator who
   enabled one of these reporters for `ash report` in a config file passes
   `--config-overrides reporters.<name>.enabled=true` and its destination options
-  instead.
+  instead. `ash merge --config` is held the same way, since the shards do not
+  record which tree was scanned either: a merge run beside such a directory with
+  `--config <that directory>/.ash/.ash.yaml` uploaded to the repository's bucket.
 
 - **`--mode container` and `--mode nix` refuse an unusable config before anything
   starts.** The config file the scan inside the image or Nix shell will use (`--config`,
