@@ -265,7 +265,12 @@ def run_command(args: List[str], shell: bool = False):
 @dependencies_app.command(name="install")
 def install_dependencies(
     bin_path: Optional[Path] = typer.Option(
-        ASH_BIN_PATH,
+        # As the docs write it, and expanded below. The default used to be
+        # core.constants.ASH_BIN_PATH, the absolute home directory (or the
+        # variable's value) read at import, so the help said where this machine's
+        # home was and wrapped differently on every machine. typer reads
+        # ASH_BIN_PATH itself through envvar, and the help says so.
+        "~/.ash/bin",
         "--bin-path",
         "-b",
         help="Path to install binaries to.",
@@ -327,8 +332,9 @@ def install_dependencies(
         use_color=color,
     )
 
-    # Use provided bin path or default if bin_path was null
-    target_bin_path = Path(bin_path or ASH_BIN_PATH)
+    # Use provided bin path or default if bin_path was null. expanduser for the
+    # default's "~", and for a "~" a shell left unexpanded.
+    target_bin_path = Path(bin_path).expanduser() if bin_path else ASH_BIN_PATH
     # Create target_bin_path directory if it doesn't exist
     target_bin_path.mkdir(parents=True, exist_ok=True)
     # Exported absolute, because the install commands that read it back do not all

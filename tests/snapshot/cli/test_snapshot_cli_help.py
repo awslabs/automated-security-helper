@@ -22,9 +22,11 @@ How the help is made identical on every OS
   detection: ``test_help`` is a VT terminal (Linux, macOS, Windows Terminal) and
   ``test_help_legacy_windows_console`` is the legacy console.
 - ``prog_name="ash"`` keeps the usage line from depending on how pytest was started.
-- The one machine-dependent help default, ``dependencies install --bin-path``
-  (``~/.ash/bin``), is masked as ``<HOME>`` by the shared normalizer, which also
-  keeps the panel border where rich drew it.
+- No help default depends on the machine. ``dependencies install --bin-path`` used
+  to show the absolute home directory, which the shared normalizer masked as
+  ``<HOME>`` only after rich had wrapped the line, so a home directory of 36
+  characters or more changed the snapshot. It shows ``~/.ash/bin`` now
+  (tests/unit/cli/test_dependencies_bin_path_help_default.py).
 """
 
 from __future__ import annotations
