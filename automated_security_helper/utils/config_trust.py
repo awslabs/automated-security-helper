@@ -249,32 +249,18 @@ def leaves_the_tree_through_a_link(
     """Whether ``value`` follows a symbolic link inside the scanned tree and ends
     outside it.
 
-    A path is checked where it resolves, so a path the operator writes inside the
-    scanned tree is judged by where it leads, and the tree decides that: a file
-    there can be a link to any file the scan can read. The path as written (``~``
-    expanded, a relative one taken from ``source_dir``) is resolved one component
-    at a time, each from its parent's resolved location as the kernel does, so a
-    link at any depth inside the tree is seen, a directory link as much as a file
-    link, and a chain of links is followed to its end. A path that ends outside
-    the tree after such a link is the tree's choice. One that leaves by ``..``
-    with no link followed is the path as written: ``../shared.toml`` from the
-    source directory names a file next to the tree.
+    The one check every tool path goes through:
+    ``config/path_trust.leaves_the_tree_through_a_link``, which finds each link the
+    kernel's lookup of the path as written follows (``utils/link_locations``), at
+    any depth and through a chain of links. A path that leaves by ``..`` with no
+    link in the tree is the path as written: ``../shared.toml`` from the source
+    directory names a file next to the tree.
     """
-    from automated_security_helper.config.path_trust import in_scanned_tree
+    from automated_security_helper.config import path_trust
 
-    path = Path(os.path.expanduser(str(value)))
-    if not path.is_absolute():
-        path = Path(os.path.abspath(source_dir)) / path
-    tree = Path(root)
-    current = Path(path.anchor)
-    followed = False
-    for part in path.parts[1:]:
-        step = current / part
-        # os.path.islink is False on any OSError; Path.is_symlink re-raises some.
-        if part != ".." and os.path.islink(step) and in_scanned_tree(current, tree):
-            followed = True
-        current = Path(os.path.realpath(step))
-    return followed and not in_scanned_tree(current, tree)
+    return path_trust.leaves_the_tree_through_a_link(
+        value, Path(source_dir), Path(root)
+    )
 
 
 @dataclass(frozen=True)
