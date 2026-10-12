@@ -367,7 +367,9 @@ This is useful when you want to:
 - Get a complete view of all security findings in your codebase
 - Perform a comprehensive security review
 
-When this flag is used, ASH will process all findings as if no suppressions were defined, but will still respect the `ignore_paths` settings. An ignore path or scanner exclusion an MCP client's config supplied is the exception: its files were scanned, so their findings are reported as ordinary findings too (see [Suppressions an MCP client's config supplied](#suppressions-an-mcp-clients-config-supplied)).
+When this flag is used, ASH processes all findings as if no suppressions were defined, and that includes `ignore_paths`. Every scanner reads the files under an ignore path, the converters convert the archives and notebooks there, and their findings are reported as ordinary findings. The same holds for an ignore path or scanner exclusion an MCP client's config supplied (see [Suppressions an MCP client's config supplied](#suppressions-an-mcp-clients-config-supplied)). Expect a slower scan when an ignore path leaves out a large part of the tree. In container mode the flag is passed to the scan inside the container.
+
+ASH's own output directory is not an ignore path. Findings located there, outside its `converted` work directory, are left out of the results with or without the flag.
 
 ## Expiring Suppressions
 

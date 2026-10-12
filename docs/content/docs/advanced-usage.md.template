@@ -306,7 +306,7 @@ suppressions start with `"(ASH)"` while inline suppressions start with
 ### Temporarily Ignoring Suppressions
 
 ```bash
-# Run a scan ignoring all suppression rules
+# Run a scan ignoring all suppression rules, ignore_paths included
 ash --ignore-suppressions
 
 # Useful for verifying if suppressed issues have been fixed

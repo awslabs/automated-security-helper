@@ -95,6 +95,19 @@
 
 ### Behavior changes
 
+- **`--ignore-suppressions` lifts `ignore_paths` for every scanner.** With the
+  flag, the files under an ignore path are converted and read by every scanner,
+  and their findings are reported. Before, the flag lifted ignore paths only in
+  the results: a scanner that reads the whole directory, such as bandit, reported
+  those findings, while a scanner ASH hands a file list, such as detect-secrets,
+  never read the files, so the verdict on the same file depended on the scanner.
+  Container mode now passes the flag to the scan inside the container. A scanner
+  from a plugin module is passed an empty `global_ignore_paths` under the flag.
+  Findings located in ASH's own output directory, outside its `converted` work
+  directory, stay out of the results with the flag, as they do without it;
+  before, the flag let them through. A scan with the flag reads more files, and
+  takes longer when an ignore path leaves out a large part of the tree.
+
 - **Under the MCP server, a config file the operator did not set aside resolves no
   `!ENV` for a remote client.** `!ENV` reads the server's environment. For a remote
   caller, every file outside `ASH_MCP_ALLOWED_CONFIG_ROOTS` and the session's own

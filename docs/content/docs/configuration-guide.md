@@ -258,6 +258,12 @@ global_settings:
       expiration: '2025-12-31'  # Optional expiration date (YYYY-MM-DD)
 ```
 
+An ignore path is a suppression. ASH does not convert a file under one or include
+it in the file lists it hands scanners, and leaves a finding any scanner reports
+there out of the results. `--ignore-suppressions` lifts ignore paths along with
+suppressions: every scanner reads those files and their findings are reported. See
+[Temporarily Disabling Suppressions](suppressions.md#temporarily-disabling-suppressions).
+
 Omitting `line_end` does **not** suppress only `line_start`. A suppression with
 `line_start` and no `line_end` matches every finding from that line to the end of
 the file, including findings introduced later. To suppress a single line, set

@@ -278,7 +278,7 @@ The following built-in scanners use UV tool integration:
 
 1. **Generate SARIF Reports**: SARIF is the standard format for security findings
 2. **Handle Errors Gracefully**: Use try/except blocks to handle errors
-3. **Respect Global Ignore Paths**: Skip files that are in the global ignore paths
+3. **Respect Global Ignore Paths**: Skip the files under the `global_ignore_paths` your `scan` method is passed, rather than reading `global_settings.ignore_paths` from the config. Under `--ignore-suppressions` ASH passes an empty list, so a scanner that uses the list it is given scans those files as the built-in scanners do
 4. **Use Subprocess Utilities**: Use the provided `_run_subprocess` method for running external commands
 5. **Add Metadata**: Add useful metadata to the results container
 6. **UV Tool Integration**: For CLI tools that can be managed via UV, set `use_uv_tool = True` in your `model_post_init` method to enable automatic tool isolation and management
