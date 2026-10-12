@@ -1,18 +1,27 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A whole offline ``ash scan``: nothing behind a link that leaves the tree is read.
+"""A whole offline ``ash scan`` with every scanner: nothing behind a link that leaves
+the tree is read.
 
-The tree commits links to a ``.py``, a ``.tf`` and a ``Dockerfile`` outside it, each
-holding a marker string (and the ``.py`` an AWS-key-shaped string). Measured before
-the change, bandit's snippet of the outside ``.py`` reached ash.sarif,
-ash_aggregated_results.json, the CSV, flat JSON and GitLab SAST reports and
-ash.summary.md. Every scanner installed where the test runs takes part; this checks
-every file the scan wrote.
+The tree commits links to a ``.py``, a ``.tf``, a ``Dockerfile``, a ``config.yml``
+standing in for a credentials file and a ``package.json``, all outside it, each
+holding a marker string; the ``.py`` and the ``.yml`` also hold secret-shaped
+strings. Measured before the change, bandit's snippet of the outside ``.py`` reached
+ash.sarif, ash_aggregated_results.json, the CSV, flat JSON and GitLab SAST reports
+and ash.summary.md, and checkov's results held the outside ``.tf``. The scan enables
+every plugin module, so every registered scanner takes part; the ones whose tool is
+not installed where the test runs are MISSING. Every file the scan wrote is checked,
+and no finding may sit at a link's path.
 
-In-tree controls show the scanners ran: ``real.py`` and ``real.tf`` hold what bandit
-and checkov report, and ``in_tree_link.py`` is a link to ``real.py``, which is still
-scanned.
+In-tree controls show the scanners ran: ``real.py`` and ``real.tf`` hold what bandit,
+checkov and the semgrep rule report, and ``in_tree_link.py`` is a link to
+``real.py``, which is still scanned.
+
+Tools the test can use when the environment provides them, none required: the
+grype and trivy databases (``GRYPE_DB_CACHE_DIR``, ``TRIVY_CACHE_DIR``), and the
+scanner binaries on ``PATH``. semgrep and opengrep get an offline rule cache the
+test writes.
 """
 
 from __future__ import annotations
@@ -23,6 +32,7 @@ import shutil
 import subprocess  # nosec B404 -- runs this interpreter's ASH on a fixture tree
 import sys
 import textwrap
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -35,14 +45,57 @@ pytestmark = [
 ]
 
 MARKER = "OUTSIDE-CONTENT-7c41"
-#: AWS-key-shaped, so detect-secrets reports it wherever it reads it.
-OUTSIDE_KEY = "AKIAOUTSIDE7C4100001"
+# Built at run time, so the test file holds no secret-shaped literal. AWS-key-shaped
+# and GitHub-token-shaped, so a secret scanner reports each wherever it reads it.
+OUTSIDE_KEY = "AKIA" + "OUTSIDE7C4100001"
+OUTSIDE_TOKEN = "ghp_" + "7c41" + "Q" * 32
+NEEDLES = [MARKER, MARKER.lower(), OUTSIDE_KEY, OUTSIDE_TOKEN]
+#: In the tree, for the secret scanners' control.
+IN_TREE_KEY = "AKIA" + "INTREE7C41000001"
+
+#: The links that leave the tree, by their path in it.
+LINKS_OUT = {
+    "link_out.py": "secret.py",
+    "infra/main.tf": "main.tf",
+    "docker/Dockerfile": "Dockerfile",
+    "config.yml": "hosts.yml",
+    "pkg/package.json": "package.json",
+    "cfn/stack.template.json": "stack.template.json",
+}
+
+
+def _template(bucket_name: str) -> str:
+    """A CloudFormation template with a public-read bucket, which cfn-nag reports."""
+    return json.dumps(
+        {
+            "AWSTemplateFormatVersion": "2010-09-09",
+            "Resources": {
+                "Bucket": {
+                    "Type": "AWS::S3::Bucket",
+                    "Properties": {
+                        "BucketName": bucket_name,
+                        "AccessControl": "PublicRead",
+                    },
+                }
+            },
+        },
+        indent=2,
+    )
+
 
 INSECURE_BUCKET = """
 resource "aws_s3_bucket" "b" {{
   bucket = "{name}"
   acl    = "public-read"
 }}
+"""
+
+SHELL_TRUE_RULE = """rules:
+  - id: links-e2e-shell-true
+    languages: [python]
+    severity: WARNING
+    message: subprocess with shell=True
+    pattern: subprocess.call(..., shell=True)
 """
 
 DRIVER = textwrap.dedent(
@@ -54,6 +107,12 @@ DRIVER = textwrap.dedent(
     app()
     """
 )
+
+PLUGIN_MODULES = [
+    "automated_security_helper.plugin_modules.ash_trivy_plugins",
+    "automated_security_helper.plugin_modules.ash_ferret_plugins",
+    "automated_security_helper.plugin_modules.ash_snyk_plugins",
+]
 
 
 def _build(base: Path) -> Path:
@@ -74,8 +133,32 @@ def _build(base: Path) -> Path:
     (outside / "Dockerfile").write_text(
         f"FROM alpine:3.20\n# {MARKER}\nUSER root\n", encoding="utf-8"
     )
+    (outside / "hosts.yml").write_text(
+        "github.com:\n"
+        f"    oauth_token: {OUTSIDE_TOKEN}\n"
+        f"    user: {MARKER}\n"
+        f"aws_access_key_id: {OUTSIDE_KEY}\n",
+        encoding="utf-8",
+    )
+    (outside / "package.json").write_text(
+        json.dumps(
+            {
+                "name": MARKER.lower(),
+                "version": "1.0.0",
+                "dependencies": {"minimist": "0.0.8"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (outside / "stack.template.json").write_text(
+        _template(MARKER.lower()), encoding="utf-8"
+    )
 
     (tree / "app.py").write_text("print('hello')\n", encoding="utf-8")
+    (tree / "templates").mkdir()
+    (tree / "templates" / "real.template.json").write_text(
+        _template("in-tree-bucket"), encoding="utf-8"
+    )
     (tree / "real.py").write_text(
         "import subprocess\nsubprocess.call('in-tree', shell=True)\n",
         encoding="utf-8",
@@ -83,13 +166,50 @@ def _build(base: Path) -> Path:
     (tree / "real.tf").write_text(
         INSECURE_BUCKET.format(name="in-tree-bucket"), encoding="utf-8"
     )
-    (tree / "link_out.py").symlink_to(outside / "secret.py")
-    (tree / "infra").mkdir()
-    (tree / "infra" / "main.tf").symlink_to(outside / "main.tf")
-    (tree / "docker").mkdir()
-    (tree / "docker" / "Dockerfile").symlink_to(outside / "Dockerfile")
+    (tree / "requirements.txt").write_text("django==1.2\n", encoding="utf-8")
+    (tree / "settings.yml").write_text(
+        f"aws_access_key_id: {IN_TREE_KEY}\n", encoding="utf-8"
+    )
+    for link, name in LINKS_OUT.items():
+        (tree / link).parent.mkdir(parents=True, exist_ok=True)
+        (tree / link).symlink_to(outside / name)
+    # The package whose package.json leaves the tree has a lockfile of its own.
+    (tree / "pkg" / "package-lock.json").write_text(
+        json.dumps(
+            {
+                "name": "pkg",
+                "version": "1.0.0",
+                "lockfileVersion": 3,
+                "requires": True,
+                "packages": {"": {"name": "pkg", "version": "1.0.0"}},
+            }
+        ),
+        encoding="utf-8",
+    )
     (tree / "in_tree_link.py").symlink_to("real.py")
     return tree
+
+
+def _config(base: Path) -> Path:
+    """An ASH config outside the tree that loads every plugin module."""
+    config = base / "ash-config" / ".ash.yaml"
+    config.parent.mkdir()
+    lines = ["project_name: links-leaving-the-tree", "ash_plugin_modules:"]
+    lines += [f"  - {module}" for module in PLUGIN_MODULES]
+    config.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return config
+
+
+def _rule_cache(base: Path) -> Path:
+    """An offline semgrep/opengrep rule cache holding one rule, fetched now."""
+    rules = base / "rules"
+    rules.mkdir()
+    (rules / "shell-true.yaml").write_text(SHELL_TRUE_RULE, encoding="utf-8")
+    (rules / ".ash-rules-fetched-at").write_text(
+        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") + "\n",
+        encoding="utf-8",
+    )
+    return rules
 
 
 def _isolated_env(base: Path) -> dict[str, str]:
@@ -100,7 +220,10 @@ def _isolated_env(base: Path) -> dict[str, str]:
         if not key.startswith("AWS_") and key not in ("ASH_CONFIG", "ASH_BIN_PATH")
     }
     home = base / "home"
-    home.mkdir()
+    # opengrep stops when XDG_CONFIG_HOME names a directory that does not exist.
+    for directory in (".cache", ".config", ".local/share"):
+        (home / directory).mkdir(parents=True)
+    rules = _rule_cache(base)
     env.update(
         {
             "ASH_OFFLINE": "YES",
@@ -117,8 +240,12 @@ def _isolated_env(base: Path) -> dict[str, str]:
             "XDG_CONFIG_HOME": str(home / ".config"),
             "ASH_BIN_PATH": str(home / "ash-bin"),
             "UV_OFFLINE": "1",
+            "SEMGREP_RULES_CACHE_DIR": str(rules),
+            "OPENGREP_RULES_CACHE_DIR": str(rules),
         }
     )
+    # snyk-code needs a token to start; none is given, so it cannot reach Snyk.
+    env.pop("SNYK_TOKEN", None)
     return env
 
 
@@ -137,15 +264,18 @@ def scan(tmp_path_factory):
             str(tree),
             "--output-dir",
             str(output),
+            "--config",
+            str(_config(base)),
             "--mode",
             "local",
             "--no-progress",
             "--no-fail-on-findings",
             "--no-fail-on-incomplete-scanners",
+            "--allow-stale-content-db",
         ],
         capture_output=True,
         text=True,
-        timeout=1800,
+        timeout=3600,
         env=_isolated_env(base),
         cwd=base,
     )
@@ -182,16 +312,35 @@ def _uris(output: Path) -> dict[str, set[str]]:
 
 def test_no_output_file_holds_anything_from_outside_the_tree(scan):
     output, results, console = scan
-    needles = [MARKER, MARKER.lower(), OUTSIDE_KEY]
     holding = {
-        str(path.relative_to(output)): [n for n in needles if n.encode() in data]
+        str(path.relative_to(output)): [n for n in NEEDLES if n.encode() in data]
         for path in output.rglob("*")
         if path.is_file()
         and not path.is_symlink()
-        and any(n.encode() in (data := path.read_bytes()) for n in needles)
+        and any(n.encode() in (data := path.read_bytes()) for n in NEEDLES)
     }
     assert holding == {}, (holding, _statuses(results))
-    assert not any(n in console for n in needles)
+    assert not any(n in console for n in NEEDLES)
+
+
+def test_no_finding_sits_at_a_link_leaving_the_tree(scan):
+    output, results, _ = scan
+    at_links = {
+        scanner: sorted(
+            uri
+            for uri in uris
+            if any(uri == link or uri.endswith("/" + link) for link in LINKS_OUT)
+        )
+        for scanner, uris in _uris(output).items()
+    }
+    assert {k: v for k, v in at_links.items() if v} == {}, _statuses(results)
+
+
+def test_each_link_leaving_the_tree_is_listed_as_not_scanned(scan):
+    _, results, _ = scan
+    rows = results["metadata"].get("inputs_not_scanned") or []
+    assert {row["path"] for row in rows} >= set(LINKS_OUT)
+    assert {row["reason"] for row in rows} == {"link leaves the scanned tree"}
 
 
 @pytest.mark.parametrize(
@@ -199,7 +348,7 @@ def test_no_output_file_holds_anything_from_outside_the_tree(scan):
     [
         ("bandit", "bandit", "real.py"),
         ("checkov", "checkov", "real.tf"),
-        ("detect-secrets", "detect-secrets", None),
+        ("detect-secrets", "detect-secrets", "settings.yml"),
     ],
 )
 def test_the_measured_readers_ran_and_still_scan_the_tree(
@@ -216,6 +365,25 @@ def test_the_measured_readers_ran_and_still_scan_the_tree(
         assert any(in_tree_uri in uri for uri in _uris(output).get(scanner, set())), (
             _uris(output)
         )
+
+
+def test_every_registered_scanner_took_part(scan):
+    _, results, _ = scan
+    assert set(_statuses(results)) >= {
+        "bandit",
+        "cdk-nag",
+        "cfn-nag",
+        "checkov",
+        "detect-secrets",
+        "ferret-scan",
+        "grype",
+        "npm-audit",
+        "opengrep",
+        "semgrep",
+        "snyk-code",
+        "syft",
+        "trivy-repo",
+    }
 
 
 def test_an_in_tree_link_is_still_scanned_by_bandit(scan):

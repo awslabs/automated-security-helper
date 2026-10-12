@@ -27,6 +27,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
+from automated_security_helper.utils.link_exclusions import syft_excludes
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.package_identity import (
     NpmLockIndex,
@@ -417,11 +418,22 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         target_results_dir = self.results_dir.joinpath(target_type)
         results_file = target_results_dir.joinpath("results_sarif.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
-        final_args = self._resolve_arguments(
-            # Grype expects directory scans to have the target begin with `dir:`
-            target=f"dir:{target.as_posix()}",
-            results_file=results_file,
+        # Each link leaving the target, for this resolution only (extra_args
+        # persists across scan() calls, and the next target has links of its own).
+        # grype follows none of them; see utils/link_exclusions.py.
+        original_extra_args = list(self.args.extra_args)
+        self.args.extra_args.extend(
+            ToolExtraArg(key="--exclude", value=pattern)
+            for pattern in syft_excludes(target)
         )
+        try:
+            final_args = self._resolve_arguments(
+                # Grype expects directory scans to have the target begin with `dir:`
+                target=f"dir:{target.as_posix()}",
+                results_file=results_file,
+            )
+        finally:
+            self.args.extra_args = original_extra_args
         scan_env = {**snapshot_environ(), **self.extra_env}
         # The database's directory, resolved once as grype resolves it on this host
         # and named to the scan, the refresh and the staleness check alike: the

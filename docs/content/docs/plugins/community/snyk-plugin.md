@@ -180,6 +180,7 @@ Snyk Code results are integrated into ASH's unified reporting system:
 - **Large Codebases**: Scanning time scales with codebase size
 - **Rate Limits**: Snyk may apply rate limits based on your subscription tier
 - **Offline Mode**: Snyk Code needs Snyk's service, so offline it does not run and is reported MISSING (see [Offline Mode](#offline-mode))
+- **Links leaving the tree**: `snyk code test` uploads the files it reads and has no option that leaves out one path, so ASH does not run it on a directory holding a link to a file whose target is outside that directory. snyk-code is then `ERROR`, and the error names the link. Remove the link, or exclude snyk-code for that scan.
 
 ## Troubleshooting
 

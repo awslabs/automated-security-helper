@@ -29,6 +29,7 @@ from automated_security_helper.config.path_trust import (
     cwd_outside_scanned_tree,
     honored_path,
 )
+from automated_security_helper.utils.link_exclusions import syft_excludes
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.process_env import snapshot_environ
@@ -300,6 +301,13 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             # Re-apply config options (exclude paths, config file) that were
             # set during model_post_init but lost by the ToolArgs rebuild above.
             self._process_config_options()
+            # Each link leaving this target; syft follows none of them. Rebuilt
+            # with the arguments above for every target. See
+            # utils/link_exclusions.py.
+            self.args.extra_args.extend(
+                ToolExtraArg(key="--exclude", value=pattern)
+                for pattern in syft_excludes(target)
+            )
             conf: SyftScannerConfig = self.config
             opts: SyftScannerConfigOptions = conf.options
             for out in opts.additional_outputs:

@@ -338,8 +338,8 @@ the tree stays in the scan set, and a source directory that is itself reached th
 a link is scanned as given. This applies to the readers of the scan set listed above.
 
 The scanners that walk the directory they scan themselves do not read the scan set.
-For each of them, either the tool does not follow such a link, or ASH tells it to skip
-every link to a file whose target leaves that directory:
+So ASH tells each of them to skip every link to a file whose target leaves that
+directory, or does not run it on that directory:
 
 - bandit reads a link to a file wherever it points (measured with bandit 1.9.4). ASH
   adds each such link to bandit's `--exclude`, as the link's own path.
@@ -353,23 +353,36 @@ every link to a file whose target leaves that directory:
   it scans. How ferret-scan treats links has not been measured.
 - grype and syft follow neither a link to a file nor a link to a directory whose
   target leaves the directory they scan (measured with grype 0.120.1 and syft
-  1.54.1).
-- semgrep, opengrep and trivy (the `trivy-repo` scanner) skip every link, inside the
-  tree or not (measured with semgrep 1.180.0, opengrep 1.30.2 and trivy 0.75.0).
-- snyk-code passes the source directory to the Snyk CLI as it is. How the Snyk CLI
-  treats links has not been measured.
+  1.54.1). Each such link is still passed in their `--exclude`, as `./` and its
+  path with the glob characters escaped, which leaves out that path and no other.
+- trivy (the `trivy-repo` scanner) skips every link, inside the tree or not
+  (measured with trivy 0.75.0). Each such link is still passed in `--skip-files`,
+  glob characters escaped, unless its path holds a comma, a double quote or a line
+  break, which trivy's option cannot carry.
+- semgrep and opengrep skip every link, inside the tree or not (measured with
+  semgrep 1.180.0 and opengrep 1.30.2). Their `--exclude` cannot name one path: a
+  pattern with a `/` is anchored at semgrep's project root, the git checkout's root
+  when the scanned directory is inside one, and opengrep matches a top-level name at
+  every depth. So a link's own name is passed only when no other file or directory
+  in the tree has that name, and the name holds only letters, digits and
+  `. _ + @ = ~ -`.
+- snyk-code uploads the files it reads to Snyk, `snyk code test` has no option that
+  leaves out one path, and how it treats links has not been measured. So ASH does
+  not run it on a directory holding such a link.
 
 ASH finds these links the way the tools walk: it does not read ignore files, so a
 link in a directory a `.gitignore` excludes is skipped too, and it does not enter a
-link to a directory. When a link's path cannot be written in the tool's option, ASH
-does not run that tool on that directory, rather than let it read the file the link
-points at. The scanner's status is `ERROR`, and the error names the link, as `Not
-running bandit on /src: 'a,b.py': link leaves the scanned tree, and bandit's
---exclude cannot leave out that file alone, ...`. bandit cannot be given a path with
-a comma or one of `*`, `?` and `[`, or a path that another file's path contains,
-because it also leaves out every path an entry is part of. ferret-scan cannot be
-given a path with a comma or any of `*?[]{}\`. checkov cannot be given any on
-Windows, where it joins the paths it walks with `\`.
+link to a directory. When bandit, checkov or ferret-scan cannot be given a link's
+path, ASH does not run that tool on that directory, rather than let it read the file
+the link points at; the same goes for snyk-code and any such link. The scanner's
+status is `ERROR`, and the error names the link, as `Not running bandit on /src:
+'a,b.py': link leaves the scanned tree, and bandit's --exclude cannot leave out that
+file alone, ...`. bandit cannot be given a path with a comma or one of `*`, `?` and
+`[`, or a path that another file's path contains, because it also leaves out every
+path an entry is part of. ferret-scan cannot be given a path with a comma or any of
+`*?[]{}\`. checkov cannot be given any on Windows, where it joins the paths it walks
+with `\`. For the scanners that follow no such link, a path their option cannot
+carry is only left out of it, and on Windows none is passed.
 
 `honor_ignore_files` is a top-level key, and it defaults to `true`. To scan the files
 the repository's ignore files match as well, set it to `false` in a config file

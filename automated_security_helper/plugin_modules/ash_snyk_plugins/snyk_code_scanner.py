@@ -27,8 +27,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
     SarifReport,
 )
+from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
+from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
 from automated_security_helper.utils.subprocess_utils import find_executable
 
 
@@ -172,6 +174,29 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
 
         return args
 
+    def _refuse_links_leaving(self, target: Path) -> None:
+        """Refuse a target holding a link to a file whose target leaves it.
+
+        ``snyk code test`` uploads the files it reads to Snyk, has no option that
+        leaves out one path (``--exclude`` is for open-source projects, and takes
+        names, not paths), and how it treats links has not been measured. So a link
+        the repository committed could send a file from outside the scanned tree,
+        such as a credentials file, off the host. The links come from
+        ``file_links_leaving_tree``, which does not enter links to directories and
+        does not read ignore files.
+
+        Raises:
+            ScannerError: Naming the first such link. snyk is then not run on
+                ``target``.
+        """
+        links = file_links_leaving_tree(target)
+        if links:
+            raise ScannerError(
+                f"Not running snyk code test on {Path(target).as_posix()}: "
+                f"{links[0]!r}: {REASON_LINK_LEAVES_TREE}, and snyk has no option "
+                "that leaves out one path, so it might upload the file it points at."
+            )
+
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — SnykCodeScanner overrides scan() directly; this is unreachable."""
         raise NotImplementedError(
@@ -244,6 +269,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             return False
 
         try:
+            self._refuse_links_leaving(target)
             target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             target_results_dir.mkdir(exist_ok=True, parents=True)

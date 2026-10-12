@@ -40,6 +40,7 @@ from automated_security_helper.utils.download_utils import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.config.path_trust import honored_path
+from automated_security_helper.utils.link_exclusions import trivy_skip_files
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
@@ -707,6 +708,10 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 f"--secret-config={self._secret_config_file()}",
                 f"--cache-dir={cache.as_posix()}",
                 f"--config={self._config_file()}",
+                # Each link leaving the target; trivy follows no link. In the
+                # joined form, since a path can start with "-". See
+                # utils/link_exclusions.py.
+                *(f"--skip-files={path}" for path in trivy_skip_files(target)),
             ]
             if self._scanner_offline():
                 final_args = self._offline_misconfig_args(final_args)
