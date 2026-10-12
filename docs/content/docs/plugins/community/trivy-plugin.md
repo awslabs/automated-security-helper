@@ -103,7 +103,7 @@ scanners:
 | `severity_threshold` | str       | `"MEDIUM"`                                   | Minimum severity level to report (UNKNOWN, LOW, MEDIUM, HIGH, CRITICAL) |
 | `ignore_unfixed`     | bool      | `false`                                      | Ignore vulnerabilities without available fixes                          |
 | `license_full`       | bool      | `false`                                      | Enable full license scanning (more comprehensive but slower)            |
-| `disable_telemetry`  | bool      | `true`                                       | Disable Trivy telemetry data collection                                 |
+| `disable_telemetry`  | bool      | `true`                                       | Disable Trivy telemetry data collection. Only `--config-overrides` or a config file outside every git checkout and the scanned directory can set it to `false`; any config can set it to `true` |
 
 ### Scanner Types
 

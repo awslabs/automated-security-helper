@@ -171,6 +171,16 @@
 
 ### Behavior changes
 
+- **Only the operator turns trivy-repo's telemetry on.** A config file inside a git
+  checkout or the scanned directory could set
+  `scanners.trivy-repo.options.disable_telemetry: false`, and trivy then sent
+  anonymous usage data to its vendor on every online scan. Such a value is now
+  ignored with a warning, and trivy gets `--disable-telemetry`. `true` still
+  applies from any config, and `false` from `--config-overrides` or a config file
+  outside every git checkout and the scanned directory; a file that leaves the
+  option out keeps the operator's value. An MCP client's config was already
+  refused for setting it.
+
 - **`--mode container` and `--mode nix` refuse an unusable config before anything
   starts.** The config file the scan inside the image or Nix shell will use (`--config`,
   the file `ASH_CONFIG` names, or the one found in the source directory) is read on the

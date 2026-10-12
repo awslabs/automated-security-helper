@@ -43,6 +43,11 @@ by a plugin module (``confine_tool_versions``). The plugins read the value they
 are given, so this one step covers each of them, and a plugin added later is
 covered without a gate of its own.
 
+trivy-repo's ``disable_telemetry`` decides whether trivy sends anonymous usage
+data to its vendor on an online scan. Like opengrep's and semgrep's ``metrics``,
+only the value that stops it applies from any config (``TIGHTENING_VALUES``);
+``false`` is the operator's.
+
 What happens now
 ----------------
 * When the config was built from a file inside the scanned tree, or from a file
@@ -119,22 +124,27 @@ SCANNER_CONFIG_FILE_OPTIONS: Dict[str, Tuple[str, ...]] = {
 
 #: Values of a confined option that only narrow what the tool does, so a
 #: repository's or a client's config may still set them: opengrep and semgrep
-#: with ``metrics: off`` send no usage data.
+#: with ``metrics: off`` send no usage data, and neither does trivy-repo with
+#: ``disable_telemetry: true``. Only a value the file writes counts: a file that
+#: leaves the option out keeps the operator's choice.
 TIGHTENING_VALUES: Dict[Tuple[str, str], Tuple[Any, ...]] = {
     ("opengrep", "metrics"): ("off",),
     ("semgrep", "metrics"): ("off",),
+    ("trivy-repo", "disable_telemetry"): (True,),
 }
 
 #: detect-secrets ``scan_settings`` lists whose entries may name a file the
 #: worker loads code from (``file://<path>``).
 _SETTINGS_FILE_LISTS: Tuple[str, ...] = ("plugins_used", "filters_used")
 
-#: Options that choose which part of a scanner's own config the tool uses, or
-#: whether it applies the exclusion files it reads from the tree itself, each
-#: with its default, which is what applies when the operator sets nothing.
+#: Options that choose which part of a scanner's own config the tool uses,
+#: whether it applies the exclusion files it reads from the tree itself, or
+#: whether it sends usage data to its vendor, each with its default, which is
+#: what applies when the operator sets nothing.
 SCANNER_CONFIG_CHOICE_OPTIONS: Dict[str, Dict[str, Any]] = {
     "ferret-scan": {"profile": None, "use_default_config": True},
     "snyk-code": {"honor_tree_exclusions": False},
+    "trivy-repo": {"disable_telemetry": True},
 }
 
 #: Options of every scanner and converter section, built in or added by a plugin
@@ -178,6 +188,19 @@ def _trusted_option(options: Any, name: str) -> Any:
 
 def _or_default(value: Any, default: Any) -> Any:
     return default if value is _MISSING or value is None else value
+
+
+def _wrote(options: Any, name: str, written: Any) -> bool:
+    """Whether the config set ``name`` itself, rather than leaving it to its default.
+
+    A plugin's section is a dict holding only what was written. A built-in
+    scanner's options are a model, whose unset fields read as their defaults,
+    so its ``model_fields_set`` says which were written.
+    """
+    if written is _MISSING or written is None:
+        return False
+    fields_set = getattr(options, "model_fields_set", None)
+    return fields_set is None or name in fields_set
 
 
 def _options_of(section: Any) -> Any:
@@ -252,7 +275,9 @@ def confine_scanner_config_files(
                 wanted = _trusted_option(trusted_options, name)
                 written = _get(options, name)
                 current = _or_default(written, default)
-                if current in TIGHTENING_VALUES.get((scanner, name), ()):
+                if _wrote(options, name, written) and current in TIGHTENING_VALUES.get(
+                    (scanner, name), ()
+                ):
                     continue
                 if current == _or_default(wanted, default):
                     if written is None and default is not None:
