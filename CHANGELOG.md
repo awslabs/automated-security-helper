@@ -191,6 +191,12 @@
   check, which contacts AWS with the host's credentials: Security Hub called
   `DescribeHub`, the others STS. Each now ships `enabled: false`; turn one on with
   `enabled: true` in its section of your config or with `--config-overrides`.
+  - A run logs one warning for each of these reporters whose config section sets
+    options but not `enabled`, naming the reporter and the key to set
+    (`reporters.<name>.enabled: true`). It names no option value, changes
+    nothing, and is not logged when the requested `--output-formats` leave the
+    reporter out. `ash merge` names the operator's `--config` sections the same
+    way.
   - A reporter's dependency check now runs only for the reporters a run will use:
     the requested `--output-formats` are applied first, so `-f sarif` checks no AWS
     reporter, and workspace reporting no longer checks a per-project reporter at
@@ -1355,6 +1361,11 @@
 
 ### Breaking changes
 
+- **A config that sets S3, CloudWatch Logs, Security Hub or Bedrock summary
+  reporter options but not `enabled` stops uploading** until `enabled: true` is
+  set in the operator's config, or with `--config-overrides` such as
+  `reporters.s3.enabled=true`, because these reporters are now disabled by default
+  (see Behavior changes).
 - **A container scan that runs as root builds the root image only when asked.**
   `ash --mode container`, `ash build-image`, `./ash` and `Invoke-ASH` build the
   `non-root` stage by default, CI or not, and refuse that build before it starts when
