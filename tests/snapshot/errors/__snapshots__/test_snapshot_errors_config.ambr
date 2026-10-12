@@ -21,10 +21,10 @@
 # ---
 # name: test_missing_file[lint]
   dict({
-    'exit_code': 1,
+    'exit_code': 3,
     'stderr': '',
     'stdout': '''
-      ❌ Config file not found: missing.yaml
+      ❌ Invalid configuration: Configuration file not found: missing.yaml
   
     ''',
   })
@@ -51,10 +51,10 @@
 # ---
 # name: test_missing_file[validate]
   dict({
-    'exit_code': 1,
+    'exit_code': 3,
     'stderr': '',
     'stdout': '''
-      ❌ Config file not found: missing.yaml
+      ❌ Invalid configuration: Configuration file not found: missing.yaml
   
     ''',
   })
@@ -78,18 +78,13 @@
 # ---
 # name: test_not_yaml[lint]
   dict({
-    'exit_code': 1,
+    'exit_code': 3,
     'stderr': '',
     'stdout': '''
-      Linting configuration file: ash.yaml
-      
-      Found 1 issue(s):
-        ❌ Failed to parse config file: while parsing a flow sequence
+      ❌ Invalid configuration: could not load ash.yaml: while parsing a flow sequence
         in "ash.yaml", line 2, column 11
       expected ',' or ']', but got '<stream end>'
         in "ash.yaml", line 3, column 1
-      
-        Errors: 1
   
     ''',
   })
@@ -126,23 +121,13 @@
 # ---
 # name: test_not_yaml[validate]
   dict({
-    'exit_code': 1,
+    'exit_code': 3,
     'stderr': '',
     'stdout': '''
-      Validating configuration file: ash.yaml
-      
-      ❌ Configuration validation failed with 1 error(s):
-        1. YAML parsing error: while parsing a flow sequence
+      ❌ Invalid configuration: could not load ash.yaml: while parsing a flow sequence
         in "ash.yaml", line 2, column 11
       expected ',' or ']', but got '<stream end>'
         in "ash.yaml", line 3, column 1
-      
-      💡 Common fixes:
-        - Remove internal-only fields like 'name', 'extension', 'tool_version' from scanner/reporter configs
-        - Remove invalid top-level sections like 'build' or 'mcp-resource-management'
-        - Check for duplicate field definitions in your YAML file
-      
-      📖 See the ASH configuration documentation for the correct format.
   
     ''',
   })
