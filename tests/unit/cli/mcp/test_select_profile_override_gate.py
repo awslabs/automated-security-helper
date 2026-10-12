@@ -511,6 +511,22 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
             }
         },
     ),
+    "/scanners/trivy/**": (
+        {
+            "op": "replace",
+            "path": "/scanners/trivy/options/disable_telemetry",
+            "value": False,
+        },
+        {"scanners": {"trivy": {"options": {"disable_telemetry": False}}}},
+    ),
+    "/scanners/zizmor/**": (
+        {
+            "op": "replace",
+            "path": "/scanners/zizmor/options/online_audits",
+            "value": True,
+        },
+        {"scanners": {"zizmor": {"options": {"online_audits": True}}}},
+    ),
     "/scanners/detect-secrets/options/scan_settings/filters_used": (
         {
             "op": "replace",
