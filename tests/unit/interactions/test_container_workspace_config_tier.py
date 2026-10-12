@@ -34,6 +34,7 @@ from automated_security_helper.cli.main import app
 from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
+from tests.utils.config_link_layouts import config_through_links
 
 GRANT = "project_name: tier\nsandbox:\n  extra_read_paths:\n    - /opt/tier-grant\n"
 FIX = "Keep --config outside the checkout, or inside the workspace"
@@ -104,6 +105,7 @@ def _run_command(commands: List[List[str]]) -> List[str]:
         "the-config-in-the-checkout-outside-the-workspace",
         "the-config-in-another-checkout",
         "a-link-outside-the-checkout-to-a-config-in-it",
+        "a-link-in-the-checkout-on-the-way-to-a-config-outside-it",
     ],
 )
 def test_a_config_the_repository_could_have_written_is_refused(
@@ -114,6 +116,11 @@ def test_a_config_the_repository_could_have_written_is_refused(
     elif where == "the-config-in-another-checkout":
         (tmp_path / "elsewhere" / ".git").mkdir(parents=True)
         config = _config(tmp_path / "elsewhere" / "ash-config.yaml")
+    elif where == "a-link-in-the-checkout-on-the-way-to-a-config-outside-it":
+        (checkout / "ci").mkdir()
+        config = config_through_links(
+            "file-link-in-the-scanned-checkout", checkout, tmp_path
+        )
     else:
         # Named outside every checkout, but the file it names is in one, and that
         # file is what is mounted.

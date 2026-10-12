@@ -516,6 +516,17 @@
   `Invoke-ASH`, which scan one directory and hand the scan inside `--source-dir /src`,
   now refuse a `--workspace` passed through with exit 3 instead of starting a
   container that refused it.
+- **`./ash` and `Invoke-ASH` mark a `--config` reached through a link in a checkout.**
+  A local scan, and `ash --mode container`, count a config as repository-written
+  when a symlink its path follows sits in the scanned tree or in any git checkout,
+  even though neither the path given nor the file it resolves to is in one: whoever
+  wrote the link chose the file. The two wrappers checked only the path given and
+  the resolved file, so a config named `ops/cfg.yaml`, linked to a link in the
+  scanned checkout that leads to a file outside it, went to the scan inside unmarked
+  and kept its sandbox grants there. Both wrappers now follow the path one component
+  at a time, at most 40 links, and pass `--config-from-scanned-repository` when any
+  link on the way sits in the scanned tree or a checkout. A chain of links outside
+  every checkout is used as before.
 - **`Invoke-ASH` builds the non-root user with the caller's IDs on Linux and macOS.**
   Without `-ContainerUID` and `-ContainerGID` it built the Dockerfile's default UID 500
   and GID 100, which cannot write an output directory the caller owns, and checked

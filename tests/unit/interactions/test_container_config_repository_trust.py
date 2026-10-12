@@ -28,6 +28,12 @@ from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrate
 from automated_security_helper.interactions.run_ash_container import (
     _assemble_run_command,
 )
+from tests.utils.config_link_layouts import (
+    LINKED_LAYOUTS,
+    LINKS_OUTSIDE_EVERY_CHECKOUT,
+    config_through_a_link_in,
+    config_through_links,
+)
 
 FLAG = "--config-from-scanned-repository"
 #: A module no environment has: a config inside the tree may not add it.
@@ -155,6 +161,51 @@ class TestTheHostTellsTheContainer:
 
         assert FLAG not in inner
         assert inner[inner.index("--config") + 1] == "/src/.ash/ash.yaml"
+
+    @pytest.mark.parametrize("layout", LINKED_LAYOUTS)
+    def test_a_config_reached_through_a_link_in_a_checkout_is_marked(
+        self, layout, checkout, tmp_path
+    ):
+        """As locally, and as ./ash and Invoke-ASH mark it
+        (tests/utils/config_link_layouts.py)."""
+        config = config_through_links(layout, checkout["root"], tmp_path)
+
+        inner = _inner_args(
+            _assemble(checkout["source"], checkout["out"], config=str(config))
+        )
+
+        assert FLAG in inner
+        assert inner[inner.index("--config") + 1] == "/ash-config/ash.yaml"
+
+    def test_a_config_reached_through_a_link_in_the_scanned_directory_is_marked(
+        self, tmp_path
+    ):
+        """Outside every checkout, the scanned directory is the scanned tree."""
+        source = tmp_path / "pkg"
+        config = config_through_a_link_in(source, tmp_path)
+        out = tmp_path / "out"
+        out.mkdir()
+
+        inner = _inner_args(
+            _assemble(source.resolve(), out.resolve(), config=str(config))
+        )
+
+        assert FLAG in inner
+        assert inner[inner.index("--config") + 1] == "/ash-config/ash.yaml"
+
+    def test_a_link_chain_outside_every_checkout_is_not_marked(
+        self, checkout, tmp_path
+    ):
+        """Control."""
+        config = config_through_links(
+            LINKS_OUTSIDE_EVERY_CHECKOUT, checkout["root"], tmp_path
+        )
+
+        inner = _inner_args(
+            _assemble(checkout["source"], checkout["out"], config=str(config))
+        )
+
+        assert FLAG not in inner
 
 
 class TestTheScanInsideAppliesTheSameLimits:

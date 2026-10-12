@@ -245,9 +245,11 @@ file at a path another file of the chain needs as a directory. A config the scan
 repository wrote keeps the limits a local scan gives it (see
 [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)):
 when the config or a file it extends is inside a git checkout, the one holding
-`--source-dir` or any other, but outside `--source-dir` itself, where the scan inside
-the container cannot see that, the host passes it `--config-from-scanned-repository`
-(`./ash` and `Invoke-ASH` do the same for the config file). A workspace scan inside the
+`--source-dir` or any other, or is reached through a symlink that sits in one or in
+the scanned tree, but outside `--source-dir` itself, where the scan inside the
+container cannot see that, the host passes it `--config-from-scanned-repository`
+(`./ash` and `Invoke-ASH` do the same for the config file, following its path one link
+at a time as the host does). A workspace scan inside the
 container refuses that flag, so in workspace mode `--mode container` refuses such a
 `--config` instead, with exit 3 before anything is built or mounted: keep `--config`
 outside the checkout, or inside the workspace. A config inside the workspace root is

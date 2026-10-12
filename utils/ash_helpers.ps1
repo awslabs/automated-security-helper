@@ -327,6 +327,60 @@ function Invoke-ASH {
             $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
             return [bool]($item -and $item.LinkType -in @('SymbolicLink', 'Junction'))
         }
+        # Whether the directory, or one above it, holds a .git entry: is it in a
+        # git checkout.
+        function Test-AshInCheckout([string]$Directory) {
+            $dir = Get-Item -LiteralPath $Directory -Force -ErrorAction SilentlyContinue
+            while ($null -ne $dir) {
+                if (Test-Path -LiteralPath (Join-Path $dir.FullName '.git')) { return $true }
+                $dir = $dir.Parent
+            }
+            return $false
+        }
+        # Whether a link the path follows sits inside one of $Trees or any git
+        # checkout. The path is resolved one component at a time, as Get-AshRealPath
+        # resolves it, so a link reached only through another link counts too:
+        # whoever writes the directory a link sits in chooses where it leads
+        # (config/sandbox_grants.links_followed). At most 40 links are followed, so
+        # a cycle of links ends.
+        function Test-AshFollowsLinkInCheckout([string]$Path, [string[]]$Trees) {
+            $full = [System.IO.Path]::GetFullPath($Path)
+            $root = [System.IO.Path]::GetPathRoot($full)
+            $walked = $root
+            $rest = [System.Collections.Generic.List[string]]::new()
+            foreach ($part in $full.Substring($root.Length).Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)) {
+                $rest.Add($part)
+            }
+            $hops = 0
+            while ($rest.Count -gt 0) {
+                $part = $rest[0]
+                $rest.RemoveAt(0)
+                if ($part -eq '.') { continue }
+                if ($part -eq '..') {
+                    $parent = Split-Path -Parent $walked
+                    $walked = if ($parent) { $parent } else { $root }
+                    continue
+                }
+                $candidate = Join-Path $walked $part
+                $item = Get-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue
+                if (-not ($item -and $item.LinkType -in @('SymbolicLink', 'Junction') -and $item.Target)) {
+                    $walked = $candidate
+                    continue
+                }
+                $hops++
+                if ($hops -gt 40) { return $false }
+                $linkDir = $walked.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
+                if (@($Trees | Where-Object { Test-AshUnder $linkDir $_ }).Count -gt 0) { return $true }
+                if (Test-AshInCheckout $walked) { return $true }
+                $target = [string]@($item.Target)[0]
+                if ([System.IO.Path]::IsPathRooted($target)) {
+                    $walked = [System.IO.Path]::GetPathRoot($target)
+                    $target = $target.Substring($walked.Length)
+                }
+                $rest.InsertRange(0, [string[]]@($target.Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)))
+            }
+            return $false
+        }
         $spelledOutput = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path (Get-Location).Path $OutputDir }
         $outputRoot = [System.IO.Path]::GetPathRoot($spelledOutput)
         $walked = [System.Collections.Generic.List[string]]::new()
@@ -447,17 +501,12 @@ function Invoke-ASH {
                 # being scanned. The scan inside sees it only at /ash-config, outside its
                 # own tree, so it is told.
                 $configFromRepository = $realInTree
-                # A config inside any other git checkout is one a local scan counts as
-                # repository-written too (config/sandbox_grants.repository_written), so
-                # it is marked; the link check above stays with the scanned tree.
-                $dir = Get-Item -LiteralPath (Split-Path -Parent $configFull)
-                while ($null -ne $dir) {
-                    if (Test-Path -LiteralPath (Join-Path $dir.FullName '.git')) {
-                        $configInCheckout = $true
-                        break
-                    }
-                    $dir = $dir.Parent
-                }
+                # A config inside any other git checkout, or reached through a link
+                # that sits in the scanned tree or any checkout, is one a local scan
+                # counts as repository-written too
+                # (config/sandbox_grants.repository_written), so it is marked; the
+                # refusal above stays with the scanned tree.
+                $configInCheckout = (Test-AshInCheckout (Split-Path -Parent $configFull)) -or (Test-AshFollowsLinkInCheckout $configNamed $trees)
             }
             $ashCmdArgs.Add("--config")
             $ashCmdArgs.Add('"$configInner"')

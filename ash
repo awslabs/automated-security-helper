@@ -242,6 +242,51 @@ resolve_file() {
   printf '%s/%s\n' "${dir}" "$(basename -- "${path}")"
 }
 
+# Whether the directory, or one above it, holds a .git entry: is it in a git
+# checkout.
+in_a_checkout() {
+  local dir="$1"
+  while :; do
+    if [ -e "${dir}/.git" ]; then return 0; fi
+    if [ "${dir}" = "/" ] || [ -z "${dir}" ]; then return 1; fi
+    dir="$(dirname -- "${dir}")"
+  done
+}
+
+# Whether a symlink the path follows sits inside the scanned tree (TREES, below) or
+# any git checkout. The path is resolved one component at a time, as the kernel
+# resolves it, so a link reached only through another link counts too: whoever
+# writes the directory a link sits in chooses where it leads
+# (config/sandbox_grants.links_followed). At most 40 links are followed, the
+# kernel's own limit, so a cycle of links ends.
+follows_a_link_in_a_checkout() {
+  local rest="${1#/}" walked="" part target tree hops=0
+  while [ -n "${rest}" ]; do
+    part="${rest%%/*}"
+    if [ "${part}" = "${rest}" ]; then rest=""; else rest="${rest#*/}"; fi
+    case "${part}" in
+      "" | .) continue ;;
+      ..) walked="${walked%/*}"; continue ;;
+    esac
+    if [ ! -L "${walked}/${part}" ]; then
+      walked="${walked}/${part}"
+      continue
+    fi
+    hops=$((hops + 1))
+    if [ "${hops}" -gt 40 ]; then return 1; fi
+    for tree in "${TREES[@]}"; do
+      case "${walked}/" in "${tree%/}"/*) return 0 ;; esac
+    done
+    if in_a_checkout "${walked:-/}"; then return 0; fi
+    target="$(readlink -- "${walked}/${part}")" || return 1
+    case "${target}" in
+      /*) walked=""; rest="${target#/}${rest:+/${rest}}" ;;
+      *) rest="${target}${rest:+/${rest}}" ;;
+    esac
+  done
+  return 1
+}
+
 # The config file, --config or else ASH_CONFIG, is read by the scan inside the
 # container, which sees the host only through its mounts: the host path itself
 # names nothing there. A config inside the source dir is read through the
@@ -312,20 +357,17 @@ if [[ "${NO_RUN}" = "NO" && ( "${CONFIG_GIVEN}" = "YES" || -n "${CONFIG_PATH}" )
       fi
       CONFIG_RUN_ARGS=(--mount "type=bind,source=${CONFIG_REAL},destination=/ash-config/$(basename -- "${CONFIG_REAL}"),readonly")
       CONFIG_ASH_ARGS=(--config "/ash-config/$(basename -- "${CONFIG_REAL}")")
-      # A config elsewhere in the scanned tree, or inside any other git checkout
-      # by its named or real path, is one a local scan counts as repository-written
+      # A config elsewhere in the scanned tree, inside any other git checkout by
+      # its named or real path, or reached through a link that sits in one, is one
+      # a local scan counts as repository-written
       # (config/sandbox_grants.repository_written). The scan inside sees it only at
       # /ash-config, outside its own tree, so it is told.
       in_checkout="NO"
       for start in "$(dirname -- "${CONFIG_NAMED}")" "$(dirname -- "${CONFIG_REAL}")"; do
-        dir="${start}"
-        while :; do
-          if [ -e "${dir}/.git" ]; then in_checkout="YES"; break; fi
-          if [ "${dir}" = "/" ] || [ -z "${dir}" ]; then break; fi
-          dir="$(dirname -- "${dir}")"
-        done
+        if in_a_checkout "${start}"; then in_checkout="YES"; fi
       done
-      if [[ "${real_in_tree}" = "YES" || "${in_checkout}" = "YES" ]]; then
+      if [[ "${real_in_tree}" = "YES" || "${in_checkout}" = "YES" ]] \
+        || follows_a_link_in_a_checkout "${CONFIG_NAMED}"; then
         CONFIG_ASH_ARGS+=(--config-from-scanned-repository)
       fi
       ;;

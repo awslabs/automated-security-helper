@@ -34,6 +34,13 @@ from typing import List
 
 import pytest
 
+from tests.utils.config_link_layouts import (
+    LINKED_LAYOUTS,
+    LINKS_OUTSIDE_EVERY_CHECKOUT,
+    config_through_a_link_in,
+    config_through_links,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPERS = REPO_ROOT / "utils" / "ash_helpers.ps1"
 PWSH = shutil.which("pwsh")
@@ -651,6 +658,69 @@ def test_a_config_elsewhere_in_the_checkout_is_marked_as_the_repositorys(
     args = _recorded(tmp_path)
     assert args[args.index("--config") + 1] == "/ash-config/ash.yaml"
     assert "--config-from-scanned-repository" in args
+
+
+@_POSIX_ONLY
+@pytest.mark.parametrize("layout", LINKED_LAYOUTS)
+def test_a_config_reached_through_a_link_in_a_checkout_is_marked(
+    layout, pwsh, recording_docker, checkout, tmp_path
+):
+    """As a local scan treats it (config/sandbox_grants.links_followed), and as
+    ./ash does: whoever wrote a link on the way chose the file the config resolves
+    to, though neither the name given nor that file is in a checkout."""
+    config = config_through_links(layout, checkout, tmp_path)
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        f"-SourceDir repo/svc -OutputDir out -Config '{config}'",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = _recorded(tmp_path)
+    assert args[args.index("--config") + 1] == "/ash-config/ash.yaml"
+    assert "--config-from-scanned-repository" in args
+
+
+@_POSIX_ONLY
+def test_a_config_reached_through_a_link_in_the_scanned_directory_is_marked(
+    pwsh, recording_docker, tmp_path
+):
+    """Outside every checkout, the scanned directory is the scanned tree."""
+    config = config_through_a_link_in(tmp_path / "pkg", tmp_path)
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        f"-SourceDir pkg -OutputDir out -Config '{config}'",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = _recorded(tmp_path)
+    assert args[args.index("--config") + 1] == "/ash-config/ash.yaml"
+    assert "--config-from-scanned-repository" in args
+
+
+@_POSIX_ONLY
+def test_a_link_chain_outside_every_checkout_is_not_marked(
+    pwsh, recording_docker, checkout, tmp_path
+):
+    """Control."""
+    config = config_through_links(LINKS_OUTSIDE_EVERY_CHECKOUT, checkout, tmp_path)
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        f"-SourceDir repo/svc -OutputDir out -Config '{config}'",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = _recorded(tmp_path)
+    assert args[args.index("--config") + 1] == "/ash-config/ash.yaml"
+    assert "--config-from-scanned-repository" not in args
 
 
 @_POSIX_ONLY

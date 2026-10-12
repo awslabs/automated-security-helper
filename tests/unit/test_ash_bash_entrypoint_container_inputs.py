@@ -25,6 +25,12 @@ from typing import Dict, List, Optional, Tuple
 
 import pytest
 
+from tests.utils.config_link_layouts import (
+    LINKED_LAYOUTS,
+    LINKS_OUTSIDE_EVERY_CHECKOUT,
+    config_through_a_link_in,
+    config_through_links,
+)
 from tests.utils.host_ids import UNPRIVILEGED_GID, UNPRIVILEGED_UID, with_fixed_ids
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -474,6 +480,59 @@ class TestAConfigTheScannedRepositoryWroteKeepsItsLimits:
             fake_runner,
             checkout / "services" / "api",
             ["--no-build", "--config", str(tmp_path / "operator" / "ash.yaml")],
+        )
+
+        assert rc == 0, output
+        inner = _inner_args(_only(calls, "run"))
+        assert "--config-from-scanned-repository" not in inner
+        assert _flag(inner, "--config") == "/ash-config/ash.yaml"
+
+    @pytest.mark.parametrize("layout", LINKED_LAYOUTS)
+    def test_a_config_reached_through_a_link_in_a_checkout_is_marked(
+        self, layout, fake_runner, checkout, tmp_path
+    ):
+        """As a local scan treats it (config/sandbox_grants.links_followed): whoever
+        wrote a link on the way chose the file the config resolves to, though
+        neither the name given nor that file is in a checkout."""
+        config = config_through_links(layout, checkout, tmp_path)
+
+        rc, output, calls = _run_ash_status(
+            fake_runner,
+            checkout / "services" / "api",
+            ["--no-build", "--config", str(config)],
+        )
+
+        assert rc == 0, output
+        inner = _inner_args(_only(calls, "run"))
+        assert "--config-from-scanned-repository" in inner
+        assert _flag(inner, "--config") == "/ash-config/ash.yaml"
+
+    def test_a_config_reached_through_a_link_in_the_scanned_directory_is_marked(
+        self, fake_runner, tmp_path
+    ):
+        """Outside every checkout, the scanned directory is the scanned tree."""
+        source = tmp_path / "pkg"
+        config = config_through_a_link_in(source, tmp_path)
+
+        rc, output, calls = _run_ash_status(
+            fake_runner, source, ["--no-build", "--config", str(config)]
+        )
+
+        assert rc == 0, output
+        inner = _inner_args(_only(calls, "run"))
+        assert "--config-from-scanned-repository" in inner
+        assert _flag(inner, "--config") == "/ash-config/ash.yaml"
+
+    def test_a_link_chain_outside_every_checkout_is_not_marked(
+        self, fake_runner, checkout, tmp_path
+    ):
+        """Control."""
+        config = config_through_links(LINKS_OUTSIDE_EVERY_CHECKOUT, checkout, tmp_path)
+
+        rc, output, calls = _run_ash_status(
+            fake_runner,
+            checkout / "services" / "api",
+            ["--no-build", "--config", str(config)],
         )
 
         assert rc == 0, output
