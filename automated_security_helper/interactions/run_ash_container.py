@@ -802,12 +802,18 @@ def _assemble_run_command(
     shard_count: int | None = None,
     fail_on_incomplete_scanners: bool | None = None,
     outer_run_id: str | None = None,
+    ignore_suppressions: bool = False,
 ) -> List[str]:
     """Assemble the full `docker run` command list.
 
     Args:
         outer_run_id: Handed to the in-container run, which writes it into its
             results file when it completes (utils/inner_run_outcome.py).
+        ignore_suppressions: Forwarded as ``--ignore-suppressions``. The
+            in-container scan decides which files its scanners read, and under
+            the flag every scanner reads the files under ignore paths. The host
+            recomputes the verdict from the results it reads back, but it cannot
+            count a finding no scanner produced.
         fail_on_incomplete_scanners: Whether the in-container scan should fail
             when a selected scanner did not complete, or None for unset. Defaults
             to None so that the many existing callers -- most of them tests
@@ -929,6 +935,8 @@ def _assemble_run_command(
         ash_args.append("--fail-on-incomplete-scanners")
     elif fail_on_incomplete_scanners is not None:
         ash_args.append("--no-fail-on-incomplete-scanners")
+    if ignore_suppressions:
+        ash_args.append("--ignore-suppressions")
 
     for phase in phases:
         ash_args.extend(
@@ -1083,6 +1091,7 @@ def run_ash_container(
     shard_index: int | None = None,
     shard_count: int | None = None,
     outer_run_id: str | None = None,
+    ignore_suppressions: bool = False,
 ):
     """Build and run the ASH container image.
 
@@ -1115,6 +1124,8 @@ def run_ash_container(
         shard_count: Total shard count, forwarded alongside shard_index.
         outer_run_id: Handed to the in-container run, which writes it into its
             results file when it completes (utils/inner_run_outcome.py).
+        ignore_suppressions: Forwarded to the in-container invocation, so its
+            scanners read the files under ignore paths.
 
     Returns:
         CompletedProcess: The result of the container execution
@@ -1369,6 +1380,7 @@ def run_ash_container(
             shard_index=shard_index,
             shard_count=shard_count,
             outer_run_id=outer_run_id,
+            ignore_suppressions=ignore_suppressions,
         )
 
         return _execute_container(run_cmd, debug=debug)

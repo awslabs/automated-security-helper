@@ -1852,6 +1852,7 @@ def _run_container_mode(
         allow_missing_projects=opts.allow_missing_projects,
         shard_index=opts.shard_index,
         shard_count=opts.shard_count,
+        ignore_suppressions=opts.ignore_suppressions,
     )
 
     if opts.debug:
@@ -1916,8 +1917,8 @@ def _run_container_mode(
     # NOT "any non-zero status", and the difference matters: the container entrypoint is
     # this same CLI, so 0, 1 and 2 are verdicts that _compute_exit_code reached from a
     # results file, and the host deliberately recomputes them, because it applies
-    # --min-severity and --ignore-suppressions, neither of which is forwarded inward.
-    # Exiting on 2 here would report findings the operator asked to filter out.
+    # --min-severity, which is not forwarded inward. Exiting on 2 here would report
+    # findings the operator asked to filter out.
     #
     # NOT ASH_EXIT_CODES either, which is the wider table of every status the CLI can
     # return and includes two that assert the opposite of a verdict. 3 is an invalid
