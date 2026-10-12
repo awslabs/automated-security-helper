@@ -17,6 +17,12 @@ same wherever the setting was. An option that sets one of them directly
 (``--ash-plugin-modules``, ``--no-honor-ignore-files``, ``--allow-stale-content-db``)
 is named after it.
 
+:data:`SET_BY_THE_OPERATOR` is the same rule as a scanner option's description
+states it: the options ``config/tool_config_trust.py`` takes from the trusted base
+(a scanner's own config file and the options that choose part of it) describe who
+may set them with it, so the descriptions, the JSON schemas built from them and the
+reference pages say the same thing.
+
 Kept free of imports, so any of those modules can use it without an import cycle.
 """
 
@@ -25,4 +31,12 @@ KEEP_A_SETTING = (
     "To keep a setting, move the file outside every git checkout, or pass the "
     "setting with --config-overrides. A file inside the scanned directory has to "
     "move out of it as well."
+)
+
+#: Who sets an option that only the operator chooses, as the option's description
+#: gives it.
+SET_BY_THE_OPERATOR = (
+    "Used only when the operator sets it, with --config-overrides or in a config "
+    "file outside every git checkout and the scanned directory: a config file "
+    "inside one, or one an MCP client delivered, does not choose it."
 )

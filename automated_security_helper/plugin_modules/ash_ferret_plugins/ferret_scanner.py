@@ -22,6 +22,7 @@ from automated_security_helper.config.path_trust import (
     honored_path,
     resolved_path,
 )
+from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.base.options import (
     ScannerOptionsBase,
@@ -359,9 +360,7 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
         Field(
             description="Use the default ferret-config.yaml bundled with this plugin. "
             "Set to False to disable the default config and rely only on ferret-scan's built-in defaults. "
-            "Used only when the operator sets it, with --config-overrides or in a config file outside "
-            "the scanned tree: a config file inside the tree, or one an MCP client delivered, does not "
-            "choose it."
+            f"{SET_BY_THE_OPERATOR}"
         ),
     ] = True
 
@@ -370,10 +369,7 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
         Field(
             description="Profile name to use from config file (e.g., 'quick', 'ci', "
             "'security-audit', 'comprehensive'). A profile can run fewer checks and "
-            "report only higher-confidence findings. Used only when the operator sets "
-            "it, with --config-overrides or in a config file outside the scanned tree: "
-            "a config file inside the tree, or one an MCP client delivered, does not "
-            "choose it."
+            f"report only higher-confidence findings. {SET_BY_THE_OPERATOR}"
         ),
     ] = None
 

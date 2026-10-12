@@ -14,6 +14,7 @@ from pydantic import Field
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     ToolExtraArg,
@@ -131,10 +132,7 @@ class SnykCodeScannerConfigOptions(ScannerOptionsBase):
             ".snyk file and the rules of a .dcignore file, which leave the files "
             "they name out of the analysis. snyk has no option that stops it "
             "reading them, so while this is false and the tree has one, snyk-code "
-            "does not run and its error names the files. Used only when the "
-            "operator sets it, with --config-overrides or in a config file outside "
-            "the scanned tree: a config file inside the tree, or one an MCP client "
-            "delivered, does not choose it."
+            f"does not run and its error names the files. {SET_BY_THE_OPERATOR}"
         ),
     ] = False
 

@@ -39,6 +39,7 @@ from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.config.path_trust import honored_path
 from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.utils.link_exclusions import trivy_skip_files
@@ -155,10 +156,11 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
         str | None,
         Field(
             description=(
-                "A trivy ignore file, passed as --ignorefile. Used only when it is "
-                "outside the scanned tree; a relative path is taken from the "
-                "directory of the config file that sets it, or from the working "
-                "directory for --config-overrides and the environment variable. "
+                f"A trivy ignore file, passed as --ignorefile. {SET_BY_THE_OPERATOR} "
+                "The file is used only when it is outside the scanned tree; a "
+                "relative path is taken from the directory of the config file that "
+                "sets it, or from the working directory for --config-overrides and "
+                "the environment variable. "
                 "Unset, TRIVY_IGNOREFILE is used the same way, and "
                 "otherwise trivy gets an empty one, so a .trivyignore in the scanned "
                 "repository does not remove findings."
@@ -170,10 +172,10 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "A trivy secret scanning config (trivy-secret.yaml), passed as "
-                "--secret-config. Used only when it is outside the scanned tree; a "
-                "relative path is taken from the directory of the config file that "
-                "sets it, or from the working directory for --config-overrides and "
-                "the environment variable. Unset, "
+                f"--secret-config. {SET_BY_THE_OPERATOR} The file is used only when "
+                "it is outside the scanned tree; a relative path is taken from the "
+                "directory of the config file that sets it, or from the working "
+                "directory for --config-overrides and the environment variable. Unset, "
                 "TRIVY_SECRET_CONFIG is used the same way, and otherwise trivy gets "
                 "an empty one, so a trivy-secret.yaml in the scanned repository does "
                 "not disable secret rules."
