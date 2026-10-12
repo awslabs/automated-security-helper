@@ -91,6 +91,19 @@ def test_it_runs_on_pull_requests_and_answers_to_the_gate():
     assert name in _jobs()["required-checks"]["needs"]
 
 
+RUN_SCAN_TEST = REPO_ROOT / ".github" / "actions" / "run-scan-test" / "action.yml"
+
+
+def test_the_scan_legs_probe_the_ci_stage_too():
+    """run-scan-test builds ``ci`` for the scan legs; its runtime-snapshot step runs
+    the same permissions probe against it, with the flag that enables it."""
+    steps = yaml.safe_load(RUN_SCAN_TEST.read_text(encoding="utf-8"))["runs"]["steps"]
+    probing = [step for step in steps if PROBE in _words(step)]
+
+    assert len(probing) == 1, [step.get("name") for step in probing]
+    assert "--run-container-snapshots" in _words(probing[0])
+
+
 def test_a_ci_build_is_not_mistaken_for_the_default_stage():
     """Control for the matcher: the scan legs' explicit ci builds do not count."""
     assert not _builds_the_default_stage(
