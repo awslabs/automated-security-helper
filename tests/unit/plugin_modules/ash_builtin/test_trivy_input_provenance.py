@@ -193,11 +193,17 @@ def test_a_value_from_an_mcp_delivered_config_is_not_used(
 ):
     """A config an MCP client delivered is the client's, wherever it is staged.
 
-    Where the option is a default ``denied_paths`` entry, the delivered config is
-    refused outright, naming it, which uses the value no more than ignoring it
-    would.
+    Where the default ``denied_paths`` cover the option, by its own entry or by
+    the scanner's whole section (both trivy scanners' are always denied), the
+    delivered config is refused outright, naming it, which uses the value no more
+    than ignoring it would. Asked of the runtime-override check, which matches
+    the entries as the delivered-config check does, globs included.
     """
     from automated_security_helper.config.ash_config import RuntimeOverridesConfig
+    from automated_security_helper.config.runtime_patch import (
+        RuntimePatchDeniedError,
+        check_runtime_ops,
+    )
     from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
     source = _source(tmp_path)
@@ -205,7 +211,16 @@ def test_a_value_from_an_mcp_delivered_config_is_not_used(
     delivered = _write_config(
         tmp_path / "upload" / "ash.yaml", scanner, option, str(chosen)
     )
-    if f"/scanners/{scanner}/options/{option}" in RuntimeOverridesConfig().denied_paths:
+    pointer = f"/scanners/{scanner}/options/{option}"
+    try:
+        check_runtime_ops(
+            [{"op": "add", "path": pointer, "value": str(chosen)}],
+            allowlist=RuntimeOverridesConfig(enabled=True, allowed_paths=["/**"]),
+        )
+        denied = False
+    except RuntimePatchDeniedError:
+        denied = True
+    if denied:
         with pytest.raises(ASHConfigFieldDeniedError) as refused:
             resolve_config(
                 config_path=delivered, source_dir=source, untrusted_config=True
