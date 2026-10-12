@@ -320,6 +320,26 @@ def _existing(paths: Iterable[Optional[Path]]) -> List[Path]:
     return list(seen.values())
 
 
+def _screened_uv_directory(path: Optional[Path], named_by: str) -> Optional[Path]:
+    """``path`` unless it is too broad to mount for uv, with a warning when it is.
+
+    uv's directories are mounted for every scanner. One that is "/", a home, a
+    directory holding one, or a directory directly in one (~/.local) would expose
+    far more than uv's own files, so it is not mounted, the way the rule cache
+    variables are treated (_env_named_read_paths).
+    """
+    if path is None or not _broader_than_a_tool(path):
+        return path
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    ASH_LOGGER.warning(
+        f"{named_by} names {path.as_posix()!r}, which is not mounted in the scanner "
+        "sandbox: it would expose far more than uv's own files. Point it at a "
+        "directory that holds only uv's, such as ~/.local/share/uv/tools."
+    )
+    return None
+
+
 def _uv_directories() -> List[Path]:
     """uv's tool and interpreter directories, without starting uv.
 
@@ -327,12 +347,18 @@ def _uv_directories() -> List[Path]:
     uv-managed interpreter, so both have to be visible. Computed from uv's documented
     environment variables and XDG defaults rather than by running ``uv tool dir``:
     this runs for every scanner spawn, and a spawn here would itself need wrapping.
+    A directory UV_TOOL_DIR or UV_PYTHON_INSTALL_DIR names is screened first
+    (_screened_uv_directory).
     """
     home = Path.home()
     data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local" / "share")
     candidates = [
-        _expand(os.environ["UV_TOOL_DIR"]) if os.environ.get("UV_TOOL_DIR") else None,
-        _expand(os.environ["UV_PYTHON_INSTALL_DIR"])
+        _screened_uv_directory(_expand(os.environ["UV_TOOL_DIR"]), "UV_TOOL_DIR")
+        if os.environ.get("UV_TOOL_DIR")
+        else None,
+        _screened_uv_directory(
+            _expand(os.environ["UV_PYTHON_INSTALL_DIR"]), "UV_PYTHON_INSTALL_DIR"
+        )
         if os.environ.get("UV_PYTHON_INSTALL_DIR")
         else None,
         data / "uv" / "tools",
@@ -374,7 +400,8 @@ def _uv_tool_locks() -> List[Path]:
         if os.environ.get("UV_TOOL_DIR")
         else data / "uv" / "tools"
     )
-    if tool_dir is None:
+    # Not the lock of a tools directory too broad to mount (_uv_directories warns).
+    if tool_dir is None or _broader_than_a_tool(tool_dir):
         return []
     lock = tool_dir / ".lock"
     return [lock.absolute()] if lock.is_file() and not lock.is_symlink() else []
@@ -1077,7 +1104,11 @@ def build_scanner_policy(
         + [*scan_tree, scan_target, _readable_cwd(cwd), tool_config_dir]
     )
 
-    cache = _existing([uv_cache_directory()] + [_expand(p) for p in declared_cache])
+    uv_cache = _screened_uv_directory(
+        uv_cache_directory(),
+        "UV_CACHE_DIR" if os.environ.get("UV_CACHE_DIR") else "XDG_CACHE_HOME",
+    )
+    cache = _existing([uv_cache] + [_expand(p) for p in declared_cache])
 
     refuse_symlinked_output_dir(source_dir, output_dir)
     _refuse_symlinked_results_dir(output_dir, results_dir)

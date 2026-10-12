@@ -107,6 +107,62 @@ def _resolved(paths):
     return {Path(os.path.realpath(p)) for p in paths}
 
 
+class TestUvDirectoriesAreScreened:
+    """uv's directories named in ASH's environment get the breadth rule too.
+
+    UV_TOOL_DIR, UV_PYTHON_INSTALL_DIR and UV_CACHE_DIR name directories mounted for
+    every scanner, so uv can run tools. A value that is "/", a home or a directory
+    holding one would mount far more than uv's files, so it is not mounted, with a
+    warning, the way the rule cache variables are treated.
+    """
+
+    @pytest.fixture
+    def warnings(self, monkeypatch):
+        from automated_security_helper.utils import log
+
+        said = []
+        monkeypatch.setattr(
+            log.ASH_LOGGER, "warning", lambda message, *a, **k: said.append(message)
+        )
+        return said
+
+    @pytest.mark.parametrize("named", ["home", "holding-home", "root"])
+    @pytest.mark.parametrize(
+        "variable", ["UV_TOOL_DIR", "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR"]
+    )
+    def test_a_broad_value_is_not_mounted(
+        self, layout, monkeypatch, warnings, variable, named
+    ):
+        value = {
+            "home": layout.home,
+            "holding-home": layout.home.parent,
+            "root": Path(os.path.abspath(os.sep)),
+        }[named]
+        monkeypatch.setenv(variable, str(value))
+
+        policy = _policy(layout)
+
+        granted = _resolved([*policy.read_only, *policy.cache])
+        assert Path(os.path.realpath(value)) not in granted
+        assert any(variable in str(said) for said in warnings), warnings
+
+    @pytest.mark.parametrize(
+        "variable", ["UV_TOOL_DIR", "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR"]
+    )
+    def test_a_directory_of_uvs_own_is_still_mounted(
+        self, layout, monkeypatch, warnings, variable
+    ):
+        value = layout.home / ".local" / "share" / "uv" / variable.lower()
+        value.mkdir(parents=True)
+        monkeypatch.setenv(variable, str(value))
+
+        policy = _policy(layout)
+
+        granted = _resolved([*policy.read_only, *policy.cache])
+        assert Path(os.path.realpath(value)) in granted
+        assert not any(variable in str(said) for said in warnings), warnings
+
+
 class TestNetwork:
     def test_off_unless_declared(self, layout):
         assert _policy(layout).network is False

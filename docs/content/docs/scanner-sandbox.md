@@ -57,7 +57,10 @@ it needs.
   persistent location it can write. The rest of the output directory is read-only.
 - `/tmp` and `$HOME` are private and empty. Your real home directory is not visible.
   The tool locations a scanner needs (ASH's bin directory, uv's tool and Python
-  directories, the scanner's declared caches) are mounted at their usual paths.
+  directories, the scanner's declared caches) are mounted at their usual paths. A
+  uv directory that `UV_TOOL_DIR`, `UV_PYTHON_INSTALL_DIR` or `UV_CACHE_DIR` names
+  is not mounted, with a warning, when it is `/`, a home directory, a directory
+  holding one, or a directory directly in one such as `~/.local`.
 - Tool caches (uv's cache, grype's and trivy's databases, semgrep's settings) are
   writable only where the writes are thrown away: under bwrap (bubblewrap 0.8+ and
   Linux 5.11+) through an overlay, so writes succeed but are discarded when the
