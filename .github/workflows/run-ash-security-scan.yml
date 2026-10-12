@@ -1134,6 +1134,14 @@ jobs:
               exit 1
               ;;
           esac
+          # git fetch reads a refspec that starts with '-' as an option, wherever it
+          # sits on the command line, and runs the command `--upload-pack=` names for
+          # a local or ssh remote. No branch, tag or commit name starts with '-' or
+          # holds a space, so such a value is refused before git sees it.
+          if [[ "${CONFIG_REF}" == -* || "${CONFIG_REF}" =~ [[:space:][:cntrl:]] ]]; then
+            echo "::error::config-ref is not a branch, tag or commit name: it starts with '-', or holds a space or a control character."
+            exit 1
+          fi
           if [ -z "${CONFIG_PATH}" ]; then
             echo "::error::config-ref is set but config is empty. Name the config file to read from ${CONFIG_REF}, for example 'config: .ash/.ash.yaml'."
             exit 1
