@@ -200,8 +200,9 @@ class TestASectionWithOptionsButNoEnabled:
     ):
         """The section in the scanned repository's own config enables nothing.
 
-        The warning tells the operator which key to set, in their own config or on
-        the command line; the run is the same as with no warning.
+        Its options do not reach the report phase: the operator's settings replace
+        them, with a warning naming each key it ignored. So nothing is sent, and no
+        warning tells the operator to turn on a section only the repository wrote.
         """
         source_dir = _source_tree(tmp_path)
         repo_config = source_dir / ".ash" / ".ash.yaml"
@@ -216,10 +217,9 @@ class TestASectionWithOptionsButNoEnabled:
 
         assert requests == []
         assert sessions == []
-        named = _about("s3", warnings_logged)
-        assert len(named) == 1, warnings_logged
-        assert "operator" in named[0]
-        assert BUCKET not in named[0]
+        assert _about("s3", warnings_logged) == []
+        assert any("reporters.s3.options.bucket_name" in m for m in warnings_logged)
+        assert not any(BUCKET in message for message in warnings_logged)
 
     def test_formats_that_leave_the_reporter_out_name_nothing(
         self, tmp_path, requests, warnings_logged
@@ -300,12 +300,17 @@ class TestAWorkspaceRun:
     def test_names_the_reporter_once_for_every_project(
         self, tmp_path, requests, sessions, warnings_logged
     ):
-        """Each project's report phase reads the same section; one warning says so."""
+        """Each project's report phase reads the same section; one warning says so.
+
+        The operator's config is outside the workspace, as an operator's is: one
+        inside the scanned tree is the repository's, and its AWS settings are ignored.
+        """
         from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 
+        workspace_root = tmp_path / "ws"
         projects = []
         for key in ("api", "web"):
-            project_dir = tmp_path / key
+            project_dir = workspace_root / key
             project_dir.mkdir(parents=True)
             (project_dir / "app.py").write_text("value = 1\n", encoding="utf-8")
             projects.append(
@@ -319,15 +324,15 @@ class TestAWorkspaceRun:
                 )
             )
         plan = WorkspacePlan(
-            workspace_file=(tmp_path / "dev.code-workspace").as_posix(),
-            workspace_root=tmp_path.as_posix(),
+            workspace_file=(workspace_root / "dev.code-workspace").as_posix(),
+            workspace_root=workspace_root.as_posix(),
             projects=projects,
         )
 
         _scan(
             tmp_path,
             _operator_config(tmp_path / "op", _section("s3")),
-            source_dir=tmp_path,
+            source_dir=workspace_root,
             workspace_plan=plan,
         )
 
