@@ -52,9 +52,9 @@ sends what its base sends, so the check walks ``cls.__mro__``: such a class is
 also kept when a trusted entry names the base's module or a package around it.
 One warning names each dropped class and its package. A config with no
 trusted list recorded is built only from the operator's files, so its own
-``ash_plugin_modules`` are the trusted entries. That check covers every config
-because the classes a scan is offered are every class registered in the process
-so far: under the MCP server, those an earlier scan's config loaded. The off-host
+``ash_plugin_modules`` are the trusted entries. The check runs for every config,
+because a scan is offered every class registered in the process so far: under
+the MCP server, those an earlier scan's config loaded as well. The off-host
 packages declare no ``ASH_EVENT_HANDLERS``
 (tests/unit/config/test_off_host_plugin_modules_from_repo_config.py derives what
 they send from their reporters, handlers and scanners), so only classes are
@@ -296,11 +296,12 @@ def drop_untrusted_off_host_plugins(
     elsewhere that derives from such a class (``_off_host_bases``) is kept under
     the same terms, or when a trusted name is the base's defining module or a
     package around it, for the base of each off-host package it derives from.
-    Every other class is kept. For a config ``resolve_config`` recorded no trusted list on, every file
-    it was built from is the operator's, so its own ``ash_plugin_modules`` are the
-    trusted names. The classes a scan is offered are every class registered in the
-    process so far, and the MCP server runs every scan in the server's process, so
-    a class an earlier scan loaded is held to the same rule.
+    Every other class is kept. For a config ``resolve_config`` recorded no trusted
+    list on, every file it was built from is the operator's, so its own
+    ``ash_plugin_modules`` are the trusted names. The classes a scan is offered
+    are every class registered in the process so far, and the MCP server runs
+    every scan in the server's process, so a class an earlier scan loaded is held
+    to the same rule.
 
     Args:
         config: The config ``resolve_config`` returned, or None for the defaults.
