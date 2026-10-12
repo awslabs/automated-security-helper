@@ -511,6 +511,46 @@ def test_an_in_process_caller_with_no_session_counts_when_every_caller_is_remote
     assert with_a_session.get("success") is True, with_a_session
 
 
+def test_an_in_process_caller_with_no_session_id_is_not_refused_for_its_identity(
+    granted, held
+) -> None:
+    """No session id is the in-process caller, not a network caller with none."""
+
+    async def main() -> Dict[str, Any]:
+        try:
+            return await mcp_scan_directory(
+                directory_path=str(granted / "one"), session_id=None
+            )
+        finally:
+            await _finish(held)
+
+    result = asyncio.run(main())
+
+    assert result.get("success") is True, result
+    assert result.get("error_type") != "session_identity_required", result
+
+
+def test_a_scan_started_with_no_limit_counts_once_a_limit_is_set(
+    tmp_path, monkeypatch, granted, held
+) -> None:
+    """With the limit off a session's scans are still counted, so a later limit sees them."""
+    _limit(tmp_path, monkeypatch, 0)
+
+    async def main() -> List[Dict[str, Any]]:
+        try:
+            first = await _start(granted, "session-a", "one")
+            _limit(tmp_path, monkeypatch, 1)
+            second = await _start(granted, "session-a", "two")
+            return [first, second]
+        finally:
+            await _finish(held)
+
+    first, second = asyncio.run(main())
+
+    assert first.get("success") is True, first
+    assert second.get("error_type") == LIMIT_REFUSED, second
+
+
 # -- over the protocol ------------------------------------------------------------
 
 

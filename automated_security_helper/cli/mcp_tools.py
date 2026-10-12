@@ -394,7 +394,13 @@ async def mcp_scan_directory(
         session_identity_refusal,
     )
 
-    refusal = session_identity_refusal(session_id, "scan_directory")
+    # No session id is an in-process caller, not a network caller the server
+    # could not identify (UNIDENTIFIED_SESSION_ID), so there is nothing to refuse.
+    refusal = (
+        session_identity_refusal(session_id, "scan_directory")
+        if session_id is not None
+        else None
+    )
     if refusal is not None:
         return refusal
 
@@ -589,7 +595,11 @@ async def mcp_scan_directory(
     counted: Optional[Any] = None
     limit = per_session_scan_limit(session_id)
     if claimed_session is not None:
-        if not claimed_session.try_start_scan(limit):
+        if limit is None:
+            # No limit applies, and with none try_start_scan always counts. The
+            # scan is counted anyway, so a limit set later sees it running.
+            claimed_session.try_start_scan(None)
+        elif not claimed_session.try_start_scan(limit):
             claimed_session.release_scan()
             return session_scan_limit_refusal("scan_directory", limit)
         counted = claimed_session
