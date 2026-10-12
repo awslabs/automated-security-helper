@@ -417,6 +417,8 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/scanners/semgrep/**",
             "/scanners/snyk-code/**",
             "/scanners/trivy-repo/**",
+            "/scanners/trivy/**",
+            "/scanners/zizmor/**",
             "/converters/archive/options/max_members",
             "/converters/archive/options/max_member_bytes",
             "/converters/archive/options/max_total_bytes",

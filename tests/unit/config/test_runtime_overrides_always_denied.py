@@ -69,6 +69,8 @@ FLOOR = [
     "/scanners/semgrep/**",
     "/scanners/snyk-code/**",
     "/scanners/trivy-repo/**",
+    "/scanners/trivy/**",
+    "/scanners/zizmor/**",
 ]
 
 #: The reporters that send results off the host, each a whole section.

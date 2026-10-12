@@ -904,11 +904,12 @@ ARCHIVE_LIMIT_RUNTIME_PATHS: Tuple[str, ...] = tuple(
 #: section itself; a reporter's ``enabled: false`` is accepted and takes no effect,
 #: see reporter_trust; a workspace scan's ``scanners`` and ``excluded_scanners``
 #: arguments can still leave a scanner out of a run, never add one): the reporters
-#: that send the results, and the
-#: scanners that send the source (snyk-code), dependency lists (npm-audit,
-#: trivy-repo), candidate secrets (detect-secrets) or usage metrics (semgrep,
-#: opengrep). tests/unit/config/test_off_host_plugins_are_operator_only.py lists what
-#: each one sends and classifies every plugin.
+#: that send the results, and the scanners that send the source (snyk-code),
+#: dependency lists (npm-audit), candidate secrets (detect-secrets), usage metrics
+#: (semgrep, opengrep) or usage data (trivy, trivy-repo), or that call the GitHub
+#: API with the token in ASH's environment (zizmor's online audits).
+#: tests/unit/config/test_off_host_plugins_are_operator_only.py lists what each one
+#: sends and classifies every plugin.
 #:
 #: A floor rather than the default alone: denied_paths was replaced whole by a
 #: profile's own list, so adding one entry dropped every shipped one.
@@ -933,6 +934,8 @@ ALWAYS_DENIED_PATHS = (
     "/scanners/semgrep/**",
     "/scanners/snyk-code/**",
     "/scanners/trivy-repo/**",
+    "/scanners/trivy/**",
+    "/scanners/zizmor/**",
 )
 
 
@@ -1149,8 +1152,9 @@ class RuntimeOverridesConfig(BaseModel):
         # from it (off by default; GHAS's is on by default and off reports more).
         "/reporters/gitlab-sast/options/exclude_suppressed",
         # The scanners that send data off the host, whole, for the same reason: the
-        # source (snyk-code), dependency lists (npm-audit, trivy-repo), candidate
-        # secrets (detect-secrets) or usage metrics (semgrep, opengrep). Also in
+        # source (snyk-code), dependency lists (npm-audit), candidate secrets
+        # (detect-secrets), usage metrics (semgrep, opengrep) or usage data (trivy,
+        # trivy-repo), or the GitHub token (zizmor's online audits). Also in
         # ALWAYS_DENIED_PATHS.
         "/scanners/detect-secrets/**",
         "/scanners/npm-audit/**",
@@ -1158,6 +1162,8 @@ class RuntimeOverridesConfig(BaseModel):
         "/scanners/semgrep/**",
         "/scanners/snyk-code/**",
         "/scanners/trivy-repo/**",
+        "/scanners/trivy/**",
+        "/scanners/zizmor/**",
         # The archive converter's extraction limits bound what extracting an
         # archive in the scanned tree may write, so a client may not raise them.
         # A write at an ancestor (/converters/archive, /converters) is refused too.

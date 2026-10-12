@@ -80,10 +80,20 @@ OFF_HOST: Dict[Plugin, str] = {
         "`metrics` option (opengrep_scanner.py:69, :277)"
     ),
     ("scanners", "trivy-repo"): (
-        "dependency identifiers, in the API requests trivy makes to identify "
-        "dependencies, unless `--offline-scan` is passed, which is only offline "
-        "(trivy_repo_scanner.py:328); and usage data to Aqua when "
-        "`disable_telemetry` is false (trivy_repo_scanner.py:140, :294)"
+        "usage data to Aqua when `disable_telemetry` is false "
+        "(_trivy_scanner_base.py, `--disable-telemetry`). Online it also fetches "
+        "its databases and checks bundle (`_shared_update_flags`); every scan gets "
+        "`--offline-scan` (SCAN_FLAGS), so it makes no dependency lookups"
+    ),
+    ("scanners", "trivy"): (
+        "the same, through the same base (_trivy_scanner_base.py): usage data to "
+        "Aqua when `disable_telemetry` is false, and online it fetches its "
+        "vulnerability and Java databases"
+    ),
+    ("scanners", "zizmor"): (
+        "the workflows' action and repository references, with the GitHub token in "
+        "ASH's environment, to the GitHub API, when `online_audits` is set "
+        "(zizmor_scanner.py `_online`)"
     ),
     ("scanners", "detect-secrets"): (
         "each candidate secret, to the service that issued it, when the "
@@ -121,6 +131,12 @@ LOCAL: Dict[Plugin, str] = {
         "checks for updates online (syft_scanner.py:71); catalogs locally"
     ),
     ("scanners", "ferret-scan"): "reads the files (ferret_scanner.py:412, :548)",
+    ("scanners", "actionlint"): (
+        "reads the workflow files; runs shellcheck and pyflakes on this host"
+    ),
+    ("scanners", "cfn-lint"): "reads the templates",
+    ("scanners", "cfn-guard"): "reads the templates and its installed rules bundle",
+    ("scanners", "gitleaks"): "reads the files",
     ("reporters", "csv"): "writes a file",
     ("reporters", "cyclonedx"): "writes a file",
     ("reporters", "flat-json"): "writes a file",

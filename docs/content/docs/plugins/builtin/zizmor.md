@@ -77,7 +77,8 @@ scanners:
   repository is not read: a config there can disable audits or ignore findings,
   which zizmor then never reports, so they would be neither in ASH's results nor
   counted as suppressed. `config_file` set by an ASH config inside a git checkout
-  or the scanned directory, or by an MCP client, is ignored with a warning. A configured file that
+  or the scanned directory is ignored with a warning, and an MCP client cannot set
+  it at all (see `online_audits` below). A configured file that
   does not exist fails the scan rather than being ignored. The file may be inside
   the scanned tree, but the scanned repository decides what is at such a path, so
   one there that leads out of the tree through a symbolic link fails the scan with
@@ -113,9 +114,10 @@ unchanged, which enables the audits that query the GitHub API (for example
 known-vulnerable actions and impostor commits). It is honored only when the
 operator sets it, with `--config-overrides` or an ASH config file outside every
 git checkout and the scanned directory; set by a config inside one, it is ignored
-with a warning and zizmor runs offline without the tokens, and a config an MCP
-client delivered that sets it is refused, since it is a default `denied_paths`
-entry. ASH never
+with a warning and zizmor runs offline without the tokens. An MCP client cannot
+configure zizmor at all: its whole section, `/scanners/zizmor/**`, is denied to a
+client whatever a profile's `denied_paths` says, as for every scanner that can send
+data off the host. ASH never
 reads, copies or logs the token and never puts it on zizmor's command line.
 ASH's own offline mode (`ASH_OFFLINE=true` or `ash scan --offline`) overrides
 `online_audits`. Under `--sandbox`, zizmor never gets the token: the sandbox

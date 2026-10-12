@@ -1207,6 +1207,15 @@
   the AWS reporters' destinations and credentials, and the GitLab SAST
   reporter's `exclude_suppressed`. Left at its default, each still scans.
 
+- **An MCP client cannot configure trivy or zizmor.** `/scanners/trivy/**` and
+  `/scanners/zizmor/**` join the denials every profile keeps, beside
+  `/scanners/trivy-repo/**`: trivy sends usage data to Aqua when `disable_telemetry`
+  is false, and zizmor's online audits send the workflows' action references to the
+  GitHub API with the token in ASH's environment. A client can no longer turn either
+  on or off or change its options; the operator's own configuration is unchanged.
+  actionlint, cfn-lint, cfn-guard and gitleaks send nothing off the host and stay
+  tunable, within the profile's `denied_paths`.
+
 - **A default scan runs six more scanners.** actionlint, cfn-lint, cfn-guard,
   gitleaks, trivy and zizmor are builtin and on by default, so a scan with an existing
   config now reports their findings too, and a run whose host lacks one of their tools
