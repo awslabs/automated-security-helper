@@ -167,7 +167,7 @@
       }
     },
     "explain_finding": {
-      "description": "Return structured details for a single finding by ID.\n\nPerforms a pure structured lookup against already-emitted SARIF results.\nNo LLM calls are made.\n\nArgs:\n    finding_id: The FlatVulnerability ID to look up (e.g. \"bandit-B601-deadbeef\").\n    results_path: Optional path to the output directory containing\n                  ash_aggregated_results.json. Defaults to\n                  <cwd>/.ash/ash_output.\n\nReturns:\n    Dict with ``success`` and ``finding`` keys containing title, description,\n    severity, severity_rationale, cwe_id, cve_id, references, scanner,\n    and scanner_metadata.",
+      "description": "Return structured details for a single finding by ID.\n\nPerforms a pure structured lookup against already-emitted SARIF results.\nNo LLM calls are made.\n\nArgs:\n    finding_id: The ID from reports/ash.flat.json; copy it without modification.\n    results_path: Optional path to the output directory containing\n                  ash_aggregated_results.json. Defaults to\n                  <cwd>/.ash/ash_output.\n\nReturns:\n    Dict with ``success`` and ``finding`` keys containing title, description,\n    severity, severity_rationale, cwe_id, cve_id, references, scanner,\n    and scanner_metadata.",
       "inputSchema": {
         "properties": {
           "finding_id": {

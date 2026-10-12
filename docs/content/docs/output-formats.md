@@ -80,7 +80,7 @@ Each object in the `findings` array has these fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string | Unique identifier for the finding (e.g., `bandit-B105-4821`) |
+| `id` | string | Opaque identifier for the finding; use the value from the current report for MCP lookups |
 | `title` | string | Rule ID or short name of the finding |
 | `description` | string | Human-readable explanation of the issue |
 | `severity` | string | One of `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO` |
@@ -102,6 +102,12 @@ Each object in the `findings` array has these fields:
 | `properties` | string or null | JSON-encoded map of additional scanner-specific properties |
 | `references` | string or null | JSON-encoded array of reference URIs |
 | `raw_data` | string or null | Full SARIF result object as a JSON string, for lossless access |
+
+Use the complete `id` from the current `ash.flat.json` for MCP finding lookups. Do not construct or parse it.
+Generated SARIF IDs use `<scanner>-<rule>-v2-<32-hex-digest>`.
+Additional reports without source IDs use `<scanner>-v2-<32-hex-digest>`; explicit source IDs keep their existing scanner prefix.
+Refresh stored IDs when regenerating reports from older results.
+If an older aggregate discarded referenced scanner metadata, run a new scan to capture that metadata.
 
 ### Example output
 
@@ -133,7 +139,7 @@ Each object in the `findings` array has these fields:
   ],
   "findings": [
     {
-      "id": "bandit-B105-4821",
+      "id": "bandit-B105-v2-c51f2f2279d62ff662b5a80f55f212da",
       "title": "B105",
       "description": "Possible hardcoded password: 'secret_key'",
       "severity": "HIGH",

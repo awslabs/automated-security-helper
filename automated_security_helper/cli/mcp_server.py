@@ -1173,7 +1173,7 @@ async def explain_finding(
     No LLM calls are made.
 
     Args:
-        finding_id: The FlatVulnerability ID to look up (e.g. "bandit-B601-deadbeef").
+        finding_id: The ID from reports/ash.flat.json; copy it without modification.
         results_path: Optional path to the output directory containing
                       ash_aggregated_results.json. Defaults to
                       <cwd>/.ash/ash_output.

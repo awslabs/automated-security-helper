@@ -16,7 +16,6 @@ pass once each bug is corrected. One test per bug:
 
 from __future__ import annotations
 
-import hashlib
 import inspect
 import re
 
@@ -41,21 +40,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
 
 
 def test_phase0_bug1_flat_vulnerability_id_is_stable_hash_not_pythonhash():
-    """Bug 1: FlatVulnerability ids must be derived from a stable hash.
-
-    Today, ``from_sarif_result`` builds the id with
-    ``f"{scanner}-{ruleId}-{hash(description) % 10000}"``. Python's ``hash()``
-    is randomized per process via PYTHONHASHSEED, so the same SARIF result
-    yields different ids across runs/processes — breaking dedup downstream.
-
-    The fix is to use a deterministic hash (e.g. ``hashlib.sha256`` of the
-    description bytes, taking the first 8 hex chars). After the fix, the id
-    suffix is a function of the description alone and matches the sha256 prefix.
-    Today this assertion fails because the suffix is a 4-digit decimal from
-    Python's randomized ``hash()``.
-    """
+    """The same saved occurrence retains its versioned deterministic identity."""
     description = "test vulnerability description abc"
-    expected_suffix = hashlib.sha256(description.encode()).hexdigest()[:8]
 
     result = Result(
         ruleId="RULE001",
@@ -64,15 +50,9 @@ def test_phase0_bug1_flat_vulnerability_id_is_stable_hash_not_pythonhash():
 
     vuln = FlatVulnerability.from_sarif_result(result, "bandit", "SAST")
 
-    # The id should END with the deterministic sha256 prefix once the fix
-    # lands. Today the suffix is `hash(description) % 10000` — 0-4 decimal
-    # digits with no overlap with a hex sha256 prefix (which is 8 chars and
-    # almost certainly contains a-f).
-    assert vuln.id.endswith(expected_suffix), (
-        f"Expected id to end with stable sha256 prefix {expected_suffix!r} but "
-        f"got id={vuln.id!r}. The id likely uses Python's randomized hash() "
-        f"instead of a deterministic hash, breaking cross-process dedup."
-    )
+    restored = Result.model_validate_json(result.model_dump_json())
+    assert vuln.id == FlatVulnerability.from_sarif_result(restored, "bandit", "SAST").id
+    assert re.fullmatch(r"bandit-RULE001-v2-[0-9a-f]{32}", vuln.id)
 
 
 # -----------------------------------------------------------------------------
