@@ -223,16 +223,18 @@ def test_workspace_overrides_refuse_the_verification_filter(tmp_path):
         json.dumps([{"path": VERIFICATION_FILTER, "min_level": 2}])
     )
 
-    with pytest.raises(RuntimePatchDeniedError):
-        workspace_module._gate_client_overrides([override], str(profile))
+    # The policy is the registered profile's, named here as a per-call profile;
+    # the session config is the config the overrides apply to.
+    with pytest.raises(RuntimePatchDeniedError, match="denied_paths"):
+        workspace_module._gate_client_overrides([override], str(profile), profile="op")
 
 
 def test_the_profile_s_own_entry_is_still_denied(tmp_path):
     profile = _profile(tmp_path, ["/scanners/**"])
 
-    with pytest.raises(RuntimePatchDeniedError):
+    with pytest.raises(RuntimePatchDeniedError, match="denied_paths"):
         workspace_module._gate_client_overrides(
-            ["scanners.bandit.options.extra_args=[]"], str(profile)
+            ["scanners.bandit.options.extra_args=[]"], str(profile), profile="op"
         )
 
 
@@ -240,5 +242,5 @@ def test_control_an_allowed_option_still_passes(tmp_path):
     profile = _profile(tmp_path, ["/scanners/**"])
 
     workspace_module._gate_client_overrides(
-        ["scanners.bandit.options.severity_threshold=HIGH"], str(profile)
+        ["scanners.bandit.options.severity_threshold=HIGH"], str(profile), profile="op"
     )

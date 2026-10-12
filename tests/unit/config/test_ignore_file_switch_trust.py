@@ -158,34 +158,38 @@ class TestARepositoryOrClientConfigCannotSetTheSwitch:
         assert any(CONFIG_KEY in w and "ash.yaml" in w for w in warnings), warnings
 
     def test_a_config_an_mcp_client_supplied(self, tmp_path):
-        """Outside the tree, but written by the client: ``untrusted_config``."""
+        """Outside the tree, but written by the client: ``untrusted_config``.
+
+        Refused rather than confined: the switch is in the default denied_paths,
+        and a config an MCP client supplied that sets a denied field is refused
+        (``client_config_policy``, exit 3), naming the field.
+        """
+        from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
         source = _repo(tmp_path)
         uploaded = _outside(tmp_path, _yaml(False), name="uploaded.yaml")
-        config, warnings = _warnings_while(
-            resolve_config,
-            config_path=uploaded,
-            source_dir=source,
-            untrusted_config=True,
-        )
-        assert honors_ignore_files(config) is True
-        assert any(CONFIG_KEY in w and "uploaded.yaml" in w for w in warnings), warnings
+        with pytest.raises(ASHConfigFieldDeniedError) as refused:
+            resolve_config(
+                config_path=uploaded, source_dir=source, untrusted_config=True
+            )
+        assert CONFIG_KEY in str(refused.value)
+        assert "uploaded.yaml" in str(refused.value)
 
 
 class TestTheWarningSaysWhoWroteTheFile:
-    """An MCP client's upload is not in the scanned tree; the warning must not say it is."""
+    """An MCP client's upload is not in the scanned tree; the refusal must not say it is."""
 
     def test_an_upload_is_named_as_the_clients(self, tmp_path):
+        from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
         source = _repo(tmp_path)
         uploaded = _outside(tmp_path, _yaml(False), name="uploaded.yaml")
-        _config, warnings = _warnings_while(
-            resolve_config,
-            config_path=uploaded,
-            source_dir=source,
-            untrusted_config=True,
-        )
-        (warning,) = [w for w in warnings if CONFIG_KEY in w]
-        assert "MCP client" in warning, warning
-        assert "inside a git checkout" not in warning, warning
+        with pytest.raises(ASHConfigFieldDeniedError) as refused:
+            resolve_config(
+                config_path=uploaded, source_dir=source, untrusted_config=True
+            )
+        assert "MCP client" in str(refused.value), refused.value
+        assert "inside a git checkout" not in str(refused.value), refused.value
 
     def test_an_in_tree_file_is_named_as_the_repositorys(self, tmp_path):
         source = _repo(tmp_path, _yaml(False))
@@ -235,11 +239,8 @@ class TestMcpRuntimeOverrides:
             )
 
     def test_a_client_config_override_cannot_set_the_switch(self, tmp_path):
-        from automated_security_helper.cli.mcp.workspace import _gate_client_overrides
-
-        profile = _profile_with_open_overrides(tmp_path)
-        with pytest.raises(RuntimePatchDeniedError):
-            _gate_client_overrides([f"{CONFIG_KEY}=false"], str(profile))
+        with pytest.raises(RuntimePatchDeniedError, match="denied_paths"):
+            _gate([f"{CONFIG_KEY}=false"], tmp_path)
 
     # Controls: the same gate, safe inputs.
 
@@ -251,15 +252,11 @@ class TestMcpRuntimeOverrides:
             )
 
     def test_control_an_allowed_key_is_accepted(self, tmp_path):
-        from automated_security_helper.cli.mcp.workspace import _gate_client_overrides
-
         check_runtime_ops(
             [{"op": "replace", "path": "/project_name", "value": "renamed"}],
             allowlist=_OPEN_ALLOWLIST,
         )
-        _gate_client_overrides(
-            ["project_name=renamed"], str(_profile_with_open_overrides(tmp_path))
-        )
+        _gate(["project_name=renamed"], tmp_path)
 
 
 def _profile_with_open_overrides(tmp_path: Path) -> Path:
@@ -273,3 +270,24 @@ def _profile_with_open_overrides(tmp_path: Path) -> Path:
         '      allowed_paths: ["/**"]\n'
     )
     return path
+
+
+def _gate(overrides: List[str], tmp_path: Path) -> None:
+    """The workspace tools' gate, under the open profile registered as ``open``.
+
+    The policy is the registered profile's (``session_profile_entry``); the
+    session config is the config the overrides apply to.
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        clear_profile_registry,
+        register_profiles,
+        set_profile_registry,
+    )
+    from automated_security_helper.cli.mcp.workspace import _gate_client_overrides
+
+    profile = _profile_with_open_overrides(tmp_path)
+    set_profile_registry(register_profiles([f"open={profile}"]))
+    try:
+        _gate_client_overrides(overrides, str(profile), profile="open")
+    finally:
+        clear_profile_registry()

@@ -143,11 +143,14 @@ DENIED_OVERRIDES = {
 
 @pytest.mark.parametrize("case", sorted(DENIED_OVERRIDES))
 def test_workspace_overrides_cannot_set_detect_secrets_settings(profile, case):
-    with pytest.raises(RuntimePatchDeniedError):
-        workspace_module._gate_client_overrides([DENIED_OVERRIDES[case]], str(profile))
+    # The policy is the registered profile's, named here as a per-call profile.
+    with pytest.raises(RuntimePatchDeniedError, match="denied_paths"):
+        workspace_module._gate_client_overrides(
+            [DENIED_OVERRIDES[case]], str(profile), profile="op"
+        )
 
 
 def test_control_workspace_overrides_can_tune_another_scanner_option(profile):
     workspace_module._gate_client_overrides(
-        ["scanners.bandit.options.severity_threshold=HIGH"], str(profile)
+        ["scanners.bandit.options.severity_threshold=HIGH"], str(profile), profile="op"
     )
