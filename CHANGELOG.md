@@ -1189,12 +1189,12 @@
   `--config-overrides reporters.s3.enabled=true`, or with a config file outside the
   tree.
   - Under the MCP server, `/reporters/aws-security-hub/**`,
-    `/reporters/bedrock-summary-reporter/**` and `/reporters/s3/enabled` join the
+    `/reporters/bedrock-summary-reporter/**` and `/reporters/s3/**` join the
     default `denied_paths` (`/reporters/cloudwatch-logs/**` already covers that
-    reporter), in place of Security Hub's per-option entries. A delivered config
-    that turns one of these reporters on, or sets any other Security Hub or Bedrock
-    setting, is refused with
-    `error_type: config_field_denied`. `enabled: false`, and a value equal to the
+    reporter), in place of Security Hub's and S3's per-option entries. A delivered
+    config, or a client's runtime override, that turns one of these reporters on or
+    sets any other setting of its section, S3's `file_format` included, is refused
+    with `error_type: config_field_denied`. `enabled: false`, and a value equal to the
     server's, are accepted. A profile that relied on a client turning one of these
     reporters on sets it in the profile instead.
   - The Bedrock reporter's `include_code_snippets` and `custom_prompt`, which choose

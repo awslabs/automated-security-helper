@@ -71,14 +71,7 @@ global_settings:
       - /reporters/bedrock-summary-reporter/options/output_file
       - /reporters/bedrock-summary-reporter/options/output_executive_file
       - /reporters/bedrock-summary-reporter/options/output_technical_file
-      - /reporters/s3/options/aws_region
-      - /reporters/s3/options/aws_profile
-      - /reporters/s3/options/bucket_name
-      - /reporters/s3/options/key_prefix
-      - /reporters/s3/options/max_retries
-      - /reporters/s3/options/base_delay
-      - /reporters/s3/options/max_delay
-      - /reporters/s3/enabled
+      - /reporters/s3/**
       - /reporters/bedrock-summary-reporter/**
       - /reporters/gitlab-sast/options/exclude_suppressed
       denied_value_patterns: {}

@@ -76,8 +76,10 @@ that changes one is refused.
 
 Whether the reporter runs is the operator's too: where the operator's settings have
 it off, a config file inside the scanned tree does not turn it on, and under the MCP
-server `/reporters/s3/enabled` is a default `denied_paths` entry, so a delivered
-config that turns it on is refused. `enabled: false` applies from any config. See
+server the whole section, `/reporters/s3/**`, is a default `denied_paths` entry, so a
+delivered config or a client's runtime override that turns it on, or changes any of
+its settings, `file_format` included, is refused. `enabled: false` applies from any
+config. See
 [Settings only the operator can set](index.md#settings-only-the-operator-can-set).
 
 The reporter is in the `ash_aws_plugins` package, which only the operator can load,

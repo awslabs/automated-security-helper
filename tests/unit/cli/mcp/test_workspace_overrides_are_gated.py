@@ -370,3 +370,43 @@ async def test_an_override_turning_an_off_host_reporter_on_is_refused(
     result = await _resolve(tmp_path, [f"reporters.{reporter}.enabled=true"])
     assert result["success"] is False, result
     assert "denied_paths entry" in json.dumps(result), result
+
+
+def _reporter_settings() -> list:
+    from automated_security_helper.config.reporter_trust import (
+        REPORTER_DESTINATION_OPTIONS,
+    )
+
+    settings = [
+        (reporter, f"options.{name}=other-value")
+        for reporter in _OFF_HOST_REPORTERS
+        for name in REPORTER_DESTINATION_OPTIONS[reporter]
+    ]
+    # Settings the CLI leaves to a repository's config, denied here with the rest
+    # of the section.
+    return settings + [
+        ("aws-security-hub", "extension=other.asff.json"),
+        ("s3", "options.file_format=yaml"),
+        ("bedrock-summary-reporter", "options.temperature=0.1"),
+    ]
+
+
+#: The profile has a section for each reporter, so each override writes one
+#: field of it rather than adding the section.
+_REPORTER_SECTIONS = "reporters:\n" + "".join(
+    f"  {reporter}:\n    enabled: false\n    options: {{}}\n"
+    for reporter in _OFF_HOST_REPORTERS
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reporter,setting", _reporter_settings(), ids=lambda part: part
+)
+async def test_an_override_setting_an_off_host_reporter_option_is_refused(
+    tmp_path, monkeypatch, reporter, setting
+):
+    _with_profile(monkeypatch, tmp_path, ["/**"], extra=_REPORTER_SECTIONS)
+    result = await _resolve(tmp_path, [f"reporters.{reporter}.{setting}"])
+    assert result["success"] is False, result
+    assert f"matches denied_paths entry '/reporters/{reporter}/" in result["error"]

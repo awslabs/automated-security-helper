@@ -604,13 +604,31 @@ def test_an_upload_may_turn_an_off_host_reporter_off(_server, reporter) -> None:
     assert config.get_plugin_config("reporter", reporter)["enabled"] is False
 
 
-def test_an_upload_changing_any_security_hub_setting_is_refused(_server) -> None:
-    """Every setting of the section is the operator's, so it is denied as a whole."""
-    text = "reporters:\n  aws-security-hub:\n    extension: other.asff.json\n"
+#: A setting of each off-host reporter that config/reporter_trust.py does not
+#: list, which a repository's config may still set on the CLI.
+_OPEN_ON_THE_CLI = [
+    ("aws-security-hub", "extension: other.asff.json", "extension"),
+    ("s3", "options:\n      file_format: yaml", "options.file_format"),
+    (
+        "bedrock-summary-reporter",
+        "options:\n      temperature: 0.1",
+        "options.temperature",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "reporter,setting,key", _OPEN_ON_THE_CLI, ids=[r for r, _, _ in _OPEN_ON_THE_CLI]
+)
+def test_an_upload_changing_any_off_host_reporter_setting_is_refused(
+    _server, reporter, setting, key
+) -> None:
+    """The whole section is the operator's, so it is denied as a whole."""
+    text = f"reporters:\n  {reporter}:\n    {setting}\n"
     source = _upload({"ash.yaml": text})
     _assert_refused(
         _scan_resolution(_server["target"], str(source / "ash.yaml")),
-        key="reporters.aws-security-hub.extension",
+        key=f"reporters.{reporter}.{key}",
     )
 
 

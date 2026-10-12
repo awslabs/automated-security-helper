@@ -80,16 +80,15 @@ run a reporter for one scan, set it with `--config-overrides`, such as
 `--config-overrides reporters.s3.enabled=true`, or in a config file outside the tree.
 The reporters' other options still apply from the tree.
 
-Under the MCP server they are also default `denied_paths` entries, and so is
-`enabled` of each of these reporters. For `aws-security-hub`, `cloudwatch-logs` and
-`bedrock-summary-reporter` every setting of the section is
-(`/reporters/aws-security-hub/**`, `/reporters/cloudwatch-logs/**`,
-`/reporters/bedrock-summary-reporter/**`): every option of the first two is the
-operator's, and the Bedrock reporter's other options choose what is sent to the model
-and how. For `s3`, the options in the table and `enabled` are entries of their own,
-and `file_format` is not. A config an MCP client delivered that changes one is refused
-with `error_type: config_field_denied`; one that leaves them at the server's values,
-or sets `enabled: false`, scans. `enabled` of a reporter that writes only local files,
+Under the MCP server the whole section of each of these reporters is a default
+`denied_paths` entry, `enabled` included: `/reporters/s3/**`,
+`/reporters/aws-security-hub/**`, `/reporters/cloudwatch-logs/**` and
+`/reporters/bedrock-summary-reporter/**`. So the settings the table leaves to a
+repository's config, such as S3's `file_format` or the Bedrock reporter's model
+parameters, are the operator's there too. A config an MCP client delivered, or a
+client's runtime override, that changes one is refused with
+`error_type: config_field_denied`; one that leaves them at the server's values, or
+sets `enabled: false`, scans. `enabled` of a reporter that writes only local files,
 such as `sarif` or `html`, is not a default entry: a client's config may turn one on
 or off.
 See [Configs an MCP client delivered](../../configuration-guide.md#configs-an-mcp-client-delivered).

@@ -949,9 +949,9 @@ _SUMMARY_SHAPE = (
 
 #: Options of the off-host reporters that a repository's config may still set,
 #: each with why. Every other option of their models is in
-#: REPORTER_DESTINATION_OPTIONS. Under the MCP server a delivered config may set
-#: one only where no default denied_paths entry covers it
-#: (``test_the_coverage_table_is_what_the_default_list_gives``).
+#: REPORTER_DESTINATION_OPTIONS. Under the MCP server none of them is open: every
+#: off-host reporter's section is a whole-section default denied_paths entry
+#: (``test_every_off_host_reporter_is_denied_to_a_client_as_a_whole_section``).
 _OPEN_OFF_HOST_OPTIONS: Dict[Tuple[str, str], str] = {
     ("s3", "file_format"): (
         "picks JSON or YAML for the uploaded object's content; where it goes and "
@@ -970,17 +970,6 @@ _OPEN_OFF_HOST_OPTIONS: Dict[Tuple[str, str], str] = {
     ("bedrock-summary-reporter", "enable_caching"): (
         "whether ASH reuses a response it already has for the same request"
     ),
-}
-
-#: How each off-host reporter's settings stand under the MCP server's default
-#: denied_paths: "section" when every setting of the section is denied (with
-#: ``enabled: false`` still accepted), else "options" when each operator-only
-#: option and ``enabled`` are denied one by one.
-_MCP_COVERAGE: Dict[str, str] = {
-    "aws-security-hub": "section",
-    "bedrock-summary-reporter": "section",
-    "cloudwatch-logs": "section",
-    "s3": "options",
 }
 
 
@@ -1004,28 +993,21 @@ def test_every_option_of_an_off_host_reporter_is_classified(reporter_fields):
     assert not stale
 
 
-def test_a_reporter_with_nothing_open_is_denied_as_a_whole_section():
-    """So an option added later is denied to a client before anyone lists it."""
-    with_open = {reporter for reporter, _ in _OPEN_OFF_HOST_OPTIONS}
-    for reporter in REPORTER_ENABLED_DEFAULTS:
-        if reporter not in with_open:
-            assert _MCP_COVERAGE[reporter] == "section", reporter
-
-
-def test_the_coverage_table_is_what_the_default_list_gives():
+def test_every_off_host_reporter_is_denied_to_a_client_as_a_whole_section():
+    """So a client can neither turn one on nor configure it, and an option added
+    later is denied before anyone lists it. A client's ``enabled: false`` is still
+    accepted under the entry (``client_config_policy._writes_a_tightening`` and
+    ``runtime_patch._turns_an_off_host_reporter_off``)."""
     from automated_security_helper.config.ash_config import RuntimeOverridesConfig
-    from automated_security_helper.config.client_config_policy import _names
+    from automated_security_helper.config.client_config_policy import (
+        SHIPPED_DEFAULT_DENIED_PATHS,
+        _names,
+    )
 
     shipped = RuntimeOverridesConfig().denied_paths
-    for reporter, mode in _MCP_COVERAGE.items():
-        whole = f"/reporters/{reporter}/**" in shipped
-        assert whole is (mode == "section"), reporter
-        if mode == "options":
-            assert f"/reporters/{reporter}/enabled" in shipped, reporter
-            for open_reporter, name in _OPEN_OFF_HOST_OPTIONS:
-                if open_reporter == reporter:
-                    pointer = f"/reporters/{reporter}/options/{name}"
-                    assert not any(_names(e, pointer) for e in shipped), pointer
+    for reporter in REPORTER_ENABLED_DEFAULTS:
+        assert f"/reporters/{reporter}/**" in shipped, reporter
+        assert f"/reporters/{reporter}/**" in SHIPPED_DEFAULT_DENIED_PATHS[-1]
     # enabled is denied for the off-host reporters only: a client may still turn
     # a local reporter on or off.
     assert not any(_names(e, "/reporters/sarif/enabled") for e in shipped)

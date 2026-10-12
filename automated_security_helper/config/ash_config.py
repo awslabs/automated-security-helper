@@ -828,12 +828,10 @@ class RuntimeOverridesConfig(BaseModel):
         "/scanners/semgrep/options/metrics",
         # AWS-credential-bearing reporter options (plugin-provided, hyphenated
         # names), and every other destination and credential option of the
-        # built-in AWS reporters (config/reporter_trust.py). Security Hub's,
-        # CloudWatch Logs' and the Bedrock reporter's whole sections are denied:
-        # every option of the first two is the operator's, and the Bedrock
-        # reporter's others choose what is sent to the model and how. Then
-        # whether S3 runs, since it sends findings off the host as the others
-        # do. A client may still set enabled to false
+        # built-in AWS reporters (config/reporter_trust.py). The whole section
+        # of each reporter that sends findings off the host is denied, its
+        # enabled with the rest: S3's, Security Hub's, CloudWatch Logs' and the
+        # Bedrock reporter's. A client may still set enabled to false
         # (client_config_policy._writes_a_tightening), and a local reporter's
         # enabled is not denied.
         "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -843,14 +841,7 @@ class RuntimeOverridesConfig(BaseModel):
         "/reporters/bedrock-summary-reporter/options/output_file",
         "/reporters/bedrock-summary-reporter/options/output_executive_file",
         "/reporters/bedrock-summary-reporter/options/output_technical_file",
-        "/reporters/s3/options/aws_region",
-        "/reporters/s3/options/aws_profile",
-        "/reporters/s3/options/bucket_name",
-        "/reporters/s3/options/key_prefix",
-        "/reporters/s3/options/max_retries",
-        "/reporters/s3/options/base_delay",
-        "/reporters/s3/options/max_delay",
-        "/reporters/s3/enabled",
+        "/reporters/s3/**",
         "/reporters/bedrock-summary-reporter/**",
         # The GitLab SAST report leaves suppressed findings out with this set, so
         # the findings a client's own suppressions are marked on would be gone

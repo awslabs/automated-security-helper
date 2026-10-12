@@ -37,6 +37,7 @@ from automated_security_helper.cli.mcp.profile_registry import (
 from automated_security_helper.cli.mcp_tools import mcp_select_profile
 from automated_security_helper.config.reporter_trust import (
     REPORTER_DESTINATION_OPTIONS,
+    REPORTER_ENABLED_DEFAULTS,
 )
 from automated_security_helper.config.ash_config import (
     RuntimeOverridesConfig,
@@ -516,11 +517,14 @@ _REPORTER_DENIALS: Dict[str, Any] = {
     if (pointer := f"/reporters/{reporter}/options/{name}")
     in RuntimeOverridesConfig().denied_paths
 }
+# Each off-host reporter's whole-section entry (CloudWatch Logs' has a case of
+# its own above) and any enabled entry of its own.
 _REPORTER_DENIALS.update(
     {
-        "/reporters/s3/enabled": True,
-        "/reporters/aws-security-hub/**": True,
-        "/reporters/bedrock-summary-reporter/**": True,
+        entry: True
+        for reporter in REPORTER_ENABLED_DEFAULTS
+        for entry in (f"/reporters/{reporter}/**", f"/reporters/{reporter}/enabled")
+        if entry in RuntimeOverridesConfig().denied_paths and entry not in _DENIED_CASES
     }
 )
 
@@ -557,46 +561,61 @@ for _pointer, _value in _REPORTER_DENIALS.items():
 
 
 #: A change a client makes to an off-host reporter the profile configures, and the
-#: entry that refuses it.
-_CONFIGURED_REPORTER_CASES: Dict[str, Tuple[str, Any, str]] = {
-    "security hub on": (
-        "/reporters/aws-security-hub/enabled",
-        True,
-        "/reporters/aws-security-hub/**",
-    ),
-    "s3 on": ("/reporters/s3/enabled", True, "/reporters/s3/enabled"),
-    "bedrock on": (
-        "/reporters/bedrock-summary-reporter/enabled",
-        True,
-        "/reporters/bedrock-summary-reporter/**",
-    ),
-    "bedrock code snippets": (
-        "/reporters/bedrock-summary-reporter/options/include_code_snippets",
-        True,
-        "/reporters/bedrock-summary-reporter/**",
-    ),
-    "bedrock prompt": (
-        "/reporters/bedrock-summary-reporter/options/custom_prompt",
-        "Summarize differently.",
-        "/reporters/bedrock-summary-reporter/**",
-    ),
+#: entry that refuses it: for each reporter, turning it on, setting each of its
+#: operator-only options, and setting an option the operator left open on the
+#: CLI. Each is refused by the reporter's whole-section entry, or by the entry of
+#: its own that the Bedrock reporter's options listed before it have.
+_OPEN_ON_THE_CLI = {
+    "s3": ("file_format", "yaml"),
+    "bedrock-summary-reporter": ("temperature", 0.1),
 }
+_BEDROCK_OWN_ENTRIES = {
+    "aws_region": "/reporters/bedrock-summary-reporter/options/aws_*",
+    "aws_profile": "/reporters/bedrock-summary-reporter/options/aws_*",
+    **{
+        name: f"/reporters/bedrock-summary-reporter/options/{name}"
+        for name in (
+            "model_id",
+            "output_file",
+            "output_executive_file",
+            "output_technical_file",
+        )
+    },
+}
+_CONFIGURED_REPORTER_CASES: Dict[str, Tuple[str, Any, str]] = {}
+for _reporter in sorted(REPORTER_ENABLED_DEFAULTS):
+    _entry = f"/reporters/{_reporter}/**"
+    _own = _BEDROCK_OWN_ENTRIES if _reporter == "bedrock-summary-reporter" else {}
+    _CONFIGURED_REPORTER_CASES[f"{_reporter} on"] = (
+        f"/reporters/{_reporter}/enabled",
+        True,
+        _entry,
+    )
+    for _name in REPORTER_DESTINATION_OPTIONS[_reporter]:
+        _CONFIGURED_REPORTER_CASES[f"{_reporter} {_name}"] = (
+            f"/reporters/{_reporter}/options/{_name}",
+            "other-value",
+            _own.get(_name, _entry),
+        )
+    if _reporter in _OPEN_ON_THE_CLI:
+        _name, _value = _OPEN_ON_THE_CLI[_reporter]
+        _CONFIGURED_REPORTER_CASES[f"{_reporter} {_name}"] = (
+            f"/reporters/{_reporter}/options/{_name}",
+            _value,
+            _entry,
+        )
 
 
 @pytest.mark.parametrize("case", sorted(_CONFIGURED_REPORTER_CASES))
 def test_a_client_cannot_turn_on_or_feed_a_reporter_the_profile_configures(
     tmp_path: Path, case: str
 ) -> None:
-    """Refused by the entry for the field itself, not by one for a sibling option."""
+    """Refused on both routes, by the entry the case names."""
     pointer, value, entry = _CONFIGURED_REPORTER_CASES[case]
     document = _profile(allowed_paths=["/**"])
     document["reporters"] = {
-        "aws-security-hub": {"enabled": False},
-        "s3": {"enabled": False},
-        "bedrock-summary-reporter": {
-            "enabled": False,
-            "options": {"include_code_snippets": False, "custom_prompt": None},
-        },
+        reporter: {"enabled": False, "options": {}}
+        for reporter in REPORTER_ENABLED_DEFAULTS
     }
     _install(tmp_path, document)
     restated = yaml.safe_load(yaml.safe_dump(document))
@@ -607,7 +626,7 @@ def test_a_client_cannot_turn_on_or_feed_a_reporter_the_profile_configures(
     node[rest[-1]] = value
 
     patched, overridden = _both_routes(
-        {"op": "replace", "path": pointer, "value": value},
+        {"op": "add", "path": pointer, "value": value},
         yaml.safe_dump(restated),
     )
 
