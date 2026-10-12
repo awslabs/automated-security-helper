@@ -294,6 +294,15 @@
   bidirectional-formatting characters escaped in the text summary, on the console
   and in the log.
 
+- **A workspace with an incomplete project exits 1, even when another project has
+  findings.** A project that failed, or whose scanners did not all complete
+  (`scan_incomplete`), now ranks above actionable findings, as in a
+  single-directory scan, so `ash --source-dir P` and P inside a workspace give the
+  same code. A workspace that exited 2 with one project over its threshold and
+  another incomplete now exits 1. Findings are still in each project's
+  `exceeds_threshold` and counts, and in every summary; a gate that has to block on
+  findings whatever else happened should read them there. A misconfigured project
+  (3) still ranks first.
 - **trivy-repo and syft read no config file from the scanned tree, online or
   offline.** A `trivy.yaml` in the scanned repository
   could turn on a VEX repository download or client/server mode, and a `.syft.yaml`

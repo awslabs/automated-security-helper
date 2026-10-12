@@ -691,7 +691,7 @@ scanner_results:
 used_suppressions: []
 validation_checkpoints: []
 workspace:
-  exit_code: 2
+  exit_code: 1
   max_parallel_projects: 1
   project_timeout: null
   projects:

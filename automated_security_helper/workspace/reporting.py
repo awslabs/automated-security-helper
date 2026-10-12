@@ -72,9 +72,9 @@ Failure modes and known limitations
   and ``execute_workspace``'s exit code is a verdict about code under scan.
 * An ``UNSUPPORTED`` reporter *does* fail the run, at
   ``WorkspaceExitCode.INTERNAL_ERROR``, and only when the run would otherwise
-  have succeeded. It does not override exit 2 or 3, for the reason recorded in
-  ``models.workspace``: a finding is a certainty and must not be suppressed by
-  anything weaker. No reporter shipped here declares ``UNSUPPORTED``; the path is
+  have succeeded. It does not override exit 2 or 3: those are verdicts about the
+  code under scan, and a reporter that cannot render them is not one. No
+  reporter shipped here declares ``UNSUPPORTED``; the path is
   built and tested so the enum member is a mechanism rather than a comment.
 * A per-project reporter that ASH's default config leaves off (the AWS reporters)
   is listed with the per-project artefacts that exist on disk, because the

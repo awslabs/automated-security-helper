@@ -463,7 +463,7 @@ Workspace resolution refuses the whole workspace rather than scanning part of it
 
 Workspace mode does not introduce a separate exit-code vocabulary; it uses the codes in [Exit Codes](#exit-codes). Every refusal listed above is code `4` — the workspace definition could not be used, so nothing was scanned. That is deliberately distinct from code `2`, which means a scan ran and found issues above the threshold.
 
-When several projects end differently, the code is chosen by how specific the diagnosis is rather than by severity: `3` (a named misconfigured project) outranks `1` (a project that reached no verdict at all, whether from an internal error or a per-project timeout), which outranks `2` (a project with a verdict that failed). The results payload also records `workspace.status` — `completed` or `refused` — and `workspace.refusal_detail`, for consumers reading the file rather than the exit status.
+When several projects end differently, the code is chosen by how specific the diagnosis is rather than by severity: `3` (a named misconfigured project) outranks `1` (a project that reached no verdict at all, whether from an internal error or a per-project timeout, or one whose scanners did not all complete), which outranks `2` (a project with a verdict that failed). That is the order a single-directory scan uses, so a workspace with one incomplete project exits `1` even when another project has findings; each project's findings are still in the results file and the summaries. The results payload also records `workspace.status` — `completed` or `refused` — and `workspace.refusal_detail`, for consumers reading the file rather than the exit status.
 
 Comments are not supported in the workspace file. VS Code tolerates them; ASH reads strict JSON and reports a commented file as malformed.
 
@@ -1413,13 +1413,12 @@ clears only the verdict: `incomplete_scanners` and `incomplete_converters` still
 name what did not run, because turning the gate off accepts the risk rather than
 asserting the scan was complete.
 
-One difference from a single-project scan, and it is deliberate. Here findings
-outrank an incomplete project rather than the reverse: a workspace where project A
-is incomplete and project B has actionable findings exits `2`, not `1`. A workspace
-can hold both outcomes at once, and leading with the unknown would let A's absent
-tool suppress B's findings. A single-project scan has no second project to
-suppress, which is why it can afford to lead with the unknown. Exit `4` is
-unaffected either way — it means no project was attempted at all.
+An incomplete project outranks findings, as in a single-project scan: a workspace
+where project A is incomplete and project B has actionable findings exits `1`, not
+`2`. B's findings are still in the results file (`exceeds_threshold` and the
+counts) and in every summary, so a gate that has to block on findings whatever else
+happened should read them there. Exit `4` is unaffected, because it means no
+project was attempted at all.
 
 ### A scan against a stale database is not a clean scan
 

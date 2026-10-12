@@ -11,7 +11,7 @@
     "workspace_file": "<REPO>/tests/test_data/snapshot_fixture/workspace/snapshot.code-workspace",
     "workspace_root": "<REPO>/tests/test_data/snapshot_fixture/workspace",
     "status": "completed",
-    "exit_code": 2,
+    "exit_code": 1,
     "projects": [
       {
         "project": "api",

@@ -8,7 +8,7 @@ Each project is scanned independently and judged against its own threshold, so a
 
 | Project | Status | Findings | Actionable | Threshold | Result |
 | --- | --- | ---: | ---: | --- | --- |
-| snapshot-api (api) | COMPLETED | 1 | 1 | MEDIUM | FAILED |
+| snapshot-api (api) | COMPLETED | 1 | 1 | MEDIUM | FAILED (incomplete) |
 | snapshot-web (web) | COMPLETED | 2 | 1 | HIGH | FAILED |
 
 ## Scan Metadata

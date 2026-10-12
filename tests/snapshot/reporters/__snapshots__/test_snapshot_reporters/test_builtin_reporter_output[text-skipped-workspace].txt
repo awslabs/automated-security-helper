@@ -10,10 +10,10 @@ ASH version: <ASH_VERSION>
 
 
 PROJECTS
--------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------
 Project             Status     Findings  Actionable  Threshold  Result
--------------------------------------------------------------------------------
-snapshot-api (api)  COMPLETED  1         1           MEDIUM     FAILED
+-----------------------------------------------------------------------------------
+snapshot-api (api)  COMPLETED  1         1           MEDIUM     FAILED (incomplete)
 snapshot-web (web)  COMPLETED  2         1           HIGH       FAILED
 docs                SKIPPED    0         0           n/a        SKIPPED (error)
 

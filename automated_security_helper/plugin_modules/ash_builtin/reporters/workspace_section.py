@@ -96,9 +96,11 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             result = f"SKIPPED ({reason})"
         elif project.error:
             result = "FAILED"
-        elif project.exceeds_threshold:
-            result = "FAILED"
         elif project.scan_incomplete:
+            # Ahead of the threshold arm, in the order workspace_exit_code reads a
+            # project (incomplete before findings, as a single-directory scan
+            # does); the Actionable column still shows a breach.
+            #
             # Without this arm a COMPLETED project carrying scan_incomplete=True,
             # no error and no threshold breach fell to the else and was emitted as
             # PASSED with its counts -- the same row a clean scan produces -- while
@@ -110,6 +112,8 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             # else changes the text and leaves the row green. Renaming this string
             # means changing that predicate in the same edit.
             result = "FAILED (incomplete)"
+        elif project.exceeds_threshold:
+            result = "FAILED"
         else:
             result = "PASSED"
 
@@ -119,14 +123,10 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
 
         detail = project.error or project.skip_detail or ""
         if project.incomplete_scanners:
-            # Named whenever the list is populated, not only when the arm above
-            # won. A project over its threshold *and* missing a scanner reports
-            # the threshold breach in Result, because that is the precedence
-            # workspace_exit_code ratified -- a certainty must not be suppressed
-            # by an unknown -- and an operator who switched
-            # fail_on_incomplete_scanners off gets a PASSED row. In both cases the
-            # scanner that did not run is the one fact the rest of the row cannot
-            # convey.
+            # Named whenever the list is populated, not only when the incomplete
+            # arm above won: an operator who switched fail_on_incomplete_scanners
+            # off gets a PASSED or threshold-FAILED row, and the scanner that did
+            # not run is the one fact the rest of the row cannot convey.
             unrun = "did not complete: " + ", ".join(project.incomplete_scanners)
             detail = f"{detail}; {unrun}" if detail else unrun
         converters = getattr(project, "incomplete_converters", None) or {}

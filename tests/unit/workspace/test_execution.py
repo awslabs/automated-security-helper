@@ -600,12 +600,10 @@ class TestScannerCompleteness:
     for the same reason a finding-count verdict cannot tell "nothing was wrong"
     from "nothing was checked".
 
-    Workspace mode keeps its own contract rather than borrowing single-project
-    precedence. An incomplete project is an unknown, so it lands on
-    ``INTERNAL_ERROR`` (1) -- which in workspace mode sits BELOW
-    ``ACTIONABLE_FINDINGS`` (2), the reverse of single-project mode, because an
-    unknown must not suppress a certainty. ``WORKSPACE_ERROR`` (4) is untouched:
-    it means nothing was attempted, and these projects were.
+    An incomplete project is an unknown, so it lands on ``INTERNAL_ERROR`` (1),
+    which ranks ABOVE ``ACTIONABLE_FINDINGS`` (2), as in single-project mode.
+    ``WORKSPACE_ERROR`` (4) is untouched: it means nothing was attempted, and these
+    projects were.
     """
 
     def test_a_missing_scanner_stops_a_clean_project_reporting_success(self, tmp_path):
@@ -737,13 +735,13 @@ class TestScannerCompleteness:
         assert entry.scan_incomplete is False
         assert outcome.exit_code == WorkspaceExitCode.SUCCESS
 
-    def test_findings_still_outrank_an_incomplete_project(self, tmp_path):
-        """Workspace precedence is preserved, not replaced by single-project's.
+    def test_an_incomplete_project_outranks_another_project_s_findings(self, tmp_path):
+        """Workspace precedence is single-project's: 1 ahead of 2.
 
-        Single-project mode answers 1 when both hold. Workspace mode answers 2,
-        and that difference is deliberate -- see the ordering rationale in
-        models/workspace.py. Collapsing the two models here would make a CI gate
-        that retries 1 stop blocking on real findings.
+        Reverses this test's earlier expectation (ACTIONABLE_FINDINGS), by ruling:
+        `ash --source-dir P` answers 1 when a scanner did not complete, so P inside
+        a workspace must too, whatever another project found. The findings stay in
+        the payload; see the ordering rationale in models/workspace.py.
         """
         _, plan = _make_workspace(tmp_path, ("api", "LOW"), ("web", "MEDIUM"))
         FakeOrchestrator.behaviour["api"] = {
@@ -757,10 +755,12 @@ class TestScannerCompleteness:
         outcome = _run(tmp_path, plan)
         verdicts = {p.project: p.scan_incomplete for p in outcome.payload.projects}
 
-        # Control: the incomplete project really is flagged, so 2 is precedence
-        # winning rather than the completeness pass never having fired.
+        # Control: both facts really are present, so 1 is precedence and not the
+        # findings having gone missing.
         assert verdicts == {"api": False, "web": True}
-        assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
+        thresholds = {p.project: p.exceeds_threshold for p in outcome.payload.projects}
+        assert thresholds == {"api": True, "web": False}
+        assert outcome.exit_code == WorkspaceExitCode.INTERNAL_ERROR
 
     def test_a_complete_clean_project_still_reports_success(self, tmp_path):
         """Load-bearing: the gate must not fail every workspace it looks at."""
@@ -1064,11 +1064,12 @@ class TestFailureHandling:
         FakeOrchestrator.behaviour["broken"] = {"raise": RuntimeError("boom")}
         assert _run(tmp_path, plan).exit_code == WorkspaceExitCode.INTERNAL_ERROR
 
-    def test_a_failing_project_does_not_mask_another_project_findings(self, tmp_path):
-        """A gate that retries 1 as infrastructure trouble would never block.
+    def test_a_failing_project_outranks_another_project_s_findings(self, tmp_path):
+        """1 ahead of 2, as in a single-directory scan, and the findings still shown.
 
-        The failed project stays disclosed in the payload; what changes is that it
-        no longer decides the exit code when a real finding is present.
+        Reverses this test's earlier expectation (ACTIONABLE_FINDINGS), by ruling.
+        The other project's findings do not decide the exit code any more, so the
+        payload is where they must stay visible.
         """
         _, plan = _make_workspace(tmp_path, ("broken", "MEDIUM"), ("dirty", "LOW"))
         FakeOrchestrator.behaviour["broken"] = {"raise": RuntimeError("boom")}
@@ -1076,11 +1077,14 @@ class TestFailureHandling:
 
         outcome = _run(tmp_path, plan)
 
-        assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
+        assert outcome.exit_code == WorkspaceExitCode.INTERNAL_ERROR
         statuses = {p.project: p.status for p in outcome.payload.projects}
         assert statuses["broken"] is ProjectRunStatus.FAILED
         errors = {p.project: p.error for p in outcome.payload.projects}
         assert "boom" in (errors["broken"] or "")
+        dirty = next(p for p in outcome.payload.projects if p.project == "dirty")
+        assert dirty.exceeds_threshold is True
+        assert dirty.finding_count == 7
 
     def test_the_failure_message_names_the_project(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("broken", "MEDIUM"))

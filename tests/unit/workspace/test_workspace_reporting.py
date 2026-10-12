@@ -1169,7 +1169,12 @@ class TestExecuteWorkspaceRunsTheReportStep:
         _, _, result = self._execute(
             tmp_path, phases=("scan",), reporter_classes=[FakeUnsupportedReporter]
         )
-        assert result.exit_code == 2  # the fixture findings, not a refusal
+        # The fixture's own verdict, not a refusal (which raises; see above): its
+        # projects are over threshold and also incomplete (no scanner recorded a
+        # result), and incomplete ranks first, as in a single-directory scan.
+        assert result.payload.status == "completed"
+        assert all(project.exceeds_threshold for project in result.payload.projects)
+        assert result.exit_code == 1
 
 
 class TestSarifStaysOneRunPerProject:
