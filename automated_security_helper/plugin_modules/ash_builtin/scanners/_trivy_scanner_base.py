@@ -359,6 +359,8 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         ``global_ignore_paths`` ignores, picked as ASH matches them below the source
         directory. In the joined form, since a path can start with "-".
         """
+        if self.context is None:
+            raise ScannerError(f"{self.__class__.__name__} has no plugin context")
         source_dir = self.context.source_dir
         return [
             *(
