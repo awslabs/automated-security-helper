@@ -137,13 +137,20 @@ def package_manager_inputs(
     package, a linked one and one in a linked directory included, since yarn follows
     both when it looks for a workspace's members; ``node_modules``, ``.git`` and the
     ``skip`` directories are left out. A name that resolves to nothing is not listed:
-    no tool can read it.
+    no tool can read it. The package's own ``package.json`` is the exception: it is
+    listed when it is a link, even one to nothing, so that a dangling link is
+    refused with its reason rather than the tool started without a manifest.
     """
     package_dir = Path(package_dir)
+    manifest = package_dir / "package.json"
+    inputs: List[Path] = []
+    if manifest.is_symlink() and not manifest.exists():
+        inputs.append(manifest)
     if binary != "yarn":
         names = _PACKAGE_MANAGER_INPUTS.get(binary, ("package.json",))
-        return [package_dir / name for name in names if (package_dir / name).exists()]
-    inputs = []
+        return inputs + [
+            package_dir / name for name in names if (package_dir / name).exists()
+        ]
     if (package_dir / "yarn.lock").exists():
         inputs.append(package_dir / "yarn.lock")
     skipped = [Path(os.path.realpath(p)) for p in skip]

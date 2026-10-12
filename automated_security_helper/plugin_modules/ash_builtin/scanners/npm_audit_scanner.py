@@ -1011,6 +1011,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             f"{self.__class__.__name__} overrides scan() directly."
         )
 
+    #: The lockfiles that make a directory a package npm-audit audits, in the order
+    #: scan() looks for them.
+    _AUDITED_LOCKFILE_NAMES = ("yarn.lock", "pnpm-lock.yaml", "package-lock.json")
+
     #: Why npm-audit audits nothing offline. Recorded with every lockfile it skips.
     _OFFLINE_REASON = (
         "npm, pnpm and yarn audit dependencies only against the package registry's "
@@ -1171,6 +1175,24 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 pf = Path(f)
                 if pf.name == "package.json":
                     scannable.append(pf.as_posix())
+            # The scan set leaves out a link whose target is outside the tree, so a
+            # package whose package.json is such a link would vanish here and its
+            # in-tree lockfile go unaudited with nothing failing. Such a package is
+            # taken from its lockfile instead, when a package.json sits beside it
+            # (by lstat) that the scan set left out; refused_inputs below then
+            # refuses it. A lockfile with no package.json beside it is not a
+            # package, as before.
+            listed = {Path(p).parent for p in scannable}
+            for f in orig_scannable:
+                pf = Path(f)
+                manifest = pf.parent / "package.json"
+                if (
+                    pf.name in self._AUDITED_LOCKFILE_NAMES
+                    and pf.parent not in listed
+                    and (manifest.is_symlink() or manifest.exists())
+                ):
+                    listed.add(pf.parent)
+                    scannable.append(manifest.as_posix())
             joined_files = "\n- ".join(scannable)
             self._plugin_log(f"Found {len(scannable)} package locks:\n- {joined_files}")
 
