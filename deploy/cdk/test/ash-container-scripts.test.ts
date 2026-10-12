@@ -735,3 +735,88 @@ exit 1
     expect(stderr).toContain('cannot serve MCP at all');
   });
 });
+
+/**
+ * The shared secret goes to `ash mcp` on descriptor 3 when the image's ASH takes
+ * `--auth-header-value-fd`, so it is on no command line. Run for real, with a
+ * stand-in `ash` that records its argv and what it reads from descriptor 3, and a
+ * stand-in `python3` in place of the Secrets Manager read.
+ */
+describe('MCP entrypoint keeps the shared secret off the command line', () => {
+  const os = require('os') as typeof import('os');
+  const fs = require('fs') as typeof import('fs');
+  const path = require('path') as typeof import('path');
+  const { spawnSync } = require('child_process') as typeof import('child_process');
+
+  const SECRET = 'probe-secret-value';
+
+  const FAKE_ASH = `#!/bin/sh
+if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+  echo "  --auth-header-name TEXT"
+  echo "  --auth-header-value TEXT"
+  if [ -n "\${FAKE_ASH_FD:-}" ]; then
+    echo "  --auth-header-value-fd INTEGER"
+  fi
+  exit 0
+fi
+: > "\${FAKE_ASH_ARGV}"
+for fake_arg in "$@"; do
+  echo "\${fake_arg}" >> "\${FAKE_ASH_ARGV}"
+done
+if [ -n "\${FAKE_ASH_FD:-}" ]; then
+  cat <&3 > "\${FAKE_ASH_ARGV}.fd3"
+fi
+exit 0
+`;
+
+  const FAKE_PYTHON = `#!/bin/sh
+printf '%s' '${SECRET}'
+`;
+
+  function run(withFd: boolean): { status: number | null; argv: string[]; fd3: string | null } {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ash-secret-'));
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'ash'), FAKE_ASH, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'python3'), FAKE_PYTHON, { mode: 0o755 });
+    const entrypoint = path.join(dir, 'entrypoint.sh');
+    fs.writeFileSync(entrypoint, MCP_ENTRYPOINT_SCRIPT);
+    const argvFile = path.join(dir, 'argv');
+
+    const result = spawnSync('sh', [entrypoint], {
+      encoding: 'utf-8',
+      env: {
+        PATH: `${bin}:${process.env.PATH}`,
+        FAKE_ASH_ARGV: argvFile,
+        FAKE_ASH_FD: withFd ? '1' : '',
+        ASH_MCP_STATELESS: 'false',
+        ASH_MCP_TRUST_UPSTREAM_HOST_CHECK: 'true',
+        ASH_MCP_AUTH_HEADER_NAME: 'X-Ash-Token',
+        // Only checked for being set; the stand-in python3 answers for the read.
+        ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN: 'probe-secret-arn',
+      },
+    });
+
+    const argv = fs.existsSync(argvFile)
+      ? fs.readFileSync(argvFile, 'utf-8').split('\n').filter((line: string) => line !== '')
+      : [];
+    const fd3 = fs.existsSync(`${argvFile}.fd3`) ? fs.readFileSync(`${argvFile}.fd3`, 'utf-8') : null;
+    return { status: result.status, argv, fd3 };
+  }
+
+  test('an ASH with --auth-header-value-fd gets the secret on descriptor 3, not argv', () => {
+    const { status, argv, fd3 } = run(true);
+    expect(status).toBe(0);
+    expect(argv).toContain('--auth-header-value-fd');
+    expect(argv).not.toContain('--auth-header-value');
+    expect(argv.join(' ')).not.toContain(SECRET);
+    expect(fd3).toBe(`${SECRET}\n`);
+  });
+
+  test('an older ASH still gets the secret, on argv, the only form it takes', () => {
+    const { status, argv } = run(false);
+    expect(status).toBe(0);
+    expect(argv).not.toContain('--auth-header-value-fd');
+    expect(argv[argv.indexOf('--auth-header-value') + 1]).toBe(SECRET);
+  });
+});

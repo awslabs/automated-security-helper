@@ -438,12 +438,16 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * excuses, so that target keeps exiting 65 until its `AshVersion` can serve
  * stateless.
  *
- * KNOWN LIMITATION: ASH takes the shared-secret value as `--auth-header-value`,
- * a command-line argument, and exposes no environment-variable equivalent for
- * it. The resolved secret is therefore visible in the container's own process
- * list. Nothing outside the container can read it, and it never reaches the
- * template or the task definition, but a process running inside the same
- * container could. Closing that would need an env-var option in ASH itself.
+ * THE SHARED SECRET STAYS OFF THE COMMAND LINE WHEN ASH ALLOWS IT. A process's
+ * command line is readable by every user in the container, and from the host by
+ * anyone who can list its processes. When this image's `ash mcp --help` lists
+ * `--auth-header-value-fd`, the entrypoint passes the resolved secret on
+ * descriptor 3, a here-document `ash mcp` reads once and closes, so it is on no
+ * command line and, as before, in no environment variable, the template or the
+ * task definition. An older ASH (the `AshVersion` decides) has only
+ * `--auth-header-value`, and gets the secret on its command line as it always
+ * did. A here-document and not a file: a file would put the secret on the
+ * container's storage.
  *
  * WHY THE ALLOWED HOSTS ARE FOLDED TO LOWER CASE
  * ---------------------------------------------
@@ -614,7 +618,13 @@ fi
 # Both halves are required: a header name with no value would make ASH compare
 # against an empty secret.
 if [ -n "\${ASH_MCP_AUTH_HEADER_NAME:-}" ] && [ -n "$ASH_AUTH_VALUE" ]; then
-  set -- "$@" --auth-header-name "\${ASH_MCP_AUTH_HEADER_NAME}" --auth-header-value "$ASH_AUTH_VALUE"
+  set -- "$@" --auth-header-name "\${ASH_MCP_AUTH_HEADER_NAME}"
+  if ash_mcp_supports '--auth-header-value-fd'; then
+    exec "$@" --auth-header-value-fd 3 3<<ASH_AUTH_EOF
+$ASH_AUTH_VALUE
+ASH_AUTH_EOF
+  fi
+  set -- "$@" --auth-header-value "$ASH_AUTH_VALUE"
 elif [ -n "\${ASH_MCP_AUTH_HEADER_NAME:-}" ]; then
   echo "ash-mcp-entrypoint: McpAuthHeaderName was set but no secret value resolved; refusing to start an unauthenticated server that the deployment expected to authenticate." >&2
   exit 64
