@@ -5,9 +5,10 @@
 A reporter class sets ``sends_off_host = True`` when its report goes to a remote
 service (the four AWS reporters). Such a reporter runs only when its section of
 the config sets ``enabled: true``; its own default does not count. ``ash report``,
-the report phase of a scan and the workspace report step all apply that rule, and
-``ash merge`` runs none of them, because its config is the one the shards carried,
-not one the operator of the merge supplied.
+the report phase of a scan and the workspace report step all apply that rule.
+``ash merge`` applies it to the operator's own ``--config`` only: the config the
+shards carried is not one the operator of the merge supplied, so its ``enabled``
+is ignored in both directions.
 
 The class attribute replaces a check on the reporter's module name, which only
 knew ASH's own AWS package: a reporter from any other package could send
@@ -297,19 +298,37 @@ class TestTheWorkspaceReportStep:
 
 
 class TestTheMergeCommand:
-    def test_ash_merge_runs_no_off_host_reporter_even_when_the_shards_enable_it(
-        self, tmp_path, monkeypatch, reporters, ran
-    ):
+    """``ash merge`` runs an off-host reporter only when the operator's ``--config`` enables it.
+
+    The shards' recorded configuration came from whatever config each shard's scan
+    read, a file in the scanned repository included, so it decides nothing about
+    a reporter that sends findings off the host, in either direction: its
+    ``enabled`` is ignored, with a warning when it disagrees with the operator.
+    """
+
+    def _merge(self, tmp_path, monkeypatch, reporters, shard_section, operator_section):
+        import logging
+
         from automated_security_helper.cli import merge as merge_module
         from automated_security_helper.core.enums import AshLogLevel
         from tests.unit.cli.test_merge import build_shards, write_shards
 
         shards = build_shards(2)
         for shard in shards:
-            # The shards' own config turns it on, which is the config ash merge
-            # reports with.
-            shard.ash_config.reporters = _config({"enabled": True}).reporters
+            shard.ash_config.reporters = _config(shard_section).reporters
         shard_paths = write_shards(tmp_path / "artifacts", shards)
+        config_path = None
+        if operator_section is not None:
+            config_path = tmp_path / "operator" / "ash-config.yaml"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text(
+                "reporters:\n  fake-off-host:\n"
+                + "".join(
+                    f"    {key}: {str(value).lower()}\n"
+                    for key, value in operator_section.items()
+                ),
+                encoding="utf-8",
+            )
 
         monkeypatch.setattr(
             merge_module.ash_plugin_manager,
@@ -317,6 +336,21 @@ class TestTheMergeCommand:
             lambda plugin_type=None, **kwargs: list(reporters),
         )
         monkeypatch.setattr(merge_module, "load_plugins", lambda **kwargs: None)
+        # get_logger replaces the ASH logger's handlers, so the command's warnings
+        # are read from a logger of its own.
+        warnings = []
+
+        class _Recorder(logging.Handler):
+            def emit(self, record):
+                if record.levelno >= logging.WARNING:
+                    warnings.append(record.getMessage())
+
+        recorder_logger = logging.getLogger("test-merge-off-host")
+        recorder_logger.handlers = [_Recorder()]
+        recorder_logger.propagate = False
+        monkeypatch.setattr(
+            merge_module, "get_logger", lambda **kwargs: recorder_logger
+        )
 
         try:
             merge_module.merge_command(
@@ -327,6 +361,7 @@ class TestTheMergeCommand:
                 ignore_suppressions=False,
                 fail_on_findings=False,
                 fail_on_incomplete_scanners=None,
+                config=str(config_path) if config_path else None,
                 log_level=AshLogLevel.ERROR,
                 verbose=False,
                 debug=False,
@@ -334,5 +369,46 @@ class TestTheMergeCommand:
             )
         except typer.Exit as exit_:
             assert exit_.exit_code == 0, exit_.exit_code
+        return warnings
+
+    def test_a_shards_enabled_true_does_not_run_it(
+        self, tmp_path, monkeypatch, reporters, ran
+    ):
+        warnings = self._merge(
+            tmp_path, monkeypatch, reporters, {"enabled": True}, None
+        )
+
+        assert ran == ["fake-local"]
+        assert any(
+            "fake-off-host" in message and "enabled: true" in message
+            for message in warnings
+        ), warnings
+
+    def test_the_operators_config_runs_it(self, tmp_path, monkeypatch, reporters, ran):
+        warnings = self._merge(
+            tmp_path, monkeypatch, reporters, None, {"enabled": True}
+        )
+
+        assert sorted(ran) == ["fake-local", "fake-off-host"]
+        assert not any("fake-off-host" in message for message in warnings), warnings
+
+    def test_a_shards_enabled_false_does_not_stop_the_operators_reporter(
+        self, tmp_path, monkeypatch, reporters, ran
+    ):
+        warnings = self._merge(
+            tmp_path, monkeypatch, reporters, {"enabled": False}, {"enabled": True}
+        )
+
+        assert sorted(ran) == ["fake-local", "fake-off-host"]
+        assert any(
+            "fake-off-host" in message and "enabled: false" in message
+            for message in warnings
+        ), warnings
+
+    def test_an_operator_config_that_does_not_enable_it_does_not_run_it(
+        self, tmp_path, monkeypatch, reporters, ran
+    ):
+        """Its own default (on, for this fake) does not count either."""
+        self._merge(tmp_path, monkeypatch, reporters, None, {"enabled": False})
 
         assert ran == ["fake-local"]

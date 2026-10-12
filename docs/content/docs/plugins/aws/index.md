@@ -36,8 +36,8 @@ reporters.<name>.enabled=true`.
   `DescribeHub`, Bedrock's model list) runs only for a reporter the scan will run.
 - `ash report --format <name>` refuses an AWS reporter that is not enabled, and
   exits 1 with the setting to change.
-- `ash merge` runs no AWS reporter, whatever the shards' config says. Run
-  `ash report --format <name>` on the merged output with a config that enables it.
+- `ash merge` runs an AWS reporter only when the operator's own `--config`
+  enables it, whatever the shards' recorded config says, in either direction.
 - A reporter plugin that sends findings off the host declares
   `sends_off_host = True` on its class. ASH then runs it only when its section of
   the config sets `enabled: true`, whatever its own default is.

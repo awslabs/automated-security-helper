@@ -541,6 +541,7 @@ ash merge --results <file-or-dir> [--results ...] --output-dir <dir> [options]
 | `--min-severity`       | Minimum severity that counts as actionable for the exit code                  | `low`                                             |                      |
 | `--fail-on-findings`   | Exit non-zero when the merged report has actionable findings                   | The scan configuration's value, then `True`       |                      |
 | `--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | Refuse the merge when a shard completed none of the scanners it owned, and exit 1 when any scanner in the union is `ERROR` or `MISSING` | The scan configuration's value, then `True` | |
+| `--config`, `-c`       | The operator's configuration file; only it can turn on a reporter that sends findings off the host | None                                              |                      |
 | `--log-level`          | Set the log level                                                             | `INFO`                                            |                      |
 | `--verbose`, `-v`      | Enable verbose logging                                                        | `False`                                           |                      |
 | `--debug`, `-d`        | Enable debug logging                                                          | `False`                                           |                      |
@@ -552,7 +553,7 @@ The merged report does not depend on the order the shards are listed in. They ar
 
 The reporters and severity thresholds come from the scan's own configuration, carried through the shard results, rather than from a config file resolved on the collector host. The collector job need not have the source tree checked out at all, and a config file found there could disagree with the one the shards actually scanned under, which would move the verdict without moving the findings.
 
-`ash merge` runs no reporter that sends findings off the host (the AWS reporters), even when the shards' configuration enables one: that configuration came with the shard results, not from the operator of the merge, and the reporter would send the merged findings with the collector host's credentials. To send them, run `ash report --format <name>` on the merged output with a config that enables the reporter.
+A reporter that sends findings off the host (the AWS reporters) is the exception. `ash merge` runs one only when the operator's own `--config` sets `enabled: true` in its section, and builds it from that section, so its destination is the operator's too. The shards' configuration is ignored for these reporters in both directions: it came with the shard results, not from the operator of the merge, and the reporter would send the merged findings with the collector host's credentials. Where the shards' `enabled` disagrees with the operator's decision, the merge logs a warning that it was ignored. As in a scan, these reporters run only when no `--output-formats` is given, since no format names one.
 
 ### What Merge Refuses
 

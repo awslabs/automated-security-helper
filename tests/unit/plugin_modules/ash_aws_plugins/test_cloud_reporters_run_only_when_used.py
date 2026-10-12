@@ -447,6 +447,87 @@ class TestReportCommand:
         assert ("s3", "PutObject") in requests
 
 
+class TestMergeCommand:
+    """``ash merge`` sends merged findings off the host only on the operator's ``--config``."""
+
+    S3_SECTION = {
+        "enabled": True,
+        "options": {"bucket_name": "b", "aws_region": "us-east-1", "max_retries": 0},
+    }
+
+    def _merge(self, tmp_path, shard_reporters, config=None):
+        import typer
+
+        from automated_security_helper.cli.merge import merge_command
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.core.enums import AshLogLevel
+        from tests.unit.cli.test_merge import build_shards, write_shards
+
+        shards = build_shards(2)
+        for shard in shards:
+            shard.ash_config.reporters = AshConfig.model_validate(
+                {"reporters": shard_reporters}
+            ).reporters
+        paths = write_shards(tmp_path / "artifacts", shards)
+        try:
+            merge_command(
+                results=paths,
+                output_dir=str(tmp_path / "merged"),
+                output_formats=None,
+                min_severity="low",
+                ignore_suppressions=False,
+                fail_on_findings=False,
+                fail_on_incomplete_scanners=None,
+                config=str(config) if config else None,
+                log_level=AshLogLevel.ERROR,
+                verbose=False,
+                debug=False,
+                color=False,
+            )
+        except typer.Exit:
+            pass
+
+    def test_shards_that_enable_s3_send_nothing(self, tmp_path, requests, sessions):
+        self._merge(tmp_path, {"s3": self.S3_SECTION})
+
+        assert requests == []
+        assert sessions == []
+
+    def test_the_operators_config_that_enables_s3_reaches_put_object(
+        self, tmp_path, monkeypatch, requests
+    ):
+        """Control: with the operator's --config enabling it, the upload is attempted.
+
+        The stub answers the dependency check (GetCallerIdentity, HeadBucket), so
+        the reporter gets as far as its upload, which is refused like every other
+        request. The shards' ``enabled: false`` does not stop it.
+        """
+        refusing = botocore.client.BaseClient._make_api_call
+        answers = {
+            "GetCallerIdentity": {"Account": "123456789012", "Arn": "a", "UserId": "u"},
+            "HeadBucket": {},
+        }
+
+        def answering_identity(client, operation_name, api_params):
+            if operation_name in answers:
+                requests.append(
+                    (client.meta.service_model.service_name, operation_name)
+                )
+                return answers[operation_name]
+            return refusing(client, operation_name, api_params)
+
+        monkeypatch.setattr(
+            botocore.client.BaseClient, "_make_api_call", answering_identity
+        )
+        config = TestReportCommand._s3_operator_config(
+            None, tmp_path, "    enabled: true\n"
+        )
+
+        self._merge(tmp_path, {"s3": {"enabled": False}}, config=config)
+
+        assert ("s3", "PutObject") in requests
+
+
 class TestWorkspaceReporting:
     def test_a_per_project_reporter_is_not_checked_at_workspace_level(
         self, tmp_path, requests, sessions

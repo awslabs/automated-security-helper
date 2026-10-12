@@ -134,6 +134,7 @@ Merges the results of a sharded scan into one unified report.
 | `--ignore-suppressions` | bool | False |  | Ignore all suppression rules and report every finding regardless of suppression status. Mirrors 'ash scan --ignore-suppressions', so the same tree gives the same verdict sharded or not. |
 | `--fail-on-findings/--no-fail-on-findings` | bool |  |  | Exit non-zero when the merged report has actionable findings. Defaults to the scan configuration's value, then to true. |
 | `--fail-on-incomplete-scanners/--no-fail-on-incomplete-scanners` | bool |  |  | Refuse the merge when a shard completed none of the scanners it owned, and exit 1 when any scanner in the union is ERROR or MISSING. Without it, a shard whose scanners never ran contributes no findings and the merged report reads as a complete, clean scan. Defaults to the scan configuration's value, then to true; pass --no-fail-on-incomplete-scanners to merge a partial union anyway. |
+| `--config`, `-c` | str |  |  | The operator's configuration file. Only this file can turn on a reporter that sends findings off the host (the AWS reporters): the configuration the shards recorded is ignored for them, in both directions. Everything else comes from the shards. |
 | `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `INFO` |  | Set the log level. |
 | `--verbose`, `-v` | bool | False |  | Enable verbose logging |
 | `--debug`, `-d` | bool | False |  | Enable debug logging |

@@ -148,7 +148,9 @@ from pydantic import ValidationError
 from rich import print  # noqa: A004
 from rich.markup import escape
 
+from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base.reporter_plugin import off_host_reporter_refused
 
 # Imported at module scope, and not lazily inside the functions that need it,
 # because importing this module is what calls AshAggregatedResults.model_rebuild().
@@ -159,6 +161,7 @@ from automated_security_helper.base.plugin_context import PluginContext
 # for another purpose is what makes this fragile, so the dependency is named here.
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.plugin_module_trust import split_plugin_modules
+from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.enums import (
     AshLogLevel,
     ExportFormat,
@@ -1319,6 +1322,19 @@ def merge_command(
             ),
         ),
     ] = None,
+    config: Annotated[
+        Optional[str],
+        typer.Option(
+            "--config",
+            "-c",
+            help=(
+                "The operator's configuration file. Only this file can turn on a "
+                "reporter that sends findings off the host (the AWS reporters): "
+                "the configuration the shards recorded is ignored for them, in "
+                "both directions. Everything else comes from the shards."
+            ),
+        ),
+    ] = None,
     log_level: Annotated[
         AshLogLevel, typer.Option("--log-level", help="Set the log level.")
     ] = AshLogLevel.INFO,
@@ -1446,26 +1462,27 @@ def merge_command(
     write_text_atomically(merged_file, merged.model_dump_json(indent=2))
     logger.info(f"Wrote merged results to {merged_file}")
 
+    # The plugins were loaded above, before anything was written.
+    # A reporter that sends findings off the host runs only when the operator's
+    # own --config enables it. The configuration the shards carried came from
+    # whatever config each shard's scan read, a file in the scanned repository
+    # included, and the reporter would send the merged findings with this host's
+    # credentials; so that configuration decides nothing for it, in either
+    # direction.
+    operator_config = resolve_config(config_path=config) if config else None
+    local_reporters, off_host_reporters, notices = select_merge_reporters(
+        ash_plugin_manager.plugin_modules(plugin_type="reporter"),
+        shard_config=merged.ash_config,
+        operator_config=operator_config,
+    )
+    for notice in notices:
+        logger.warning(notice)
+
     # ReportPhase writes reports/ash.<extension> for every enabled reporter, and
     # its progress display is used unconditionally, so a display is supplied with
     # output turned off rather than None.
-    # No reporter that sends findings off the host runs here. Its config would be
-    # the one the shards carried, not one the operator of this merge supplied,
-    # and it would send the merged findings with this host's credentials. Run
-    # `ash report --format <name>` on the merged results with an operator config
-    # to send them.
-    reporter_classes = []
-    for reporter_class in ash_plugin_manager.plugin_modules(plugin_type="reporter"):
-        if getattr(reporter_class, "sends_off_host", False) is True:
-            logger.info(
-                f"Not running reporter {getattr(reporter_class, '__name__', reporter_class)} "
-                "in ash merge: it sends findings off the host. Use `ash report "
-                "--format <name>` on the merged results with an operator config."
-            )
-            continue
-        reporter_classes.append(reporter_class)
     report_phase = ReportPhase(
-        plugins=reporter_classes,
+        plugins=local_reporters,
         plugin_context=plugin_context,
         progress_display=LiveProgressDisplay(show_progress=False),
         asharp_model=merged,
@@ -1476,6 +1493,28 @@ def merge_command(
         aggregated_results=merged,
         python_based_plugins_only=False,
     )
+    # The off-host reporters run with the operator's configuration, so their
+    # destinations are the operator's too. No --output-formats value names one,
+    # so, as in a scan, they run only when no format is requested.
+    if off_host_reporters and not parsed_formats:
+        off_host_context = PluginContext(
+            source_dir=Path.cwd(),
+            output_dir=output_dir_path,
+            work_dir=output_dir_path.joinpath("work"),
+            config=operator_config,
+            ignore_suppressions=ignore_suppressions,
+        )
+        merged = ReportPhase(
+            plugins=off_host_reporters,
+            plugin_context=off_host_context,
+            progress_display=LiveProgressDisplay(show_progress=False),
+            asharp_model=merged,
+        ).execute(
+            report_dir=output_dir_path.joinpath("reports"),
+            cli_output_formats=None,
+            aggregated_results=merged,
+            python_based_plugins_only=False,
+        )
 
     exit_code = _merged_exit_code(
         merged,
@@ -1487,6 +1526,63 @@ def merge_command(
     _print_merge_summary(merged, merged_file, exit_code)
     if exit_code != 0:
         raise typer.Exit(exit_code)
+
+
+def _section(config: Optional[AshConfig], reporter_class: type) -> Optional[Any]:
+    if config is None:
+        return None
+    try:
+        return config.get_plugin_config(
+            plugin_type="reporter", plugin_name=plugin_config_key(reporter_class)
+        )
+    except Exception:  # noqa: BLE001 -- an unknown reporter has no section
+        return None
+
+
+def select_merge_reporters(
+    reporter_classes: Sequence[type],
+    shard_config: Optional[AshConfig],
+    operator_config: Optional[AshConfig],
+) -> Tuple[List[type], List[type], List[str]]:
+    """Split ``ash merge``'s reporters into local and off-host ones, and say what was ignored.
+
+    A reporter that sends findings off the host runs only when the operator's own
+    ``--config`` sets ``enabled: true`` in its section (``off_host_reporter_refused``).
+    The configuration the shards recorded is ignored for it, in both directions:
+    a shard's ``enabled: true`` does not run it and a shard's ``enabled: false``
+    does not stop it. Where the shards' value disagrees with the operator's
+    decision, a notice says it was ignored. Every recorded configuration carries
+    every reporter's ``enabled``, its default included, so a value that agrees
+    cannot be told from a default and is not reported.
+
+    Returns the local reporters, the off-host reporters that run, and the notices.
+    """
+    local: List[type] = []
+    off_host: List[type] = []
+    notices: List[str] = []
+    for reporter_class in reporter_classes:
+        if getattr(reporter_class, "sends_off_host", False) is not True:
+            local.append(reporter_class)
+            continue
+        name = plugin_config_key(reporter_class)
+        refused = off_host_reporter_refused(
+            reporter_class, _section(operator_config, reporter_class)
+        )
+        shard_section = _section(shard_config, reporter_class)
+        shard_enabled = (
+            shard_section.get("enabled") if isinstance(shard_section, dict) else None
+        )
+        if isinstance(shard_enabled, bool) and shard_enabled is refused:
+            notices.append(
+                f"Ignoring 'enabled: {str(shard_enabled).lower()}' for reporter "
+                f"'{name}' in the configuration the shards recorded: it sends "
+                "findings off the host, so only the operator's --config decides "
+                f"whether it runs. It {'does not run' if refused else 'runs'}."
+            )
+        if refused:
+            continue
+        off_host.append(reporter_class)
+    return local, off_host, notices
 
 
 def _relocate_colliding_output_dir(output_dir: Path) -> Path:

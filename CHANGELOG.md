@@ -172,10 +172,12 @@
     workspace level.
   - `ash report --format <aws reporter>` refuses a reporter that is not enabled and
     exits 1, instead of sending the stored findings.
-  - `ash merge` runs none of the AWS reporters. Their config would be the one
-    the shards carried, and they would send the merged findings with the
-    collector host's credentials; run `ash report --format <name>` on the merged
-    output with an operator config instead.
+  - `ash merge` runs an AWS reporter only when the operator's own `--config`
+    (new) enables it, and builds it from that config. The configuration the
+    shards recorded is ignored for these reporters in both directions, with a
+    warning where it disagrees: it came with the shard results, not from the
+    operator of the merge, and the reporter would send the merged findings with
+    the collector host's credentials.
   - A reporter class declares `sends_off_host = True` when it sends findings to
     a remote service, as the four AWS reporters now do. Such a reporter runs in
     a scan, `ash report` or a workspace report step only when its config section
