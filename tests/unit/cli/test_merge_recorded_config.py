@@ -508,7 +508,10 @@ class TestRecordedPluginModules:
         assert harness.loaded_modules == [[]]
         named = [m for m in harness.ignoring() if "ash_plugin_modules" in m]
         assert named and AWS in named[0], harness.warnings
-        assert shard_paths[0].as_posix() in named[0]
+        message = named[0]
+        assert shard_paths[0].as_posix() in message
+        assert "only modules the operator's configuration names are imported" in message
+        assert "installed modules outside the tree" not in message
 
     def test_an_override_loads_the_package(self, harness):
         shard_paths = harness.write_shards(SHARD_CONFIG)
