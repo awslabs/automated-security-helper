@@ -32,6 +32,9 @@ from automated_security_helper.utils.sandbox.policy import (
 
 PROBE_TIMEOUT_SECONDS = 20
 
+#: The shared temporary directory firejail's --private-tmp and /tmp whitelists cover.
+_TMP_ROOT = Path("/tmp")  # nosec B108 - compared against, never written
+
 #: The Landlock wrapper, which bwrap and firejail also run inside their sandbox for
 #: its seccomp socket filter alone (``--socket-filter``).
 LANDLOCK_EXEC = Path(__file__).with_name("landlock_exec.py")
@@ -133,6 +136,20 @@ class SandboxBackend:
         self, argv: Sequence[str], env: Mapping[str, str], policy: SandboxPolicy
     ) -> SpawnPlan:
         raise NotImplementedError
+
+
+def _passwd_home() -> Optional[Path]:
+    """The home directory the passwd entry names, or None where there is none.
+
+    Not always the policy's home: that is Path.home(), which reads HOME, and an
+    operator or a CI job can set HOME elsewhere.
+    """
+    try:
+        import pwd
+
+        return Path(pwd.getpwuid(os.getuid()).pw_dir)
+    except (ImportError, KeyError, AttributeError, OSError):
+        return None
 
 
 def _probe_process(
@@ -493,8 +510,13 @@ class FirejailBackend(SandboxBackend):
     ) -> SpawnPlan:
         if not self._executable:
             raise RuntimeError(f"{self.name}: probe() must succeed before plan()")
-        home = _real(policy.home)
-        tmp_root = _real(Path("/tmp"))  # nosec B108 - compared against, never written
+        # firejail is setuid, so it takes the home it makes private, and the one a
+        # whitelist inside $HOME applies to, from the passwd entry, never from HOME
+        # (init_cfg in firejail's main.c). Its whitelists are decided against that
+        # home. HOME's own directory, when it is another one, is blacklisted below.
+        home = _real(_passwd_home() or policy.home)
+        home_variable = _real(policy.home)
+        tmp_root = _real(_TMP_ROOT)
         cmd = [self._executable, "--quiet", *_FIREJAIL_CONFINEMENT]
         if not policy.network:
             cmd.append("--net=none")
@@ -534,6 +556,17 @@ class FirejailBackend(SandboxBackend):
             cmd.append("--private-tmp")
         for p in whitelisted:
             cmd.append(f"--whitelist={p.as_posix()}")
+        # HOME names a directory firejail does not treat as the home: the scanner is
+        # told its home is there, and its ~/.ssh and ~/.aws would stay readable.
+        # Under /tmp it is already hidden by --private-tmp or by the /tmp whitelists.
+        # A policy path inside it is blacklisted with it, so a tool kept there fails
+        # to start rather than the directory being shown.
+        if (
+            home_variable != home
+            and home_variable != Path("/")
+            and not _is_within(home_variable, tmp_root)
+        ):
+            cmd.append(f"--blacklist={home_variable.as_posix()}")
         # A whitelisted path is mounted read-write whatever --read-only=/ said, so
         # every readable path is made read-only again here, and only then are the
         # writable ones (the results directory, inside the read-only output and

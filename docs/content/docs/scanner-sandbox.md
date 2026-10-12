@@ -544,6 +544,13 @@ everything outside `$HOME` stays visible, `/run` and its sockets included, the
 scanner is started through the same seccomp socket filter as under bwrap. Use bwrap
 when you can.
 
+firejail takes the home directory it hides from your account's passwd entry, not
+from `HOME`. When `HOME` names another directory, ASH decides the whitelists inside
+the home against the passwd entry's home, as firejail applies them, and also
+blacklists the directory `HOME` names, unless it is under `/tmp`, which is already
+private. A tool installed inside that directory then fails to start rather than the
+directory being shown.
+
 firejail also decides for itself whether to build a sandbox at all. When it finds no
 kernel threads among the first ten PIDs, as inside a container that has its own PID
 namespace, it concludes it is already sandboxed and runs the command with none of the

@@ -36,6 +36,16 @@ from automated_security_helper.utils.sandbox.policy import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _home_is_the_passwd_home(monkeypatch):
+    """HOME is the passwd entry's home here, as on most hosts.
+
+    Every test sets HOME to a directory of its own; the case where the two differ
+    is TestFirejailHidesBothHomes, which overrides this.
+    """
+    monkeypatch.setattr(backends_module, "_passwd_home", Path.home, raising=False)
+
+
 @pytest.fixture
 def layout(tmp_path, monkeypatch):
     home = tmp_path / "home"
@@ -888,6 +898,76 @@ class TestProbeScope:
                 assert active.scanner_name == own_name
         finally:
             clear_backend_cache()
+
+
+class TestFirejailHidesBothHomes:
+    """firejail hides the passwd entry's home; HOME's directory needs its own blacklist.
+
+    firejail is setuid and takes the home it makes private, and the one a whitelist
+    inside $HOME applies to, from getpwuid() (init_cfg in firejail's main.c), never
+    from HOME. The plan decided ``--private`` and its whitelists against HOME's
+    directory, so with HOME elsewhere it hid the passwd home by luck (``--private``)
+    or not at all (a whitelist under HOME), and HOME's own directory, where the
+    scanner is told its home is, stayed readable unless it was under /tmp.
+    """
+
+    @pytest.fixture
+    def fake_tmp(self, tmp_path, monkeypatch):
+        """Stand in for /tmp, so no test writes to the real one."""
+        root = tmp_path / "fake-tmp"
+        root.mkdir()
+        monkeypatch.setattr(backends_module, "_TMP_ROOT", root, raising=False)
+        return root
+
+    def _argv(self, layout):
+        backend = FirejailBackend()
+        backend._executable = "/fj"
+        return backend.plan(["/usr/bin/true"], {}, _policy(layout)).argv
+
+    def test_home_is_the_passwd_home(self, layout, fake_tmp):
+        """Unchanged: --private hides the one home, and nothing is blacklisted."""
+        argv = self._argv(layout)
+        assert "--private" in argv
+        assert not [a for a in argv if a.startswith("--blacklist=") and "home" in a]
+
+    def test_home_elsewhere_with_nothing_in_the_passwd_home(
+        self, layout, fake_tmp, tmp_path, monkeypatch
+    ):
+        passwd_home = tmp_path / "passwd-home"
+        passwd_home.mkdir()
+        monkeypatch.setattr(backends_module, "_passwd_home", lambda: passwd_home)
+        argv = self._argv(layout)
+        assert "--private" in argv
+        assert f"--blacklist={_as_argv(layout.home)}" in argv
+
+    def test_home_elsewhere_with_a_tool_in_the_passwd_home(
+        self, layout, fake_tmp, tmp_path, monkeypatch
+    ):
+        """The whitelist applies to the passwd home, so it is decided against that."""
+        passwd_home = tmp_path / "passwd-home"
+        venv_bin = passwd_home / "work" / "venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        monkeypatch.setattr(backends_module, "_passwd_home", lambda: passwd_home)
+        monkeypatch.setenv("PATH", str(venv_bin))
+        argv = self._argv(layout)
+        assert f"--whitelist={_as_argv(venv_bin)}" in argv
+        assert "--private" not in argv
+        assert f"--blacklist={_as_argv(layout.home)}" in argv
+
+    def test_home_elsewhere_under_tmp_needs_no_blacklist(
+        self, layout, fake_tmp, tmp_path, monkeypatch
+    ):
+        """/tmp is already hidden by --private-tmp or by its own whitelists."""
+        home = fake_tmp / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        passwd_home = tmp_path / "passwd-home"
+        passwd_home.mkdir()
+        monkeypatch.setattr(backends_module, "_passwd_home", lambda: passwd_home)
+        argv = self._argv(layout)
+        assert not [a for a in argv if a.startswith("--blacklist=") and "home" in a]
+        assert "--private" in argv
 
 
 class TestWritableWinsOverReadOnly:
