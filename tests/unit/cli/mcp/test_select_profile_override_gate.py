@@ -1182,7 +1182,40 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
         "/scanners/snyk-code/",
         "/scanners/trivy-repo/",
     )
-    covering_override = first_denied_under(section) if plugin_section else covering
+    # An entry earlier in the list can cover the same write: the whole section of
+    # a plugin that sends data off the host comes after its options, and an op
+    # writing scan_settings writes the plugins_used and filters_used under it.
+    # The first entry that covers the write is the one named.
+    from automated_security_helper.config.runtime_patch import (
+        _denied_path_reason,
+        known_plugin_keys,
+    )
+
+    def first_covering(written: str, fallback: str) -> str:
+        return next(
+            (
+                denied
+                for denied in RuntimeOverridesConfig().denied_paths
+                if _denied_path_reason(denied, written, known_plugin_keys(None))
+                is not None
+            ),
+            fallback,
+        )
+
+    covering = first_covering(patch_op["path"], covering)
+    # The override's patch is the diff against the restated profile, which can
+    # write below the case's field (scan_settings' plugins_used, say): the entry
+    # named is the first that covers the write the refusal quotes.
+    import re
+
+    quoted = re.search(r"'path': '([^']+)'", overridden["error"])
+    covering_override = (
+        first_denied_under(section)
+        if plugin_section
+        else first_covering(quoted.group(1), covering)
+        if quoted
+        else covering
+    )
     assert f"entry {covering!r}" in patched["error"], patched["error"]
     assert f"entry {covering_override!r}" in overridden["error"], overridden["error"]
     _assert_unbound("patch")
@@ -1434,11 +1467,15 @@ def test_a_profile_holding_an_earlier_default_list_gets_todays_denials(
 
 
 def test_a_replacing_list_is_used_as_written(tmp_path: Path) -> None:
-    """Positive control: with replace_default_denied_paths, a dropped default applies no more."""
+    """Positive control: with replace_default_denied_paths, a dropped default applies no more.
+
+    A local scanner's option: a plugin that sends data off the host is denied
+    whole whatever the list (ALWAYS_DENIED_PATHS).
+    """
     edited = [
         entry
         for entry in RuntimeOverridesConfig().denied_paths
-        if entry != "/scanners/opengrep/options/exclude_rule"
+        if entry != "/scanners/bandit/options/confidence_level"
     ]
     document = _profile(allowed_paths=["/**"], denied_paths=edited)
     document["global_settings"]["mcp"]["runtime_overrides"][
@@ -1451,8 +1488,8 @@ def test_a_replacing_list_is_used_as_written(tmp_path: Path) -> None:
         patch_ops=[
             {
                 "op": "add",
-                "path": "/scanners/opengrep/options/exclude_rule",
-                "value": ["some.rule.id"],
+                "path": "/scanners/bandit/options/confidence_level",
+                "value": "high",
             }
         ],
         session_id="patch",

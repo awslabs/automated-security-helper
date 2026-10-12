@@ -196,10 +196,15 @@ def test_no_profile_lets_a_client_configure_an_off_host_plugin(plugin):
         (f"/{section}/{name}/enabled", False),
         (f"/{section}/{name}/options/anything", "else"),
     ):
+        ops = [{"op": "add", "path": path, "value": value}]
+        if section == "reporters" and value is False:
+            # Asks for nothing beyond the profile, so it is not refused, and it
+            # does not turn the reporter off either: its enabled is taken from
+            # the registered profile (runtime_patch._turns_an_off_host_reporter_off).
+            check_runtime_ops(ops, allowlist=policy)
+            continue
         with pytest.raises(RuntimePatchDeniedError):
-            check_runtime_ops(
-                [{"op": "add", "path": path, "value": value}], allowlist=policy
-            )
+            check_runtime_ops(ops, allowlist=policy)
 
 
 def test_control_a_local_plugin_stays_tunable():

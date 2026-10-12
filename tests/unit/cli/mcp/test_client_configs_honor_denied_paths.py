@@ -1018,9 +1018,12 @@ def test_the_check_reads_what_resolution_parsed_not_the_file_again(_server) -> N
     upload = source / "ash.yaml"
     real = rc.resolve_config_document
 
-    def read_then_swap(*args: Any, **kwargs: Any) -> Any:
-        document = real(*args, **kwargs)
-        upload.write_text("project_name: benign\n", encoding="utf-8")
+    def read_then_swap(path: Any, *args: Any, **kwargs: Any) -> Any:
+        document = real(path, *args, **kwargs)
+        # Once the upload itself was read: resolution reads the server's own
+        # ASH_CONFIG too, and may read it first.
+        if Path(path).resolve() == upload.resolve():
+            upload.write_text("project_name: benign\n", encoding="utf-8")
         return document
 
     with patch.object(rc, "resolve_config_document", read_then_swap):

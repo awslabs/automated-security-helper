@@ -1275,14 +1275,16 @@ def _spellings(key: str) -> List[str]:
 
 
 # (denial, section, field written below the plugin's section, plugin keys the
-# glob covers, plugin keys it does not)
+# glob covers, plugin keys it does not). The keys it does not cover are local
+# plugins: a plugin that sends data off the host is denied whole whatever the
+# list (ALWAYS_DENIED_PATHS), so it would be refused under any glob.
 _GLOB_DENIALS = [
     (
         "/scanners/trivy-*/options/ignore_file",
         "scanners",
         "options/ignore_file",
         ["trivy-repo"],
-        ["bandit", "ferret-scan", "detect-secrets"],
+        ["bandit", "ferret-scan", "grype"],
     ),
     (
         "/scanners/trivy?repo/options/ignore_file",
@@ -1296,14 +1298,14 @@ _GLOB_DENIALS = [
         "reporters",
         "options/aws_region",
         ["bedrock-summary-reporter"],
-        ["csv", "cloudwatch-logs", "sarif"],
+        ["csv", "gitlab-sast", "sarif"],
     ),
     (
         "/reporters/bedrock*/options/aws_*",
         "reporters",
         "options/aws_region",
         ["bedrock-summary-reporter"],
-        ["csv", "cloudwatch-logs"],
+        ["csv", "gitlab-sast"],
     ),
 ]
 
@@ -1373,17 +1375,19 @@ class TestGlobPluginDenials:
                 )
 
     def test_a_value_pattern_bound_through_a_glob_covers_every_spelling(self) -> None:
+        # A local scanner: one that sends data off the host is denied whole by
+        # ALWAYS_DENIED_PATHS before any value pattern is read.
         allowlist = RuntimeOverridesConfig(
             enabled=True,
             allowed_paths=["/**"],
             denied_paths=[],
-            denied_value_patterns={"/scanners/trivy-*/options/ignore_file": r"."},
+            denied_value_patterns={"/scanners/cdk-*/options/nag_packs": r"."},
         )
         ops = [
             {
                 "op": "add",
-                "path": "/scanners/TrivyRepo",
-                "value": {"options": {"ignore_file": "standin.txt"}},
+                "path": "/scanners/CdkNag",
+                "value": {"options": {"nag_packs": "standin"}},
             }
         ]
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
@@ -1411,6 +1415,7 @@ class TestGlobDenialsNameKnownPlugins:
     ) -> None:
         import fnmatch
 
+        from automated_security_helper.config.ash_config import ALWAYS_DENIED_PATHS
         from automated_security_helper.config.runtime_patch import known_plugin_keys
 
         allowlist = RuntimeOverridesConfig(
@@ -1423,8 +1428,16 @@ class TestGlobDenialsNameKnownPlugins:
         for key in keys:
             ops = [_write(section, key, "options/field")]
             folded = key.replace("-", "_")
-            if fnmatch.fnmatchcase(key, glob) or fnmatch.fnmatchcase(
-                folded, glob.replace("-", "_")
+            # A plugin that sends data off the host is denied whole whatever the
+            # list, so it is refused whether or not the glob matches it.
+            always = any(
+                f"/{section}/{spelled}/**" in ALWAYS_DENIED_PATHS
+                for spelled in (key, key.replace("_", "-"))
+            )
+            if (
+                always
+                or fnmatch.fnmatchcase(key, glob)
+                or fnmatch.fnmatchcase(folded, glob.replace("-", "_"))
             ):
                 with pytest.raises(RuntimePatchDeniedError):
                     check_runtime_ops(ops, allowlist=allowlist)
