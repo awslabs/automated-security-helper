@@ -204,6 +204,7 @@ def read_config_document(
     log_failure: bool = True,
     refuse_env: Optional[RefuseEnv] = None,
     anchor_relative_paths: Optional[AnchorPaths] = None,
+    unquoted: bool = False,
 ) -> ResolvedConfigDocument:
     """``resolve_config_document``, refusing a config file that does not load.
 
@@ -216,6 +217,12 @@ def read_config_document(
     ever replaced by the default config, which would scan with that file's
     suppressions, ignore paths and settings switched off and still report
     success.
+
+    A parser's message can quote the line it stopped at. For a file an MCP
+    client delivered (by any name on its way, ``_is_a_client_file``) or one the
+    caller marks ``unquoted`` (a config a client named), that is text the client
+    may not have written, so the error and the log line give only the parser's
+    error type and position (``_unquoted_load_error``).
 
     ``log_failure`` False leaves out the "Failed to load configuration file" log
     line, for a caller that reads the file ahead of the resolution that reports
@@ -234,6 +241,11 @@ def read_config_document(
     except (OSError, UnicodeDecodeError, yaml.YAMLError, json.JSONDecodeError) as e:
         # json.JSONDecodeError and UnicodeDecodeError are ValueErrors, but a bare
         # ValueError is not caught: pydantic's ValidationError is one too.
+        if not isinstance(e, OSError) and (unquoted or _is_a_client_file(path)):
+            problem = _unquoted_load_error(path, e)
+            if log_failure:
+                ASH_LOGGER.error(f"Failed to load configuration file: {problem}")
+            raise ASHConfigSourceError(problem) from None
         if log_failure:
             ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
         verb = "read" if isinstance(e, OSError) else "parse"
@@ -1554,6 +1566,7 @@ def _resolve_config(
                 permit_base=permit_base,
                 refuse_env=refuse_env,
                 anchor_relative_paths=anchor_paths,
+                unquoted=bool(untrusted_config),
             )
             data = document.data
             if overlay is not None and isinstance(data, dict):

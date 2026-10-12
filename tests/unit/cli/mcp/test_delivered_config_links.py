@@ -409,27 +409,32 @@ def test_a_linked_file_that_is_not_a_config_is_not_quoted(_server) -> None:
 
 @pytest.mark.usefixtures("host_set_aside")
 def test_a_linked_file_that_does_not_parse_is_not_quoted(_server) -> None:
-    """The parser's message quotes the line it stopped at; the warning does not."""
+    """The parser's message quotes the line it stopped at; the refusal does not."""
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
+
     source = _linked_tree(_server, NOT_YAML)
 
-    config = _scan_resolution(source)
+    outcome = _scan_resolution(source)
 
-    assert isinstance(config, AshConfig), config
-    warnings = " ".join(config._resolution_warnings)
-    assert "could not be parsed" in warnings, warnings
-    assert ".ash.yaml" in warnings
-    assert YAML_CANARY not in warnings
+    assert isinstance(outcome, ASHConfigSourceError), outcome
+    assert "could not be parsed" in str(outcome), outcome
+    assert ".ash.yaml" in str(outcome)
+    assert YAML_CANARY not in str(outcome)
+    assert YAML_CANARY not in repr(outcome.args)
+    assert outcome.__cause__ is None
 
 
 @pytest.mark.usefixtures("host_set_aside")
 def test_the_log_line_for_it_does_not_quote_it_either(_server, caplog) -> None:
     from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
     from automated_security_helper.utils.log import ASH_LOGGER
 
     source = _linked_tree(_server, NOT_YAML)
 
     with caplog.at_level(logging.ERROR, logger=ASH_LOGGER.name):
-        resolve_config(source_dir=source)
+        with pytest.raises(ASHConfigSourceError):
+            resolve_config(source_dir=source)
 
     (line,) = [
         r.getMessage() for r in caplog.records if "Failed to load" in r.getMessage()
