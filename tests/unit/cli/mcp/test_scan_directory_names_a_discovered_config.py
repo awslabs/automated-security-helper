@@ -115,6 +115,47 @@ def test_a_config_that_is_a_link_to_itself_is_refused_and_named(target, named):
     assert ".ash.yaml" in result["error"], result
 
 
+UNSET_VARIABLE = "ASH_TEST_UNSET_VARIABLE_5e2b"
+
+
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [
+        pytest.param(
+            ".ash/.ash.yaml",
+            f"project_name: !ENV ${{{UNSET_VARIABLE}}}\n",
+            id="yaml-explicit",
+        ),
+        pytest.param(
+            ".ash.yml", f"project_name: ${{{UNSET_VARIABLE}}}\n", id="yaml-implicit"
+        ),
+        pytest.param(
+            ".ashrc.toml", f'project_name = "${{{UNSET_VARIABLE}}}"\n', id="toml"
+        ),
+        pytest.param(
+            "pyproject.toml",
+            f'[tool.ash]\nproject_name = "${{{UNSET_VARIABLE}}}"\n',
+            id="pyproject",
+        ),
+    ],
+)
+def test_a_discovered_config_reading_an_unset_variable_is_refused_and_named(
+    target, monkeypatch, name, content
+):
+    """A value read from a variable that is not set, with no default, is one the
+    file cannot supply: refused before the scan, naming the file and the variable."""
+    monkeypatch.delenv(UNSET_VARIABLE, raising=False)
+    _write(target / name, content)
+
+    result, started = _scan(target)
+
+    assert started is False, result
+    assert result["success"] is False, result
+    assert Path(name).name in result["error"], result
+    assert UNSET_VARIABLE in result["error"], result
+    assert not (target / ".ash" / "ash_output").exists()
+
+
 def test_a_discovered_pyproject_that_declares_ash_but_does_not_parse(target, caplog):
     """Discovery refuses it, as the scan's own discovery does, naming the file."""
     _write(target / "pyproject.toml", f'[tool.ash]\nproject_name = "{CANARY}\n')
