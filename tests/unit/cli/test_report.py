@@ -281,7 +281,7 @@ def test_a_linked_output_or_reports_directory_is_refused(
     with pytest.raises(typer.Exit) as exited:
         report_command(report_format="text", output_dir=str(output_dir))
 
-    assert exited.value.exit_code == 1
+    assert exited.value.exit_code == 3
     printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list if c.args)
     assert "is a symlink" in printed and "--output-dir" in printed
     plugin.report.assert_not_called()

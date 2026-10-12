@@ -1702,7 +1702,7 @@ class TestMergeCli:
 
         result = self._invoke(args)
 
-        assert result.exit_code == 1, result.output
+        assert result.exit_code == 3, result.output
         output = " ".join(result.output.split())
         assert "is a symlink" in output
         assert "--output-dir" in output

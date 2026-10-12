@@ -635,7 +635,7 @@ This one check is opt-in while the rest are unconditional. The others describe a
 
 An unstamped results file is refused rather than treated as "probably the only shard". A whole unsharded scan and one shard of five are indistinguishable without that record, and guessing would let `ash merge` accept a single scan as a complete merge of a five-way split.
 
-The output directory is checked the way `ash scan` checks it: when it, a directory or file ASH writes in it, or a directory below the current directory on the way to it is a symlink, the merge is refused with exit 1 before anything is written. See [Output directory](concepts.md#output-directory).
+The output directory is checked the way `ash scan` checks it: when it, a directory or file ASH writes in it, or a directory below the current directory on the way to it is a symlink, the merge is refused with exit 3 before anything is written. See [Output directory](concepts.md#output-directory).
 
 The merged output carries no shard provenance of its own; it records `merged_shard_count` and `merged_shard_indices` instead. Copying the base shard's assignment through would make the merged file look like shard 0 of n, so a second `ash merge` over an output directory would accept it and report a whole scan as one fifth of itself.
 
@@ -918,7 +918,7 @@ ash report [options]
 | Option               | Description                       | Default           | Environment Variable |
 |----------------------|-----------------------------------|-------------------|----------------------|
 | `--format`           | Report format to generate         | `markdown`        |                      |
-| `--output-dir`       | Directory containing scan results. Refused, with exit 1, when it, a directory or file ASH writes in it, or a directory below the current directory on the way to it is a symlink; see [Output directory](concepts.md#output-directory). | `.ash/ash_output` | `ASH_OUTPUT_DIR`     |
+| `--output-dir`       | Directory containing scan results. Refused, with exit 3, when it, a directory or file ASH writes in it, or a directory below the current directory on the way to it is a symlink; see [Output directory](concepts.md#output-directory). | `.ash/ash_output` | `ASH_OUTPUT_DIR`     |
 | `--config`, `-c`     | Path to configuration file        | `.ash/.ash.yaml`  | `ASH_CONFIG`         |
 | `--config-overrides` | Override configuration values     |                   |                      |
 | `--log-level`        | Set the log level                 | `INFO`            |                      |

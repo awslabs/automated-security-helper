@@ -66,7 +66,7 @@ def _refused(opts: ScanOptions, capsys: pytest.CaptureFixture) -> bool:
     try:
         _refuse_symlinked_output_dir(opts)
     except SystemExit as exc:
-        assert exc.code == 1
+        assert exc.code == 3
         # rich wraps and colors the message; compare its words.
         words = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out).split())
         assert "is a symlink" in words and "whatever the sandbox mode" in words

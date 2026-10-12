@@ -542,10 +542,10 @@ ASH then logs a warning naming each in-tree tool it uses. A repository's `.ash/.
 
 **Symptom**
 
-The scan exits 1 before any scanner runs, with a message like:
+The scan exits 3 before any scanner runs, with a message like:
 
 ```
-ERROR (1) The output directory /home/me/out is a symlink. ASH does not write to, clear or mount its output directory through a link, whatever the sandbox mode. Pass --output-dir with a directory that is not a link, or replace the link with a directory.
+ERROR (3) The output directory /home/me/out is a symlink. ASH does not write to, clear or mount its output directory through a link, whatever the sandbox mode. Pass --output-dir with a directory that is not a link, or replace the link with a directory.
 ```
 
 The first sentence names the link; it can be a directory on the way to the output directory, a working directory such as `.ash/ash_output/reports`, or a file such as `.ash/ash_output/ash.log`. Over MCP the message ends with a remedy for the MCP caller instead.

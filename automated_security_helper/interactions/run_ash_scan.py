@@ -1513,17 +1513,24 @@ def _scan_config_path(opts: ScanOptions, log_selection: bool = False) -> Optiona
     )
 
 
-class OutputDirRefusedExit(SystemExit):
-    """``sys.exit(1)`` for an output directory ASH will not use, with the reason.
+#: The exit code for an output directory ASH will not use because it, or something
+#: ASH writes below it, is reached through a link: 3, as for container mode's other
+#: unusable inputs, and the same whichever check refuses it (container mode's own
+#: rule, the general check, or the log file's open).
+OUTPUT_DIR_REFUSED_EXIT_CODE = 3
 
-    A ``SystemExit`` with code 1, so the CLI's exit code is what it was. ``found``
-    names the link and ``reason`` adds the command-line remedy; an in-process
-    caller (the MCP scan runner) reports ``found`` with a remedy of its own instead
-    of a bare "exited with code 1".
+
+class OutputDirRefusedExit(SystemExit):
+    """``sys.exit(3)`` for an output directory ASH will not use, with the reason.
+
+    A ``SystemExit`` with OUTPUT_DIR_REFUSED_EXIT_CODE. ``found`` names the link and
+    ``reason`` adds the command-line remedy; an in-process caller (the MCP scan
+    runner) reports ``found`` with a remedy of its own instead of a bare "exited
+    with code 3".
     """
 
     def __init__(self, found: str, reason: str):
-        super().__init__(1)
+        super().__init__(OUTPUT_DIR_REFUSED_EXIT_CODE)
         self.found = found
         self.reason = reason
 
@@ -1544,17 +1551,17 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
     checked by workspace/execution.py before it is created; here a workspace run's
     ``projects`` and spool directories are checked with the rest.
 
-    Container mode first applies its own link rule, with exit 3 as for its other
-    unusable inputs: the output directory is mounted read-write at ``/out``, so the
-    scan inside the container would write wherever a link leads
-    (``container_output_dir_refusal``). The general check then runs as in every
-    other mode, for the paths that rule does not name.
+    Container mode first applies its own link rule: the output directory is mounted
+    read-write at ``/out``, so the scan inside the container would write wherever a
+    link leads (``container_output_dir_refusal``). The general check then runs as
+    in every other mode, for the paths that rule does not name. Either refusal
+    exits OUTPUT_DIR_REFUSED_EXIT_CODE (3).
     """
     if opts.mode == RunMode.container:
         refusal = container_output_dir_refusal(opts.source_dir, opts.output_dir)
         if refusal is not None:
             typer.secho(refusal, fg=typer.colors.RED)
-            sys.exit(3)
+            raise OutputDirRefusedExit(refusal, refusal)
     from automated_security_helper.utils.output_dir_links import (
         OutputDirLinkRefused,
         refuse_linked_output_dir,
@@ -1567,7 +1574,10 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
             workspace=opts.workspace_plan is not None,
         )
     except OutputDirLinkRefused as refusal:
-        print(f"[bold red]ERROR (1) {escape_markup(str(refusal))}[/bold red]")
+        print(
+            f"[bold red]ERROR ({OUTPUT_DIR_REFUSED_EXIT_CODE}) "
+            f"{escape_markup(str(refusal))}[/bold red]"
+        )
         raise OutputDirRefusedExit(refusal.found, str(refusal)) from refusal
 
 
@@ -1581,13 +1591,10 @@ def _setup_logger(opts: ScanOptions):
 
     The log file is opened as ASH's other writes below the output directory are,
     so a symlink at ``ash.log``, or a file another name refers to, stops the scan
-    here with exit 1 rather than being written through.
+    here with exit 3 (OutputDirRefusedExit) rather than being written through.
     """
     from automated_security_helper.utils.log import get_logger
-    from automated_security_helper.utils.sandbox.fs_guard import (
-        OutputHardLinkRefused,
-        OutputLinkRefused,
-    )
+    from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
 
     final_log_level = _resolve_log_level(opts)
     final_logging_level = logging._nameToLevel.get(final_log_level.value, logging.INFO)
@@ -1602,12 +1609,17 @@ def _setup_logger(opts: ScanOptions):
             simple_format=simple_logging,
             truncate_log=opts.existing_results is None,
         )
-    except (OutputLinkRefused, OutputHardLinkRefused) as refused:
-        print(
-            f"[bold red]ERROR (1) {escape_markup(str(refused))}. Remove it, or "
-            "choose an output directory outside the scanned tree.[/bold red]"
+    except OutputDirLinkRefused as refused:
+        # The family's base: a symlink or a file another name refers to.
+        reason = (
+            f"{refused}. Remove it, or choose an output directory outside the "
+            "scanned tree."
         )
-        sys.exit(1)
+        print(
+            f"[bold red]ERROR ({OUTPUT_DIR_REFUSED_EXIT_CODE}) "
+            f"{escape_markup(reason)}[/bold red]"
+        )
+        raise OutputDirRefusedExit(refused.found, reason) from refused
 
 
 # ---------------------------------------------------------------------------

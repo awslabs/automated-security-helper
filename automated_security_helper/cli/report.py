@@ -164,7 +164,8 @@ def report_command(
         refuse_linked_output_dir(Path.cwd(), output_dir_path)
     except OutputDirLinkRefused as refusal:
         print(f"[red]{escape_markup(str(refusal))}[/red]")
-        raise typer.Exit(1)
+        # 3, as a scan exits for the same refusal (OUTPUT_DIR_REFUSED_EXIT_CODE).
+        raise typer.Exit(3)
     results_file_paths = [
         output_dir_path.joinpath(".ash", "ash_output", "ash_aggregated_results.json"),
         output_dir_path.joinpath("ash_output", "ash_aggregated_results.json"),

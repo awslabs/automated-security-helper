@@ -132,7 +132,7 @@
   ASH's own writes below the output directory (`ash.log` and `ash.log.jsonl`, worker
   request files, stream logs, results files, reports, the aggregated results,
   extracted archive members) no longer follow a symlink, with or without a sandbox;
-  a link at `ash.log` stops the scan with exit 1 before it starts. The default
+  a link at `ash.log` stops the scan with exit 3 before it starts. The default
   output directory is inside the scanned tree, so a link committed at one of those
   paths used to redirect the write when the sandbox was off. A link at any
   component of the path now stops the write (`OutputLinkRefused`) and the scanner is
@@ -787,12 +787,14 @@
   `ash-scan-set-files-list.txt`). In workspace mode a link at `projects/` or
   `.workspace-spool` stops the whole run, and a link at a project's
   `projects/<key>`, or in that project's own output tree, fails that project with
-  the reason. The error names the link and says to pass `--output-dir`. This holds
-  in local, container, nix, workspace and MCP scans, and `ash report` and
-  `ash merge` refuse the same links below the current directory. An MCP scan whose
+  the reason. The error names the link and says to pass `--output-dir`, and the exit
+  code is 3, the same whichever check refuses it: container mode's own rule, the
+  general check, or the log file's open. This holds in local, container, nix,
+  workspace and MCP scans, and `ash report` and `ash merge` refuse the same links
+  below the current directory, also with exit 3. An MCP scan whose
   `.ash` or `.ash/ash_output` is a link is refused up front with `error_type`
   `output_dir_not_permitted`; a link at a working directory or a fixed-name file
-  fails the scan with `ASH exited with code 1:`, the reason and a remedy for the MCP
+  fails the scan with `ASH exited with code 3:`, the reason and a remedy for the MCP
   caller. ASH opens the logs, the scan-set lists, the workspace results and the
   reports it writes in place without following a link at their names. Links above
   an output directory outside the scanned tree, such as `/tmp` on macOS, are

@@ -13,7 +13,7 @@ A scan also refuses an output directory reached through a symlink, as `ash scan`
 output to `.ash/ash_output` in the scanned directory. A link at `.ash` or
 `.ash/ash_output` is refused before the scan starts, with `error_type`
 `output_dir_not_permitted`; a link at a directory or file ASH writes there fails the
-scan with `ASH exited with code 1:` and an error that asks for the link to be
+scan with `ASH exited with code 3:` and an error that asks for the link to be
 replaced with a directory. `run_ash_workspace_scan` takes `output_dir`, and its error
 asks for one that is not a link.
 

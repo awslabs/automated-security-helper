@@ -160,5 +160,5 @@ def test_ash_scan_refuses_it_before_writing_with_the_sandbox_off(layout):
     with pytest.raises(SystemExit) as exited:
         _refuse_symlinked_output_dir(_scan_options(tree, tree / ".ash" / "ash_output"))
 
-    assert exited.value.code == 1
+    assert exited.value.code == 3
     assert [p.name for p in host.iterdir()] == ["keep.txt"]

@@ -140,7 +140,7 @@ class TestTheScanCommandsCheck:
             _options(layout, _linked_output(layout), sandbox=sandbox)
         )
 
-        assert exited.code == 1
+        assert exited.code == 3
         assert "out-link is a symlink" in exited.found
         assert "--output-dir" in exited.reason
         assert "--output-dir" in printed

@@ -549,7 +549,7 @@ class TestTheLogFile:
                     handler.close()
             ASH_LOGGER.handlers = handlers
 
-        assert exited.value.code == 1
+        assert exited.value.code == 3
         assert target.read_text() == ORIGINAL
         assert REFUSAL in " ".join(capsys.readouterr().out.split())
 
