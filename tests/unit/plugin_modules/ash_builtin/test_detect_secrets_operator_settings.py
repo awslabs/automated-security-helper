@@ -230,12 +230,27 @@ def _file_entries(module: Path) -> dict:
     }
 
 
-@pytest.mark.parametrize("source", ["repository config", "repository baseline"])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "repository config",
+        "repository baseline",
+        # Each key alone, because each sets settings_from_baseline in its own
+        # branch: a baseline carrying only plugins_used was never judged when
+        # the plugins branch stopped setting it, and the worker imported the file.
+        "repository baseline, plugins only",
+        "repository baseline, filters only",
+    ],
+)
 def test_repository_settings_import_no_file(
     recorder, repo, tmp_path, elsewhere, source
 ):
     module, marker = _host_module(tmp_path)
     entries = _file_entries(module)
+    if source.endswith("plugins only"):
+        entries = {"plugins_used": entries["plugins_used"]}
+    elif source.endswith("filters only"):
+        entries = {"filters_used": entries["filters_used"]}
     if source == "repository config":
         _config(
             repo / ".ash" / ".ash.yaml",
