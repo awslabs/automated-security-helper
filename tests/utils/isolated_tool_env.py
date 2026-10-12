@@ -70,13 +70,24 @@ _TOOL_DIRS = {
 }
 
 
-def isolated_tool_env(root: Path) -> Dict[str, str]:
-    """Variables that keep a subprocess's tools, caches and downloads under *root*."""
-    env: Dict[str, str] = {"UV_OFFLINE": "1"}
+def isolated_tool_dirs(root: Path) -> Dict[str, str]:
+    """The directory variables alone: where tools and installers write, under *root*.
+
+    For a test that runs scanner code in its own process and sets these with
+    ``monkeypatch.setenv``; the proxy and AWS settings of :func:`isolated_tool_env`
+    are for a subprocess.
+    """
+    env: Dict[str, str] = {}
     for name, sub in _TOOL_DIRS.items():
         path = root / sub
         path.mkdir(parents=True, exist_ok=True)
         env[name] = str(path)
+    return env
+
+
+def isolated_tool_env(root: Path) -> Dict[str, str]:
+    """Variables that keep a subprocess's tools, caches and downloads under *root*."""
+    env: Dict[str, str] = {"UV_OFFLINE": "1", **isolated_tool_dirs(root)}
     cache = os.environ.get("UV_CACHE_DIR")
     if not cache:
         cache_dir = root / "uv-cache"

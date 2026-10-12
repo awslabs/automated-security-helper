@@ -32,6 +32,8 @@ is decided by the scan's own plugin modules, which
 tests/unit/cli/mcp/test_list_scanners_scan_selection.py holds.
 """
 
+import pytest
+
 from automated_security_helper.cli.mcp_tools import (
     _VENDORED_SCANNER_PLUGIN_PACKAGES,
     _loaded_scanner_classes,
@@ -42,6 +44,21 @@ from automated_security_helper.plugins.loader import (
     load_additional_plugin_modules,
     load_internal_plugins,
 )
+from tests.utils.isolated_tool_env import isolated_tool_dirs
+
+
+@pytest.fixture(autouse=True)
+def _tool_writes_stay_in_tmp_path(tmp_path, monkeypatch):
+    """Point every directory a scanner probe writes to under the test's tmp_path.
+
+    ``mcp_list_scanners()`` builds each scanner in this process, and building one
+    probes its tool: semgrep writes its settings and version cache, checkov its
+    update cache, and uv its tool directory lock, under the XDG and uv tool
+    directories, which are otherwise the developer's own.
+    """
+    for name, value in isolated_tool_dirs(tmp_path / "tool-dirs").items():
+        monkeypatch.setenv(name, value)
+
 
 VENDORED_SCANNER_NAMES = {"ferret_scan", "snyk_code", "trivy_repo"}
 VENDORED_SCANNER_CLASSES = {"FerretScanScanner", "SnykCodeScanner", "TrivyRepoScanner"}

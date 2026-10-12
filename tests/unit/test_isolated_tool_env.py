@@ -22,6 +22,7 @@ from tests.utils.isolated_tool_env import (
     REFUSED_INSTALLERS,
     REFUSING_PROXY,
     install_refusing_installers,
+    isolated_tool_dirs,
     isolated_tool_env,
 )
 
@@ -54,6 +55,14 @@ def test_every_write_location_is_under_the_root(tmp_path, monkeypatch):
     for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy"):
         assert env[name] == REFUSING_PROXY
     assert env["NO_PROXY"] == "" and env["no_proxy"] == ""
+
+
+def test_the_directory_variables_alone_are_every_write_location(tmp_path):
+    """What an in-process test sets with monkeypatch: each write location, no more."""
+    dirs = isolated_tool_dirs(tmp_path)
+
+    assert sorted(dirs) == sorted(_WRITE_LOCATIONS)
+    assert all(_inside(path, tmp_path) for path in dirs.values()), dirs
 
 
 def test_an_operator_uv_cache_is_reused(tmp_path, monkeypatch):
