@@ -43,6 +43,8 @@ from tests.unit.cli.test_merge import build_shards, write_shards
 
 REFUSED = "zz_other_command_pkg"
 ACCEPTED = "zzother_ash_plugins"
+#: A second accepted package, for an entry that names two.
+ACCEPTED_TOO = "zzother2_ash_plugins"
 #: Inside the namespace, and no package of this name is installed.
 NOT_INSTALLED = "zzother_absent_ash_plugins"
 EXIT_INVALID_CONFIG = 3
@@ -52,7 +54,7 @@ EXIT_INVALID_CONFIG = 3
 def packages(tmp_path, monkeypatch):
     """Both packages importable from outside any scanned tree, forgotten afterwards."""
     site = tmp_path / "site"
-    for name in (REFUSED, ACCEPTED):
+    for name in (REFUSED, ACCEPTED, ACCEPTED_TOO):
         (site / name).mkdir(parents=True)
         (site / name / "__init__.py").write_text("LOADED = True\n", encoding="utf-8")
     monkeypatch.syspath_prepend(str(site))
@@ -76,7 +78,11 @@ def packages(tmp_path, monkeypatch):
     monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
     monkeypatch.setenv("AWS_ENDPOINT_URL", "http://127.0.0.1:9")
     yield site
-    for name in [n for n in sys.modules if n.split(".", 1)[0] in (REFUSED, ACCEPTED)]:
+    for name in [
+        n
+        for n in sys.modules
+        if n.split(".", 1)[0] in (REFUSED, ACCEPTED, ACCEPTED_TOO)
+    ]:
         del sys.modules[name]
 
 
@@ -276,6 +282,31 @@ class TestCommandsExitThree:
         assert result.exit_code == EXIT_INVALID_CONFIG, result.output
         assert REFUSED not in sys.modules
         assert not (tmp_path / "merged" / "ash_aggregated_results.json").exists()
+
+    def test_merge_splits_a_comma_joined_entry_as_a_scan_does(
+        self, packages, tmp_path, monkeypatch
+    ):
+        """Control for the test above: one entry naming two accepted modules."""
+        reporters = MagicMock()
+        reporters.plugin_modules.return_value = []
+        monkeypatch.setattr(
+            "automated_security_helper.cli.merge.ash_plugin_manager", reporters
+        )
+        shards = build_shards(3)
+        for shard in shards:
+            shard.ash_config.ash_plugin_modules = [f"{ACCEPTED}, {ACCEPTED_TOO}"]
+        args = ["merge", "--output-dir", str(tmp_path / "merged")]
+        for path in write_shards(tmp_path / "artifacts", shards):
+            args += ["--results", path]
+
+        result = _invoke(args)
+
+        assert result.exit_code != EXIT_INVALID_CONFIG, (
+            result.output,
+            result.exception,
+        )
+        assert (tmp_path / "merged" / "ash_aggregated_results.json").exists()
+        assert ACCEPTED in sys.modules and ACCEPTED_TOO in sys.modules
 
 
 class TestConfigValidateRefusesWhatAScanRefuses:
