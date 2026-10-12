@@ -79,8 +79,8 @@ holding a ``trivy.yaml`` with ``cache.dir`` (or a ``.grype.yaml`` or
 and ``grype db status`` reported the planted database's time (2099-01-01), so a
 repository scanned with ``cd repo && ash --offline`` could carry a stale database past
 this check. So each probe runs from ``ProbeContext.cwd``, outside the scanned tree, passes
-``content_db_refresh.EMPTY_TOOL_CONFIG`` as its config file (neither tool then looks for
-one), and names ``ProbeContext.cache_dir``, the directory the scanner pointed its scan at,
+``content_db_shared.EMPTY_TOOL_CONFIG`` as its config file, the one the refresh passes
+(neither tool then looks for one), and names ``ProbeContext.cache_dir``, the directory the scanner pointed its scan at,
 with the flag or variable that beats any config file (``--cache-dir``,
 ``GRYPE_DB_CACHE_DIR``).
 """
@@ -116,6 +116,7 @@ from automated_security_helper.utils.content_databases import (
     is_stale,
     parse_timestamp,
 )
+from automated_security_helper.utils.content_db_shared import EMPTY_TOOL_CONFIG
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import spawn_run
 from automated_security_helper.utils.process_env import snapshot_environ
@@ -124,14 +125,6 @@ if TYPE_CHECKING:
     from automated_security_helper.schemas.sarif_schema_model import Notification
 
 STALE_NOTIFICATION_ID = "ASH-CONTENT-DB-STALE"
-
-#: ``content_db_refresh.EMPTY_TOOL_CONFIG``, the empty config file every grype and
-#: trivy command ASH runs is given. The same path, kept here rather than imported:
-#: the markdown, text and flat-json reporters reach this module, and importing
-#: content_db_refresh would put the database updates it runs in their import graph
-#: (tests/unit/config/test_off_host_plugin_modules_from_repo_config.py).
-#: tests/unit/utils/test_content_db_staleness.py checks the two are equal.
-EMPTY_TOOL_CONFIG = Path(__file__).resolve().with_name("empty-tool-config.yaml")
 
 
 class ContentDatabaseAbsent(ValueError):

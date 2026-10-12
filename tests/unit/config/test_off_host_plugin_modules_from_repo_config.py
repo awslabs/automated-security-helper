@@ -495,12 +495,14 @@ def _reached(module: str, repo: Path = REPO) -> Dict[str, Set[str]]:
     """What ``module`` and the modules it reaches use: ``network``, ``processes``
     and ``dynamic`` (an import chosen at run time, or ctypes/cffi).
 
-    Each set holds the names of the modules that use it.
+    Each set holds the names of the modules that use it; ``modules`` holds every
+    module of the package the walk opened.
     """
     found: Dict[str, Set[str]] = {
         "network": set(),
         "processes": set(),
         "dynamic": set(),
+        "modules": set(),
     }
     seen: Set[str] = set()
     pending = [module]
@@ -512,6 +514,7 @@ def _reached(module: str, repo: Path = REPO) -> Dict[str, Set[str]]:
         path = _module_file(name, repo)
         if not path.is_file():
             continue
+        found["modules"].add(name)
         package = name if path.name == "__init__.py" else name.rpartition(".")[0]
         imported, calls = _imports_and_calls(path, package)
         if any(_matches(i, _NETWORK_MODULES) for i in imported):
@@ -659,6 +662,30 @@ def test_the_walk_follows_shared_helpers_and_sees_processes(tmp_path):
     assert paths["network"] == set()
     fetch = _reached("automated_security_helper.plugin_modules.probe.fetch", root)
     assert fetch["network"] == {"automated_security_helper.plugin_modules.probe.fetch"}
+
+
+def test_the_staleness_probes_share_the_refreshs_paths_without_reaching_it():
+    """The reporters reach utils/content_db_staleness, which shares the empty tool
+    config with utils/content_db_refresh through utils/content_db_shared. That
+    module imports the standard library only, so the walk from the probes reaches
+    it and finds nothing to review there, and never reaches the database updates."""
+    shared = "automated_security_helper.utils.content_db_shared"
+    imported, calls = _imports_and_calls(
+        _module_file(shared, REPO), "automated_security_helper.utils"
+    )
+    assert not {
+        name for name in imported if name.startswith("automated_security_helper")
+    }
+
+    assert _reached(shared) == {
+        "network": set(),
+        "processes": set(),
+        "dynamic": set(),
+        "modules": {shared},
+    }
+    probes = _reached("automated_security_helper.utils.content_db_staleness")
+    assert shared in probes["modules"]
+    assert "automated_security_helper.utils.content_db_refresh" not in probes["modules"]
 
 
 # Run in a subprocess: the report() of every built-in reporter outside

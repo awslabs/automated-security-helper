@@ -35,7 +35,8 @@ Isolation
 These commands run outside the sandbox, so nothing from the scanned repository may
 reach them. They run from a working directory outside the scanned tree
 (``config.path_trust.cwd_outside_scanned_tree``, the same rule checkov's scans use),
-with ``EMPTY_TOOL_CONFIG`` as an explicit config file (``-c`` for grype,
+with ``EMPTY_TOOL_CONFIG`` (``utils/content_db_shared.py``, which the staleness
+probes share) as an explicit config file (``-c`` for grype,
 ``--config`` for trivy) so neither tool looks for one in the working directory, the
 home directory or anywhere else, and with the cache directory passed explicitly.
 The environment is the operator's own (``snapshot_environ``), not anything a
@@ -89,6 +90,7 @@ from typing import Any, Dict, List, Mapping, Optional, Set, Tuple, Union
 
 from automated_security_helper.config.path_trust import cwd_outside_scanned_tree
 from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.utils.content_db_shared import EMPTY_TOOL_CONFIG
 from automated_security_helper.utils.file_lock import exclusive_lock
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.scope import outside_scanner_sandbox
@@ -110,19 +112,6 @@ GRYPE_PREPARED_ENV = {
     "GRYPE_DB_VALIDATE_AGE": "false",
     "GRYPE_CHECK_FOR_APP_UPDATE": "false",
 }
-
-#: An empty file, shipped with ASH, passed as the config file of every grype and
-#: trivy command ASH runs on a scan's behalf (the refresh here and the staleness
-#: probes in utils/content_db_staleness.py), so the tool reads no config of its
-#: own finding: not ``trivy.yaml``, ``.grype.yaml`` or ``.grype/config.yaml`` in
-#: its working directory, nor one under the home directory. In ASH's package
-#: because every sandbox backend mounts that read-only (``sandbox.policy
-#: ._ash_paths``) and a probe runs inside the scanner's sandbox, where a file in a
-#: temporary directory would not be visible and one in the results directory
-#: would be writable by the scanner. An empty file rather than trivy's
-#: ``--config ""``, which disables loading only from trivy 0.75.0
-#: (pkg/commands/app.go initConfig; 0.74.0 and earlier fail on it).
-EMPTY_TOOL_CONFIG = Path(__file__).resolve().with_name("empty-tool-config.yaml")
 
 _prepared_lock = threading.Lock()
 _prepared: Set[Tuple[str, str, bool, bool, str]] = set()
