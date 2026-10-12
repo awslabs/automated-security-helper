@@ -761,24 +761,49 @@ def validate_config_chain(
         None if permitted, otherwise an :class:`MCPResourceError`.
     """
 
-    refusal = validate_config_input(config_path, session_id=session_id)
-    if refusal is not None:
-        return refusal
+    return check_config_input(config_path, session_id, source_dir).refusal
+
+
+@dataclass(frozen=True)
+class ConfigInputCheck:
+    """What :func:`check_config_input` found: a refusal, a load error, or neither."""
+
+    refusal: Optional[MCPResourceError] = None
+    load_error: Optional[MCPResourceError] = None
+
+
+def check_config_input(
+    config_path: str | Path,
+    session_id: Optional[str] = None,
+    source_dir: Optional[str | Path] = None,
+) -> ConfigInputCheck:
+    """:func:`validate_config_chain` and :func:`config_load_error`, reading the file once.
+
+    The file goes through :func:`validate_config_input` first and is not read
+    when that refuses it. Otherwise it and its ``extends`` chain are read and
+    validated as the scan reads them (``resolve_config.load_config_file``), under
+    :func:`config_base_gate` and against the confinement root a scan of
+    ``source_dir`` would use. A base outside the grant is a ``refusal``; a file or
+    chain that does not load, or does not validate, is a ``load_error``. Each
+    check used to parse the file on its own, on the event loop every session
+    shares.
+    """
 
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
-        is_regular_file,
-        resolve_config_document,
     )
+    from automated_security_helper.config.resolve_config import load_config_file
     from automated_security_helper.core.exceptions import (
         ASHConfigInputNotPermittedError,
+        ASHConfigValidationError,
     )
 
+    refusal = validate_config_input(config_path, session_id=session_id)
+    if refusal is not None:
+        return ConfigInputCheck(refusal=refusal)
     path = Path(config_path)
-    if not is_regular_file(path):
-        return None
     try:
-        resolve_config_document(
+        load_config_file(
             path,
             confine_to=default_confinement_root(
                 path, Path(source_dir) if source_dir is not None else None
@@ -786,10 +811,37 @@ def validate_config_chain(
             permit_base=config_base_gate(session_id),
         )
     except ASHConfigInputNotPermittedError as exc:
-        return config_chain_refusal(config_path, exc)
-    except Exception as exc:  # noqa: BLE001 -- reported by the caller's own read
-        _logger.debug("MCP sandbox: config chain not resolved here (%s)", exc)
-    return None
+        return ConfigInputCheck(refusal=config_chain_refusal(config_path, exc))
+    except ASHConfigValidationError as exc:
+        return ConfigInputCheck(load_error=_config_load_error(config_path, exc))
+    except BaseException as exc:
+        # As resolve_config refuses it: pydantic-core reports a Rust panic as
+        # pyo3's PanicException, a BaseException, which would otherwise reach
+        # the event loop every session shares. Anything else propagates.
+        if (
+            type(exc).__name__ != "PanicException"
+            or type(exc).__module__ != "pyo3_runtime"
+        ):
+            raise
+        return ConfigInputCheck(
+            load_error=_config_load_error(
+                config_path,
+                f"The configuration could not be resolved: {type(exc).__name__}: {exc}",
+            )
+        )
+    return ConfigInputCheck()
+
+
+def _config_load_error(config_path: object, reason: object) -> MCPResourceError:
+    """The error for a config file at ``config_path`` that does not load."""
+
+    return MCPResourceError(
+        f"Configuration file {config_path} cannot be loaded: {reason}",
+        context={
+            "config_path": str(config_path),
+            "error_category": ErrorCategory.INVALID_FORMAT.value,
+        },
+    )
 
 
 def config_chain_refusal(config_path: object, exc: Exception) -> MCPResourceError:
@@ -834,40 +886,11 @@ def config_load_error(
         source_dir: The scan target the config will be resolved against, if any.
 
     Returns:
-        None if the config loads, otherwise an :class:`MCPResourceError`.
+        None if the config loads and validates, otherwise an
+        :class:`MCPResourceError`.
     """
 
-    from automated_security_helper.config.config_sources import (
-        default_confinement_root,
-    )
-    from automated_security_helper.config.resolve_config import read_config_document
-    from automated_security_helper.core.exceptions import (
-        ASHConfigInputNotPermittedError,
-        ASHConfigValidationError,
-    )
-
-    if validate_config_input(config_path, session_id=session_id) is not None:
-        return None
-    path = Path(config_path)
-    try:
-        read_config_document(
-            path,
-            confine_to=default_confinement_root(
-                path, Path(source_dir) if source_dir is not None else None
-            ),
-            permit_base=config_base_gate(session_id),
-        )
-    except ASHConfigInputNotPermittedError:
-        return None
-    except ASHConfigValidationError as exc:
-        return MCPResourceError(
-            f"Configuration file {config_path} cannot be loaded: {exc}",
-            context={
-                "config_path": str(config_path),
-                "error_category": ErrorCategory.INVALID_FORMAT.value,
-            },
-        )
-    return None
+    return check_config_input(config_path, session_id, source_dir).load_error
 
 
 # ---------------------------------------------------------------------------
@@ -931,7 +954,9 @@ __all__ = [
     "DEFAULT_TRANSPORT",
     "CONFIG_DIR_NAME",
     "SOURCE_DIR_NAME",
+    "ConfigInputCheck",
     "SessionSandbox",
+    "check_config_input",
     "config_base_gate",
     "config_chain_refusal",
     "config_is_client_supplied",

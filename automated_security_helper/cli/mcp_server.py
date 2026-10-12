@@ -57,7 +57,7 @@ from automated_security_helper.cli.mcp.profile_registry import (
     resolve_session_config_path,
 )
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
-from automated_security_helper.cli.mcp.sandbox import validate_config_chain
+from automated_security_helper.cli.mcp.sandbox import check_config_input
 from automated_security_helper.cli.mcp.scan_target import (
     resolve_scan_target,
     validate_output_tree,
@@ -328,6 +328,7 @@ async def run_ash_scan(
         #
         # Nothing is invented for an unbound session: config_path stays None and
         # ASH's own discovery finds an in-tree .ash.yaml as it always has.
+        config_check = None
         if config_path is None:
             config_path = resolve_session_config_path(session_id)
             if config_path is not None:
@@ -340,10 +341,12 @@ async def run_ash_scan(
             # boundary the workspace tools' config inputs get. Without this the
             # scan tool would be the one unconfined config read left. Every base
             # its `extends` chain names is checked the same way, against the scan
-            # target the chain will be resolved for.
-            config_error = validate_config_chain(
+            # target the chain will be resolved for. mcp_scan_directory is handed
+            # the result, so the file is read once.
+            config_check = check_config_input(
                 config_path, session_id=session_id, source_dir=source_dir
             )
+            config_error = config_check.refusal
             if config_error:
                 await ctx.error(str(config_error))
                 return {
@@ -417,6 +420,7 @@ async def run_ash_scan(
             severity_threshold=severity_threshold,
             config_path=config_path,
             session_id=session_id,
+            config_check=config_check,
         )
 
         if not result.get("success", False) or "scan_id" not in result:

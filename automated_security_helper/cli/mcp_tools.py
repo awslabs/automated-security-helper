@@ -47,6 +47,7 @@ from automated_security_helper.utils.output_dir_links import (
 
 if TYPE_CHECKING:
     # Typing only: the runtime import stays local to the tools that need it.
+    from automated_security_helper.cli.mcp.sandbox import ConfigInputCheck
     from automated_security_helper.config.ash_config import AshConfig
 
 # Configure module logger (without affecting global logging)
@@ -150,6 +151,8 @@ async def mcp_scan_directory(
     severity_threshold: str = "MEDIUM",
     config_path: Optional[str] = None,
     session_id: Optional[str] = None,
+    *,
+    config_check: Optional["ConfigInputCheck"] = None,
 ) -> Dict[str, Any]:
     """
     Start a security scan with file-based progress tracking.
@@ -170,6 +173,10 @@ async def mcp_scan_directory(
             dir. Distinct sessions never contend. A caller the server could not
             identify is refused before anything is checked or written: its scan
             would be one it can neither poll nor cancel.
+        config_check: What ``sandbox.check_config_input`` found for
+            ``config_path``, this session and this target, when the caller has
+            already run it (``run_ash_scan`` does, before it acts on the
+            target). The file is then not read again here.
 
     Returns:
         Dictionary with scan ID and status information
@@ -264,10 +271,7 @@ async def mcp_scan_directory(
     # `is not None`: an empty path is a config input too, and is refused here
     # rather than starting a scan that fails on it.
     if config_path is not None:
-        from automated_security_helper.cli.mcp.sandbox import (
-            config_load_error,
-            validate_config_chain,
-        )
+        from automated_security_helper.cli.mcp.sandbox import check_config_input
 
         if not config_path.strip():
             return create_error_response(
@@ -282,11 +286,17 @@ async def mcp_scan_directory(
                 operation="scan_directory",
             )
 
-        chain_error = validate_config_chain(
-            config_path, session_id=session_id, source_dir=resolved_target
+        # One read of the file and its chain answers both checks below: a base
+        # outside the grant (a refusal) and a config that does not load.
+        checked = (
+            config_check
+            if config_check is not None
+            else check_config_input(
+                config_path, session_id=session_id, source_dir=resolved_target
+            )
         )
-        if chain_error is not None:
-            return _config_refusal(chain_error, "scan_directory")
+        if checked.refusal is not None:
+            return _config_refusal(checked.refusal, "scan_directory")
 
         config_error = validate_config_path(config_path)
         if config_error:
@@ -300,14 +310,12 @@ async def mcp_scan_directory(
                 ],
             )
 
-        # Refused here rather than by the scan: a file that does not load would
-        # otherwise start a scan that fails on its first read of the config.
-        load_error = config_load_error(
-            config_path, session_id=session_id, source_dir=resolved_target
-        )
-        if load_error:
+        # Refused here rather than by the scan: a file that does not load, or
+        # does not validate, would otherwise start a scan that fails on its
+        # first read of the config.
+        if checked.load_error:
             return create_error_response(
-                error=load_error,
+                error=checked.load_error,
                 operation="scan_directory",
                 suggestions=[
                     "Fix the error the message names; a syntax error names its line",
