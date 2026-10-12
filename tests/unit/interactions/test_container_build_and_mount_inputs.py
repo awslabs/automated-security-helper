@@ -562,6 +562,53 @@ class TestTheBuildTargetIsTheOneRequested:
             "ARG ASH_BASE_IMAGE\nFROM ${ASH_BASE_IMAGE}\n", encoding="utf-8"
         )
 
+        self._build_and_run(build_target=None, custom_containerfile=str(containerfile))
+
+        builds = [cmd for cmd in commands if _subcommand(cmd) == "build"]
+        assert _flag(builds[0], "--target") == "ci"
+        assert "--target" not in builds[1]
+
+    def test_non_root_with_a_custom_file_that_has_no_such_stage_is_refused(
+        self, commands, tmp_path
+    ):
+        """The custom image is built on ``ci``; asking for ``non-root`` there would
+        give the root image without a word."""
+        containerfile = tmp_path / "Containerfile.custom"
+        containerfile.write_text(
+            "ARG ASH_BASE_IMAGE\nFROM ${ASH_BASE_IMAGE}\n", encoding="utf-8"
+        )
+
+        result = rac.run_ash_container(
+            source_dir="src",
+            output_dir=str(Path("..") / "out"),
+            ash_revision_to_install="v3.7.0",
+            build=True,
+            run=True,
+            build_target=BuildTarget.NON_ROOT,
+            custom_containerfile=str(containerfile),
+        )
+
+        assert result.returncode == 3, result.stderr
+        assert commands == []
+        assert "--custom-containerfile" in result.stderr
+        assert "non-root" in result.stderr
+
+    @pytest.mark.parametrize(
+        "stage_line",
+        [
+            "FROM ${ASH_BASE_IMAGE} AS non-root",
+            "from --platform=linux/amd64 x as NON-ROOT",
+        ],
+    )
+    def test_non_root_with_a_custom_file_that_defines_it_builds_that_stage(
+        self, stage_line, commands, tmp_path
+    ):
+        containerfile = tmp_path / "Containerfile.custom"
+        containerfile.write_text(
+            f"ARG ASH_BASE_IMAGE\nFROM ${{ASH_BASE_IMAGE}} AS tools\n{stage_line}\n",
+            encoding="utf-8",
+        )
+
         self._build_and_run(
             build_target=BuildTarget.NON_ROOT,
             custom_containerfile=str(containerfile),
@@ -569,6 +616,8 @@ class TestTheBuildTargetIsTheOneRequested:
 
         builds = [cmd for cmd in commands if _subcommand(cmd) == "build"]
         assert _flag(builds[0], "--target") == "ci"
+        assert _flag(builds[1], "--target") == "non-root"
+        assert "automated-security-helper:custom" in _only(commands, "run")
 
     @pytest.mark.parametrize(
         ("name", "value", "target_args"),

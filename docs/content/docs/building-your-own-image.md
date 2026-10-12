@@ -54,7 +54,8 @@ on Windows anyway. Running in CI does not change the default: `CI`, `IsCI`, `ISC
 `CODEBUILD_BUILD_ID` play no part, and an explicit `--build-target` always wins. The
 stage name is read in any case, as the build reads it: `NON-ROOT` is `non-root`, and is
 built, tagged and checked as `non-root`. `--custom-containerfile` builds on
-`ci` (see [Extending the image](#extending-the-image)).
+`ci`; with it, `--build-target non-root` names the custom file's own `non-root` stage
+(see [Extending the image](#extending-the-image)).
 
 The `non-root` stage creates its user with the UID and GID of the account running ASH,
 or with `--container-uid` and `--container-gid`. A UID of 0 is root and cannot be that
@@ -217,9 +218,14 @@ passed in as the `ASH_BASE_IMAGE` build argument:
 ash build-image --build-target ci --custom-containerfile ./Dockerfile.internal
 ```
 
-Supplying a custom containerfile forces the `ci` build target, so the run-as-non-root
-configuration is not applied. Securing the final image is then yours to do — set a
-non-root `USER` in your own Dockerfile if you need one.
+Supplying a custom containerfile builds ASH's image at the `ci` target, so the
+run-as-non-root configuration is not applied. Securing the final image is then yours to
+do — set a non-root `USER` in your own Dockerfile if you need one. To build that, give
+your Dockerfile a stage named `non-root` (`FROM ${ASH_BASE_IMAGE} AS non-root`, followed
+by the `USER` it should run as) and pass `--build-target non-root`: ASH builds its own
+image at `ci` and your file at its `non-root` stage. `--build-target non-root` with a
+custom Dockerfile that has no such stage is refused with exit 3 before anything is
+built, since the image would otherwise run as root without a word.
 
 ## Third-party license files in the image
 

@@ -859,6 +859,50 @@ def _build_image(
         print(f"Build completed with return code: {result.returncode}")
 
 
+#: A ``FROM <image> AS <name>`` line, with any ``--platform``-style flags.
+_FROM_AS_STAGE = re.compile(
+    r"^[ \t]*FROM[ \t]+(?:--\S+[ \t]+)*\S+[ \t]+AS[ \t]+([A-Za-z0-9_.-]+)[ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _custom_containerfile_stage(
+    build_target: BuildTarget | str | None, custom_containerfile: str | None
+) -> str | None:
+    """The stage of ``--custom-containerfile`` to build, or None for the whole file.
+
+    The custom file is built on the ``ci`` image. ``--build-target non-root`` with it
+    names the custom file's own ``non-root`` stage, which then has to exist
+    (:func:`_custom_containerfile_stage_refusal`).
+    """
+    if custom_containerfile is None or build_target is None:
+        return None
+    name = build_target.value if hasattr(build_target, "value") else str(build_target)
+    return BuildTarget.NON_ROOT.value if name.lower() == "non-root" else None
+
+
+def _custom_containerfile_stage_refusal(
+    build_target: BuildTarget | str | None, custom_containerfile: str | None
+) -> str | None:
+    """Why ``--build-target non-root`` cannot be built from this custom file, or None."""
+    stage = _custom_containerfile_stage(build_target, custom_containerfile)
+    if stage is None:
+        return None
+    try:
+        text = Path(custom_containerfile).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None  # the build reports a file it cannot read
+    if any(name.lower() == stage for name in _FROM_AS_STAGE.findall(text)):
+        return None
+    return (
+        f"--build-target non-root was given with --custom-containerfile "
+        f"{custom_containerfile}, which defines no stage named non-root. The custom "
+        "image is built on the ci stage, which runs as root, so it would not be the "
+        "non-root image asked for. Leave out --build-target to build the custom file "
+        "as it is, on ci, or give it a stage named non-root."
+    )
+
+
 def _build_custom_image(
     oci_command_prefix: List[str],
     resolved_oci_runner: str,
@@ -866,12 +910,14 @@ def _build_custom_image(
     custom_containerfile: str,
     quiet: bool,
     debug: bool,
+    target: str | None = None,
 ) -> str:
     """Build a custom image layered on top of the base ASH image.
 
     Args:
         base_image_name: Name of the base image to build on top of.
         custom_containerfile: Path to the custom Containerfile/Dockerfile.
+        target: The custom file's stage to build, or None for the whole file.
 
     Returns:
         The image name of the custom image.
@@ -896,6 +942,8 @@ def _build_custom_image(
             f"ASH_BASE_IMAGE={base_image_name}",
         ]
     )
+    if target is not None:
+        custom_build_cmd.extend(["--target", target])
     if quiet:
         custom_build_cmd.append("-q")
     custom_build_cmd.append(Path(custom_containerfile).parent.as_posix())
@@ -1124,8 +1172,10 @@ def container_build_refusal(
     """Why the image cannot be built or run with these inputs: (exit code, message).
 
     A ``--container-uid`` or ``--container-gid`` that is not 0-9 digits (exit 3), an
-    ``--ash-revision-to-install`` the build cannot take (exit 1), and, when building
-    the ``non-root`` stage, a UID or GID of 0 (exit 3, see
+    ``--ash-revision-to-install`` the build cannot take (exit 1), and, when building,
+    ``--build-target non-root`` with a ``--custom-containerfile`` that has no such
+    stage (exit 3, :func:`_custom_containerfile_stage_refusal`) or a ``non-root``
+    stage with a UID or GID of 0 (exit 3, see
     :func:`_non_root_stage_uid_refusal`). ``run_ash_container`` checks these before
     anything else; ``run_ash_scan`` checks them before it clears the previous run's
     output, so a refused scan leaves that output as it was. None when the inputs
@@ -1143,6 +1193,11 @@ def container_build_refusal(
             return 1, _invalid_revision_message(ash_revision_to_install)
 
     if build:
+        custom_refusal = _custom_containerfile_stage_refusal(
+            build_target, custom_containerfile
+        )
+        if custom_refusal is not None:
+            return 3, custom_refusal
         refusal = _non_root_stage_uid_refusal(
             _resolve_build_target(build_target, custom_containerfile),
             container_uid if container_uid is not None else str(host_uid),
@@ -1951,6 +2006,9 @@ def run_ash_container(
                     custom_containerfile=custom_containerfile,
                     quiet=quiet,
                     debug=debug,
+                    target=_custom_containerfile_stage(
+                        build_target, custom_containerfile
+                    ),
                 )
 
         except Exception as e:
