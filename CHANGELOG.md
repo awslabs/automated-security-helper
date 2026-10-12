@@ -2379,6 +2379,15 @@
 
 ### Fixes
 
+- **A plugin module that failed to import in any shard or workspace project fails
+  the combined results too.** `metadata.plugin_load_errors` lists the plugin modules
+  a scan could not import, and the completeness gate
+  (`.github/scripts/assert_scanners_completed.py`) fails a results file that lists
+  any. `ash merge` took the field from the lowest-indexed shard only, and the
+  workspace results file wrote none, so a module lost in shard 1, or in a
+  workspace's second project, left a combined file the gate passed. Both now list
+  every shard's or project's modules: once when they agree on the error, and with
+  each distinct error, joined by `; `, when they don't.
 - **A scanner the run does not select is not resolved against the package index.**
   The scan phase builds every registered scanner to learn its name, and bandit,
   checkov and semgrep ran `uv tool run --from <spec> <tool> --version` while being

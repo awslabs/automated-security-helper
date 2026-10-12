@@ -254,6 +254,7 @@ from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import (
     PluginModuleError,
+    combined_plugin_load_errors,
     load_plugins,
     refuse_plugin_modules_outside_namespace,
 )
@@ -959,7 +960,9 @@ def merge_shard_results(
     shard, and taking them from the *lowest index* rather than from the first
     ``--results`` argument makes the merged report independent of the order the
     operator listed the shards in. ``converter_results`` rows are combined across
-    shards instead; see :func:`_merge_converter_rows`.
+    shards instead; see :func:`_merge_converter_rows`. So is
+    ``metadata.plugin_load_errors``, every shard's modules that failed to import
+    (``plugins.loader.combined_plugin_load_errors``).
 
     Args:
         loaded: (path, results) pairs, in any order.
@@ -1038,6 +1041,12 @@ def merge_shard_results(
 
     _adopt_owning_shard_results(merged, shards, owner_by_scanner)
     _merge_scan_set_records(merged, shards)
+    # Every shard's, not the base shard's: each shard imports the plugin modules
+    # itself, and the completeness gate reads a module missing from this record
+    # as one that loaded.
+    merged.metadata.plugin_load_errors = combined_plugin_load_errors(
+        shard.metadata.plugin_load_errors for _, shard, _ in shards
+    )
     _merge_timing(merged, shards)
     _record_merge_provenance(merged, shards)
 

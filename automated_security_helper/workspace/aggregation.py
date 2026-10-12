@@ -960,6 +960,7 @@ class WorkspaceAggregator:
         project_timeout: Optional[float] = None,
         project_name: Optional[str] = None,
         secret_value_shapes: Optional[Sequence[Any]] = None,
+        plugin_load_errors: Optional[Mapping[str, str]] = None,
     ) -> Path:
         """Stream the unified results file and return its path.
 
@@ -971,6 +972,12 @@ class WorkspaceAggregator:
         ``secret_value_shapes`` are the shapes of the values every project's
         secret findings exposed (``AshAggregatedResults.secret_value_shapes``),
         written only when there are any, as the model writes them.
+
+        ``plugin_load_errors`` are the plugin modules any project's scan could not
+        import (``plugins.loader.combined_plugin_load_errors`` of each project's
+        ``metadata.plugin_load_errors``), written to ``metadata`` when there are
+        any. The completeness gate reads a module missing from it as one that
+        loaded.
         """
         payload = self.results_payload(
             exit_code,
@@ -998,6 +1005,8 @@ class WorkspaceAggregator:
         ignore_file_exclusions = workspace_ignore_file_exclusions(payload.projects)
         if ignore_file_exclusions is not None:
             metadata["ignore_file_exclusions"] = ignore_file_exclusions
+        if plugin_load_errors:
+            metadata["plugin_load_errors"] = dict(plugin_load_errors)
 
         header: Dict[str, Any] = {
             "name": f"ASH Workspace Scan: {project_name or Path(self.plan.workspace_root).name}",

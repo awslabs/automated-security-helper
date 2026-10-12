@@ -458,6 +458,9 @@ class _ProjectRun:
     #: The raw values the project's own masking found (``exposed_secret_values``),
     #: so every other project's outputs can be masked with them too.
     secret_values: Set[str] = field(default_factory=set)
+    #: The project's ``metadata.plugin_load_errors``, for the workspace results'
+    #: own: the modules its scan could not import, with the error.
+    plugin_load_errors: Dict[str, str] = field(default_factory=dict)
 
 
 def workspace_plugin_modules(
@@ -987,7 +990,13 @@ def _scan_one_project(
         ignore_file_exclusions=_ignore_file_exclusions_of(results),
     )
     return _ProjectRun(
-        outcome=outcome, run=run, secret_values=exposed_secret_values(results)
+        outcome=outcome,
+        run=run,
+        secret_values=exposed_secret_values(results),
+        plugin_load_errors=dict(
+            getattr(getattr(results, "metadata", None), "plugin_load_errors", None)
+            or {}
+        ),
     )
 
 
@@ -1697,12 +1706,20 @@ def execute_workspace(
 
     exit_code = int(workspace_exit_code(entry.outcome for entry in collected.values()))
     wall_clock = time.monotonic() - started
+    from automated_security_helper.plugins.loader import combined_plugin_load_errors
+
     results_path = aggregator.write(
         exit_code=exit_code,
         wall_clock_seconds=wall_clock,
         max_parallel_projects=configured_bound,
         project_timeout=settings.project_timeout,
         secret_value_shapes=shapes,
+        # In workspace-file order, as the projects are written.
+        plugin_load_errors=combined_plugin_load_errors(
+            collected[project.key].plugin_load_errors
+            for project in plan.projects
+            if project.key in collected
+        ),
     )
     payload = aggregator.results_payload(
         exit_code,

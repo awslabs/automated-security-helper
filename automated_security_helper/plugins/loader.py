@@ -2,7 +2,7 @@
 
 import importlib
 import sys
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
 
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.plugins import ash_plugin_manager
@@ -33,6 +33,26 @@ def plugin_load_errors() -> Dict[str, str]:
     A copy, so a caller inspecting the failures cannot clear them for the next one.
     """
     return dict(_PLUGIN_LOAD_ERRORS)
+
+
+def combined_plugin_load_errors(
+    records: Iterable[Optional[Mapping[str, str]]],
+) -> Dict[str, str]:
+    """Several runs' ``metadata.plugin_load_errors`` as one map.
+
+    For the results that combine runs: ``ash merge`` (each shard's) and a
+    workspace (each project's). Every module any run failed to import is kept,
+    in the order *records* gives the runs. A module that failed with the same
+    error in several runs is listed once; one whose errors differ keeps each
+    distinct one, joined with ``"; "`` in that order, so no run's reason is lost.
+    """
+    errors: Dict[str, List[str]] = {}
+    for record in records:
+        for module_path, error in (record or {}).items():
+            seen = errors.setdefault(module_path, [])
+            if error not in seen:
+                seen.append(error)
+    return {module_path: "; ".join(seen) for module_path, seen in errors.items()}
 
 
 def load_internal_plugins():
