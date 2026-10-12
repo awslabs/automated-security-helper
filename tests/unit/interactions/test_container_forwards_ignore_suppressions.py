@@ -95,7 +95,9 @@ def container_stubs(monkeypatch, tmp_path):
     monkeypatch.setattr(
         rac,
         "_execute_container",
-        lambda cmd, debug=False: create_completed_process(args=cmd, returncode=0),
+        lambda cmd, debug=False, env=None: create_completed_process(
+            args=cmd, returncode=0
+        ),
     )
     for name in ("CI", "IsCI", "ISCI", "CODEBUILD_BUILD_ID", "ASH_IMAGE_NAME"):
         monkeypatch.delenv(name, raising=False)
