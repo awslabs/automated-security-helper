@@ -125,7 +125,11 @@ it needs.
   directory holding one is never mounted: a tool in `$WORK/bin` with
   `HOME=$WORK/home` gets `$WORK/bin`, and nothing of `$WORK` when `$WORK/bin` is a
   link to `$WORK` itself. When `HOME` names a directory other than your account's
-  passwd entry's home, both directories are screened this way.
+  passwd entry's home, both directories are screened this way. A link at the top of
+  a home that names a directory elsewhere, such as `~/.local` kept on another disk,
+  counts as part of that home: the directory it names is screened as if it were
+  directly in the home, so its `share` and keyrings are not mounted. A link to a
+  system directory (`~/u` linked to `/usr`) changes nothing.
 - A program that one of ASH's own checks has a spawn's tool start gets the grants
   that tool gets, through the same rules: its directory and its install prefix. The
   check of a pre-installed scanner runs `uv`, which starts the scanner's Python to

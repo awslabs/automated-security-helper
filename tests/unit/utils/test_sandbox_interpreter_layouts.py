@@ -703,3 +703,86 @@ def test_a_real_bin_directory_in_a_home_is_still_mounted(
 
     assert Path(os.path.realpath(home / "bin")) in _real_grants(policy)
     _assert_no_home_mounted(world, policy)
+
+
+# A link at the top of a home whose target is elsewhere, such as ~/.local kept on
+# another disk, names a directory of that home: its target counts as directly in
+# the home for every home check, next to the checks of the real path.
+
+
+def _local_kept_elsewhere(world, which_home):
+    """~/.local -> /persist/me/.local, with the keyrings in its share directory."""
+    home = _in_which_home(world, which_home)
+    elsewhere = world.root / "persist" / "me" / ".local"
+    (elsewhere / "share" / "keyrings").mkdir(parents=True)
+    (elsewhere / "share" / "keyrings" / "login.keyring").write_text("x")
+    _link(home / ".local", elsewhere)
+    return home, elsewhere
+
+
+@pytest.mark.parametrize("which_home", ["HOME", "passwd home"])
+def test_ashs_python_in_a_dot_local_kept_elsewhere_is_refused(
+    world, monkeypatch, which_home
+):
+    """A Python built with --prefix=$HOME/.local, where ~/.local is a link out."""
+    home, elsewhere = _local_kept_elsewhere(world, which_home)
+    _python(elsewhere / "bin" / "python3.12")
+
+    with pytest.raises(SandboxUnavailable) as refused:
+        _build(
+            world, monkeypatch, home / ".local" / "bin" / "python3.12", home / ".local"
+        )
+
+    assert repr((home / ".local").as_posix()) in str(refused.value)
+
+
+@pytest.mark.parametrize("which_home", ["HOME", "passwd home"])
+def test_a_tool_in_a_dot_local_kept_elsewhere_mounts_none_of_its_share(
+    world, monkeypatch, which_home
+):
+    """A tool in ~/.local/bin, where ~/.local is a link out: its bin directory is
+    mounted, its prefix ~/.local, holding the keyrings, is not."""
+    home, elsewhere = _local_kept_elsewhere(world, which_home)
+    _python(elsewhere / "bin" / "tool")
+    usr, system_python = _system_python(world)
+
+    policy = _build(
+        world, monkeypatch, system_python, usr, argv0=home / ".local" / "bin" / "tool"
+    )
+
+    granted = _real_grants(policy)
+    assert Path(os.path.realpath(elsewhere / "bin")) in granted
+    assert Path(os.path.realpath(elsewhere)) not in granted
+    assert not _covered(policy, elsewhere / "share" / "keyrings" / "login.keyring")
+
+
+@pytest.mark.parametrize("which_home", ["HOME", "passwd home"])
+def test_a_path_entry_in_a_dot_local_kept_elsewhere_is_skipped(
+    world, monkeypatch, which_home
+):
+    """~/.local/share/tool on PATH, where ~/.local is a link out, is a directory in
+    a home that is no bin directory."""
+    home, elsewhere = _local_kept_elsewhere(world, which_home)
+    (elsewhere / "share" / "tool").mkdir()
+    monkeypatch.setenv("PATH", str(home / ".local" / "share" / "tool"))
+    usr, system_python = _system_python(world)
+
+    policy = _build(world, monkeypatch, system_python, usr)
+
+    assert Path(os.path.realpath(elsewhere / "share" / "tool")) not in _real_grants(
+        policy
+    )
+
+
+def test_a_top_level_link_to_a_system_directory_changes_nothing(world, monkeypatch):
+    """Control: ~/u -> /usr names no directory of the user's, so an interpreter
+    installed under /usr is mounted as before. /usr/bin/env stands in for it: only
+    its path is read."""
+    _link(world.home / "u", "/usr")
+
+    try:
+        policy = _build(world, monkeypatch, "/usr/bin/env", Path("/usr"))
+    except SandboxUnavailable as refused:
+        pytest.fail(f"refused: {refused}")
+
+    assert Path(os.path.realpath("/usr")) in _real_grants(policy)

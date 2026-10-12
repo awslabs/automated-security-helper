@@ -426,20 +426,25 @@ def _inside(path: Path, parent: Path) -> bool:
         return False
 
 
-def _a_bin_directory(path: Path, homes: Sequence[Path]) -> bool:
+def _a_bin_directory(
+    path: Path, homes: Sequence[Path], links: Optional[Sequence[Path]] = None
+) -> bool:
     """Whether ``path`` really is a bin, sbin or Scripts directory.
 
     Judged on the directory it resolves to, not on its spelling: ~/bin -> ~/.aws is
     spelled bin and is a configuration directory, and $WORK/bin -> . with
     HOME=$WORK/home is spelled bin and holds a home. A filesystem root, a home and a
-    directory holding one are never a bin directory, whatever their name.
+    directory holding one are never a bin directory, whatever their name, and nor is
+    a directory holding one a link at the top of a home names (_home_link_targets).
     """
     real = Path(os.path.realpath(path))
     if real.name not in _BIN_DIR_NAMES:
         return False
+    links = _home_link_targets(homes) if links is None else links
     return not (
         real == Path(real.anchor)
         or any(real == home or real in home.parents for home in homes)
+        or any(real in link.parents for link in links)
     )
 
 
@@ -504,6 +509,8 @@ def _path_directories(trees: Sequence[Path] = ()) -> List[Path]:
     from automated_security_helper.utils.scanned_tree import is_inside_tree
 
     homes = _homes()
+    # A directory a link at the top of a home names counts as one in that home.
+    links = _home_link_targets(homes)
     entries = []
     for raw in os.environ.get("PATH", "").split(os.pathsep):
         if not raw or not os.path.isabs(raw):
@@ -517,9 +524,10 @@ def _path_directories(trees: Sequence[Path] = ()) -> List[Path]:
             continue
         if resolved == Path("/") or resolved in homes:
             continue
-        if _broader_than_a_tool(path, homes):
+        if _broader_than_a_tool(path, homes, links):
             continue
-        if not _a_bin_directory(path, homes) and any(_inside(path, h) for h in homes):
+        in_a_home = any(_inside(path, home) for home in [*homes, *links])
+        if in_a_home and not _a_bin_directory(path, homes, links):
             continue
         entries.append(path)
     return _existing(entries)
@@ -563,20 +571,63 @@ def _inside_any(real: PurePath, roots: Sequence[PurePath]) -> bool:
     return any(real == root or root in real.parents for root in roots)
 
 
-def _broader_than_a_tool(path: Path, homes: Optional[List[Path]] = None) -> bool:
+def _home_link_targets(homes: Sequence[Path]) -> List[Path]:
+    """The real directories that links at the top of a home name outside the homes.
+
+    ~/.local can be a link to /persist/me/.local on another disk. The breadth rules
+    measure real paths, by which that directory is outside every home, so it was
+    mounted with its keyrings. Each such directory counts as directly in its home in
+    every home check, next to the checks of the real path. Left out are links to "/",
+    to a home or a directory holding or inside one (measured already), and to, into
+    or above a system read path: ~/u -> /usr names no directory of the user's.
+    """
+    system = [Path(path) for path in SYSTEM_READ_PATHS]
+    system += [Path(os.path.realpath(path)) for path in system]
+    targets: List[Path] = []
+    for home in homes:
+        try:
+            names = [entry.name for entry in os.scandir(home) if entry.is_symlink()]
+        except OSError:
+            continue
+        for name in names:
+            real = Path(os.path.realpath(home / name))
+            if (
+                real == Path(real.anchor)
+                or not real.is_dir()
+                or any(
+                    real == other or other in real.parents or real in other.parents
+                    for other in homes
+                )
+                or _inside_any(real, system)
+                or any(real in path.parents for path in system)
+            ):
+                continue
+            if real not in targets:
+                targets.append(real)
+    return targets
+
+
+def _broader_than_a_tool(
+    path: Path,
+    homes: Optional[Sequence[Path]] = None,
+    links: Optional[Sequence[Path]] = None,
+) -> bool:
     """Whether mounting ``path`` would expose more than one tool installation.
 
     True for /, for a home directory, for any directory that contains one, and for
     any directory directly under one (~/.local, ~/.cargo): each of those holds other
-    files of the user's. ``homes`` defaults to _homes().
+    files of the user's. A directory a link at the top of a home names (``links``,
+    _home_link_targets) counts as directly under that home, so it and any directory
+    holding it are true too. ``homes`` defaults to _homes().
     """
     real = Path(os.path.realpath(path))
     if real == Path("/"):
         return True
+    homes = _homes() if homes is None else homes
+    links = _home_link_targets(homes) if links is None else links
     return any(
-        real == home or real in home.parents or real.parent == home
-        for home in (_homes() if homes is None else homes)
-    )
+        real == home or real in home.parents or real.parent == home for home in homes
+    ) or any(real == link or real in link.parents for link in links)
 
 
 def _env_named_read_paths(names: Sequence[str]) -> List[Path]:
@@ -605,8 +656,12 @@ def _env_named_read_paths(names: Sequence[str]) -> List[Path]:
                 )
             continue
         real = Path(os.path.realpath(value))
-        if real == Path(real.anchor) or any(
-            real == home or real in home.parents for home in homes
+        if (
+            real == Path(real.anchor)
+            or any(real == home or real in home.parents for home in homes)
+            # Holding a directory a link at the top of a home names (~/.local kept
+            # on another disk) is holding part of that home.
+            or any(real in link.parents for link in _home_link_targets(homes))
         ):
             from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -657,6 +712,7 @@ def _executable_prefix(argv0: str) -> List[Path]:
     if not found:
         return []
     homes = _homes()
+    links = _home_link_targets(homes)
 
     def too_broad(prefix: Path) -> bool:
         # A prefix of /, of a home directory, of a directory holding one (a Python
@@ -664,7 +720,7 @@ def _executable_prefix(argv0: str) -> List[Path]:
         # ~/.cargo) holds far more than the tool: ~/.local/share carries keyrings
         # and ~/.cargo carries credentials.toml. Deeper prefixes, such as
         # ~/.nvm/versions/node/v22, are a single installation.
-        return _broader_than_a_tool(prefix, homes)
+        return _broader_than_a_tool(prefix, homes, links)
 
     paths: List[Path] = []
     candidates = set(_symlink_hops(Path(found))) | {Path(os.path.realpath(found))}
@@ -681,7 +737,7 @@ def _executable_prefix(argv0: str) -> List[Path]:
         # A bin directory by what it resolves to (_a_bin_directory), so a link
         # spelled bin that names a home's directory, or one holding a home, is
         # judged by the breadth rules like any other directory.
-        is_bin = _a_bin_directory(parent, homes)
+        is_bin = _a_bin_directory(parent, homes, links)
         if is_bin or not too_broad(parent):
             paths.append(parent)
         if is_bin and not too_broad(parent.parent):
@@ -743,13 +799,18 @@ def _ash_paths() -> Tuple[List[Path], List[Path]]:
         for p in (sys.prefix, sys.base_prefix, sys.exec_prefix)
     } | {Path(os.path.realpath(import_root))}
 
+    links = _home_link_targets(homes)
+
     def _importable(entry: str) -> bool:
         if not entry or not os.path.isabs(entry) or not os.path.isdir(entry):
             return False
         real = Path(os.path.realpath(entry))
-        if _broader_than_a_tool(real, homes):
+        if _broader_than_a_tool(real, homes, links):
             return False
-        if not any(home in real.parents for home in homes):
+        in_a_home = any(home in real.parents for home in homes) or any(
+            real == link or link in real.parents for link in links
+        )
+        if not in_a_home:
             return True
         return any(real == root or root in real.parents for root in interpreter_roots)
 
@@ -817,7 +878,9 @@ _A_VENV_IS_REFUSED_TOO = (
 )
 
 
-def _refused_prefix(path: Path, real: Path, homes: Sequence[Path]) -> str:
+def _refused_prefix(
+    path: Path, real: Path, homes: Sequence[Path], links: Sequence[Path] = ()
+) -> str:
     """Why ASH's Python prefix ``path`` is refused, and what to do instead."""
     named = path.as_posix()
     if real == Path(real.anchor):
@@ -826,8 +889,13 @@ def _refused_prefix(path: Path, real: Path, homes: Sequence[Path]) -> str:
             "would mount every directory for every scanner. Use a Python installed "
             f"under a prefix of its own; {_A_VENV_IS_REFUSED_TOO}"
         )
-    if any(real == home or real in home.parents for home in homes):
-        reason = "is a home directory or holds one, so the sandbox would mount the home"
+    if any(real == home or real in home.parents for home in homes) or any(
+        real in link.parents for link in links
+    ):
+        reason = (
+            "is a home directory or holds one, or holds a directory a home links "
+            "to, so the sandbox would mount the home's files"
+        )
     else:
         reason = (
             "is directly in a home directory and is not a single Python installation "
@@ -840,7 +908,9 @@ def _refused_prefix(path: Path, real: Path, homes: Sequence[Path]) -> str:
     )
 
 
-def _refused_link(path: Path, real: Path, homes: Sequence[Path]) -> str:
+def _refused_link(
+    path: Path, real: Path, homes: Sequence[Path], links: Sequence[Path] = ()
+) -> str:
     """Why a directory ASH's Python is reached through is refused, and the way out."""
     reached = (
         f"ASH's Python {sys.executable!r} is reached through a link in "
@@ -855,7 +925,11 @@ def _refused_link(path: Path, real: Path, homes: Sequence[Path]) -> str:
             f"{reached}, a home directory, so the sandbox would mount it for every "
             f"scanner. {outside_the_home}"
         )
-    if real == Path(real.anchor) or any(real in home.parents for home in homes):
+    if (
+        real == Path(real.anchor)
+        or any(real in home.parents for home in homes)
+        or any(real in link.parents for link in links)
+    ):
         return (
             f"{reached}, which is the filesystem root or a directory holding a home, "
             "so the sandbox would mount it for every scanner. Use an interpreter "
@@ -896,40 +970,48 @@ def _refuse_a_home_among(
     - an ASH_BIN_PATH that is "/", a home or holds one, or is directly in a home
       without being a bin, sbin or Scripts directory (~/.local).
     Whether a directory is a bin directory is judged on what it resolves to
-    (_a_bin_directory), so ~/bin -> ~/.aws is not one.
+    (_a_bin_directory), so ~/bin -> ~/.aws is not one. A directory a link at the top
+    of a home names (_home_link_targets, ~/.local kept on another disk) counts as
+    directly in that home, so it is measured like ~/.local, and holding it is
+    holding part of the home.
     """
     roots = [Path(os.path.realpath(root)) for root in interpreter_roots]
+    links = _home_link_targets(homes)
 
     def holds_a_home(real: Path) -> bool:
-        return real == Path("/") or any(
-            real == home or real in home.parents for home in homes
+        return (
+            real == Path("/")
+            or any(real == home or real in home.parents for home in homes)
+            or any(real in link.parents for link in links)
         )
 
     def directly_in_a_home(real: Path) -> bool:
-        return real.parent in homes
+        return real.parent in homes or real in links
 
     for path in interpreter_dirs:
         real = Path(os.path.realpath(path))
         if holds_a_home(real) or (
             directly_in_a_home(real) and not _is_an_installation_root(real)
         ):
-            raise SandboxUnavailable(_refused_prefix(path, real, homes))
+            raise SandboxUnavailable(_refused_prefix(path, real, homes, links))
     for path in link_dirs:
         real = Path(os.path.realpath(path))
-        in_a_home = any(home in real.parents for home in homes)
+        in_a_home = any(home in real.parents for home in homes) or any(
+            real == link or link in real.parents for link in links
+        )
         part_of_an_interpreter = any(
             real == root or root in real.parents for root in roots
         )
         if holds_a_home(real) or (
             in_a_home
-            and not _a_bin_directory(path, homes)
+            and not _a_bin_directory(path, homes, links)
             and not part_of_an_interpreter
         ):
-            raise SandboxUnavailable(_refused_link(path, real, homes))
+            raise SandboxUnavailable(_refused_link(path, real, homes, links))
     if os.path.isdir(bin_path):
         real = Path(os.path.realpath(bin_path))
         if holds_a_home(real) or (
-            directly_in_a_home(real) and not _a_bin_directory(bin_path, homes)
+            directly_in_a_home(real) and not _a_bin_directory(bin_path, homes, links)
         ):
             raise SandboxUnavailable(
                 f"ASH_BIN_PATH {bin_path.as_posix()!r} is a home directory, holds one, "
