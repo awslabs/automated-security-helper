@@ -903,7 +903,12 @@ class TestMergeWarnings:
             assert "--ash-plugin-modules" not in message, message
 
     def test_every_confinement_step_runs_on_the_recorded_config(self, harness):
-        """Sandbox grants and scanner config files are confined too, not only reporters."""
+        """Sandbox grants and scanner config files are confined too, not only reporters.
+
+        Their warnings name the results file and say why a shard's value is not
+        used, and give no remedy: no scanner runs during a merge, so the value
+        would change only what the merged results record.
+        """
         outside = harness.tmp_path / "elsewhere"
         outside.mkdir()
         bandit_config = outside / "bandit.yaml"
@@ -928,25 +933,6 @@ class TestMergeWarnings:
         )["ash_config"]
         assert recorded["sandbox"]["extra_read_paths"] == []
         assert str(bandit_config) not in json.dumps(recorded)
-
-    def test_the_scanner_step_warnings_say_no_scanner_runs(self, harness):
-        """The sandbox and scanner-config warnings give no remedy that changes nothing."""
-        outside = harness.tmp_path / "elsewhere"
-        outside.mkdir()
-        bandit_config = outside / "bandit.yaml"
-        bandit_config.write_text("skips: []\n", encoding="utf-8")
-        shard_paths = harness.write_shards(
-            {
-                "sandbox": {"extra_read_paths": [str(outside)]},
-                "scanners": {
-                    "bandit": {"options": {"config_file": str(bandit_config)}}
-                },
-            }
-        )
-
-        result = harness.merge(shard_paths)
-
-        _assert_merged(result, harness)
         messages = [
             m
             for m in harness.ignoring()
@@ -955,7 +941,10 @@ class TestMergeWarnings:
         ]
         assert len(messages) == 2, harness.warnings
         for message in messages:
+            assert shard_paths[0].as_posix() in message, message
+            assert "a shard recorded in its results" in message, message
             assert "No scanner runs during a merge" in message, message
+            assert "inside the scanned tree" not in message, message
             assert "Set these with" not in message, message
             assert "Set them with" not in message, message
 
