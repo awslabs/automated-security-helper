@@ -146,10 +146,12 @@ class ReporterPluginConfigBase(PluginConfigBase):
             return value
         name = (info.data or {}).get("name") or cls.__name__
         key = f"reporters.{name}.extension"
+        # The key and the rule, not the value: a value can be one read from the
+        # environment, and the warning goes to the console and ash.log.
         _warn_once(
             key,
             str(value),
-            f"Ignoring {key}: {value!r} is not a filename suffix such as 'json'. "
+            f"Ignoring {key}: the value is not a filename suffix such as 'json'. "
             "The report is written to ash.<extension> in the reports directory, so "
             "it cannot contain '/', '\\', '..' or NUL. Using the default instead.",
         )

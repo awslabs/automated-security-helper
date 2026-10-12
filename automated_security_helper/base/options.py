@@ -39,10 +39,12 @@ def release_tag(key: str) -> WrapValidator:
         value = handler(value)
         if isinstance(value, str) and _RELEASE_TAG.fullmatch(value):
             return value
+        # The key and the rule, not the value: a value can be one read from the
+        # environment, and the warning goes to the console and ash.log.
         _warn_once(
             key,
             str(value),
-            f"Ignoring {key}: {value!r} is not a release tag such as 'v1.2.3'. "
+            f"Ignoring {key}: the value is not a release tag such as 'v1.2.3'. "
             "Using the pinned version instead.",
         )
         raise PydanticUseDefault from None
@@ -78,11 +80,14 @@ def tool_version_constraint(key: str) -> WrapValidator:
         value = handler(value)
         try:
             return validate_version_constraint(value)
-        except ValueError as error:
+        except ValueError:
+            # Not the check's message, which quotes the value; see release_tag.
             _warn_once(
                 key,
                 str(value),
-                f"Ignoring {key}: {error}. Using the default constraint instead.",
+                f"Ignoring {key}: the value is not a version constraint; use PEP 440 "
+                "specifiers such as '>=1.2.0,<2.0.0' or '==1.4.1'. Using the default "
+                "constraint instead.",
             )
             raise PydanticUseDefault from None
 
@@ -106,10 +111,11 @@ def report_file_name(key: str) -> WrapValidator:
         value = handler(value)
         if is_report_file_name(value):
             return value
+        # The key and the rule, not the value; see release_tag.
         _warn_once(
             key,
             str(value),
-            f"Ignoring {key}: {value!r} is not a file name such as 'summary.md'. "
+            f"Ignoring {key}: the value is not a file name such as 'summary.md'. "
             "The file is written directly inside the reports directory, so the name "
             "cannot contain '/', '\\' or NUL, or be '.' or '..'. Using the default "
             "instead.",

@@ -684,7 +684,14 @@ class ReportMetadata(BaseModel):
         if not v:
             v = datetime.now(timezone.utc)
         if isinstance(v, str):
-            v = datetime.fromisoformat(v.strip())
+            try:
+                v = datetime.fromisoformat(v.strip())
+            except ValueError:
+                # fromisoformat's own message quotes the value, which is read
+                # from a results file; the rule is named instead.
+                raise ValueError(
+                    "generated_at must be an ISO 8601 date and time"
+                ) from None
         return v.isoformat(timespec="seconds")
 
     def model_post_init(self, context):

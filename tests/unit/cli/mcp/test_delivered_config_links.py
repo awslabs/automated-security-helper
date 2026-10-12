@@ -452,8 +452,8 @@ def test_the_scan_tool_does_not_quote_it_either(_server) -> None:
     assert CANARY not in repr(result)
 
 
-#: A suppression expiration the model's own validator rejects, in a message that
-#: repeats the value.
+#: A suppression expiration the model's own validator rejects. Its message names
+#: the rule, not the value.
 EXPIRY_CANARY = "canary-zz-41f7"
 BAD_EXPIRY = (
     "project_name: linked\n"
@@ -504,8 +504,9 @@ def test_a_key_the_schema_does_not_have_is_not_named(_server) -> None:
     assert "NOT-A-SEVERITY" not in message
 
 
-def test_positive_control_the_validators_message_quotes_the_value(_server) -> None:
-    """Without that, the test above could not fail: the operator's file shows it."""
+def test_the_validators_message_names_the_rule_not_the_value(_server) -> None:
+    """The operator's own file gets the validator's message, which names the rule
+    and not the value: a value can be one read from the environment."""
     from automated_security_helper.config.resolve_config import resolve_config
     from automated_security_helper.core.exceptions import ASHConfigValidationError
 
@@ -516,7 +517,9 @@ def test_positive_control_the_validators_message_quotes_the_value(_server) -> No
     with pytest.raises(ASHConfigValidationError) as raised:
         resolve_config(config_path=host_file, source_dir=elsewhere)
 
-    assert EXPIRY_CANARY in str(raised.value)
+    message = str(raised.value)
+    assert "Invalid expiration date format. Use YYYY-MM-DD" in message, message
+    assert EXPIRY_CANARY not in message, message
 
 
 def test_positive_control_an_operator_file_keeps_the_detailed_error(

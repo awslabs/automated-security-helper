@@ -226,7 +226,12 @@
   workspace policy file's refusal still shows the value the file wrote, since nothing
   in it is read from the environment. A client's runtime patch that the patched
   config refuses is answered without the inputs, which hold the registered
-  profile's values.
+  profile's values. ASH's own validators name the field and the rule in their
+  messages, not the value, and so do the warnings logged when a plugin option is
+  replaced by its default (a `tool_version`, opengrep's `version`, a report file
+  name, a reporter's `extension`). For example, a suppression's expiration is
+  refused with "Invalid expiration date format. Use YYYY-MM-DD", and a
+  `denied_paths` entry by its position.
 - **Only the operator turns trivy-repo's telemetry on.** A config file inside a git
   checkout or the scanned directory could set
   `scanners.trivy-repo.options.disable_telemetry: false`, and trivy then sent

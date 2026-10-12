@@ -448,10 +448,12 @@ class AshSuppression(IgnorePathWithReason):
         entry would silently match nothing.
         """
         if v is not None and not is_valid_symbol(v):
+            # The rule, not the value: a value can be one read from the
+            # environment, and the message goes wherever the error is shown.
             raise ValueError(
-                f"symbol must be a dotted qualified name such as "
-                f"'MyClass.my_method' (identifiers joined by '.', no spaces, "
-                f"wildcards or call syntax): {v!r}"
+                "symbol must be a dotted qualified name such as "
+                "'MyClass.my_method' (identifiers joined by '.', no spaces, "
+                "wildcards or call syntax)"
             )
         return v
 
@@ -467,7 +469,11 @@ class AshSuppression(IgnorePathWithReason):
             try:
                 datetime.strptime(v, "%Y-%m-%d")
             except ValueError:
-                raise ValueError(f"Invalid expiration date format. Use YYYY-MM-DD: {v}")
+                # Not the value, as for symbol; from None so strptime's message,
+                # which quotes it, is not the context either.
+                raise ValueError(
+                    "Invalid expiration date format. Use YYYY-MM-DD"
+                ) from None
         return v
 
     @property

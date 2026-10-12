@@ -260,11 +260,14 @@ def test_a_bedrock_file_name_that_is_not_a_file_name_is_replaced_by_the_default(
     options = BedrockSummaryReporterConfigOptions(**{option: value})
 
     assert getattr(options, option) == default
-    assert any(
-        f"reporters.bedrock-summary-reporter.options.{option}" in message
-        and repr(value) in message
-        for message in caplog_ash
-    ), caplog_ash
+    # The warning names the key and the rule, not the value, which can be one
+    # read from the environment. ('..' is also named by the rule itself.)
+    key = f"reporters.bedrock-summary-reporter.options.{option}"
+    named = [message for message in caplog_ash if key in message]
+    assert named, caplog_ash
+    assert all(f"{key}: {value!r}" not in message for message in named), named
+    if value != "..":
+        assert all(value not in message for message in named), named
 
 
 @pytest.mark.parametrize("option", BEDROCK_FILE_OPTIONS)
@@ -302,7 +305,9 @@ def test_a_bedrock_file_name_from_config_overrides_is_validated(tmp_path, caplog
         )
 
     assert reporter.companion_file_names()[0] == "ash.bedrock.summary.md"
-    assert any("../escaped.md" in message for message in caplog_ash), caplog_ash
+    key = "reporters.bedrock-summary-reporter.options.output_file"
+    assert any(key in message for message in caplog_ash), caplog_ash
+    assert not any("../escaped.md" in message for message in caplog_ash), caplog_ash
 
 
 def test_a_directory_at_the_name_does_not_lose_the_report(tmp_path):

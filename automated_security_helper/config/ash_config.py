@@ -1092,22 +1092,30 @@ class RuntimeOverridesConfig(BaseModel):
     @field_validator("denied_paths")
     @classmethod
     def _denied_paths_are_pointers(cls, value: List[str]) -> List[str]:
-        bad = [entry for entry in value if not str(entry).startswith("/")]
+        # Named by position, not quoted: a value can be one read from the
+        # environment, and the message goes wherever the error is shown.
+        bad = [
+            str(index)
+            for index, entry in enumerate(value)
+            if not str(entry).startswith("/")
+        ]
         if bad:
             raise ValueError(
                 "denied_paths entries are JSON pointers and start with '/'; "
-                f"these do not and would match nothing: {bad}"
+                f"the entries at positions {', '.join(bad)} do not and would match "
+                "nothing"
             )
         return value
 
     @field_validator("denied_value_patterns")
     @classmethod
     def _value_pattern_keys_are_pointers(cls, value: Dict[str, str]) -> Dict[str, str]:
-        bad = [key for key in value if not str(key).startswith("/")]
+        # Counted, not quoted, as for denied_paths.
+        bad = sum(1 for key in value if not str(key).startswith("/"))
         if bad:
             raise ValueError(
                 "denied_value_patterns keys are JSON pointers and start with '/'; "
-                f"these do not and would match nothing: {bad}"
+                f"{bad} of them do not and would match nothing"
             )
         return value
 
@@ -1484,8 +1492,10 @@ class ContentDbStalenessOverride(BaseModel):
 
         names = sorted(entry.name for entry in CONTENT_DATABASES)
         if v not in names:
+            # The declared names, not the value: a value can be one read from the
+            # environment, and the message goes wherever the error is shown.
             raise ValueError(
-                f"unknown content database {v!r}; declared databases: {', '.join(names)}"
+                f"unknown content database; declared databases: {', '.join(names)}"
             )
         return v
 
@@ -1495,7 +1505,9 @@ class ContentDbStalenessOverride(BaseModel):
         try:
             datetime.strptime(v, "%Y-%m-%d")
         except ValueError:
-            raise ValueError(f"Invalid expiration date format. Use YYYY-MM-DD: {v}")
+            # Not the value, as above; from None so strptime's message, which
+            # quotes it, is not the cause either.
+            raise ValueError("Invalid expiration date format. Use YYYY-MM-DD") from None
         return v
 
     @property
@@ -1770,15 +1782,17 @@ class AshConfig(BaseModel):
     def _one_override_per_database(
         cls, v: List[ContentDbStalenessOverride]
     ) -> List[ContentDbStalenessOverride]:
-        seen: set[str] = set()
-        for entry in v:
+        # Named by the entries' positions, not by the database: a refusal names the
+        # field and the rule, never a value.
+        seen: Dict[str, int] = {}
+        for index, entry in enumerate(v):
             if entry.database in seen:
                 raise ValueError(
-                    f"content database {entry.database!r} is named by more than one "
-                    "content_db_staleness_overrides entry; which one applies would be "
-                    "ambiguous"
+                    f"content_db_staleness_overrides entries {seen[entry.database]} "
+                    f"and {index} name the same content database; one named by more "
+                    "than one entry would be ambiguous"
                 )
-            seen.add(entry.database)
+            seen[entry.database] = index
         return v
 
     @model_validator(mode="after")
