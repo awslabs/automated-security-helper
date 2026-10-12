@@ -175,12 +175,27 @@ def test_a_value_from_the_scanned_trees_config_is_not_used(
 def test_a_value_from_an_mcp_delivered_config_is_not_used(
     tmp_path, scanner, option, flag, name, content
 ):
-    """A config an MCP client delivered is the client's, wherever it is staged."""
+    """A config an MCP client delivered is the client's, wherever it is staged.
+
+    Where the option is a default ``denied_paths`` entry, the delivered config is
+    refused outright, naming it, which uses the value no more than ignoring it
+    would.
+    """
+    from automated_security_helper.config.ash_config import RuntimeOverridesConfig
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
     source = _source(tmp_path)
     chosen = _outside(tmp_path, name, content)
     delivered = _write_config(
         tmp_path / "upload" / "ash.yaml", scanner, option, str(chosen)
     )
+    if f"/scanners/{scanner}/options/{option}" in RuntimeOverridesConfig().denied_paths:
+        with pytest.raises(ASHConfigFieldDeniedError) as refused:
+            resolve_config(
+                config_path=delivered, source_dir=source, untrusted_config=True
+            )
+        assert f"scanners.{scanner}.options.{option}" in str(refused.value)
+        return
     config = resolve_config(
         config_path=delivered, source_dir=source, untrusted_config=True
     )
