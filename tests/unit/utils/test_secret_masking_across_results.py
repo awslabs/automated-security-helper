@@ -398,6 +398,39 @@ class TestMaskingByValue:
 
         assert VALUE not in _region_text(model.sarif.runs[0].results[1])
 
+    def test_a_raw_value_holding_an_asterisk_is_masked_where_it_is_reused(self):
+        """Only the exact shape ``_mask_secret_value`` writes counts as already masked.
+
+        Any ``*`` used to send the value to the recovery from the finding's own
+        line, which found nothing for a raw value, so its reuse stayed in clear.
+        """
+        value = VALUE[:4] + "*" + VALUE[5:]
+        model = _results(
+            _result("B105", "app.py", 1, HARDCODED + "'" + value + "'"),
+            _result(
+                "B602", "deploy.py", 5, "subprocess call", snippet=f'run("{value}")\n'
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert value not in _region_text(model.sarif.runs[0].results[1])
+
+    def test_a_masked_value_that_cannot_be_recovered_still_records_its_shape(self):
+        """With no line to read it back from, the masked form still gives its shape."""
+        model = _results(
+            _result(
+                "B105", "app.py", 1, HARDCODED + "'" + _mask_secret_value(VALUE) + "'"
+            )
+        )
+
+        mask_secrets_in_results(model)
+
+        assert [
+            (shape.prefix, shape.suffix, shape.length)
+            for shape in model.secret_value_shapes
+        ] == [(VALUE[:2], VALUE[-1], len(VALUE))]
+
     def test_a_short_value_is_masked_only_in_its_own_finding(self):
         """Replacing a three-character token everywhere would change unrelated code."""
         model = _results(

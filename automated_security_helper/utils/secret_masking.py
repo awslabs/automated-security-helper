@@ -575,16 +575,31 @@ def _exposed_values(quoted: str, result: Any) -> List[str]:
     lines the finding itself reports whose mask is exactly that shape. Those lines
     are masked by location anyway; the value is recovered so that its reuse on a
     line no secret finding reports is masked too.
+
+    Only the exact shape counts as already masked (``_is_masked_form``): a raw
+    value can hold a ``*`` too. The quoted text is returned as well either way.
+    For a raw value that is the value; for a masked one, masking it again
+    changes nothing, and it carries the value's shape when no line holds the
+    value to read back.
     """
-    if not quoted or "*" not in quoted:
-        return [quoted] if quoted else []
-    found = []
+    if not quoted:
+        return []
+    found = [quoted]
+    if not _is_masked_form(quoted):
+        return found
     for line in _own_snippet_lines(result):
         for match in _STRING_LITERAL.finditer(line):
             candidate = match.group(2)
             if candidate != quoted and _mask_secret_value(candidate) == quoted:
                 found.append(candidate)
     return found
+
+
+def _is_masked_form(text: str) -> bool:
+    """Whether ``text`` has the shape ``_mask_secret_value`` writes for its length."""
+    shown_prefix, shown_suffix = _visible_lengths(len(text))
+    hidden = text[shown_prefix : len(text) - shown_suffix]
+    return bool(hidden) and set(hidden) == {"*"}
 
 
 def _own_snippet_lines(result: Any) -> List[str]:
