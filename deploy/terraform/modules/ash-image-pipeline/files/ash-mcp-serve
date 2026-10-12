@@ -75,6 +75,47 @@ def _env_bool(name: str, default: str) -> bool:
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+HEADER_VALUE_ENV = "ASH_MCP_AUTH_HEADER_VALUE"
+HEADER_VALUE_FD_ENV = "ASH_MCP_AUTH_HEADER_VALUE_FD"
+
+
+def _take_header_value() -> str:
+    """The MCP auth header value, removed from this process's environment.
+
+    ash-container-init hands a value from Secrets Manager over in an inherited
+    in-memory file, named by ASH_MCP_AUTH_HEADER_VALUE_FD; that one is read and its
+    descriptor closed. An operator may instead set ASH_MCP_AUTH_HEADER_VALUE.
+    Both variables are removed either way, so ``ash mcp`` and everything it starts
+    get neither: a config file may read any ``ASH_*`` variable through
+    ``${ASH_...}``, and one that read this value would copy it into the effective
+    config, logs and reports. The descriptor wins when both are set, as the
+    secret did when ash-container-init exported it.
+    """
+    direct = os.environ.pop(HEADER_VALUE_ENV, None)
+    fd_text = os.environ.pop(HEADER_VALUE_FD_ENV, None)
+    if fd_text is None or fd_text.strip() == "":
+        return (direct or "").strip()
+    fd = int(fd_text) if fd_text.strip().isdigit() else -1
+    if fd < 3:
+        # 0, 1 and 2 are stdin, stdout and stderr, never the hand-over.
+        _fail(
+            f"{HEADER_VALUE_FD_ENV}={fd_text!r} is not a descriptor "
+            "ash-container-init opened"
+        )
+    try:
+        with open(fd, "rb") as handle:
+            if handle.seekable():
+                handle.seek(0)
+            data = handle.read()
+        return data.decode("utf-8").strip()
+    except (OSError, UnicodeDecodeError) as exc:
+        _fail(
+            f"could not read the MCP auth header value from {HEADER_VALUE_FD_ENV}={fd}: "
+            f"{exc}"
+        )
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
 def _split_hosts(raw: str) -> list[str]:
     """Split a Host allowlist on commas and whitespace, dropping empties."""
     separated = raw.replace(",", " ")
@@ -113,7 +154,7 @@ def build_argv() -> list[str]:
             argv.append("--trust-upstream-session-id")
 
     header_name = _env("ASH_MCP_AUTH_HEADER_NAME", "")
-    header_value = _env("ASH_MCP_AUTH_HEADER_VALUE", "")
+    header_value = _take_header_value()
     if header_name and not header_value:
         _fail(
             "ASH_MCP_AUTH_HEADER_NAME is set but no value was resolved. Set "

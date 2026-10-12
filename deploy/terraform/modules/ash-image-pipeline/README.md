@@ -51,9 +51,16 @@ Two stacked Docker builds:
 2. A thin wrapper (`files/wrapper.Dockerfile`) adding two scripts:
    - `ash-container-init` (the `ENTRYPOINT`) materializes the base config from
      SSM to `.ash/.ash.yaml`, resolves the MCP auth header value from Secrets
-     Manager, then `exec`s whatever command it was given.
+     Manager, then `exec`s whatever command it was given. The value is handed
+     over in an in-memory file the command inherits, named by
+     `ASH_MCP_AUTH_HEADER_VALUE_FD`, not in the environment: an ASH config may
+     read any `ASH_*` variable, so an exported value could be copied into the
+     effective config, logs and reports.
    - `ash-mcp-serve` (the `CMD`) builds an `ash mcp` command line from
-     environment variables and execs it.
+     environment variables and execs it. It reads the auth header value from
+     that file, or from `ASH_MCP_AUTH_HEADER_VALUE` when an operator sets it
+     directly, and removes both variables first, so `ash mcp` and the scanners
+     it starts see neither.
 
 The wrapper exists because Bedrock AgentCore Runtime has **no container command
 override** — its `container_configuration` block accepts only `container_uri`.

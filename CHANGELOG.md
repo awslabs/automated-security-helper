@@ -459,6 +459,15 @@
   `ash.log` in it either way. The source directory counts under the name it was given
   and its real path; links at or above it are your own spelling and are not examined.
   This is the rule a sandboxed local scan already applies.
+- **The image pipeline's MCP container keeps the auth header value out of the
+  environment.** `ash-container-init` exported the value it read from Secrets Manager
+  as `ASH_MCP_AUTH_HEADER_VALUE`, so `ash mcp` and every process it started inherited
+  it, and a config reference such as `${ASH_MCP_AUTH_HEADER_VALUE:}` copied it into the
+  effective config. It now hands the value over in an in-memory file named by
+  `ASH_MCP_AUTH_HEADER_VALUE_FD`; `ash-mcp-serve` reads and closes it, and removes that
+  variable and a directly set `ASH_MCP_AUTH_HEADER_VALUE` before it starts `ash mcp`.
+  A custom command run in place of `ash-mcp-serve` with `ASH_MCP_AUTH_SECRET_ARN` set
+  gets the descriptor instead of the variable.
 - **`Invoke-ASH` builds the non-root user with the caller's IDs on Linux and macOS.**
   Without `-ContainerUID` and `-ContainerGID` it built the Dockerfile's default UID 500
   and GID 100, which cannot write an output directory the caller owns, and checked
