@@ -541,8 +541,12 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
     return index
 
 
-#: A quoted string literal in a line of source.
-_STRING_LITERAL = re.compile(r"""(["'])((?:\\.|(?!\1).)*)\1""")
+#: A quoted string literal in a line of source. The two alternatives inside it
+#: are disjoint (an escape, or one character that is neither the quote nor a
+#: backslash), so the search is linear: with ``(?!\1).`` a backslash matched
+#: either one, and an unterminated quote followed by n backslashes took a
+#: Fibonacci(n) number of paths.
+_STRING_LITERAL = re.compile(r"""(["'])((?:\\.|(?!\1)[^\\])*)\1""")
 
 
 def _exposed_values(quoted: str, result: Any) -> List[str]:

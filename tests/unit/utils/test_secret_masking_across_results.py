@@ -444,6 +444,60 @@ class TestMaskingByValue:
         assert _region_text(model.sarif.runs[0].results[1]) == f'run("{longer}")\n'
 
 
+#: Masks one B105 whose message bandit already masked and whose own line holds an
+#: unterminated quote followed by many backslashes: the string-literal search over
+#: that line used to backtrack exponentially in their number.
+_BACKSLASH_PROBE = r"""
+import sys, time
+from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.utils.secret_masking import (
+    _mask_secret_value, mask_secrets_in_results,
+)
+value = "abcdefgh"
+line = 'pass' + 'word = "' + value + '"  # it' + "'s " + "\\" * int(sys.argv[1]) + "\n"
+model = AshAggregatedResults()
+model.sarif = SarifReport.model_validate({"version": "2.1.0", "runs": [{
+    "tool": {"driver": {"name": "test"}},
+    "results": [{
+        "ruleId": "B105", "level": "warning",
+        "message": {"text": "Possible hardcoded pass" + "word: '"
+                    + _mask_secret_value(value) + "'"},
+        "locations": [{"physicalLocation": {
+            "artifactLocation": {"uri": "app.py"},
+            "region": {"startLine": 1, "endLine": 1, "snippet": {"text": line}},
+        }}],
+    }],
+}]})
+started = time.monotonic()
+mask_secrets_in_results(model)
+print(f"{time.monotonic() - started:.3f}")
+"""
+
+
+class TestPathologicalInput:
+    def test_a_line_of_backslashes_is_masked_in_bounded_time(self, tmp_path):
+        """One line in a scanned file must not stall the scan or an MCP server.
+
+        Run in a child process so a regression fails at the timeout instead of
+        hanging the suite: the search holds the GIL, so a thread could not be
+        stopped.
+        """
+        import subprocess
+        import sys
+
+        completed = subprocess.run(
+            [sys.executable, "-c", _BACKSLASH_PROBE, "100000"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=tmp_path,
+        )
+
+        assert completed.returncode == 0, completed.stderr
+        assert float(completed.stdout.strip().splitlines()[-1]) < 5.0
+
+
 class TestMaskingAsAWhole:
     def test_results_without_secret_findings_are_unchanged(self):
         model = _results(
