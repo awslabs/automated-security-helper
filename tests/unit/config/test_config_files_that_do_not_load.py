@@ -279,6 +279,56 @@ class TestARustPanicWhileResolvingIsRefused:
             resolve_config(source_dir=tmp_path)
 
 
+needs_proc_environ = pytest.mark.skipif(
+    not Path("/proc/self/environ").exists(), reason="needs Linux /proc"
+)
+
+
+@needs_proc_environ
+class TestAConfigLinkedToAPseudoFile:
+    """Known limit: a pseudo-file passes the regular-file check and is read.
+
+    ``/proc/self/environ`` is a regular file to ``stat``, so a config name linked
+    to it is opened and read, then refused when it does not parse. These tests
+    pin what that refusal says: it names the config file, and it quotes none of
+    the content, so no environment value reaches a log or an MCP client. A
+    change that refuses such a link before the read must keep it a config error.
+    The MCP server already refuses it before the read.
+    """
+
+    MARKER = "marker-value-pseudo-file"
+
+    def test_it_is_refused_naming_the_file_and_no_content(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ASH_TEST_PSEUDO_FILE_MARKER", self.MARKER)
+        link = tmp_path / ".ash.yaml"
+        link.symlink_to("/proc/self/environ")
+
+        with pytest.raises(ASHConfigSourceError) as excinfo:
+            resolve_config(config_path=link, source_dir=tmp_path)
+
+        message = str(excinfo.value)
+        assert message.startswith(f"could not parse {link.as_posix()}: "), message
+        assert "unacceptable character #x0000" in message
+        assert f'in "{link}", position' in message
+        assert self.MARKER not in message
+
+    def test_get_config_raw_refuses_it_before_the_read(self, tmp_path, monkeypatch):
+        """The MCP server judges a config input by where it resolves, so the link
+        is refused as outside the permitted config roots, not read."""
+        from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+        monkeypatch.setenv("ASH_TEST_PSEUDO_FILE_MARKER", self.MARKER)
+        link = tmp_path / ".ash.yaml"
+        link.symlink_to("/proc/self/environ")
+
+        result = mcp_get_config(config_path=str(link), raw=True)
+
+        assert result["success"] is False, "raw read returned content"
+        assert result["error_type"] == "config_input_not_permitted", result
+        assert result["error_category"] == "invalid_path"
+        assert self.MARKER not in str(result)
+
+
 #: Every name discovery looks for, where it looks: each dedicated name at the root
 #: and in .ash/, each ashrc name at the root, and pyproject.toml.
 EVERY_DISCOVERY_LOCATION = [
