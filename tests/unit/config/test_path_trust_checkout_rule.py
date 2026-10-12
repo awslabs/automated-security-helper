@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
 from automated_security_helper.config.path_trust import (
     honored_path,
     reset_path_refusal_warnings,
@@ -355,13 +356,19 @@ def test_a_repository_config_still_cannot_name_a_file_in_another_checkout(
     config = resolve_config(source_dir=target)
     caplog.set_level("WARNING")
     assert _honored(rules, target, config) is None
-    (message,) = [
-        r.getMessage() for r in caplog.records if "Ignoring" in r.getMessage()
-    ]
-    assert (
-        "move the file outside every git checkout, or pass the setting with "
-        "--config-overrides" in message
+    messages = [r.getMessage() for r in caplog.records if "Ignoring" in r.getMessage()]
+    # Two steps refuse it, each in its own warning: resolution drops the
+    # repository's config_file (tool_config_trust), naming the config that set
+    # it, and the path check refuses the file it names (path_trust), naming the
+    # checkout that file is in. Both end with the same remedy.
+    config_file = (target / ".ash" / ".ash.yaml").as_posix()
+    assert len(messages) == 2, messages
+    assert any(f"from {config_file}:" in message for message in messages), messages
+    assert any("inside the git checkout at" in message for message in messages), (
+        messages
     )
+    for message in messages:
+        assert message.endswith(KEEP_A_SETTING), message
 
 
 def test_an_operator_named_file_inside_the_scanned_tree_is_still_refused(
