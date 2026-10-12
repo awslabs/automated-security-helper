@@ -15,7 +15,6 @@ list cannot be read, the misconfiguration scanner is not run offline at all.
 """
 
 import os
-import shutil
 from pathlib import Path
 from typing import List
 
@@ -32,6 +31,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScannerConfigOptions,
 )
 from automated_security_helper.utils import subprocess_utils
+from tests.utils.helpers import require_scanner_binary
 from tests.utils.refusing_proxy import (
     RecordingProxy,
     route_through,
@@ -279,10 +279,13 @@ def _reset_list_cache() -> None:
         reset()
 
 
-@pytest.mark.skipif(
-    shutil.which("trivy") is None, reason="needs a trivy binary on PATH"
-)
 def test_a_real_offline_trivy_fetches_no_terraform_module(offline, context, tmp_path):
+    """trivy itself, offline, over a .tf file that names remote module sources.
+
+    Runs in the CI job that installs every scanner, where a missing trivy fails it
+    (tests/utils/helpers.require_scanner_binary); elsewhere it skips without trivy.
+    """
+    require_scanner_binary("trivy")
     scrub_cloud_credentials(offline)
     proxy = RecordingProxy()
     route_through(offline, proxy)

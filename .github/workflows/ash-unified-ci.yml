@@ -1047,6 +1047,24 @@ jobs:
           "$trivy" image --download-db-only --no-progress
           mkdir -p "$EMPTY_TARGET"
           "$trivy" config "$EMPTY_TARGET"
+      # The unit tests that run the real syft and trivy offline (a fake `go` on PATH
+      # must record no call from syft; trivy must fetch no Terraform module source).
+      # Every other job skips them, because only this one installs the tools. The
+      # tools' directories go first on PATH, and ASH_REQUIRE_REAL_SCANNER_TESTS turns
+      # a skip into a failure, so a change to the install above cannot pass by
+      # skipping them (the ASH_REQUIRE_SYMBOLS_EXTRA pattern).
+      - name: Run the real-scanner offline tests
+        env:
+          TMPDIR: ${{ runner.temp }}
+          ASH_REQUIRE_REAL_SCANNER_TESTS: "1"
+        run: |
+          tools="$(python -c 'import os; from automated_security_helper.utils.subprocess_utils import find_executable; print(os.pathsep.join(os.path.dirname(find_executable(n) or "") for n in ("syft", "trivy")))')"
+          export PATH="${tools}${PATH:+:${PATH}}"
+          uv sync --frozen --extra cdk
+          uv run --frozen pytest \
+            tests/unit/plugin_modules/test_offline_go_toolchain.py \
+            tests/unit/plugin_modules/test_offline_trivy_terraform_modules.py \
+            --no-cov -p no:randomly -n 0
       # Every scanner runs twice over one fixture, with --sandbox off and under the
       # backend, offline and online, and status plus findings must match per scanner.
       # --require names the scanners that must actually have run, so a scanner that

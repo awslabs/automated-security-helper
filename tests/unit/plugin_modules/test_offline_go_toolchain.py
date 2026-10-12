@@ -17,7 +17,6 @@ a real syft, when one is installed, against a module with a fake ``go`` on PATH.
 """
 
 import os
-import shutil
 import sys
 from typing import Dict, List
 
@@ -35,6 +34,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner 
 )
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.offline_tool_env import offline_tool_environment
+from tests.utils.helpers import require_scanner_binary
 from tests.utils.refusing_proxy import (
     RecordingProxy,
     route_through,
@@ -128,9 +128,13 @@ def test_offline_grype_keeps_the_go_toolchain_local(offline, context):
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the fake go is a POSIX shell script"
 )
-@pytest.mark.skipif(shutil.which("syft") is None, reason="needs a syft binary on PATH")
 def test_a_real_offline_syft_runs_no_go_command(offline, context, tmp_path):
-    """syft itself, with a ``go`` first on PATH that records every invocation."""
+    """syft itself, with a ``go`` first on PATH that records every invocation.
+
+    Runs in the CI job that installs every scanner, where a missing syft fails it
+    (tests/utils/helpers.require_scanner_binary); elsewhere it skips without syft.
+    """
+    require_scanner_binary("syft")
     scrub_cloud_credentials(offline)
     proxy = RecordingProxy()
     route_through(offline, proxy)
