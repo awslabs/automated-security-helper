@@ -145,6 +145,10 @@ _INSTALLER = f"{_ASH}/assets/install-pinned-tool.py"
 _INSTALLS = "the standalone tool installer: the install and staging directories"
 _CONFIG = "the config file the operator names or ASH resolved"
 _DOWNLOADS = "tool installs, download staging and the asset cache under ASH's home"
+_RULES_INSTALLS = (
+    "the cfn-guard rules directory beside the tool installs (rules_bundles.rules_root): "
+    "a staging directory made in it, renamed into place"
+)
 _ATOMIC = (
     "fs_guard.open_for_atomic_write itself, which write_text_atomically calls: a "
     "staging file it created exclusively, renamed over the target, relative to the "
@@ -353,6 +357,38 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         "the sandbox's private home, a temporary directory",
     ),
+    # The cfn-guard rules bundle, installed beside the tools: staged under the
+    # rules directory and renamed into place.
+    (_INSTALLER, "install_bundle", "Path.open"): (2, _INSTALLS),
+    (_INSTALLER, "install_bundle", "os.replace"): (2, _INSTALLS),
+    (_INSTALLER, "install_bundle", "write_text"): (1, _INSTALLS),
+    (f"{_ASH}/utils/rules_bundles.py", "extract_bundle", "Path.open"): (
+        1,
+        _RULES_INSTALLS,
+    ),
+    (f"{_ASH}/utils/rules_bundles.py", "extract_bundle", "os.fdopen"): (
+        1,
+        _RULES_INSTALLS,
+    ),
+    (f"{_ASH}/utils/rules_bundles.py", "install_rules_bundle", "os.replace"): (
+        2,
+        _RULES_INSTALLS,
+    ),
+    (f"{_ASH}/utils/rules_bundles.py", "install_rules_bundle", "write_text"): (
+        1,
+        _RULES_INSTALLS,
+    ),
+    # gitleaks' re-scan copies of the files a .gitleaksignore names.
+    (
+        f"{_ASH}/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py",
+        "_write_private_copy",
+        "os.open",
+    ): (1, _TOOL_CONFIG_DIR),
+    (
+        f"{_ASH}/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py",
+        "_write_private_copy",
+        "os.fdopen",
+    ): (1, _TOOL_CONFIG_DIR),
 }
 
 
