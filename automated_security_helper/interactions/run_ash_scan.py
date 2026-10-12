@@ -62,6 +62,7 @@ from automated_security_helper.core.unified_metrics import (
     get_unified_scanner_metrics,
 )
 from automated_security_helper.interactions.run_ash_container import (
+    container_build_refusal,
     container_input_refusal,
     container_was_started,
     run_ash_container,
@@ -1765,6 +1766,33 @@ def _run_container_mode(
         if refusal is not None:
             typer.secho(refusal, fg=typer.colors.RED)
             sys.exit(3)
+        # The build inputs too: IDs that are not numbers, a revision the build cannot
+        # take, and a non-root build as UID or GID 0, which is the default outcome on
+        # a root host that does not pass --build-target ci. With the host IDs
+        # unreadable, run_ash_container reports that itself.
+        from automated_security_helper.utils import subprocess_utils
+
+        try:
+            host_ids = (
+                subprocess_utils.get_host_uid(),
+                subprocess_utils.get_host_gid(),
+            )
+        except Exception:
+            host_ids = None
+        if host_ids is not None:
+            build_refusal = container_build_refusal(
+                build=opts.build,
+                build_target=opts.build_target,
+                custom_containerfile=opts.custom_containerfile,
+                container_uid=opts.container_uid,
+                container_gid=opts.container_gid,
+                ash_revision_to_install=opts.ash_revision_to_install,
+                host_uid=host_ids[0],
+                host_gid=host_ids[1],
+            )
+            if build_refusal is not None:
+                typer.secho(build_refusal[1], fg=typer.colors.RED)
+                sys.exit(build_refusal[0])
         # Only when a scan is actually being asked for. --no-run builds an image and
         # stops; it never claims to have scanned anything, so it has no business
         # discarding a report from a run that did.

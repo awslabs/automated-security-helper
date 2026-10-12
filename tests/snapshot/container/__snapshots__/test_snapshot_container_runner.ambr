@@ -72,8 +72,6 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-                   INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
       Invalid ASH revision value: 'main;touch pwned'. Only alphanumeric characters, dots, hyphens, underscores, and forward slashes are allowed.
   
     ''',

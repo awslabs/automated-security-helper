@@ -8,7 +8,9 @@ left in the output directory (``_discard_prior_run_artifacts``), so a results fi
 found afterwards is this run's. The inputs are checked before that: a ``--config``
 that does not exist, an ``extends`` entry the container cannot resolve, or an
 output path ``--mount`` cannot carry refuses the scan with exit 3 and leaves the
-output directory as it was.
+output directory as it was. So do the build inputs: a ``--container-uid`` or
+``--container-gid`` that is not a number and a ``non-root`` build as UID or GID 0
+(exit 3), and an ``--ash-revision-to-install`` the build cannot take (exit 1).
 """
 
 from __future__ import annotations
@@ -120,6 +122,65 @@ def test_an_output_path_the_mount_cannot_carry(runtime, tmp_path):
     result = _scan(output)
 
     assert result.exit_code == 3, result.output
+    assert runtime["executed"] == 0
+    _kept(output)
+
+
+def _scan_building(output: Path, *extra: str):
+    """The same scan, building the image first."""
+    return CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--mode",
+            "container",
+            "--no-progress",
+            "--source-dir",
+            "src",
+            "--output-dir",
+            str(output),
+            *extra,
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("extra", "code"),
+    [
+        pytest.param(["--container-uid", "x1"], 3, id="uid-not-a-number"),
+        pytest.param(["--container-gid", "x1"], 3, id="gid-not-a-number"),
+        pytest.param(["--ash-revision-to-install", "v1;x"], 1, id="unsafe-revision"),
+    ],
+)
+def test_a_build_input_the_image_cannot_take(extra, code, runtime, tmp_path):
+    output = tmp_path / "out"
+    _prior_run(output)
+
+    result = _scan_building(output, *extra)
+
+    assert result.exit_code == code, result.output
+    assert runtime["executed"] == 0
+    _kept(output)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        pytest.param([], id="host-runs-as-root"),
+        pytest.param(["--build-target", "non-root"], id="explicit-non-root"),
+    ],
+)
+def test_a_non_root_build_as_root(extra, runtime, monkeypatch, tmp_path):
+    """The default outcome on a root host that does not pass --build-target ci."""
+    monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 0)
+    monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: 0)
+    output = tmp_path / "out"
+    _prior_run(output)
+
+    result = _scan_building(output, *extra)
+
+    assert result.exit_code == 3, result.output
+    assert "--build-target ci" in result.output
     assert runtime["executed"] == 0
     _kept(output)
 

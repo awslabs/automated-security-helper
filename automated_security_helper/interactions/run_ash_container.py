@@ -1103,6 +1103,56 @@ def container_input_refusal(
     return None
 
 
+def _invalid_revision_message(revision: str) -> str:
+    return (
+        f"Invalid ASH revision value: {revision!r}. Only alphanumeric characters, "
+        "dots, hyphens, underscores, and forward slashes are allowed."
+    )
+
+
+def container_build_refusal(
+    *,
+    build: bool,
+    build_target: BuildTarget | str | None,
+    custom_containerfile: str | None,
+    container_uid: str | None,
+    container_gid: str | None,
+    ash_revision_to_install: str | None,
+    host_uid: int | str,
+    host_gid: int | str,
+) -> Tuple[int, str] | None:
+    """Why the image cannot be built or run with these inputs: (exit code, message).
+
+    A ``--container-uid`` or ``--container-gid`` that is not 0-9 digits (exit 3), an
+    ``--ash-revision-to-install`` the build cannot take (exit 1), and, when building
+    the ``non-root`` stage, a UID or GID of 0 (exit 3, see
+    :func:`_non_root_stage_uid_refusal`). ``run_ash_container`` checks these before
+    anything else; ``run_ash_scan`` checks them before it clears the previous run's
+    output, so a refused scan leaves that output as it was. None when the inputs
+    can be used. The revision ASH derives from its own installation, when none is
+    given, is not an input and is checked where ``run_ash_container`` resolves it.
+    """
+    for label, value in (("UID", container_uid), ("GID", container_gid)):
+        # 0-9 only: str.isdigit also accepts digits such as "²" or "٠", which
+        # neither the build nor int() reads as an ID.
+        if value is not None and not _ASCII_DIGITS.fullmatch(value):
+            return 3, f"Container {label} must be a numeric value"
+
+    if ash_revision_to_install is not None and ash_revision_to_install != "LOCAL":
+        if not _validate_ash_revision(ash_revision_to_install):
+            return 1, _invalid_revision_message(ash_revision_to_install)
+
+    if build:
+        refusal = _non_root_stage_uid_refusal(
+            _resolve_build_target(build_target, custom_containerfile),
+            container_uid if container_uid is not None else str(host_uid),
+            container_gid if container_gid is not None else str(host_gid),
+        )
+        if refusal is not None:
+            return 3, refusal
+    return None
+
+
 #: Tells the scan inside the container that its --config was written by the
 #: repository being scanned; see _written_by_the_scanned_repository.
 CONFIG_FROM_SCANNED_REPOSITORY_FLAG = "--config-from-scanned-repository"
@@ -1799,35 +1849,31 @@ def run_ash_container(
             create_completed_process(args=[], returncode=1, stdout="", stderr=str(e))
         )
 
-    # Validate container UID and GID if specified. 0-9 only: str.isdigit also accepts
-    # digits such as "²" or "٠", which neither the build nor int() reads as a UID.
-    # Exit 3, as ./ash and Invoke-ASH refuse the same input.
-    if container_uid is not None:
-        if not _ASCII_DIGITS.fullmatch(container_uid):
-            typer.secho("Container UID must be a numeric value", fg=typer.colors.RED)
-            return _not_started(
-                create_completed_process(
-                    args=[],
-                    returncode=3,
-                    stdout="",
-                    stderr="Container UID must be a numeric value",
-                )
+    # The IDs, the revision and a non-root build as UID or GID 0, before the runner is
+    # resolved or anything is built; run_ash_scan checks the same before it clears
+    # the previous run's output. Exit 3, as ./ash and Invoke-ASH refuse the same
+    # input, and 1 for the revision.
+    build_refusal = container_build_refusal(
+        build=build,
+        build_target=build_target,
+        custom_containerfile=custom_containerfile,
+        container_uid=container_uid,
+        container_gid=container_gid,
+        ash_revision_to_install=ash_revision_to_install,
+        host_uid=host_uid,
+        host_gid=host_gid,
+    )
+    if build_refusal is not None:
+        code, message = build_refusal
+        typer.secho(message, fg=typer.colors.RED)
+        return _not_started(
+            create_completed_process(
+                args=[], returncode=code, stdout="", stderr=message
             )
-    else:
+        )
+    if container_uid is None:
         container_uid = str(host_uid)
-
-    if container_gid is not None:
-        if not _ASCII_DIGITS.fullmatch(container_gid):
-            typer.secho("Container GID must be a numeric value", fg=typer.colors.RED)
-            return _not_started(
-                create_completed_process(
-                    args=[],
-                    returncode=3,
-                    stdout="",
-                    stderr="Container GID must be a numeric value",
-                )
-            )
-    else:
+    if container_gid is None:
         container_gid = str(host_gid)
 
     # Resolve OCI runner
@@ -1841,7 +1887,8 @@ def run_ash_container(
 
     oci_command_prefix = _get_oci_wrapper_prefix()
 
-    # Resolve ASH revision
+    # Resolve ASH revision. One given was checked above (container_build_refusal);
+    # the one derived from this installation is checked here.
     rev = get_ash_revision()
     resolved_revision = (
         ash_revision_to_install if ash_revision_to_install is not None else rev
@@ -1849,18 +1896,11 @@ def run_ash_container(
 
     if resolved_revision is not None and resolved_revision != "LOCAL":
         if not _validate_ash_revision(resolved_revision):
-            typer.secho(
-                f"Invalid ASH revision value: {resolved_revision!r}. "
-                "Only alphanumeric characters, dots, hyphens, underscores, "
-                "and forward slashes are allowed.",
-                fg=typer.colors.RED,
-            )
+            message = _invalid_revision_message(resolved_revision)
+            typer.secho(message, fg=typer.colors.RED)
             return _not_started(
                 create_completed_process(
-                    args=[],
-                    returncode=1,
-                    stdout="",
-                    stderr=f"Invalid ASH revision value: {resolved_revision!r}",
+                    args=[], returncode=1, stdout="", stderr=message
                 )
             )
 
@@ -1869,19 +1909,8 @@ def run_ash_container(
         "ASH_IMAGE_NAME", f"automated-security-helper:{resolved_build_target}"
     )
 
-    # Build phase
+    # Build phase (a non-root build as UID or GID 0 was refused above)
     if build:
-        root_uid_refusal = _non_root_stage_uid_refusal(
-            resolved_build_target, container_uid, container_gid
-        )
-        if root_uid_refusal is not None:
-            typer.secho(root_uid_refusal, fg=typer.colors.RED)
-            return _not_started(
-                create_completed_process(
-                    args=[], returncode=3, stdout="", stderr=root_uid_refusal
-                )
-            )
-
         # Only a build reads the Dockerfile. --no-build runs an image that is already
         # present, so looking one up first refused a scan outside an ASH checkout
         # (revision LOCAL, no Dockerfile in or above the working directory) although
