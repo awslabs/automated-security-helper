@@ -556,7 +556,13 @@ def test_get_config_shows_a_patched_profile_with_the_registered_grants(
     shown = mcp_get_config(config_path=bound, session_id=SESSION)
 
     assert shown["project_name"] == "x"
-    assert shown["sandbox"] == _GRANTS
+    # The full dump also shows the two scanner grants the profile leaves at
+    # their defaults.
+    assert shown["sandbox"] == {
+        **_GRANTS,
+        "read_path_scanners": [],
+        "env_scanners": [],
+    }
 
 
 def test_the_scan_pre_checks_and_validate_config_accept_a_patched_profile(
