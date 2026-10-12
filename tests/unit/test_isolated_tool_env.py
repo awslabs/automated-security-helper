@@ -95,3 +95,46 @@ def test_an_installer_stub_refuses_and_writes_nothing(tmp_path, name):
     assert "stubbed in this test" in completed.stderr
     assert sorted(p.name for p in stubs.iterdir()) == before
     assert list(workdir.iterdir()) == []
+
+
+_REFUSING_AWS = {
+    "AWS_CONFIG_FILE": os.devnull,
+    "AWS_SHARED_CREDENTIALS_FILE": os.devnull,
+    "AWS_EC2_METADATA_DISABLED": "true",
+    "AWS_ENDPOINT_URL": "http://127.0.0.1:9",
+    "AWS_REGION": "us-east-1",
+}
+
+
+def test_the_environment_gives_no_usable_aws_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(Path.home() / ".aws" / "config"))
+
+    env = isolated_tool_env(tmp_path)
+
+    assert {name: env.get(name) for name in _REFUSING_AWS} == _REFUSING_AWS
+
+
+def _harness_envs(tmp_path):
+    """The environment each subprocess harness that runs in-process scans builds."""
+    from tests.unit.cli.mcp.test_list_scanners_scan_selection import _Sequence
+    from tests.unit.plugins.test_refused_plugin_modules import _Run
+    from tests.unit.plugins.test_scan_plugin_selection import _Process
+
+    yield "list_scanners _Sequence", _Sequence(tmp_path / "sequence")._env()
+    yield "refused modules _Run", _Run(tmp_path / "run").env()
+    yield "plugin selection _Process", _Process(tmp_path / "process")._env()
+
+
+def test_each_harness_drops_inherited_aws_settings(tmp_path, monkeypatch):
+    """An inherited profile or key would apply even beside the refusing settings."""
+    monkeypatch.setenv("AWS_PROFILE", "inherited-profile")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "inherited-key-id")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "inherited-secret")
+    monkeypatch.setenv("AWS_SESSION_TOKEN", "inherited-token")
+    monkeypatch.setenv("AWS_DEFAULT_PROFILE", "inherited-default")
+    for name in ("sequence", "run", "process"):
+        (tmp_path / name).mkdir()
+
+    for harness, env in _harness_envs(tmp_path):
+        aws = {name: value for name, value in env.items() if name.startswith("AWS_")}
+        assert aws == _REFUSING_AWS, harness

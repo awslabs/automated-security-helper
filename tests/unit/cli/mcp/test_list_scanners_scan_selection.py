@@ -51,6 +51,7 @@ from typing import Dict, List
 from tests.utils.isolated_tool_env import (
     install_refusing_installers,
     isolated_tool_env,
+    without_inherited_aws,
 )
 
 SNYK_MODULE = "automated_security_helper.plugin_modules.ash_snyk_plugins"
@@ -245,11 +246,13 @@ class _Sequence:
         self.workdir.mkdir()
 
     def _env(self) -> Dict[str, str]:
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if not key.startswith(("ASH_", "SNYK_", "TRIVY_", "FERRET_"))
-        }
+        env = without_inherited_aws(
+            {
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith(("ASH_", "SNYK_", "TRIVY_", "FERRET_"))
+            }
+        )
         if platform.system().lower() == "windows":
             path = os.pathsep.join([str(self.bin_dir), env.get("PATH", "")])
         else:

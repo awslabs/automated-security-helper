@@ -54,6 +54,7 @@ from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 from tests.utils.isolated_tool_env import (
     install_refusing_installers,
     isolated_tool_env,
+    without_inherited_aws,
 )
 
 #: Refused by the loader. The second and third are what a prefix test written as
@@ -291,7 +292,9 @@ class _Run:
         (self.tree / "app.py").write_text("x = 1\n", encoding="utf-8")
 
     def env(self, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-        env = {k: v for k, v in os.environ.items() if not k.startswith("ASH_")}
+        env = without_inherited_aws(
+            {k: v for k, v in os.environ.items() if not k.startswith("ASH_")}
+        )
         python_path = [str(self.site)]
         if env.get("PYTHONPATH"):
             python_path.append(env["PYTHONPATH"])

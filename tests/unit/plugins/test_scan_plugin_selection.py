@@ -49,6 +49,7 @@ from automated_security_helper.plugins.plugin_manager import AshPluginManager
 from tests.utils.isolated_tool_env import (
     install_refusing_installers,
     isolated_tool_env,
+    without_inherited_aws,
 )
 
 SNYK_MODULE = "automated_security_helper.plugin_modules.ash_snyk_plugins"
@@ -382,11 +383,13 @@ class _Process:
         return tree
 
     def _env(self) -> Dict[str, str]:
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if not key.startswith(("ASH_", "SNYK_", "TRIVY_", "FERRET_", "AWS_"))
-        }
+        env = without_inherited_aws(
+            {
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith(("ASH_", "SNYK_", "TRIVY_", "FERRET_"))
+            }
+        )
         python_path = [str(self.site)]
         if env.get("PYTHONPATH"):
             python_path.append(env["PYTHONPATH"])
@@ -405,13 +408,8 @@ class _Process:
                 "PLUGIN_SELECTION_PREIMPORT": json.dumps(self.preimport),
                 "PLUGIN_SELECTION_EVENTS": str(self.events_log),
                 "PYTHONIOENCODING": "utf-8",
-                # No usable cloud credentials and a refusing endpoint, whatever
-                # the host has: an in-process scan builds ASH's reporters.
-                "AWS_CONFIG_FILE": os.devnull,
-                "AWS_SHARED_CREDENTIALS_FILE": os.devnull,
-                "AWS_EC2_METADATA_DISABLED": "true",
-                "AWS_ENDPOINT_URL": "http://127.0.0.1:9",
-                "AWS_REGION": "us-east-1",
+                # Includes no usable AWS settings and a refusing endpoint: an
+                # in-process scan builds ASH's reporters.
                 **isolated_tool_env(self.root / "tool-env"),
             }
         )

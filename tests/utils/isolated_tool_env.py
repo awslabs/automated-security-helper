@@ -12,6 +12,11 @@ So a subprocess built with these helpers gets:
   directories, ``UV_TOOL_DIR``, ``UV_TOOL_BIN_DIR``, ``ASH_BIN_PATH``) under *root*;
 * ``UV_OFFLINE=1`` and HTTP(S) proxies that refuse every connection, so nothing is
   fetched;
+* no usable AWS settings: the config and credentials files are the null device,
+  instance metadata is off, and every AWS endpoint is a port that refuses
+  connections (:data:`AWS_SETTINGS`). The harness drops the AWS variables it
+  inherited first (:func:`without_inherited_aws`), because an inherited
+  ``AWS_PROFILE`` or access key would still apply;
 * ``UV_CACHE_DIR`` taken from the caller's environment when it is set, so a cache the
   operator chose is read rather than refilled, and otherwise an empty cache under
   *root*;
@@ -30,10 +35,26 @@ import platform
 import stat
 import sys
 from pathlib import Path
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Mapping
 
 #: A port nothing listens on, so a proxied connection is refused at once.
 REFUSING_PROXY = "http://127.0.0.1:9"
+
+#: AWS settings that give an in-process scan no credentials and no reachable
+#: endpoint, whatever the host has configured.
+AWS_SETTINGS = {
+    "AWS_CONFIG_FILE": os.devnull,
+    "AWS_SHARED_CREDENTIALS_FILE": os.devnull,
+    "AWS_EC2_METADATA_DISABLED": "true",
+    "AWS_ENDPOINT_URL": REFUSING_PROXY,
+    "AWS_REGION": "us-east-1",
+}
+
+
+def without_inherited_aws(env: Mapping[str, str]) -> Dict[str, str]:
+    """*env* without any ``AWS_*`` variable, for a harness to apply its own on top."""
+    return {key: value for key, value in env.items() if not key.startswith("AWS_")}
+
 
 #: Installers a scan or a scanner listing can start.
 REFUSED_INSTALLERS = ("uv", "gem", "npm")
@@ -67,6 +88,7 @@ def isolated_tool_env(root: Path) -> Dict[str, str]:
         env[name.lower()] = REFUSING_PROXY
     env["NO_PROXY"] = ""
     env["no_proxy"] = ""
+    env.update(AWS_SETTINGS)
     return env
 
 
