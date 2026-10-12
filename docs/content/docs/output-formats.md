@@ -68,8 +68,9 @@ outer process reads the inner run's results back only when they carry a
 (`ASH_OUTER_RUN_ID`); otherwise it exits 1, saying the inner run did not complete.
 
 `--use-existing` exits 1 rather than report on a results file that holds no scan:
-one with no scanner results, as a run that stopped before its scan recorded
-anything leaves, or one that records a refused run. Run the scan again without
+one with neither scanner results nor findings, as a run that stopped before its
+scan recorded anything leaves, or one that records a refused run. Run the scan
+again without
 `--use-existing`.
 
 Each reporter writes files of its own. When two enabled reporters would write the

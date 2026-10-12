@@ -389,9 +389,9 @@ def read_refusal_outcome(
 def existing_results_problem(results: object) -> Optional[str]:
     """Why ``--use-existing`` must not report on ``results``, or None.
 
-    Results that record a refused run, or that hold no scanner results, hold no
-    scan: reported on, they read as a clean one. A workspace run's unified results
-    hold their projects' scans.
+    Results that record a refused run, or that hold neither scanner results nor
+    findings, hold no scan: reported on, they read as a clean one. A workspace
+    run's unified results hold their projects' scans.
     """
     for checkpoint in getattr(results, "validation_checkpoints", None) or []:
         if (
@@ -403,14 +403,23 @@ def existing_results_problem(results: object) -> Optional[str]:
                 f"({checkpoint.get('message') or 'its reports were refused'}), so it "
                 "holds no complete scan"
             )
-    if not getattr(results, "scanner_results", None) and (
-        getattr(results, "workspace", None) is None
+    if (
+        getattr(results, "scanner_results", None)
+        or getattr(results, "workspace", None) is not None
+        or _holds_findings(results)
     ):
-        return (
-            "holds no scanner results, as a run that stopped before its scan "
-            "recorded anything leaves"
-        )
-    return None
+        return None
+    return (
+        "holds no scanner results and no findings, as a run that stopped before "
+        "its scan recorded anything leaves"
+    )
+
+
+def _holds_findings(results: object) -> bool:
+    sarif = getattr(results, "sarif", None)
+    return any(
+        getattr(run, "results", None) for run in getattr(sarif, "runs", None) or []
+    )
 
 
 @dataclass(frozen=True)

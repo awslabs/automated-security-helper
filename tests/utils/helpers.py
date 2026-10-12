@@ -88,7 +88,8 @@ def results_of_a_scan():
     """Results that hold a scan: one scanner's entry, as a scan phase records it.
 
     For tests that hand ``--use-existing`` a results file. ``AshAggregatedResults()``
-    on its own holds no scanner results, which ``--use-existing`` refuses.
+    on its own holds no scanner results and no findings, which ``--use-existing``
+    refuses.
     """
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 

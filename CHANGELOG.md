@@ -899,8 +899,9 @@
   refused before any project is scanned, including for a name that collides with
   `reports/workspace-reports.json`.
 
-- **`--use-existing` exits 1 on results that hold no scan.** A results file with no
-  scanner results, as a run that stopped before its scan recorded anything leaves
+- **`--use-existing` exits 1 on results that hold no scan.** A results file with
+  neither scanner results nor findings, as a run that stopped before its scan
+  recorded anything leaves
   (a release up to v3.7.1 writes such a file after its scan phase), or one that
   records a refused run, used to be reported on as a clean scan and exit 0. The
   error names the file and says to run the scan without `--use-existing`.

@@ -75,6 +75,29 @@ def test_only_a_regular_file_is_read_without_question(tmp_path):
     assert not_a_regular_file(fifo) == "is not a regular file"
 
 
+def test_results_with_findings_hold_a_scan():
+    """Findings without scanner entries, as a converted or hand-built file holds."""
+    results = AshAggregatedResults.model_validate(
+        {"sarif": {"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "x"}}}]}}
+    )
+    assert existing_results_problem(results) is not None
+    results = AshAggregatedResults.model_validate(
+        {
+            "sarif": {
+                "version": "2.1.0",
+                "runs": [
+                    {
+                        "tool": {"driver": {"name": "x"}},
+                        "results": [{"message": {"text": "a finding"}}],
+                    }
+                ],
+            }
+        }
+    )
+
+    assert existing_results_problem(results) is None
+
+
 def test_workspace_results_hold_their_projects_scans():
     """A workspace run's unified results carry no top-level scanner results."""
     from automated_security_helper.models.workspace import WorkspaceResults
