@@ -3,8 +3,8 @@
 
 """The config files ASH writes for a scanner's tool are outside the scanned tree.
 
-bandit, grype, syft, trivy, trivy-repo and ferret-scan each get a config file ASH
-writes when the operator names none, one that sets nothing, so the tool does not read one
+bandit, grype, syft, trivy, trivy-repo, ferret-scan and actionlint each get a config
+file ASH writes when the operator names none, one that sets nothing, so the tool does not read one
 from the tree on its own (``config/tool_config_trust.empty_tool_config``), and
 trivy-repo an empty modules directory (``empty_tool_directory``). The
 output directory defaults to ``<source>/.ash/ash_output``, so the scanner's results
@@ -52,6 +52,12 @@ AshAggregatedResults.model_rebuild()
 
 _EMPTY_SARIF = json.dumps({"version": "2.1.0", "runs": []})
 
+#: A workflow for actionlint to find.
+_WORKFLOW = (
+    "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n"
+    "    steps:\n      - run: echo hello\n"
+)
+
 
 @dataclass(frozen=True)
 class Case:
@@ -62,11 +68,16 @@ class Case:
     #: Its path under the scanner's results directory, where it used to be written.
     old_name: str
     content: str
-    #: The tool's results file, relative to the results directory.
-    results_file: str
+    #: The tool's results file, relative to the results directory; None for a
+    #: tool whose results ASH reads from its standard output.
+    results_file: Optional[str]
     options: Dict[str, Any] = field(default_factory=dict)
     #: An empty directory the tool reads files from, rather than a file.
     directory: bool = False
+    #: Files the scanned tree holds for this scanner to find something to scan.
+    files: Dict[str, str] = field(default_factory=dict)
+    #: What the tool prints when it succeeds.
+    stdout: str = ""
 
     def __str__(self) -> str:
         return f"{self.scanner}{self.flag}"
@@ -129,6 +140,15 @@ CASES = [
     ),
     Case("trivy", "--config", "trivy-config.yaml", "", "source/results_sarif.sarif"),
     Case(
+        "actionlint",
+        "-config-file",
+        "source/ash-default-actionlint.yaml",
+        "# Written by ASH so actionlint reads no config from the scanned tree.\n",
+        None,
+        files={".github/workflows/ci.yml": _WORKFLOW},
+        stdout='{"version":"1.7.12","errors":[]}',
+    ),
+    Case(
         "ferret-scan",
         "--config",
         "ferret-empty-config.yaml",
@@ -149,13 +169,16 @@ def _isolated(monkeypatch: pytest.MonkeyPatch):
     reset_path_refusal_warnings()
 
 
-def _context(tmp_path: Path) -> PluginContext:
+def _context(tmp_path: Path, case: Optional[Case] = None) -> PluginContext:
     """A checkout scanned with the default output directory, inside it."""
     source = tmp_path / "repo"
     source.mkdir()
     (source / ".git").mkdir()
     (source / "app.py").write_text("x = 1\n", encoding="utf-8")
     (source / "requirements.txt").write_text("requests==2.19.1\n", encoding="utf-8")
+    for name, text in (case.files if case is not None else {}).items():
+        (source / name).parent.mkdir(parents=True, exist_ok=True)
+        (source / name).write_text(text, encoding="utf-8")
     output = source / ".ash" / "ash_output"
     (output / ASH_WORK_DIR_NAME).mkdir(parents=True)
     return PluginContext(
@@ -191,6 +214,11 @@ def _scanner_class(name: str):
         from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (  # type: ignore[assignment]
             TrivyScanner as cls,
             TrivyScannerConfig as config,
+        )
+    elif name == "actionlint":
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (  # type: ignore[assignment]
+            ActionlintScanner as cls,
+            ActionlintScannerConfig as config,
         )
     else:
         from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (  # type: ignore[assignment]
@@ -250,11 +278,12 @@ class _Tool:
         if self.outcome == "fails":
             self.scanner.exit_code = 2
             return {"returncode": 2, "stdout": "", "stderr": "failed"}
-        results = Path(self.scanner.results_dir) / self.case.results_file
-        results.parent.mkdir(parents=True, exist_ok=True)
-        results.write_text(_EMPTY_SARIF, encoding="utf-8")
+        if self.case.results_file is not None:
+            results = Path(self.scanner.results_dir) / self.case.results_file
+            results.parent.mkdir(parents=True, exist_ok=True)
+            results.write_text(_EMPTY_SARIF, encoding="utf-8")
         self.scanner.exit_code = 0
-        return {"returncode": 0, "stdout": "", "stderr": ""}
+        return {"returncode": 0, "stdout": self.case.stdout, "stderr": ""}
 
 
 def _run_through_the_executor(context: PluginContext, case: Case, scanner: Any):
@@ -270,7 +299,7 @@ def _run_through_the_executor(context: PluginContext, case: Case, scanner: Any):
 def test_the_config_is_outside_the_scanned_tree_and_holds_what_ash_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: Case
 ) -> None:
-    context = _context(tmp_path)
+    context = _context(tmp_path, case)
     scanner = _scanner(case, context, monkeypatch)
     tool = _Tool(case, scanner)
     with patch.object(scanner, "_run_subprocess", side_effect=tool):
@@ -289,7 +318,7 @@ def test_the_config_is_outside_the_scanned_tree_and_holds_what_ash_writes(
 def test_the_directory_is_private_while_the_tool_runs_and_gone_after(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: Case, outcome: str
 ) -> None:
-    context = _context(tmp_path)
+    context = _context(tmp_path, case)
     scanner = _scanner(case, context, monkeypatch)
     tool = _Tool(case, scanner, outcome)
     with patch.object(scanner, "_run_subprocess", side_effect=tool):
@@ -307,7 +336,7 @@ def test_the_directory_is_private_while_the_tool_runs_and_gone_after(
 def test_a_link_at_the_old_path_is_not_written_through(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: Case
 ) -> None:
-    context = _context(tmp_path)
+    context = _context(tmp_path, case)
     kept = tmp_path / "elsewhere" / "kept.txt"
     kept.parent.mkdir()
     kept.write_text("not ASH's\n", encoding="utf-8")
@@ -373,7 +402,7 @@ def test_a_sandboxed_scanner_may_read_the_directory_and_not_write_it(
     # Offline, so grype and trivy do not first update their databases outside
     # the sandbox, which would run the real tools.
     monkeypatch.setenv("ASH_OFFLINE", "true")
-    context = _context(tmp_path)
+    context = _context(tmp_path, case)
     scanner = _scanner(case, context, monkeypatch)
     backend = _RecordingBackend(case.flag)
 
@@ -428,7 +457,7 @@ def test_trivy_s_database_probe_names_no_config_its_run_removed(
     read as "no usable database".
     """
     (case,) = [c for c in CASES if c.scanner == scanner_name and c.flag == "--config"]
-    context = _context(tmp_path)
+    context = _context(tmp_path, case)
     scanner = _scanner(case, context, monkeypatch)
     tool = _Tool(case, scanner)
     with patch.object(scanner, "_run_subprocess", side_effect=tool):
@@ -458,7 +487,7 @@ def test_constructing_ferret_scan_writes_no_config(
     temp.mkdir(mode=0o700)
     os.chmod(temp, 0o700)
     monkeypatch.setattr(tempfile, "tempdir", str(temp))
-    context = _context(tmp_path)
+    context = _context(tmp_path, case)
     scanner = _scanner(case, context, monkeypatch)
     assert all(arg.key != "--config" for arg in scanner.args.extra_args)
     assert [

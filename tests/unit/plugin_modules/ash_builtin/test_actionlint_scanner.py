@@ -60,8 +60,22 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 from automated_security_helper.utils import subprocess_utils
+from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
 
 FIXTURES = Path(__file__).resolve().parents[3] / "test_data" / "scanners" / "actionlint"
+
+
+def _ashs_own(config: Path, repo: Path) -> bool:
+    """Whether ``config`` is the empty config ASH writes for this run's actionlint.
+
+    ``config/tool_config_trust.empty_tool_config`` writes it in a directory of the
+    scanner run's own, outside the scanned tree.
+    """
+    return not config.resolve().is_relative_to(repo.resolve()) and any(
+        parent.name.startswith(TOOL_CONFIG_DIR_PREFIX) for parent in config.parents
+    )
+
+
 FIXTURE_REPO = FIXTURES / "repo"
 FAKE_ACTIONLINT = "/opt/fake/bin/actionlint"
 
@@ -575,7 +589,7 @@ def test_no_workflows_does_not_run_actionlint_and_evaluates_nothing(
     assert scanner.targets_attempted == 0
 
 
-def test_without_a_config_an_empty_one_is_passed_from_the_results_dir(
+def test_without_a_config_an_empty_one_is_passed_from_outside_the_tree(
     repo, monkeypatch, on_path
 ):
     scanner = _scanner(repo)
@@ -585,7 +599,7 @@ def test_without_a_config_an_empty_one_is_passed_from_the_results_dir(
 
     ((argv, _),) = fake.calls
     config = Path(argv[argv.index("-config-file") + 1])
-    assert config.is_relative_to(Path(scanner.results_dir))
+    assert _ashs_own(config, repo)
     assert config.read_text().startswith("#")
 
 
@@ -605,7 +619,7 @@ def test_the_scanned_trees_actionlint_config_is_not_read(
 
     ((argv, _),) = fake.calls
     config = Path(argv[argv.index("-config-file") + 1])
-    assert config.is_relative_to(Path(scanner.results_dir))
+    assert _ashs_own(config, repo)
     assert config.read_text().startswith("#")
     assert f".github/{name} in the scanned tree is not read" in caplog.text
 
@@ -628,7 +642,7 @@ def test_config_file_is_passed_only_when_the_operator_set_it(
         assert config == (repo / "ci" / "actionlint.yaml").absolute()
         assert "Ignoring scanners.actionlint.options.config_file" not in caplog.text
     else:
-        assert config.is_relative_to(Path(scanner.results_dir))
+        assert _ashs_own(config, repo)
         assert "Ignoring scanners.actionlint.options.config_file" in caplog.text
 
 

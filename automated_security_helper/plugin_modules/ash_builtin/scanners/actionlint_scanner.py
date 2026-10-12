@@ -77,7 +77,7 @@ Decisions, and why
    ``.git`` directory, and a config's ``paths`` section can ``ignore`` findings,
    which actionlint drops before ASH sees them: they are neither reported nor
    counted as suppressed. So ASH passes ``-config-file`` every time: an empty config
-   it writes into its own results directory, unless the operator set
+   it writes outside the scanned tree for this run, unless the operator set
    ``options.config_file`` (``--config-overrides`` or a config file outside the
    scanned tree, ``utils/config_trust.py``). A ``config_file`` set by a config in
    the scanned tree is ignored with a warning, and a ``.github/actionlint.yaml`` or
@@ -179,6 +179,7 @@ from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.config.path_trust import in_scanned_tree
+from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.utils.config_trust import (
     INSIDE_THE_TREE,
     LEADS_OUT_OF_THE_TREE,
@@ -893,7 +894,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                         return spec
         return None
 
-    def _resolve_config_file(self, target: Path, results_dir: Path) -> Path:
+    def _resolve_config_file(self, target: Path) -> Path:
         """The config file actionlint is given, always explicitly. See decision 3."""
         configured = self._options().config_file
         context_config = self.context.config if self.context is not None else None
@@ -940,13 +941,14 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 "to use an actionlint config.",
                 level=logging.INFO,
             )
-        empty = results_dir / "ash-default-actionlint.yaml"
-        with open_for_write(empty) as handle:
-            handle.write(
-                "# Written by ASH so actionlint reads no config from the scanned "
-                "tree.\n"
-            )
-        return empty.absolute()
+        # Outside the scanned tree, new for this run and removed when it ends
+        # (config/tool_config_trust.empty_tool_config). It sets nothing, so
+        # where it lives does not change what actionlint reports.
+        return empty_tool_config(
+            "ash-default-actionlint.yaml",
+            "# Written by ASH so actionlint reads no config from the scanned tree.\n",
+            context=self.context,
+        ).absolute()
 
     def _execute_scan(
         self,
@@ -1014,7 +1016,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         post_scanned = False
 
         try:
-            config_file = self._resolve_config_file(target, results_dir)
+            config_file = self._resolve_config_file(target)
             ignore_patterns = config_ignore_patterns(config_file)
             if ignore_patterns:
                 self._plugin_log(
