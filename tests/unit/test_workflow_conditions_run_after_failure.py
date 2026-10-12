@@ -255,6 +255,73 @@ def test_a_condition_on_a_failed_outcome_calls_a_status_function():
     )
 
 
+#: An `if:` at the start of a comment's text, as in a USAGE block, optionally as a list
+#: item. Prose that mentions "`if:`" mid-sentence does not match.
+_COMMENT_IF = re.compile(r"^\s*#(?P<indent>\s*)(?:-\s+)?if:\s*(?P<value>.*)$")
+_COMMENT = re.compile(r"^\s*#(?P<indent>\s*)(?P<text>.*)$")
+
+
+def comment_conditions(text: str) -> Iterator[tuple[int, str]]:
+    """(line, condition) for each `if:` written inside a comment, block scalars joined."""
+    lines = text.splitlines()
+    for number, line in enumerate(lines, 1):
+        found = _COMMENT_IF.match(line)
+        if not found:
+            continue
+        value = found.group("value").strip()
+        if value in ("|", "|-", ">", ">-"):
+            parts = []
+            for following in lines[number:]:
+                more = _COMMENT.match(following)
+                if not more or len(more.group("indent")) <= len(found.group("indent")):
+                    break
+                parts.append(more.group("text").strip())
+            value = " ".join(parts)
+        yield number, value
+
+
+def test_a_condition_in_a_usage_comment_calls_a_status_function():
+    """Callers copy the USAGE blocks in workflow comments, which no `if:` key holds."""
+    found, missing = [], []
+    for path in workflow_files():
+        where = path.relative_to(REPO_ROOT)
+        for line, condition in comment_conditions(path.read_text(encoding="utf-8")):
+            found.append(f"{where}:{line}")
+            if lacks_status_after_failure(condition):
+                missing.append(f"{where}:{line}: {condition}")
+    assert any("upload-ash-sarif.yml" in f for f in found), (
+        f"the comment reader finds no usage `if:` in upload-ash-sarif.yml: {found}"
+    )
+    assert not missing, (
+        "these usage examples in comments read a failed or skipped outcome but call "
+        "no status function, so a caller who copies one gets GitHub's implicit "
+        "success() and skips the job after every failed scan:\n" + "\n".join(missing)
+    )
+
+
+def test_the_comment_reader_joins_a_folded_condition():
+    text = (
+        "#  USAGE\n"
+        "#      sarif:\n"
+        "#        if: >-\n"
+        "#          (needs.ash.result == 'success' || needs.ash.result == 'failure')\n"
+        "#          && needs.ash.outputs.artifact-id != ''\n"
+        "#        uses: ./x.yml\n"
+        "#  Prose about a job whose `if:` is false is not a condition.\n"
+        "#    - if: steps.scan.outcome == 'failure'\n"
+    )
+    conditions = list(comment_conditions(text))
+    folded = (
+        "(needs.ash.result == 'success' || needs.ash.result == 'failure') "
+        "&& needs.ash.outputs.artifact-id != ''"
+    )
+    assert conditions == [
+        (3, folded),
+        (8, "steps.scan.outcome == 'failure'"),
+    ], conditions
+    assert all(lacks_status_after_failure(c) for _, c in conditions)
+
+
 def test_an_upload_after_the_scan_runs_when_the_scan_fails():
     _, _, uploads, found = _scan()
     assert any(
