@@ -860,6 +860,84 @@ def config_document_denials(
     return denials
 
 
+def _built_in_reporter_names() -> frozenset:
+    """``reduced_plugin_name`` of every section the reporters model declares.
+
+    Those are ASH's built-in reporters, each of which writes its report on the
+    host. Any other section is read by a reporter a plugin module brings: the
+    AWS reporters, or another plugin's, which declares nothing about where it
+    sends findings.
+    """
+    from automated_security_helper.config.ash_config import ReporterConfigSegment
+
+    names = set()
+    for field_name, field in ReporterConfigSegment.model_fields.items():
+        for name in (field_name, field.alias):
+            if name and reduced_plugin_name(name):
+                names.add(reduced_plugin_name(name))
+    return frozenset(names)
+
+
+def _is_off_host_section(key: str) -> bool:
+    """Whether reporters section ``key`` is not read as a built-in reporter's.
+
+    ``get_plugin_config`` reads a section under any key in
+    ``plugin_key_lookup_names``, so a spelling of a built-in reporter's name is
+    that reporter's section, and every other key is some other reporter's.
+    """
+    return not plugin_key_lookup_names(key) & _built_in_reporter_names()
+
+
+def _off_host_reporter_section(op: Dict[str, Any]) -> str | None:
+    """The reporters section ``op`` writes or reads that only the operator may set, or None.
+
+    An off-host reporter sends findings where its section says (a bucket, a log
+    group, a Region, a profile), with the server's credentials, so a client that
+    sets it can have them sent to itself, and one that reads it learns where the
+    operator sends them. A section counts unless it is a built-in reporter's
+    (``_is_off_host_section``), and every op on it counts.
+
+    The reporters section, and the whole document, hold every section: an add or
+    replace there counts when its value has such a section, a ``test`` there
+    reads them all, and a ``remove`` of the reporters section clears them.
+    """
+    segments = _path_segments(op.get("path", ""))
+    op_name = op.get("op")
+    if not segments or segments == ["reporters"]:
+        if op_name == "test":
+            return "reporters"
+        if op_name == "remove":
+            return "reporters" if segments else None
+        value = op.get("value")
+        sections = (
+            value.get("reporters")
+            if not segments and isinstance(value, dict)
+            else value
+        )
+        if isinstance(sections, dict):
+            for key in sections:
+                if isinstance(key, str) and _is_off_host_section(key):
+                    return key
+        return None
+    if segments[0] != "reporters":
+        return None
+    return segments[1] if _is_off_host_section(segments[1]) else None
+
+
+def _check_off_host_reporter(op: Dict[str, Any]) -> None:
+    section = _off_host_reporter_section(op)
+    if section is None:
+        return
+    raise RuntimePatchDeniedError(
+        op,
+        f"path {op.get('path', '')!r} reaches the {section!r} reporters section: a "
+        f"reporter that is not one of ASH's built-in reporters can send the "
+        f"findings off the host, to wherever its section says, so only the "
+        f"operator's own configuration sets that section, whatever allowed_paths "
+        f"permits",
+    )
+
+
 def check_runtime_ops(
     patch_ops: List[Dict[str, Any]],
     *,
@@ -917,6 +995,11 @@ def check_runtime_ops(
             )
         _check_op_paths(op, allowlist=allowlist, plugin_keys=plugin_keys, config=config)
         _check_value_pattern(op, allowlist=allowlist, plugin_keys=plugin_keys)
+        # A client's enabled: false of an AWS reporter asks for nothing beyond
+        # the profile and takes no effect (_turns_an_off_host_reporter_off), so
+        # this rule leaves it alone, as denied_paths does.
+        if not _turns_an_off_host_reporter_off(op, config):
+            _check_off_host_reporter(op)
 
 
 def apply_runtime_patch(

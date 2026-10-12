@@ -13,6 +13,7 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.config.runtime_patch import (
     RuntimePatchDeniedError,
+    _off_host_reporter_section,
     apply_runtime_override,
     apply_runtime_patch,
     check_runtime_ops,
@@ -1233,18 +1234,282 @@ class TestDenialsMatchEveryPluginSpelling:
             check_runtime_ops(ops, allowlist=allowlist)
         assert "denied_value_patterns" in excinfo.value.rule
 
-    @pytest.mark.parametrize(
-        "path",
-        ["/scanners/TrivyImage/options/ignore_file", "/reporters/TrivyRepo/options/x"],
-    )
-    def test_another_plugin_or_section_is_not_refused(self, path: str) -> None:
+    def test_another_plugin_is_not_refused(self) -> None:
         allowlist = RuntimeOverridesConfig(
             enabled=True,
             allowed_paths=["/**"],
             denied_paths=["/scanners/trivy-repo/options/ignore_file"],
         )
         check_runtime_ops(
-            [{"op": "add", "path": path, "value": "x"}], allowlist=allowlist
+            [
+                {
+                    "op": "add",
+                    "path": "/scanners/TrivyImage/options/ignore_file",
+                    "value": "x",
+                }
+            ],
+            allowlist=allowlist,
+        )
+
+    def test_another_section_is_not_refused_by_the_plugins_denial(self) -> None:
+        """A reporters section named like the denied scanner is not that scanner's.
+
+        It is refused all the same, as the section of a reporter that is not one
+        of ASH's built-in reporters (TestOffHostReporterSections), and only for
+        that.
+        """
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=["/scanners/trivy-repo/options/ignore_file"],
+        )
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            check_runtime_ops(
+                [{"op": "add", "path": "/reporters/TrivyRepo/options/x", "value": "x"}],
+                allowlist=allowlist,
+            )
+        assert "denied_paths" not in excinfo.value.rule, excinfo.value.rule
+        assert "'TrivyRepo'" in excinfo.value.rule, excinfo.value.rule
+
+
+#: Writes to the section of a reporter that can send findings off the host, under
+#: an allowlist that permits the whole reporters section and denies nothing:
+#: (op, the section the refusal names). The AWS reporters in each spelling the
+#: config lookup accepts, a plugin's reporter, which declares nothing about where
+#: it sends, and the reporters section or the whole document, which carry every
+#: section at once.
+_OFF_HOST_WRITES = {
+    "s3-enabled": (
+        {
+            "op": "add",
+            "path": "/reporters/s3",
+            "value": {"enabled": True, "options": {"bucket_name": "clients-bucket"}},
+        },
+        "s3",
+    ),
+    "s3-bucket": (
+        {
+            "op": "replace",
+            "path": "/reporters/s3/options/bucket_name",
+            "value": "clients-bucket",
+        },
+        "s3",
+    ),
+    "security-hub": (
+        {"op": "replace", "path": "/reporters/aws-security-hub/enabled", "value": True},
+        "aws-security-hub",
+    ),
+    "security-hub-spelled-as-a-class": (
+        {"op": "add", "path": "/reporters/SecurityHub", "value": {"enabled": True}},
+        "SecurityHub",
+    ),
+    "cloudwatch-underscores": (
+        {
+            "op": "add",
+            "path": "/reporters/cloudwatch_logs/options/log_group_name",
+            "value": "clients-group",
+        },
+        "cloudwatch_logs",
+    ),
+    "bedrock": (
+        {
+            "op": "add",
+            "path": "/reporters/bedrock-summary-reporter/enabled",
+            "value": True,
+        },
+        "bedrock-summary-reporter",
+    ),
+    "a-plugins-reporter": (
+        {
+            "op": "add",
+            "path": "/reporters/webhook",
+            "value": {"options": {"url": "https://clients.example"}},
+        },
+        "webhook",
+    ),
+    "remove": ({"op": "remove", "path": "/reporters/s3"}, "s3"),
+    "test-reads-the-bucket": (
+        {"op": "test", "path": "/reporters/s3/options/bucket_name", "value": "x"},
+        "s3",
+    ),
+    "the-whole-section-with-s3": (
+        {
+            "op": "replace",
+            "path": "/reporters",
+            "value": {"s3": {"options": {"bucket_name": "clients-bucket"}}},
+        },
+        "s3",
+    ),
+    "remove-the-whole-section": ({"op": "remove", "path": "/reporters"}, "reporters"),
+    "test-the-whole-section": (
+        {"op": "test", "path": "/reporters", "value": {}},
+        "reporters",
+    ),
+}
+
+
+class TestOffHostReporterSections:
+    """Only the operator's trusted config sets an off-host reporter's section.
+
+    A reporter that sends findings off the host (the AWS reporters, or any
+    reporter a plugin module brings, which says nothing about where it sends)
+    sends them where its section says, with the server's credentials. Under an
+    allowlist that permitted ``/reporters/**``, an MCP client enabled S3 with a
+    bucket of its own and the scan uploaded its findings there. Each such
+    section is refused whatever the allowlist says; ASH's built-in reporters,
+    which write their reports on the host, are not.
+    """
+
+    _ALLOWLIST = RuntimeOverridesConfig(
+        enabled=True, allowed_paths=["", "/reporters/**"], denied_paths=[]
+    )
+
+    @pytest.mark.parametrize("case", sorted(_OFF_HOST_WRITES))
+    def test_a_write_to_an_off_host_reporters_section_is_refused(
+        self, case: str
+    ) -> None:
+        """The rule names the section. The AWS reporters' sections, and a write that
+        covers one of them, are also always-denied entries, which are checked
+        first, so their refusal can name the entry instead."""
+        op, section = _OFF_HOST_WRITES[case]
+
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            check_runtime_ops([op], allowlist=self._ALLOWLIST)
+
+        rule = excinfo.value.rule
+        assert repr(section) in rule or "denied_paths entry '/reporters/" in rule, rule
+        assert _off_host_reporter_section(op) == section
+
+    @pytest.mark.parametrize(
+        "path, section",
+        [
+            ("/reporters/webhook", "webhook"),
+            ("/reporters/SecurityHub", "SecurityHub"),
+            ("/reporters/webhook/enabled", "webhook"),
+        ],
+    )
+    def test_a_section_no_entry_denies_is_refused_by_this_rule(
+        self, path: str, section: str
+    ) -> None:
+        """A plugin's reporter, or a spelling no always-denied entry reads as an AWS
+        reporter's: only this rule refuses it, ``enabled: false`` included."""
+        value: Any = False if path.endswith("/enabled") else {"enabled": True}
+
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            check_runtime_ops(
+                [{"op": "add", "path": path, "value": value}],
+                allowlist=self._ALLOWLIST,
+            )
+
+        assert f"reaches the {section!r} reporters section" in excinfo.value.rule, (
+            excinfo.value.rule
+        )
+
+    def test_a_whole_document_with_an_off_host_section_is_refused(self) -> None:
+        """Even where the allowlist names the root. The always-denied entries it
+        covers refuse it first; the rule names the section all the same."""
+        swapped = _base_config().model_dump(mode="json", by_alias=False)
+        swapped["reporters"]["s3"] = {"options": {"bucket_name": "clients-bucket"}}
+        op = {"op": "replace", "path": "", "value": swapped}
+        with pytest.raises(RuntimePatchDeniedError):
+            check_runtime_ops([op], allowlist=self._ALLOWLIST)
+        assert _off_host_reporter_section(op) == "s3"
+
+    def test_a_test_of_the_whole_document_is_refused(self) -> None:
+        """It compares every reporters section, the operator's bucket included."""
+        op = {"op": "test", "path": "", "value": {}}
+        with pytest.raises(RuntimePatchDeniedError):
+            check_runtime_ops([op], allowlist=self._ALLOWLIST)
+        assert _off_host_reporter_section(op) == "reporters"
+
+    def test_control_the_rule_leaves_a_whole_built_in_reporters_section(
+        self,
+    ) -> None:
+        """A replace of all of /reporters that holds only built-in sections is not
+        this rule's. It is still refused, because it covers the always-denied
+        entries of the AWS reporters."""
+        sections = _base_config().model_dump(mode="json", by_alias=False)["reporters"]
+        sections["markdown"]["enabled"] = False
+        op = {"op": "replace", "path": "/reporters", "value": sections}
+        assert _off_host_reporter_section(op) is None
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            check_runtime_ops([op], allowlist=self._ALLOWLIST)
+        assert "denied_paths entry '/reporters/" in excinfo.value.rule
+
+    @pytest.mark.parametrize(
+        "reporter",
+        ["s3", "aws-security-hub", "cloudwatch-logs", "bedrock-summary-reporter"],
+    )
+    def test_an_aws_reporters_enabled_false_is_still_accepted(
+        self, reporter: str
+    ) -> None:
+        """It asks for nothing beyond the profile and takes no effect
+        (runtime_patch._turns_an_off_host_reporter_off), so neither the always-
+        denied entries nor this rule refuse it: written at the leaf, or as a
+        section holding only it where the config has none."""
+        for op in (
+            {"op": "add", "path": f"/reporters/{reporter}/enabled", "value": False},
+            {
+                "op": "add",
+                "path": f"/reporters/{reporter}",
+                "value": {"enabled": False},
+            },
+        ):
+            check_runtime_ops([op], allowlist=self._ALLOWLIST, config=_base_config())
+
+    @pytest.mark.parametrize(
+        "reporter, option",
+        [
+            ("s3", "bucket_name"),
+            ("s3", "aws_region"),
+            ("cloudwatch-logs", "log_group_name"),
+            ("bedrock-summary-reporter", "model_id"),
+        ],
+    )
+    def test_enabled_false_with_a_destination_is_refused(
+        self, reporter: str, option: str
+    ) -> None:
+        op = {
+            "op": "add",
+            "path": f"/reporters/{reporter}",
+            "value": {"enabled": False, "options": {option: "the-clients"}},
+        }
+        with pytest.raises(RuntimePatchDeniedError):
+            check_runtime_ops([op], allowlist=self._ALLOWLIST, config=_base_config())
+        assert _off_host_reporter_section(op) == reporter
+
+    @pytest.mark.parametrize(
+        "path, value",
+        [
+            ("/reporters/markdown/enabled", False),
+            ("/reporters/unused_suppressions/enabled", False),
+            ("/reporters/flat_json/enabled", False),
+            ("/reporters/sarif/options", {}),
+        ],
+    )
+    def test_control_a_built_in_reporters_section_is_still_patched(
+        self, path: str, value: object
+    ) -> None:
+        # The patch applies to the config as dumped, whose sections are keyed by
+        # field name (unused_suppressions, not unused-suppressions).
+        patched = apply_runtime_patch(
+            _base_config(),
+            [{"op": "replace", "path": path, "value": value}],
+            allowlist=self._ALLOWLIST,
+        )
+        assert isinstance(patched, AshConfig)
+
+    def test_control_a_built_in_reporter_is_matched_under_its_alias(self) -> None:
+        """unused-suppressions is the built-in reporter's own section, not a plugin's."""
+        check_runtime_ops(
+            [
+                {
+                    "op": "replace",
+                    "path": "/reporters/unused-suppressions/enabled",
+                    "value": False,
+                }
+            ],
+            allowlist=self._ALLOWLIST,
         )
 
 

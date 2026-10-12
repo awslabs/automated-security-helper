@@ -444,12 +444,27 @@ def mcp_server(tmp_path, monkeypatch):
     sessions.reset_default_registry_for_tests()
 
 
-def _register_profile(tmp_path: Path, reporter: str, section: str) -> Dict[str, Any]:
-    """Register an operator profile that allows client overrides at every path.
+#: A profile's runtime overrides that let a client change every reporters section
+#: and deny nothing of its own.
+_REPORTERS_ALLOWED = {
+    "enabled": True,
+    "allowed_paths": ["/reporters/**"],
+    "denied_paths": [],
+}
 
-    ``section`` is what it holds for ``reporter``: every option the reporter needs
-    and ``enabled: true`` (``"enabled"``), the options alone (``"options"``), or
-    nothing (``"none"``). Returns the profile's document.
+
+def _register_profile(
+    tmp_path: Path,
+    reporter: str,
+    section: str,
+    runtime_overrides: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Register an operator profile that allows client overrides.
+
+    At every path, unless ``runtime_overrides`` says otherwise. ``section`` is what
+    it holds for ``reporter``: every option the reporter needs and ``enabled:
+    true`` (``"enabled"``), the options alone (``"options"``), or nothing
+    (``"none"``). Returns the profile's document.
     """
     from automated_security_helper.cli.mcp.profile_registry import (
         register_profiles,
@@ -460,7 +475,10 @@ def _register_profile(tmp_path: Path, reporter: str, section: str) -> Dict[str, 
         "project_name": "operator",
         "ash_plugin_modules": [_AWS_PLUGINS],
         "global_settings": {
-            "mcp": {"runtime_overrides": {"enabled": True, "allowed_paths": ["/**"]}}
+            "mcp": {
+                "runtime_overrides": runtime_overrides
+                or {"enabled": True, "allowed_paths": ["/**"]}
+            }
         },
     }
     if section != "none":
@@ -667,4 +685,221 @@ def test_a_client_s_enabled_true_is_refused(
     )
     assert not (output / "ash_aggregated_results.json").exists()
     assert aws_requests == []
+    assert other_traffic == []
+
+
+# ---------------------------------------------------------------------------
+# A client's settings for an off-host reporter, under /reporters/**
+# ---------------------------------------------------------------------------
+
+#: The three routes a client's runtime override takes: ``select_profile``'s
+#: ``patch_ops`` or ``override_yaml``, each followed by ``scan_directory``, and a
+#: workspace scan's ``config_overrides``.
+_ROUTES = ["patch_ops", "override_yaml", "config_overrides"]
+
+#: A reporters section no reporter shipped with ASH reads: a reporter a plugin
+#: module brings, which may send findings anywhere its options say.
+_PLUGIN_REPORTER = "hook-reporter"
+
+
+def _client_change_then_scan(
+    tmp_path: Path,
+    route: str,
+    profile: Dict[str, Any],
+    patch_op: Dict[str, Any],
+    sections: Dict[str, Any],
+    config_overrides: List[str],
+) -> Tuple[Dict[str, Any], Path]:
+    """Send one client change by ``route``, then scan a tree with findings.
+
+    ``patch_op`` is the change as ``patch_ops`` sends it, ``sections`` as the
+    reporters sections ``override_yaml`` restates over the profile's, and
+    ``config_overrides`` as a workspace scan sends it. Returns the answer of the
+    tool that took the change and the directory the scan writes its results to.
+    Nothing is scanned after ``select_profile`` refuses the change.
+    """
+    from automated_security_helper.cli.mcp.workspace import mcp_scan_workspace
+    from automated_security_helper.cli.mcp_tools import mcp_select_profile
+
+    project = tmp_path / "ws" / "app"
+    write_fixture_tree(project)
+    if route == "config_overrides":
+        bound = mcp_select_profile("operator", session_id=_SESSION)
+        assert bound["success"] is True, bound
+        workspace = project.parent / "dev.code-workspace"
+        workspace.write_text(
+            json.dumps({"folders": [{"path": "app"}]}), encoding="utf-8"
+        )
+        output = tmp_path / "out"
+        result = asyncio.run(
+            mcp_scan_workspace(
+                str(workspace),
+                config_overrides=config_overrides,
+                output_dir=str(output),
+                scanners=["detect-secrets"],
+                offline=True,
+                session_id=_SESSION,
+            )
+        )
+        return result, output
+    if route == "override_yaml":
+        restated = copy.deepcopy(profile)
+        restated.setdefault("reporters", {}).update(copy.deepcopy(sections))
+        result = mcp_select_profile(
+            "operator", override_yaml=yaml.safe_dump(restated), session_id=_SESSION
+        )
+    else:
+        result = mcp_select_profile(
+            "operator", patch_ops=[patch_op], session_id=_SESSION
+        )
+    if result["success"] is True:
+        _scan_directory(project)
+    return result, project / ".ash" / "ash_output"
+
+
+#: A destination of the client's own for a reporter the operator enables: the
+#: reporter, the option, and the client's value.
+_CLIENT_DESTINATIONS = [
+    ("s3", "bucket_name", "clients-bucket"),
+    ("s3", "aws_region", "eu-west-1"),
+    ("cloudwatch-logs", "log_group_name", "clients-group"),
+]
+
+
+@pytest.mark.parametrize("route", _ROUTES)
+@pytest.mark.parametrize("reporter, option, value", _CLIENT_DESTINATIONS)
+@pytest.mark.usefixtures("mcp_server")
+def test_a_client_cannot_aim_an_operator_s_reporter_elsewhere(
+    tmp_path, aws_requests, other_traffic, reporter, option, value, route
+):
+    """Under an allowlist of ``/reporters/**`` that denies nothing, a client's
+    destination for a reporter the operator enables is refused, and nothing is
+    scanned or sent."""
+    profile = _register_profile(tmp_path, reporter, "enabled", _REPORTERS_ALLOWED)
+    options = {**_OPERATOR_OPTIONS[reporter], option: value}
+
+    result, output = _client_change_then_scan(
+        tmp_path,
+        route,
+        profile,
+        {
+            "op": "add",
+            "path": f"/reporters/{reporter}/options/{option}",
+            "value": value,
+        },
+        {reporter: {"enabled": True, "options": options}},
+        [f"reporters.{reporter}.options.{option}={value}"],
+    )
+
+    assert result["success"] is False, result
+    assert f"/reporters/{reporter}" in str(result.get("error")), result
+    assert not (output / "ash_aggregated_results.json").exists()
+    assert aws_requests == []
+    assert other_traffic == []
+
+
+@pytest.mark.parametrize("route", _ROUTES)
+@pytest.mark.usefixtures("mcp_server")
+def test_enabled_false_sent_with_a_destination_is_refused(
+    tmp_path, aws_requests, other_traffic, route
+):
+    """``enabled: false`` is accepted only on its own. Sent with a bucket, where
+    the profile has no S3 section, the change is refused on every route."""
+    profile = _register_profile(tmp_path, "s3", "none", _REPORTERS_ALLOWED)
+    section = {"enabled": False, "options": {"bucket_name": "clients-bucket"}}
+
+    result, output = _client_change_then_scan(
+        tmp_path,
+        route,
+        profile,
+        {"op": "add", "path": "/reporters/s3", "value": section},
+        {"s3": section},
+        [
+            "reporters.s3.enabled=false",
+            "reporters.s3.options.bucket_name=clients-bucket",
+        ],
+    )
+
+    assert result["success"] is False, result
+    assert "/reporters/s3" in str(result.get("error")), result
+    assert not (output / "ash_aggregated_results.json").exists()
+    assert aws_requests == []
+    assert other_traffic == []
+
+
+@pytest.mark.parametrize("route", _ROUTES)
+@pytest.mark.usefixtures("mcp_server")
+def test_a_client_cannot_configure_a_plugin_modules_reporter(
+    tmp_path, aws_requests, other_traffic, route
+):
+    """A reporter a plugin module brings may send findings wherever its options
+    say, and nothing about it says where, so its section is the operator's too:
+    a client enabling one with a URL of its own is refused, whatever the
+    allowlist says, and the refusal names the section."""
+    profile = _register_profile(tmp_path, "s3", "none", _REPORTERS_ALLOWED)
+    section = {"enabled": True, "options": {"url": "https://client.invalid/"}}
+
+    result, output = _client_change_then_scan(
+        tmp_path,
+        route,
+        profile,
+        {"op": "add", "path": f"/reporters/{_PLUGIN_REPORTER}", "value": section},
+        {_PLUGIN_REPORTER: section},
+        [
+            f"reporters.{_PLUGIN_REPORTER}.enabled=true",
+            f"reporters.{_PLUGIN_REPORTER}.options.url=https://client.invalid/",
+        ],
+    )
+
+    assert result["success"] is False, result
+    assert f"reaches the {_PLUGIN_REPORTER!r} reporters section" in str(
+        result.get("error")
+    ), result
+    assert not (output / "ash_aggregated_results.json").exists()
+    assert aws_requests == []
+    assert other_traffic == []
+
+
+@pytest.mark.parametrize("route", _ROUTES)
+@pytest.mark.usefixtures("mcp_server")
+def test_control_a_client_still_sets_a_built_in_reporter(tmp_path, route):
+    """Under the same allowlist, a built-in reporter's section is the client's to
+    change: the scan runs."""
+    profile = _register_profile(tmp_path, "s3", "none", _REPORTERS_ALLOWED)
+
+    result, output = _client_change_then_scan(
+        tmp_path,
+        route,
+        profile,
+        {"op": "add", "path": "/reporters/markdown/enabled", "value": False},
+        {"markdown": {"enabled": False}},
+        ["reporters.markdown.enabled=false"],
+    )
+
+    assert result["success"] is True, result
+    assert load_results(output).sarif.get_all_results()
+
+
+@pytest.mark.usefixtures("mcp_server")
+def test_control_the_operator_s_profile_still_enables_and_aims_s3(
+    tmp_path, aws_requests, other_traffic
+):
+    """The operator's own profile, under the same allowlist, still turns S3 on and
+    sends the results to the operator's bucket in the operator's region."""
+    from automated_security_helper.cli.mcp_tools import mcp_select_profile
+
+    _register_profile(tmp_path, "s3", "enabled", _REPORTERS_ALLOWED)
+    project = tmp_path / "ws" / "app"
+    write_fixture_tree(project)
+    bound = mcp_select_profile("operator", session_id=_SESSION)
+    assert bound["success"] is True, bound
+
+    _scan_directory(project)
+
+    puts = [
+        r for r in aws_requests if (r["service"], r["operation"]) == ("s3", "PutObject")
+    ]
+    assert puts, aws_requests
+    assert {r["params"]["Bucket"] for r in puts} == {"ash-findings"}
+    assert {r["region"] for r in aws_requests} == {_REGION}, aws_requests
     assert other_traffic == []

@@ -1518,3 +1518,110 @@ def test_an_edited_list_does_not_lift_the_defaults(tmp_path: Path) -> None:
     )
     assert project["success"] is False
     assert "denied_paths entry '/project_name'" in project["error"], project
+
+
+def _s3_uploads_with_the_bound_config(
+    session_id: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> List[tuple]:
+    """The S3 calls the S3 reporter makes with the config ``session_id`` bound.
+
+    botocore's last step before the network is stood in for, so a call is
+    recorded, with its bucket, and nothing leaves the host.
+    """
+    from unittest.mock import MagicMock
+
+    import botocore.client
+
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import (
+        S3Reporter,
+        S3ReporterConfig,
+    )
+
+    calls: List[tuple] = []
+
+    def stand_in(client, operation_name, api_params):
+        calls.append((operation_name, api_params.get("Bucket")))
+        return {}
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", stand_in)
+    bound = get_session_state(session_id).bound_config
+    section = bound.get_plugin_config("reporter", "s3") if bound is not None else None
+    if not section:
+        return calls
+    work = tmp_path / f"s3-{session_id}"
+    reporter = S3Reporter(
+        context=PluginContext(
+            source_dir=work, output_dir=work / "output", work_dir=work / "work"
+        ),
+        config=S3ReporterConfig.model_validate(section),
+    )
+    if reporter.config.enabled and reporter.config.options.bucket_name:
+        model = MagicMock()
+        model.metadata.generated_at = "20261012-000000"
+        model.metadata.workspace_project = None
+        model.to_simple_dict.return_value = {"findings": []}
+        reporter.report(model)
+    return calls
+
+
+def test_a_client_cannot_send_the_findings_to_a_bucket_of_its_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An off-host reporter's section is the operator's, whatever the allowlist says.
+
+    Under an allowlist of ``/reporters/**`` that denies nothing, a client enabling
+    S3 with a bucket of its own is refused on both routes, and nothing is
+    uploaded. S3's section is also an always-denied entry, which is checked
+    first, so the refusal can name the entry instead of the section.
+    """
+    for name, value in {
+        "AWS_ACCESS_KEY_ID": "testing",
+        "AWS_SECRET_ACCESS_KEY": "testing",  # pragma: allowlist secret
+        "AWS_DEFAULT_REGION": "us-east-1",
+        "AWS_CONFIG_FILE": str(tmp_path / "no-aws-config"),
+        "AWS_SHARED_CREDENTIALS_FILE": str(tmp_path / "no-aws-credentials"),
+    }.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    document = _profile(allowed_paths=["/reporters/**"], denied_paths=[])
+    _install(tmp_path, document)
+    section = {
+        "enabled": True,
+        "options": {"bucket_name": "clients-bucket", "aws_region": "us-east-1"},
+    }
+
+    patched, overridden = _both_routes(
+        {"op": "add", "path": "/reporters/s3", "value": section},
+        _override_for(document, {"reporters": {"s3": section}}),
+    )
+    uploads = _s3_uploads_with_the_bound_config(
+        "patch", tmp_path, monkeypatch
+    ) + _s3_uploads_with_the_bound_config("override", tmp_path, monkeypatch)
+
+    assert uploads == [], uploads
+    for result in (patched, overridden):
+        assert result["success"] is False, result
+        error = result["error"]
+        assert "'s3'" in error or "denied_paths entry '/reporters/s3/**'" in error, (
+            error
+        )
+    _assert_unbound("patch")
+    _assert_unbound("override")
+
+
+def test_control_a_client_still_patches_a_built_in_reporter(tmp_path: Path) -> None:
+    document = _profile(allowed_paths=["/reporters/**"], denied_paths=[])
+    _install(tmp_path, document)
+
+    patched, overridden = _both_routes(
+        {"op": "replace", "path": "/reporters/markdown/enabled", "value": False},
+        _override_for(document, {"reporters": {"markdown": {"enabled": False}}}),
+    )
+
+    for result in (patched, overridden):
+        assert result["success"] is True, result
+    for session_id in ("patch", "override"):
+        bound = get_session_state(session_id).bound_config
+        assert bound is not None
+        assert bound.get_plugin_config("reporter", "markdown")["enabled"] is False

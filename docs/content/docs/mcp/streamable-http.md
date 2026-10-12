@@ -295,6 +295,11 @@ The allowlist defines:
 Additional invariants enforced by `apply_runtime_patch`:
 
 - `move` and `copy` ops are rejected outright (they sidestep target-path checks).
+- No op may reach the reporters section of a reporter that isn't one of ASH's built-in reporters, whatever `allowed_paths` says. That covers the AWS reporters (`s3`, `aws-security-hub`, `cloudwatch-logs`, `bedrock-summary-reporter`, whose sections are also always-denied entries) and any reporter a plugin module brings. Such a reporter can send the findings off the host, to wherever its section says, with the server's credentials, so only the operator's own configuration sets that section.
+  - Every spelling ASH reads as such a section counts, and so does every op type: a `test` would tell a client where the operator sends findings.
+  - An `add` or `replace` of all of `/reporters`, or of the whole document, is refused when its value has such a section. A `test` or `remove` of `/reporters`, or a `test` of the whole document, is refused outright.
+  - The one exception is a client's `enabled: false` of an AWS reporter, on its own. It's accepted and takes no effect, and a warning names it.
+  - A client can still change a built-in reporter's section, such as `/reporters/markdown/enabled`, where the allowlist permits it.
 - Patch documents larger than **64 KiB** are rejected.
 - Any rejection raises `RuntimePatchDeniedError` with the offending op and the rule that fired; nothing is applied.
 

@@ -2483,6 +2483,23 @@
 
 ### Fixes
 
+- **An MCP client's runtime override can't set the reporters section of a reporter
+  that isn't one of ASH's built-in reporters, whatever the profile's
+  `allowed_paths` permits.** That covers `select_profile` with `patch_ops` or
+  `override_yaml`, and a workspace scan's `config_overrides`. A reporter a plugin
+  module brings may send the findings wherever its options say, with the server's
+  credentials. Under an allowlist of `/reporters/**`, a client could enable one
+  that declares no `destination_options` and give it a URL of its own. The AWS
+  reporters' sections were already always-denied entries, and they count too.
+  Every spelling the config lookup reads counts, and so does every op type. An
+  `add` or `replace` of all of `/reporters`, or of the whole document, counts when
+  its value holds such a section, and a `test` or `remove` of `/reporters` counts
+  outright. The refusal names the section. A client's `enabled: false` of an AWS
+  reporter is still accepted, has no effect and is named in a warning, but not
+  when it's sent with a destination option. Built-in reporters' sections can
+  still be changed where the allowlist permits. An operator who wants such a
+  reporter configured puts it in the trusted config (the registered profile)
+  instead.
 - **A scanner that refuses a target before starting its tool says so, without an
   exit code.** A refusal while the command was being assembled, such as bandit's
   for a link it cannot leave out, was reported with "(exit code 0: an accepted
