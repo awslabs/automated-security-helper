@@ -558,6 +558,19 @@ def test_gitignore_is_respected(repo, monkeypatch, on_path):
     assert argv[argv.index("--") + 1 :] == [".github/workflows/clean.yml"]
 
 
+@pytest.mark.parametrize("honor", [True, False])
+def test_the_gitignore_applies_as_the_config_says(tmp_path, repo, honor):
+    """A scan set actionlint computes itself follows ``honor_ignore_files``."""
+    (repo / ".gitignore").write_text(".github/workflows/vulnerable.yml\n")
+    scanner = _scanner(repo, output=tmp_path / f"out-{honor}")
+    scanner.context.config.honor_ignore_files = honor
+
+    linted = scanner._workflow_files(repo, "source", [])
+
+    assert (".github/workflows/vulnerable.yml" in linted) is not honor
+    assert ".github/workflows/clean.yml" in linted
+
+
 def test_a_workflow_path_starting_with_a_dash_is_after_the_separator(
     tmp_path, monkeypatch, on_path
 ):

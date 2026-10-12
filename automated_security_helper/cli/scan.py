@@ -500,8 +500,8 @@ def run_ash_scan_cli_command(
             help=(
                 "Whether the .gitignore and .ignore files in the scanned tree decide "
                 "which files are left out of ASH's scan set (the files "
-                "detect-secrets, cfn-nag, cdk-nag, npm-audit and the converters "
-                "read). --no-honor-ignore-files scans the files they match too; "
+                "detect-secrets, cfn-nag, cdk-nag, cfn-lint, cfn-guard, actionlint, "
+                "zizmor, npm-audit and the converters read). --no-honor-ignore-files scans the files they match too; "
                 "ASH's own exclusions such as .git still apply. Defaults to unset, "
                 "which prefers the operator's `honor_ignore_files` config value and "
                 "then honoring them. Either form takes precedence over the config. "

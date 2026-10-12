@@ -1646,7 +1646,7 @@
         },
         "honor_ignore_files": {
           "default": true,
-          "description": "Whether the .gitignore and .ignore files in the scanned tree decide which files are left out of ASH's scan set, the file list detect-secrets, cfn-nag, cdk-nag, npm-audit and the converters read. True (the default) leaves out every file they match. False scans those files too; ASH's own exclusions (.git, CDK assets, its own output directory) still apply. An operator setting: a config file inside the scanned tree, or one an MCP client supplied, cannot change it, and its value there is ignored with a warning. Set it in a config file outside the tree, with --config-overrides, or with --no-honor-ignore-files / --honor-ignore-files. Every scan records the outcome in metadata.ignore_file_exclusions.",
+          "description": "Whether the .gitignore and .ignore files in the scanned tree decide which files are left out of ASH's scan set, the file list detect-secrets, cfn-nag, cdk-nag, cfn-lint, cfn-guard, actionlint, zizmor, npm-audit and the converters read. True (the default) leaves out every file they match. False scans those files too; ASH's own exclusions (.git, CDK assets, its own output directory) still apply. An operator setting: a config file inside the scanned tree, or one an MCP client supplied, cannot change it, and its value there is ignored with a warning. Set it in a config file outside the tree, with --config-overrides, or with --no-honor-ignore-files / --honor-ignore-files. Every scan records the outcome in metadata.ignore_file_exclusions.",
           "title": "Honor Ignore Files",
           "type": "boolean"
         },

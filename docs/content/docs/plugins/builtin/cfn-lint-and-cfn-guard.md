@@ -25,7 +25,7 @@ The `sarif` extra is required; it provides the SARIF output format ASH reads. An
 
 ### Which files it scans
 
-The same files cfn-nag scans: every `.json`, `.yaml` and `.yml` file in the scan set (after ASH's ignore paths and `.gitignore`) that parses as YAML or JSON and has a top-level `Resources` mapping. A file with a `Resources` mapping that ASH cannot model as CloudFormation is reported as a target the scanner could not evaluate, so it counts toward partial coverage instead of disappearing. Templates in the converted target (archives ASH extracted) are scanned too. A template that is a symlink, sits under a symlinked directory, or has more than one hard link is skipped with a warning, because cfn-lint would read it where it points.
+The same files cfn-nag scans: every `.json`, `.yaml` and `.yml` file in the scan set (after ASH's ignore paths, and the `.gitignore` and `.ignore` files while `honor_ignore_files` is on, the default) that parses as YAML or JSON and has a top-level `Resources` mapping. A file with a `Resources` mapping that ASH cannot model as CloudFormation is reported as a target the scanner could not evaluate, so it counts toward partial coverage instead of disappearing. Templates in the converted target (archives ASH extracted) are scanned too. A template that is a symlink, sits under a symlinked directory, or has more than one hard link is skipped with a warning, because cfn-lint would read it where it points.
 
 ### Configuration
 

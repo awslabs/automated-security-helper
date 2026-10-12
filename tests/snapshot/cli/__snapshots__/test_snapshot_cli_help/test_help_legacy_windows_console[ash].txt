@@ -357,6 +357,8 @@
 │                                                                           (the files            │
 │                                                                           detect-secrets,       │
 │                                                                           cfn-nag, cdk-nag,     │
+│                                                                           cfn-lint, cfn-guard,  │
+│                                                                           actionlint, zizmor,   │
 │                                                                           npm-audit and the     │
 │                                                                           converters read).     │
 │                                                                           --no-honor-ignore-fi… │

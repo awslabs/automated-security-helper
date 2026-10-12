@@ -637,8 +637,9 @@ class ReportMetadata(BaseModel):
         ),
     ]
     # Declared for the reasons the `shard` field above states. The scan set decides
-    # what detect-secrets, cfn-nag, cdk-nag, npm-audit and the converters read, and
-    # nothing in their own results says a file was left out of it.
+    # what detect-secrets, cfn-nag, cdk-nag, cfn-lint, cfn-guard, actionlint, zizmor,
+    # npm-audit and the converters read, and nothing in their own results says a
+    # file was left out of it.
     ignore_file_exclusions: Annotated[
         IgnoreFileExclusions | None,
         Field(

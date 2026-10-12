@@ -279,6 +279,11 @@
   "The scanned repository's own scanner configs are not read" under Behavior
   changes.
 
+  actionlint, zizmor, cfn-lint and cfn-guard take their files from ASH's scan set,
+  so the scanned tree's `.gitignore` and `.ignore` files leave files out of them
+  only while `honor_ignore_files` is on (the default); `--no-honor-ignore-files`
+  scans those files with them too.
+
   ASH does not deduplicate across scanners, so overlapping pairs (gitleaks and
   detect-secrets, trivy and grype or trivy-repo, zizmor and actionlint) report a
   shared finding once per scanner; each scanner page says where.

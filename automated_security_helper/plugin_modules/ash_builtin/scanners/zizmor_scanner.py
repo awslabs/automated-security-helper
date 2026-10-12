@@ -146,7 +146,7 @@ from automated_security_helper.utils.config_trust import (
     operator_path,
     set_by_operator,
 )
-from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.scan_targets import scan_targets
@@ -777,6 +777,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 for item in scan_set(
                     source=str(self._plugin_context.source_dir),
                     output=str(self._plugin_context.output_dir),
+                    honor_ignore_files=honors_ignore_files(self._plugin_context.config),
                 )
             ]
         output_abs = Path(self._plugin_context.output_dir).absolute()

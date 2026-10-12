@@ -26,6 +26,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scann
     CfnNagScanner,
 )
 from automated_security_helper.utils.cfn_template_discovery import (
+    candidate_files,
     discover_templates,
     display_path,
 )
@@ -123,6 +124,22 @@ def test_a_symlinked_template_is_refused_by_both(context, ash_temp_path):
     assert link not in discovered.templates
     assert [shown for shown, _ in discovered.refused] == ["linked.yaml"]
     test_cfn_nag_selects_the_same_templates(context)
+
+
+@pytest.mark.parametrize("honor", [True, False])
+def test_the_gitignore_applies_as_the_config_says(context, honor):
+    """The scan set discovery computes itself follows ``honor_ignore_files``, as
+    cfn-nag's does."""
+    source = Path(context.source_dir)
+    (source / ".gitignore").write_text("stack.yaml\n", encoding="utf-8")
+    context.config.honor_ignore_files = honor
+
+    names = {
+        p.relative_to(source).as_posix() for p in candidate_files(context, "source")
+    }
+
+    assert ("stack.yaml" in names) is not honor
+    assert "nested/stack.json" in names
 
 
 def test_display_path_is_relative_inside_and_absolute_outside(tmp_path):

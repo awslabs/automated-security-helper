@@ -440,6 +440,22 @@ def test_gitignored_and_output_dir_files_are_not_inputs(repo):
     ]
 
 
+@pytest.mark.parametrize("honor", [True, False])
+def test_the_gitignore_applies_as_the_config_says(repo, honor):
+    """A scan set zizmor computes itself follows ``honor_ignore_files``."""
+    (repo / ".gitignore").write_text("other/\n")
+    scanner = _scanner(repo)
+    scanner._plugin_context.config.honor_ignore_files = honor
+
+    inputs = _relative(scanner._collect_inputs(repo, "source", []), repo)
+
+    ignored = [p for p in EXPECTED_INPUTS if p.startswith("other/")]
+    assert ignored, "the fixture has no input under other/"
+    assert inputs == (
+        [p for p in EXPECTED_INPUTS if p not in ignored] if honor else EXPECTED_INPUTS
+    )
+
+
 # --------------------------------------------------------------------------- #
 # argv and environment
 # --------------------------------------------------------------------------- #

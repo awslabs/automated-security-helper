@@ -47,7 +47,7 @@ from automated_security_helper.utils.cfn_template_model import (
     CloudFormationTemplateModelError,
     get_model_from_template,
 )
-from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.scan_targets import scan_targets
 from automated_security_helper.utils.scanned_tree import TreeInputRefused
@@ -83,7 +83,11 @@ def candidate_files(
     if target_type == "converted":
         found = [str(p) for p in Path(context.work_dir).glob("**/*.*")]
     else:
-        found = scan_set(source=str(context.source_dir), output=str(context.output_dir))
+        found = scan_set(
+            source=str(context.source_dir),
+            output=str(context.output_dir),
+            honor_ignore_files=honors_ignore_files(context.config),
+        )
     selected = {
         Path(f) for f in found if any(str(f).endswith(s) for s in _TEMPLATE_SUFFIXES)
     }

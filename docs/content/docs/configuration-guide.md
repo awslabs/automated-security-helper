@@ -350,8 +350,8 @@ database trustworthy.
 ### Ignore files and the scan set
 
 Before the scanners run, ASH builds a scan set: the list of files in the source
-directory that detect-secrets, cfn-nag, cdk-nag, npm-audit and the archive and
-Jupyter converters read. By default every file a `.gitignore` or `.ignore` in the
+directory that detect-secrets, cfn-nag, cdk-nag, cfn-lint, cfn-guard, actionlint,
+zizmor, npm-audit and the archive and Jupyter converters read. By default every file a `.gitignore` or `.ignore` in the
 scanned tree matches is left out of it, as git would leave it out. A nested ignore
 file applies to the directory it sits in, a later negation (`!keep.log`) puts a file
 back, and a directory the root `.gitignore` excludes is not entered at all, so the

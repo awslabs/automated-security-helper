@@ -4,8 +4,8 @@
 """Whole ``ash scan`` runs over one tree, with and without honoring its ignore files.
 
 The scanned repository's ``.gitignore`` and ``.ignore`` files decide which of its files
-are in ASH's scan set, the list detect-secrets, cfn-nag, cdk-nag, npm-audit and the
-converters read. Two things are required of that:
+are in ASH's scan set, the list detect-secrets, cfn-nag, cdk-nag, cfn-lint, cfn-guard,
+actionlint, zizmor, npm-audit and the converters read. Two things are required of that:
 
 - An operator can tell ASH not to honor them, with a CLI flag or with operator-tier
   config (a config file outside the scanned tree, ``ASH_CONFIG`` outside it, or

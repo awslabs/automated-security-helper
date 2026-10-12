@@ -188,7 +188,7 @@ from automated_security_helper.utils.config_trust import (
     scan_root,
     set_by_operator,
 )
-from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.scan_targets import scan_targets
@@ -801,6 +801,9 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             candidates = scan_set(
                 source=str(self._source_dir()),
                 output=str(self._output_dir()),
+                honor_ignore_files=honors_ignore_files(
+                    getattr(self.context, "config", None)
+                ),
             )
 
         target_abs = Path(target).absolute()

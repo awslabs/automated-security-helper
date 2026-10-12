@@ -17,7 +17,8 @@ zizmor is a builtin scanner, enabled by default: a default scan runs it. `scanne
 ## What gets scanned
 
 ASH passes zizmor two kinds of file, taken from its scan set so `.gitignore`,
-`.ignore` and `global_settings.ignore_paths` apply:
+`.ignore` and `global_settings.ignore_paths` apply (the ignore files only while
+`honor_ignore_files` is on, the default):
 
 - workflows: `*.yml` and `*.yaml` directly inside a `.github/workflows` directory
   (the only place GitHub runs a workflow from; subdirectories are not scanned),
