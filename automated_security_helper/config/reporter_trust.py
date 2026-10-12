@@ -178,11 +178,10 @@ _MISSING = object()
 def turns_a_reporter_off(value: Any) -> bool:
     """Whether ``enabled: value``, written by an MCP client, only asks to turn a reporter off.
 
-    Only ``false`` itself. A value pydantic would also read as false (``0``,
-    ``"no"``) is not taken as one here, so it is refused like ``true``. Such a
-    value is not refused, since it asks for nothing beyond the server's config,
-    but it does not take effect either: ``_confine_enabled`` takes ``enabled``
-    from the trusted base.
+    Only ``false`` itself: a value pydantic would also read as false (``0``,
+    ``"no"``) is refused like ``true``. ``false`` is not refused, since it asks
+    for nothing beyond the server's config, but it does not take effect either:
+    ``_confine_enabled`` takes ``enabled`` from the trusted base.
     """
     return value is False
 
