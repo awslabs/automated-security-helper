@@ -160,7 +160,11 @@ it needs.
   hold) is refused the same way, before anything in it is changed, with "`<path>`
   was not written: `<n>` names refer to it" (`OutputHardLinkRefused`); so is one
   already below a sandboxed scanner's results directory when the scanner starts.
-  Links at or above the output directory itself are not examined, as above. A process the scanner leaves running cannot keep
+  Links at or above the output directory itself are not examined, as above. On
+  Windows, which has no way to open a path relative to a directory without
+  following a link, ASH checks each component by name before it opens the file,
+  symlinks and reparse points such as junctions included: a link already there is
+  refused, but one created between that check and the open is not. A process the scanner leaves running cannot keep
   planting links afterwards: bwrap and firejail end the whole process tree with the
   scanner, and the Landlock wrapper is a child subreaper that kills any process its
   scanner left behind before it exits. On a timeout ASH sends a sandboxed process

@@ -137,7 +137,10 @@
   remove it. A file at one of those paths that another name also refers to (a hard
   link, which an archive can carry) is refused too (`OutputHardLinkRefused`), before
   it is truncated: the file was opened with `O_TRUNC`, so a hard link to a file
-  elsewhere on the filesystem was emptied and overwritten.
+  elsewhere on the filesystem was emptied and overwritten. On Windows, where these
+  writes were plain `open()` calls, each component is now checked by name first
+  (symlinks and reparse points such as junctions), so a link already in place is
+  refused; one created between that check and the open is not.
 
   If a sandbox was requested and cannot be provided, the scanner is recorded
   `MISSING` with the reason and the scan exits 1. ASH never falls back to running it

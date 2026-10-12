@@ -176,6 +176,102 @@ class TestOpenForWrite:
         assert target.read_text() == "written\n"
 
 
+class TestWithoutDirectoryDescriptors:
+    """Windows has no O_NOFOLLOW or dir_fd; open_for_write checks each component.
+
+    Forced here by turning off fs_guard's directory-descriptor support. A link is
+    a symlink (``S_ISLNK``) or, on Windows, anything with the reparse-point
+    attribute, such as a junction; the latter is simulated through ``_lstat``.
+    """
+
+    @pytest.fixture(autouse=True)
+    def no_directory_descriptors(self, monkeypatch):
+        monkeypatch.setattr(fs_guard, "_HAS_DIR_FD", False)
+
+    def test_a_link_at_the_file_name_is_refused(self, layout):
+        source, output, target = layout
+        _held = _context(source, output)  # its root lasts as long as it does
+        path = output / "reports" / "ash.sarif"
+        path.parent.mkdir()
+        path.symlink_to(target)
+
+        with pytest.raises(fs_guard.OutputLinkRefused):
+            fs_guard.open_for_write(path)
+
+        assert target.read_text() == ORIGINAL
+
+    def test_a_link_at_a_directory_component_is_refused(self, layout):
+        source, output, target = layout
+        _held = _context(source, output)  # its root lasts as long as it does
+        (output / "reports").symlink_to(target.parent, target_is_directory=True)
+
+        with pytest.raises(fs_guard.OutputLinkRefused):
+            fs_guard.open_for_write(output / "reports" / "ash.sarif")
+
+        assert sorted(p.name for p in target.parent.iterdir()) == [target.name]
+
+    def test_a_reparse_point_at_a_directory_component_is_refused(
+        self, layout, monkeypatch
+    ):
+        import stat as stat_module
+        from types import SimpleNamespace
+
+        source, output, target = layout
+        _held = _context(source, output)  # its root lasts as long as it does
+        junction = output / "reports"
+        junction.mkdir()
+        real_lstat = fs_guard._lstat
+
+        def lstat(path):
+            if Path(path) == junction:
+                return SimpleNamespace(
+                    st_mode=stat_module.S_IFDIR | 0o755,
+                    st_nlink=1,
+                    st_file_attributes=0x400,  # FILE_ATTRIBUTE_REPARSE_POINT
+                )
+            return real_lstat(path)
+
+        monkeypatch.setattr(fs_guard, "_lstat", lstat)
+
+        with pytest.raises(fs_guard.OutputLinkRefused):
+            fs_guard.open_for_write(junction / "ash.sarif")
+
+        assert list(junction.iterdir()) == []
+
+    def test_a_file_another_name_refers_to_is_refused(self, layout):
+        source, output, target = layout
+        _held = _context(source, output)  # its root lasts as long as it does
+        path = output / "ash_aggregated_results.json"
+        os.link(target, path)
+
+        with pytest.raises(fs_guard.OutputHardLinkRefused):
+            fs_guard.open_for_write(path)
+
+        assert target.read_bytes() == ORIGINAL.encode()
+
+    def test_an_atomic_write_through_a_linked_directory_is_refused(self, layout):
+        from automated_security_helper.utils.atomic_write import write_text_atomically
+
+        source, output, target = layout
+        _held = _context(source, output)  # its root lasts as long as it does
+        (output / "reports").symlink_to(target.parent, target_is_directory=True)
+
+        with pytest.raises(fs_guard.OutputLinkRefused):
+            write_text_atomically(output / "reports" / "ash.sarif", "{}")
+
+        assert sorted(p.name for p in target.parent.iterdir()) == [target.name]
+
+    def test_a_regular_file_there_is_written_and_directories_made(self, layout):
+        source, output, _target = layout
+        _held = _context(source, output)  # its root lasts as long as it does
+        path = output / "reports" / "nested" / "ash.sarif"
+
+        with fs_guard.open_for_write(path) as handle:
+            handle.write("written\n")
+
+        assert path.read_text() == "written\n"
+
+
 class TestRefuseLinksBelow:
     """The check of a sandboxed scanner's results directory before the scanner runs."""
 

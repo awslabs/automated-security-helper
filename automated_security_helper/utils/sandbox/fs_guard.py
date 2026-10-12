@@ -36,10 +36,7 @@ from pathlib import Path
 from typing import IO, Dict, FrozenSet, Iterable, Iterator, Optional, Tuple, Union
 
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.output_dir_links import (
-    OutputDirLinkRefused,
-    is_link,
-)
+from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
 
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 # O_BINARY on Windows, so the CRT does not translate newlines a second time under
@@ -294,6 +291,55 @@ _NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 # No O_TRUNC: the file is truncated only after fstat shows it is a regular file
 # that no other name refers to (_open_regular).
 _FILE_FLAGS = os.O_WRONLY | os.O_CREAT | _NOFOLLOW | _NONBLOCK | _BINARY
+#: Whether paths can be opened relative to a directory descriptor without
+#: following a link (POSIX). Without it (Windows) each component is checked by
+#: name before the open; see _check_beneath_by_name.
+_HAS_DIR_FD = hasattr(os, "fwalk")
+#: FILE_ATTRIBUTE_REPARSE_POINT: Windows symlinks, junctions and mount points.
+_REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+
+
+def _lstat(path: Path) -> os.stat_result:
+    return os.lstat(path)
+
+
+def _is_link_status(status: os.stat_result) -> bool:
+    return stat.S_ISLNK(status.st_mode) or bool(
+        getattr(status, "st_file_attributes", 0) & _REPARSE_POINT
+    )
+
+
+def _check_beneath_by_name(root: Path, relative: Tuple[str, ...], target: Path) -> None:
+    """Without directory descriptors: refuse a link on the way to ``target``.
+
+    Each directory component below ``root`` is examined with lstat and created
+    when missing; a symlink or reparse point (a junction, say) raises
+    OutputLinkRefused, and so does one at the file name. A regular file at the
+    name that another name refers to raises OutputHardLinkRefused. This refuses a
+    link that is already there, as one committed with the scanned tree is. A link
+    made between this check and the caller's open is not caught.
+    """
+    os.makedirs(root, exist_ok=True)
+    current = root
+    for part in relative[:-1]:
+        current = current / part
+        try:
+            status = _lstat(current)
+        except FileNotFoundError:
+            os.mkdir(current)
+            continue
+        if _is_link_status(status):
+            raise OutputLinkRefused(target, current)
+        if not stat.S_ISDIR(status.st_mode):
+            raise NotADirectoryError(errno.ENOTDIR, f"not a directory: {current}")
+    try:
+        status = _lstat(target)
+    except FileNotFoundError:
+        return
+    if _is_link_status(status):
+        raise OutputLinkRefused(target, target)
+    if stat.S_ISREG(status.st_mode) and status.st_nlink > 1:
+        raise OutputHardLinkRefused(target, status.st_nlink)
 
 
 def _is_link(name: str, dir_fd: int) -> bool:
@@ -404,14 +450,19 @@ def open_parent_beneath(path: Union[str, Path]) -> Optional[Tuple[int, str]]:
     component is opened without following a link and created when missing; a link
     at one, or at the file name, raises OutputLinkRefused, and a file at the name
     that another name refers to raises OutputHardLinkRefused. The caller closes the
-    descriptor. None when ``path`` is below no registered root (or the platform has
-    no directory descriptors), and the caller writes as it otherwise would.
+    descriptor. None when ``path`` is below no registered root, and the caller
+    writes as it otherwise would. None as well on a platform without directory
+    descriptors (Windows), after the same refusals were checked by name
+    (_check_beneath_by_name).
     """
     path = Path(os.path.abspath(path))
-    root = _writable_root_for(path) if hasattr(os, "fwalk") else None
+    root = _writable_root_for(path)
     if root is None:
         return None
     relative = path.relative_to(root).parts
+    if not _HAS_DIR_FD:
+        _check_beneath_by_name(root, relative, path)
+        return None
     dir_fd = _open_dir_beneath(root, relative[:-1], path)
     try:
         _refuse_link_at(relative[-1], dir_fd, path)
@@ -457,6 +508,11 @@ def open_for_write(
 
     With ``exclusive`` the file is created and must not exist yet (O_EXCL, open()'s
     "x"), guarded or not; FileExistsError is raised if something is at the name.
+
+    On a platform without directory descriptors (Windows) the components below a
+    root are checked by name first, symlinks and reparse points such as junctions
+    included, and then the file is opened by name: a link already there is
+    refused, one made between the check and the open is not.
     """
     if exclusive and append:
         raise ValueError("exclusive creates the file; it cannot also append")
@@ -466,13 +522,9 @@ def open_for_write(
     )
     path = Path(os.path.abspath(path))
     root = _guard_root(path, root)
-    if root is not None and not hasattr(os, "fwalk"):
-        # No directory descriptors to open beneath (Windows): the name itself is
-        # still checked, a junction included, before the plain open below.
-        if is_link(path):
-            raise OutputLinkRefused(path, path)
-        root = None
-    if root is None:
+    if root is not None and not _HAS_DIR_FD:
+        _check_beneath_by_name(root, path.relative_to(root).parts, path)
+    if root is None or not _HAS_DIR_FD:
         if make_parents:
             path.parent.mkdir(parents=True, exist_ok=True)
         if mode == 0o666:

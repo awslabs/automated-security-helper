@@ -17,7 +17,6 @@ there.
 from __future__ import annotations
 
 import errno
-import os
 import pickle
 import sys
 from pathlib import Path
@@ -231,11 +230,11 @@ class TestExclusiveCreation:
 
 @needs_symlinks
 class TestTheNameWithoutDirectoryDescriptors:
-    """Where os.fwalk is missing (Windows) the name itself is still checked."""
+    """Without directory descriptors (Windows) a named root is checked by name."""
 
     @pytest.fixture(autouse=True)
-    def _no_fwalk(self, monkeypatch):
-        monkeypatch.delattr(os, "fwalk", raising=False)
+    def _no_directory_descriptors(self, monkeypatch):
+        monkeypatch.setattr(fs_guard, "_HAS_DIR_FD", False)
 
     def test_a_link_at_the_name_is_refused(self, output, victim):
         (output / "ash.log").symlink_to(victim)
