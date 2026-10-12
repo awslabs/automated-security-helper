@@ -464,6 +464,56 @@ def test_an_in_tree_config_that_leaves_the_reporter_out_keeps_it_off(
     assert not any("enabled" in message for message in _warnings(ash_log))
 
 
+def _ops_config(where: Path) -> Path:
+    """A config that turns the S3 reporter on and names its bucket."""
+    return _write_config(
+        where / "ash.yaml",
+        {"s3": {"enabled": True, "options": {"bucket_name": "ops-bucket"}}},
+    )
+
+
+def test_an_ash_config_in_another_checkout_neither_turns_on_nor_points_a_reporter(
+    tmp_path, ash_log, monkeypatch
+):
+    """A file in any git checkout, not only the scanned one, is one someone else
+    can push to (sandbox_grants.repository_written): its reporter choices are
+    replaced by the trusted base's, with the remedy that keeps them. Named by
+    ASH_CONFIG here; the same file named with --config is covered end to end in
+    tests/unit/plugin_modules/ash_aws_plugins/
+    test_scanned_repository_config_cannot_send_off_host.py."""
+    from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
+
+    ops = tmp_path / "ops"
+    (ops / ".git").mkdir(parents=True)
+    monkeypatch.setenv("ASH_CONFIG", str(_ops_config(ops / "ash")))
+    source = tmp_path / "repo"
+    (source / ".git").mkdir(parents=True)
+
+    config = resolve_config(source_dir=source)
+
+    assert _enabled(config, "s3") is REPORTER_ENABLED_DEFAULTS["s3"] is False
+    assert _options(config, "s3").get("bucket_name") != "ops-bucket"
+    named = [m for m in _warnings(ash_log) if "reporters.s3." in m]
+    assert len(named) == 1, named
+    assert "reporters.s3.enabled" in named[0]
+    assert "reporters.s3.options.bucket_name" in named[0]
+    assert named[0].endswith(KEEP_A_SETTING), named[0]
+
+
+def test_control_the_same_ash_config_outside_every_checkout_is_the_operators(
+    tmp_path, ash_log, monkeypatch
+):
+    monkeypatch.setenv("ASH_CONFIG", str(_ops_config(tmp_path / "ops" / "ash")))
+    source = tmp_path / "repo"
+    (source / ".git").mkdir(parents=True)
+
+    config = resolve_config(source_dir=source)
+
+    assert _enabled(config, "s3") is True
+    assert _options(config, "s3").get("bucket_name") == "ops-bucket"
+    assert not [m for m in _warnings(ash_log) if "reporters.s3." in m]
+
+
 def test_the_operators_ash_config_turning_one_off_holds_too(
     tmp_path, ash_log, monkeypatch
 ):
