@@ -387,6 +387,9 @@ class GitleaksScannerConfig(ScannerPluginConfigBase):
 class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     """Secret detection over the scan target's files using gitleaks."""
 
+    #: gitleaks is a native binary. See ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = False
+
     # gitleaks' rules are compiled into the binary and it makes no network calls.
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
     success_exit_codes: ClassVar[Set[int]] = {0, LEAKS_EXIT_CODE}

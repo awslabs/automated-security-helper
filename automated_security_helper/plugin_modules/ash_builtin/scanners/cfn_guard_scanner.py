@@ -230,6 +230,9 @@ class CfnGuardScannerConfig(ScannerPluginConfigBase):
 class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     """Evaluates CloudFormation templates against cfn-guard rules."""
 
+    #: cfn-guard is a native binary. See ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = False
+
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
     # Rules warnings already logged. The rules are selected again for the dependency

@@ -587,6 +587,9 @@ class _RefusedIntegration(Exception):
 class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     """Lints GitHub Actions workflow files with actionlint."""
 
+    #: actionlint is a native binary. See ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = False
+
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
     # The strict default, declared so the choice is visible: actionlint reads the
     # workflows and ASH's config file, and needs no network, cache or variables. An

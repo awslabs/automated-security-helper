@@ -416,6 +416,10 @@ class CfnLintScannerConfig(ScannerPluginConfigBase):
 class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     """Validates CloudFormation templates with cfn-lint."""
 
+    #: cfn-lint is a Python package ASH runs through uv. See
+    #: ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = True
+
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
     # The strict default, declared so the choice is visible: cfn-lint is a uv tool,
     # whose directories and cache the baseline already exposes, and it reads the

@@ -329,6 +329,9 @@ class TrivyScannerConfig(ScannerPluginConfigBase):
 class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
     """Dependency vulnerability scanning with trivy."""
 
+    #: trivy is a native binary. See ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = False
+
     success_exit_codes: ClassVar[Set[int]] = {0}
 
     def model_post_init(self, context: Any) -> None:

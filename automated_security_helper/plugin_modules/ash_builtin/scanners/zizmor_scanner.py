@@ -465,6 +465,11 @@ class ZizmorScannerConfig(ScannerPluginConfigBase):
 class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     """GitHub Actions workflow and composite action analysis with zizmor."""
 
+    #: zizmor is a Python package ASH runs through uv: its PyPI wheel holds the
+    #: native binary, as semgrep's holds semgrep-core. A zizmor found on PATH
+    #: instead is the same program. See ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = True
+
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
     # 3 is "no auditable inputs"; see _read_results_file. Findings never set the
     # exit status because the scan passes --no-exit-codes.
