@@ -238,6 +238,12 @@ class ConfigValidator:
                                     f"this should not be in user configs"
                                 )
 
+            # The names a scan refuses with exit 3, checked the same way and, like
+            # the scan's check, without importing anything.
+            plugin_modules_error = cls._plugin_modules_refusal(resolved_data)
+            if plugin_modules_error is not None:
+                errors.append(plugin_modules_error)
+
             # Validate ignore_paths and suppression paths for directory-without-glob issues
             warnings = cls._check_path_patterns(config_path, resolved_data, source_dir)
             errors.extend(warnings)
@@ -253,6 +259,36 @@ class ConfigValidator:
         except Exception as e:
             errors.append(f"Unexpected error during validation: {str(e)}")
             return False, errors
+
+    #: Prefix of the error for ``ash_plugin_modules`` names a scan refuses.
+    PLUGIN_MODULES_ERROR_PREFIX = "Invalid ash_plugin_modules: "
+
+    @classmethod
+    def _plugin_modules_refusal(cls, config_data: dict) -> Optional[str]:
+        """The scan's refusal of the config's ``ash_plugin_modules``, or None.
+
+        Entries are split on commas and stripped the way a scan reads them, then
+        given to ``plugins.loader.refuse_plugin_modules_outside_namespace``, which
+        imports nothing. Whether an accepted name imports is not checked here.
+        """
+        from automated_security_helper.config.plugin_module_trust import (
+            split_plugin_modules,
+        )
+        from automated_security_helper.plugins.loader import (
+            PluginModuleError,
+            refuse_plugin_modules_outside_namespace,
+        )
+
+        entries = config_data.get("ash_plugin_modules")
+        if isinstance(entries, str):
+            entries = [entries]
+        if not isinstance(entries, (list, tuple)):
+            return None
+        try:
+            refuse_plugin_modules_outside_namespace(split_plugin_modules(entries))
+        except PluginModuleError as e:
+            return f"{cls.PLUGIN_MODULES_ERROR_PREFIX}{e}"
+        return None
 
     @classmethod
     def resolve_source_chain(

@@ -625,7 +625,10 @@ same name refuses `ash plugin list`, `ash dependencies install`, `ash report` an
 merge` with exit code 3. A module that is named correctly but does not import, because
 it is not installed or its import raises an error, refuses a scan with exit code 3 too,
 before any scanner runs, and refuses `ash plugin list`, `ash dependencies install` and
-`ash report` the same way; the message names the module and the error. When the list comes from
+`ash report` the same way; the message names the module and the error. `ash config
+validate` and the MCP `validate_config` tool report a name a scan refuses as a
+validation error; they import nothing, so they do not check whether an accepted name
+imports. When the list comes from
 a config file inside the scanned tree, only installed modules are imported; see
 [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose).
 

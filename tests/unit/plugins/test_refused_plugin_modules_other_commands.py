@@ -256,6 +256,55 @@ class TestCommandsExitThree:
         assert not (tmp_path / "merged" / "ash_aggregated_results.json").exists()
 
 
+class TestConfigValidateRefusesWhatAScanRefuses:
+    """``ash config validate`` and the MCP validate tool report the scan's refusal.
+
+    Validation imports nothing, so it checks the names only, not whether each one
+    imports.
+    """
+
+    def test_ash_config_validate(self, packages, tmp_path):
+        result = _invoke(
+            ["config", "validate", "--config", str(_config_file(tmp_path, REFUSED))]
+        )
+
+        assert result.exit_code == 1, result.output
+        assert REFUSED in result.output
+        assert "Configuration is valid" not in result.output
+        assert REFUSED not in sys.modules
+
+    def test_ash_config_validate_accepts_a_name_a_scan_accepts(
+        self, packages, tmp_path
+    ):
+        """Control: the same file with an accepted, comma-joined entry."""
+        result = _invoke(
+            [
+                "config",
+                "validate",
+                "--config",
+                str(_config_file(tmp_path, f"{ACCEPTED}, {ACCEPTED}")),
+            ]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "Configuration is valid" in result.output
+        assert ACCEPTED not in sys.modules, "validation imported a plugin module"
+
+    def test_the_mcp_validate_config_tool(self, packages):
+        from automated_security_helper.cli.mcp_tools import mcp_validate_config
+
+        result = mcp_validate_config(
+            config_content=(
+                f"project_name: t\nash_plugin_modules:\n  - {ACCEPTED}\n  - {REFUSED}\n"
+            )
+        )
+
+        assert result["valid"] is False, result
+        (error,) = [e for e in result["errors"] if REFUSED in e["message"]]
+        assert error["field"] == "ash_plugin_modules", error
+        assert REFUSED not in sys.modules
+
+
 #: A refused name holding console markup: the refusal message quotes it, so the
 #: message must be printed as text.
 MARKUP_NAME = "zz[/]markup"

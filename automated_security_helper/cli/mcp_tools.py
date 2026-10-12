@@ -1565,6 +1565,13 @@ def mcp_validate_config(
         # "base.yaml" would otherwise match the YAML branch below.
         if raw.startswith(ConfigValidator.NOT_PERMITTED_ERROR_PREFIX):
             return {"field": "", "message": raw, "type": CONFIG_INPUT_NOT_PERMITTED}
+        # Also before the generic branches: the message quotes module names.
+        if raw.startswith(ConfigValidator.PLUGIN_MODULES_ERROR_PREFIX):
+            return {
+                "field": "ash_plugin_modules",
+                "message": raw,
+                "type": "invalid_field",
+            }
         if "YAML parsing error" in raw or "yaml" in raw.lower():
             return {"field": "", "message": raw, "type": "yaml_parse_error"}
         if "JSON parsing error" in raw:
