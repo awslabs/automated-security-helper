@@ -272,21 +272,29 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         return args
 
     def _refuse_links_leaving(self, target: Path) -> None:
-        """Refuse a target holding a link to a file whose target leaves it.
+        """Refuse a target holding any link whose target leaves it.
 
         ``snyk code test`` uploads the files it reads to Snyk, has no option that
         leaves out one path (``--exclude`` is for open-source projects, and takes
-        names, not paths), and how it treats links has not been measured. So a link
-        the repository committed could send a file from outside the scanned tree,
-        such as a credentials file, off the host. The links come from
-        ``file_links_leaving_tree``, which does not enter links to directories and
-        does not read ignore files.
+        names, not paths), and how it treats links has not been measured by running
+        it. So a link the repository committed could send a file from outside the
+        scanned tree, such as a credentials file, off the host. A link to a
+        directory (``creds -> ~/.aws``) counts too: snyk's sources list files
+        without walking into one (see ``tree_exclusion_files``), but that is read,
+        not measured, and the files below one could be every credential the host
+        has. The links come
+        from ``file_links_leaving_tree``, which does not read ignore files and lists
+        the directory links it does not enter.
 
         Raises:
             ScannerError: Naming the first such link. snyk is then not run on
                 ``target``.
         """
-        links = file_links_leaving_tree(target)
+        directory_links: List[str] = []
+        links = sorted(
+            file_links_leaving_tree(target, directory_links=directory_links)
+            + directory_links
+        )
         if links:
             raise ScannerError(
                 f"Not running snyk code test on {Path(target).as_posix()}: "

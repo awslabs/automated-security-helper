@@ -264,7 +264,9 @@ def _left_out_as_a_link_leaving_the_tree(
 
 
 def file_links_leaving_tree(
-    root: str | Path, all_files: Optional[List[str]] = None
+    root: str | Path,
+    all_files: Optional[List[str]] = None,
+    directory_links: Optional[List[str]] = None,
 ) -> List[str]:
     """Every link to a file under *root* whose target leaves it, sorted.
 
@@ -282,6 +284,9 @@ def file_links_leaving_tree(
         all_files: Filled, when given, with every file the walk found, links
             included, so a caller can check that an exclusion it builds matches
             nothing else.
+        directory_links: Filled, when given, with every link to a directory whose
+            target leaves *root*. The walk does not enter these, so a scanner whose
+            tool might (snyk-code) refuses on them.
 
     Returns:
         Paths below *root*, with ``/`` separators.
@@ -304,6 +309,10 @@ def file_links_leaving_tree(
                     pending.append((entry.path, f"{relative}/"))
                     continue
                 if entry.is_symlink() and os.path.isdir(entry.path):
+                    if directory_links is not None and not resolves_inside(
+                        entry.path, root
+                    ):
+                        directory_links.append(relative)
                     continue
             except OSError:
                 continue

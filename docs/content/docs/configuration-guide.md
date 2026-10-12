@@ -381,8 +381,11 @@ directory, or does not run it on that directory:
   be one of the scanned directory's own names, and then semgrep left out every file
   in it.
 - snyk-code uploads the files it reads to Snyk, `snyk code test` has no option that
-  leaves out one path, and how it treats links has not been measured. So ASH does
-  not run it on a directory holding such a link.
+  leaves out one path, and how it treats links has not been measured by running it.
+  So ASH does not run it on a directory holding such a link, or a link to a
+  directory whose target is outside it (`creds -> ~/.aws`). Snyk's sources list
+  files without walking into a link to a directory, but that has been read, not
+  measured.
 
 ASH finds these links the way the tools walk: it does not read ignore files, so a
 link in a directory a `.gitignore` excludes is skipped too, and it does not enter a

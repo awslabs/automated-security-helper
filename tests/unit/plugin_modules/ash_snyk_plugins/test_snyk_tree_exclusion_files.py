@@ -189,7 +189,10 @@ def test_a_linked_directory_is_neither_followed_nor_counted(
 ) -> None:
     """snyk does not walk into a link to a directory, so its files exclude nothing.
 
-    See ``tree_exclusion_files`` for where snyk's file filters were read.
+    See ``tree_exclusion_files`` for where snyk's file filters were read. The scan
+    is still refused, for the link itself: a link to a directory outside the tree
+    is not scanned (test_walking_scanners_skip_links_leaving_the_tree.py), and the
+    refusal names the link, not the file behind it.
     """
     outside = tmp_path / "elsewhere"
     outside.mkdir()
@@ -199,8 +202,12 @@ def test_a_linked_directory_is_neither_followed_nor_counted(
     os.symlink(outside, Path(context.source_dir) / "linked", target_is_directory=True)
 
     assert snyk_code_scanner.tree_exclusion_files(Path(context.source_dir)) == []
-    _scan(context)
-    assert len(runs) == 1
+    with pytest.raises(ScannerError) as refused:
+        _scan(context)
+    assert "'linked'" in str(refused.value)
+    assert "link leaves the scanned tree" in str(refused.value)
+    assert ".snyk" not in str(refused.value)
+    assert runs == []
 
 
 def test_the_operator_can_accept_the_trees_exclusions(

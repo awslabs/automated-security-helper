@@ -395,8 +395,42 @@ def test_snyk_code_does_not_scan_a_target_with_a_link_leaving_it(tmp_path, monke
     assert "link leaves the scanned tree" in str(refused.value)
 
 
+@pytest.mark.parametrize(
+    "link",
+    ["creds", "deep/aws"],
+    ids=["top-level", "nested"],
+)
+def test_snyk_code_does_not_scan_a_target_with_a_directory_link_leaving_it(
+    tmp_path, monkeypatch, link
+):
+    """A link to a directory outside, such as one pointing at ~/.aws.
+
+    snyk might upload every file below it, and the walk that finds file links does
+    not enter directory links, so these were not refused.
+    """
+    source = _tree(tmp_path, {"app.py": "x = 1\n"}, {link: "outside"})
+    scanner = _snyk(source, tmp_path, monkeypatch)
+    scanner.dependencies_satisfied = True
+
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_post_scan"),
+        patch.object(scanner, "_run_subprocess") as run,
+    ):
+        with pytest.raises(ScannerError) as refused:
+            scanner.scan(target=source, target_type="source")
+
+    run.assert_not_called()
+    assert repr(link) in str(refused.value)
+    assert "link leaves the scanned tree" in str(refused.value)
+
+
 def test_snyk_code_still_scans_a_target_whose_links_stay_inside(tmp_path, monkeypatch):
-    source = _tree(tmp_path, {"app.py": "x = 1\n"}, {"in_tree.py": "app.py"})
+    source = _tree(
+        tmp_path,
+        {"app.py": "x = 1\n", "real/x.py": "y = 2\n"},
+        {"in_tree.py": "app.py", "dir_in": "real"},
+    )
     scanner = _snyk(source, tmp_path, monkeypatch)
 
     argv = _recorded_argv(scanner, source)
