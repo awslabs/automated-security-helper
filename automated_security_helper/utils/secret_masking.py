@@ -390,12 +390,41 @@ def is_secret_finding(result: Any, secret_rule_ids: Set[str] = frozenset()) -> b
     return bool(_quoted_values(text))
 
 
+class _LineRanges:
+    """A set of line numbers kept as inclusive (start, end) ranges.
+
+    One entry per secret finding rather than per line, so a region a stored
+    results file says ends at line 3,000,000 costs one pair, not three million
+    integers.
+    """
+
+    def __init__(self, ranges: Iterable[Tuple[int, int]] = ()) -> None:
+        self.ranges: List[Tuple[int, int]] = list(ranges)
+
+    def add(self, start: int, end: int) -> None:
+        self.ranges.append((start, max(start, end)))
+
+    def __contains__(self, line: object) -> bool:
+        return isinstance(line, int) and any(
+            start <= line <= end for start, end in self.ranges
+        )
+
+    def overlaps(self, start: int, end: int) -> bool:
+        return any(first <= end and start <= last for first, last in self.ranges)
+
+    def __or__(self, other: "_LineRanges") -> "_LineRanges":
+        return _LineRanges(self.ranges + other.ranges)
+
+    def __bool__(self) -> bool:
+        return bool(self.ranges)
+
+
 class _SecretIndex:
     """The locations and values the secret findings of one scan report."""
 
     def __init__(self) -> None:
         #: normalized uri -> reported lines, or None for the whole file.
-        self.lines: Dict[str, Optional[Set[int]]] = {}
+        self.lines: Dict[str, Optional[_LineRanges]] = {}
         self._by_basename: Dict[str, List[str]] = {}
         self.values: Set[str] = set()
         self.shapes: Set[SecretValueShape] = set()
@@ -433,18 +462,18 @@ class _SecretIndex:
 
     def add_location(self, uri: str, start: Optional[int], end: Optional[int]) -> None:
         if uri not in self.lines:
-            self.lines[uri] = set()
+            self.lines[uri] = _LineRanges()
             self._by_basename.setdefault(uri.rsplit("/", 1)[-1], []).append(uri)
         current = self.lines[uri]
         if current is None:
             return
-        if start is None:
+        if not isinstance(start, int):
             self.lines[uri] = None
             return
         last = end if isinstance(end, int) and end >= start else start
-        current.update(range(start, last + 1))
+        current.add(start, last)
 
-    def lines_for(self, uri: Any) -> Optional[Tuple[bool, Set[int]]]:
+    def lines_for(self, uri: Any) -> Optional[Tuple[bool, _LineRanges]]:
         """(whole file, lines) a secret finding reports in ``uri``, or None.
 
         Two URIs name the same file when they are equal or one ends with the other
@@ -456,7 +485,7 @@ class _SecretIndex:
         if normalized is None:
             return None
         whole = False
-        lines: Set[int] = set()
+        lines = _LineRanges()
         matched = False
         for candidate in self._by_basename.get(normalized.rsplit("/", 1)[-1], []):
             if not (
@@ -634,7 +663,7 @@ def _own_snippet_lines(result: Any) -> List[str]:
 
 
 def _mask_lines(
-    text: str, first_line: Optional[int], whole: bool, lines: Set[int]
+    text: str, first_line: Optional[int], whole: bool, lines: _LineRanges
 ) -> str:
     """``text`` with each line at a reported line number replaced by ``MASKED_LINE``.
 
@@ -662,7 +691,7 @@ def _mask_snippet(
     content: Any,
     first_line: Optional[int],
     last_line: Optional[int],
-    placed: Tuple[bool, Set[int]],
+    placed: Tuple[bool, _LineRanges],
 ) -> None:
     """Mask one ``ArtifactContent`` in place by the reported lines in its file."""
     whole, lines = placed
@@ -686,12 +715,12 @@ def _mask_snippet(
         if (
             whole
             or not isinstance(first_line, int)
-            or lines & set(range(first_line, max(first_line, last_line or 0) + 1))
+            or lines.overlaps(first_line, max(first_line, last_line or 0))
         ):
             content.binary = None
 
 
-def _mask_region(region: Any, placed: Tuple[bool, Set[int]]) -> None:
+def _mask_region(region: Any, placed: Tuple[bool, _LineRanges]) -> None:
     if region is None:
         return
     _mask_snippet(

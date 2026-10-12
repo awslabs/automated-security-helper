@@ -595,6 +595,52 @@ class TestPathologicalInput:
         assert float(completed.stdout.strip().splitlines()[-1]) < 5.0
 
 
+class TestLargeRegions:
+    def test_a_secret_region_of_millions_of_lines_takes_little_memory(self):
+        """The reported lines are kept as ranges, not one entry per line.
+
+        A stored results file whose secret finding ends at line 3,000,000 made
+        ``ash report`` and the MCP readers allocate hundreds of megabytes.
+        """
+        import tracemalloc
+
+        model = _results(
+            _result(
+                "SECRET-KEYWORD",
+                "app.py",
+                1,
+                "Secret of type 'Keyword' detected",
+                scanner="detect-secrets",
+            ),
+            _result(
+                "B404",
+                "app.py",
+                1,
+                "import",
+                snippet=OTHER_LINE,
+                context=(1, OTHER_LINE + ASSIGN_LINE),
+                scanner="bandit",
+            ),
+        )
+        region = (
+            model.sarif.runs[0].results[0].locations[0].physicalLocation.root.region
+        )
+        region.endLine = 3_000_000
+
+        tracemalloc.start()
+        try:
+            mask_secrets_in_results(model)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+
+        assert peak < 20 * 1024 * 1024, peak
+        # Both context lines fall inside the reported range.
+        assert _region_text(model.sarif.runs[0].results[1], "contextRegion") == (
+            (MASKED_LINE + "\n") * 2
+        )
+
+
 class TestMaskingAsAWhole:
     def test_results_without_secret_findings_are_unchanged(self):
         model = _results(
