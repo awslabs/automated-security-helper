@@ -108,21 +108,50 @@ def test_cfn_nag_selects_the_same_templates(context):
     assert scanner.targets_failed == len(discovered.unmodelable) == 1
 
 
-def test_a_symlinked_template_is_refused_by_both(context, ash_temp_path):
-    """A template reached through a symlink is read by neither, and named by both."""
-    outside = ash_temp_path / "elsewhere" / "outside.yaml"
-    outside.parent.mkdir()
-    outside.write_text(TREE["stack.yaml"], encoding="utf-8")
-    link = Path(context.source_dir) / "linked.yaml"
+def _symlink_or_skip(link: Path, target: Path) -> None:
     try:
-        link.symlink_to(outside)
+        link.symlink_to(target)
     except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
         pytest.skip(f"symlink creation unavailable on this platform: {exc}")
+
+
+def test_a_symlinked_template_is_refused_by_both(context):
+    """A template reached through a symlink is read by neither, and named by both.
+
+    The link points inside the tree, so the scan set keeps it and the readers' own
+    check is what refuses it; a link out of the tree is left out before that (below).
+    """
+    link = Path(context.source_dir) / "linked.yaml"
+    _symlink_or_skip(link, Path(context.source_dir) / "stack.yaml")
 
     discovered = discover_templates(context, "source")
 
     assert link not in discovered.templates
     assert [shown for shown, _ in discovered.refused] == ["linked.yaml"]
+    test_cfn_nag_selects_the_same_templates(context)
+
+
+def test_a_template_linked_from_outside_the_tree_is_left_out_by_the_scan_set(
+    context, ash_temp_path, caplog
+):
+    """The scan set both readers take their files from leaves such a link out.
+
+    So neither reader's own check sees it: it is not a template and not refused,
+    and the warning is the scan set's, naming the link and not its target.
+    """
+    outside = ash_temp_path / "elsewhere" / "outside.yaml"
+    outside.parent.mkdir()
+    outside.write_text(TREE["stack.yaml"], encoding="utf-8")
+    link = Path(context.source_dir) / "linked.yaml"
+    _symlink_or_skip(link, outside)
+
+    with caplog.at_level("WARNING"):
+        discovered = discover_templates(context, "source")
+
+    assert link not in discovered.templates
+    assert discovered.refused == []
+    assert "Not scanning 'linked.yaml': link leaves the scanned tree" in caplog.text
+    assert outside.as_posix() not in caplog.text
     test_cfn_nag_selects_the_same_templates(context)
 
 
