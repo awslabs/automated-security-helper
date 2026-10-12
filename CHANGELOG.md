@@ -2500,6 +2500,16 @@
   still be changed where the allowlist permits. An operator who wants such a
   reporter configured puts it in the trusted config (the registered profile)
   instead.
+- **A config file's path is quoted with its control characters escaped.** When
+  `ash merge --config`, `ash scan --config` or another command refuses a config
+  file it cannot use, the error and the log line name the file. A path holding a
+  newline or a terminal escape sequence was printed as it was, so it could start a
+  line of its own in a CI log or restyle the console. It is now written as `\n`,
+  `\x1b` and the like, wherever ASH names a config file, including the YAML
+  parser's own message. `ash merge --config` was checked for a missing file, an
+  unreadable one, a directory, a dangling link, a file that is not YAML and one
+  that does not validate: each still exits 3, before anything is written, and
+  the file is read at most once.
 - **A scanner that refuses a target before starting its tool says so, without an
   exit code.** A refusal while the command was being assembled, such as bandit's
   for a link it cannot leave out, was reported with "(exit code 0: an accepted

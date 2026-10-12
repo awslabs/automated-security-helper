@@ -107,6 +107,10 @@ from automated_security_helper.config.untrusted_source import (
     IN_TREE_OR_DELIVERED,
     UntrustedSource,
 )
+from automated_security_helper.utils.display_text import (
+    escape_controls_in,
+    path_spellings,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -244,11 +248,15 @@ def read_config_document(
         # json.JSONDecodeError and UnicodeDecodeError are ValueErrors, but a bare
         # ValueError is not caught: pydantic's ValidationError is one too.
         if isinstance(e, OSError) or not (unquoted or _is_a_client_file(path)):
+            # A YAML parser's message quotes the file's path as given, so its
+            # control characters are escaped there as describe_config_path
+            # escapes them.
+            reason = escape_controls_in(e, path_spellings(path))
             if log_failure:
-                ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
+                ASH_LOGGER.error(f"Failed to load configuration file: {reason}")
             verb = "read" if isinstance(e, OSError) else "parse"
             raise ASHConfigSourceError(
-                f"could not {verb} {describe_config_path(path)}: {e}"
+                f"could not {verb} {describe_config_path(path)}: {reason}"
             ) from e
         problem = _unquoted_load_error(path, e)
         if log_failure:

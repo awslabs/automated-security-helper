@@ -225,6 +225,7 @@ from automated_security_helper.config.resolve_config import (
     confine_to_trusted_base,
     resolve_config,
 )
+from automated_security_helper.config.config_sources import describe_config_path
 from automated_security_helper.config.untrusted_source import SHARD_RECORDED
 from automated_security_helper.core.enums import (
     AshLogLevel,
@@ -264,6 +265,10 @@ from automated_security_helper.plugins.loader import (
     refuse_plugin_modules_outside_namespace,
 )
 from automated_security_helper.utils.atomic_write import write_text_atomically
+from automated_security_helper.utils.display_text import (
+    escape_controls_in,
+    path_spellings,
+)
 from automated_security_helper.utils.inner_run_outcome import without_run_records
 from automated_security_helper.utils.log import ASH_LOGGER, escape_markup, get_logger
 from automated_security_helper.utils.output_dir_links import (
@@ -1388,7 +1393,9 @@ def resolve_operator_config(config_path: Optional[str]) -> AshConfig:
     Resolved the way ``ash report`` resolves its config, except that a
     ``--config`` naming nothing readable is refused rather than replaced by the
     defaults: a merge whose operator values silently became the defaults would
-    send its reports somewhere other than the operator chose.
+    send its reports somewhere other than the operator chose. The file is read
+    once, here; the rest of the merge uses what this returns. A refusal quotes the
+    path with its control characters escaped (``describe_config_path``).
 
     Raises:
         ASHConfigSourceError: When the path is not a file, or the file cannot be
@@ -1400,7 +1407,7 @@ def resolve_operator_config(config_path: Optional[str]) -> AshConfig:
     path = Path(config_path)
     if not path.is_file():
         raise ASHConfigSourceError(
-            f"--config {path.as_posix()} does not exist or is not a file."
+            f"--config {describe_config_path(path)} does not exist or is not a file."
         )
     try:
         config = resolve_config(config_path=path, fallback_to_default=False)
@@ -1409,10 +1416,13 @@ def resolve_operator_config(config_path: Optional[str]) -> AshConfig:
     except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError) as exc:
         # json.JSONDecodeError is a ValueError.
         raise ASHConfigSourceError(
-            f"--config {path.as_posix()} could not be read: {exc}"
+            f"--config {describe_config_path(path)} could not be read: "
+            f"{escape_controls_in(exc, path_spellings(path))}"
         ) from exc
     if config is None:
-        raise ASHConfigSourceError(f"--config {path.as_posix()} could not be read.")
+        raise ASHConfigSourceError(
+            f"--config {describe_config_path(path)} could not be read."
+        )
     return config
 
 

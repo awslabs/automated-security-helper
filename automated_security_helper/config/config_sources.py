@@ -249,6 +249,7 @@ from automated_security_helper.core.exceptions import (
     ASHConfigInputNotPermittedError,
     ASHConfigSourceError,
 )
+from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -445,13 +446,19 @@ def _tool_ash_line(path: Path) -> Optional[int]:
 
 
 def describe_config_path(path: Path) -> str:
-    """Name a config source for a message: the path, plus the table for pyproject."""
+    """Name a config source for a message: the path, plus the table for pyproject.
+
+    The path is written with its control characters escaped
+    (``utils.display_text.escape_controls``), so a name holding a newline or a
+    terminal escape cannot start a line of its own or restyle the output.
+    """
     path = Path(path)
+    shown = escape_controls(path.as_posix())
     if is_pyproject(path):
         line = _tool_ash_line(path)
         where = f" (line {line})" if line else ""
-        return f"{path.as_posix()} [tool.ash]{where}"
-    return path.as_posix()
+        return f"{shown} [tool.ash]{where}"
+    return shown
 
 
 @dataclass(frozen=True)
