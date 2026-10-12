@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import stat
+import threading
 from pathlib import Path
 from types import UnionType
 from typing import (
@@ -15,6 +16,7 @@ from typing import (
     NamedTuple,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Union,
     get_args,
@@ -1228,11 +1230,15 @@ def _with_own_sandbox(
 
     Returns the settings and whether the file wrote its own ``mode``. A section
     that does not validate on its own (one the file's ``patch`` repairs, say) adds
-    nothing, so the file then keeps no grants, as before this rule.
+    nothing, so the file then keeps no grants, as before this rule. A file whose
+    own section is dropped because it is not the operator's is named in a
+    warning, once per process (``_warn_dropped_own_sandbox``).
     """
-    if repository_written([path], scan_root, lexical) or _not_the_operators(
-        [path], trees, names
-    ):
+    if repository_written([path], scan_root, lexical):
+        return trusted, False
+    trees = list(trees)
+    if _not_the_operators([path], trees, names):
+        _warn_dropped_own_sandbox(path, trees, names)
         return trusted, False
     own = _own_sandbox_settings(path)
     if not own:
@@ -1249,6 +1255,45 @@ def _with_own_sandbox(
     updated = trusted.model_copy()
     updated.sandbox = sandbox
     return updated, wrote_mode
+
+
+#: The files ``_warn_dropped_own_sandbox`` already named in this process. One
+#: request resolves the same config more than once (the MCP server's checks
+#: before a scan, then the scan), and one file should produce one warning.
+_DROPPED_OWN_SANDBOX_WARNED: Set[str] = set()
+_DROPPED_OWN_SANDBOX_LOCK = threading.Lock()
+
+
+def reset_dropped_own_sandbox_warnings() -> None:
+    """Forget which files were already named (tests)."""
+    with _DROPPED_OWN_SANDBOX_LOCK:
+        _DROPPED_OWN_SANDBOX_WARNED.clear()
+
+
+def _warn_dropped_own_sandbox(
+    path: Path, trees: List[Path], names: Optional[ChainNames]
+) -> None:
+    """Name ``path``, one of ``_not_the_operators``, whose own ``sandbox`` section
+    ``_with_own_sandbox`` leaves out of the trusted settings.
+
+    Only when the file writes such a section; the warning names the file and why
+    it is not the operator's (``_whose_file``), never a value it sets, since the
+    file is a client's or the repository's.
+    """
+    if not _own_sandbox_settings(path):
+        return
+    key = os.path.realpath(path)
+    with _DROPPED_OWN_SANDBOX_LOCK:
+        if key in _DROPPED_OWN_SANDBOX_WARNED:
+            return
+        _DROPPED_OWN_SANDBOX_WARNED.add(key)
+    reason, place = _whose_file(path, trees, names)
+    ASH_LOGGER.warning(
+        f"Ignoring the sandbox settings '{describe_config_path(path)}' writes: it "
+        f"{reason}, so it is not the operator's file and grants no sandbox access. "
+        f"To keep them, move the file outside {place}, or pass the settings with "
+        "--config-overrides."
+    )
 
 
 class OperatorConfig(NamedTuple):
