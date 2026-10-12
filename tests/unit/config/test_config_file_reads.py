@@ -306,6 +306,82 @@ class TestDiscoveryThatCannotLookIsRefused:
         assert resolve_config(source_dir=tmp_path).project_name == "ash-scan"
 
 
+def _swap_in_a_new_file(path: Path, text: str) -> None:
+    """Replace `path` by a different file (a new inode), as a racing writer would."""
+    replacement = path.with_name(path.name + ".new")
+    replacement.write_text(text, encoding="utf-8")
+    os.replace(replacement, path)
+
+
+class TestTheFileReadIsTheFileThatWasChecked:
+    """A file replaced between the check and the read is refused, not read.
+
+    The check (a permit decision, a regular-file check) is made on what the name
+    led to then; the read opens the name again. After the open, the descriptor's
+    device and inode are compared with the ones the check saw.
+    """
+
+    def test_read_config_bytes_refuses_a_file_that_is_not_the_one_expected(
+        self, tmp_path
+    ):
+        path = tmp_path / "cfg.yaml"
+        path.write_text("project_name: checked\n", encoding="utf-8")
+        checked = config_sources.file_identity(path)
+        _swap_in_a_new_file(path, "project_name: swapped\n")
+
+        with pytest.raises(OSError, match="changed after it was checked"):
+            config_sources.read_config_bytes(path, expect=checked)
+
+    def test_control_the_same_file_is_read(self, tmp_path):
+        path = tmp_path / "cfg.yaml"
+        path.write_text("project_name: checked\n", encoding="utf-8")
+
+        assert config_sources.read_config_bytes(
+            path, expect=config_sources.file_identity(path)
+        ) == (b"project_name: checked\n")
+
+    def test_an_extends_base_replaced_after_its_check_is_refused(
+        self, tmp_path, monkeypatch
+    ):
+        base = tmp_path / "base.yaml"
+        base.write_text("project_name: checked\n", encoding="utf-8")
+        child = tmp_path / ".ash.yaml"
+        child.write_text("extends: base.yaml\n", encoding="utf-8")
+        real_resolve_base_path = config_sources._resolve_base_path
+
+        def resolve_then_swap(*args, **kwargs):
+            result = real_resolve_base_path(*args, **kwargs)
+            _swap_in_a_new_file(base, "project_name: swapped\n")
+            return result
+
+        monkeypatch.setattr(config_sources, "_resolve_base_path", resolve_then_swap)
+
+        with pytest.raises(ASHConfigSourceError, match="changed after it was checked"):
+            resolve_config(config_path=child, source_dir=tmp_path)
+
+    def test_mcp_get_config_raw_refuses_a_file_replaced_after_its_check(
+        self, tmp_path, monkeypatch
+    ):
+        from automated_security_helper.cli.mcp import sandbox
+        from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+        path = tmp_path / ".ash.yaml"
+        path.write_text("project_name: checked\n", encoding="utf-8")
+        real_validate = sandbox.validate_config_input
+
+        def validate_then_swap(*args, **kwargs):
+            refusal = real_validate(*args, **kwargs)
+            _swap_in_a_new_file(path, "project_name: swapped\n")
+            return refusal
+
+        monkeypatch.setattr(sandbox, "validate_config_input", validate_then_swap)
+
+        result = mcp_get_config(config_path=str(path), raw=True)
+
+        assert result.get("success") is False, result
+        assert "swapped" not in str(result)
+
+
 class TestTheReadItselfBlocks:
     def test_o_nonblock_is_cleared_once_the_file_is_known_to_be_regular(
         self, tmp_path, monkeypatch

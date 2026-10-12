@@ -1412,6 +1412,7 @@ def mcp_get_config(
     from automated_security_helper.config.ash_config import load_config_yaml
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
+        file_identity,
         read_config_bytes,
         read_config_file,
     )
@@ -1422,6 +1423,9 @@ def mcp_get_config(
     )
 
     if config_path is not None:
+        # The file the name leads to before it is checked: the raw read below must
+        # open that same file, so one swapped in after the check is refused.
+        checked = file_identity(Path(config_path))
         # Before the existence check: the default config for an absent path and
         # the file for a present one would otherwise answer whether it exists.
         refusal = validate_config_input(config_path, session_id=session_id)
@@ -1454,6 +1458,7 @@ def mcp_get_config(
             else None
         )
         path = None
+        checked = None
         if refusal is None:
             try:
                 # Under the session's gate, so a source in the directory that is a
@@ -1467,6 +1472,7 @@ def mcp_get_config(
                 # Discovery refused a source it could not read.
                 return _config_load_failure(exc, None)
             if path is not None:
+                checked = file_identity(path)
                 refusal = validate_config_input(path, session_id=session_id)
         if refusal is not None:
             return _config_refusal(refusal, "get_config")
@@ -1479,8 +1485,13 @@ def mcp_get_config(
             check_config_path(path)
             if path.name.endswith(".toml"):
                 # pyproject.toml yields its [tool.ash] table, as when it is loaded.
-                return read_config_file(path) or {}
-            return load_config_yaml(read_config_bytes(path).decode("utf-8")) or {}
+                return read_config_file(path, expect=checked) or {}
+            return (
+                load_config_yaml(
+                    read_config_bytes(path, expect=checked).decode("utf-8")
+                )
+                or {}
+            )
         except (
             ASHConfigValidationError,
             OSError,

@@ -268,16 +268,34 @@ def is_regular_file(path: Path) -> bool:
         return False
 
 
-def read_config_bytes(path: Path) -> bytes:
+FileIdentity = Tuple[int, int]
+
+
+def file_identity(path: Path) -> Optional[FileIdentity]:
+    """(device, inode) of the file `path` leads to now, or None when it leads nowhere.
+
+    Taken when a caller checks a config path, and handed to ``read_config_bytes``
+    as ``expect``, so the file read is the file that was checked.
+    """
+    try:
+        info = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    return info.st_dev, info.st_ino
+
+
+def read_config_bytes(path: Path, expect: Optional[FileIdentity] = None) -> bytes:
     """A config file's bytes; see "Bounds" in the module docstring.
 
     Opened with ``O_NONBLOCK``, so opening a FIFO does not wait for a writer, and
     ``O_NOCTTY``, so a tty swapped in at the name cannot become the controlling
     terminal of a process that has none (a daemonized MCP server). Checked with
     ``fstat`` on the open descriptor, so what is read is the regular file that was
-    opened and not whatever the name pointed at when a caller checked it. Raises
-    ``OSError`` for anything else, and ``ASHConfigSourceError`` for a file longer
-    than ``ASH_CONFIG_MAX_FILE_BYTES``.
+    opened and not whatever the name pointed at when a caller checked it. With
+    ``expect`` (from ``file_identity`` at the caller's check), the opened file's
+    device and inode must be those, so a file replaced between a check and this
+    read is refused rather than read. Raises ``OSError`` for anything else, and
+    ``ASHConfigSourceError`` for a file longer than ``ASH_CONFIG_MAX_FILE_BYTES``.
     """
     nonblock = getattr(os, "O_NONBLOCK", 0)
     flags = (
@@ -285,8 +303,15 @@ def read_config_bytes(path: Path) -> bytes:
     )
     fd = os.open(path, flags)
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
             raise OSError(errno.EINVAL, "not a regular file", os.fspath(path))
+        if expect is not None and (opened.st_dev, opened.st_ino) != expect:
+            raise OSError(
+                errno.ESTALE,
+                "changed after it was checked, so it is not read",
+                os.fspath(path),
+            )
         if nonblock:
             # O_NONBLOCK was for the open. A regular file is then read normally:
             # on some filesystems a non-blocking read of one can return early.
@@ -310,10 +335,10 @@ def read_config_bytes(path: Path) -> bytes:
     return b"".join(chunks)
 
 
-def _read_toml_text(path: Path) -> str:
+def _read_toml_text(path: Path, expect: Optional[FileIdentity] = None) -> str:
     """A TOML file's text. A leading UTF-8 byte order mark is dropped, since
     tomllib rejects it and editors on some platforms write one."""
-    text = read_config_bytes(path).decode("utf-8")
+    text = read_config_bytes(path, expect=expect).decode("utf-8")
     return text.removeprefix("\ufeff")
 
 
@@ -692,21 +717,22 @@ def _resolve_toml_env(value: Any) -> Any:
     return value
 
 
-def read_config_file(path: Path) -> Any:
+def read_config_file(path: Path, expect: Optional[FileIdentity] = None) -> Any:
     """Parse one config file, without resolving its `extends`.
 
     A ``pyproject.toml`` yields its ``[tool.ash]`` table; any other ``.toml``
     file is a config at its top level. YAML and JSON are read exactly as
-    ``AshConfig.from_file`` always read them.
+    ``AshConfig.from_file`` always read them. ``expect`` is passed to
+    ``read_config_bytes``.
     """
     path = Path(path)
     if path.name.endswith(".json"):
         # utf-8-sig: a leading byte order mark is dropped, as YAML and TOML drop
         # it; Windows PowerShell 5 writes one.
-        return json.loads(read_config_bytes(path).decode("utf-8-sig"))
+        return json.loads(read_config_bytes(path, expect=expect).decode("utf-8-sig"))
     if path.name.endswith(".toml"):
         try:
-            text = _read_toml_text(path)
+            text = _read_toml_text(path, expect=expect)
         except UnicodeDecodeError as exc:
             raise ASHConfigSourceError(
                 f"{describe_config_path(path)} is not valid UTF-8, which TOML "
@@ -733,7 +759,7 @@ def read_config_file(path: Path) -> Any:
                 )
             document = table
         return _resolve_toml_env(document)
-    stream = io.StringIO(read_config_bytes(path).decode("utf-8"))
+    stream = io.StringIO(read_config_bytes(path, expect=expect).decode("utf-8"))
     # The name a parse error quotes, as it quoted the open file's.
     stream.name = os.fspath(path)
     return load_yaml_config(stream)
@@ -820,7 +846,12 @@ def _resolve_base_path(
     extending: Path,
     root: Path,
     permit_base: Optional[PermitBase] = None,
-) -> Path:
+) -> Tuple[Path, Optional[FileIdentity]]:
+    """The base `ref` names, resolved and checked, and the identity checked.
+
+    The identity is the file the resolved path led to when the checks ran; the
+    read of the base must open that same file (``read_config_bytes(expect=)``).
+    """
     if _URL_PATTERN.match(ref):
         raise ASHConfigSourceError(
             f"'{EXTENDS_KEY}: {ref}' in {describe_config_path(extending)} looks like "
@@ -855,6 +886,7 @@ def _resolve_base_path(
             f"must stay inside ({root.as_posix()})."
         )
     resolved = candidate.resolve()
+    checked = file_identity(resolved)
     # Ahead of the root check, whose message names the resolved target: this
     # refusal must read the same whether or not that target exists.
     if permit_base is not None and not permit_base(resolved):
@@ -868,7 +900,7 @@ def _resolve_base_path(
             f"{how} to {resolved.as_posix()}, which is outside the directory "
             f"config bases must stay inside ({root.as_posix()})."
         )
-    return resolved
+    return resolved, checked
 
 
 def deep_merge(base: Any, overlay: Any) -> Any:
@@ -964,6 +996,7 @@ def _resolve(
     state: _ChainState,
     ref: Optional[str] = None,
     named: Optional[Path] = None,
+    expect: Optional[FileIdentity] = None,
 ) -> Any:
     real = path.resolve()
     named = path if named is None else named
@@ -987,7 +1020,7 @@ def _resolve(
     if not stack:
         # The root config: a read or parse error propagates as the reader raised
         # it, and resolve_config.read_config_document refuses it.
-        data = read_config_file(path)
+        data = read_config_file(path, expect=expect)
     else:
         extending = stack[-1]
         if not is_regular_file(real):
@@ -996,7 +1029,7 @@ def _resolve(
                 f"{real.as_posix()}, which does not exist or is not a file"
             )
         try:
-            data = read_config_file(real)
+            data = read_config_file(real, expect=expect)
         except ASHConfigSourceError:
             raise
         except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as exc:
@@ -1025,7 +1058,7 @@ def _resolve(
         ops = own.pop(PATCH_KEY, None)
         merged: Any = {}
         for base_ref in refs:
-            base_path = _resolve_base_path(
+            base_path, checked = _resolve_base_path(
                 base_ref, real, state.root, state.permit_base
             )
             # The base as its entry spells it, before any symlink is followed:
@@ -1034,7 +1067,14 @@ def _resolve(
             base_named = spelled if spelled.is_absolute() else real.parent / spelled
             merged = deep_merge(
                 merged,
-                _resolve(base_path, stack + (real,), state, base_ref, base_named),
+                _resolve(
+                    base_path,
+                    stack + (real,),
+                    state,
+                    base_ref,
+                    base_named,
+                    expect=checked,
+                ),
             )
         merged = deep_merge(merged, own)
         if ops is not None:
@@ -1073,7 +1113,9 @@ def resolve_config_document(
         else default_confinement_root(config_path)
     )
     state = _ChainState(root=root, permit_base=permit_base)
-    data = _resolve(config_path, (), state)
+    # The root is read as the file the name leads to now, when its caller has
+    # just checked it; one swapped in before the open is refused.
+    data = _resolve(config_path, (), state, expect=file_identity(config_path))
     return ResolvedConfigDocument(
         data=data, chain=state.order, root=root, named=state.named
     )
