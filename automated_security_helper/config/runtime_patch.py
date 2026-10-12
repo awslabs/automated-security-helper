@@ -57,10 +57,22 @@ import jsonpatch
 from pydantic import ValidationError
 
 from automated_security_helper.config.ash_config import (
+    ALWAYS_DENIED_PATHS,
     AshConfig,
     RuntimeOverridesConfig,
     plugin_key_lookup_names,
     reduced_plugin_name,
+)
+
+#: The always-denied entries that cover a whole scanner section
+#: (``/scanners/<name>/**``). A scanner exclusion that resolution moves out of the
+#: options is not refused by these alone (``_writes_a_moved_exclusion``,
+#: ``config_document_denials``'s ``moved``); every other entry still applies to it,
+#: an operator's own entry for the option among them.
+SECTION_FLOOR_ENTRIES: FrozenSet[str] = frozenset(
+    entry
+    for entry in ALWAYS_DENIED_PATHS
+    if re.fullmatch(r"/scanners/[^/*?\[\]]+/\*\*", entry)
 )
 
 
@@ -472,6 +484,36 @@ def _turns_an_off_host_reporter_off(
     )
 
 
+def _writes_a_moved_exclusion(op: Dict[str, Any]) -> bool:
+    """Whether ``op`` only writes a scanner exclusion that resolution moves out of the options.
+
+    An ``add`` or ``replace`` of an option in
+    ``client_scanner_exclusions.SCANNER_EXCLUSION_OPTIONS`` (or, for a list
+    option, of entries appended to it) whose value the move takes out whole
+    (``moves_all_of``). Every route this gate guards leaves a client's change
+    with the client: ``select_profile``'s ``patch_ops`` and ``override_yaml``
+    write the session's client copy, and the workspace tools'
+    ``config_overrides`` are resolved as the client's
+    (``apply_client_config_rules``'s ``client_overrides``). Resolution then moves
+    the entries out of the scanner's options before it runs, as it does for a
+    delivered file, so the always-denied entries that cover a whole scanner
+    section (``SECTION_FLOOR_ENTRIES``) do not refuse the op. ``allowed_paths``,
+    every other ``denied_paths`` entry and the value patterns still apply.
+    """
+    from automated_security_helper.config.client_scanner_exclusions import (
+        exclusion_option_at,
+        moves_all_of,
+    )
+
+    if op.get("op") not in {"add", "replace"} or "value" not in op:
+        return False
+    located = exclusion_option_at(_path_segments(op.get("path", "")))
+    if located is None:
+        return False
+    spec, entry = located
+    return moves_all_of(spec, op["value"], entry=entry)
+
+
 def _check_op_paths(
     op: Dict[str, Any],
     *,
@@ -484,10 +526,13 @@ def _check_op_paths(
         raise RuntimePatchDeniedError(op, f"path {path!r} not in allowed_paths")
     if _turns_an_off_host_reporter_off(op, config):
         return
+    moved = _writes_a_moved_exclusion(op)
     # denied_paths always holds ALWAYS_DENIED_PATHS (RuntimeOverridesConfig's
     # validator adds any a profile's own list leaves out), the archive extraction
     # limits among them.
     for denied in allowlist.denied_paths:
+        if moved and denied in SECTION_FLOOR_ENTRIES:
+            continue
         reason = _denied_path_reason(denied, path, plugin_keys)
         if reason is not None:
             raise RuntimePatchDeniedError(op, reason)
@@ -739,6 +784,7 @@ def config_document_denials(
     exempt: Sequence[str] = (),
     inert: Sequence[str] = (),
     repeats_trusted: bool = False,
+    moved: Sequence[str] = (),
 ) -> List[DocumentDenial]:
     """The fields ``document`` sets that ``allowlist``'s denials refuse.
 
@@ -762,7 +808,11 @@ def config_document_denials(
     A write at or under a pattern in ``exempt`` is not checked against
     ``denied_paths``, though value patterns still apply to it. A write at or
     under a pattern in ``inert`` is not checked at all: it names a field with no
-    effect in this document.
+    effect in this document. A write at or under a pointer in ``moved`` is a
+    scanner exclusion that resolution moves out of the options before any
+    scanner runs (``client_scanner_exclusions.moved_exclusion_pointers``): the
+    entries that cover a whole scanner section (``SECTION_FLOOR_ENTRIES``) do not
+    refuse it, and every other entry and value pattern still does.
     """
     plugin_keys = known_plugin_keys(config)
     dump = (
@@ -780,11 +830,13 @@ def config_document_denials(
             reason = _key_pattern_reason(path, op["value"], allowlist, plugin_keys)
         else:
             if not _covered(exempt, path, plugin_keys):
+                floor_lifted = kind == "leaf" and _covered(moved, path, plugin_keys)
                 reason = next(
                     (
                         found
                         for denied in allowlist.denied_paths
-                        if (found := _denied_path_reason(denied, path, plugin_keys))
+                        if not (floor_lifted and denied in SECTION_FLOOR_ENTRIES)
+                        and (found := _denied_path_reason(denied, path, plugin_keys))
                     ),
                     None,
                 )

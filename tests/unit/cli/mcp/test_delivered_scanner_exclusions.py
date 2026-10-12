@@ -804,6 +804,90 @@ def test_the_operators_own_entries_are_not_moved(case: Case) -> None:
     assert config._client_scanner_exclusions == []
 
 
+# ---------------------------------------------------------------------------
+# A scanner whose whole section a client may not set
+# ---------------------------------------------------------------------------
+#
+# opengrep, semgrep and trivy-repo are in the always-denied floor
+# (ALWAYS_DENIED_PATHS) with every other scanner that sends something off the
+# host. Their exclusion options are moved out of the options first, and the
+# floor then checks whatever else the delivered section sets.
+
+
+#: Each scanner the floor covers, an option of it that excludes nothing with a
+#: value other than its default, and the exclusion it also delivers, if it has one.
+OFF_HOST_SCANNERS = [
+    ("detect-secrets", "baseline_file", ".secrets.baseline", None),
+    ("npm-audit", "offline", True, None),
+    ("opengrep", "config", "p/default", ("exclude", ["client-dir"])),
+    ("semgrep", "config", "p/default", ("exclude", ["client-dir"])),
+    ("snyk-code", "honor_tree_exclusions", True, None),
+    ("trivy-repo", "scanners", ["vuln"], ("ignore_file", ".trivyignore")),
+]
+
+
+@pytest.mark.parametrize(
+    ("scanner", "option", "value", "exclusion"),
+    OFF_HOST_SCANNERS,
+    ids=[scanner for scanner, *_ in OFF_HOST_SCANNERS],
+)
+def test_an_off_host_scanners_other_options_are_still_refused(
+    scanner: str, option: str, value: Any, exclusion: Any
+) -> None:
+    """The refusal names the other option, not the exclusion that was moved."""
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    options = {option: value}
+    if exclusion is not None:
+        options[exclusion[0]] = exclusion[1]
+    document = {"scanners": {scanner: {"options": options}}}
+    source = _upload(
+        {
+            ".ash/.ash.yaml": yaml.safe_dump(document),
+            ".trivyignore": "CVE-2020-0001\n",
+        }
+    )
+    outcome = _scan_resolution(source)
+    assert isinstance(outcome, ASHConfigFieldDeniedError), outcome
+    assert f"scanners.{scanner}.options.{option}" in str(outcome)
+    if exclusion is not None:
+        assert f"scanners.{scanner}.options.{exclusion[0]}" not in str(outcome)
+
+
+@pytest.mark.parametrize("scanner", ["opengrep", "semgrep", "trivy-repo"])
+def test_a_moved_exclusion_leaves_no_client_value_in_an_off_host_scanners_options(
+    scanner: str, tmp_path: Path
+) -> None:
+    """What is left in the option is the operator's, and the finding is marked the client's."""
+    from automated_security_helper.config.ash_config import AshConfig
+
+    if scanner == "trivy-repo":
+        source = _trivy_delivered(
+            {".trivyignore": "CVE-2020-0001\n", "client-dir/app.py": "x = 1\n"},
+            ".trivyignore",
+        )
+        option, operators = "ignore_file", {None}
+        finding = {
+            "scanner": scanner,
+            "uri": "client-dir/app.py",
+            "rule": "CVE-2020-0001",
+        }
+    else:
+        source = _delivered(next(case for case in CASES if case.scanner == scanner))
+        option = "exclude"
+        operators = set(OPERATOR["scanners"][scanner]["options"]["exclude"])
+        finding = {"scanner": scanner, "uri": "client-dir/app.py"}
+    config = _scan_resolution(source)
+    assert isinstance(config, AshConfig), config
+
+    value = config.get_plugin_config("scanner", scanner)["options"].get(option)
+    left = set(_patterns(value)) if isinstance(value, list) else {value or None}
+    assert left <= operators, f"a client value reached {scanner}: {left - operators}"
+    (result,) = _apply(source, config, _sarif([finding]), tmp_path).runs[0].results
+    (mark,) = _marks(result)
+    assert f"scanners.{scanner}.options.{option}" in mark
+
+
 def test_a_cli_config_outside_the_mcp_workspace_is_unchanged(tmp_path: Path) -> None:
     from automated_security_helper.config.resolve_config import resolve_config
 

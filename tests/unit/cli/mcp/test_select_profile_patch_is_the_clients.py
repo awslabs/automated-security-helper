@@ -353,6 +353,122 @@ def test_an_override_yaml_value_is_the_clients_too(_server) -> None:
     assert notes
 
 
+# trivy-repo and semgrep are in the always-denied floor (ALWAYS_DENIED_PATHS). On
+# every client route the floor leaves their exclusion options to resolution,
+# which moves them out of the options, and still refuses anything else the
+# change writes in their sections.
+
+
+def _off_host_profile() -> Dict[str, Any]:
+    return {
+        "project_name": "operator",
+        "scanners": {
+            "trivy-repo": {"enabled": True, "options": {}},
+            "semgrep": {"enabled": True, "options": {}},
+        },
+        "global_settings": _policy(
+            ["/scanners/trivy-repo/options/**", "/scanners/semgrep/options/**"]
+        ),
+    }
+
+
+@pytest.mark.parametrize("change", ["patch_ops", "override_yaml", "config_overrides"])
+def test_a_change_to_an_off_host_scanners_other_option_is_still_refused(
+    _server, isolated_registry, executions, change: str
+) -> None:
+    from automated_security_helper.cli.mcp_tools import mcp_select_profile
+    from automated_security_helper.cli.mcp.workspace import mcp_scan_workspace
+
+    document = _off_host_profile()
+    _register(_server, document)
+    ignore_file = str(_server["other"] / ".trivyignore")
+    if change == "patch_ops":
+        outcome: Any = mcp_select_profile(
+            "op",
+            session_id=SESSION,
+            patch_ops=[
+                {
+                    "op": "add",
+                    "path": f"/{TRIVY_KEY.replace('.', '/')}",
+                    "value": ignore_file,
+                },
+                {
+                    "op": "replace",
+                    "path": "/scanners/trivy-repo/options/scanners",
+                    "value": ["vuln"],
+                },
+            ],
+        )
+    elif change == "override_yaml":
+        restated = yaml.safe_load(yaml.safe_dump(document))
+        restated["scanners"]["trivy-repo"]["options"] = {
+            "ignore_file": ignore_file,
+            "scanners": ["vuln"],
+        }
+        outcome = mcp_select_profile(
+            "op", session_id=SESSION, override_yaml=yaml.safe_dump(restated)
+        )
+    else:
+        _bind(SESSION)
+        outcome = asyncio.run(
+            mcp_scan_workspace(
+                str(_workspace(_server["scan_root"])),
+                session_id=SESSION,
+                config_overrides=[
+                    f"{TRIVY_KEY}={ignore_file}",
+                    'scanners.trivy-repo.options.scanners=["vuln"]',
+                ],
+            )
+        )
+        assert not executions, "the workspace scan ran"
+
+    assert outcome.get("success") is False, outcome
+    assert "/scanners/trivy-repo/options/scanners" in str(outcome)
+    assert "ignore_file" not in str(outcome).replace(ignore_file, "")
+
+
+@pytest.mark.parametrize("change", ["patch_ops", "override_yaml", "config_overrides"])
+def test_a_patched_exclusion_leaves_no_client_value_in_an_off_host_scanners_options(
+    _server, isolated_registry, executions, change: str
+) -> None:
+    """semgrep scans what the client listed, and its findings there are marked."""
+    document = _off_host_profile()
+    _register(_server, document)
+    if change == "patch_ops":
+        _bind(
+            SESSION,
+            patch_ops=[
+                {
+                    "op": "add",
+                    "path": "/scanners/semgrep/options/exclude/-",
+                    "value": "client-dir",
+                }
+            ],
+        )
+        config = _scanned(_server["target"], SESSION)
+    elif change == "override_yaml":
+        restated = yaml.safe_load(yaml.safe_dump(document))
+        restated["scanners"]["semgrep"]["options"] = {
+            "exclude": ["*-converted.py", "*_report_result.txt", "client-dir"]
+        }
+        _bind(SESSION, override_yaml=yaml.safe_dump(restated))
+        config = _scanned(_server["target"], SESSION)
+    else:
+        _bind(SESSION)
+        config = _workspace_config(
+            _server["scan_root"],
+            SESSION,
+            executions,
+            config_overrides=['scanners.semgrep.options.exclude+=["client-dir"]'],
+        )
+
+    assert "client-dir" not in _options(config, "semgrep").get("exclude", [])
+    assert [
+        (item.scanner, item.option, item.pattern)
+        for item in config._client_scanner_exclusions
+    ] == [("semgrep", "exclude", "client-dir")]
+
+
 # ---------------------------------------------------------------------------
 # 2. A patched suppression or ignore path is marked client_supplied
 # ---------------------------------------------------------------------------

@@ -604,6 +604,7 @@ def client_file_denials(
     scanned_root: Path | str | None = None,
     all_delivered: bool = False,
     names: Optional[Mapping[Path, Sequence[Path]]] = None,
+    moved_exclusions: bool = False,
 ) -> List[Tuple[Path, List[Any]]]:
     """(file, denials) for each client-delivered file in ``documents`` that sets a denied field.
 
@@ -615,11 +616,24 @@ def client_file_denials(
     the file a link of the client's reaches. Under a default policy the
     restrict-only settings are checked for anything they ask beyond the trusted
     base (``_widenings``).
+
+    ``moved_exclusions`` says the files' scanner exclusions are moved out of the
+    scanners' options before any scanner runs (``apply_client_config_rules``,
+    which a scan resolves every delivered file with), so an exclusion option
+    the move empties of client values is not refused by the always-denied
+    entries that cover a whole scanner section; any other entry, an operator's
+    own entry for the option among them, still refuses it
+    (``client_scanner_exclusions.moved_exclusion_pointers``,
+    ``runtime_patch.config_document_denials``). A caller whose files are not
+    resolved that way leaves it off and refuses them as written.
     """
     from automated_security_helper.cli.mcp.profile_registry import (
         session_config_was_patched,
     )
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.client_scanner_exclusions import (
+        moved_exclusion_pointers,
+    )
     from automated_security_helper.config.config_sources import by_every_name
     from automated_security_helper.config.runtime_patch import (
         config_document_denials,
@@ -639,6 +653,7 @@ def client_file_denials(
                 allowlist=rules.policy,
                 config=rules.base,
                 exempt=exempt,
+                moved=moved_exclusion_pointers(document) if moved_exclusions else (),
                 inert=INERT_PATHS,
                 repeats_trusted=session_config_was_patched(path),
             )
@@ -944,8 +959,19 @@ def apply_client_config_rules(
             f"A config an MCP client delivered cannot be checked: {rules.unreadable}"
         )
     root = Path(scanned_root or source_dir or Path.cwd())
+    # The denied-fields check sees each scanner section as the move below leaves
+    # it (moved_exclusions): an exclusion option the move empties of client
+    # values is not refused, and anything else a file sets in the section still
+    # is, under a floor entry that covers the whole section too. The move itself
+    # runs last so the config it records the exclusions on is the one returned;
+    # _drop_denied_fields builds a new one.
     found = client_file_denials(
-        documents, rules, scanned_root=root, all_delivered=all_delivered, names=names
+        documents,
+        rules,
+        scanned_root=root,
+        all_delivered=all_delivered,
+        names=names,
+        moved_exclusions=True,
     )
     if found and DENIED_FIELD_HANDLING == "refuse":
         from automated_security_helper.core.exceptions import (

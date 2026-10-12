@@ -26,6 +26,19 @@ An entry is the operator's when the option's default has it, the trusted config
 has it, or a file of the chain that no client delivered has it. Those stay in
 the option and apply as before.
 
+opengrep, semgrep and trivy-repo are among the scanners whose whole section a
+client may not set (the always-denied floor in ``ash_config.ALWAYS_DENIED_PATHS``).
+For them too the denied-fields check of a delivered file sees the section as the
+move leaves it: the floor's whole-section entry does not refuse an option the
+move empties of client values (``moved_exclusion_pointers``), and every other
+value the file sets in the section is still refused. An operator's own
+``denied_paths`` entry for the option still refuses it. The runtime-override
+gate on ``select_profile``'s ``patch_ops`` and ``override_yaml`` and the
+workspace tools' ``config_overrides`` leaves these options to resolution the
+same way (``runtime_patch._writes_a_moved_exclusion``). A client's list may
+leave out some of the operator's entries; the scanner then scans those files
+too.
+
 Options that exclude by something other than a path (``exclude_rule``, a
 detect-secrets baseline, or a whole category such as checkov's
 ``skip_frameworks`` or ferret-scan's ``checks``) have no file to scan instead,
@@ -90,7 +103,17 @@ import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, List, Literal, Mapping, Optional, Set, Tuple
+from typing import (
+    Any,
+    Iterable,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 from pydantic import BaseModel, ConfigDict
 
@@ -256,6 +279,99 @@ def _same_trivy_id(rule_id: str, entry: str) -> bool:
         return value[4:] if value.upper().startswith("AVD-") else value
 
     return bare(rule_id).upper() == bare(entry).upper()
+
+
+def exclusion_option_at(
+    segments: Sequence[str],
+) -> Optional[Tuple[ScannerExclusionOption, bool]]:
+    """The exclusion option a config path names, and whether it names one entry of it.
+
+    ``segments`` is a path split into keys: ``scanners``, the scanner's key in
+    any spelling the plugin lookup reads, ``options``, and the option with ``-``
+    or ``_``, then for a list option ``-`` or an index to name one entry.
+    """
+    from automated_security_helper.config.ash_config import (
+        plugin_key_lookup_names,
+        reduced_plugin_name,
+    )
+
+    if len(segments) not in (4, 5) or segments[0] != "scanners":
+        return None
+    if segments[2] != "options":
+        return None
+    names = plugin_key_lookup_names(str(segments[1]))
+    option = str(segments[3]).replace("-", "_")
+    for spec in SCANNER_EXCLUSION_OPTIONS:
+        if spec.option != option or reduced_plugin_name(spec.scanner) not in names:
+            continue
+        if len(segments) == 4:
+            return spec, False
+        last = str(segments[4])
+        if spec.kind != "trivy-ignore-file" and (last == "-" or last.isdigit()):
+            return spec, True
+        return None
+    return None
+
+
+def moves_all_of(spec: ScannerExclusionOption, value: Any, *, entry: bool) -> bool:
+    """Whether resolution takes all of ``value``, written at ``spec``'s option, out of it.
+
+    ``strip_client_scanner_exclusions`` moves every list entry that has a path
+    pattern and is not the operator's, and leaves the operator's where they are,
+    so no client value is left in the option. An entry with no pattern stays,
+    so a value holding one is not moved whole. A trivy ignore file that is set
+    is replaced by the trusted one. ``entry`` says ``value`` is written as
+    entries appended to the list (one, or a list of them, as an appending
+    ``--config-overrides`` names them) rather than as the whole option.
+    """
+    if spec.kind == "trivy-ignore-file":
+        return not entry and isinstance(value, str) and bool(value)
+    if entry:
+        entries = value if isinstance(value, list) else [value]
+    elif isinstance(value, list):
+        entries = value
+    else:
+        return False
+    return all(_pattern_of(item)[0] is not None for item in entries)
+
+
+def moved_exclusion_pointers(document: Any) -> List[str]:
+    """The JSON pointers of the exclusion options in ``document`` that resolution moves whole.
+
+    For the denied-fields check of a delivered file, which sees the sections as
+    the move leaves them (``client_config_policy.apply_client_config_rules``):
+    these hold nothing of the client's once the move has run, so the
+    always-denied entries that cover a whole scanner section do not refuse them
+    (``runtime_patch.SECTION_FLOOR_ENTRIES``). Every other ``denied_paths``
+    entry and value pattern still applies, and so does the check of every other
+    key of the section.
+    """
+    from automated_security_helper.config.config_sources import _resolve_dict_key
+
+    scanners = document.get("scanners") if isinstance(document, dict) else None
+    if not isinstance(scanners, dict):
+        return []
+    found: List[str] = []
+    for key, section in scanners.items():
+        if not isinstance(section, dict):
+            continue
+        options_key = _resolve_dict_key(section, "options")
+        options = section.get(options_key)
+        if not isinstance(options, dict):
+            continue
+        for name, value in options.items():
+            segments = ["scanners", str(key), str(options_key), str(name)]
+            located = exclusion_option_at(segments)
+            if located is None or not moves_all_of(located[0], value, entry=False):
+                continue
+            found.append(
+                "/"
+                + "/".join(
+                    segment.replace("~", "~0").replace("/", "~1")
+                    for segment in segments
+                )
+            )
+    return found
 
 
 def strip_client_scanner_exclusions(

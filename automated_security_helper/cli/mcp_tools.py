@@ -2145,11 +2145,11 @@ def _validated_document_denials(
     try:
         if config_content is not None:
             # The same check a scan of a delivered file gets, the restrict-only
-            # settings included.
+            # settings and the moved scanner exclusions included.
             found = [
                 (denial.key, denial.reason)
                 for _file, denials in client_file_denials(
-                    documents, rules, all_delivered=True
+                    documents, rules, all_delivered=True, moved_exclusions=True
                 )
                 for denial in denials
             ]
@@ -2159,7 +2159,11 @@ def _validated_document_denials(
             found = [
                 (denial.key, f"{denial.reason}, in {file.name}")
                 for file, denials in client_file_denials(
-                    documents, rules, all_delivered=checked, names=names
+                    documents,
+                    rules,
+                    all_delivered=checked,
+                    names=names,
+                    moved_exclusions=True,
                 )
                 for denial in denials
             ]
