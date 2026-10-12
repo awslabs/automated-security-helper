@@ -202,6 +202,18 @@ def _log_unsatisfied_output_formats(unsatisfied: Dict[str, str]) -> None:
         )
 
 
+def _disable(plugin_instance) -> bool:
+    """Set a reporter's config to disabled; False when its config cannot be set."""
+    config = getattr(plugin_instance, "config", None)
+    if config is None or not hasattr(config, "enabled"):
+        return False
+    try:
+        config.enabled = False
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return getattr(config, "enabled", None) is False
+
+
 class ReportPhase(EnginePhase):
     """Implementation of the Report phase."""
 
@@ -259,8 +271,11 @@ class ReportPhase(EnginePhase):
         # Create all reporter instances upfront, then filter via the shared helper.
         all_reporter_instances = []
         # A reporter that sends findings off the host and whose config section
-        # does not set enabled: true is built (so a requested format it would
-        # have satisfied is reported as disabled, not missing) but never run.
+        # does not set enabled: true is disabled, whatever its own default: the
+        # shared filter below then drops it as disabled, before any dependency
+        # check, and a requested format it would have satisfied is reported as
+        # disabled, not missing. Only an instance whose config cannot be set
+        # disabled is held back here instead.
         off_host_refused = set()
         for plugin_class in reporter_classes:
             try:
@@ -277,7 +292,9 @@ class ReportPhase(EnginePhase):
                     config=plugin_config,
                 )
                 all_reporter_instances.append(plugin_instance)
-                if off_host_reporter_refused(plugin_class, plugin_config):
+                if off_host_reporter_refused(
+                    plugin_class, plugin_config
+                ) and not _disable(plugin_instance):
                     off_host_refused.add(id(plugin_instance))
             except Exception as e:
                 ASH_LOGGER.error(
