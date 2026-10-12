@@ -296,6 +296,11 @@
     `--config-overrides` or a config file outside the tree loads that package, the
     class's module, or the package that lists it. Each class left out is named in a
     warning, in a scan and in `ash report`.
+  - A scan applies the same rule to those classes when an earlier scan in the same
+    process loaded them, as the MCP server's scans do. A scan whose config files
+    are all the operator's, or that has none, selects one only when that config's
+    `ash_plugin_modules` or `--ash-plugin-modules` loads it; it used to select
+    every one any earlier scan had loaded.
   - bandit's, grype's and syft's own config files are the operator's.
     `scanners.bandit.options.config_file`, `scanners.grype.options.config_file`
     and `scanners.syft.options.config_file` from such a file are ignored; ASH no

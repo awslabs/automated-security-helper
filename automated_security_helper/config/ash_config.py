@@ -1290,7 +1290,7 @@ class AshConfig(BaseModel):
     # trusted base, with the overrides replayed. A plugin class defined in an
     # off-host package is selected only when one of them, or
     # --ash-plugin-modules, loads it (config/plugin_module_trust.py). None when
-    # no file of the chain needs it.
+    # no file of the chain needs it; the config's own entries are trusted then.
     _trusted_plugin_modules: Optional[Tuple[str, ...]] = PrivateAttr(default=None)
 
     # Project information

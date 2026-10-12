@@ -12,6 +12,10 @@ also checks the classes it selects: a class defined in an off-host package is
 dropped, with a warning, unless the trusted base or ``--ash-plugin-modules``
 loads that package or a module that lists the class.
 
+Registration lasts for the rest of the process, and the MCP server runs every
+scan in the server's process, so a scan is also checked after an earlier scan
+in that process loaded those classes.
+
 The re-exporting package is written outside the scanned tree and put on the
 path of a subprocess, because importing a plugin package registers its plugins
 for the rest of the process.
@@ -41,8 +45,18 @@ ASH_SCANNERS = [SnykCodeScanner]
 ASH_REPORTERS = [S3Reporter]
 """
 
-# The scan engine built over a config resolved the way the CLI resolves it, with
-# argv[2:] as --ash-plugin-modules. Prints the classes it selected and the
+#: The classes the two off-host packages define.
+OFF_HOST_SCANNERS = ("SnykCodeScanner",)
+OFF_HOST_REPORTERS = (
+    "BedrockSummaryReporter",
+    "CloudWatchLogsReporter",
+    "S3Reporter",
+    "SecurityHubReporter",
+)
+
+# One scan engine per entry of argv[1], built in this one process in order, over
+# a config resolved the way the CLI resolves it, with the entry's "cli" as
+# --ash-plugin-modules. Prints, for each, the classes it selected and the
 # warnings it logged.
 _ENGINE = """
 import json, logging, sys
@@ -52,7 +66,7 @@ from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.execution_engine import ScanExecutionEngine
 from automated_security_helper.utils.log import ASH_LOGGER
 
-spec = json.loads(sys.argv[1])
+scans = json.loads(sys.argv[1])
 warnings = []
 
 class _Collect(logging.Handler):
@@ -61,19 +75,23 @@ class _Collect(logging.Handler):
 
 ASH_LOGGER.addHandler(_Collect(level=logging.WARNING))
 ASH_LOGGER.setLevel(logging.DEBUG)
-source = Path(spec["source"])
-config = resolve_config(source_dir=source, **spec.get("resolve", {}))
-engine = ScanExecutionEngine(
-    context=PluginContext(source_dir=source, output_dir=source.parent / "out",
-                          work_dir=source.parent / "work", config=config),
-    show_progress=False,
-    ash_plugin_modules=spec["cli"],
-)
-print(json.dumps({
-    "scanners": sorted(c.__name__ for c in engine.plugins["scanner"]),
-    "reporters": sorted(c.__name__ for c in engine.plugins["reporter"]),
-    "warnings": warnings,
-}))
+results = []
+for spec in scans:
+    warnings.clear()
+    source = Path(spec["source"])
+    config = resolve_config(source_dir=source, **spec.get("resolve", {}))
+    engine = ScanExecutionEngine(
+        context=PluginContext(source_dir=source, output_dir=source.parent / "out",
+                              work_dir=source.parent / "work", config=config),
+        show_progress=False,
+        ash_plugin_modules=spec["cli"],
+    )
+    results.append({
+        "scanners": sorted(c.__name__ for c in engine.plugins["scanner"]),
+        "reporters": sorted(c.__name__ for c in engine.plugins["reporter"]),
+        "warnings": list(warnings),
+    })
+print(json.dumps(results))
 """
 
 #: Variables that would hand the subprocess a config or plugin list the test did
@@ -111,21 +129,21 @@ def _tree(tmp_path: Path, modules: List[str]) -> Path:
     return source
 
 
-def _engine(
-    site: Path,
-    source: Path,
-    cli: List[str] | None = None,
-    env: Dict[str, str] | None = None,
-    **resolve: Any,
-) -> Dict[str, Any]:
+def _scan(source: Path, cli: List[str] | None = None, **resolve: Any) -> Dict[str, Any]:
+    return {"source": str(source), "cli": cli or [], "resolve": resolve}
+
+
+def _engines(
+    site: Path, scans: List[Dict[str, Any]], env: Dict[str, str] | None = None
+) -> List[Dict[str, Any]]:
+    """What each of ``scans`` selected, built one after another in one process."""
     environment = {k: v for k, v in os.environ.items() if k not in _AMBIENT}
     environment.update(env or {})
     environment["PYTHONPATH"] = os.pathsep.join(
         [str(site), *filter(None, [os.environ.get("PYTHONPATH")])]
     )
-    spec = {"source": str(source), "cli": cli or [], "resolve": resolve}
     result = subprocess.run(
-        [sys.executable, "-c", _ENGINE, json.dumps(spec)],
+        [sys.executable, "-c", _ENGINE, json.dumps(scans)],
         cwd=site.parent,
         env=environment,
         capture_output=True,
@@ -134,6 +152,17 @@ def _engine(
     )
     assert result.returncode == 0, result.stderr[-4000:]
     return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def _engine(
+    site: Path,
+    source: Path,
+    cli: List[str] | None = None,
+    env: Dict[str, str] | None = None,
+    **resolve: Any,
+) -> Dict[str, Any]:
+    [result] = _engines(site, [_scan(source, cli, **resolve)], env)
+    return result
 
 
 def _dropped(warnings: List[str], name: str) -> List[str]:
@@ -207,6 +236,41 @@ def test_without_a_package_that_re_exports_nothing_is_dropped(tmp_path, site):
     assert not [w for w in result["warnings"] if "not selected" in w], result
 
 
+@pytest.mark.parametrize("first", ["tree", "operator"])
+def test_a_later_scan_in_the_same_process_selects_only_what_it_loads(
+    tmp_path, site, first
+):
+    """Registration outlives a scan, so each scan checks the classes it selects.
+
+    The first scan loads the re-exporting package, from a config inside its tree
+    or from the operator's config, and importing it registers every class of both
+    off-host packages. The next scan, in the same process, is of a tree with no
+    config, and names neither package; the one after it names the Snyk package on
+    the command line.
+    """
+    source = tmp_path / "repo"
+    if first == "tree":
+        earlier = _scan(_tree(tmp_path, [PACKAGE]))
+    else:
+        source.mkdir()
+        operator = _write(
+            tmp_path / "operator" / "ash.yaml", {"ash_plugin_modules": [PACKAGE]}
+        )
+        earlier = _scan(source, config_path=str(operator))
+    plain = tmp_path / "plain"
+    plain.mkdir()
+
+    _, later, named = _engines(site, [earlier, _scan(plain), _scan(plain, [SNYK])])
+
+    assert not set(later["scanners"]) & set(OFF_HOST_SCANNERS), later
+    assert not set(later["reporters"]) & set(OFF_HOST_REPORTERS), later
+    assert "BanditScanner" in later["scanners"], later
+    [dropped] = [w for w in later["warnings"] if "not selected" in w]
+    assert SNYK in dropped and AWS in dropped, dropped
+    assert "SnykCodeScanner" in named["scanners"], named
+    assert not set(named["reporters"]) & set(OFF_HOST_REPORTERS), named
+
+
 def test_a_class_outside_the_off_host_packages_is_kept(tmp_path):
     """Only a class defined in an off-host package is checked."""
     from automated_security_helper.config.ash_config import AshConfig
@@ -226,8 +290,13 @@ def test_a_class_outside_the_off_host_packages_is_kept(tmp_path):
     assert kept == {"scanner": [LocalScanner]}
 
 
-def test_nothing_is_dropped_for_a_config_with_no_untrusted_file():
-    """``resolve_config`` records the trusted list only when a file needs it."""
+def test_a_config_with_no_untrusted_file_selects_what_its_own_modules_load():
+    """``resolve_config`` records the trusted list only when a file needs it.
+
+    Without one, every file the config was built from is the operator's, so its
+    own ``ash_plugin_modules`` are the trusted names. A class that something else
+    in the process registered is not selected on that alone.
+    """
     from automated_security_helper.config.ash_config import AshConfig
     from automated_security_helper.config.plugin_module_trust import (
         drop_untrusted_off_host_plugins,
@@ -238,8 +307,11 @@ def test_nothing_is_dropped_for_a_config_with_no_untrusted_file():
 
     ImportedScanner.__module__ = f"{SNYK}.snyk_code_scanner"
     plugins = {"scanner": [ImportedScanner]}
+    named = AshConfig(ash_plugin_modules=[SNYK])
 
-    assert drop_untrusted_off_host_plugins(AshConfig(), plugins, []) == plugins
+    assert drop_untrusted_off_host_plugins(AshConfig(), plugins, []) == {"scanner": []}
+    assert drop_untrusted_off_host_plugins(named, plugins, []) == plugins
+    assert drop_untrusted_off_host_plugins(AshConfig(), plugins, [SNYK]) == plugins
 
 
 # ``ash report``: resolves --config, loads the config's plugin modules, and looks

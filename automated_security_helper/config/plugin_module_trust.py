@@ -47,7 +47,11 @@ which ``ScanExecutionEngine`` and ``ash report`` call once the plugin modules ar
 loaded, drops each selected class whose defining module (``cls.__module__``) is
 inside an off-host package, unless a trusted entry or ``--ash-plugin-modules``
 names that module or a package around it, or names a module that lists the
-class. One warning names each dropped class and its package. The off-host
+class. One warning names each dropped class and its package. A config with no
+trusted list recorded is built only from the operator's files, so its own
+``ash_plugin_modules`` are the trusted entries. That check covers every config
+because the classes a scan is offered are every class registered in the process
+so far: under the MCP server, those an earlier scan's config loaded. The off-host
 packages declare no ``ASH_EVENT_HANDLERS``
 (tests/unit/config/test_off_host_plugin_modules_from_repo_config.py derives what
 they send from their reporters, handlers and scanners), so only classes are
@@ -260,7 +264,7 @@ def _within(module: str, name: str) -> bool:
 
 
 def drop_untrusted_off_host_plugins(
-    config: "AshConfig",
+    config: Optional["AshConfig"],
     plugins: Mapping[str, Sequence[type]],
     operator_modules: Optional[Iterable[object]],
 ) -> Dict[str, List[type]]:
@@ -271,11 +275,14 @@ def drop_untrusted_off_host_plugins(
     config's ``_trusted_plugin_modules`` and ``operator_modules``) is that module
     or a package around it, or is an imported module that lists the class in its
     ``ASH_SCANNERS``, ``ASH_REPORTERS`` or ``ASH_CONVERTERS``. Every other class is
-    kept. Nothing is dropped for a config ``resolve_config`` recorded no trusted
-    list on, since every file it was built from is the operator's.
+    kept. For a config ``resolve_config`` recorded no trusted list on, every file
+    it was built from is the operator's, so its own ``ash_plugin_modules`` are the
+    trusted names. The classes a scan is offered are every class registered in the
+    process so far, and the MCP server runs every scan in the server's process, so
+    a class an earlier scan loaded is held to the same rule.
 
     Args:
-        config: The config ``resolve_config`` returned.
+        config: The config ``resolve_config`` returned, or None for the defaults.
         plugins: The selected plugin classes, by plugin type.
         operator_modules: ``--ash-plugin-modules`` and ``ASH_PLUGIN_MODULES``.
 
@@ -285,10 +292,16 @@ def drop_untrusted_off_host_plugins(
     from automated_security_helper.config.ash_config import AshConfig
 
     selected = {kind: list(classes) for kind, classes in plugins.items()}
-    if not isinstance(config, AshConfig) or config._trusted_plugin_modules is None:
+    if config is None:
+        config = AshConfig()
+    if not isinstance(config, AshConfig):
         return selected
+    recorded = config._trusted_plugin_modules
     trusted = split_plugin_modules(
-        [*config._trusted_plugin_modules, *(operator_modules or [])]
+        [
+            *(config.ash_plugin_modules if recorded is None else recorded),
+            *(operator_modules or []),
+        ]
     )
     listed: List[type] = []
     for name in trusted:
@@ -314,10 +327,12 @@ def drop_untrusted_off_host_plugins(
         selected[kind] = kept
     if dropped:
         ASH_LOGGER.warning(
-            f"Plugin classes {', '.join(dropped)} are not selected: a module that "
-            "a config inside the scanned tree, or one an MCP client delivered, "
-            "loads lists or imports them, and they send findings or source off the "
-            "host. Load their package with --ash-plugin-modules, --config-overrides "
-            "or a config file outside the tree."
+            f"Plugin classes {', '.join(dropped)} are not selected: they send "
+            "findings or source off the host, and no module that "
+            "--ash-plugin-modules or the operator's configuration names defines or "
+            "lists them. A module that a config inside the scanned tree, or one an "
+            "MCP client delivered, loads can import them, as can an earlier scan in "
+            "the same process. Load their package with --ash-plugin-modules, "
+            "--config-overrides or a config file outside the tree."
         )
     return selected

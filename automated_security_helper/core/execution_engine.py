@@ -283,12 +283,13 @@ class ScanExecutionEngine:
         for k, v in self.plugins.items():
             ASH_LOGGER.verbose(f"Discovered {len(v)} {k} plugins at runtime")
 
-        # A class from an off-host plugin package that only an in-tree or
-        # delivered config's module brought in is not selected.
-        if self._context.config is not None:
-            self.plugins = drop_untrusted_off_host_plugins(
-                self._context.config, self.plugins, ash_plugin_modules
-            )
+        # A class from an off-host plugin package is selected only when this
+        # scan's trusted modules load it: not when only an in-tree or delivered
+        # config's module brought it in, nor when an earlier scan in this process
+        # did. Without a config the defaults name no module.
+        self.plugins = drop_untrusted_off_host_plugins(
+            self._context.config, self.plugins, ash_plugin_modules
+        )
 
         # The plugin modules are loaded, so every reporter's declared destination
         # options are known: those a config file in the scanned tree set are
