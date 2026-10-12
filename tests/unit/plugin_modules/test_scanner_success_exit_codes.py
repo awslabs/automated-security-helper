@@ -209,12 +209,16 @@ def _results_paths(command, results_dir: Path):
     return paths
 
 
-def _rows(plugin_context, monkeypatch, name: str, runs):
+def _rows(plugin_context, monkeypatch, name: str, runs, earlier_run_code=None):
     """The scanner's rows after one executor call over source, then converted.
 
     ``runs`` holds one ``(exit code, results file content)`` pair per target, in
     that order, on one plugin instance. A ``None`` in place of a pair leaves the
     converted tree empty, so the scanner has nothing to run there.
+
+    With ``earlier_run_code``, the dependency check of each target records a run of
+    the plugin's that exited with it before the tool runs, as a version probe that
+    goes through ``_run_subprocess`` does.
     """
     scanner = _scanner_class(name)(context=plugin_context)
     captured = {}
@@ -263,8 +267,15 @@ def _rows(plugin_context, monkeypatch, name: str, runs):
         scanner._process_command_response(response)
         return response
 
+    def dependencies():
+        if earlier_run_code is not None:
+            scanner._process_command_response(
+                {"returncode": earlier_run_code, "stdout": "", "stderr": ""}
+            )
+        return True
+
     monkeypatch.setattr(scanner, "_run_subprocess", tool)
-    monkeypatch.setattr(scanner, "validate_plugin_dependencies", lambda: True)
+    monkeypatch.setattr(scanner, "validate_plugin_dependencies", dependencies)
     executor = ScannerExecutor(
         plugin_context=plugin_context, progress_display=MagicMock(), scanner_tasks=[]
     )
@@ -318,6 +329,30 @@ def test_an_accepted_exit_code_with_no_findings_is_passed(
         f"{name} exiting {exit_code} with no findings was graded {row.status.value}; "
         f"errors: {row.errors!r}"
     )
+
+
+@pytest.mark.parametrize("name", EXECUTED)
+def test_the_tools_own_exit_code_decides_over_an_earlier_run_in_the_target(
+    plugin_context, monkeypatch, name
+):
+    """An earlier run of the plugin's in this target exits 2; the tool exits 0.
+
+    The plugin keeps the largest code of all its runs, so the row is graded on the
+    tool's run only because the scanner records that run's code.
+    """
+    row = _rows(
+        plugin_context,
+        monkeypatch,
+        name,
+        [(0, _empty_results(name))],
+        earlier_run_code=2,
+    )["source"]
+
+    assert row.status == ScannerStatus.PASSED, (
+        f"{name}'s tool exited 0 after an earlier run that exited 2; the row was "
+        f"graded {row.status.value}, errors: {row.errors!r}"
+    )
+    assert row.exit_code == 0
 
 
 # Two targets, source then converted, through one plugin instance.
