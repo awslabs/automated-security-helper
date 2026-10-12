@@ -151,11 +151,15 @@ def test_the_refusal_names_the_path_as_written(tree, caplog) -> None:
     with caplog.at_level(logging.WARNING, logger=ASH_LOGGER.name):
         honored_path(link, source_dir=source, key="scanners.x.options.config_file")
 
+    # The link is judged by the name it has in the scanned tree, so the warning
+    # names that name and the setting, not the file the link reaches.
     (message,) = [
-        r.getMessage() for r in caplog.records if "symbolic link" in r.getMessage()
+        r.getMessage()
+        for r in caplog.records
+        if "scanners.x.options.config_file" in r.getMessage()
     ]
     assert link.as_posix() in message
-    assert "scanners.x.options.config_file" in message
+    assert (operator / "tool.yaml").as_posix() not in message
 
 
 # ---------------------------------------------------------------------------
