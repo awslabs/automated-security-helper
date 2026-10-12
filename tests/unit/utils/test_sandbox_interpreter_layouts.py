@@ -94,14 +94,23 @@ def _build(world, monkeypatch, executable, prefix, base_prefix=None, argv0="/bin
 
 
 def _assert_no_home_mounted(world, policy):
+    """No grant is a home or holds one, and none covers what a home keeps private.
+
+    A grant of ~/.ssh or ~/.local/share alone, or of any directory above them in
+    the home such as ~/.local, would pass the first check and still expose keys and
+    keyrings, so each of those is checked too.
+    """
     homes = {
         Path(os.path.realpath(world.home)),
         Path(os.path.realpath(world.passwd_home)),
     }
+    private = [home / name for home in homes for name in (".ssh", ".local/share")]
     for granted in [*policy.read_only, *policy.cache]:
         real = Path(os.path.realpath(granted))
         for home in homes:
             assert real != home and real not in home.parents, (granted, home)
+        for kept in private:
+            assert real != kept and real not in kept.parents, (granted, kept)
 
 
 def _venv(directory: Path, base_python: Path) -> Path:
