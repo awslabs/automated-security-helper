@@ -87,6 +87,27 @@ def python_child(*args: str, parent: Optional[Path] = None) -> Iterator[PythonCh
         )
 
 
+#: The first statement of a ``-c`` child that has to start where its caller is. It
+#: removes the ``''`` entry Python adds for ``-c`` before anything is imported;
+#: ``import sys`` is built in and reads nothing from disk, and ``sitecustomize`` and
+#: ``usercustomize`` are imported before that entry is added (measured on 3.10 and
+#: 3.14). Under ``-P`` or ``PYTHONSAFEPATH`` the entry is not there, and the first,
+#: real entry is kept. ``utils/cdk_nag_worker.py`` starts its child the same way.
+DROP_WORKING_DIRECTORY = (
+    "import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]; "
+)
+
+
+def python_code_argv(source: str) -> List[str]:
+    """ASH's interpreter running ``source`` with ``-c``, importing nothing from its cwd.
+
+    For a child that cannot be given an empty start directory, such as the inner scan
+    ``nix develop --command`` runs in the scan's own directory: ``-P`` where Python
+    has it, and ``source`` behind :data:`DROP_WORKING_DIRECTORY` for Python 3.10.
+    """
+    return [sys.executable, *_SAFE_PATH_FLAGS, "-c", DROP_WORKING_DIRECTORY + source]
+
+
 def runs_module_or_code(argv: Sequence[str]) -> bool:
     """Whether ``argv`` starts ASH's interpreter with ``-m`` or ``-c``.
 

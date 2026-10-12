@@ -22,6 +22,7 @@ from typing import List, Optional
 
 from automated_security_helper.core.constants import ASH_REPO_URL
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.python_child import python_code_argv
 from automated_security_helper.utils.subprocess_utils import (
     child_environ,
     find_executable,
@@ -151,8 +152,14 @@ _INNER_ENTRY_POINT = (
 
 
 def _this_ash() -> List[str]:
-    """The command that runs the ASH running now."""
-    return [sys.executable, "-c", _INNER_ENTRY_POINT]
+    """The command that runs the ASH running now.
+
+    ``nix develop --command`` starts it in the scan's own directory, which ``-c``
+    puts first on ``sys.path``: an ``automated_security_helper/`` there would run in
+    place of ASH. The directory is left as it is, and the command drops that entry
+    (``utils/python_child.python_code_argv``).
+    """
+    return python_code_argv(_INNER_ENTRY_POINT)
 
 
 def build_nix_command(

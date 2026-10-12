@@ -160,9 +160,82 @@ class TestBuildNixCommand:
         inner = cmd[cmd.index("--command") + 1 :]
         assert inner[0] == sys.executable
         assert Path(inner[0]).is_absolute()
-        assert inner[1] == "-c"
-        assert "automated_security_helper.cli.entrypoint" in inner[2]
-        assert inner[3:] == ["scan", "--mode", "local"]
+        code = inner.index("-c")
+        # -P, where Python has it, is the only option before -c.
+        assert inner[1:code] == (["-P"] if sys.version_info >= (3, 11) else [])
+        assert "automated_security_helper.cli.entrypoint" in inner[code + 1]
+        assert inner[code + 2 :] == ["scan", "--mode", "local"]
+
+
+#: The inner command as it was: `-c`, with nothing dropping the working directory.
+_OLD_INNER_COMMAND = [
+    sys.executable,
+    "-c",
+    (
+        "import sys; sys.argv[0] = 'ash'; "
+        "from automated_security_helper.cli.entrypoint import main; main()"
+    ),
+]
+
+
+def _plant_ash(directory: Path, marker: Path) -> None:
+    """An ``automated_security_helper`` package in ``directory`` that records its import."""
+    init = directory / "automated_security_helper" / "__init__.py"
+    init.parent.mkdir(parents=True)
+    init.write_text(
+        f"open({str(marker)!r}, 'a', encoding='utf-8').write('planted\\n')\n",
+        encoding="utf-8",
+    )
+
+
+def _run_in(argv, cwd: Path) -> subprocess.CompletedProcess:
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONSAFEPATH"}
+    return subprocess.run(
+        [*argv, "--version"],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+
+
+class TestTheInnerScanImportsNothingFromTheScanDirectory:
+    """``nix develop --command`` starts the inner scan in the scan's directory.
+
+    Under ``-c`` Python puts that directory first on ``sys.path`` (as ``''``), and
+    the inner command's first import is ``automated_security_helper``, so a package of
+    that name in the scanned repository ran in place of ASH. The directory stays as
+    it is; the inner command drops the entry instead, and adds ``-P`` where Python
+    has it.
+    """
+
+    def test_control_the_old_inner_command_imports_the_planted_package(self, tmp_path):
+        marker = tmp_path / "IMPORTED"
+        _plant_ash(tmp_path / "repo", marker)
+        _run_in(_OLD_INNER_COMMAND, tmp_path / "repo")
+        assert marker.read_text(encoding="utf-8") == "planted\n"
+
+    def test_the_inner_command_runs_the_installed_ash(self, tmp_path):
+        from automated_security_helper.interactions.run_ash_nix import _this_ash
+
+        marker = tmp_path / "IMPORTED"
+        _plant_ash(tmp_path / "repo", marker)
+        result = _run_in(_this_ash(), tmp_path / "repo")
+        assert not marker.exists(), marker.read_text(encoding="utf-8")
+        assert result.returncode == 0, result.stderr
+
+    def test_without_p_the_code_alone_drops_the_entry(self, tmp_path):
+        """Python 3.10 has no -P, so the -c source has to be enough on its own."""
+        from automated_security_helper.interactions.run_ash_nix import _this_ash
+
+        argv = [arg for arg in _this_ash() if arg != "-P"]
+        marker = tmp_path / "IMPORTED"
+        _plant_ash(tmp_path / "repo", marker)
+        result = _run_in(argv, tmp_path / "repo")
+        assert not marker.exists(), marker.read_text(encoding="utf-8")
+        assert result.returncode == 0, result.stderr
 
     def test_flake_ref_is_passed_to_develop(self):
         cmd = build_nix_command("github:owner/repo/v1", ["scan"], "nix")
