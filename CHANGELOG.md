@@ -108,6 +108,19 @@
   before, the flag let them through. A scan with the flag reads more files, and
   takes longer when an ignore path leaves out a large part of the tree.
 
+- **An MCP client's `enabled: false` no longer turns off an AWS reporter the
+  server runs.** Whether the Security Hub, Bedrock summary, CloudWatch Logs and S3
+  reporters run, and a plugin reporter that declares `destination_options`, comes
+  from the server's config in both directions, as it does for a repository's
+  config (see Breaking changes). A client's `enabled: false` for one of them, in a
+  config file it delivered or named, in `select_profile`'s `patch_ops` or
+  `override_yaml`, or in the MCP workspace tools' `config_overrides`, is still
+  accepted rather than refused, but it takes no effect: the server's `enabled`, or
+  the reporter's own default where the server's config sets none, applies, and a
+  warning names the client's value. Before, the client's value turned the reporter
+  off. `enabled: true` is still refused. A server run with no operator config of
+  its own gives each reporter its default.
+
 - **Under the MCP server, a config file the operator did not set aside resolves no
   `!ENV` for a remote client.** `!ENV` reads the server's environment. For a remote
   caller, every file outside `ASH_MCP_ALLOWED_CONFIG_ROOTS` and the session's own
@@ -1266,11 +1279,11 @@
 
   `ash_plugin_modules` is stricter than in a scan: `ash merge` imports only the
   modules the operator's configuration names, so an installed plugin module a
-  shard recorded is dropped unless the operator names it too. So is `enabled` of
-  a reporter that sends findings off the host: it comes from the operator's
-  configuration, or the reporter's default where that is silent. A scan applies a
-  repository's `enabled: false`, but `ash merge` ignores a shard's `enabled: false`
-  with a warning, as it ignores a shard's `enabled: true`.
+  shard recorded is dropped unless the operator names it too. `enabled` of a
+  reporter that sends findings off the host comes from the operator's
+  configuration, or the reporter's default where that is silent, as in a scan:
+  `ash merge` ignores a shard's `enabled: false` with a warning, as it ignores a
+  shard's `enabled: true`.
 
   The settings the verdict reads (`fail_on_findings`, `fail_on_incomplete_scanners`,
   `global_settings.severity_threshold`, `global_settings.suppressions`,
@@ -1316,29 +1329,30 @@
     directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names, where before they used it.
     Move the file into such a directory, or name its directory there.
 
-- **A repository's config can no longer turn on an AWS reporter the operator has
-  off.** The Security Hub, Bedrock summary, CloudWatch Logs and S3 reporters send
-  findings off the host, so whether they run is the operator's choice, as their
-  destinations already are. Where the defaults, `--config-overrides` or a config
-  file outside the scanned tree have one of them off, a config file inside the tree,
-  or one an MCP client delivered, does not turn it on: its `enabled: true` is
-  ignored with a warning, and a config that leaves the section out, which would
-  return the reporter to its own default, leaves it off. `enabled: false` still
-  applies from any config. The same holds for a reporter from a plugin module that
-  declares `destination_options`, once the scan or `ash report` has imported it.
-  A repository that turned one of these reporters on from its own config keeps it
-  with `--config-overrides`, such as
-  `--config-overrides reporters.s3.enabled=true`, or with a config file outside the
-  tree.
+- **A repository's config can no longer turn an AWS reporter on or off.** The
+  Security Hub, Bedrock summary, CloudWatch Logs and S3 reporters send findings off
+  the host, so whether they run is the operator's choice in both directions, as
+  their destinations already are. A config file inside the scanned tree, or one an
+  MCP client delivered or named, neither turns one of them on nor turns one off:
+  where its `enabled: true` or `enabled: false` differs from the defaults,
+  `--config-overrides` or a config file outside the tree, it is ignored with a
+  warning, and a config that leaves the section out, which would return the
+  reporter to its own default, leaves it as the operator has it. The same holds for
+  a reporter from a plugin module that declares `destination_options`, once the
+  scan or `ash report` has imported it. A repository that turned one of these
+  reporters on or off from its own config sets it with `--config-overrides`, such
+  as `--config-overrides reporters.s3.enabled=true` or `reporters.s3.enabled=false`,
+  or with a config file outside the tree.
   - Under the MCP server, `/reporters/aws-security-hub/**`,
     `/reporters/bedrock-summary-reporter/**` and `/reporters/s3/**` join the
     default `denied_paths` (`/reporters/cloudwatch-logs/**` already covers that
     reporter), in place of Security Hub's and S3's per-option entries. A delivered
     config, or a client's runtime override, that turns one of these reporters on or
     sets any other setting of its section, S3's `file_format` included, is refused
-    with `error_type: config_field_denied`. `enabled: false`, and a value equal to the
-    server's, are accepted. A profile that relied on a client turning one of these
-    reporters on sets it in the profile instead.
+    with `error_type: config_field_denied`. A value equal to the server's is
+    accepted, and so is `enabled: false`, which then takes no effect (see Behavior
+    changes). A profile that relied on a client turning one of these reporters on
+    or off sets it in the profile instead.
   - The Bedrock reporter's `include_code_snippets` and `custom_prompt`, which choose
     what is sent to the model with the findings, are the operator's too: a config
     file inside the scanned tree that sets one is ignored with a warning, and a
@@ -1387,8 +1401,8 @@
     and reported a rate-limit error at the first refusal.
   - `enabled: false` for one of these reporters is accepted the same way through
     `select_profile`'s `patch_ops` and `override_yaml` and the MCP workspace tools'
-    `config_overrides`, under the entries that cover it; `enabled: true`, and
-    removing `enabled`, are still refused there.
+    `config_overrides`, under the entries that cover it, and takes no effect there
+    either; `enabled: true`, and removing `enabled`, are still refused there.
 
 ### Fixes
 

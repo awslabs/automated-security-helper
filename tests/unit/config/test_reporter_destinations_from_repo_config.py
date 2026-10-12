@@ -282,7 +282,6 @@ def test_other_reporter_options_in_the_tree_still_apply(tmp_path, ash_log):
         source / ".ash" / ".ash.yaml",
         {
             "bedrock-summary-reporter": {
-                "enabled": False,
                 "options": {
                     "summary_style": "technical",
                     "aws_region": "repo-region-1",
@@ -296,7 +295,6 @@ def test_other_reporter_options_in_the_tree_still_apply(tmp_path, ash_log):
     config = resolve_config(source_dir=source)
 
     bedrock = config.get_plugin_config("reporter", "bedrock-summary-reporter")
-    assert bedrock["enabled"] is False
     assert bedrock["options"]["summary_style"] == "technical"
     assert _options(config, "s3")["file_format"] == "yaml"
     assert config.reporters.markdown.options.compact is True
@@ -439,13 +437,45 @@ def test_the_operators_ash_config_turning_one_off_holds_too(
     assert any("reporters.s3.enabled" in m for m in _warnings(ash_log))
 
 
+@pytest.mark.parametrize("operator", ["defaults", "operator-on"])
 @pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
-def test_an_in_tree_config_may_turn_one_off(tmp_path, ash_log, reporter):
-    """``enabled: false`` only narrows what is sent, so it applies from any config."""
+def test_an_in_tree_config_cannot_turn_one_off(tmp_path, ash_log, reporter, operator):
+    """Whether it runs is the operator's in both directions, so the tree's
+    ``enabled: false`` is ignored with a warning, as its ``true`` is."""
     source = tmp_path / "repo"
-    _write_config(source / ".ash" / ".ash.yaml", {reporter: {"enabled": False}})
+    project = _write_config(
+        source / ".ash" / ".ash.yaml", {reporter: {"enabled": False}}
+    )
+    trusted = (
+        {"trusted_config_path": _operator(tmp_path, reporter, True)}
+        if operator == "operator-on"
+        else {}
+    )
 
-    config = resolve_config(source_dir=source)
+    config = resolve_config(config_path=project, source_dir=source, **trusted)
+
+    expected = (
+        True if operator == "operator-on" else REPORTER_ENABLED_DEFAULTS[reporter]
+    )
+    assert _enabled(config, reporter) is expected
+    warnings = "\n".join(_warnings(ash_log))
+    assert f"reporters.{reporter}.enabled" in warnings, warnings
+
+
+@pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+def test_an_override_turns_one_off(tmp_path, ash_log, reporter):
+    """``--config-overrides`` are the operator's, in both directions."""
+    source = tmp_path / "repo"
+    project = _write_config(
+        source / ".ash" / ".ash.yaml", {reporter: {"enabled": True}}
+    )
+
+    config = resolve_config(
+        config_path=project,
+        source_dir=source,
+        trusted_config_path=_operator(tmp_path, reporter, True),
+        config_overrides=[f"reporters.{reporter}.enabled=false"],
+    )
 
     assert _enabled(config, reporter) is False
     assert not any("enabled" in message for message in _warnings(ash_log))

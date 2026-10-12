@@ -38,23 +38,24 @@ value is replaced by the trusted base's, as for a file inside the tree. An
 operator who wants such a file refused lists the option in the profile's own
 ``denied_paths``.
 
-Whether such a reporter runs at all is the operator's choice too, since each of
-them sends findings off the host when it runs. So ``enabled`` of a built-in AWS
+Whether such a reporter runs at all is the operator's choice too, in both
+directions, since each of them sends findings off the host when it runs and the
+operator decides which destinations get them. So ``enabled`` of a built-in AWS
 reporter, and of a reporter a plugin module adds that declares
-``destination_options``, follows the same rule: where the trusted base has the
-reporter off (by its own ``enabled``, or by the reporter's default when it sets
-none), a file inside the tree or one an MCP client delivered does not turn it on,
-whether it writes ``enabled: true`` or leaves the section out while the
-reporter's default is on (a file that replaces the operator's config would
-otherwise return the reporter to that default). ``enabled: false`` only narrows
-what is sent, so it applies from any config (``turns_a_reporter_off``). A reporter that declares no ``destination_options``
-writes only local files, and its ``enabled`` still applies from the tree. Under
-the MCP server the default ``denied_paths`` also refuse a client's file that turns
-a built-in AWS reporter on, and every other option of the Bedrock reporter, which
-chooses what is sent to the model; ``enabled: false`` is accepted there, in a
-delivered file (``client_config_policy._writes_a_tightening``) and in a client's
-runtime overrides (``runtime_patch._turns_an_off_host_reporter_off``). The reporters' other options
-(formatting, model parameters) still apply from the tree.
+``destination_options``, comes from the trusted base, or from the reporter's own
+default where the trusted base sets none: a file inside the tree, one an MCP
+client delivered or named, a client's runtime overrides and a shard's recorded
+config neither turn one on nor turn one off, and a value of theirs the reporter
+reads differently is ignored with the warning. Leaving the section out does not
+return the reporter to its default either, where that differs from the trusted
+base. A reporter that declares no ``destination_options`` writes only local files,
+and its ``enabled`` still applies from the tree. Under the MCP server the default
+``denied_paths`` also refuse a client's file that turns a built-in AWS reporter on,
+and every other setting of its section. A client's ``enabled: false`` is not
+refused there, in a delivered file (``client_config_policy._writes_a_tightening``)
+or in its runtime overrides (``runtime_patch._turns_an_off_host_reporter_off``),
+but it takes no effect: the confinement above replaces it. The reporters' other
+options (formatting, model parameters) still apply from the tree.
 """
 
 from __future__ import annotations
@@ -175,10 +176,13 @@ _MISSING = object()
 
 
 def turns_a_reporter_off(value: Any) -> bool:
-    """Whether ``enabled: value``, written in an untrusted config, only turns a reporter off.
+    """Whether ``enabled: value``, written by an MCP client, only asks to turn a reporter off.
 
     Only ``false`` itself. A value pydantic would also read as false (``0``,
-    ``"no"``) is not taken as one here, so it is confined like ``true``.
+    ``"no"``) is not taken as one here, so it is refused like ``true``. Such a
+    value is not refused, since it asks for nothing beyond the server's config,
+    but it does not take effect either: ``_confine_enabled`` takes ``enabled``
+    from the trusted base.
     """
     return value is False
 
@@ -421,17 +425,10 @@ def _confine(
     in_tree: Sequence[Path],
     source: UntrustedSource = IN_TREE_OR_DELIVERED,
 ) -> None:
-    """Set each reporter's ``destinations`` options, and ``enabled`` where the
-    trusted base turns it off, to the trusted base's, with one warning."""
+    """Set each reporter's ``destinations`` options, and the ``enabled`` of each
+    reporter of ``enabled_defaults``, to the trusted base's, with one warning."""
     ignored = _confine_options(config, trusted_config, destinations)
-    ignored.extend(
-        _confine_enabled(
-            config,
-            trusted_config,
-            enabled_defaults,
-            from_trusted_only=source.enabled_from_trusted_only,
-        )
-    )
+    ignored.extend(_confine_enabled(config, trusted_config, enabled_defaults))
     if not ignored:
         return
     files = ", ".join(describe_config_path(path) for path in in_tree)
@@ -524,20 +521,17 @@ def _confine_enabled(
     config: "AshConfig",
     trusted_config: "AshConfig",
     enabled_defaults: Mapping[str, bool],
-    from_trusted_only: bool = False,
 ) -> List[str]:
-    """Turn off each reporter of ``enabled_defaults`` that the trusted base has off.
+    """Give each reporter of ``enabled_defaults`` the trusted base's ``enabled``.
 
-    A section's value is its ``enabled``, or the reporter's default when it sets
-    none. Where the trusted base's value is off, each of ``config``'s sections
-    the lookup reads whose value is not ``false`` gets ``enabled: false``, and
-    the key of each that wrote a value is returned. A config with no section for
-    the reporter gets one that turns it off, unless the reporter's default
-    already does. Nothing changes where the trusted base has the reporter on.
-
-    With ``from_trusted_only`` (``UntrustedSource.enabled_from_trusted_only``),
-    the trusted base's value applies in both directions: ``config``'s
-    ``enabled: false`` is replaced as well (``_take_trusted_enabled``).
+    In both directions: the config being confined neither turns one of these
+    reporters on nor turns one off. The wanted value is the trusted base's as
+    the reporter reads it (``_reads_as_off``), or the reporter's default where
+    the trusted base sets none. Each of ``config``'s sections the lookup reads
+    is given it, and the key of each whose ``enabled`` the reporter reads
+    differently, or would refuse, is returned. A section that writes no
+    ``enabled`` is set only where the reporter's default differs from the wanted
+    value, and a config with no section for the reporter gets one in that case.
     """
     extras = config.reporters.__pydantic_extra__
     ignored: List[str] = []
@@ -545,63 +539,20 @@ def _confine_enabled(
         return ignored
     for plugin, default in enabled_defaults.items():
         trusted_section = _as_dict(trusted_config.get_plugin_config("reporter", plugin))
-        trusted_off = _reads_as_off((trusted_section or {}).get("enabled", default))
-        if from_trusted_only:
-            ignored.extend(
-                _take_trusted_enabled(config, plugin, default, not trusted_off)
-            )
-            continue
-        if not trusted_off:
-            continue
+        wanted = not _reads_as_off((trusted_section or {}).get("enabled", default))
         keys = _sections_of(config, plugin)
-        if not keys:
-            if not _reads_as_off(default):
-                extras[plugin] = {"enabled": False}
-            continue
+        if not keys and _reads_as_off(default) == wanted:
+            extras[plugin] = {"enabled": wanted}
         for key in keys:
             section = _as_section(extras[key])
             current = section.get("enabled", _MISSING)
-            if turns_a_reporter_off(current) or (
-                current is _MISSING and _reads_as_off(default)
-            ):
+            if current is _MISSING:
+                if _reads_as_off(default) != wanted:
+                    continue
+            elif current is wanted:
                 continue
-            if current is not _MISSING:
+            elif _reads_as(current) != wanted:
                 ignored.append(f"reporters.{key}.enabled")
-            section["enabled"] = False
+            section["enabled"] = wanted
             extras[key] = section
-    return ignored
-
-
-def _take_trusted_enabled(
-    config: "AshConfig", plugin: str, default: bool, wanted: bool
-) -> List[str]:
-    """Give each of ``config``'s sections for ``plugin`` the trusted base's ``enabled``.
-
-    ``wanted`` is the trusted base's value as the reporter reads it, its default
-    where the trusted base sets none. A section whose ``enabled`` the reporter
-    reads differently, or would refuse, has its key returned; one that writes none is set only
-    where the reporter's default differs from ``wanted``. A config with no
-    section for the reporter gets one in that case too.
-    """
-    extras = config.reporters.__pydantic_extra__
-    ignored: List[str] = []
-    if extras is None:
-        return ignored
-    keys = _sections_of(config, plugin)
-    if not keys:
-        if _reads_as_off(default) == wanted:
-            extras[plugin] = {"enabled": wanted}
-        return ignored
-    for key in keys:
-        section = _as_section(extras[key])
-        current = section.get("enabled", _MISSING)
-        if current is _MISSING:
-            if _reads_as_off(default) != wanted:
-                continue
-        elif current is wanted:
-            continue
-        elif _reads_as(current) != wanted:
-            ignored.append(f"reporters.{key}.enabled")
-        section["enabled"] = wanted
-        extras[key] = section
     return ignored

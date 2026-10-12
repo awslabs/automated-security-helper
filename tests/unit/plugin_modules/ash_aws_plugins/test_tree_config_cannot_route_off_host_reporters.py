@@ -4,9 +4,10 @@
 """A repository's own config can neither turn on an off-host reporter nor point it.
 
 The four AWS reporters send findings off the host with the operator's
-credentials. A config file inside the scanned tree (``.ash/.ash.yaml``) may turn
-one off, but cannot turn on one the trusted base has off, and cannot set any of
-its operator-only options (config/reporter_trust.py): S3's bucket and key prefix,
+credentials. A config file inside the scanned tree (``.ash/.ash.yaml``) can
+neither turn one on that the trusted base has off nor turn off one it has on, and
+cannot set any of its operator-only options (config/reporter_trust.py): S3's
+bucket and key prefix,
 CloudWatch Logs' group and stream, Security Hub's region and account, the Bedrock
 reporter's model and output files, and the rest of each reporter's
 ``REPORTER_DESTINATION_OPTIONS`` entry. Each is checked under the spellings of the
@@ -182,7 +183,9 @@ def _cli(source: Path, **resolve: Any):
     return config
 
 
-def _workspace(tmp_path: Path, project_config: Path, operator: Path | None):
+def _workspace(
+    tmp_path: Path, project_config: Path, operator: Path | None, **settings: Any
+):
     from automated_security_helper.workspace.execution import (
         ProjectScanSettings,
         _project_config_with_policy,
@@ -199,11 +202,14 @@ def _workspace(tmp_path: Path, project_config: Path, operator: Path | None):
         severity_threshold="MEDIUM",
         config_source=project_config.as_posix(),
     )
-    settings = ProjectScanSettings(
-        output_dir=tmp_path / "out",
-        default_config_path=operator.as_posix() if operator else None,
+    config = _project_config_with_policy(
+        project,
+        ProjectScanSettings(
+            output_dir=tmp_path / "out",
+            default_config_path=operator.as_posix() if operator else None,
+            **settings,
+        ),
     )
-    config = _project_config_with_policy(project, settings)
     confine_declared_reporter_destinations(config, ASH_REPORTERS)
     return config
 
@@ -364,6 +370,98 @@ def test_a_tree_config_without_the_section_keeps_the_operators_options(
     assert f"reporters.{reporter}" not in _warnings(ash_log)
 
 
+def _operator_on(tmp_path: Path, reporter: str) -> Path:
+    return _write(
+        tmp_path / "operator" / "ash.yaml",
+        {"reporters": {reporter: {"enabled": True}}},
+    )
+
+
+@pytest.mark.parametrize(
+    "reporter,section",
+    [(r, s) for r in sorted(REPORTER_ENABLED_DEFAULTS) for s in _SECTION_SPELLINGS[r]],
+)
+def test_neither_route_lets_the_tree_turn_one_off(tmp_path, ash_log, reporter, section):
+    """Whether it runs is the operator's in both directions: the tree's
+    ``enabled: false`` is ignored with a warning, as its ``true`` is."""
+    operator = _operator_on(tmp_path, reporter)
+    repo = tmp_path / "workspace" / "repo"
+    project = _write(
+        repo / ".ash" / ".ash.yaml", {"reporters": {section: {"enabled": False}}}
+    )
+
+    for config in (
+        _cli(repo, config_path=project, trusted_config_path=operator),
+        _workspace(tmp_path, project, operator),
+    ):
+        assert _built(config, reporter, tmp_path / "context").config.enabled is True
+    assert f"reporters.{section}.enabled" in _warnings(ash_log)
+
+
+def _client_rules():
+    """The rules of a profile that lets a client override anything it may."""
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.client_config_policy import rules_from
+
+    return rules_from(
+        AshConfig.model_validate(
+            {
+                "global_settings": {
+                    "mcp": {
+                        "runtime_overrides": {"enabled": True, "allowed_paths": ["/**"]}
+                    }
+                }
+            }
+        )
+    )
+
+
+@pytest.mark.parametrize("on", [True, False], ids=["operator-on", "operator-off"])
+@pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+def test_a_clients_workspace_override_does_not_choose_whether_one_runs(
+    tmp_path, ash_log, reporter, on
+):
+    """The MCP workspace tools' config_overrides are the client's: neither an
+    ``enabled: false`` nor an ``enabled: true`` in them takes effect."""
+    operator = _write(
+        tmp_path / "operator" / "ash.yaml",
+        {"reporters": {reporter: {"enabled": on}}},
+    )
+    project = _write(
+        tmp_path / "workspace" / "api" / ".ash" / ".ash.yaml", {"project_name": "api"}
+    )
+
+    config = _workspace(
+        tmp_path,
+        project,
+        operator,
+        config_overrides=(f"reporters.{reporter}.enabled={str(not on).lower()}",),
+        client_config_rules=_client_rules(),
+    )
+
+    assert _built(config, reporter, tmp_path / "context").config.enabled is on
+    assert f"reporters.{reporter}.enabled" in _warnings(ash_log)
+
+
+@pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+def test_the_operators_workspace_override_turns_one_off(tmp_path, ash_log, reporter):
+    """On the CLI the overrides are the operator's, and turn the reporter off."""
+    project = _write(
+        tmp_path / "workspace" / "api" / ".ash" / ".ash.yaml",
+        {"reporters": {reporter: {"enabled": True}}},
+    )
+
+    config = _workspace(
+        tmp_path,
+        project,
+        _operator_on(tmp_path, reporter),
+        config_overrides=(f"reporters.{reporter}.enabled=false",),
+    )
+
+    assert _built(config, reporter, tmp_path / "context").config.enabled is False
+    assert f"reporters.{reporter}.enabled" not in _warnings(ash_log)
+
+
 @pytest.mark.parametrize("value", ["disabled", "maybe", 2, None])
 @pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
 def test_an_operator_enabled_the_model_refuses_reads_as_off(
@@ -392,8 +490,21 @@ def test_an_operator_enabled_the_model_refuses_reads_as_off(
 def test_off_by_default_neither_route_lets_the_tree_turn_one_on(
     tmp_path, ash_log, monkeypatch, reporter
 ):
-    """Stands in for reporters that default to off: the tree's true loses."""
+    """Stands in for reporters that default to off: the tree's true loses. The
+    reporters' models are held equal to the table, so the check that runs once
+    they are loaded reads the same stand-in."""
+    from automated_security_helper.config import reporter_trust
+
     monkeypatch.setitem(REPORTER_ENABLED_DEFAULTS, reporter, False)
+    declared = reporter_trust.declared_enabled_defaults
+    monkeypatch.setattr(
+        reporter_trust,
+        "declared_enabled_defaults",
+        lambda classes: {
+            key: REPORTER_ENABLED_DEFAULTS.get(key, value)
+            for key, value in declared(classes).items()
+        },
+    )
     repo = tmp_path / "workspace" / "repo"
     project = _write(
         repo / ".ash" / ".ash.yaml",

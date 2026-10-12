@@ -832,9 +832,10 @@ class RuntimeOverridesConfig(BaseModel):
         # built-in AWS reporters (config/reporter_trust.py). The whole section
         # of each reporter that sends findings off the host is denied, its
         # enabled with the rest: S3's, Security Hub's, CloudWatch Logs' and the
-        # Bedrock reporter's. A client may still set enabled to false
-        # (client_config_policy._writes_a_tightening), and a local reporter's
-        # enabled is not denied.
+        # Bedrock reporter's. A client's enabled: false is not refused
+        # (client_config_policy._writes_a_tightening), but takes no effect: the
+        # operator's enabled applies (config/reporter_trust.py). A local
+        # reporter's enabled is not denied.
         "/reporters/bedrock-summary-reporter/options/aws_*",
         "/reporters/cloudwatch-logs/**",
         "/reporters/aws-security-hub/**",

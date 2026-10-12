@@ -596,13 +596,133 @@ def test_a_tool_choice_or_report_destination_in_an_upload_is_refused(
     )
 
 
+@pytest.fixture
+def ash_log():
+    import logging
+
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    records: List[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Collect(level=logging.WARNING)
+    previous = ASH_LOGGER.level
+    ASH_LOGGER.addHandler(handler)
+    ASH_LOGGER.setLevel(logging.DEBUG)
+    try:
+        yield records
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+        ASH_LOGGER.setLevel(previous)
+
+
+def _warned(records: List[Any], key: str) -> bool:
+    return any(
+        r.getMessage().startswith("Ignoring ") and key in r.getMessage()
+        for r in records
+    )
+
+
+def _enabled_under(config: Any, reporter: str) -> Any:
+    from automated_security_helper.config.reporter_trust import (
+        REPORTER_ENABLED_DEFAULTS,
+    )
+
+    section = config.get_plugin_config("reporter", reporter) or {}
+    return section.get("enabled", REPORTER_ENABLED_DEFAULTS[reporter])
+
+
+def _server_config(_server: Dict[str, Any], reporters: Dict[str, Any]) -> None:
+    operator = _server["tmp"] / "operator" / "ash.yaml"
+    operator.write_text(
+        yaml.safe_dump({"project_name": "operator", "reporters": reporters}),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize("server", ["on", "defaults"])
+@pytest.mark.parametrize("route", ["upload", "delivered-tree", "another-checkout"])
 @pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
-def test_an_upload_may_turn_an_off_host_reporter_off(_server, reporter) -> None:
-    """``enabled: false`` only narrows what is sent, under every entry that covers it."""
-    source = _upload({"ash.yaml": f"reporters:\n  {reporter}:\n    enabled: false\n"})
-    config = _scan_resolution(_server["target"], str(source / "ash.yaml"))
+def test_a_clients_enabled_false_is_accepted_and_ignored(
+    _server, ash_log, reporter, route, server
+) -> None:
+    """Not refused, but whether the reporter runs is the operator's in both
+    directions: the server's ``enabled``, or the reporter's default where the
+    server sets none, applies, and the client's value is named in a warning."""
+    from automated_security_helper.config.reporter_trust import (
+        REPORTER_ENABLED_DEFAULTS,
+    )
+
+    if server == "on":
+        _server_config(_server, {reporter: {"enabled": True}})
+    text = f"reporters:\n  {reporter}:\n    enabled: false\n"
+    if route == "upload":
+        target, named = _server["target"], str(_upload({"ash.yaml": text}) / "ash.yaml")
+    elif route == "delivered-tree":
+        target, named = _upload({".ash/.ash.yaml": text, "app.py": "x = 1\n"}), None
+    else:
+        other = _server["target"].parent / "other-checkout" / "ash.yaml"
+        other.parent.mkdir()
+        other.write_text(text, encoding="utf-8")
+        target, named = _server["target"], str(other)
+
+    config = _scan_resolution(target, named)
+
     assert not isinstance(config, Exception), config
-    assert config.get_plugin_config("reporter", reporter)["enabled"] is False
+    expected = True if server == "on" else REPORTER_ENABLED_DEFAULTS[reporter]
+    assert _enabled_under(config, reporter) is expected
+    assert _warned(ash_log, f"reporters.{reporter}.enabled")
+
+
+def _bind_with_runtime_overrides(
+    _server: Dict[str, Any], reporter: str, mode: str, enabled: bool
+) -> Dict[str, Any]:
+    """Bind a profile that has ``reporter`` on and lets a client override anything,
+    with the client's change setting its ``enabled``."""
+    from automated_security_helper.cli.mcp_tools import mcp_select_profile
+
+    document = {
+        "project_name": "profile",
+        "global_settings": {
+            "mcp": {"runtime_overrides": {"enabled": True, "allowed_paths": ["/**"]}}
+        },
+        "reporters": {reporter: {"enabled": True}},
+    }
+    profile = _server["tmp"] / "operator" / "profile.yaml"
+    profile.write_text(yaml.safe_dump(document), encoding="utf-8")
+    set_profile_registry(register_profiles([f"op={profile}"]))
+    if mode == "patch_ops":
+        op = {"op": "replace", "path": f"/reporters/{reporter}/enabled"}
+        return mcp_select_profile(
+            "op", session_id=SESSION, patch_ops=[{**op, "value": enabled}]
+        )
+    document["reporters"][reporter]["enabled"] = enabled
+    return mcp_select_profile(
+        "op", session_id=SESSION, override_yaml=yaml.safe_dump(document)
+    )
+
+
+@pytest.mark.parametrize("mode", ["patch_ops", "override_yaml"])
+@pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
+def test_a_clients_runtime_override_turning_one_off_is_accepted_and_ignored(
+    _server, ash_log, reporter, mode
+) -> None:
+    """select_profile accepts it, and the scan, which resolves the client's copy
+    against the registered profile, runs the reporter as the profile has it. The
+    scan tools hand a scan that names no config the bound copy's path."""
+    bound = _bind_with_runtime_overrides(_server, reporter, mode, False)
+    assert bound["success"] is True, bound
+    client_copy = resolve_session_config_path(SESSION)
+    assert client_copy is not None
+
+    config = _scan_resolution(_server["target"], client_copy)
+
+    assert not isinstance(config, Exception), config
+    assert _enabled_under(config, reporter) is True
+    assert _warned(ash_log, f"reporters.{reporter}.enabled")
 
 
 #: A setting of each off-host reporter that config/reporter_trust.py does not

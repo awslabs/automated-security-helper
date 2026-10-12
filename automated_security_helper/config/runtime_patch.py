@@ -428,9 +428,12 @@ def _turns_an_off_host_reporter_off(
     """Whether ``op`` only sets ``enabled: false`` on a reporter that sends findings off the host.
 
     The reporters in ``reporter_trust.REPORTER_ENABLED_DEFAULTS``, under any
-    spelling the plugin lookup reads. Turning one off sends less off the host, so
-    a client may do it under a ``denied_paths`` entry that covers it, as a
-    delivered file may (``client_config_policy._writes_a_tightening``). Two
+    spelling the plugin lookup reads. It asks for nothing beyond the profile, so
+    it is not refused under a ``denied_paths`` entry that covers it, as it is not
+    in a delivered file (``client_config_policy._writes_a_tightening``). It does
+    not take effect either: the client's copy of the profile is resolved against
+    the registered profile, and ``reporter_trust`` takes ``enabled`` from that,
+    with a warning naming the client's value. Two
     shapes: an ``add`` or ``replace`` of ``/reporters/<name>/enabled`` with
     ``false``, and an ``add`` of ``/reporters/<name>`` whose value holds only
     ``enabled: false`` where ``config`` has no section for that reporter, which

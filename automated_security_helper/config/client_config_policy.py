@@ -587,7 +587,11 @@ def _writes_a_tightening(document: Any, denial: Any) -> bool:
     ``tool_config_trust.TIGHTENING_VALUES``: opengrep's and semgrep's
     ``metrics: off``. And ``enabled: false`` of a reporter that sends findings off
     the host (``reporter_trust.REPORTER_ENABLED_DEFAULTS``), under any entry that
-    covers it, ``/reporters/cloudwatch-logs/**`` included.
+    covers it, ``/reporters/cloudwatch-logs/**`` included. That one is not
+    refused, since it asks for nothing beyond the server's config, but it takes
+    no effect: ``reporter_trust`` takes ``enabled`` from the trusted base, with a
+    warning naming the file's value. A ``patch`` op that writes it is refused like
+    any other op on a denied path.
     """
     from automated_security_helper.config.ash_config import plugin_key_lookup_names
     from automated_security_helper.config.ash_config import reduced_plugin_name

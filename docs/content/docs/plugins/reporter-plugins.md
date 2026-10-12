@@ -353,12 +353,12 @@ reporter, in a scan and in `ash report`. The built-in AWS reporters declare thei
 the same way; see [Settings a repository's config cannot choose](../configuration-guide.md#settings-a-repositorys-config-cannot-choose).
 
 A reporter that declares any destination option sends findings somewhere, so
-whether it runs is the operator's choice too. Where the trusted base has it off
-(its `enabled`, or the default of your config model's `enabled` when the trusted
-base sets none), such a file does not turn it on: its `enabled: true` is replaced
-with a warning, and leaving the section out leaves the reporter off. Its
-`enabled: false` applies. A reporter that declares no destination options writes
-only local files, and its `enabled` applies from the file.
+whether it runs is the operator's choice too, in both directions. Its `enabled`
+comes from the trusted base, or from the default of your config model's `enabled`
+when the trusted base sets none: such a file's `enabled: true` or `enabled: false`
+is replaced with a warning where it differs, and leaving the section out leaves the
+reporter as the trusted base has it. A reporter that declares no destination
+options writes only local files, and its `enabled` applies from the file.
 
 Under the MCP server, a delivered file that sets a declared option is scanned with
 the server's value rather than refused, because the server checks the file against

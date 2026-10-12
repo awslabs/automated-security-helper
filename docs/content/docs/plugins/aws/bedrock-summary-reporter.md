@@ -113,12 +113,13 @@ about. The model parameters (`temperature`, `top_p`, `max_tokens`),
 `add_table_of_contents`, `summary_style` and `enable_caching` still apply from the
 tree.
 
-Whether the reporter runs is the operator's too: where the operator's settings have
-it off, a config file inside the scanned tree does not turn it on (see
+Whether the reporter runs is the operator's too: a config file inside the scanned tree
+neither turns it on nor turns it off (see
 [Settings only the operator can set](index.md#settings-only-the-operator-can-set)).
 Under the MCP server every setting of the section is a default `denied_paths` entry
 (`/reporters/bedrock-summary-reporter/**`), so a delivered config that changes one is
-refused. `enabled: false` is accepted from any config.
+refused. A client's `enabled: false` is not refused, but the server's `enabled`
+applies.
 
 The reporter is in the `ash_aws_plugins` package, which only the operator can load,
 with `--ash-plugin-modules`, `ASH_PLUGIN_MODULES` or the operator's own config, never

@@ -72,13 +72,15 @@ retries, from every source: `max_retries` at most 10, `max_delay` at most 60 sec
 and `base_delay` at most `max_delay`. A larger value is a validation error naming the
 option and its limit, and the reporter is not built.
 
-Whether each reporter runs is the operator's too. A config file inside the scanned
-tree may set `enabled: false`. Where the operator's settings have a reporter off, the
-tree's `enabled: true` is ignored with a warning, and a tree config that leaves the
-section out, which would return the reporter to its own default, leaves it off. To
-run a reporter for one scan, set it with `--config-overrides`, such as
-`--config-overrides reporters.s3.enabled=true`, or in a config file outside the tree.
-The reporters' other options still apply from the tree.
+Whether each reporter runs is the operator's too, in both directions. A config file
+inside the scanned tree neither turns a reporter on nor turns one off: where its
+`enabled: true` or `enabled: false` differs from the operator's settings, or from the
+reporter's own default where those set none, it is ignored with a warning, and a tree
+config that leaves the section out, which would return the reporter to its own
+default, leaves it as the operator has it. To run or skip a reporter for one scan, set
+it with `--config-overrides`, such as `--config-overrides reporters.s3.enabled=true`
+or `reporters.s3.enabled=false`, or in a config file outside the tree. The reporters'
+other options still apply from the tree.
 
 Under the MCP server the whole section of each of these reporters is a default
 `denied_paths` entry, `enabled` included: `/reporters/s3/**`,
@@ -87,8 +89,9 @@ Under the MCP server the whole section of each of these reporters is a default
 repository's config, such as S3's `file_format` or the Bedrock reporter's model
 parameters, are the operator's there too. A config an MCP client delivered, or a
 client's runtime override, that changes one is refused with
-`error_type: config_field_denied`; one that leaves them at the server's values, or
-sets `enabled: false`, scans. `enabled` of a reporter that writes only local files,
+`error_type: config_field_denied`; one that leaves them at the server's values
+scans. One that sets `enabled: false` scans too, but the server's `enabled` applies
+and a warning names the client's value. `enabled` of a reporter that writes only local files,
 such as `sarif` or `html`, is not a default entry: a client's config may turn one on
 or off.
 See [Configs an MCP client delivered](../../configuration-guide.md#configs-an-mcp-client-delivered).

@@ -766,7 +766,9 @@ def test_leaving_a_declared_reporter_out_keeps_the_operators_off(tmp_path, ash_l
     assert not ash_log
 
 
-def test_a_tree_may_turn_a_declared_reporter_off(tmp_path, ash_log):
+def test_a_tree_cannot_turn_a_declared_reporter_off(tmp_path, ash_log):
+    """Whether it runs is the operator's in both directions, as for the
+    built-in AWS reporters: here the reporter's default, which is on."""
     from automated_security_helper.config.reporter_trust import (
         confine_declared_reporter_destinations,
     )
@@ -780,8 +782,9 @@ def test_a_tree_may_turn_a_declared_reporter_off(tmp_path, ash_log):
 
     confine_declared_reporter_destinations(config, [_AliasedReporter])
 
-    assert _enabled(config) is False
-    assert not ash_log
+    assert _enabled(config) is True
+    [warning] = [r.getMessage() for r in ash_log]
+    assert "reporters.aliased-reporter.enabled" in warning
 
 
 def test_a_reporter_with_no_destination_keeps_its_enabled_from_the_tree(

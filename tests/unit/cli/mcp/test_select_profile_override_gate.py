@@ -668,7 +668,9 @@ def _bound_reporter_enabled(session_id: str, reporter: str) -> Any:
 def test_a_client_may_turn_off_a_reporter_the_profile_turns_on(
     tmp_path: Path, reporter: str
 ) -> None:
-    """``enabled: false`` sends less off the host, so it is accepted on both routes."""
+    """``enabled: false`` asks for nothing beyond the profile, so it is accepted on
+    both routes. A scan of the client's copy takes ``enabled`` from the profile
+    (test_a_clients_runtime_override_turning_one_off_is_accepted_and_ignored)."""
     document = _profile(allowed_paths=["/**"])
     document["reporters"] = {reporter: {"enabled": True}}
     _install(tmp_path, document)

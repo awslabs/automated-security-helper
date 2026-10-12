@@ -355,7 +355,9 @@ _OFF_HOST_REPORTERS = (
 async def test_an_override_turning_an_off_host_reporter_off_is_accepted(
     tmp_path, monkeypatch, reporter
 ):
-    """It sends less off the host, under the default denied_paths."""
+    """It asks for nothing beyond the session's config, under the default
+    denied_paths. Each project's resolution then takes ``enabled`` from the
+    operator (test_a_clients_workspace_override_does_not_choose_whether_one_runs)."""
     _with_profile(monkeypatch, tmp_path, ["/**"])
     result = await _resolve(tmp_path, [f"reporters.{reporter}.enabled=false"])
     assert result["success"] is True, result

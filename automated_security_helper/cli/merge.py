@@ -125,17 +125,15 @@ the outermost git checkout around the working directory, or the working
 directory itself outside one. A step added to ``confine_to_trusted_base``, or a
 row added to those modules' tables, applies here without a change to this one.
 
-Three things differ from a scan, and ``SHARD_RECORDED`` carries all of them. The
-warnings name the shard's results file and give ``ash merge``'s own options as the
-fix. An ``ash_plugin_modules`` entry the operator's configuration does not name is
+Two things differ from a scan, and ``SHARD_RECORDED`` carries both. The warnings
+name the shard's results file and give ``ash merge``'s own options as the fix. And
+an ``ash_plugin_modules`` entry the operator's configuration does not name is
 dropped even when it is an installed module outside the tree: nothing the merge
 imports is a shard's choice. So the merge does not need
 ``drop_untrusted_off_host_plugins``; every class it loads comes from a module the
-operator named. And ``enabled`` of a reporter that sends findings off the host
-comes from the operator alone, in both directions: a scan applies a repository's
-``enabled: false``, but at merge time a shard's ``false`` is ignored with the
-warning like its ``true``, so the scanned repository cannot stop a destination the
-operator chose.
+operator named. ``enabled`` of a reporter that sends findings off the host comes
+from the operator alone, in both directions, as in a scan: a shard's ``false`` is
+ignored with the warning like its ``true``.
 
 ``--config-overrides`` are applied to every shard's recorded configuration as it
 is loaded (:func:`apply_operator_overrides`), so the completion gate, the verdict
