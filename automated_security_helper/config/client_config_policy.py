@@ -1039,9 +1039,9 @@ def _trusted_config(
 
     operator = _load_operator_config(trusted_config_path, source_dir, permit_base)
     if operator is not None:
-        delivered = by_every_name(config_is_client_supplied, operator[2])
-        if not any(delivered(path) for path in operator[1]):
-            return operator[0]
+        delivered = by_every_name(config_is_client_supplied, operator.names)
+        if not any(delivered(path) for path in operator.chain):
+            return operator.config
     return trusted_default_config()
 
 

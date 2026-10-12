@@ -12,6 +12,7 @@ from typing import (
     Dict,
     Iterable,
     List,
+    NamedTuple,
     Optional,
     Sequence,
     Tuple,
@@ -732,11 +733,11 @@ def resolve_config(
     if (
         operator is not None
         and not repository_written(
-            operator[1], root, [Path(trusted_config_path), *operator[2]]
+            operator.chain, root, [Path(trusted_config_path), *operator.named]
         )
-        and not _not_the_operators(operator[1], trees, operator[3])
+        and not _not_the_operators(operator.chain, trees, operator.names)
     ):
-        trusted = operator[0]
+        trusted = operator.config
     else:
         trusted = AshConfig() if default_in_tree else get_default_config()
         # A file that may grant, made untrusted only by a base it extends, keeps
@@ -750,7 +751,7 @@ def resolve_config(
             own_mode = own_mode or (wrote_mode and operator is None)
         if operator is not None:
             trusted, wrote_mode = _with_own_sandbox(
-                trusted, operator[1][-1], root, [Path(trusted_config_path)]
+                trusted, operator.chain[-1], root, [Path(trusted_config_path)]
             )
             own_mode = own_mode or wrote_mode
     # The same for the config file the scan selected: an operator's --config
@@ -764,7 +765,7 @@ def resolve_config(
     # that may grant writes itself is the operator's choice, `off` included.
     if trusted.sandbox.mode == "off" and not own_mode:
         trusted.sandbox.mode = (
-            operator[0].sandbox.mode
+            operator.config.sandbox.mode
             if operator is not None
             else get_default_config().sandbox.mode
         )
@@ -1183,16 +1184,27 @@ def _with_own_sandbox(
     return updated, wrote_mode
 
 
+class OperatorConfig(NamedTuple):
+    """The operator's config as ``_load_operator_config`` read it."""
+
+    #: The validated config.
+    config: AshConfig
+    #: The files it was built from, its bases first (``ResolvedConfigDocument.chain``).
+    chain: List[Path]
+    #: The names those files were reached by, in the chain's order
+    #: (``ResolvedConfigDocument.named``).
+    named: List[Path]
+    #: The same names by file (``ResolvedConfigDocument.names``).
+    names: Dict[Path, Tuple[Path, ...]]
+
+
 def _load_operator_config(
     trusted_config_path: Path | str | None,
     source_dir: Path | str | None,
     permit_base: Optional[Callable[[Path], bool]],
     anchor_paths: Optional[AnchorPaths] = None,
-) -> Optional[Tuple[AshConfig, List[Path], List[Path], Dict[Path, Tuple[Path, ...]]]]:
+) -> Optional[OperatorConfig]:
     """The operator's config file, the files it was built from, and their names.
-
-    The names twice: as a list in the chain's order (``ResolvedConfigDocument.named``)
-    and by file (``ResolvedConfigDocument.names``).
 
     None only when no operator config was named. One that was named is loaded
     the way _resolve_config loads a config file, and refused the same way when it
@@ -1208,11 +1220,11 @@ def _load_operator_config(
         permit_base=permit_base,
         anchor_relative_paths=anchor_paths,
     )
-    return (
-        _validate_config_document(document, path),
-        list(document.chain),
-        list(document.named),
-        dict(document.names),
+    return OperatorConfig(
+        config=_validate_config_document(document, path),
+        chain=list(document.chain),
+        named=list(document.named),
+        names=dict(document.names),
     )
 
 
