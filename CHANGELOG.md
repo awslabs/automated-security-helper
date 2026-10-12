@@ -2911,12 +2911,15 @@
   `scanners/<tool>/` held their findings (grype's and trivy's vulnerabilities, the
   packages in syft's SBOM, which also reached the reports' SBOMs). Each is now
   told, matching each pattern as ASH does when it drops findings: grype and syft
-  with `--exclude ./<path>` (a fully ignored directory `./<dir>/**`), trivy-repo
-  with `--skip-files` and `--skip-dirs`, checkov with an anchored `--skip-path`,
-  and semgrep and opengrep with `--exclude=<name>` for a name nothing else has.
-  cfn-nag, cdk-nag and npm-audit leave the ignored files out of the scan set they
-  read. A semgrep or opengrep scan whose every file is ignored is `SKIPPED`, not
-  `ERROR`. snyk-code, which has no such option and uploads what it reads, refuses
+  with `--exclude ./<path>` (a fully ignored directory `./<dir>/**`), trivy and
+  trivy-repo with `--skip-files` and `--skip-dirs`, checkov with an anchored
+  `--skip-path`, and semgrep and opengrep with `--exclude=<name>` for a name
+  nothing else has. cfn-nag, cdk-nag, npm-audit, cfn-lint and cfn-guard leave the
+  ignored files out of the scan set they read, as actionlint and zizmor already
+  did. A semgrep or opengrep scan whose every file is ignored is `SKIPPED`, not
+  `ERROR`. gitleaks has no option that leaves out a path, so it still reads the
+  ignored files, and ASH drops what it finds there. snyk-code, which has no such
+  option either and uploads what it reads, refuses
   a directory holding an ignored file, the source directory and ASH's directory of
   converted files alike, wherever that is: `snyk code test` is not started,
   snyk-code is `ERROR`, and the error names the first such file and the pattern

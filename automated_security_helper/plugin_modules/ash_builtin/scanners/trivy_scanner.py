@@ -490,8 +490,10 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Resolve the argv, results path and environment for one trivy run.
 
-        ``global_ignore_paths`` is applied to every scanner's SARIF by ASH's
-        suppression pass, so it is not translated into trivy flags.
+        ``global_ignore_paths`` reaches trivy as trivy-repo's do: ``--skip-files``
+        and ``--skip-dirs`` for the ignored paths trivy's option can carry
+        (``TrivyScannerBase._link_skip_args``). ASH's suppression pass still drops
+        the findings of any it cannot.
         """
         if self.results_dir is None:
             raise ScannerError("TrivyScanner has no results directory")
@@ -529,7 +531,8 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         # (TrivyScannerBase._trivy_input_file).
         extra.append(f"--ignorefile={self._ignore_file()}")
         extra.append(f"--secret-config={self._secret_config_file()}")
-        extra.extend(self._link_skip_args(target))
+        # Each link leaving the target, and each path the global ignore paths ignore.
+        extra.extend(self._link_skip_args(target, global_ignore_paths))
         # Before the target, which _resolve_arguments places after the options.
         target_index = final_args.index(Path(target).as_posix())
         final_args[target_index:target_index] = extra

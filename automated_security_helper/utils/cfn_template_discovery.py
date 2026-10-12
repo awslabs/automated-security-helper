@@ -41,13 +41,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Literal, Optional, Tuple
+from typing import TYPE_CHECKING, Iterable, List, Literal, Optional, Tuple
 
 from automated_security_helper.utils.cfn_template_model import (
     CloudFormationTemplateModelError,
     get_model_from_template,
 )
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
+from automated_security_helper.utils.link_exclusions import drop_ignored
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.scan_targets import scan_targets
 from automated_security_helper.utils.scanned_tree import TreeInputRefused
@@ -72,21 +73,29 @@ class TemplateDiscovery:
 
 
 def candidate_files(
-    context: "PluginContext", target_type: Literal["source", "converted"]
+    context: "PluginContext",
+    target_type: Literal["source", "converted"],
+    global_ignore_paths: Optional[Iterable[object]] = None,
 ) -> List[Path]:
     """The JSON/YAML files cfn-nag would consider for ``target_type``, sorted.
 
     The same two sources ``CfnNagScanner.scan`` reads: the converted work directory's
-    files for a converted target, and the scan set otherwise. Sorted so runs are
-    reproducible regardless of filesystem enumeration order.
+    files for a converted target, and otherwise the scan set without the files
+    ``global_ignore_paths`` ignores (``link_exclusions.drop_ignored``), as cfn-nag
+    is given them. Sorted so runs are reproducible regardless of filesystem
+    enumeration order.
     """
     if target_type == "converted":
         found = [str(p) for p in Path(context.work_dir).glob("**/*.*")]
     else:
-        found = scan_set(
-            source=str(context.source_dir),
-            output=str(context.output_dir),
-            honor_ignore_files=honors_ignore_files(context.config),
+        found = drop_ignored(
+            scan_set(
+                source=str(context.source_dir),
+                output=str(context.output_dir),
+                honor_ignore_files=honors_ignore_files(context.config),
+            ),
+            context.source_dir,
+            global_ignore_paths,
         )
     selected = {
         Path(f) for f in found if any(str(f).endswith(s) for s in _TEMPLATE_SUFFIXES)
@@ -95,13 +104,19 @@ def candidate_files(
 
 
 def discover_templates(
-    context: "PluginContext", target_type: Literal["source", "converted"]
+    context: "PluginContext",
+    target_type: Literal["source", "converted"],
+    global_ignore_paths: Optional[Iterable[object]] = None,
 ) -> TemplateDiscovery:
-    """Classify every candidate file as a template, not-a-template, unmodelable, or refused."""
+    """Classify every candidate file as a template, not-a-template, unmodelable, or refused.
+
+    ``global_ignore_paths`` is what the scanner's ``scan()`` was given; see
+    ``candidate_files``.
+    """
     result = TemplateDiscovery()
     # The tree CfnNagScanner.scan reads each candidate against.
     scan_root = context.work_dir if target_type == "converted" else context.source_dir
-    for path in candidate_files(context, target_type):
+    for path in candidate_files(context, target_type, global_ignore_paths):
         if not path.is_file():
             continue
         try:

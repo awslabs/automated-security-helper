@@ -681,7 +681,10 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             results_dir = self.results_dir.joinpath(target_type)
             results_dir.mkdir(parents=True, exist_ok=True)
             rule_args = self._rules_arguments(selected)
-            discovery = discover_templates(self.context, target_type)
+            # Without the files the global ignore paths ignore, as cfn-nag reads them.
+            discovery = discover_templates(
+                self.context, target_type, global_ignore_paths
+            )
             for shown, reason in discovery.refused:
                 # Not read, so not known to be CloudFormation: skipped and named, as
                 # cfn-nag skips it.

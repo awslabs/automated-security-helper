@@ -575,15 +575,20 @@ ignored file, or once for a directory whose every file is ignored.
 
 - bandit: in its `--exclude`;
 - grype and syft: `--exclude ./<path>`, and `./<dir>/**` for a directory;
-- trivy-repo: `--skip-files` and `--skip-dirs`;
+- trivy and trivy-repo: `--skip-files` and `--skip-dirs`;
 - checkov: one `--skip-path` each, anchored so it matches that path alone;
 - semgrep and opengrep: `--exclude=<name>`, only for a name that nothing else
   below the scanned directory, and nothing in that directory's own path, has.
 
+cfn-lint and cfn-guard pick their templates from the file lists ASH hands
+scanners, so an ignored template is not linted, as cfn-nag does not read it.
+
 A path a tool's option cannot carry (one with a comma for bandit and trivy, or a
 name that is not unique for semgrep and opengrep) is still read by that tool, and
-ASH drops what it finds there. snyk-code has no option that leaves out a path and
-uploads the files it reads, so it refuses a directory holding a file an ignore path
+ASH drops what it finds there. gitleaks has no option that leaves out a path, so
+it still reads the files an ignore path matches, and ASH drops what it finds
+there. snyk-code has no such option either and uploads the files it reads, so it
+refuses a directory holding a file an ignore path
 matches, whether the source directory or ASH's directory of converted files,
 wherever that is. Each file is matched as ASH matches the location snyk reports for
 a finding in it, its path below the directory snyk tests, so a file is refused
