@@ -427,6 +427,53 @@ def test_a_change_to_an_off_host_scanners_other_option_is_still_refused(
     assert "ignore_file" not in str(outcome).replace(ignore_file, "")
 
 
+@pytest.mark.parametrize(
+    "op",
+    [
+        pytest.param(
+            {
+                "op": "add",
+                "path": "/scanners/semgrep/options/exclude/-",
+                "value": {"x": 1},
+            },
+            id="semgrep-dict-entry",
+        ),
+        pytest.param(
+            {
+                "op": "replace",
+                "path": "/scanners/semgrep/options/exclude",
+                "value": "x",
+            },
+            id="semgrep-not-a-list",
+        ),
+        pytest.param(
+            {
+                "op": "add",
+                "path": "/scanners/npm-audit/options/exclude",
+                "value": ["x"],
+            },
+            id="npm-audit-has-no-move",
+        ),
+        pytest.param(
+            {"op": "remove", "path": "/scanners/semgrep/options/exclude"},
+            id="semgrep-remove",
+        ),
+    ],
+)
+def test_a_patch_the_move_does_not_take_is_still_refused(_server, op) -> None:
+    """Only an add or replace whose value the move takes out whole is left to it."""
+    from automated_security_helper.cli.mcp_tools import mcp_select_profile
+
+    document = _off_host_profile()
+    document["scanners"]["npm-audit"] = {"enabled": True, "options": {}}
+    document["global_settings"] = _policy(["/scanners/**"])
+    _register(_server, document)
+
+    outcome = mcp_select_profile("op", session_id=SESSION, patch_ops=[op])
+
+    assert outcome.get("success") is False, outcome
+
+
 @pytest.mark.parametrize("change", ["patch_ops", "override_yaml", "config_overrides"])
 def test_a_patched_exclusion_leaves_no_client_value_in_an_off_host_scanners_options(
     _server, isolated_registry, executions, change: str

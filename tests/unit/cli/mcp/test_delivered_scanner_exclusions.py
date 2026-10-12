@@ -888,6 +888,56 @@ def test_a_moved_exclusion_leaves_no_client_value_in_an_off_host_scanners_option
     assert f"scanners.{scanner}.options.{option}" in mark
 
 
+#: Delivered values at an exclusion option that the move does not take out
+#: whole, and values at an exclusion option's name under a scanner that has no
+#: such option. The floor still refuses each.
+NOT_MOVED = [
+    pytest.param("semgrep", "exclude", [{"not_a_path": 1}], id="semgrep-dict-entry"),
+    pytest.param("opengrep", "exclude", [5], id="opengrep-number-entry"),
+    pytest.param("opengrep", "exclude", "client-dir", id="opengrep-not-a-list"),
+    pytest.param("trivy-repo", "ignore_file", ["a", "b"], id="trivy-list"),
+    pytest.param("npm-audit", "exclude", ["client-dir"], id="npm-audit-exclude"),
+    pytest.param("snyk-code", "ignore_file", ".snyk", id="snyk-code-ignore-file"),
+    pytest.param("detect-secrets", "exclude", ["client-dir"], id="detect-secrets"),
+]
+
+
+@pytest.mark.parametrize(("scanner", "option", "value"), NOT_MOVED)
+def test_a_value_the_move_does_not_take_is_still_refused(
+    scanner: str, option: str, value: Any
+) -> None:
+    from automated_security_helper.config.ash_config import AshConfig
+
+    document = {"scanners": {scanner: {"options": {option: value}}}}
+    source = _upload({".ash/.ash.yaml": yaml.safe_dump(document)})
+    outcome = _scan_resolution(source)
+    # Refused, by the floor or by the option's own type, before any scanner runs.
+    assert not isinstance(outcome, AshConfig), outcome
+    assert isinstance(outcome, Exception), outcome
+
+
+@pytest.mark.parametrize("spelling", ["OpenGrep", "open-grep", "opengrep-scanner"])
+def test_a_moved_exclusion_under_another_spelling_reaches_no_scanner(
+    spelling: str,
+) -> None:
+    """Every spelling the plugin lookup reads is moved, or the file is refused."""
+    from automated_security_helper.config.ash_config import AshConfig
+
+    document = {"scanners": {spelling: {"options": {"exclude": ["client-dir"]}}}}
+    source = _upload(
+        {".ash/.ash.yaml": yaml.safe_dump(document), "client-dir/app.py": "x = 1\n"}
+    )
+    outcome = _scan_resolution(source)
+    if isinstance(outcome, AshConfig):
+        scanners = json.dumps(outcome.model_dump(mode="json")["scanners"])
+        assert "client-dir" not in scanners, scanners
+        assert [
+            (item.option, item.pattern) for item in outcome._client_scanner_exclusions
+        ] == [("exclude", "client-dir")]
+    else:
+        assert isinstance(outcome, Exception), outcome
+
+
 def test_a_cli_config_outside_the_mcp_workspace_is_unchanged(tmp_path: Path) -> None:
     from automated_security_helper.config.resolve_config import resolve_config
 
