@@ -2,20 +2,23 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-import re
 import shlex
 import logging
-import threading
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
+from typing import Annotated, Any, ClassVar, List, Literal, Optional, Set
 from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.config.tool_config_trust import empty_tool_directory
 from automated_security_helper.models.core import ToolArgs
+
+# trivy_default_misconfig_scanners and its reset live with the shared base, which
+# the builtin trivy uses too; this module has always offered them, so it still does.
 from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
     TrivyScannerBase,
+    reset_trivy_default_misconfig_scanners as reset_trivy_default_misconfig_scanners,
+    trivy_default_misconfig_scanners,
 )
 from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
@@ -32,68 +35,8 @@ from automated_security_helper.utils.link_exclusions import (
     trivy_skip_files,
 )
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
-from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import find_executable
-from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
-
-
-#: The trivy misconfiguration scanner that downloads the module sources a .tf file
-#: names. See TrivyRepoScanner._offline_misconfig_args.
-_TERRAFORM_MISCONFIG_SCANNER = "terraform"
-
-_DEFAULT_MISCONFIG_SCANNERS: Dict[Tuple[str, ...], Optional[List[str]]] = {}
-_DEFAULT_MISCONFIG_SCANNERS_LOCK = threading.Lock()
-
-
-def reset_trivy_default_misconfig_scanners() -> None:
-    """Forget the lists trivy_default_misconfig_scanners read (tests)."""
-    with _DEFAULT_MISCONFIG_SCANNERS_LOCK:
-        _DEFAULT_MISCONFIG_SCANNERS.clear()
-
-
-def trivy_default_misconfig_scanners(
-    binary: str, subcommands: List[str]
-) -> Optional[List[str]]:
-    """trivy's default ``--misconfig-scanners`` list, as the installed trivy prints it.
-
-    Read from ``<binary> <subcommands> --help`` (the "(default [...])" of that flag)
-    rather than written down here, because the list differs between trivy releases
-    and trivy given a value it does not know runs every misconfiguration scanner
-    instead (measured with trivy 0.74.0). None when the list cannot be read. A list
-    that was read is kept per binary and subcommand; a failed read is not, so the next
-    scan tries again rather than every later scan in the process (a long-running MCP
-    server, a workspace's projects) leaving out every misconfiguration check.
-    """
-    key = (binary, *subcommands)
-    with _DEFAULT_MISCONFIG_SCANNERS_LOCK:
-        if key in _DEFAULT_MISCONFIG_SCANNERS:
-            return _DEFAULT_MISCONFIG_SCANNERS[key]
-    try:
-        result = subprocess_utils.run_command(
-            [binary, *subcommands, "--help"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            log_level=logging.DEBUG,
-        )
-        text = f"{result.stdout or ''}\n{result.stderr or ''}"
-    except Exception as error:  # the list is unknown; the caller fails closed
-        ASH_LOGGER.debug(
-            f"Could not run {binary} {' '.join(subcommands)} --help: {error}"
-        )
-        text = ""
-    match = re.search(r"--misconfig-scanners\b[^\n]*?\(default \[([^\]]*)\]\)", text)
-    listed = (
-        [name.strip() for name in match.group(1).split(",") if name.strip()]
-        if match
-        else None
-    )
-    listed = listed or None
-    if listed is not None:
-        with _DEFAULT_MISCONFIG_SCANNERS_LOCK:
-            _DEFAULT_MISCONFIG_SCANNERS[key] = listed
-    return listed
 
 
 class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
@@ -258,56 +201,14 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         self._append_trivy_options()
         return super()._process_config_options()
 
-    def _offline_misconfig_args(self, final_args: List[str]) -> List[str]:
-        """``final_args`` without trivy's Terraform checks, for an offline scan.
+    def _default_misconfig_scanners(self, binary: str) -> Optional[List[str]]:
+        """``TrivyScannerBase._default_misconfig_scanners``, looked up in this module.
 
-        trivy's Terraform scanner fetches the source of every ``module`` block it
-        evaluates, with every offline flag ASH passes and with
-        ``--tf-exclude-downloaded-modules`` (measured with trivy 0.75.0): a registry
-        source contacted registry.terraform.io, a ``git::`` source ran the host's
-        git, with the operator's git configuration and credentials, against the URL
-        the repository chose, and an ``https://`` archive was downloaded. trivy has
-        no setting that stops it. So offline, trivy gets ``--misconfig-scanners``
-        naming its own default list without ``terraform``. When that list cannot be
-        read from trivy, the misconfiguration scanner is not run offline at all,
-        rather than guessed at. checkov still checks Terraform.
+        Through this module's ``trivy_default_misconfig_scanners``, the name
+        trivy-repo's callers have always used (and replaced, in its tests), rather
+        than the base module's; both name the same function.
         """
-        if "misconfig" not in (self.config.options.scanners or []):
-            return final_args
-        # model_post_init sets the command to "trivy"; the base class allows None.
-        command = self.command or "trivy"
-        binary = find_executable(command) or command
-        defaults = trivy_default_misconfig_scanners(binary, list(self.subcommands))
-        kept = [name for name in defaults or [] if name != _TERRAFORM_MISCONFIG_SCANNER]
-        args = list(final_args)
-        if kept:
-            message = (
-                "trivy's Terraform checks are skipped offline: trivy downloads the "
-                "module sources a .tf file names, and has no setting that stops it. "
-                "checkov still checks Terraform."
-            )
-            head = [self.command, *self.subcommands]
-            insert_at = len(head) if args[: len(head)] == head else len(args)
-            args[insert_at:insert_at] = [f"--misconfig-scanners={','.join(kept)}"]
-        else:
-            message = (
-                "trivy's misconfiguration checks are skipped offline: ASH could not "
-                f"read trivy's list of them from `{binary} "
-                f"{' '.join(self.subcommands)} --help`, so it cannot leave out the "
-                "Terraform checks, which download module sources."
-            )
-            index = args.index("--scanners") if "--scanners" in args else -1
-            if index >= 0 and index + 1 < len(args):
-                remaining = [
-                    name for name in args[index + 1].split(",") if name != "misconfig"
-                ]
-                if not remaining:
-                    raise ScannerError(message)
-                args[index + 1] = ",".join(remaining)
-        if message not in self._warned_inputs:
-            self._warned_inputs.add(message)
-            self._plugin_log(message, level=logging.WARNING)
-        return args
+        return trivy_default_misconfig_scanners(binary, list(self.subcommands))
 
     def _pinned_config_args(self) -> List[str]:
         """``--config`` and ``--module-dir``, so trivy loads neither from where it runs.

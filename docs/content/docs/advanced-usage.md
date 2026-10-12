@@ -196,12 +196,13 @@ over the network on their own:
 - trivy's version check and telemetry are off whatever `disable_telemetry` says, through
   `TRIVY_SKIP_VERSION_CHECK` and `TRIVY_DISABLE_TELEMETRY` rather than flags, which a
   trivy too old to know them would refuse.
-- trivy-repo does not run trivy's Terraform checks offline. trivy downloads the source
-  of every `module` block a `.tf` file names (from the Terraform registry, with the
-  host's `git`, or over HTTPS), and has no setting that stops it, so ASH passes
-  `--misconfig-scanners` with trivy's own default list minus `terraform`. If that list
-  cannot be read from `trivy repository --help`, trivy's misconfiguration checks are
-  skipped offline. checkov still checks Terraform. Any `git` a tool runs offline gets
+- trivy-repo, and trivy when `misconfig` is in its `scanners`, do not run trivy's
+  Terraform checks offline. trivy downloads the source of every `module` block a
+  `.tf` file names (from the Terraform registry, with the host's `git`, or over
+  HTTPS), and has no setting that stops it, so ASH passes `--misconfig-scanners` with
+  trivy's own default list minus `terraform`. If that list cannot be read from
+  `trivy repository --help` (`trivy fs --help` for trivy), trivy's misconfiguration
+  checks are skipped offline. checkov still checks Terraform. Any `git` a tool runs offline gets
   `GIT_ALLOW_PROTOCOL=file`, so it reaches no remote.
 - npm-audit runs no audit, because npm, pnpm and yarn audit only against the package
   registry's advisory service: offline `npm audit --offline` reported no advisories for

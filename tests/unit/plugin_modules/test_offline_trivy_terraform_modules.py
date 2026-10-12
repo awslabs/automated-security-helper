@@ -22,6 +22,14 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    _trivy_scanner_base as trivy_base,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+    TrivyScanner,
+    TrivyScannerConfig,
+    TrivyScannerConfigOptions,
+)
 from automated_security_helper.plugin_modules.ash_trivy_plugins import (
     trivy_repo_scanner,
 )
@@ -31,6 +39,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScannerConfigOptions,
 )
 from automated_security_helper.utils import subprocess_utils
+from automated_security_helper.utils.config_trust import record_provenance
 from tests.utils.helpers import require_scanner_binary
 from tests.utils.refusing_proxy import (
     RecordingProxy,
@@ -243,6 +252,71 @@ def test_an_operator_input_that_is_not_a_file_refuses_the_scan(
 
 def test_control_online_trivy_keeps_its_terraform_checks(online, context):
     command = _scan_command(_trivy(context), context, online)
+
+    assert _values(command, "--misconfig-scanners") == []
+    assert "misconfig" in ",".join(_values(command, "--scanners")).split(",")
+
+
+# ---------------------------------------------------------------------------
+# The builtin trivy, which runs misconfig only when the operator asks for it
+# ---------------------------------------------------------------------------
+
+
+def _builtin_trivy(ctx, scanners) -> TrivyScanner:
+    # Built from no config file in the tree, so the scanner set is the operator's
+    # (TrivyScanner._honor_scanner_set keeps it).
+    record_provenance(ctx.config, in_tree=[])
+    return TrivyScanner(
+        context=ctx,
+        config=TrivyScannerConfig(
+            enabled=True, options=TrivyScannerConfigOptions(scanners=scanners)
+        ),
+    )
+
+
+@pytest.mark.parametrize("target_type", ["source", "converted"])
+def test_offline_builtin_trivy_leaves_out_its_terraform_checks(
+    offline, context, target_type
+):
+    offline.setattr(
+        trivy_base,
+        "trivy_default_misconfig_scanners",
+        lambda *args, **kwargs: list(FULL_DEFAULTS),
+        raising=False,
+    )
+    scanner = _builtin_trivy(context, ["vuln", "misconfig"])
+
+    command = _scan_command(scanner, context, offline, target_type)
+
+    chosen = _values(command, "--misconfig-scanners")
+    assert chosen, f"offline trivy runs its Terraform checks: {command}"
+    assert chosen[-1].split(",") == WITHOUT_TERRAFORM
+
+
+def test_offline_builtin_trivy_runs_no_misconfig_checks_when_their_list_is_unknown(
+    offline, context
+):
+    offline.setattr(
+        trivy_base,
+        "trivy_default_misconfig_scanners",
+        lambda *args, **kwargs: None,
+        raising=False,
+    )
+    scanner = _builtin_trivy(context, ["vuln", "misconfig"])
+
+    command = _scan_command(scanner, context, offline)
+
+    scanners = ",".join(_values(command, "--scanners")).split(",")
+    assert "misconfig" not in scanners, command
+    assert "vuln" in scanners, command
+
+
+def test_control_online_builtin_trivy_keeps_its_terraform_checks(online, context):
+    # The database update is not what this checks; it needs trivy itself.
+    online.setattr(trivy_base, "prepare_content_db", lambda *args, **kwargs: None)
+    scanner = _builtin_trivy(context, ["vuln", "misconfig"])
+
+    command = _scan_command(scanner, context, online)
 
     assert _values(command, "--misconfig-scanners") == []
     assert "misconfig" in ",".join(_values(command, "--scanners")).split(",")

@@ -514,6 +514,10 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         # Before the target, which _resolve_arguments places after the options.
         target_index = final_args.index(Path(target).as_posix())
         final_args[target_index:target_index] = extra
+        if self._offline():
+            # Only with misconfig, which the operator has to add: trivy's Terraform
+            # checks download module sources (TrivyScannerBase._offline_misconfig_args).
+            final_args = self._offline_misconfig_args(final_args)
 
         subprocess_env = (
             {**snapshot_environ(), **self.extra_env} if self.extra_env else None

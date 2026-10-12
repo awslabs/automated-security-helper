@@ -257,7 +257,9 @@
     dependencies are resolved from the scanned tree and `~/.m2/repository` only.
     trivy does not check for new versions either: online every scan passes
     `--skip-version-check`, and offline `TRIVY_SKIP_VERSION_CHECK=true` turns the
-    same check off.
+    same check off. Offline with `misconfig` in `scanners`, trivy leaves out its
+    Terraform checks as trivy-repo does (see "Offline, trivy-repo does not run
+    trivy's Terraform checks" under Behavior changes).
 
   Options that name something a tool executes or loads are not taken from a config
   file inside the scanned tree: actionlint's `shellcheck` and `pyflakes` accept only
