@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.config.path_trust import (
     honored_path,
-    scanned_tree_reason,
+    scanned_checkout_reason,
 )
 from automated_security_helper.config.secret_verification_trust import (
     UntrustedDetectSecretsSettings,
@@ -606,19 +606,22 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     ) -> Optional[str]:
         """Why the baseline's settings are not the operator's, or None when they are.
 
-        A baseline inside the scanned tree is the repository's whichever config named
-        it; ``detect-secrets scan`` writes the verification filter into every baseline
-        it generates, so a repository's ``.secrets.baseline`` normally carries it. One
-        outside the tree is the operator's when the config is, or when the operator's
-        own settings name that same ``baseline_file`` (``--config-overrides``, or a
-        workspace's default config, beside a repository's own config).
+        A baseline inside the scanned tree, or inside a git checkout that holds the
+        scanned tree, is the repository's whichever config named it
+        (``scanned_checkout_reason``); ``detect-secrets scan`` writes the verification
+        filter into every baseline it generates, so a repository's
+        ``.secrets.baseline`` normally carries it. One outside both, in another
+        checkout included, is the operator's when the config is, or when the
+        operator's own settings name that same ``baseline_file``
+        (``--config-overrides``, or a workspace's default config, beside a
+        repository's own config).
         """
         baseline = self.config.options.baseline_file
         if baseline is None:
             return None
         config = getattr(self.context, "config", None)
         root = getattr(config, "_scanned_root", None) or self.context.source_dir
-        why = scanned_tree_reason(Path(baseline), root)
+        why = scanned_checkout_reason(Path(baseline), root)
         if why is not None:
             return f"the baseline {Path(baseline).as_posix()} is used, and {why}"
         if record is None or same_baseline(
@@ -715,7 +718,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     "Verification runs only online, when the operator's own ASH "
                     "config names the filter in "
                     "scanners.detect-secrets.options.scan_settings.filters_used or "
-                    "names a baseline outside the scanned tree that does.",
+                    "names a baseline that does, outside the scanned tree and the "
+                    "git checkout holding it (another checkout counts).",
                     level=logging.INFO if offline else logging.WARNING,
                 )
             if files:
@@ -723,7 +727,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     f"Not loading the detect-secrets plugin or filter files "
                     f"{', '.join(files)}: {why}. A plugin or filter named by file is "
                     "loaded only from the operator's own ASH config, or a baseline "
-                    "outside the scanned tree that it names.",
+                    "it names outside the scanned tree and the git checkout holding "
+                    "it, and only from a file outside the scanned tree and every git "
+                    "checkout.",
                     level=logging.WARNING,
                 )
 

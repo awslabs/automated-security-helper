@@ -345,7 +345,8 @@
   contact the issuer, and `--offline` did not stop it without `--sandbox`. Now the
   filter is kept only from the operator's own configuration (a config file outside the
   scanned tree and every git checkout, `--config-overrides`, the MCP session's
-  profile, or a baseline outside the tree that such a config names), and only online;
+  profile, or a baseline such a config names outside the tree and the git checkout
+  holding it, which may sit in another checkout), and only online;
   from any other source ASH removes it and logs a warning naming the source, and when
   verification is off the detect-secrets worker refuses every HTTP request. Candidates
   the issuer would have rejected are now reported, so a repository whose own baseline
@@ -358,7 +359,7 @@
   repository's config, its `.secrets.baseline`, an MCP client's config or a baseline
   any of them names is removed with a warning, wherever the file is (one outside the
   tree is any file on the host, and the worker imports it); the operator's own entries
-  are kept. An operator's `--config-overrides` naming a baseline outside the tree
+  are kept. An operator's `--config-overrides` naming a baseline outside the tree and its checkout
   verifies beside a repository's own config, and an operator's verification filter is
   kept when the tree's `.secrets.baseline` supplies the plugins and other filters. To
   keep verifying, name the filter with its `min_level` in

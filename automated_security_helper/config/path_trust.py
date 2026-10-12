@@ -226,13 +226,66 @@ def scanned_tree_reason(
     Pass ``path`` as it was named. Both it and its resolved path are checked, so a
     symlink is judged by where it sits and by where it points.
     """
-    # Imported here: sandbox_grants imports ash_config, which imports the scanners
-    # that import this module.
+    # Imported here, in this module's functions: sandbox_grants imports ash_config,
+    # which imports the scanners that import this module.
     from automated_security_helper.config.sandbox_grants import untrusted_reason
 
     reason = untrusted_reason(Path(path), Path(scan_root))
     if reason is not None:
         return reason
+    return _client_delivered_reason(path)
+
+
+def _checkouts_holding(scan_root: Path) -> List[Path]:
+    """Every git checkout at or above the scan root, under each name the root has.
+
+    All of them rather than the nearest: a scanned submodule's superproject chose
+    the submodule's commit, so its files are the scanned repository's too.
+    """
+    from automated_security_helper.config.sandbox_grants import scan_root_names
+
+    checkouts: List[Path] = []
+    for name in scan_root_names(scan_root):
+        for candidate in (name, *name.parents):
+            if os.path.lexists(candidate / ".git") and candidate not in checkouts:
+                checkouts.append(candidate)
+    return checkouts
+
+
+def scanned_checkout_reason(
+    path: Union[str, Path], scan_root: Union[str, Path]
+) -> Optional[str]:
+    """Why ``path`` belongs to the scanned repository, or None when it does not.
+
+    The rule for a detect-secrets baseline, whose settings the operator names
+    rather than a tool reading them from its working directory. ``path`` is the
+    scanned repository's when it is inside the scan root, or inside a git checkout
+    that holds the scan root (scanning ``repo/service`` leaves ``repo/ops`` the
+    repository's), by the path as named or as resolved; and, under the MCP server,
+    when an MCP client delivered it. A file in some other checkout is not: a team's
+    shared baselines kept in a repository of their own, checked out beside the
+    scanned one, are the operator's. ``scanned_tree_reason``, which refuses every
+    checkout, stays the rule for files a tool reads as its own config or loads as
+    code.
+    """
+    from automated_security_helper.config.sandbox_grants import (
+        _named_within,
+        is_within,
+        scan_root_names,
+    )
+
+    path = Path(path)
+    root = Path(scan_root)
+    names = scan_root_names(root)
+    if any(is_within(path, name) for name in names) or _named_within(path, names):
+        return f"it is inside the scanned directory {root.as_posix()}"
+    checkouts = _checkouts_holding(root)
+    for checkout in checkouts:
+        if is_within(path, checkout) or _named_within(path, [checkout]):
+            return (
+                f"it is inside the git checkout at {checkout.as_posix()}, which "
+                f"holds the scanned directory"
+            )
     return _client_delivered_reason(path)
 
 

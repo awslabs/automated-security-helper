@@ -921,13 +921,15 @@ asks for it, and never in offline mode:
   always in `runtime_overrides.denied_paths`, whatever `allowed_paths` says. A profile
   that sets its own `denied_paths` adds to them and cannot remove them, as for the
   scanner sandbox, `ash_plugin_modules` and the archive extraction limits. It
-  can be in `scan_settings.filters_used`, or in a `baseline_file` outside the scanned
-  tree that the operator names, including through `--config-overrides` beside a
-  repository's own config.
+  can be in `scan_settings.filters_used`, or in a `baseline_file` the operator names
+  that is outside the scanned tree and outside the git checkout holding it, including
+  through `--config-overrides` beside a repository's own config. A baseline in another
+  checkout counts: scanning `repo/service` with a baseline from a separate
+  `shared-baselines` checkout verifies, while one in `repo/ops` does not.
 - When `scan_settings` sets `plugins_used` or `version`, it replaces the baseline's
   plugins and filters. Otherwise the baseline's are used, and a verification filter
   the operator's `scan_settings.filters_used` names is kept beside them.
-- A `.secrets.baseline` inside the scanned tree, a config file the scanned repository
+- A `.secrets.baseline` inside the scanned tree or its checkout, a config file the scanned repository
   holds (`.ash/.ash.yaml` and the other discovered names, including a workspace
   project's own config), and a config an MCP client supplied cannot turn verification
   on, whatever baseline they name. ASH removes the filter, keeps the rest of the
@@ -950,7 +952,8 @@ scanners:
 The same sources decide which plugin and filter files detect-secrets may import. A
 `plugins_used` or `filters_used` entry named by `file://` path is a Python file the
 detect-secrets worker loads, so only the operator's own configuration, or a baseline
-outside the scanned tree that the operator names, may name one. A `file://` entry in a
+outside the scanned tree and its checkout that the operator names, may name one. The
+file itself must also be outside the scanned tree and every git checkout. A `file://` entry in a
 repository's config or `.secrets.baseline`, or in a baseline such a config names, is
 removed with a warning, wherever the file is; the built-in detectors it lists by name
 still run.
