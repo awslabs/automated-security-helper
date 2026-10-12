@@ -1306,6 +1306,11 @@ def _load_overlay(
             f"Config file '{describe_config_path(path)}' does not exist or is not "
             "a file."
         )
+    # A client's file is refused without its text, by the parser's error type and
+    # position, or the problem locations, and outside the handler, so the
+    # error under it, which can quote it, is not the context either.
+    client_file = _is_a_client_file(path)
+    unquoted: Optional[str] = None
     try:
         document = resolve_config_document(
             path,
@@ -1318,16 +1323,16 @@ def _load_overlay(
         raise
     except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as e:
         # json.JSONDecodeError is a ValueError.
-        raise ASHConfigSourceError(
-            f"Config file '{describe_config_path(path)}' could not be read: {e}"
-        ) from e
-    try:
-        AshConfig.model_validate(document.data, strict=True)
-    except ValidationError as e:
-        raise ASHConfigValidationError(
-            f"Configuration validation failed for '{describe_config_path(path)}': "
-            f"{str(e)}. Run 'ash config lint' to identify and fix issues."
-        ) from e
+        if isinstance(e, OSError) or not client_file:
+            raise ASHConfigSourceError(
+                f"Config file '{describe_config_path(path)}' could not be read: {e}"
+            ) from e
+        unquoted = _unquoted_load_error(path, e)
+    if unquoted is not None:
+        raise ASHConfigSourceError(unquoted)
+    validate_config_document(
+        document, path, unquoted=CLIENT_FILE if client_file else None
+    )
     return document
 
 

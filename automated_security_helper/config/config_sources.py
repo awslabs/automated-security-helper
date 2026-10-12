@@ -1451,6 +1451,7 @@ def _resolve(
         env_refused = (
             env_refused_above or state.refuse_env(named) or state.refuse_env(real)
         )
+        unquoted: Optional[str] = None
         try:
             data = read_config_file(
                 real, expect=expect, refuse_env=_env_rule(env_refused)
@@ -1458,11 +1459,33 @@ def _resolve(
         except ASHConfigSourceError:
             raise
         except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as exc:
-            # json.JSONDecodeError is a ValueError.
-            raise ASHConfigSourceError(
+            # json.JSONDecodeError is a ValueError. A base of a client's chain, or
+            # one a client delivered, is not quoted: the parser's message repeats
+            # the line it stopped at, and a client's link can reach a file on
+            # the server. Raised outside the handler, so that message is not the
+            # context either.
+            if isinstance(exc, OSError) or not (
+                env_refused
+                or config_is_client_delivered(real)
+                or config_is_client_delivered(named)
+            ):
+                raise ASHConfigSourceError(
+                    f"Base config {describe_config_path(real)}, extended by "
+                    f"{describe_config_path(extending)}, could not be read: {exc}"
+                ) from exc
+            mark = getattr(exc, "problem_mark", None)
+            where = (
+                f" at line {mark.line + 1}, column {mark.column + 1}"
+                if mark is not None
+                else ""
+            )
+            unquoted = (
                 f"Base config {describe_config_path(real)}, extended by "
-                f"{describe_config_path(extending)}, could not be read: {exc}"
-            ) from exc
+                f"{describe_config_path(extending)}, could not be parsed "
+                f"({type(exc).__name__}{where})"
+            )
+        if unquoted is not None:
+            raise ASHConfigSourceError(unquoted)
         if not isinstance(data, dict):
             raise ASHConfigSourceError(
                 f"Base config {describe_config_path(real)}, extended by "

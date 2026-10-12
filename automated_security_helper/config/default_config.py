@@ -62,16 +62,17 @@ def default_config_document():
     """The resolution of the file ASH_CONFIG names, with its extends bases, or None.
 
     A ``config_sources.ResolvedConfigDocument``: the files get_default_config()
-    reads, each file's document, and the paths each was reached by.
+    reads, each file's document, and the paths each was reached by. Read with
+    ``resolve_config.read_config_document``, so a file that cannot be read or
+    parsed is refused as that file (``ASHConfigSourceError``), and one an MCP
+    client delivered without quoting it.
     """
-    from automated_security_helper.config.config_sources import (
-        resolve_config_document,
-    )
+    from automated_security_helper.config.resolve_config import read_config_document
 
     config_env_var = os.environ.get("ASH_CONFIG", None)
     if not (config_env_var and Path(config_env_var).exists()):
         return None
-    return resolve_config_document(Path(config_env_var))
+    return read_config_document(Path(config_env_var))
 
 
 def default_config_names() -> List[Path]:
