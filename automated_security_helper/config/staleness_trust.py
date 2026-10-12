@@ -7,12 +7,14 @@ Why this exists
 ---------------
 A scan fails when a scanner's content database (grype's or trivy's vulnerability
 database, the offline semgrep and opengrep rulesets) is older than its declared
-bound (``utils/content_db_staleness.py``). Two settings relax that:
-``content_db_staleness: warn`` for every database, and a
-``content_db_staleness_overrides`` entry with ``policy: warn`` for one. Both are
-top-level keys of the config; no scanner has a staleness option of its own. A
-config file inside the scanned tree could set either, so the repository being
-scanned could have its scan pass against an out-of-date database.
+bound (``utils/content_db_staleness.py``). Three settings relax that:
+``content_db_staleness: warn`` for every database, a
+``content_db_staleness_overrides`` entry with ``policy: warn`` for one, and
+``content_db_staleness_offline_image_default: true``, which holds trivy-db to
+``warn`` in an image built with ``OFFLINE=YES``. All are top-level keys of the
+config; no scanner has a staleness option of its own. A config file inside the
+scanned tree could set any of them, so the repository being scanned could have
+its scan pass against an out-of-date database.
 
 What happens now
 ----------------
@@ -29,14 +31,16 @@ fail``, and any entry with ``policy: fail``. Every other entry, a ``policy: warn
 the operator did not set, is dropped, and the policy and the dropped entries' databases are
 named in one warning. Nothing is added: an entry the operator's file has and the
 repository's config does not is not copied in, as the policy the repository's
-config keeps is at least as strict.
+config keeps is at least as strict. ``content_db_staleness_offline_image_default``
+is kept when it is false, or when the trusted base's is true; a true where the
+operator's is false is set back to false and named in the same warning.
 
 Under the MCP server the default ``denied_paths`` already refuse a client's file
-that sets either key, and an MCP runtime patch cannot change them.
+that sets any of these keys, and an MCP runtime patch cannot change them.
 
 Constraints and known limitations
 ---------------------------------
-* ``ash merge`` does not run this step. The settings its verdict reads, these two
+* ``ash merge`` does not run this step. The settings its verdict reads, these
   among them, come from the shards, each of which ran it when it resolved its own
   config, and shards that disagree are refused (``cli/merge.py``).
 * An entry is kept or dropped whole, and compared field by field: a repository
@@ -59,6 +63,7 @@ from automated_security_helper.config.untrusted_source import (
 from automated_security_helper.utils.content_databases import (
     STALENESS_CONFIG_FIELD,
     STALENESS_FAIL,
+    STALENESS_OFFLINE_IMAGE_CONFIG_FIELD,
     STALENESS_OVERRIDES_CONFIG_FIELD,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -72,6 +77,7 @@ def _is_staleness_override(override: str) -> bool:
     return key.replace("-", "_") in (
         STALENESS_CONFIG_FIELD,
         STALENESS_OVERRIDES_CONFIG_FIELD,
+        STALENESS_OFFLINE_IMAGE_CONFIG_FIELD,
     )
 
 
@@ -93,8 +99,9 @@ def confine_content_db_staleness(
         trusted_config: The trusted base ``resolve_config`` built: the defaults,
             or the operator's config outside the tree.
         config_overrides: The operator's ``--config-overrides``. Those that set
-            ``content_db_staleness`` or ``content_db_staleness_overrides`` are
-            replayed onto ``trusted_config``.
+            ``content_db_staleness``, ``content_db_staleness_overrides`` or
+            ``content_db_staleness_offline_image_default`` are replayed onto
+            ``trusted_config``.
         in_tree: The config files that are not the operator's, named in the
             warning.
         source: Why those files are not the operator's, and the fix, for the
@@ -130,6 +137,15 @@ def confine_content_db_staleness(
             f"{STALENESS_OVERRIDES_CONFIG_FIELD} entries for {', '.join(dropped)}"
         )
         config.content_db_staleness_overrides = kept
+
+    # true holds trivy-db to warn in an image built with OFFLINE=YES, so it relaxes
+    # the gate as warn does; false only makes it stricter.
+    if (
+        config.content_db_staleness_offline_image_default
+        and not trusted_config.content_db_staleness_offline_image_default
+    ):
+        ignored.append(STALENESS_OFFLINE_IMAGE_CONFIG_FIELD)
+        config.content_db_staleness_offline_image_default = False
 
     if ignored:
         files = ", ".join(describe_config_path(path) for path in in_tree)

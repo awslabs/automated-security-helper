@@ -1501,8 +1501,10 @@
   outside the tree. From a repository's or a workspace project's own config they
   are ignored with a warning naming the key, unless they equal the operator's
   value, and a stale database fails the scan as by default. `fail`, and an entry
-  with `policy: fail`, still apply from any config. `ash merge` still takes both
-  keys from the shards. See
+  with `policy: fail`, still apply from any config. The same holds for
+  `content_db_staleness_offline_image_default: true` where the operator's value is
+  false: it is set back to false with a warning, and `false` applies from any
+  config. `ash merge` still takes these keys from the shards. See
   [Failing on a stale content database](docs/content/docs/configuration-guide.md#failing-on-a-stale-content-database).
 
 - **ASH no longer follows symlinks out of the scanned tree when it reads tree files

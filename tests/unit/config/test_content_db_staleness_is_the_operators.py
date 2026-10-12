@@ -269,3 +269,62 @@ def test_a_workspace_project_repeating_the_operators_entry_is_kept(
 
     assert _entries(config) == [_WARN_TRIVY]
     assert not _warnings_naming(ash_log, "content_db_staleness_overrides")
+
+
+# ---------------------------------------------------------------------------
+# content_db_staleness_offline_image_default
+#
+# true holds trivy-db to warn in an image built with OFFLINE=YES, so it relaxes the
+# gate the way warn does; false only makes it stricter.
+# ---------------------------------------------------------------------------
+
+_OFFLINE_IMAGE = "content_db_staleness_offline_image_default"
+
+
+def test_a_repository_config_does_not_turn_the_offline_image_default_back_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log
+) -> None:
+    repo = _repo(tmp_path, {_OFFLINE_IMAGE: True})
+    monkeypatch.setenv("ASH_CONFIG", str(_operator(tmp_path, {_OFFLINE_IMAGE: False})))
+
+    config = resolve_config(source_dir=repo)
+
+    assert config.content_db_staleness_offline_image_default is False
+    assert _warnings_naming(ash_log, _OFFLINE_IMAGE)
+
+
+def test_a_repository_config_may_turn_the_offline_image_default_off(
+    tmp_path: Path, ash_log
+) -> None:
+    repo = _repo(tmp_path, {_OFFLINE_IMAGE: False})
+
+    config = resolve_config(source_dir=repo)
+
+    assert config.content_db_staleness_offline_image_default is False
+    assert not _warnings_naming(ash_log, _OFFLINE_IMAGE)
+
+
+def test_the_operators_override_of_the_offline_image_default_is_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log
+) -> None:
+    repo = _repo(tmp_path, {_OFFLINE_IMAGE: True})
+    monkeypatch.setenv("ASH_CONFIG", str(_operator(tmp_path, {_OFFLINE_IMAGE: False})))
+
+    config = resolve_config(
+        source_dir=repo, config_overrides=[f"{_OFFLINE_IMAGE}=true"]
+    )
+
+    assert config.content_db_staleness_offline_image_default is True
+    assert not _warnings_naming(ash_log, _OFFLINE_IMAGE)
+
+
+def test_a_workspace_project_does_not_turn_the_offline_image_default_back_on(
+    tmp_path: Path,
+) -> None:
+    """The operator's --config is merged over the project's config, so its false wins."""
+    repo = _repo(tmp_path, {_OFFLINE_IMAGE: True})
+    operator = _operator(tmp_path, {_OFFLINE_IMAGE: False})
+
+    config = _workspace_project(repo, operator)
+
+    assert config.content_db_staleness_offline_image_default is False
