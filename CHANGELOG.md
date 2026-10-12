@@ -1325,7 +1325,9 @@
   lowest-indexed shard's values, and the completion gate reads the same shard's
   value whatever order `--results` lists the shards in. A value `--config` sets
   for one of these settings is named in a warning, with the `--config-overrides`
-  key that would apply it.
+  key that would apply it. A suggested override whose value needs quoting, such
+  as a list of suppressions, is quoted for a POSIX shell, and the warning says
+  so; in PowerShell or cmd.exe, quote it for that shell instead.
 
   A merge that relied on a shard's recorded reporter settings (an S3 bucket, a
   Security Hub region, an `ash_plugin_modules` entry that loads the AWS reporters)

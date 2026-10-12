@@ -467,6 +467,8 @@ A shard's recorded configuration may have been read from a config file inside th
 
 The settings the verdict reads still come from the shards, as the verdict follows the scan's own configuration: `fail_on_findings`, `fail_on_incomplete_scanners`, `global_settings.severity_threshold`, `global_settings.suppressions`, `global_settings.ignore_paths`, each scanner's `options.severity_threshold`, `content_db_staleness` and `content_db_staleness_overrides`. One verdict covers the merged scan, so shards whose values for any of these differ after `--config-overrides` are applied are refused with exit code 3, and the error names the setting and each shard's value. `--fail-on-findings`/`--no-fail-on-findings` and `--fail-on-incomplete-scanners`/`--no-fail-on-incomplete-scanners` decide their setting for the merge, so shards that disagree only on a setting whose flag is given are not refused. A value `--config` sets for one of these settings does not apply; a warning names it and the `--config-overrides` key or flag that would.
 
+When the `--config-overrides` one of these warnings suggests has a value with spaces, quotes or other characters a shell interprets, such as a list of suppressions, the warning quotes it for a POSIX shell (bash, zsh, sh) and says so after it. In PowerShell or cmd.exe, quote the same `key=value` the way that shell expects instead.
+
 To keep a shard's reporter settings, pass the same values at merge time. Loading `ash_aws_plugins` makes all four AWS reporters available, and each is on unless the operator's configuration turns it off. For example, to upload the merged report to S3 and to no other AWS service:
 
 ```bash

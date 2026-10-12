@@ -1081,6 +1081,18 @@ def _suggested_override(message: str) -> str:
     return shlex.split(suggestion)[0]
 
 
+#: What a warning says after an override it had to quote, so that someone in
+#: another shell knows to quote it their own way.
+POSIX_SHELL_NOTE = "quoted for a POSIX shell"
+
+
+def _assert_says_it_is_quoted_for_a_posix_shell(message: str) -> None:
+    suggestion = message.split("--config-overrides ", 1)[1]
+    assert suggestion.startswith("'"), message
+    assert POSIX_SHELL_NOTE in suggestion, message
+    assert "PowerShell" in suggestion, message
+
+
 #: A setting the verdict reads, and two values for it.
 VERDICT_DISAGREEMENTS = [
     ("fail_on_findings", {"fail_on_findings": False}, {"fail_on_findings": True}),
@@ -1267,6 +1279,7 @@ class TestVerdictSettings:
         assert named, harness.warnings
         assert "--config-overrides fail_on_findings=true" in named[0]
         assert "--fail-on-findings" in named[0]
+        assert POSIX_SHELL_NOTE not in named[0], named[0]
 
     def test_the_suggested_override_gives_back_the_operators_list(self, harness):
         """Passed as a shell passes it, the override sets the operator's suppressions.
@@ -1293,6 +1306,7 @@ class TestVerdictSettings:
         ]
         assert named, harness.warnings
         assert "client_supplied" not in named[0], named[0]
+        _assert_says_it_is_quoted_for_a_posix_shell(named[0])
         applied = apply_config_overrides(AshConfig(), [_suggested_override(named[0])])
         expected = apply_config_overrides(
             AshConfig(), [f"global_settings.suppressions={json.dumps(suppressions)}"]
@@ -1417,6 +1431,7 @@ class TestOperatorConfigOutsideTheRecordedConfig:
         module = [m for m in harness.warnings if f'ash_plugin_modules+=["{AWS}"]' in m]
         assert module, harness.warnings
         assert "--config-overrides" in module[0]
+        _assert_says_it_is_quoted_for_a_posix_shell(module[0])
         bucket = [
             m
             for m in harness.warnings
@@ -1424,6 +1439,8 @@ class TestOperatorConfigOutsideTheRecordedConfig:
             in m
         ]
         assert bucket, harness.warnings
+        # Nothing in it needs quoting, so it is written the same for every shell.
+        assert POSIX_SHELL_NOTE not in bucket[0], bucket[0]
         assert any(
             "--config-overrides reporters.s3.options.aws_region=us-east-2" in m
             for m in harness.warnings

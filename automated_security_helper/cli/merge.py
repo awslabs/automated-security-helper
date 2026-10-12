@@ -1421,14 +1421,26 @@ def _override_value(value: Any) -> str:
     return json.dumps(value)
 
 
-def _override_argument(key: str, value: Any) -> str:
-    """``key`` set to ``value`` as one ``--config-overrides`` argument for a shell.
+#: Follows a suggested override that had to be quoted. The quoting is a POSIX
+#: shell's, which PowerShell and cmd.exe do not read the same way.
+POSIX_QUOTING_NOTE = (
+    "(quoted for a POSIX shell; in PowerShell or cmd.exe, quote it for that shell)"
+)
+
+
+def _override_suggestion(key: str, value: Any) -> str:
+    """``--config-overrides`` setting ``key`` to ``value``, as one argument for a shell.
 
     A list or mapping holds spaces and double quotes, and a string can hold
-    anything, so the argument is quoted the way a POSIX shell reads it back.
-    ``key`` ends with ``+`` for an appending override.
+    anything, so the argument is quoted the way a POSIX shell reads it back, and
+    a quoted one is followed by ``POSIX_QUOTING_NOTE``. ``key`` ends with ``+``
+    for an appending override.
     """
-    return shlex.quote(f"{key}={_override_value(value)}")
+    text = f"{key}={_override_value(value)}"
+    argument = shlex.quote(text)
+    if argument == text:
+        return f"--config-overrides {argument}"
+    return f"--config-overrides {argument} {POSIX_QUOTING_NOTE}"
 
 
 def warn_on_ignored_operator_verdict_settings(
@@ -1463,7 +1475,7 @@ def warn_on_ignored_operator_verdict_settings(
             f"ash merge's --config sets {key} to {_shown(value)}, and the shards "
             f"recorded {_shown(shards.get(key))}. The verdict follows the shards' "
             "own configuration, so their value applies. To apply yours, pass "
-            f"--config-overrides {_override_argument(key, value)}{flag}."
+            f"{_override_suggestion(key, value)}{flag}."
         )
 
 
@@ -1479,7 +1491,7 @@ def _apply_hint(key: str, value: Any) -> str:
     """The ``--config-overrides`` that sets ``key`` to ``value``, shortened when long."""
     if len(_override_value(value)) > 60:
         return f"pass its value with --config-overrides {key}=VALUE"
-    return f"pass --config-overrides {_override_argument(key, value)}"
+    return f"pass {_override_suggestion(key, value)}"
 
 
 def warn_on_unapplied_operator_settings(
@@ -1505,7 +1517,7 @@ def warn_on_unapplied_operator_settings(
             f"ash merge's --config names the ash_plugin_modules entry {name!r}, which "
             "does not apply: the shards did not record it, and --config supplies "
             "values for what the shards recorded without adding to it. To load it, "
-            f"pass --config-overrides {_override_argument('ash_plugin_modules+', [name])}."
+            f"pass {_override_suggestion('ash_plugin_modules+', [name])}."
         )
     destinations: Dict[str, Tuple[str, ...]] = dict(REPORTER_DESTINATION_OPTIONS)
     destinations.update(declared_destination_options(reporter_classes))
