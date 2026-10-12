@@ -145,6 +145,48 @@ def test_a_process_left_after_a_normal_exit_is_reaped(tmp_path):
     assert not late.exists()
 
 
+def test_a_stopped_scanner_and_what_it_detached_end_inside_half_a_second(tmp_path):
+    """SIGTERM to the wrapper, as ASH stops a sandboxed spawn, then the grace.
+
+    Half a second is the shortest grace ASH gives a stopping process before it
+    SIGKILLs it. The wrapper must have ended the scanner and the process it
+    detached by then; the detached process would write a file two seconds later.
+    """
+    import signal
+    import subprocess  # nosec B404 - runs the sandboxed command under test
+
+    backend = _landlock()
+    results = tmp_path / "out" / "scanners" / "probe"
+    results.mkdir(parents=True)
+    ready = results / "ready.txt"
+    late = results / "late.txt"
+    script = (
+        f"(setsid sh -c 'sleep 2; echo late > {late}' &) ; "
+        f"echo ready > {ready} && echo ready ; sleep 60"
+    )
+    argv = ["/bin/sh", "-c", script]
+    plan = _plan(backend, tmp_path, argv)
+    process = subprocess.Popen(plan.argv, env=plan.env, stdout=subprocess.PIPE)  # nosec B603 - backend-built argv
+    try:
+        assert process.stdout.readline() == b"ready\n"
+        started = time.monotonic()
+        process.send_signal(signal.SIGTERM)
+        process.wait(timeout=30)
+        elapsed = time.monotonic() - started
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        process.stdout.close()
+        plan.run_cleanup()
+
+    assert elapsed < 0.5, elapsed
+    # The scanner could write there, so the missing file below is the reap's doing.
+    assert ready.exists()
+    time.sleep(3)
+    assert not late.exists(), "a process the stopped scanner detached outlived it"
+
+
 def test_a_scanner_cannot_kill_its_wrapper_to_escape_reaping(tmp_path):
     """The wrapper sits outside the scanner's Landlock domain.
 
