@@ -22,7 +22,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 from automated_security_helper.config.ash_config import load_config_yaml
-from automated_security_helper.config.config_sources import read_config_file
+from automated_security_helper.config.config_sources import (
+    read_config_bytes,
+    read_config_file,
+)
 from automated_security_helper.config.config_validator import ConfigValidator
 
 logger = logging.getLogger(__name__)
@@ -189,7 +192,7 @@ class ConfigLinter:
         """
         cls._refuse_to_rewrite_toml(config_path)
         config_data = cls._load_config(config_path)
-        raw_content = config_path.read_text(encoding="utf-8")
+        raw_content = read_config_bytes(config_path).decode("utf-8")
 
         if issues is None:
             lint_result = cls.lint(config_path)
@@ -270,7 +273,7 @@ class ConfigLinter:
         """
         cls._refuse_to_rewrite_toml(config_path)
         config_data = cls._load_config(config_path)
-        raw_content = config_path.read_text(encoding="utf-8")
+        raw_content = read_config_bytes(config_path).decode("utf-8")
 
         # Find the unused suppressions report
         report_path, report_timestamp = cls._find_unused_report(config_path, output_dir)
@@ -460,15 +463,16 @@ class ConfigLinter:
 
         A TOML file goes through the config loader's reader, so a
         pyproject.toml yields its [tool.ash] table. Its own ``extends`` is not
-        followed: lint reports on the file it would fix.
+        followed: lint reports on the file it would fix. Every file is read as a
+        scan reads it (``read_config_bytes``): without blocking on a FIFO, only a
+        regular file, and at most ``ASH_CONFIG_MAX_FILE_BYTES``.
         """
         if str(config_path).endswith(".toml"):
             return read_config_file(config_path) or {}
-        with open(config_path, "r", encoding="utf-8") as f:
-            if str(config_path).endswith(".json"):
-                return json.load(f)
-            else:
-                return load_config_yaml(f) or {}
+        data = read_config_bytes(config_path)
+        if str(config_path).endswith(".json"):
+            return json.loads(data.decode("utf-8-sig"))
+        return load_config_yaml(data.decode("utf-8")) or {}
 
     @classmethod
     def _refuse_to_rewrite_toml(cls, config_path: Path) -> None:

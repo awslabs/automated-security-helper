@@ -1102,7 +1102,12 @@
   reference showed it, and it printed the discovered file even when `ASH_CONFIG`
   named another one. The positional path still works and wins over
   `ASH_CONFIG`; a positional path and a different `--config` on one command line
-  exit 2.
+  exit 2. `ash config validate` and `ash config lint` also exit 3, not 1, for a
+  file that cannot be loaded at all (missing, a directory, unreadable, not UTF-8,
+  not valid YAML, JSON or TOML, or using a YAML alias) and when discovery refuses
+  a source; 1 still means a file that loads has problems. They, and
+  `ash config update`, read the file as a scan does, so a FIFO at the config name
+  is refused at once instead of blocking the command.
 
 - **A config file that cannot be loaded stops the scan with exit 3 instead of
   being replaced by the default configuration.** A file named by `--config`,

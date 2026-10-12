@@ -250,11 +250,12 @@ class TestConfigValidate:
     """Tests for the config validate command."""
 
     def test_validate_nonexistent_file(self):
+        """A config that is not there cannot be loaded: exit 3, as a scan refuses it."""
         result = runner.invoke(
             config_app,
             ["validate", "--config", "/nonexistent/path.yaml"],
         )
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
     def test_validate_valid_config(self, tmp_path):
         config_path = tmp_path / ".ash.yaml"

@@ -15,6 +15,7 @@ from automated_security_helper.config.config_sources import (
     PATCH_KEY,
     default_confinement_root,
     describe_config_path,
+    read_config_bytes,
     read_config_file,
     resolve_config_document,
 )
@@ -115,6 +116,7 @@ class ConfigValidator:
         errors = []
         config_path = Path(config_path)
         is_toml = config_path.name.endswith(".toml")
+        raw_content = ""
 
         try:
             # Load the config file. YAML and JSON are parsed exactly as before;
@@ -127,11 +129,17 @@ class ConfigValidator:
                     errors.append(f"TOML error: {e}")
                     return False, errors
             else:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    if str(config_path).endswith(".json"):
-                        config_data = json.load(f)
-                    else:
-                        config_data = load_config_yaml(f)
+                # Read as a scan reads it: without blocking on a FIFO, only a
+                # regular file, and at most ASH_CONFIG_MAX_FILE_BYTES.
+                data = read_config_bytes(config_path)
+                if str(config_path).endswith(".json"):
+                    # utf-8-sig, as the loader reads JSON: a byte order mark is
+                    # dropped.
+                    raw_content = data.decode("utf-8-sig")
+                    config_data = json.loads(raw_content)
+                else:
+                    raw_content = data.decode("utf-8")
+                    config_data = load_config_yaml(raw_content)
 
             if not isinstance(config_data, dict):
                 errors.append(
@@ -180,8 +188,9 @@ class ConfigValidator:
 
             # Check for duplicate field definitions (YAML allows this but causes
             # issues). TOML rejects a duplicate key when it parses, and its
-            # `key = value` lines would not be recognized here anyway.
-            raw_content = "" if is_toml else config_path.read_text()
+            # `key = value` lines would not be recognized here anyway, so for TOML
+            # raw_content stays empty. The text is the one parsed above, not a
+            # second read of the name.
             top_level_fields = {}
             for line in raw_content.split("\n"):
                 stripped = line.strip()

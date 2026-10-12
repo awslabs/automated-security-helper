@@ -31,8 +31,11 @@ from automated_security_helper.config.config_sources import (
     EXTENDS_KEY,
     PATCH_KEY,
     describe_config_path,
+    read_config_bytes,
+    read_config_file,
 )
 from automated_security_helper.config.resolve_config import (
+    check_config_path,
     find_config_file,
     resolve_config,
 )
@@ -55,6 +58,31 @@ def _config_path_or_discovered(config: str | None) -> Path:
     if config:
         return Path(config)
     return find_config_file(Path.cwd()) or Path(".ash/.ash.yaml")
+
+
+def _refuse_unloadable(config_path: Path) -> None:
+    """Exit 3 when `config_path` cannot be loaded at all, as a scan refuses it.
+
+    Missing, not a regular file (a directory, a FIFO), unreadable, not UTF-8,
+    not valid YAML, JSON or TOML, or using a YAML alias. Read with the scan's
+    reader, so a FIFO is refused rather than waited on. Its ``extends`` chain is
+    not followed here: the commands report a chain that does not resolve
+    themselves, as a problem in a file that loads.
+    """
+    try:
+        check_config_path(config_path)
+        read_config_file(config_path)
+    except ASHConfigValidationError as e:
+        typer.secho(f"❌ Invalid configuration: {e}", fg=typer.colors.RED)
+        raise typer.Exit(3)
+    except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError) as e:
+        # json.JSONDecodeError is a ValueError.
+        typer.secho(
+            f"❌ Invalid configuration: could not load "
+            f"{describe_config_path(config_path)}: {e}",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(3)
 
 
 def _print_source_chain(config_path: Path) -> None:
@@ -87,9 +115,10 @@ def _rewrite_refusal(config_path: Path) -> str | None:
     if config_path.name.endswith(".toml"):
         return "it is a TOML file, and this command writes YAML; edit it by hand"
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            raw = load_config_yaml(f)
-    except (OSError, yaml.YAMLError):
+        # As a scan reads it, so a FIFO at the name is refused, not waited on. A
+        # file that does not load is refused when the command loads it.
+        raw = load_config_yaml(read_config_bytes(config_path).decode("utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError, ASHConfigValidationError):
         return None
     if isinstance(raw, dict) and (EXTENDS_KEY in raw or PATCH_KEY in raw):
         return (
@@ -393,10 +422,15 @@ def update(
     config_strings = []
 
     # Preserve the schema reference if it exists in the original file
-    with open(config_path, "r") as f:
-        first_line = f.readline().strip()
-        if first_line.startswith("#") and "schema" in first_line.lower():
-            config_strings.append(first_line)
+    # Read as a scan reads it, so a FIFO swapped in at the name is refused rather
+    # than waited on; the file loaded above, so a failure here only drops the line.
+    try:
+        lines = read_config_bytes(config_path).decode("utf-8").splitlines()
+    except (OSError, UnicodeDecodeError, ASHConfigValidationError):
+        lines = []
+    first_line = lines[0].strip() if lines else ""
+    if first_line.startswith("#") and "schema" in first_line.lower():
+        config_strings.append(first_line)
 
     # If no schema reference was found, add the default one
     if not config_strings:
@@ -615,12 +649,10 @@ def lint(
         config_path = _config_path_or_discovered(config)
     except ASHConfigValidationError as e:
         typer.secho(f"❌ {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        raise typer.Exit(3)
     output_dir_path = Path(output_dir) if output_dir else None
 
-    if not config_path.exists():
-        typer.secho(f"❌ Config file not found: {config_path}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+    _refuse_unloadable(config_path)
 
     if (fix or fix_unused) and config_path.name.endswith(".toml"):
         typer.secho(
@@ -1155,11 +1187,13 @@ def validate(
     try:
         from automated_security_helper.config.config_validator import ConfigValidator
 
-        config_path = _config_path_or_discovered(config)
+        try:
+            config_path = _config_path_or_discovered(config)
+        except ASHConfigValidationError as e:
+            typer.secho(f"❌ {e}", fg=typer.colors.RED)
+            raise typer.Exit(3)
 
-        if not config_path.exists():
-            typer.secho(f"❌ Config file not found: {config_path}", fg=typer.colors.RED)
-            raise typer.Exit(1)
+        _refuse_unloadable(config_path)
 
         typer.secho(
             f"Validating configuration file: {describe_config_path(config_path)}",

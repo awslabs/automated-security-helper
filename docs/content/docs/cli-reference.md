@@ -728,6 +728,9 @@ The `ash config validate` command performs comprehensive validation of your ASH 
 **Exit Codes:**
 - `0`: Configuration is valid
 - `1`: Configuration has validation errors
+- `3`: The file cannot be loaded at all, as `ash scan` refuses it: missing, a
+  directory or FIFO, unreadable, not UTF-8, not valid YAML, JSON or TOML, or using a
+  YAML alias
 
 **Example Output:**
 
@@ -792,6 +795,7 @@ The `ash config lint` command performs all validation checks plus additional lin
 **Exit Codes:**
 - `0`: No errors found (warnings and info are acceptable)
 - `1`: Configuration has errors that need attention
+- `3`: The file cannot be loaded at all (see `ash config validate`)
 
 **Example Output:**
 
