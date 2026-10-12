@@ -252,19 +252,25 @@ _GLOB_CHARS = frozenset("*?[")
 _SHIPPED_PLUGIN_KEYS: Dict[str, FrozenSet[str]] = {
     "scanners": frozenset(
         {
+            "actionlint",
             "bandit",
             "cdk-nag",
+            "cfn-guard",
+            "cfn-lint",
             "cfn-nag",
             "checkov",
             "detect-secrets",
             "ferret-scan",
+            "gitleaks",
             "grype",
             "npm-audit",
             "opengrep",
             "semgrep",
             "snyk-code",
             "syft",
+            "trivy",
             "trivy-repo",
+            "zizmor",
         }
     ),
     "reporters": frozenset(

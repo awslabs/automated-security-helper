@@ -1179,16 +1179,22 @@ _REVIEWED_OPTIONS: Dict[tuple, str] = {
 
 def _scanner_option_models() -> Dict[str, Any]:
     from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        actionlint_scanner,
         bandit_scanner,
         cdk_nag_scanner,
+        cfn_guard_scanner,
+        cfn_lint_scanner,
         cfn_nag_scanner,
         checkov_scanner,
         detect_secrets_scanner,
+        gitleaks_scanner,
         grype_scanner,
         npm_audit_scanner,
         opengrep_scanner,
         semgrep_scanner,
         syft_scanner,
+        trivy_scanner,
+        zizmor_scanner,
     )
     from automated_security_helper.plugin_modules.ash_ferret_plugins import (
         ferret_scanner,
@@ -1201,16 +1207,22 @@ def _scanner_option_models() -> Dict[str, Any]:
     )
 
     return {
+        "actionlint": actionlint_scanner.ActionlintScannerConfigOptions,
         "bandit": bandit_scanner.BanditScannerConfigOptions,
         "cdk-nag": cdk_nag_scanner.CdkNagScannerConfigOptions,
+        "cfn-guard": cfn_guard_scanner.CfnGuardScannerConfigOptions,
+        "cfn-lint": cfn_lint_scanner.CfnLintScannerConfigOptions,
         "cfn-nag": cfn_nag_scanner.CfnNagScannerConfigOptions,
         "checkov": checkov_scanner.CheckovScannerConfigOptions,
         "detect-secrets": detect_secrets_scanner.DetectSecretsScannerConfigOptions,
+        "gitleaks": gitleaks_scanner.GitleaksScannerConfigOptions,
         "grype": grype_scanner.GrypeScannerConfigOptions,
         "npm-audit": npm_audit_scanner.NpmAuditScannerConfigOptions,
         "opengrep": opengrep_scanner.OpengrepScannerConfigOptions,
         "semgrep": semgrep_scanner.SemgrepScannerConfigOptions,
         "syft": syft_scanner.SyftScannerConfigOptions,
+        "trivy": trivy_scanner.TrivyScannerConfigOptions,
+        "zizmor": zizmor_scanner.ZizmorScannerConfigOptions,
         "ferret-scan": ferret_scanner.FerretScannerConfigOptions,
         "snyk-code": snyk_code_scanner.SnykCodeScannerConfigOptions,
         "trivy-repo": trivy_repo_scanner.TrivyRepoScannerConfigOptions,
