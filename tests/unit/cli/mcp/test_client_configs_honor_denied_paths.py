@@ -209,6 +209,19 @@ def test_every_spelling_of_the_denied_plugin_section_is_refused(
     )
 
 
+def test_a_local_reporters_enabled_false_is_refused_where_the_operator_denies_it(
+    _server,
+) -> None:
+    """The ``enabled: false`` a delivered file may write without a refusal is the
+    off-host reporters' only; a local reporter's is held to the profile's list."""
+    _bind_profile(_server["tmp"], _profile_denying("/reporters/sarif/enabled"))
+    source = _upload({"ash.yaml": "reporters:\n  sarif:\n    enabled: false\n"})
+    _assert_refused(
+        _scan_resolution(_server["target"], str(source / "ash.yaml")),
+        key="reporters.sarif.enabled",
+    )
+
+
 def test_the_bound_profiles_denials_apply_including_a_wildcard(_server) -> None:
     _bind_profile(
         _server["tmp"], _profile_denying("/scanners/trivy-*/options/ignore_file")

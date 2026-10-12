@@ -777,6 +777,37 @@ def test_a_client_still_cannot_turn_a_reporter_on(
     _assert_unbound("override")
 
 
+@pytest.mark.parametrize("shape", ["leaf", "section"])
+def test_the_enabled_false_exemption_is_for_off_host_reporters_only(
+    tmp_path: Path, shape: str
+) -> None:
+    """An operator who denies a local reporter's ``enabled`` has it refused,
+    ``false`` included: only the off-host reporters' ``enabled: false`` is exempt."""
+    document = _profile(
+        allowed_paths=["/**"], denied_paths=["/reporters/sarif/enabled"]
+    )
+    if shape == "leaf":
+        document["reporters"] = {"sarif": {"enabled": True}}
+        patch_op = {"op": "replace", "path": "/reporters/sarif/enabled", "value": False}
+    else:
+        patch_op = {
+            "op": "add",
+            "path": "/reporters/sarif",
+            "value": {"enabled": False},
+        }
+    _install(tmp_path, document)
+    restated = yaml.safe_load(yaml.safe_dump(document))
+    restated.setdefault("reporters", {})["sarif"] = {"enabled": False}
+
+    patched, overridden = _both_routes(patch_op, yaml.safe_dump(restated))
+
+    for result in (patched, overridden):
+        assert result["success"] is False, result
+        assert "/reporters/sarif/enabled" in result["error"], result["error"]
+    _assert_unbound("patch")
+    _assert_unbound("override")
+
+
 def test_a_section_turning_a_reporter_off_may_not_carry_anything_else(
     tmp_path: Path,
 ) -> None:
