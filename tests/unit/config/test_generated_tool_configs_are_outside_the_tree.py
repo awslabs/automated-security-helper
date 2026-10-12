@@ -5,8 +5,10 @@
 
 bandit, grype, syft, trivy, trivy-repo, ferret-scan, actionlint and cfn-lint each get
 a config file ASH writes when the operator names none, one that sets nothing, so the tool does not read one
-from the tree on its own (``config/tool_config_trust.empty_tool_config``), and
-trivy-repo an empty modules directory (``empty_tool_directory``). The
+from the tree on its own (``config/tool_config_trust.empty_tool_config``); gitleaks
+gets one that names only its default rules. trivy-repo's modules directory and
+gitleaks' ignore directory are empty directories ASH makes the same way
+(``empty_tool_directory``). The
 output directory defaults to ``<source>/.ash/ash_output``, so the scanner's results
 directory, where these files used to be written, is inside the tree.
 
@@ -62,6 +64,15 @@ _WORKFLOW = (
 _TEMPLATE = (
     "AWSTemplateFormatVersion: '2010-09-09'\n"
     "Resources:\n  Bucket:\n    Type: AWS::S3::Bucket\n"
+)
+
+#: The config ASH passes gitleaks when the operator names none (written out here,
+#: not imported, so a change to it is a change this test sees).
+_GITLEAKS_DEFAULT_RULES = (
+    "# Written by ASH: gitleaks' default rules and nothing else, so no gitleaks\n"
+    "# config in the scanned tree is read.\n"
+    "[extend]\n"
+    "useDefault = true\n"
 )
 
 
@@ -164,6 +175,21 @@ CASES = [
         files={"template.yaml": _TEMPLATE},
     ),
     Case(
+        "gitleaks",
+        "--config",
+        "source/ash-gitleaks-default-rules.toml",
+        _GITLEAKS_DEFAULT_RULES,
+        "source/gitleaks.sarif",
+    ),
+    Case(
+        "gitleaks",
+        "--gitleaks-ignore-path",
+        "source/ash-no-gitleaksignore",
+        "",
+        "source/gitleaks.sarif",
+        directory=True,
+    ),
+    Case(
         "ferret-scan",
         "--config",
         "ferret-empty-config.yaml",
@@ -176,7 +202,14 @@ CASES = [
 
 @pytest.fixture(autouse=True)
 def _isolated(monkeypatch: pytest.MonkeyPatch):
-    for name in ("TRIVY_IGNOREFILE", "TRIVY_SECRET_CONFIG", "ASH_CONFIG"):
+    for name in (
+        "TRIVY_IGNOREFILE",
+        "TRIVY_SECRET_CONFIG",
+        "ASH_CONFIG",
+        # Either leaves gitleaks' config to gitleaks, and ASH writes none.
+        "GITLEAKS_CONFIG",
+        "GITLEAKS_CONFIG_TOML",
+    ):
         monkeypatch.delenv(name, raising=False)
     reset_path_refusal_warnings()
     with patch.object(UVToolRunner, "is_uv_available", return_value=False):
@@ -239,6 +272,11 @@ def _scanner_class(name: str):
         from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (  # type: ignore[assignment]
             CfnLintScanner as cls,
             CfnLintScannerConfig as config,
+        )
+    elif name == "gitleaks":
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (  # type: ignore[assignment]
+            GitleaksScanner as cls,
+            GitleaksScannerConfig as config,
         )
     else:
         from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (  # type: ignore[assignment]

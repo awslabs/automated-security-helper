@@ -106,9 +106,10 @@ it needs.
   grype config when it sets `db.cache-dir`; a trivy `cache.dir` is overridden
   without one.
 - The config files ASH writes for a scanner's tool (the empty config bandit, grype,
-  syft, ferret-scan, trivy, trivy-repo, actionlint and cfn-lint get when you name none, trivy's and
-  trivy-repo's empty ignore file and secret config, and trivy-repo's empty modules
-  directory) are in a directory of that scanner run's own, outside the
+  syft, ferret-scan, trivy, trivy-repo, actionlint and cfn-lint get when you name
+  none, gitleaks' default-rules config, trivy's and trivy-repo's empty ignore file
+  and secret config, and the empty directories ASH passes trivy-repo as its modules
+  directory and gitleaks as its ignore path) are in a directory of that scanner run's own, outside the
   scanned tree (normally in the system temporary directory, never under one another
   account can change), made with mode 0700 and removed when the run ends. The
   scanner can read it and cannot write to it. Under sandbox-exec, the one backend

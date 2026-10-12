@@ -44,6 +44,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scan
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.config_trust import record_provenance
+from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
     get_severity_metrics_from_sarif,
@@ -108,8 +109,28 @@ def _scanner(
     )
 
 
-def _default_rules(tmp_path: Path) -> str:
-    return f"--config={(tmp_path / 'ash-gitleaks-default-rules.toml').resolve().as_posix()}"
+def _ashs_own(path: Path, source: Path) -> bool:
+    """Whether ``path`` is one ASH made for this run's gitleaks.
+
+    ``config/tool_config_trust`` makes it in a directory of the scanner run's own,
+    outside the scanned tree.
+    """
+    return not path.resolve().is_relative_to(Path(source).resolve()) and any(
+        parent.name.startswith(TOOL_CONFIG_DIR_PREFIX) for parent in path.parents
+    )
+
+
+def _passes_the_default_rules(args: list, source: Path) -> bool:
+    """Whether ``args`` give gitleaks ASH's default-rules config, and no other."""
+    configs = [a for a in args if a.startswith("--config")]
+    if len(configs) != 1 or not configs[0].startswith("--config="):
+        return False
+    path = Path(configs[0].split("=", 1)[1])
+    return (
+        path.name == "ash-gitleaks-default-rules.toml"
+        and _ashs_own(path, source)
+        and path.read_text() == DEFAULT_RULES_CONFIG
+    )
 
 
 def _parse(scanner: GitleaksScanner, raw: dict) -> SarifReport:
@@ -157,7 +178,6 @@ def test_argv_for_the_source_target(tmp_path):
     results = tmp_path / "out.sarif"
     args = scanner._build_arguments(source, results)
     assert args[:2] == ["gitleaks", "dir"]
-    no_ignore = (tmp_path / "ash-no-gitleaksignore").resolve()
     for flag in (
         "--report-format=sarif",
         f"--report-path={results.as_posix()}",
@@ -165,14 +185,17 @@ def test_argv_for_the_source_target(tmp_path):
         f"--exit-code={LEAKS_EXIT_CODE}",
         "--no-banner",
         "--no-color",
-        f"--gitleaks-ignore-path={no_ignore.as_posix()}",
-        _default_rules(tmp_path),
     ):
         assert flag in args
+    (no_ignore,) = [
+        Path(a.split("=", 1)[1])
+        for a in args
+        if a.startswith("--gitleaks-ignore-path=")
+    ]
+    assert no_ignore.name == "ash-no-gitleaksignore"
+    assert _ashs_own(no_ignore, source)
     assert no_ignore.is_dir() and not any(no_ignore.iterdir())
-    assert (tmp_path / "ash-gitleaks-default-rules.toml").read_text() == (
-        DEFAULT_RULES_CONFIG
-    )
+    assert _passes_the_default_rules(args, source)
     # Source-relative paths: "." from the source directory, after "--".
     assert args[-2:] == ["--", "."]
     # gitleaks then reads no file a symlink in the tree names.
@@ -289,7 +312,7 @@ def test_a_gitleaks_config_in_the_scanned_tree_is_not_read(
         args = scanner._build_arguments(
             scanner.context.source_dir, tmp_path / "o.sarif"
         )
-    assert [a for a in args if a.startswith("--config")] == [_default_rules(tmp_path)]
+    assert _passes_the_default_rules(args, scanner.context.source_dir)
     assert f"{name} in the scanned tree is not read" in caplog.text
 
 
@@ -335,7 +358,7 @@ def test_config_file_and_baseline_from_the_scanned_tree_are_ignored(
     (source / "baseline.json").write_text("[]")
     with caplog.at_level("WARNING"):
         args = scanner._build_arguments(source, tmp_path / "o.sarif")
-    assert [a for a in args if a.startswith("--config")] == [_default_rules(tmp_path)]
+    assert _passes_the_default_rules(args, scanner.context.source_dir)
     assert not any(a.startswith("--baseline-path") for a in args)
     for option in ("config_file", "baseline_path"):
         assert f"scanners.gitleaks.options.{option}" in caplog.text
@@ -695,7 +718,7 @@ def test_gitleaks_config_variables_are_left_to_gitleaks_outside_a_sandbox(
     (scanner.context.source_dir / ".gitleaks.toml").write_text('title = "repo"\n')
     monkeypatch.setenv("GITLEAKS_CONFIG", str(tmp_path / "operator.toml"))
 
-    assert scanner._resolve_config_file(tmp_path) is None
+    assert scanner._resolve_config_file() is None
 
 
 def test_under_a_sandbox_gitleaks_config_variables_give_the_default_rules(
@@ -713,9 +736,10 @@ def test_under_a_sandbox_gitleaks_config_variables_give_the_default_rules(
     monkeypatch.setattr(module, "active_scope", lambda: object())
 
     with caplog.at_level("INFO"):
-        chosen = scanner._resolve_config_file(tmp_path)
+        chosen = scanner._resolve_config_file()
 
-    assert chosen == (tmp_path / "ash-gitleaks-default-rules.toml").resolve()
+    assert chosen is not None and chosen.name == "ash-gitleaks-default-rules.toml"
+    assert _ashs_own(chosen, scanner.context.source_dir)
     assert chosen.read_text() == DEFAULT_RULES_CONFIG
     assert "not passed into the scanner sandbox" in caplog.text
     assert ".gitleaks.toml in the scanned tree is not read" in caplog.text

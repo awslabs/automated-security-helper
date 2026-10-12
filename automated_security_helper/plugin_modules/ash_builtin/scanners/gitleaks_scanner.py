@@ -30,8 +30,11 @@ Every invocation carries these flags, and none of them is configurable:
   the converted files) is judged by its own run's exit code.
 * ``--no-banner``, ``--no-color``: the log goes to a file nobody reads in a
   terminal.
-* ``--gitleaks-ignore-path=<empty directory ASH writes>``: by default gitleaks
+* ``--gitleaks-ignore-path=<empty directory ASH makes>``: by default gitleaks
   reads ``.gitleaksignore`` from its working directory, the source directory.
+  The directory, like ASH's default-rules config below, is new for each run,
+  outside the scanned tree, and removed when the run ends
+  (``config/tool_config_trust``).
 
 The scanned repository's own gitleaks configuration is not used
 ---------------------------------------------------------------
@@ -141,6 +144,10 @@ from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
+)
+from automated_security_helper.config.tool_config_trust import (
+    empty_tool_config,
+    empty_tool_directory,
 )
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
@@ -553,7 +560,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             )
         return None
 
-    def _resolve_config_file(self, results_dir: Path) -> Optional[Path]:
+    def _resolve_config_file(self) -> Optional[Path]:
         """The config to pass as ``--config``; None leaves it to the environment.
 
         See "The scanned repository's own gitleaks configuration is not used" in
@@ -587,24 +594,24 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 "to use a gitleaks config.",
                 level=logging.INFO,
             )
-        default_rules = results_dir / "ash-gitleaks-default-rules.toml"
-        with open_for_write(default_rules) as handle:
-            handle.write(DEFAULT_RULES_CONFIG)
-        return default_rules.resolve()
+        # Outside the scanned tree, new for this run and removed when it ends
+        # (config/tool_config_trust.empty_tool_config). It names no path, so
+        # where it lives does not change what gitleaks reports.
+        return empty_tool_config(
+            "ash-gitleaks-default-rules.toml",
+            DEFAULT_RULES_CONFIG,
+            context=self.context,
+        ).resolve()
 
-    def _empty_ignore_dir(self, results_dir: Path) -> Path:
-        """A directory with no ``.gitleaksignore``, for ``--gitleaks-ignore-path``."""
-        empty = results_dir / "ash-no-gitleaksignore"
-        if empty.is_symlink() or empty.is_file():
-            empty.unlink()
-        elif empty.is_dir():
-            for child in empty.iterdir():
-                if child.is_dir() and not child.is_symlink():
-                    shutil.rmtree(child)
-                else:
-                    child.unlink()
-        empty.mkdir(parents=True, exist_ok=True)
-        return empty.resolve()
+    def _empty_ignore_dir(self) -> Path:
+        """A directory with no ``.gitleaksignore``, for ``--gitleaks-ignore-path``.
+
+        New and empty, outside the scanned tree, removed when the run ends
+        (``empty_tool_directory``).
+        """
+        return empty_tool_directory(
+            "ash-no-gitleaksignore", context=self.context
+        ).resolve()
 
     def _scan_path(self, target: Path) -> str:
         """The path gitleaks is given: ``.`` for the source, absolute otherwise.
@@ -622,7 +629,6 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         Every option is one ``--flag=value`` token and the scan path follows
         ``--``, so no path or config value can be read as a flag.
         """
-        results_dir = results_file.parent
         args: List[str] = [
             self.command or "gitleaks",
             *self.subcommands,
@@ -632,11 +638,11 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             f"--exit-code={LEAKS_EXIT_CODE}",
             "--no-banner",
             "--no-color",
-            f"--gitleaks-ignore-path={self._empty_ignore_dir(results_dir).as_posix()}",
+            f"--gitleaks-ignore-path={self._empty_ignore_dir().as_posix()}",
         ]
         if not self._honor_inline_ignores():
             args.append("--ignore-gitleaks-allow")
-        config_file = self._resolve_config_file(results_dir)
+        config_file = self._resolve_config_file()
         if config_file is not None:
             args.append(f"--config={config_file.as_posix()}")
         baseline = self._operator_option_path("baseline_path")
