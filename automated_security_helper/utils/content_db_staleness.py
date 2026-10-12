@@ -539,9 +539,11 @@ def _built_from_trivy(ctx: ProbeContext) -> tuple[datetime, str]:
     trivy loads ``trivy.yaml`` from its working directory unless ``--config`` names
     a file, and that file's ``cache.dir`` decides which database ``version``
     reports, so a probe run from ASH's own working directory could read another
-    cache than the scan did. It runs from an empty directory outside every
-    checkout instead, with ``--config``: the file the scan passed trivy, or an
-    empty one.
+    cache than the scan did. It runs from ``ctx.cwd`` instead, a directory outside
+    the scanned tree (``path_trust.cwd_outside_scanned_tree``), or without one from
+    the filesystem root of the temporary directory (``_probe_cwd``), with
+    ``--config``: the file the scan passed trivy, or ``EMPTY_TOOL_CONFIG``. It reads
+    the cache the scan was given (``--cache-dir``) when ``ctx.cache_dir`` names it.
     """
     if not ctx.executable:
         raise ValueError("trivy executable not found")
