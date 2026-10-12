@@ -308,8 +308,11 @@
     outside the scanned tree, one per scanner run, made with mode 0700 and
     removed when the run ends, instead of in `<output>/scanners/<name>/`, which
     is inside the tree with the default output directory. What the tools report
-    is unchanged. Under `--sandbox`, the scanner can read that directory and
-    cannot write to it. It is never made under a directory another local
+    is unchanged. The `commandLine` and `arguments` a scanner records in its
+    SARIF invocation name the file as the tool was handed it, under a random
+    `ash-tool-config-*` directory that no longer exists after the run. Under
+    `--sandbox`, the scanner can read that directory and cannot write to it. It
+    is never made under a directory another local
     account could change (one that account owns, or one other accounts can
     write without the sticky bit, anywhere up to `/`). With such a `TMPDIR` it
     goes under the output directory, with a warning when that is inside the
