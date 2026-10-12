@@ -870,7 +870,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         worker_cwd = Path(self.results_dir or work_dir).absolute()
         request_file = work_dir.joinpath("detect-secrets-worker-request.json")
         output_file = work_dir.joinpath("detect-secrets-worker-output.json")
-        output_file.unlink(missing_ok=True)
+        # The request first: open_for_write refuses a link at any component of
+        # work_dir, and the unlink below would follow one.
         with open_for_write(request_file) as fp:
             json.dump(
                 {
@@ -883,6 +884,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 fp,
             )
         try:
+            output_file.unlink(missing_ok=True)
             # cwd is the scanner's results directory, which ASH empties at the
             # start of each run: `python -m` puts the working directory first on
             # sys.path, so running from the scanned tree would let a repository's

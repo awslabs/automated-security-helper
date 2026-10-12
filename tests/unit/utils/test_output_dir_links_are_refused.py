@@ -246,6 +246,38 @@ class TestDetectSecretsWrites:
         assert any(REFUSAL in str(error) for error in row.errors), row.errors
 
     @pytest.mark.parametrize("mode", ["off", "bwrap"])
+    def test_a_link_at_the_directory_that_holds_its_files_is_refused(
+        self, layout, mode
+    ):
+        """The link is ``<output>/scanners/detect-secrets/source`` itself.
+
+        The directory it names holds a file under the worker output's name, which
+        ASH removes from the real directory before each run.
+        """
+        source, output, target = layout
+        outside = target.parent
+        held = outside / "detect-secrets-worker-output.json"
+        held.write_text(ORIGINAL)
+        context = _context(source, output, mode)
+        planted = output / "scanners" / "detect-secrets" / "source"
+        planted.parent.mkdir(parents=True)
+        planted.symlink_to(outside, target_is_directory=True)
+
+        _scanner, row = _detect_secrets_row(context)
+
+        assert sorted(path.name for path in outside.iterdir()) == [
+            held.name,
+            target.name,
+        ], f"--sandbox {mode}: the scanner changed the directory the link names"
+        assert target.read_text() == ORIGINAL
+        assert held.read_text() == ORIGINAL
+        assert planted.is_symlink(), "the refusal leaves the link where it was"
+        assert row.status == ScannerStatus.ERROR, (
+            f"--sandbox {mode}: the row was graded {row.status.value}"
+        )
+        assert any(REFUSAL in str(error) for error in row.errors), row.errors
+
+    @pytest.mark.parametrize("mode", ["off", "bwrap"])
     def test_regular_files_there_are_written(self, layout, mode):
         source, output, _target = layout
         context = _context(source, output, mode)
