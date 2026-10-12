@@ -5,7 +5,10 @@ import re
 import shlex
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import PluginBase
-from automated_security_helper.base.plugin_config import PluginConfigBase
+from automated_security_helper.base.plugin_config import (
+    PluginConfigBase,
+    config_validated_by_declared_model,
+)
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
@@ -22,7 +25,7 @@ from automated_security_helper.utils.subprocess_utils import (
     find_executable,
 )
 
-from pydantic import Field
+from pydantic import Field, ValidatorFunctionWrapHandler, field_validator
 from typing import (
     Annotated,
     Any,
@@ -143,6 +146,22 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             description="List of UV tool install commands to execute for this scanner"
         ),
     ] = []
+
+    @field_validator("config", mode="wrap")
+    @classmethod
+    def _config_is_validated_by_the_declared_model(
+        cls, value: Any, handler: ValidatorFunctionWrapHandler
+    ) -> Any:
+        """A scanner that declares a config model is configured by that model.
+
+        A section it refuses, such as an opengrep ``sha256`` that is not a
+        digest, is a ValidationError, which ``ScanPhase`` records as that
+        scanner's ERROR, naming the option, before it goes on with the others.
+        See ``plugin_config.config_validated_by_declared_model``.
+        """
+        return config_validated_by_declared_model(
+            cls, ScannerPluginConfigBase, value, handler
+        )
 
     def model_post_init(self, context):
         if self.config is None:

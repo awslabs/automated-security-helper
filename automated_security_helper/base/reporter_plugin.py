@@ -48,12 +48,11 @@ from typing import (
     Optional,
     Tuple,
     TypeVar,
-    get_args,
+    cast,
 )
 from typing_extensions import Self
 
 from pydantic import (
-    BaseModel,
     Field,
     ValidationInfo,
     ValidatorFunctionWrapHandler,
@@ -64,7 +63,13 @@ from pydantic_core import PydanticUseDefault
 
 from automated_security_helper.base.options import ReporterOptionsBase, _warn_once
 from automated_security_helper.base.plugin_base import PluginBase
-from automated_security_helper.base.plugin_config import PluginConfigBase
+from automated_security_helper.base.plugin_config import (
+    PluginConfigBase,
+    config_validated_by_declared_model,
+)
+from automated_security_helper.base.plugin_config import (
+    declared_config_model as plugin_declared_config_model,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -211,21 +216,13 @@ def declared_config_model(
 ) -> Optional[type[ReporterPluginConfigBase]]:
     """The config model a reporter declares with ``ReporterPluginBase[XConfig]``.
 
-    Read from the ``config`` field's resolved annotation,
-    ``Union[XConfig, ReporterPluginConfigBase, None]``. None for a reporter that
-    declares no model, or declares ``ReporterPluginConfigBase`` itself.
+    None for a reporter that declares no model, or declares
+    ``ReporterPluginConfigBase`` itself. See ``plugin_config.declared_config_model``.
     """
-    field = (getattr(reporter_class, "model_fields", None) or {}).get("config")
-    if field is None:
-        return None
-    for candidate in get_args(field.annotation):
-        if (
-            isinstance(candidate, type)
-            and issubclass(candidate, ReporterPluginConfigBase)
-            and candidate is not ReporterPluginConfigBase
-        ):
-            return candidate
-    return None
+    return cast(
+        Optional[type[ReporterPluginConfigBase]],
+        plugin_declared_config_model(reporter_class, ReporterPluginConfigBase),
+    )
 
 
 def reporter_format_name(instance: "ReporterPluginBase") -> str | None:
@@ -370,23 +367,14 @@ class ReporterPluginBase(PluginBase, Generic[T]):
     ) -> Any:
         """A reporter that declares a config model is configured by that model.
 
-        Pydantic tries each type in ``config``'s union in turn. Given a section
-        the declared model refuses, such as an AWS reporter's ``max_delay`` over
-        its 60-second cap, it built ``ReporterPluginConfigBase`` from it and
-        raised nothing, so every validator on the declared model and its options
-        was skipped. So a value that is not already the declared model is
-        validated by it, and the ValidationError reaches the caller:
-        ``ReportPhase`` and the workspace report step log it, with the option and
-        the limit, and go on without this reporter. A config of another class is
-        validated by the fields it set. A reporter that declares no model of its
-        own takes any reporter config, as before.
+        A section it refuses, such as an AWS reporter's ``max_delay`` over its
+        60-second cap, is a ValidationError: ``ReportPhase`` and the workspace
+        report step log it, with the option and the limit, and go on without this
+        reporter. See ``plugin_config.config_validated_by_declared_model``.
         """
-        declared = declared_config_model(cls)
-        if declared is None or value is None or isinstance(value, declared):
-            return handler(value)
-        if isinstance(value, BaseModel):
-            value = value.model_dump(exclude_unset=True)
-        return declared.model_validate(value)
+        return config_validated_by_declared_model(
+            cls, ReporterPluginConfigBase, value, handler
+        )
 
     @model_validator(mode="after")
     def setup_paths(self) -> Self:

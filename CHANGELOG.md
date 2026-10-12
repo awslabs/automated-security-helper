@@ -1351,6 +1351,14 @@
     limit, and that reporter does not run; the others do. Before, the reporter was
     built from the generic reporter config instead, with the refused value in it
     and nothing logged.
+  - The same holds for scanners and converters. A plugin scanner's section, such
+    as `snyk-code`'s, is checked when the scanner is built rather than when the
+    config is read, and a section its model refuses, such as
+    `honor_tree_exclusions: "flase"`, now records that scanner as ERROR under its
+    own name, with the error naming the option; the other scanners run. Before,
+    the scanner ran with the refused value, or failed on an unrelated attribute
+    error recorded under its lowercased class name (`snykcodescanner`). Built-in
+    scanner and converter sections are still refused when the config is read.
   - The Bedrock summary reporter now retries a throttled Bedrock call `max_retries`
     times, waiting `base_delay` seconds and doubling up to `max_delay`, as the
     CloudWatch Logs and S3 reporters do. Before, it read none of the three options

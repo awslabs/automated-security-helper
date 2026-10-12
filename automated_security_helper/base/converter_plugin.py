@@ -2,14 +2,22 @@
 
 from abc import abstractmethod
 from pathlib import Path
-from typing import Annotated, BinaryIO, Generic, List, TypeVar
+from typing import Annotated, Any, BinaryIO, Generic, List, TypeVar
 from typing_extensions import Self
 
-from pydantic import Field, model_validator
+from pydantic import (
+    Field,
+    ValidatorFunctionWrapHandler,
+    field_validator,
+    model_validator,
+)
 
 from automated_security_helper.base.options import ConverterOptionsBase
 from automated_security_helper.base.plugin_base import PluginBase
-from automated_security_helper.base.plugin_config import PluginConfigBase
+from automated_security_helper.base.plugin_config import (
+    PluginConfigBase,
+    config_validated_by_declared_model,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.asharp_model import RefusedInputInfo
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -39,6 +47,21 @@ class ConverterPluginBase(PluginBase, Generic[T]):
     # into the converter's results row, which is what keeps a refused input visible in
     # the scan result rather than only in the log.
     refused_inputs: List[RefusedInputInfo] = Field(default_factory=list)
+
+    @field_validator("config", mode="wrap")
+    @classmethod
+    def _config_is_validated_by_the_declared_model(
+        cls, value: Any, handler: ValidatorFunctionWrapHandler
+    ) -> Any:
+        """A converter that declares a config model is configured by that model.
+
+        A section it refuses is a ValidationError, which ``ConvertPhase`` records
+        as that converter's failure, naming the option, before it goes on with
+        the others. See ``plugin_config.config_validated_by_declared_model``.
+        """
+        return config_validated_by_declared_model(
+            cls, ConverterPluginConfigBase, value, handler
+        )
 
     @model_validator(mode="after")
     def setup_paths(self) -> Self:

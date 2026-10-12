@@ -117,6 +117,24 @@ def _scanner_display_name(plugin_instance) -> str:
     return plugin_instance.__class__.__name__.lower()
 
 
+def _unconstructed_scanner_name(plugin_config: Any, plugin_class: type) -> str:
+    """The name a scanner that did not construct is recorded under.
+
+    Its section's ``name``, read from the dict ``get_plugin_config`` returns as
+    well as from a model, else the name the scanner declares for itself. Read
+    with ``getattr`` alone, a dict section never gave a name, so the row went
+    under the lowercased class name (``snykcodescanner`` for ``snyk-code``),
+    which ``--exclude-scanners``, the shard partition and the reports do not use.
+    """
+    if isinstance(plugin_config, dict):
+        name = plugin_config.get("name")
+    else:
+        name = getattr(plugin_config, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    return plugin_config_key(plugin_class)
+
+
 class ScanPhase(EnginePhase):
     """Implementation of the Scan phase."""
 
@@ -363,8 +381,8 @@ class ScanPhase(EnginePhase):
                         # MISSING because it is reached before any dependency
                         # question is asked; the two paths are told apart by which
                         # status they carry.
-                        failed_name = (
-                            getattr(plugin_config, "name", None) or plugin_name
+                        failed_name = _unconstructed_scanner_name(
+                            plugin_config, plugin_class
                         )
                         construction_error = (
                             f"Scanner {failed_name} could not be constructed, so it "
