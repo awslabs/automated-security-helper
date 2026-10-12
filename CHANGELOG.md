@@ -2560,7 +2560,10 @@
   `ERROR`. snyk-code, which has no such option and uploads what it reads, is not
   run on a directory holding an ignored file: it is `ERROR`, and the error gives
   the number of files, the patterns, and the remedy (narrow `ignore_paths`, or
-  `--exclude-scanners snyk-code`).
+  `--exclude-scanners snyk-code`). This applies to the operator's ignore paths:
+  those in a config an MCP client delivered drop their findings but do not stop
+  the upload, and a client that does not want its files sent leaves snyk-code out
+  with the `excluded_scanners` argument of `run_ash_workspace_scan`.
 - **A plugin module that failed to import in any shard or workspace project fails
   the combined results too.** `metadata.plugin_load_errors` lists the plugin modules
   a scan could not import, and the completeness gate
