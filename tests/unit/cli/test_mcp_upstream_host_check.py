@@ -120,3 +120,30 @@ def test_the_opt_out_is_refused_where_it_means_nothing(startup, kwargs) -> None:
 
     assert excinfo.value.exit_code == 3
     assert startup["bound"] is False
+
+
+LOOPBACK = ["127.0.0.1", "localhost", "::1"]
+
+
+@pytest.mark.parametrize("transport", ["streamable-http", "sse"])
+@pytest.mark.parametrize("host", LOOPBACK)
+def test_the_opt_out_is_refused_on_a_loopback_bind(startup, transport, host) -> None:
+    """A loopback server checks its own origin; the flag would only turn that off."""
+    with pytest.raises(typer.Exit) as excinfo:
+        mcp_command(
+            ctx=_Ctx(),
+            transport=transport,
+            host=host,
+            trust_upstream_host_check=True,
+            quiet=True,
+        )
+
+    assert excinfo.value.exit_code == 3
+    assert startup["bound"] is False
+
+
+@pytest.mark.parametrize("build", [build_streamable_http_app, build_sse_app])
+@pytest.mark.parametrize("host", LOOPBACK)
+def test_the_builders_refuse_the_opt_out_on_a_loopback_bind(build, host) -> None:
+    with pytest.raises(ASHValidationError, match="--allowed-host"):
+        build(host=host, trust_upstream_host_check=True)

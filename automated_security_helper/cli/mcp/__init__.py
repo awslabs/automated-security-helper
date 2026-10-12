@@ -184,15 +184,28 @@ def _validate_bind(
     ``--trust-upstream-host-check`` says a proxy or platform in front of ASH
     checks Host and Origin instead.
 
+    On a loopback host the SDK protects, ASH accepts only its own origin
+    (``_transport_security``), and ``--trust-upstream-host-check`` would turn that
+    off. A proxy on the same host that forwards another Host name keeps the check
+    with ``--allowed-host`` for that name, so the flag is refused there.
+
     Raises:
-        ASHValidationError: for a non-loopback host with neither option, or with
-            both, which contradict each other.
+        ASHValidationError: for a non-loopback host with neither option, for
+            both options, which contradict each other, and for
+            ``--trust-upstream-host-check`` on a loopback host.
     """
     if allowed_hosts and trust_upstream_host_check:
         raise ASHValidationError(
             "--allowed-host and --trust-upstream-host-check contradict each other: "
             "the first keeps ASH's Host check on for the names given, the second "
             "turns it off because something in front of ASH checks Host. Pass one."
+        )
+    if trust_upstream_host_check and host in _SDK_PROTECTED_HOSTS:
+        raise ASHValidationError(
+            f"--trust-upstream-host-check does not apply to --host {host}: a "
+            f"loopback server accepts only its own origin, and the flag would turn "
+            f"that check off. If a proxy on this host forwards another Host name, "
+            f"pass --allowed-host with that name instead."
         )
     if allowed_hosts or trust_upstream_host_check or host in _SDK_PROTECTED_HOSTS:
         return
