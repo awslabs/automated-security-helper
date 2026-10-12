@@ -109,6 +109,7 @@ Failure modes and known limitations
 
 from __future__ import annotations
 
+import errno
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -861,7 +862,12 @@ def validate_config_input(
         None if permitted, otherwise an :class:`MCPResourceError`.
     """
 
-    resolved = Path(config_path).resolve()
+    # os.path.realpath rather than Path.resolve: on Python 3.12 and older,
+    # resolve raises RuntimeError for a symbolic link that leads back to itself,
+    # which would escape the tool as an exception. Resolved as far as it can be,
+    # the path is judged here, and its read then fails as a file that cannot be
+    # loaded.
+    resolved = Path(os.path.realpath(config_path))
     sandbox = _sandbox_for_gate(session_id)
 
     sibling = _sibling_refusal(sandbox, config_path, resolved)
@@ -999,6 +1005,17 @@ def check_config_input(
     # repeated: not a file the client named outside the config roots or
     # delivered, nor one in a checkout or the scanned directory (by path, before
     # the read; by the whole chain, before the validation).
+    # A link that leads back to itself is told by its errno before any path is
+    # resolved: Path.resolve raises RuntimeError for one on Python 3.12 and older.
+    try:
+        os.stat(path)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            return ConfigInputCheck(
+                load_error=_config_load_error(
+                    config_path, "it is a symbolic link that leads back to itself"
+                )
+            )
     scan_root = Path(source_dir) if source_dir is not None else path.parent
     named_by_client = client_named_config_is_untrusted(path, session_id=session_id)
     document = None

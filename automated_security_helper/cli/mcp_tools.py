@@ -14,7 +14,7 @@ import asyncio
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
 from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
@@ -238,6 +238,80 @@ def _discovered_config_refusal(
     if selected is None:
         return None
     return validate_config_input(selected.path, session_id=session_id)
+
+
+def _discovered_config_path(
+    target: Path, *, permit: Callable[[Path], None]
+) -> Tuple[Optional[Path], Optional[MCPResourceError]]:
+    """The config file a scan of ``target`` would discover, under ``permit``.
+
+    ``permit`` is the session's ``config_base_gate``. Returns ``(path, None)``,
+    ``(None, None)`` when there is none, or ``(None, error)`` when discovery
+    refuses the source it would select: a pyproject.toml that declares
+    ``[tool.ash]`` but cannot be read or parsed, as the scan's own discovery
+    refuses it. Discovery names the file in that message and gives the parser's
+    position, not the file's text. Any other failure is left to the scan;
+    ``_discovered_config_refusal`` has already refused a source outside the grant.
+    """
+    from automated_security_helper.config.config_sources import (
+        discover_config_source,
+    )
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
+
+    try:
+        selected = discover_config_source(target, permit=permit).selected
+    except ASHConfigValidationError as exc:
+        return None, MCPResourceError(
+            f"The configuration found in {target.as_posix()} cannot be loaded: {exc}",
+            context={
+                "directory_path": str(target),
+                "error_category": ErrorCategory.INVALID_FORMAT.value,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 -- reported by the scan's own read
+        _logger.debug(f"Config not discovered before the scan ({exc})")
+        return None, None
+    return (selected.path if selected is not None else None), None
+
+
+def _load_error_response(
+    checked: Any,
+    config_path: Optional[str],
+    target: Path,
+    session_id: Optional[str],
+) -> Dict[str, Any]:
+    """The refusal of a config, named or discovered, that does not load or validate.
+
+    Refused here rather than by the scan, which would start and then fail on its
+    first read of the config. ``checked.load_error`` names the file, in the
+    text that repeats no client's or repository's value
+    (``sandbox.check_config_input``). A file a client delivered that also sets a
+    field it may not is refused for that first, as the scan would refuse it while
+    resolving: the denial names what to remove. So is one this session's policy
+    cannot be read for. A denial check that cannot finish on a file that does not
+    validate leaves the load error to report.
+    """
+    if checked.document is not None:
+        denial = _client_config_denial(
+            config_path,
+            target,
+            session_id,
+            "scan_directory",
+            document=checked.document,
+        )
+        if denial is not None and denial.get("error_type") in (
+            CONFIG_FIELD_DENIED,
+            CONFIG_POLICY_UNREADABLE,
+        ):
+            return denial
+    return create_error_response(
+        error=checked.load_error,
+        operation="scan_directory",
+        suggestions=[
+            "Fix the error the message names; a syntax error names its line",
+            "Run 'ash config lint' on the file to check it",
+        ],
+    )
 
 
 def _session_client_rules(session_id: Optional[str]) -> Any:
@@ -545,42 +619,44 @@ async def mcp_scan_directory(
         if checked.env_error is not None:
             return _config_env_refusal(checked.env_error, "scan_directory")
         chain_document = checked.document
-        # Refused here rather than by the scan: a file that does not load, or
-        # does not validate, would otherwise start a scan that fails on its
-        # first read of the config. A file a client delivered that also sets a
-        # field it may not is refused for that first, as the scan would refuse it
-        # while resolving: the denial names what to remove. So is one this
-        # session's policy cannot be read for. A check that cannot finish on a
-        # file that does not validate leaves the load error to report.
         if checked.load_error:
-            if chain_document is not None:
-                denial = _client_config_denial(
-                    config_path,
-                    resolved_target,
-                    session_id,
-                    "scan_directory",
-                    document=chain_document,
-                )
-                if denial is not None and denial.get("error_type") in (
-                    CONFIG_FIELD_DENIED,
-                    CONFIG_POLICY_UNREADABLE,
-                ):
-                    return denial
+            return _load_error_response(
+                checked, config_path, resolved_target, session_id
+            )
+    else:
+        link_out = _discovered_config_refusal(resolved_target, session_id)
+        if link_out is not None:
+            return _config_refusal(link_out, "scan_directory")
+        # The file the scan will discover, checked as a named one is, in one
+        # read: a delivered one that uses !ENV, and one that does not load or
+        # validate, are refused before the scan starts, naming the file.
+        from automated_security_helper.cli.mcp.sandbox import config_base_gate
+
+        discovered, not_discovered = _discovered_config_path(
+            resolved_target, permit=config_base_gate(session_id)
+        )
+        if not_discovered is not None:
             return create_error_response(
-                error=checked.load_error,
+                error=not_discovered,
                 operation="scan_directory",
                 suggestions=[
                     "Fix the error the message names; a syntax error names its line",
                     "Run 'ash config lint' on the file to check it",
                 ],
             )
-    else:
-        link_out = _discovered_config_refusal(resolved_target, session_id)
-        if link_out is not None:
-            return _config_refusal(link_out, "scan_directory")
-        env_error = _delivered_config_env_error(None, resolved_target, session_id)
-        if env_error is not None:
-            return _config_env_refusal(env_error, "scan_directory")
+        if discovered is not None:
+            from automated_security_helper.cli.mcp.sandbox import check_config_input
+
+            checked = check_config_input(
+                discovered, session_id=session_id, source_dir=resolved_target
+            )
+            if checked.refusal is not None:
+                return _config_refusal(checked.refusal, "scan_directory")
+            if checked.env_error is not None:
+                return _config_env_refusal(checked.env_error, "scan_directory")
+            chain_document = checked.document
+            if checked.load_error:
+                return _load_error_response(checked, None, resolved_target, session_id)
 
     denial = _client_config_denial(
         config_path,
