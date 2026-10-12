@@ -21,6 +21,8 @@ import zipfile
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import pytest
+
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
     ArchiveConverter,
 )
@@ -70,20 +72,33 @@ def written(converter) -> List[str]:
     )
 
 
+@pytest.mark.parametrize(
+    "first, second",
+    [
+        pytest.param("a b.zip", "a-b.zip", id="space-and-hyphen"),
+        pytest.param("a/b.c.zip", "a__b/c.zip", id="slash-dot-and-underscores"),
+    ],
+)
 def test_a_failing_archive_leaves_nothing_where_another_was_extracted(
-    test_plugin_context, monkeypatch
+    first, second, test_plugin_context, monkeypatch
 ):
+    for name in (first, second):
+        Path(test_plugin_context.source_dir, name).parent.mkdir(
+            parents=True, exist_ok=True
+        )
     converter, results = convert(
         test_plugin_context,
         monkeypatch,
         [
-            ("a b.zip", zip_of({"first.py": "x = 1\n"})),
-            ("a-b.zip", zip_failing_on_its_second_member()),
+            (first, zip_of({"first.py": "x = 1\n"})),
+            (second, zip_failing_on_its_second_member()),
         ],
     )
 
-    assert [f.path for f in converter.failed_inputs] == ["a-b.zip"]
+    assert [f.path for f in converter.failed_inputs] == [second]
     assert [p.name for p in Path(converter.results_dir).rglob("second*")] == []
+    # The first archive is still listed as converted, so its files must remain:
+    # cleaning up after the second must not remove a directory the first wrote.
     (extracted,) = results
     assert sorted(p.name for p in extracted.iterdir()) == ["first.py"]
 
