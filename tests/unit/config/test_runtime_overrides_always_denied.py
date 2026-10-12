@@ -49,6 +49,10 @@ FLOOR = [
     "/scanners/detect-secrets/options/scan_settings/plugins_used",
     "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
     "/scanners/detect-secrets/options/baseline_file",
+    "/converters/archive/options/max_members",
+    "/converters/archive/options/max_member_bytes",
+    "/converters/archive/options/max_total_bytes",
+    "/converters/archive/options/max_compression_ratio",
 ]
 
 OPERATOR_ENTRY = "/scanners/*/options/extra_args"

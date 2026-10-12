@@ -600,11 +600,10 @@ class TestRootPointerRefused:
         """Naming the root in `allowed_paths` clears the structural refusal, but an
         empty `denied_paths` no longer leaves nothing to constrain: the entries ASH
         always denies (ALWAYS_DENIED_PATHS: the sandbox, ash_plugin_modules, the
-        detect-secrets verification settings) are added to any list, and a root
-        write carries every one of them. So a whole-config swap is refused. (The
-        archive extraction limits, ALWAYS_DENIED_RUNTIME_PATHS, are refused on top
-        of the list as well; test_archive_limits_always_denied.py covers them.)
-        A field below the root (`/project_name`) is still allowed.
+        detect-secrets verification settings, the archive extraction limits) are
+        added to any list, and a root write carries every one of them. So a
+        whole-config swap is refused. A field below the root (`/project_name`) is
+        still allowed.
 
         This test used to assert the swap succeeded with `denied_paths=[]`, which
         was the case the always-denied entries exist to close.

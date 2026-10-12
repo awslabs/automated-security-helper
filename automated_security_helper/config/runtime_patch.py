@@ -15,9 +15,8 @@ Defense-in-depth checks (in order):
    explicitly: an op on the whole document sets, clears or reads every field
    at once, so no per-field rule in (5) or (6) can constrain it.
 4. Each op's `path` must match at least one entry in `allowed_paths`.
-5. Each op's `path` must NOT overlap any entry in `denied_paths`, or in
-   `ALWAYS_DENIED_RUNTIME_PATHS`, which applies whatever `denied_paths` lists
-   (denied wins).
+5. Each op's `path` must NOT overlap any entry in `denied_paths`, which always
+   holds `ALWAYS_DENIED_PATHS` whatever a profile lists (denied wins).
    Both sides denote subtrees, so an entry fires for three shapes of write:
    the pointer it names, anything below that pointer (`/-`, `/0`, a nested
    key), and any ancestor, because a write at an ancestor supplies or deletes
@@ -46,7 +45,6 @@ import jsonpatch
 from pydantic import ValidationError
 
 from automated_security_helper.config.ash_config import (
-    ALWAYS_DENIED_RUNTIME_PATHS,
     AshConfig,
     RuntimeOverridesConfig,
     plugin_key_lookup_names,
@@ -297,9 +295,10 @@ def _check_op_paths(
     path = op.get("path", "")
     if not any(_path_matches(p, path) for p in allowlist.allowed_paths):
         raise RuntimePatchDeniedError(op, f"path {path!r} not in allowed_paths")
-    # ALWAYS_DENIED_RUNTIME_PATHS on top of the configured list, which a profile can
-    # replace: the archive extraction limits are never a client's to raise.
-    for denied in (*allowlist.denied_paths, *ALWAYS_DENIED_RUNTIME_PATHS):
+    # denied_paths always holds ALWAYS_DENIED_PATHS (RuntimeOverridesConfig's
+    # validator adds any a profile's own list leaves out), the archive extraction
+    # limits among them.
+    for denied in allowlist.denied_paths:
         reason = _denied_path_reason(denied, path)
         if reason is not None:
             raise RuntimePatchDeniedError(op, reason)

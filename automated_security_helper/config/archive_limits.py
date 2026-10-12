@@ -26,8 +26,9 @@ Validation already refuses a null, zero or negative limit (each is a
 ``PositiveInt``), so no spelling of "no limit" reaches this module. A limit written
 with hyphens (``max-member-bytes``) is not an option at all; it stays in the
 options' extras, unread, and the declared option keeps the value capped here.
-MCP runtime overrides of these four are refused by the shipped
-``global_settings.mcp.runtime_overrides.denied_paths``.
+MCP runtime overrides of these four are refused: they are in ``ALWAYS_DENIED_PATHS``
+(config/ash_config.py), which every ``global_settings.mcp.runtime_overrides.denied_paths``
+keeps, a profile's own list included.
 """
 
 from __future__ import annotations

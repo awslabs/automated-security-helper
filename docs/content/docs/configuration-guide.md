@@ -912,7 +912,7 @@ asks for it, and never in offline mode:
   MCP client's runtime overrides cannot set these detect-secrets settings: they are
   always in `runtime_overrides.denied_paths`, whatever `allowed_paths` says. A profile
   that sets its own `denied_paths` adds to them and cannot remove them, as for the
-  scanner sandbox and `ash_plugin_modules`. It
+  scanner sandbox, `ash_plugin_modules` and the archive extraction limits. It
   can be in `scan_settings.filters_used`, or in a `baseline_file` outside the scanned
   tree that the operator names, including through `--config-overrides` beside a
   repository's own config.

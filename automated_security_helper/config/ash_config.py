@@ -631,13 +631,12 @@ class MCPResourceManagementConfig(BaseModel):
     ] = False
 
 
-#: Runtime-override pointers refused whatever ``RuntimeOverridesConfig.denied_paths``
-#: lists. The archive converter's extraction limits bound what extracting an archive
-#: in the scanned tree may write, and an operator's profile that sets its own
-#: ``denied_paths`` replaces the shipped list, so they are checked on top of it
-#: (``runtime_patch._check_op_paths``). A write at an ancestor (``/converters/archive``,
-#: ``/converters``) is refused too, as for any denied_paths entry.
-ALWAYS_DENIED_RUNTIME_PATHS: Tuple[str, ...] = tuple(
+#: The archive converter's extraction limits as runtime-override pointers. They bound
+#: what extracting an archive in the scanned tree may write, so no client may raise
+#: them; they are part of ALWAYS_DENIED_PATHS. A write at an ancestor
+#: (``/converters/archive``, ``/converters``) is refused too, as for any denied_paths
+#: entry.
+ARCHIVE_LIMIT_RUNTIME_PATHS: Tuple[str, ...] = tuple(
     f"/converters/archive/options/{name}" for name in EXTRACTION_LIMIT_OPTIONS
 )
 
@@ -647,7 +646,8 @@ ALWAYS_DENIED_RUNTIME_PATHS: Tuple[str, ...] = tuple(
 #: these are the settings that trust depends on. The scanner sandbox. Plugin modules,
 #: imported into ASH's own process. The detect-secrets settings that turn on secret
 #: verification (each candidate secret is sent to its issuer) or import a plugin or
-#: filter from a file, and the baseline that can carry both.
+#: filter from a file, and the baseline that can carry both. The archive extraction
+#: limits.
 #:
 #: A floor rather than the default alone: denied_paths was replaced whole by a
 #: profile's own list, so adding one entry dropped every shipped one.
@@ -661,6 +661,7 @@ ALWAYS_DENIED_PATHS = (
     "/scanners/detect-secrets/options/scan_settings/plugins_used",
     "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
     "/scanners/detect-secrets/options/baseline_file",
+    *ARCHIVE_LIMIT_RUNTIME_PATHS,
 )
 
 
@@ -742,9 +743,9 @@ class RuntimeOverridesConfig(BaseModel):
         # The archive converter's extraction limits bound what extracting an
         # archive in the scanned tree may write, so a client may not raise them.
         # A write at an ancestor (/converters/archive, /converters) is refused too.
-        # Listed for the operator reading the default; refused even when a profile
-        # replaces this list (ALWAYS_DENIED_RUNTIME_PATHS).
-        *ALWAYS_DENIED_RUNTIME_PATHS,
+        # Listed for the operator reading the default; a profile's own list keeps
+        # them too (ALWAYS_DENIED_PATHS).
+        *ARCHIVE_LIMIT_RUNTIME_PATHS,
     ]
 
     denied_value_patterns: Annotated[
