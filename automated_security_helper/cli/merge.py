@@ -1900,8 +1900,9 @@ def merge_command(
             help=(
                 "Refuse the merge when a shard completed none of the scanners it "
                 "owned, and exit 1 when any scanner in the union is ERROR or "
-                "MISSING. Without it, a shard whose scanners never ran "
-                "contributes no findings and the merged report reads as a "
+                "MISSING, or when every one is SKIPPED, such as when no selected "
+                "scanner had a file to scan. Without it, a shard whose scanners "
+                "never ran contributes no findings and the merged report reads as a "
                 "complete, clean scan. Defaults to the scan configuration's "
                 "value, then to true; pass --no-fail-on-incomplete-scanners to "
                 "merge a partial union anyway."

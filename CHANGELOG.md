@@ -210,6 +210,18 @@
   scanned with nothing to scan, such as bandit on a tree with no Python file or
   with all of it excluded on purpose, or detect-secrets with every file of the
   scan set ignored, is `SKIPPED`. Both used to be `PASSED` with no findings.
+- **A run in which no selected scanner had a file to scan exits 1.** A scanner
+  with nothing of its kind to scan is now `SKIPPED` instead of `PASSED`, and a run
+  in which every scanner is `SKIPPED` already exited 1 under
+  `fail_on_incomplete_scanners` (the default), since it scanned nothing. So a scan
+  whose config ignores every file, or `--scanners bandit` on a tree with no Python
+  file, now exits 1 where it exited 0, and `ash merge` over such shards does the
+  same. `--no-fail-on-incomplete-scanners` (config:
+  `fail_on_incomplete_scanners: false`) still gives 0. The error says which
+  scanners had nothing to scan, names `global_settings.ignore_paths` and suggests
+  narrowing it when the config sets it, and gives that remedy, where it said "Scan
+  ran no scanners". A run whose scanners were all `SKIPPED` for another reason
+  keeps that message.
 - **A scan uses only the plugin modules it names.** A scan's converters,
   scanners, reporters and event handlers are ASH's built-in ones plus those of the
   modules its own `ash_plugin_modules` and `--ash-plugin-modules` name. This holds in

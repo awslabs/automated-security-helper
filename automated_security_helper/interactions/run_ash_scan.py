@@ -434,6 +434,74 @@ def no_scanner_ran(
     return not any(status in _RAN_SCANNER_STATUSES for _, status in observed)
 
 
+def scanners_with_nothing_to_scan(
+    results: Optional[AshAggregatedResults],
+) -> List[str]:
+    """The scanners that were SKIPPED because they had no file to scan.
+
+    A scanner that counts its targets says so with ``targets_attempted`` 0, which is
+    graded SKIPPED: bandit with no Python file it was not told to exclude,
+    detect-secrets with every file of its scan set ignored. A scanner that was not
+    selected, or that declined this platform, is SKIPPED too but carries no count,
+    so it is not listed: it made no claim about the files.
+    """
+    if results is None:
+        return []
+    names = []
+    for metric in get_unified_scanner_metrics(asharp_model=results):
+        attempted = getattr(metric, "targets_attempted", None)
+        if (
+            metric.status == ScannerStatus.SKIPPED.value
+            and isinstance(attempted, int)
+            and not isinstance(attempted, bool)
+            and attempted == 0
+        ):
+            names.append(metric.scanner_name)
+    return names
+
+
+#: How many ignore_paths patterns the nothing-to-scan message shows.
+_IGNORE_PATTERNS_SHOWN = 3
+
+
+def nothing_to_scan_message(
+    results: Optional[AshAggregatedResults], names: List[str]
+) -> str:
+    """Why a run whose scanners all had nothing to scan exits 1, and the remedy.
+
+    Names global_settings.ignore_paths when the recorded config sets it, since
+    ignored paths are left out of what each scanner reads and so can leave it
+    nothing. The patterns may come from a config in the scanned tree, so each is
+    shown with its control characters escaped.
+    """
+    message = (
+        f"No selected scanner had a file to scan: {', '.join(names)} "
+        f"{'was' if len(names) == 1 else 'were'} SKIPPED with nothing to scan, so "
+        "this run has shown the target to be neither clean nor dirty."
+    )
+    config = getattr(results, "ash_config", None)
+    settings = getattr(config, "global_settings", None)
+    patterns = [
+        str(getattr(entry, "path", entry))
+        for entry in (getattr(settings, "ignore_paths", None) or [])
+    ]
+    if patterns:
+        shown = ", ".join(
+            repr(inert_text(pattern)) for pattern in patterns[:_IGNORE_PATTERNS_SHOWN]
+        )
+        if len(patterns) > _IGNORE_PATTERNS_SHOWN:
+            shown += f" and {len(patterns) - _IGNORE_PATTERNS_SHOWN} more"
+        message += (
+            f" The config's global_settings.ignore_paths ({shown}) leaves every "
+            "path it matches out of what the scanners read, which can leave them "
+            "nothing to scan; narrow it to have those files scanned."
+        )
+    return message + (
+        " To accept a run that scanned nothing, set fail_on_incomplete_scanners: "
+        "false or pass --no-fail-on-incomplete-scanners."
+    )
+
+
 def _partial_coverage(metric) -> tuple[int, int] | None:
     """``(attempted, failed)`` when *metric* lost some of its input, else None.
 
@@ -3339,6 +3407,14 @@ def _compute_exit_code(
         # the assertion the individual shards are excused from. scan_incompleteness
         # applies that exemption, from the shard fields passed to it above.
         if incompleteness.no_scanner_ran:
+            # The selected scanners all had nothing to scan (each SKIPPED with a
+            # count of 0): say that, rather than suggest a selection mistake.
+            nothing_to_scan = scanners_with_nothing_to_scan(results)
+            if nothing_to_scan:
+                logging.getLogger(__name__).error(
+                    "%s", nothing_to_scan_message(results, nothing_to_scan)
+                )
+                return 1
             logging.getLogger(__name__).error(
                 "Scan ran no scanners: %s. Every scanner was skipped, so this run "
                 "has shown the target to be neither clean nor dirty -- most often a "

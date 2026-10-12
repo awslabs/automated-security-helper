@@ -1554,8 +1554,11 @@ class AshConfig(BaseModel):
             description=(
                 "Whether to exit with a non-zero code when a selected scanner did "
                 "not complete -- status ERROR (ran and failed) or MISSING "
-                "(dependencies unavailable, never ran). SKIPPED scanners are not "
-                "selected and never trip this. Independent of fail_on_findings: "
+                "(dependencies unavailable, never ran). A SKIPPED scanner, one not "
+                "selected or one with nothing of its kind to scan, does not trip "
+                "this by itself, but a run in which every scanner is SKIPPED, such "
+                "as one where no selected scanner had a file to scan, exits 1 while "
+                "this is on. Independent of fail_on_findings: "
                 "one answers 'was anything found', this one answers 'did what I "
                 "asked for actually run'. Selects on the scanner's status, so it "
                 "covers only a failure that reached that status. Defaults to True, "

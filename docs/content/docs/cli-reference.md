@@ -1474,6 +1474,25 @@ how sharding divides work between executors: each shard excludes the scanners it
 siblings own, and those land as `SKIPPED`. Gating on `SKIPPED` would fail every
 shard of a healthy sharded scan.
 
+A run in which every scanner is `SKIPPED` still exits 1, because it scanned
+nothing. A scanner with nothing of its kind to scan is `SKIPPED` too, so this is
+also what happens when no selected scanner had a file to scan: a scan whose config
+ignores every file, or `--scanners bandit` on a tree with no Python file. The
+error says so:
+
+```console
+$ ash scan --scanners detect-secrets
+ERROR    No selected scanner had a file to scan: detect-secrets was SKIPPED with nothing to scan, so this run has shown the target to be neither clean nor dirty. The config's global_settings.ignore_paths ('**') leaves every path it matches out of what the scanners read, which can leave them nothing to scan; narrow it to have those files scanned. To accept a run that scanned nothing, set fail_on_incomplete_scanners: false or pass --no-fail-on-incomplete-scanners.
+```
+
+The `ignore_paths` sentence appears only when the config sets `ignore_paths`. A run
+whose scanners were all `SKIPPED` for another reason, such as `--scanners` naming
+a scanner this platform does not support, reports `Scan ran no scanners` with the
+list of scanners and their statuses.
+
+`ash merge` reaches the same verdict over the union of its shards. With
+`--no-fail-on-incomplete-scanners` such a run exits 0.
+
 Converters count too. A notebook nbconvert could not convert (it exited non-zero,
 timed out or wrote no output) and a `.zip`, `.tar` or `.gz` file that is not an
 archive Python can read are recorded under `converter_results.<name>.failed_inputs`,
