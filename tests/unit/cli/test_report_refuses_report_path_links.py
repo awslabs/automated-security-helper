@@ -95,6 +95,52 @@ def test_a_link_at_a_file_the_reporter_writes_refuses_the_command(tmp_path):
     assert link.is_symlink()
 
 
+def test_a_companion_name_outside_reports_refuses_the_command(tmp_path, monkeypatch):
+    """In this process, with a reporter that declares such a name itself.
+
+    A scan refuses it before any reporter writes; ``ash report`` used to run the
+    reporter, which then could not write that file, and exit 0.
+    """
+    import typer
+
+    from automated_security_helper.cli import report as report_cli
+    from tests.unit.core.phases.test_companion_file_names_refuse_the_run import (
+        ESCAPING,
+        _CompanionEscaper,
+    )
+
+    ran = []
+
+    class _Escaper(_CompanionEscaper):
+        def report(self, model):
+            ran.append(True)
+            return super().report(model)
+
+    output = _output_with_results(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(report_cli, "load_plugins", lambda **kwargs: None)
+    monkeypatch.setattr(
+        report_cli.ash_plugin_manager,
+        "plugin_modules",
+        lambda plugin_type=None, **kwargs: [_Escaper],
+    )
+    printed = []
+    monkeypatch.setattr(
+        report_cli, "print", lambda *args, **kwargs: printed.append(args)
+    )
+
+    with pytest.raises(typer.Exit) as exited:
+        report_cli.report_command(
+            report_format="companion-escaper", output_dir=str(output)
+        )
+
+    assert exited.value.exit_code == 1
+    text = " ".join(str(arg) for args in printed for arg in args)
+    assert repr(ESCAPING) in text and "is not a file in" in text, text
+    assert ran == []
+    assert not list(tmp_path.rglob("companion-escape.md"))
+
+
 def test_a_link_at_a_name_the_reporter_does_not_write_is_not_examined(tmp_path):
     """``ash report --format sarif`` writes nothing in reports/, so a link there is no matter."""
     output = _output_with_results(tmp_path)

@@ -901,8 +901,13 @@ class AshAggregatedResults(BaseModel):
         if not self.scanner_results:
             self._populate_final_metrics()
 
-        report_dir = output_dir.joinpath("reports")
-        report_dir.mkdir(parents=True, exist_ok=True)
+        # Refused rather than created through when it is a link, which it can have
+        # become since the run set it up (utils/report_path_links.py).
+        from automated_security_helper.utils.report_path_links import (
+            ensure_reports_dir,
+        )
+
+        ensure_reports_dir(output_dir.joinpath("reports"))
 
         # Save aggregated results as JSON. Atomically, because this file's existence is
         # what marks the scan complete and get_scan_progress parses it while the scan is

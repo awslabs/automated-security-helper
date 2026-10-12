@@ -276,3 +276,59 @@ def test_a_per_project_reporter_not_requested_is_not_examined(tmp_path):
 
     assert len(_Orchestrator.built) == 2
     assert result.report_outcome is not None
+
+
+@pytest.mark.parametrize(
+    "behaviour",
+    [ReporterWorkspaceBehaviour.MERGED, ReporterWorkspaceBehaviour.PER_PROJECT],
+    ids=["merged", "per-project"],
+)
+def test_a_companion_name_outside_reports_refuses_before_any_project(
+    tmp_path, behaviour
+):
+    """Not only when the report step starts, after every project was scanned."""
+    from tests.unit.core.phases.test_companion_file_names_refuse_the_run import (
+        ESCAPING,
+        _CompanionEscaper,
+    )
+
+    class _Escaper(_CompanionEscaper):
+        workspace_behaviour = behaviour
+
+    with pytest.raises(ASHValidationError, match=re.escape(repr(ESCAPING))):
+        _run(tmp_path, extra_reporters=[_Escaper])
+
+    assert _Orchestrator.built == []
+
+
+def test_the_workspace_report_step_refuses_a_dangling_reports_dir(tmp_path):
+    """Refused, rather than failing with FileExistsError when it creates reports/."""
+    from automated_security_helper.utils.report_path_links import (
+        ReportPathLinkRefused,
+    )
+    from automated_security_helper.workspace.aggregation import WorkspaceAggregator
+    from automated_security_helper.workspace.reporting import (
+        REPORTS_DIR_NAME,
+        emit_workspace_reports,
+    )
+
+    root = tmp_path / "ws"
+    root.mkdir()
+    plan = WorkspacePlan(
+        workspace_file=(root / "fixture.code-workspace").as_posix(),
+        workspace_root=root.as_posix(),
+        projects=[],
+    )
+    output_dir = tmp_path / "out"
+    results_path = WorkspaceAggregator(plan=plan, output_dir=output_dir).write(
+        exit_code=0, wall_clock_seconds=0.1
+    )
+    reports = output_dir / REPORTS_DIR_NAME
+    if reports.exists():
+        reports.rmdir()
+    reports.symlink_to(tmp_path / "nothing", target_is_directory=True)
+
+    with pytest.raises(ReportPathLinkRefused):
+        emit_workspace_reports(
+            plan=plan, output_dir=output_dir, results_path=results_path
+        )

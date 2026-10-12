@@ -860,7 +860,10 @@
   `companion_file_names()`. The check runs when the report phase starts, so it covers
   `ash scan` (including `--use-existing`), `ash merge` and MCP scans, whose error
   message now carries the reason; `ash report` checks the files the chosen reporter
-  writes itself. A workspace run is refused before any project is scanned, and again
+  writes itself, and refuses one whose name is not a file in `reports/`. A
+  `reports/` that becomes a link while a run is under way is refused where the run
+  creates it again (the scan phase's results write included), rather than failing
+  with a `FileExistsError`. A workspace run is refused before any project is scanned, and again
   when its report step starts if a link appeared in the meantime. A link at
   `reports/` itself, to a directory or dangling, is refused the same way in every
   mode, before ASH creates or clears anything there, rather than failing with a

@@ -34,6 +34,7 @@ from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.utils.log import get_logger
 from automated_security_helper.utils.report_path_links import (
     refuse_linked_report_paths,
+    refuse_report_names_outside,
 )
 
 
@@ -277,12 +278,16 @@ def report_command(
                 config=plugin_config,
             )
         # The report goes to stdout, but a reporter that writes files of its own
-        # writes them to the reports directory. A link at one of them refuses the
-        # command before the reporter runs; the handler below prints why.
-        refuse_linked_report_paths(
+        # writes them to the reports directory. A name among them that is not a file
+        # there, or a link at one of them, refuses the command before the reporter
+        # runs, as a scan refuses it; the handler below prints why.
+        companions = reporter_companion_file_names(reporter_plugin)
+        refuse_report_names_outside(
             output_dir_path.joinpath("reports"),
-            reporter_companion_file_names(reporter_plugin),
+            [],
+            [(report_format, name) for name in companions],
         )
+        refuse_linked_report_paths(output_dir_path.joinpath("reports"), companions)
         report_content = reporter_plugin.report(model)
         if report_content is None:
             # `report` is annotated `-> str | None`, and a reporter returns None

@@ -522,9 +522,11 @@ class ASHScanOrchestrator(BaseModel):
             )
             self.output_dir.mkdir(parents=True, exist_ok=True)
 
-            # If we're using existing results, only ensure the reports directory exists
+            # If we're using existing results, only ensure the reports directory
+            # exists. A plain mkdir: a link there was refused at the top of this
+            # method, and the existing-results load refuses one made since.
             if self.existing_results_path and self.existing_results_path.exists():
-                ensure_reports_dir(self.output_dir.joinpath("reports"))
+                self.output_dir.joinpath("reports").mkdir(parents=True, exist_ok=True)
             else:
                 # Otherwise, set up all working directories
                 for working_dir in ["analysis", "reports", "scanners", "converted"]:
