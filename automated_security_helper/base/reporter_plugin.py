@@ -35,17 +35,21 @@ unprepared reporter a shape it has never seen and trusts it. ``UNSUPPORTED`` was
 rejected because it would fail an entire workspace run for any external plugin.
 """
 
+import threading
 from abc import abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Annotated, ClassVar, Generic, Iterable, TypeVar
+from typing import Annotated, ClassVar, Generic, Iterable, Set, TypeVar
 from typing_extensions import Self
 
 from pydantic import Field, model_validator
 
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.plugin_base import PluginBase
-from automated_security_helper.base.plugin_config import PluginConfigBase
+from automated_security_helper.base.plugin_config import (
+    PluginConfigBase,
+    plugin_config_key,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -189,6 +193,60 @@ def off_host_reporter_refused(reporter_class: type, plugin_config: object) -> bo
         return False
     return not (
         isinstance(plugin_config, dict) and plugin_config.get("enabled") is True
+    )
+
+
+#: Config keys of the off-host reporters already named by
+#: :func:`warn_off_host_section_without_enabled` in this process. A run reads a
+#: reporter's section more than once (each workspace project's report phase reads
+#: the same one), and one section should produce one warning.
+_UNENABLED_SECTIONS_WARNED: Set[str] = set()
+_UNENABLED_SECTIONS_LOCK = threading.Lock()
+
+
+def reset_unenabled_off_host_section_warnings() -> None:
+    """Forget which reporters were already named (tests)."""
+    with _UNENABLED_SECTIONS_LOCK:
+        _UNENABLED_SECTIONS_WARNED.clear()
+
+
+def _sets_something(value: object) -> bool:
+    return value not in (None, "", {}, [])
+
+
+def warn_off_host_section_without_enabled(
+    reporter_class: type, plugin_config: object
+) -> None:
+    """Warn, once per process, that an off-host reporter's section leaves it off.
+
+    The AWS reporters ship ``enabled: false``. A config written for a release in
+    which they shipped on sets their options and no ``enabled``, so it now uploads
+    nothing; this names the reporter and the key that turns it on. It changes
+    nothing: the reporter still does not run, so a section in the scanned
+    repository's own config gains nothing from it. Only the reporter's config
+    key is logged, never an option value (a bucket name, an account id).
+
+    Call it where an off-host reporter that the run would otherwise use is left
+    out because :func:`off_host_reporter_refused` says so. ``plugin_config`` is
+    what ``AshConfig.get_plugin_config`` returns: a section with ``enabled`` in
+    it (true or false), or with nothing set, is not named.
+    """
+    if getattr(reporter_class, "sends_off_host", False) is not True:
+        return
+    if not isinstance(plugin_config, dict) or "enabled" in plugin_config:
+        return
+    if not any(_sets_something(value) for value in plugin_config.values()):
+        return
+    key = plugin_config_key(reporter_class)
+    with _UNENABLED_SECTIONS_LOCK:
+        if key in _UNENABLED_SECTIONS_WARNED:
+            return
+        _UNENABLED_SECTIONS_WARNED.add(key)
+    ASH_LOGGER.warning(
+        f"Reporter '{key}' sends findings off the host and is disabled by default. "
+        "Its config section sets options but not 'enabled', so it does not run. "
+        f"To run it, set reporters.{key}.enabled: true in the operator's config, or "
+        f"pass --config-overrides reporters.{key}.enabled=true."
     )
 
 

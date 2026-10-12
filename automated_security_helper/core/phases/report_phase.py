@@ -9,6 +9,7 @@ from automated_security_helper.base.reporter_plugin import (
     off_host_reporter_refused,
     reporter_format_name,
     reporter_matches_requested_formats,
+    warn_off_host_section_without_enabled,
 )
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -292,10 +293,18 @@ class ReportPhase(EnginePhase):
                     config=plugin_config,
                 )
                 all_reporter_instances.append(plugin_instance)
-                if off_host_reporter_refused(
-                    plugin_class, plugin_config
-                ) and not _disable(plugin_instance):
-                    off_host_refused.add(id(plugin_instance))
+                if off_host_reporter_refused(plugin_class, plugin_config):
+                    # A section with options and no enabled is a config written
+                    # for when these reporters shipped on: name it, if the run
+                    # would otherwise use the reporter.
+                    if reporter_matches_requested_formats(
+                        plugin_instance, output_formats
+                    ):
+                        warn_off_host_section_without_enabled(
+                            plugin_class, plugin_config
+                        )
+                    if not _disable(plugin_instance):
+                        off_host_refused.add(id(plugin_instance))
             except Exception as e:
                 ASH_LOGGER.error(
                     f"Error creating reporter {getattr(plugin_class, '__name__', 'Unknown')}: {e}"

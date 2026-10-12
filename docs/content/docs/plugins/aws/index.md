@@ -34,6 +34,10 @@ reporters.<name>.enabled=true`.
   none of them is an AWS reporter, so a scan that passes it neither checks nor
   runs any AWS reporter. A reporter's dependency check (STS, Security Hub's
   `DescribeHub`, Bedrock's model list) runs only for a reporter the scan will run.
+- A section that sets a reporter's options but not `enabled`, as a config written
+  when these reporters were on by default does, leaves the reporter off. A scan
+  or `ash merge` that would otherwise run it logs one warning naming the reporter
+  and the key to set; the warning names no option value and changes nothing.
 - `ash report --format <name>` refuses an AWS reporter that is not enabled, and
   exits 1 with the setting to change.
 - `ash merge` runs an AWS reporter only when the operator's own `--config`

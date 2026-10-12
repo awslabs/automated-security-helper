@@ -150,7 +150,10 @@ from rich.markup import escape
 
 from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.base.reporter_plugin import off_host_reporter_refused
+from automated_security_helper.base.reporter_plugin import (
+    off_host_reporter_refused,
+    warn_off_host_section_without_enabled,
+)
 
 # Imported at module scope, and not lazily inside the functions that need it,
 # because importing this module is what calls AshAggregatedResults.model_rebuild().
@@ -1538,6 +1541,15 @@ def merge_command(
     )
     for notice in notices:
         logger.warning(notice)
+    # The off-host reporters run only when no format is requested (below), so
+    # only then is an operator section that sets options but no enabled named.
+    if not parsed_formats:
+        for reporter_class in ash_plugin_manager.plugin_modules(plugin_type="reporter"):
+            if reporter_class in off_host_reporters:
+                continue
+            warn_off_host_section_without_enabled(
+                reporter_class, _section(operator_config, reporter_class)
+            )
 
     # ReportPhase writes reports/ash.<extension> for every enabled reporter, and
     # its progress display is used unconditionally, so a display is supplied with
