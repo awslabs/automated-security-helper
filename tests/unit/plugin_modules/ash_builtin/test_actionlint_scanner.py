@@ -547,6 +547,31 @@ def test_global_ignore_paths_are_respected(repo, monkeypatch, on_path):
     assert argv[argv.index("--") + 1 :] == [".github/workflows/clean.yml"]
 
 
+@pytest.mark.parametrize("pattern", [".github/workflows/", "**/.github/"])
+def test_an_ignore_path_ending_in_a_slash_leaves_out_what_is_inside(repo, pattern):
+    """An ignore path ending in ``/`` names what is inside that directory, as every
+    other place ASH matches an ignore path reads it (``ignore_path_matches``)."""
+    scanner = _scanner(repo)
+    ignores = [IgnorePathWithReason(path=pattern, reason="t")]
+
+    assert scanner._workflow_files(repo, "source", []) == [
+        ".github/workflows/clean.yml",
+        ".github/workflows/vulnerable.yml",
+    ]
+    assert scanner._workflow_files(repo, "source", ignores) == []
+
+
+def test_an_ignore_path_ending_in_a_slash_keeps_a_file_of_that_name(repo):
+    """``clean.yml/`` names a directory, so the workflow file clean.yml is kept."""
+    scanner = _scanner(repo)
+    ignores = [IgnorePathWithReason(path=".github/workflows/clean.yml/", reason="t")]
+
+    assert scanner._workflow_files(repo, "source", ignores) == [
+        ".github/workflows/clean.yml",
+        ".github/workflows/vulnerable.yml",
+    ]
+
+
 def test_gitignore_is_respected(repo, monkeypatch, on_path):
     (repo / ".gitignore").write_text(".github/workflows/vulnerable.yml\n")
     scanner = _scanner(repo)

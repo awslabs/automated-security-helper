@@ -2916,7 +2916,8 @@
   `--skip-path`, and semgrep and opengrep with `--exclude=<name>` for a name
   nothing else has. cfn-nag, cdk-nag, npm-audit, cfn-lint and cfn-guard leave the
   ignored files out of the scan set they read, as actionlint and zizmor already
-  did. A semgrep or opengrep scan whose every file is ignored is `SKIPPED`, not
+  did; those two now also read an ignore path ending in `/` as the files inside
+  that directory, as every other scanner does. A semgrep or opengrep scan whose every file is ignored is `SKIPPED`, not
   `ERROR`. gitleaks has no option that leaves out a path, so it still reads the
   ignored files, and ASH drops what it finds there. snyk-code, which has no such
   option either and uploads what it reads, refuses

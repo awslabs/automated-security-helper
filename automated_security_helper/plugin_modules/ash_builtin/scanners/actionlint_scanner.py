@@ -198,7 +198,7 @@ from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.scan_targets import scan_targets
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.subprocess_utils import path_independent_dirs
-from automated_security_helper.utils.suppression_matcher import file_path_matches
+from automated_security_helper.utils.suppression_matcher import ignore_path_matches
 from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 
 #: The version the severity mapping below was written against.
@@ -843,9 +843,10 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             # Vendored dependencies and virtualenvs, which zizmor skips too.
             if _KNOWN_IGNORED_DIRS.intersection(PurePosixPath(rel).parts[:-1]):
                 continue
-            # Before the checks below, which warn and read the file.
+            # Before the checks below, which warn and read the file. Matched as
+            # every ignore path is, so one ending in "/" names what is inside.
             if any(
-                file_path_matches(rel, ignore.path) for ignore in global_ignore_paths
+                ignore_path_matches(rel, ignore.path) for ignore in global_ignore_paths
             ):
                 continue
             # A link whose target is missing, or that loops, is a file actionlint

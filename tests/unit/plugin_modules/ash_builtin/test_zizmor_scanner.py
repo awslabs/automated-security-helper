@@ -353,6 +353,39 @@ def test_global_ignore_paths_remove_inputs(repo):
     ]
 
 
+@pytest.mark.parametrize(
+    "pattern, removed",
+    [
+        ("actions/", ("actions/",)),
+        ("**/greet/", ("actions/greet/",)),
+        (".github/", (".github/",)),
+    ],
+)
+def test_an_ignore_path_ending_in_a_slash_removes_what_is_inside(
+    repo, pattern, removed
+):
+    """An ignore path ending in ``/`` names what is inside that directory, as every
+    other place ASH matches an ignore path reads it (``ignore_path_matches``)."""
+    scanner = _scanner(repo)
+    inputs = scanner._collect_inputs(
+        repo, "source", [IgnorePathWithReason(path=pattern, reason="test")]
+    )
+    assert _relative(inputs, repo) == [
+        p for p in EXPECTED_INPUTS if not p.startswith(removed)
+    ]
+
+
+def test_an_ignore_path_ending_in_a_slash_keeps_a_file_of_that_name(repo):
+    """``other/action.yml/`` names a directory, so the file other/action.yml is kept."""
+    scanner = _scanner(repo)
+    inputs = scanner._collect_inputs(
+        repo,
+        "source",
+        [IgnorePathWithReason(path="other/action.yml/", reason="test")],
+    )
+    assert _relative(inputs, repo) == EXPECTED_INPUTS
+
+
 def _symlink_or_skip(link: Path, target: Path) -> None:
     try:
         link.symlink_to(target, target_is_directory=target.is_dir())

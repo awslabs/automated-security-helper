@@ -158,7 +158,7 @@ from automated_security_helper.utils.subprocess_utils import (
     find_executable,
     run_command,
 )
-from automated_security_helper.utils.suppression_matcher import file_path_matches
+from automated_security_helper.utils.suppression_matcher import ignore_path_matches
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 from automated_security_helper.utils.process_env import snapshot_environ
 
@@ -821,8 +821,10 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 if candidate.is_relative_to(source_abs)
                 else candidate.as_posix()
             )
+            # Matched as every ignore path is, so one ending in "/" names what is
+            # inside.
             if any(
-                file_path_matches(source_relative, ignore.path)
+                ignore_path_matches(source_relative, ignore.path)
                 for ignore in global_ignore_paths
             ):
                 ASH_LOGGER.debug(
