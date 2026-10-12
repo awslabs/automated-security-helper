@@ -964,8 +964,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
-        # Per target; see ScannerPluginBase.scan().
+        # Per target; see ScannerPluginBase.scan(). targets_attempted is the number
+        # of files given to detect-secrets, set below; None until then (no claim).
         self.exit_code = 0
+        self.targets_attempted: Optional[int] = None
         tool_component = ToolComponent(
             name="detect-secrets",
             version=self.tool_version,
@@ -1208,6 +1210,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         f"Filtered {original_count - len(scannable)} files using global_ignore_paths"
                     )
 
+            # Nothing to scan is SKIPPED (targets_attempted 0), not PASSED.
+            self.targets_attempted = len(scannable)
             if len(scannable) == 0:
                 message = f"There were no scannable files found in target '{target}'"
                 self._plugin_log(

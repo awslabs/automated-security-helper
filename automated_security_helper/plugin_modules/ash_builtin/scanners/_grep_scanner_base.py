@@ -19,7 +19,17 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import ClassVar, Generic, List, Literal, Optional, Tuple, TypeVar, final
+from typing import (
+    Any,
+    ClassVar,
+    Generic,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    TypeVar,
+    final,
+)
 
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -29,6 +39,7 @@ from automated_security_helper.core.constants import ASH_ASSETS_DIR
 from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import (
+    IgnorePathWithReason,
     ToolExtraArg,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -378,6 +389,26 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     # is required here.
     # ---------------------------------------------------------------
 
+    def scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
+        config: Any = None,
+        *args,
+        **kwargs,
+    ) -> Any:
+        """The template scan, with this target's scanned-file count reset first.
+
+        ``targets_attempted`` is set from the tool's output (_post_process_sarif)
+        and read by the executor after every target, so a target that returns
+        before the tool runs (an empty directory) must not keep the last one's.
+        """
+        self.targets_attempted: Optional[int] = None
+        return super().scan(
+            target, target_type, global_ignore_paths, config, *args, **kwargs
+        )
+
     def _execute_scan(
         self,
         target: Path,
@@ -423,6 +454,117 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         # directories, and then it leaves out the whole target.
         final_args = self._resolve_arguments(target=target, results_file=results_file)
 
+        # The scanned and skipped paths, read after the run (_post_process_sarif).
+        # Not in patterns mode, which writes its JSON results instead of SARIF.
+        if not getattr(getattr(self.config, "options", None), "patterns", None):
+            paths_file = target_results_dir.joinpath(
+                f"{self.__class__.__name__}.paths.json"
+            )
+            paths_file.unlink(missing_ok=True)
+            head = [self.command, *self.subcommands]
+            insert_at = len(head) if final_args[: len(head)] == head else 1
+            final_args[insert_at:insert_at] = [
+                f"{_PATHS_OUTPUT_FLAG}={paths_file.as_posix()}",
+                "--verbose",
+            ]
+
         env_vars = self.extra_subprocess_env()
         subprocess_env = {**snapshot_environ(), **env_vars} if env_vars else None
         return final_args, results_file, subprocess_env
+
+    def _post_process_sarif(self, sarif_report, final_args: List[str], target: Path):
+        """Record how many files the tool scanned, and refuse a scan of none.
+
+        semgrep 1.180.0 and opengrep 1.30.2 write ``paths.scanned`` to
+        ``--json-output``, and with ``--verbose`` also ``paths.skipped``, each with
+        its reason (measured). The count becomes ``targets_attempted``. None scanned
+        while files were skipped by ``--exclude`` (``cli_exclude_flags_match``) means
+        the patterns left out every file the tool found, so the scan says nothing
+        about them: that is an error, not a PASSED with no findings. None scanned and
+        none skipped that way means nothing below the target is in a language the
+        rules cover, which the executor grades SKIPPED (``targets_attempted`` 0). An
+        unreadable or absent file leaves the count unset (no claim).
+
+        Raises:
+            ScannerError: When ``--exclude`` left out every file the tool found.
+        """
+        paths = _read_paths_output(final_args)
+        if paths is not None:
+            scanned = paths.get("scanned")
+            skipped = paths.get("skipped")
+            scanned = scanned if isinstance(scanned, list) else []
+            skipped = skipped if isinstance(skipped, list) else []
+            if scanned:
+                self.targets_attempted = len(scanned)
+            else:
+                excluded = [
+                    entry
+                    for entry in skipped
+                    if isinstance(entry, dict)
+                    and entry.get("reason") == "cli_exclude_flags_match"
+                ]
+                if excluded:
+                    raise ScannerError(
+                        f"{self.command} scanned no file below "
+                        f"{Path(target).as_posix()}: its --exclude patterns left out "
+                        f"all {len(excluded)} files it found, so its result says "
+                        "nothing about them."
+                    )
+                self.targets_attempted = 0
+                reasons = sorted(
+                    {
+                        str(entry.get("reason"))
+                        for entry in skipped
+                        if isinstance(entry, dict) and entry.get("reason")
+                    }
+                )
+                self._plugin_log(
+                    f"{self.command} scanned no file below "
+                    f"{Path(target).as_posix()}: none is in a language its rules "
+                    "cover"
+                    + (f" (skipped: {', '.join(reasons)})" if reasons else "")
+                    + ".",
+                    level=logging.INFO,
+                )
+        return super()._post_process_sarif(sarif_report, final_args, target)
+
+
+#: The flag the scanned-paths JSON is written with (semgrep and opengrep alike).
+_PATHS_OUTPUT_FLAG = "--json-output"
+
+#: The largest scanned-paths JSON read.
+_PATHS_OUTPUT_READ_LIMIT = 64 * 1024 * 1024
+
+
+def _read_paths_output(final_args: List[str]) -> Optional[dict]:
+    """The ``paths`` object of the ``--json-output`` file named in ``final_args``.
+
+    None when no such flag was passed, or the file is missing, not a regular file,
+    larger than _PATHS_OUTPUT_READ_LIMIT, or not the JSON the tools write. Opened
+    without following a link at its name.
+    """
+    import json
+    import stat
+
+    prefix = f"{_PATHS_OUTPUT_FLAG}="
+    named = [arg[len(prefix) :] for arg in final_args if str(arg).startswith(prefix)]
+    if not named:
+        return None
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(named[-1], flags)
+    except OSError:
+        return None
+    try:
+        with os.fdopen(fd, "rb") as handle:
+            status = os.fstat(handle.fileno())
+            if (
+                not stat.S_ISREG(status.st_mode)
+                or status.st_size > _PATHS_OUTPUT_READ_LIMIT
+            ):
+                return None
+            data = json.loads(handle.read().decode("utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return None
+    paths = data.get("paths") if isinstance(data, dict) else None
+    return paths if isinstance(paths, dict) else None

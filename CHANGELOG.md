@@ -201,6 +201,15 @@
   outside every checkout keep the operator's rule and may be in an ops checkout. The
   warning for a refused path now ends "To keep a setting, move the file outside every
   git checkout, or pass the setting with --config-overrides."
+- **semgrep, opengrep and bandit report PASSED only when they scanned a file.**
+  Each now records how many files it scanned: semgrep and opengrep from the
+  `--json-output` they are given (with `--verbose`, for the skipped paths), bandit
+  from the per-file metrics in its SARIF. None scanned because the `--exclude`
+  patterns (semgrep, opengrep) left out every file the tool found, or while bandit
+  had Python files it was not told to exclude, is `ERROR`, naming the count. None
+  scanned with nothing to scan, such as bandit on a tree with no Python file or
+  with all of it excluded on purpose, or detect-secrets with every file of the
+  scan set ignored, is `SKIPPED`. Both used to be `PASSED` with no findings.
 - **A scan uses only the plugin modules it names.** A scan's converters,
   scanners, reporters and event handlers are ASH's built-in ones plus those of the
   modules its own `ash_plugin_modules` and `--ash-plugin-modules` name. This holds in

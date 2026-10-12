@@ -1502,6 +1502,12 @@ those three `MISSING` while the six left-out scanners whose tools were present
 reported `SKIPPED` — the status depended on whether the tool happened to be
 installed rather than on what you asked for.
 
+A scanner that scanned no file is not `PASSED`. semgrep, opengrep and bandit record
+how many files they scanned. When their exclusions left out every file there was to
+scan (semgrep's and opengrep's `--exclude` patterns, or Python files bandit was not
+told to exclude but did not scan), the scanner is `ERROR` and the message gives the
+count; when there was nothing to scan, it is `SKIPPED`.
+
 Two more things worth knowing:
 
 - It takes precedence over `--fail-on-findings`. A run with both actionable

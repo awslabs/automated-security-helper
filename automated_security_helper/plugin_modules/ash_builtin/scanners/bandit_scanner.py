@@ -1,9 +1,10 @@
 """Module containing the Bandit security scanner implementation."""
 
+import fnmatch
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, ClassVar, List, Literal, Optional
+from typing import Annotated, Any, ClassVar, List, Literal, Optional
 
 from pydantic import Field, PrivateAttr
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -325,6 +326,26 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     # log at VERBOSE rather than INFO to keep the user-facing output clean.
     empty_target_log_level: ClassVar[int] = logging.VERBOSE
 
+    def scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
+        config: Any = None,
+        *args,
+        **kwargs,
+    ) -> Any:
+        """The template scan, with this target's scanned-file count reset first.
+
+        ``targets_attempted`` is set from bandit's SARIF (_record_scanned_files) and
+        read by the executor after every target, so a target that returns before
+        bandit runs (an empty directory) must not keep the last one's.
+        """
+        self.targets_attempted: Optional[int] = None
+        return super().scan(
+            target, target_type, global_ignore_paths, config, *args, **kwargs
+        )
+
     def _execute_scan(
         self,
         target: Path,
@@ -425,8 +446,64 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         final_args: List[str],
         target: Path,
     ) -> SarifReport:
-        """Mask any secret-shaped strings in the Bandit SARIF report."""
+        """Record how many files bandit scanned, and mask secret-shaped strings."""
+        self._record_scanned_files(sarif_report, final_args, target)
         return mask_secrets_in_sarif(sarif_report)
+
+    def _record_scanned_files(
+        self, sarif_report: SarifReport, final_args: List[str], target: Path
+    ) -> None:
+        """Set ``targets_attempted`` from the files bandit's SARIF lists.
+
+        bandit's SARIF carries ``run.properties.metrics``: ``_totals`` and one entry
+        per file it scanned. None listed while the target holds ``.py`` or ``.pyw``
+        files bandit was not told to exclude (matched as bandit 1.9.4 matches its
+        ``--exclude`` entries, by ``fnmatch`` or as a substring) means bandit
+        scanned none of them, and its result says nothing about them: an error, not
+        a PASSED with no findings. None listed and none there is SKIPPED
+        (``targets_attempted`` 0). No metrics leaves the count unset (no claim).
+
+        Raises:
+            ScannerError: When bandit scanned no file of the Python files there.
+        """
+        scanned = None
+        for run in sarif_report.runs or []:
+            properties = run.properties.model_dump() if run.properties else {}
+            metrics = properties.get("metrics")
+            if isinstance(metrics, dict):
+                scanned = (scanned or 0) + sum(1 for key in metrics if key != "_totals")
+        if scanned is None:
+            return
+        if scanned:
+            self.targets_attempted = scanned
+            return
+        prefix = "--exclude="
+        entries = [
+            entry
+            for arg in final_args
+            if str(arg).startswith(prefix)
+            for entry in str(arg)[len(prefix) :].split(",")
+            if entry
+        ]
+        root = Path(target).as_posix()
+        all_files: List[str] = []
+        file_links_leaving_tree(target, all_files=all_files)
+        python = [
+            f"{root}/{relative}"
+            for relative in all_files
+            if relative.endswith((".py", ".pyw"))
+        ]
+        unexcluded = [
+            path
+            for path in python
+            if not any(fnmatch.fnmatch(path, e) or e in path for e in entries)
+        ]
+        if unexcluded:
+            raise ScannerError(
+                f"bandit scanned no file below {root}, though {len(unexcluded)} Python "
+                "files there are not excluded, so its result says nothing about them."
+            )
+        self.targets_attempted = 0
 
 
 if __name__ == "__main__":
