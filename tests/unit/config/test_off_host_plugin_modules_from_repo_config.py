@@ -352,6 +352,13 @@ _NETWORK_MODULES = {
     "websockets",
     "xmlrpc",
 }
+#: Functions a network module above also holds that open no connection. An import
+#: that takes only these from it is not network use; any other name from the same
+#: module still is. url2pathname turns a file: URL into a local path:
+#: utils/ash_install.py reads ASH's own install location from pip's
+#: direct_url.json with it, and the gitlab-sast reporter and the suppression
+#: expiration checker reach that module through utils/symbol_spans' install hint.
+_CONNECTIONLESS_IMPORTS = {"urllib.request": {"url2pathname", "pathname2url"}}
 _PROCESS_MODULES = {
     "_posixsubprocess",
     "_winapi",
@@ -465,6 +472,9 @@ def _imports_and_calls(path: Path, package: str) -> Tuple[Set[str], Set[str]]:
                 parts = package.split(".")
                 parent = ".".join(parts[: len(parts) - node.level + 1])
                 base = f"{parent}.{base}" if base else parent
+            members = {alias.name for alias in node.names}
+            if members <= _CONNECTIONLESS_IMPORTS.get(base, set()):
+                continue
             names.add(base)
             names.update(f"{base}.{alias.name}" for alias in node.names)
         elif isinstance(node, ast.Call):
@@ -622,6 +632,10 @@ def test_the_walk_follows_shared_helpers_and_sees_processes(tmp_path):
     )
     (plugin / "low.py").write_text("from _socket import gethostbyname\nimport posix\n")
     (plugin / "native.py").write_text("import ctypes\n")
+    (plugin / "paths.py").write_text("from urllib.request import url2pathname\n")
+    (plugin / "fetch.py").write_text(
+        "from urllib.request import url2pathname, urlopen\n"
+    )
 
     reached = _reached("automated_security_helper.plugin_modules.probe.reporter", root)
 
@@ -639,6 +653,12 @@ def test_the_walk_follows_shared_helpers_and_sees_processes(tmp_path):
     assert native["dynamic"] == {
         "automated_security_helper.plugin_modules.probe.native"
     }
+    # A path conversion taken alone from a network module is not network use;
+    # any other name from that module still is.
+    paths = _reached("automated_security_helper.plugin_modules.probe.paths", root)
+    assert paths["network"] == set()
+    fetch = _reached("automated_security_helper.plugin_modules.probe.fetch", root)
+    assert fetch["network"] == {"automated_security_helper.plugin_modules.probe.fetch"}
 
 
 # Run in a subprocess: the report() of every built-in reporter outside
