@@ -29,11 +29,16 @@ def _no_operator_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
 
 
 def _marked_document() -> dict:
+    # A copy of the entry at each place: one object repeated would be dumped as
+    # a YAML alias, which ASH's config loader refuses.
     return {
-        "global_settings": {"ignore_paths": [_ENTRY], "suppressions": [_ENTRY]},
+        "global_settings": {
+            "ignore_paths": [dict(_ENTRY)],
+            "suppressions": [dict(_ENTRY)],
+        },
         "scanners": {
-            "bandit": {"options": {"excluded_paths": [_ENTRY]}},
-            "checkov": {"options": {"skip_path": [_ENTRY]}},
+            "bandit": {"options": {"excluded_paths": [dict(_ENTRY)]}},
+            "checkov": {"options": {"skip_path": [dict(_ENTRY)]}},
         },
     }
 

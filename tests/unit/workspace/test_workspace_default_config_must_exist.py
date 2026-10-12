@@ -52,8 +52,11 @@ def test_a_missing_default_config_is_refused_when_every_project_has_its_own(
 
 
 def test_control_an_existing_default_config_is_accepted(tmp_path):
-    workspace = _workspace(tmp_path, "api", with_own_config=True)
-    profile = tmp_path / "profile.yaml"
+    # The operator's default config outside the workspace root: one inside it is
+    # not the operator's, and is refused for that.
+    workspace = _workspace(tmp_path / "ws", "api", with_own_config=True)
+    profile = tmp_path / "ops" / "profile.yaml"
+    profile.parent.mkdir()
     profile.write_text("project_name: profile\n", encoding="utf-8")
 
     plan = resolve_workspace(workspace, default_config=profile)
