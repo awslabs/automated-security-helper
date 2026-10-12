@@ -186,10 +186,16 @@ def _run_escape(
     *,
     online: bool = False,
     output_in_source: "str | None" = None,
+    passwd_home_files: "Dict[str, Path] | None" = None,
 ) -> "tuple[Dict[str, str], Dict[str, str]]":
     """The probe's attempts, and what it found still working (``works``)."""
     outcomes, works, result = _scan(
-        tmp_path, listeners, mode, online=online, output_in_source=output_in_source
+        tmp_path,
+        listeners,
+        mode,
+        online=online,
+        output_in_source=output_in_source,
+        passwd_home_files=passwd_home_files,
     )
     assert outcomes is not None and works is not None, (
         f"the probe wrote no outcome (exit {result.returncode}). The scanner may have "
@@ -219,12 +225,15 @@ def _scan(
     online: bool = False,
     output_in_source: "str | None" = None,
     plant: "Callable[[Path], None] | None" = None,
+    passwd_home_files: "Dict[str, Path] | None" = None,
 ) -> "tuple[Dict[str, str] | None, Dict[str, str] | None, subprocess.CompletedProcess]":
     """Run the probe through a real scan.
 
     ``output_in_source`` puts the output directory at that path inside the source
     tree instead of beside it; ``plant`` is called with the source directory once
     it is built, to commit something into the tree before the scan.
+    ``passwd_home_files`` maps an attempt name to a file the caller planted in the
+    passwd entry's home; the probe tries to read each.
     """
     home = tmp_path / "home"
     (home / ".ssh").mkdir(parents=True)
@@ -288,6 +297,9 @@ def _scan(
             if Path("/dev/shm").is_dir()  # nosec B108 - existence check only
             else ""
         ),
+        "passwd_home_files": {
+            name: str(path) for name, path in (passwd_home_files or {}).items()
+        },
     }
     spec_file = tmp_path / "spec.json"
     spec_file.write_text(json.dumps(spec))
@@ -666,3 +678,102 @@ def test_an_unavailable_sandbox_reports_missing_and_never_runs_the_scanner(
     row = results["scanner_results"]["sandbox-escape"]
     assert row["status"] == "MISSING"
     assert not listeners.received
+
+
+def _passwd_home_to_plant_in(scan_home: Path) -> Path:
+    """The passwd entry's home, resolved, or a skip with the reason it is not usable.
+
+    Skipped: no passwd entry for this uid (or no pwd module); a pw_dir that is
+    empty or relative; one that resolves to "/"; one that is not a writable
+    directory; and one that is the scan's HOME or holds it, where planting would
+    test the HOME deny rather than the passwd one.
+    """
+    try:
+        import pwd
+
+        entry = pwd.getpwuid(os.getuid())
+    except (ImportError, KeyError) as error:
+        pytest.skip(f"no passwd entry for this uid: {type(error).__name__}")
+    if not entry.pw_dir or not os.path.isabs(entry.pw_dir):
+        pytest.skip(
+            f"the passwd entry's home is not an absolute path: {entry.pw_dir!r}"
+        )
+    home = Path(os.path.realpath(entry.pw_dir))
+    if home == Path("/"):
+        pytest.skip("the passwd entry's home is /")
+    if not home.is_dir() or not os.access(home, os.W_OK):
+        pytest.skip(f"the passwd entry's home is not a writable directory: {home}")
+    scan_home = Path(os.path.realpath(scan_home))
+    if home == scan_home or home in scan_home.parents:
+        pytest.skip(f"the passwd entry's home {home} is the scan's HOME or holds it")
+    return home
+
+
+@pytest.mark.parametrize("backend", ["off", *BACKENDS])
+def test_a_file_in_the_passwd_home_is_hidden_when_home_is_elsewhere(
+    tmp_path, listeners, backend, record_property
+):
+    """The scan's HOME is a directory of the test's own; the account's home is not.
+
+    A backend that hides only the directory HOME names leaves the passwd entry's
+    home readable: the real ~/.ssh and ~/.aws. Two files planted there, one at its
+    top and one in its .local/share (keyrings live there, and a tool in
+    ~/.local/bin is the usual way a policy path gets near it), have to stay
+    unreadable under every sandbox, and readable without one (the control, which
+    proves the attempts are real).
+
+    The files are written in a real home directory, so only in a job that opts in
+    on a runner thrown away with it (tests/utils/throwaway_runner.py); anywhere else
+    the test skips with the reason. Their absolute paths are printed and recorded as
+    test properties, so a run's log shows where they went, and they are removed,
+    with any directory made for them, whatever the outcome.
+    """
+    from tests.utils.throwaway_runner import passwd_home_write_refusal
+
+    refusal = passwd_home_write_refusal()
+    if refusal is not None:
+        pytest.skip(
+            f"plants files in the passwd home only in a throwaway job: {refusal}"
+        )
+    if backend != "off":
+        _require_backend(backend)
+    passwd_home = _passwd_home_to_plant_in(tmp_path / "home")
+    name = f".ash-sandbox-passwd-home-{uuid.uuid4().hex}.txt"
+    planted = {
+        "read_passwd_home": passwd_home / name,
+        "read_passwd_home_local_share": passwd_home / ".local" / "share" / name,
+    }
+    made: list = []
+    for attempt, path in planted.items():
+        print(f"passwd-home file ({attempt}): {path}")
+        record_property(attempt, str(path))
+    try:
+        for path in planted.values():
+            missing = [p for p in [path.parent, *path.parent.parents] if not p.exists()]
+            for directory in reversed(missing):
+                directory.mkdir()
+                made.append(directory)
+            path.write_text(CANARY)
+        outcomes, _works = _run_escape(
+            tmp_path, listeners, backend, passwd_home_files=planted
+        )
+    finally:
+        for path in planted.values():
+            path.unlink(missing_ok=True)
+        for directory in reversed(made):
+            # Left in place if something else has put a file there since.
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+
+    for attempt, path in planted.items():
+        outcome = outcomes[attempt]
+        if backend == "off":
+            assert outcome == "succeeded", (
+                f"the control could not read {path}: {outcome}"
+            )
+        else:
+            assert outcome.startswith(BLOCKED_BY), (
+                f"{backend} let the scanner read {path}: {outcome}"
+            )

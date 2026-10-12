@@ -950,6 +950,10 @@ jobs:
       - name: Run the sandbox escape and unit suites
         env:
           ASH_REQUIRE_SANDBOX_BACKENDS: ${{ matrix.require }}
+          # The escape suite may plant a file in this runner account's own home
+          # (the passwd entry's, not $HOME) and remove it: this job's runner is
+          # thrown away with it. tests/utils/throwaway_runner.py.
+          ASH_ESCAPE_TEST_WRITES_PASSWD_HOME: "1"
         run: |
           uv run pytest \
             tests/integration/sandbox \

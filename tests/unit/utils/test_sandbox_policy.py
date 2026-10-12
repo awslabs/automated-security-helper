@@ -3,6 +3,7 @@
 
 """The backend-neutral sandbox policy and the scope that decides when it applies."""
 
+import json
 import os
 import re
 import sys
@@ -28,6 +29,7 @@ from automated_security_helper.utils.sandbox.backends import (
     LANDLOCK_EXEC,
     BwrapBackend,
     FirejailBackend,
+    LandlockBackend,
     SandboxExecBackend,
     SpawnPlan,
 )
@@ -1033,6 +1035,30 @@ class TestHomeElsewhereThanThePasswdEntry:
         )
         assert allow > deny
 
+    def test_the_passwd_home_itself_on_path_is_not_readable_again(
+        self, layout, passwd_home, monkeypatch, tmp_path
+    ):
+        """The negative case: what the policy must not list stays behind the deny.
+
+        A PATH entry naming the passwd home is no tool directory. No allow after
+        that home's deny may name it, nor its .ssh, while the venv's bin beside it
+        is allowed again.
+        """
+        venv_bin = passwd_home / "work" / "venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        (passwd_home / ".ssh").mkdir()
+        monkeypatch.setenv("PATH", os.pathsep.join([str(passwd_home), str(venv_bin)]))
+        profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
+        lines = profile.splitlines()
+        deny = lines.index(f'(deny file-read* (subpath "{_as_argv(passwd_home)}"))')
+        after = [line for line in lines[deny + 1 :] if line.startswith("(allow")]
+
+        assert any(_as_argv(venv_bin) in line for line in after)
+        for hidden in (passwd_home, passwd_home / ".ssh"):
+            assert not [
+                line for line in after if f'(subpath "{_as_argv(hidden)}")' in line
+            ], hidden
+
     def test_one_home_changes_nothing(self, layout, monkeypatch, tmp_path):
         """Positive control: HOME is the passwd home, as on most hosts."""
         _fake_passwd_home(monkeypatch, layout.home)
@@ -1411,6 +1437,82 @@ def test_a_second_home(tmp_path):
     home.mkdir()
     other.mkdir()
     assert policy_module._distinct_home(home, other) == Path(os.path.realpath(other))
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="no backend runs on Windows")
+class TestBwrapAndLandlockGrantNothingInThePasswdHome:
+    """With HOME elsewhere, no bwrap or Landlock grant opens the passwd entry's home.
+
+    The plan-level stand-in for the escape suite's planted passwd-home files, which
+    are written only in a throwaway CI job. Both backends show only the paths the
+    policy lists. The passwd home here holds what a user's often does: a tool in
+    ~/bin and one in ~/.local/bin, with PATH naming the home itself and a
+    configuration directory in it, ~/.config/tool. No grant may be the passwd home
+    or hold it, and inside it only a bin directory may be granted: the home, its
+    ~/.local (keyrings in ~/.local/share) and ~/.config/tool must stay out. The
+    tool's own bin directory is granted, which shows the check reads the plan.
+    """
+
+    @pytest.fixture
+    def pw(self, tmp_path, monkeypatch):
+        home = tmp_path / "passwd-home"
+        for name in (".ssh", ".config/tool", ".local/bin", ".local/share/keyrings"):
+            (home / name).mkdir(parents=True)
+        (home / "bin").mkdir()
+        _fake_passwd_home(monkeypatch, home)
+        return home
+
+    @staticmethod
+    def _tool(directory):
+        """An executable that is not a script, so no interpreter is added."""
+        program = directory / "tool"
+        program.write_bytes(b"\x7fELF")
+        program.chmod(0o755)
+        return program
+
+    @staticmethod
+    def _granted(backend_class, layout, argv0):
+        backend = backend_class()
+        backend._executable = "/usr/bin/bwrap"
+        policy = _policy(layout, argv0=str(argv0))
+        plan = backend.plan([str(argv0)], {"PATH": "/usr/bin"}, policy)
+        try:
+            if backend_class is LandlockBackend:
+                document = json.loads(plan.argv[plan.argv.index("--policy") + 1])
+                paths = document["read_only"] + document["writable"]
+            else:
+                # bwrap's own options end at its first "--"; what follows is the
+                # command it runs, not a mount.
+                options = plan.argv[1 : plan.argv.index("--")]
+                paths = [a for a in options if a.startswith("/")]
+        finally:
+            plan.run_cleanup()
+        return {Path(p) for p in paths}
+
+    @pytest.mark.parametrize("tool_dir", ["bin", ".local/bin"])
+    @pytest.mark.parametrize("backend_class", [BwrapBackend, LandlockBackend])
+    def test_no_grant_opens_the_passwd_home(
+        self, layout, pw, monkeypatch, backend_class, tool_dir
+    ):
+        argv0 = self._tool(pw / tool_dir)
+        monkeypatch.setenv(
+            "PATH",
+            os.pathsep.join(
+                [str(pw), str(pw / ".config" / "tool"), str(argv0.parent), "/usr/bin"]
+            ),
+        )
+        granted = self._granted(backend_class, layout, argv0)
+        hidden = Path(_as_argv(pw))
+
+        assert Path(_as_argv(argv0.parent)) in granted
+        opening = sorted(
+            str(p)
+            for p in granted
+            if p == hidden
+            or p in hidden.parents
+            or (hidden in p.parents and p.name not in ("bin", "sbin", "Scripts"))
+        )
+        assert opening == [], opening
 
 
 class TestSandboxExecLeavesTheRealCacheUnwritten:

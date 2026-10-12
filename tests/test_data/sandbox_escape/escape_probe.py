@@ -38,6 +38,15 @@ def main() -> int:
             if spec["secret"] not in f.read():
                 raise RuntimeError("read something, but not the planted file")
 
+    def read_passwd_home(path):
+        # Planted in the passwd entry's home, which HOME does not name here.
+        def read():
+            with open(path, encoding="utf-8") as f:
+                if spec["secret"] not in f.read():
+                    raise RuntimeError("read something, but not the planted file")
+
+        return read
+
     def read_link_in_source(key):
         # A symlink committed in the source tree, read by its in-tree name: the
         # sandbox hides its target unless the target is on the read list.
@@ -202,6 +211,8 @@ def main() -> int:
         checks["unix_datagram_from_socketpair"] = unix_datagram_from_socketpair
     if spec.get("shm_file"):
         checks["write_dev_shm"] = write_dev_shm
+    for name, path in (spec.get("passwd_home_files") or {}).items():
+        checks[name] = read_passwd_home(path)
     for name, fn in checks.items():
         outcomes[name] = attempt(fn)
 
