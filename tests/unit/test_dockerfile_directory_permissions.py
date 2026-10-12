@@ -110,27 +110,49 @@ def _expand(word: str, env: Dict[str, str]) -> str:
     )
 
 
-def _commands(run_text: str) -> List[List[str]]:
-    """The simple commands in a RUN line, split on && ; || and ``then``/``fi``.
+#: Words that end one simple command and start the next.
+_SHELL_KEYWORDS = {"if", "then", "else", "elif", "fi", "do", "done", "while", "for"}
 
-    A command run through ``with-retry '<command>'`` or ``sh -c '<command>'`` is
-    parsed in its own right too, so a mode set inside one is seen.
+
+def _commands(run_text: str) -> List[List[str]]:
+    """The simple commands in a RUN line.
+
+    The whole line is split once, with shell punctuation as tokens of its own, so a
+    quoted argument holding ``&&`` or ``;`` stays one word; the words are then cut
+    at the operators (``&&``, ``||``, ``;``, ``|``, parentheses, redirections) and
+    at the shell keywords. A command run through ``with-retry '<command>'`` or
+    ``sh -c '<command>'`` is read the same way in its own right, so a mode set
+    inside one is seen. A line that cannot be split fails the test reading it: a
+    mode set in a line skipped would go unseen.
     """
-    commands = []
-    for part in re.split(r"&&|\|\||;|\bthen\b|\bfi\b|\bdo\b|\bdone\b", run_text):
-        try:
-            words = shlex.split(part)
-        except ValueError:
-            continue
-        if not words:
-            continue
-        commands.append(words)
-        if words[0] == "with-retry":
-            for inner in words[1:]:
-                commands.extend(_commands(inner))
-        elif words[0] in ("sh", "bash") and "-c" in words[1:-1]:
-            commands.extend(_commands(words[words.index("-c") + 1]))
-    return commands
+    lexer = shlex.shlex(run_text, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""  # ${NAME#prefix} is an expansion, not a comment
+    try:
+        tokens = list(lexer)
+    except ValueError as error:
+        raise AssertionError(
+            f"the reader cannot split this RUN text: {run_text!r} ({error})"
+        ) from error
+
+    commands: List[List[str]] = []
+    words: List[str] = []
+    for token in tokens + [";"]:
+        if set(token) <= set(lexer.punctuation_chars) or token in _SHELL_KEYWORDS:
+            if words:
+                commands.append(words)
+            words = []
+        else:
+            words.append(token)
+
+    nested = []
+    for command in commands:
+        if command[0] == "with-retry":
+            for inner in command[1:]:
+                nested.extend(_commands(inner))
+        elif command[0] in ("sh", "bash") and "-c" in command[1:-1]:
+            nested.extend(_commands(command[command.index("-c") + 1]))
+    return commands + nested
 
 
 def _grants_write_to_others(mode: str) -> bool:
@@ -343,6 +365,16 @@ def test_an_offline_image_keeps_its_database_root_owned(instructions):
         pytest.param("RUN chmod 777 /deps\n", "/deps", id="chmod"),
         pytest.param("RUN with-retry 'chmod -R 777 /deps'\n", "/deps", id="with-retry"),
         pytest.param('RUN sh -c "chmod o+w /deps"\n', "/deps", id="sh-c"),
+        # A quoted argument holding more than one command, as the Dockerfile's own
+        # with-retry arguments do.
+        pytest.param(
+            "RUN with-retry 'npm ci && chmod 777 /deps'\n",
+            "/deps",
+            id="with-retry-compound",
+        ),
+        pytest.param(
+            'RUN sh -c "true; chmod 777 /deps"\n', "/deps", id="sh-c-compound"
+        ),
         pytest.param("RUN install -d -m 777 /deps\n", "/deps", id="install-m"),
         pytest.param(
             "RUN install --mode=0777 tool /usr/bin/tool\n",
@@ -366,6 +398,12 @@ def test_the_parser_sees_every_way_to_set_a_mode(dockerfile, path):
     assert [
         (change.paths, _grants_write_to_others(change.mode)) for change in found
     ] == [([path], True)]
+
+
+def test_a_run_line_the_reader_cannot_split_fails_rather_than_being_skipped():
+    """A mode set in a line the reader skipped would go unseen."""
+    with pytest.raises(AssertionError, match="cannot split"):
+        _commands("chmod 777 /deps && echo 'unterminated")
 
 
 def _runs(instructions, stage: str) -> List[str]:
