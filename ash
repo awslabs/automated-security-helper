@@ -237,8 +237,14 @@ if [[ "${NO_RUN}" = "NO" && ( "${CONFIG_GIVEN}" = "YES" || -n "${CONFIG_PATH}" )
     *)
       # Mounted on its own, without the files it extends, so a config with an
       # extends entry would not resolve inside the container. Refused, as is every
-      # chain `ash --mode container` cannot mount whole.
-      if grep -Eq '(^|[{,])[[:space:]]*["'"'"']?extends["'"'"']?[[:space:]]*:' -- "${CONFIG_REAL}"; then
+      # chain `ash --mode container` cannot mount whole. This script cannot parse
+      # YAML, JSON or TOML, so it errs toward refusing: the key followed by ':' or
+      # '=' anywhere in the text with line breaks read as spaces (a JSON key and its
+      # ':' on two lines, TOML's '=', YAML's '? extends' key), and any quoted key
+      # holding a backslash, which may spell the name with an escape.
+      CONFIG_FLAT="$(tr '\r\n' '  ' < "${CONFIG_REAL}")"
+      if printf '%s' "${CONFIG_FLAT}" | grep -Eq '(^|[[:space:]{,])["'"'"']?extends["'"'"']?[[:space:]]*[:=]' \
+        || grep -Eq '"[^"]*\\[^"]*"[[:space:]]*:' -- "${CONFIG_REAL}"; then
         echo "ERROR: The config file '${CONFIG_PATH}' is outside the source directory and has an extends entry. ./ash mounts such a config on its own, without the files it extends. Run ash --mode container, which mounts the chain, or put the config inside the source directory." >&2
         exit 3
       fi

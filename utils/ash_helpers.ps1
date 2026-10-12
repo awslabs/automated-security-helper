@@ -300,8 +300,15 @@ function Invoke-ASH {
             else {
                 # Mounted on its own, without the files it extends, so a config with an
                 # extends entry would not resolve inside the container. Refused, as is
-                # every chain ash --mode container cannot mount whole.
-                if ((Get-Content -LiteralPath $configFull -Raw) -match '(?m)(^|[{,])\s*["'']?extends["'']?\s*:') {
+                # every chain ash --mode container cannot mount whole. Not parsed here,
+                # so this errs toward refusing: the key followed by ':' or '=' anywhere
+                # in the text with line breaks read as spaces (a JSON key and its ':'
+                # on two lines, TOML's '=', YAML's '? extends' key), and any quoted key
+                # holding a backslash, which may spell the name with an escape.
+                # Case-sensitive, as ASH reads the key.
+                $configText = [string](Get-Content -LiteralPath $configFull -Raw)
+                $configFlat = $configText -replace "[`r`n]", ' '
+                if (($configFlat -cmatch '(^|[\s{,])["'']?extends["'']?\s*[:=]') -or ($configText -cmatch '(?m)"[^"\r\n]*\\[^"\r\n]*"\s*:')) {
                     Stop-AshRefusal 3 "The config file '$Config' is outside the source directory and has an extends entry. Invoke-ASH mounts such a config on its own, without the files it extends. Run ash --mode container, which mounts the chain, or put the config inside the source directory."
                 }
                 $configInner = "/ash-config/" + (Split-Path -Leaf $configFull)

@@ -793,12 +793,20 @@ class TestAnOutsideConfigThatExtendsIsRefused:
         assert rc == 3, output
         assert calls == []
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "project_name: p\nscanners:\n  bandit:\n    enabled: true\n",
+            "project_name: extends-demo\n",
+        ],
+        ids=["no-mention", "a-value-that-mentions-the-word"],
+    )
     def test_an_outside_config_without_extends_still_runs(
-        self, fake_runner, project, tmp_path
+        self, text, fake_runner, project, tmp_path
     ):
         """Control."""
         config = tmp_path / "ash.yaml"
-        config.write_text("project_name: p\nscanners:\n  bandit:\n    enabled: true\n")
+        config.write_text(text)
 
         calls = run_ash(fake_runner, project, ["--no-build", "--config", str(config)])
 

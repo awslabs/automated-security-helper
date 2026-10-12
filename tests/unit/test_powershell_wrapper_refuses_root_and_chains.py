@@ -239,11 +239,26 @@ def test_an_id_the_non_root_stage_cannot_use_is_refused(arguments, host):
     assert calls == []
 
 
+#: (file name, text): spellings ASH reads as an ``extends`` entry; see
+#: test_container_wrappers_mount_containment.py for the precondition check.
+EXTENDS_SPELLINGS = [
+    pytest.param("ash.yaml", "extends: base.yaml\n", id="yaml"),
+    pytest.param("ash.json", '{"extends": "base.json"}\n', id="json"),
+    pytest.param("ash.toml", 'extends = "base.toml"\n', id="toml"),
+    pytest.param(
+        "ash.json", '{\n  "extends"\n  : "base.json"\n}\n', id="json-key-on-two-lines"
+    ),
+    pytest.param("ash.yaml", '"ext\\x65nds": base.yaml\n', id="yaml-escaped-key"),
+    pytest.param("ash.yaml", "? extends\n: base.yaml\n", id="yaml-complex-key"),
+]
+
+
 @pytestmark_posix
-def test_an_outside_config_with_extends_is_refused(host, tmp_path):
+@pytest.mark.parametrize(("name", "text"), EXTENDS_SPELLINGS)
+def test_an_outside_config_with_extends_is_refused(name, text, host, tmp_path):
     (tmp_path / "base.yaml").write_text("project_name: p\n", encoding="utf-8")
-    config = tmp_path / "ash.yaml"
-    config.write_text("extends: base.yaml\n", encoding="utf-8")
+    config = tmp_path / name
+    config.write_text(text, encoding="utf-8")
 
     result, calls = host(f"-NoBuild -Config '{config.as_posix()}'")
 

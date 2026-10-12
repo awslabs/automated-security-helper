@@ -244,7 +244,9 @@ root) is handed to the container the same way, and is refused with exit 3, as a
 outside it. The `./ash` wrapper and `Invoke-ASH`
 mount a config from outside the source directory on its own, without the files it
 extends, so they refuse one with an `extends` entry with exit 3; use
-`ash --mode container` for such a chain. A program that
+`ash --mode container` for such a chain. They do not parse the file, so they err toward
+refusing: the key followed by `:` or `=` anywhere, line breaks included, and any quoted
+key holding a backslash count as an `extends` entry. A program that
 calls `run_ash_scan(mode=RunMode.container)` with no `config` gets `ASH_CONFIG`'s file
 handed to the container when no config is found in the source directory, which is when
 a local scan uses it. For a workspace scan (`workspace_plan`) it is handed over whenever

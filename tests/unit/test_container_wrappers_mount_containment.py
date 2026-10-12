@@ -13,8 +13,8 @@ Python launcher reach the same decision for the same config layouts:
   when the name holds spaces, shell punctuation or glob characters;
 - the arguments before the image name are the ones the wrapper means to pass, and
   nothing from the environment adds a mount or another runner option;
-- a config outside the source directory with an ``extends`` entry is refused,
-  because the wrapper mounts that file alone;
+- a config outside the source directory with an ``extends`` entry is refused, in
+  every spelling ASH reads as one, because the wrapper mounts that file alone;
 - for a config inside the source, outside the checkout, elsewhere in the checkout,
   or linked out of the checkout, ``./ash`` and ``_assemble_run_command`` agree on
   the refusal, the inner ``--config`` path and the repository flag.
@@ -313,10 +313,11 @@ _EXTENDS_SPELLING_TABLE = [
         '{\n  "extends"\n  : "base.json"\n}\n',
     ),
     ("yaml-escaped-key", "ash.yaml", '"ext\\x65nds": base.yaml\n'),
+    ("yaml-complex-key", "ash.yaml", "? extends\n: base.yaml\n"),
 ]
 
-#: The spellings the bash wrapper test below runs.
-_REFUSED_BY_THE_BASH_WRAPPER = ("yaml", "json")
+#: The spellings the bash wrapper test below runs: all of them.
+_REFUSED_BY_THE_BASH_WRAPPER = tuple(id_ for id_, _, _ in _EXTENDS_SPELLING_TABLE)
 
 
 @pytest.mark.parametrize(
