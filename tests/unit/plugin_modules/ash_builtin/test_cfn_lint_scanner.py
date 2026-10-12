@@ -498,6 +498,41 @@ class TestScan:
         assert report.runs[0].results == []
         assert any("cfn-lint exited 1" in e for e in scanner.errors)
 
+    def test_with_template_ignores_honored_each_template_gets_its_own_run(self, repo):
+        """cfn-lint applies the last template's ignore_checks to the parse errors
+        of the template it reads next. With template ignores honored no
+        command-line list replaces them, so each template runs alone and its
+        ignores reach only itself."""
+        fake = FakeCfnLint({"templates/insecure.yaml": CAPTURED_INSECURE})
+        scanner = _scanner(repo, operator=True, honor_inline_ignores=True)
+        report = self._run(scanner, fake)
+        files = [call[call.index("--") + 1 :] for call in fake.calls]
+        assert [len(batch) for batch in files] == [1, 1], files
+        assert scanner.targets_attempted == 2 and scanner.targets_failed == 0
+        _assert_parses_to(report, EXPECTED_INSECURE)
+        # By default the templates still share one run.
+        default = FakeCfnLint({"templates/insecure.yaml": CAPTURED_INSECURE})
+        self._run(_scanner(repo, operator=True), default)
+        assert len(default.calls) == 1
+
+    def test_with_template_ignores_honored_a_failed_run_costs_only_its_template(
+        self, repo
+    ):
+        fake = FakeCfnLint({"templates/insecure.yaml": CAPTURED_INSECURE})
+
+        def cfn_lint(command, **kwargs):
+            if command[-1].endswith("/compliant.yaml"):
+                return {"stdout": "", "stderr": "boom", "returncode": 1}
+            return fake(command, **kwargs)
+
+        scanner = _scanner(repo, operator=True, honor_inline_ignores=True)
+        report = self._run(scanner, cfn_lint)
+        assert scanner.targets_attempted == 2
+        assert scanner.targets_failed == 1
+        assert "templates/compliant.yaml: cfn-lint exited 1: boom" in scanner.errors
+        assert not any("insecure.yaml" in e for e in scanner.errors), scanner.errors
+        _assert_parses_to(report, EXPECTED_INSECURE)
+
     def test_a_timeout_is_a_failed_batch(self, repo):
         fake = FakeCfnLint({}, returncode=-9, extra={"timed_out": True})
         scanner = _scanner(repo)

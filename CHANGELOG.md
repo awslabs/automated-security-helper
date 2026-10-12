@@ -120,11 +120,13 @@
     against us-east-1 unless `regions`, the template or the operator's
     `.cfnlintrc` names other regions; it does not read `AWS_REGION`. A
     template's own `Metadata` `ignore_checks` and `configure_rules` do not
-    apply, to it or to the parse errors of the template after it, unless the
-    operator sets `scanners.cfn-lint.options.honor_inline_ignores`; until then
-    the operator's `.cfnlintrc` `configure_rules` are passed on the command
-    line, one the command line cannot carry is left out with a warning, and a
-    `.cfnlintrc` that sets `merge_configs` fails the scan. A cfn-guard rule in
+    apply unless the operator sets
+    `scanners.cfn-lint.options.honor_inline_ignores`, and then only to that
+    template, which runs alone; they never reach the parse errors of another
+    template. Until then the operator's `.cfnlintrc` `configure_rules` are
+    passed on the command line, one the command line cannot carry is left out
+    with a warning, and a `.cfnlintrc` that sets `merge_configs` fails the
+    scan. A cfn-guard rule in
     two selected rule sets is reported once.
   - gitleaks 8.30.1 (`gitleaks dir`, working tree only),
     CRITICAL findings with values redacted (`--redact=100`), beside detect-secrets,

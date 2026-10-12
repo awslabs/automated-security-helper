@@ -40,7 +40,8 @@ repository-relative path ASH reports.
   sets ``honor_inline_ignores`` (``CfnLintScanner._honor_inline_ignores``).
 * Templates are batched under ``_ARGV_CHAR_BUDGET`` characters per invocation, so a
   repository with thousands of templates stays inside Windows' 32767-character
-  command-line limit.
+  command-line limit. With ``honor_inline_ignores`` on, each template gets an
+  invocation of its own instead (``CfnLintScanner._honor_inline_ignores``).
 * ``AWS_REGION`` and ``AWS_DEFAULT_REGION`` are set to us-east-1 in cfn-lint's
   environment, so the region it falls back to does not depend on the host
   (``CfnLintScanner._child_env``).
@@ -350,7 +351,10 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
                 "and counted. A config_file setting the command line cannot carry "
                 "(a list of more than one item, or a value with a comma, colon or "
                 "equals sign) is then left out with a warning, and a config_file "
-                "that sets merge_configs fails the scan. Honored only when set by "
+                "that sets merge_configs fails the scan. On, each template is "
+                "linted by a cfn-lint run of its own, so its settings reach no "
+                "other template; that adds a cfn-lint start-up per template. "
+                "Honored only when set by "
                 "--config-overrides or a config file outside the scanned tree; from "
                 "a config in the scanned tree it is ignored with a warning."
             ),
@@ -637,8 +641,11 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         else a template sets reached the next one: resource ignore_checks,
         configure_rules, regions and ignore_bad_template all left it unchanged.
         With this option on, no placeholder is passed, since it would replace
-        the template-level ignore_checks the operator let in, and a template's
-        ignore_checks can still drop the next template's E0000.
+        the template-level ignore_checks the operator let in. Each template is
+        linted by a cfn-lint run of its own instead (``scan``), so its ignores
+        reach only itself. That costs a cfn-lint start-up per template: measured
+        with 1.57.2 on the 8 CloudFormation templates under tests/test_data,
+        3.4 s in one run and 12.0 s in eight.
         """
         if not self._options().honor_inline_ignores:
             return False
@@ -1052,9 +1059,14 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
 
             # _option_args keeps this under _OPTION_CHAR_BUDGET.
             budget = _ARGV_CHAR_BUDGET - sum(len(arg) + 1 for arg in option_args)
-            for index, arguments in enumerate(
-                self.batches(list(shown_by_argument), budget)
-            ):
+            # With template ignores honored, each template runs alone, so its
+            # ignores reach no other template (see _honor_inline_ignores).
+            groups = (
+                [[argument] for argument in shown_by_argument]
+                if self._honor_inline_ignores()
+                else self.batches(list(shown_by_argument), budget)
+            )
+            for index, arguments in enumerate(groups):
                 batch = [shown_by_argument[argument] for argument in arguments]
                 self.targets_attempted += len(batch)
                 batch_file = results_dir.joinpath(f"cfn-lint.{index}.sarif")

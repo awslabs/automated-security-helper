@@ -682,48 +682,64 @@ Resources:
     Type: AWS::SNS::Topic
 """
 
-#: Ignores every E rule for itself. cfn-lint sorts the templates it is given by
-#: path, so this one is linted just before the duplicate-keys template.
-_IGNORES_E = """AWSTemplateFormatVersion: "2010-09-09"
+#: Ignores parse errors and W2001 for itself, and has an unused parameter (W2001).
+#: cfn-lint sorts the templates it is given by path, so this one is linted just
+#: before the duplicate-keys template.
+_IGNORES_PARSE_ERRORS = """AWSTemplateFormatVersion: "2010-09-09"
 Metadata:
   cfn-lint:
     config:
-      ignore_checks: [E]
+      ignore_checks: [E0000, W2001]
+Parameters:
+  Unused:
+    Type: String
 Resources:
   Topic:
     Type: AWS::SNS::Topic
 """
 
 
-def test_a_template_cannot_hide_the_next_templates_parse_errors(tmp_path):
+@pytest.mark.parametrize("honored", [False, True], ids=["default", "honored"])
+def test_a_template_cannot_hide_the_next_templates_parse_errors(tmp_path, honored):
     """cfn-lint keeps the last decoded template's Metadata config while it reads
     the next template, and drops that template's E0000 when the kept
     ignore_checks name it, without consulting --mandatory-checks (measured with
-    1.43.3 and 1.57.2). So a template that ignores E for itself made the next
-    template's parse errors disappear."""
+    1.43.3 and 1.57.2). So a template that ignores E0000 for itself made the
+    next template's parse errors disappear. With template ignores honored, the
+    template's own W2001 is still hidden, and only its own."""
     _require_cfn_lint()
+    extra = (
+        ("--config-overrides", "scanners.cfn-lint.options.honor_inline_ignores=true")
+        if honored
+        else ()
+    )
 
-    def parse_errors(*names: str) -> list:
+    def findings(*names: str) -> dict:
         root = tmp_path / "-".join(names)
         source = root / "repo"
         (source / "templates").mkdir(parents=True)
-        texts = {"a-ignores-e": _IGNORES_E, "b-duplicate-keys": _DUPLICATE_KEYS}
+        texts = {
+            "a-ignores-parse-errors": _IGNORES_PARSE_ERRORS,
+            "b-duplicate-keys": _DUPLICATE_KEYS,
+        }
         for name in names:
             (source / "templates" / f"{name}.yaml").write_text(
                 texts[name], encoding="utf-8"
             )
-        proc, output = _scan_with_tree_config(root, {})
+        proc, output = _scan_with_tree_config(root, {}, *extra)
         log = proc.stdout[-3000:] + proc.stderr[-3000:]
         assert _scanner_results(output)["cfn-lint"]["status"] != "ERROR", log
-        return sorted(
-            r["ruleId"]
-            for r in _results(output, "cfn-lint")
-            if _where(r)[0] == "templates/b-duplicate-keys.yaml"
-        )
+        by_template: dict = {}
+        for r in _results(output, "cfn-lint"):
+            by_template.setdefault(_where(r)[0], []).append(r["ruleId"])
+        return {name: sorted(ids) for name, ids in by_template.items()}
 
-    alone = parse_errors("b-duplicate-keys")
+    alone = findings("b-duplicate-keys")["templates/b-duplicate-keys.yaml"]
     assert alone == ["E0000", "E0000"], alone
-    assert parse_errors("a-ignores-e", "b-duplicate-keys") == alone
+    together = findings("a-ignores-parse-errors", "b-duplicate-keys")
+    assert together.get("templates/b-duplicate-keys.yaml") == alone, together
+    own = together.get("templates/a-ignores-parse-errors.yaml", [])
+    assert own == ([] if honored else ["W2001"]), together
 
 
 def test_the_operator_can_name_a_cfnlintrc_outside_the_tree(tmp_path):
