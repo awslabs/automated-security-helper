@@ -716,6 +716,29 @@ class TestConvert:
             "the ignore reason belongs in the log so the skip is explainable"
         )
 
+    def test_an_ignore_path_ending_in_a_slash_skips_the_directory(
+        self, converter, monkeypatch
+    ):
+        """``vendor/`` names the directory, so a notebook in it is not converted."""
+        kept = write_notebook(converter.context.source_dir / "keep", "keep.ipynb")
+        skipped = write_notebook(
+            converter.context.source_dir / "vendor" / "deep", "vendored.ipynb"
+        )
+        converter.context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/", reason="third-party code")
+        ]
+        monkeypatch.setattr(
+            f"{MODULE}.scan_set", lambda **kwargs: [str(kept), str(skipped)]
+        )
+        converter.use_uv_tool = False
+        run = nbconvert_double()
+        monkeypatch.setattr(f"{MODULE}.spawn_run", run)
+
+        results = converter.convert()
+
+        assert len(results) == 1, "the notebook under vendor/ must not be converted"
+        assert results[0].name.endswith(expected_output_name(kept))
+
     def test_a_client_supplied_ignore_path_does_not_skip_conversion(
         self, converter, monkeypatch
     ):

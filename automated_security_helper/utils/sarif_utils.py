@@ -8,10 +8,7 @@ from typing import Any, Callable, Dict, Iterable, List
 import uuid
 from pathlib import Path, PurePosixPath
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.core.constants import (
-    ASH_WORK_DIR_NAME,
-    KNOWN_IGNORE_PATHS,
-)
+from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
@@ -37,7 +34,7 @@ from automated_security_helper.utils.package_identity import (
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
 from automated_security_helper.utils.symbol_spans import SymbolResolver
-from automated_security_helper.utils.suppression_matcher import file_path_matches
+from automated_security_helper.utils.suppression_matcher import ignore_path_matches
 
 
 def get_finding_id(
@@ -522,9 +519,12 @@ def _matching_ignore_path(
     normalized_uri: str,
     ignore_paths: List[IgnorePathWithReason],
 ) -> IgnorePathWithReason | None:
-    """The first ignore path *normalized_uri* matches, or None."""
+    """The first ignore path *normalized_uri* matches, or None.
+
+    ``ignore_path_matches``: a path ending in ``/`` names its directory.
+    """
     for ignore_path in ignore_paths:
-        if file_path_matches(normalized_uri, ignore_path.path):
+        if ignore_path_matches(normalized_uri, ignore_path.path):
             return ignore_path
     return None
 
@@ -989,15 +989,14 @@ def apply_suppressions_to_sarif(
     used_suppressions: set | None = None,
 ) -> SarifReport:
     """Apply suppressions to a SARIF report based on global ignore paths and suppression rules."""
-    known_ignore_formatted: List[IgnorePathWithReason] = [
-        IgnorePathWithReason(path=p, reason="Known ignore path")
-        for item in KNOWN_IGNORE_PATHS
-        for p in (item, f"**/{item}")
-    ]
-    ignore_paths = [
-        *(plugin_context.config.global_settings.ignore_paths or []),
-        *known_ignore_formatted,
-    ]
+    # The config's ignore paths only. KNOWN_IGNORE_PATHS (node_modules/, .venv/,
+    # venv/) were added here too, with their **/ forms, but as globs ending in "/"
+    # they matched no finding. Since an ignore path ending in "/" names its
+    # directory, they would drop every finding below one, and the dependency
+    # scanners report there: npm-audit locates each finding at
+    # node_modules/<package>/package.json, so all of them would go. They are
+    # scanner-level exclusions, for bandit and checkov, and stay out of this step.
+    ignore_paths = list(plugin_context.config.global_settings.ignore_paths or [])
 
     suppressions = plugin_context.config.global_settings.suppressions or []
 

@@ -132,6 +132,27 @@ def _path_pattern_matches(file_path: Optional[str], pattern: str) -> bool:
     return fnmatch.fnmatchcase(finding_norm, pattern_norm)
 
 
+def ignore_path_pattern(pattern: str) -> str:
+    """The pattern a global ignore path's ``path`` is matched as.
+
+    One ending in ``/`` (or ``\\``) names a directory and ignores everything below
+    it, so it is matched as ``<dir>/**``. A file's path never ends in a slash, so
+    before this ``vendor/`` matched nothing, though it is how a ``.gitignore``
+    names a directory, and ASH's own known ignore paths are written that way.
+    Anchored like every ignore path: ``vendor/`` is the top-level directory, and
+    ``**/vendor/`` one at any depth. Any other pattern is returned as it is.
+
+    For ignore paths only. A suppression's path ending in ``/`` keeps its literal
+    meaning, which matches no file (see
+    ``suppression_matcher.warn_unmatched_directory_suppressions``).
+    """
+    if pattern.endswith(("/", "\\")):
+        directory = pattern.rstrip("/\\")
+        if directory:
+            return f"{directory}/**"
+    return pattern
+
+
 def match_glob(path: str, pattern: str) -> bool:
     """Public entry point: case-insensitive glob match with ``**`` support."""
     return _path_pattern_matches(path, pattern)

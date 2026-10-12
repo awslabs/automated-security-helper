@@ -8,12 +8,15 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 from automated_security_helper.models.core import AshSuppression
-from automated_security_helper.utils.path_matching import _recursive_glob_match
+from automated_security_helper.utils.path_matching import (
+    _recursive_glob_match,
+    ignore_path_pattern,
+)
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, escape_markup
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     open_in_scanned_tree,
@@ -111,6 +114,46 @@ def file_path_matches(
         return _recursive_glob_match(finding_lower, suppression_lower)
 
     return fnmatch.fnmatch(finding_lower, suppression_lower)
+
+
+def ignore_path_matches(file_path: Optional[str], ignore_path: str) -> bool:
+    """Whether ``file_path`` is under the global ignore path ``ignore_path``.
+
+    ``file_path_matches``, with the pattern read as ``path_matching.
+    ignore_path_pattern`` reads it: one ending in ``/`` names the directory and
+    matches every path below it. Every place ASH matches an ignore path calls this,
+    so they agree: dropping findings, the converters, detect-secrets, the
+    exclusions the tree-walking scanners are given, and snyk-code's refusal.
+    """
+    return file_path_matches(file_path, ignore_path_pattern(ignore_path))
+
+
+def warn_unmatched_directory_suppressions(
+    suppressions: Iterable[AshSuppression], used_ids: Iterable[str]
+) -> None:
+    """Warn once for each suppression whose path ends in ``/`` and matched nothing.
+
+    An ignore path ending in ``/`` names a directory; a suppression's path does
+    not, and matches only that literal path, which no file has. A suppression
+    written ``build/`` therefore suppresses nothing, and the findings it was
+    written for are reported. The warning names the glob that suppresses the
+    directory's findings. Called after the scan's last suppression pass, with the
+    ids of the suppressions that pass used.
+    """
+    used = set(used_ids)
+    for suppression in suppressions:
+        path = getattr(suppression, "path", None) or ""
+        if not path.endswith(("/", "\\")) or suppression.id in used:
+            continue
+        directory = path.rstrip("/\\")
+        if not directory:
+            continue
+        ASH_LOGGER.warning(
+            f"The suppression with path '{escape_markup(path)}' matched no finding: "
+            "a suppression path ending in '/' matches only that literal path, not "
+            "the files in the directory, as an ignore path's does. To suppress the "
+            f"findings below it, write '{escape_markup(directory)}/**'."
+        )
 
 
 def _line_range_matches(

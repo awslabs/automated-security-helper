@@ -637,6 +637,18 @@ class ScanExecutionEngine:
                                         self._results, "used_suppressions", None
                                     ),
                                 )
+                                # After the last suppression pass, once: a
+                                # suppression path ending in "/" matches no file.
+                                from automated_security_helper.utils.suppression_matcher import (
+                                    warn_unmatched_directory_suppressions,
+                                )
+
+                                warn_unmatched_directory_suppressions(
+                                    self._context.config.global_settings.suppressions
+                                    or [],
+                                    getattr(self._results, "used_suppressions", None)
+                                    or (),
+                                )
                             else:
                                 # The flag lifts suppressions and ignore paths,
                                 # not the exclusion of ASH's own output directory.

@@ -1191,7 +1191,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
             if global_ignore_paths:
                 from automated_security_helper.utils.suppression_matcher import (
-                    file_path_matches as path_matches_pattern,
+                    ignore_path_matches,
                 )
 
                 original_count = len(scannable)
@@ -1200,7 +1200,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     file_path
                     for file_path in scannable
                     if not any(
-                        path_matches_pattern(
+                        ignore_path_matches(
                             file_path.removeprefix(source_prefix),
                             ignore_path.path,
                         )

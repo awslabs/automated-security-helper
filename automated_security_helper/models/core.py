@@ -27,6 +27,7 @@ from datetime import datetime, date
 
 from automated_security_helper.utils.path_matching import (
     _path_pattern_matches,
+    ignore_path_pattern,
 )
 from automated_security_helper.utils.symbol_spans import is_valid_symbol
 
@@ -69,9 +70,12 @@ class IgnorePathWithReason(BaseModel):
         """Return True if ``file_path`` matches this entry's path pattern.
 
         Supports exact matches, simple globs (``*.py``), and recursive globs
-        (``tests/**/*.py``). Matching is case-insensitive for OS portability.
+        (``tests/**/*.py``). Matching is case-insensitive for OS portability. A
+        path ending in ``/`` names a directory and matches everything below it
+        (``path_matching.ignore_path_pattern``); ``AshSuppression`` keeps the
+        literal meaning.
         """
-        return _path_pattern_matches(file_path, self.path)
+        return _path_pattern_matches(file_path, ignore_path_pattern(self.path))
 
 
 class IgnoreFileExclusions(BaseModel):
@@ -509,6 +513,14 @@ class AshSuppression(IgnorePathWithReason):
         except ValueError:
             return None
         return (expiration_date - date.today()).days
+
+    def matches_path(self, file_path: str) -> bool:
+        """Return True if ``file_path`` matches this suppression's path pattern.
+
+        As ``matches`` reads the path: unlike an ignore path's, one ending in ``/``
+        is not read as its directory, so it matches no file.
+        """
+        return _path_pattern_matches(file_path, self.path)
 
     def matches(
         self,

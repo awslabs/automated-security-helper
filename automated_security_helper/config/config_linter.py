@@ -794,6 +794,7 @@ class ConfigLinter:
                         path_prefix=f"global_settings.ignore_paths[{i}].path",
                         project_root=project_root,
                         result=result,
+                        slash_names_directory=True,
                     )
 
         # Check suppression paths
@@ -818,16 +819,21 @@ class ConfigLinter:
         path_prefix: str,
         project_root: Path,
         result: LintResult,
+        slash_names_directory: bool = False,
     ) -> None:
         """Check a single path pattern for directory-without-glob issues.
 
-        A path like 'tests/test_data' or 'tests/test_data/' that points to an
-        existing directory will silently fail to match any files inside it.
-        The user likely intended 'tests/test_data/**'.
+        A path like 'tests/test_data' that points to an existing directory will
+        silently fail to match any files inside it. The user likely intended
+        'tests/test_data/**'. So does 'tests/test_data/' for a suppression; an
+        ignore path ending in '/' names the directory and matches what is in it
+        (``slash_names_directory``), so it is not reported.
         """
         # Skip patterns that already contain glob characters that would match files
         # Patterns with ** already handle recursive matching
         if "**" in path_pattern:
+            return
+        if slash_names_directory and path_pattern.endswith(("/", "\\")):
             return
 
         # Strip trailing slash for directory check

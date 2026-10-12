@@ -33,9 +33,7 @@ from automated_security_helper.utils.get_scan_set import (
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.normalizers import get_normalized_filename
-from automated_security_helper.utils.suppression_matcher import (
-    file_path_matches as path_matches_pattern,
-)
+from automated_security_helper.utils.suppression_matcher import ignore_path_matches
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.sandbox.scope import (
     SandboxUnavailable,
@@ -698,7 +696,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                             .relative_to(self.context.source_dir)
                             .as_posix()
                         )
-                        if path_matches_pattern(rel_path, ignore_path.path):
+                        if ignore_path_matches(rel_path, ignore_path.path):
                             ASH_LOGGER.debug(
                                 f"Skipping conversion of ignored path: {ipynb_file} due to global ignore_path '{ignore_path.path}' with reason '{ignore_path.reason}'"
                             )

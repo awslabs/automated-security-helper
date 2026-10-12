@@ -31,7 +31,7 @@ from typing import Callable, Iterable, List, Sequence
 
 from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.suppression_matcher import file_path_matches
+from automated_security_helper.utils.suppression_matcher import ignore_path_matches
 
 #: The characters doublestar (the glob library syft, grype and trivy match with)
 #: reads as pattern syntax, each escaped with a backslash to stand for itself.
@@ -159,12 +159,12 @@ def ignored_entries(
     source_dir: str | Path,
     ignore_paths: Iterable[object],
     files: Sequence[str],
-    matches: Callable[[str, str], bool] = file_path_matches,
+    matches: Callable[[str, str], bool] = ignore_path_matches,
 ) -> List[str]:
     """The paths below ``target`` that ``ignore_paths`` ignore, as few as possible.
 
     Each ignore path's pattern is matched as ASH matches it when it drops findings
-    (``matches``, by default ``file_path_matches``), against each file's path below
+    (``matches``, by default ``ignore_path_matches``), against each file's path below
     ``source_dir``. A directory whose every walked file is ignored is returned once,
     with a trailing ``/``, and the files below it are not; any other ignored file is
     returned itself. Paths are relative to ``target`` and ``/``-joined.
@@ -298,7 +298,7 @@ def ignoring_patterns(
     paths: Iterable[str | Path],
     source_dir: str | Path,
     ignore_paths: Iterable[object] | None,
-    matches: Callable[[str, str], bool] = file_path_matches,
+    matches: Callable[[str, str], bool] = ignore_path_matches,
 ) -> dict[str, str]:
     """``{path: pattern}`` for each of ``paths`` an ignore path ignores, with the
     first pattern that matches it.
@@ -343,7 +343,7 @@ def drop_ignored(
     paths: Iterable[str | Path],
     source_dir: str | Path,
     ignore_paths: Iterable[object] | None,
-    matches: Callable[[str, str], bool] = file_path_matches,
+    matches: Callable[[str, str], bool] = ignore_path_matches,
 ) -> List[str]:
     """``paths`` without the ones ``ignore_paths`` ignore, for a scan-set reader.
 

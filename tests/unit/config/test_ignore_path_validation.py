@@ -159,18 +159,41 @@ class TestIgnorePathLinting:
         assert "tests/test_data" in ignore_path_issues[0].message
         assert "/**" in ignore_path_issues[0].message
 
-    def test_warns_on_directory_with_trailing_slash(
+    def test_no_warning_for_an_ignore_path_ending_in_a_slash(
         self, config_with_trailing_slash_ignore_path
     ):
-        """A path with trailing slash pointing to an existing directory should also warn."""
+        """An ignore path ending in '/' names the directory and ignores what is in
+        it, so there is nothing to warn about."""
         result = ConfigLinter.lint(config_with_trailing_slash_ignore_path)
 
         ignore_path_issues = [
             i for i in result.issues if i.category == LintCategory.IGNORE_PATH_ISSUE
         ]
+        assert ignore_path_issues == []
+
+    def test_warns_on_a_suppression_path_ending_in_a_slash(self, project_with_dirs):
+        """A suppression path ending in '/' still matches no file in the directory."""
+        config_path = project_with_dirs / ".ash" / ".ash.yaml"
+        config_path.write_text(
+            yaml.dump(
+                {
+                    "project_name": "test-project",
+                    "global_settings": {
+                        "suppressions": [
+                            {"path": "docs/", "rule_id": "R1", "reason": "examples"}
+                        ]
+                    },
+                }
+            )
+        )
+
+        result = ConfigLinter.lint(config_path)
+
+        ignore_path_issues = [
+            i for i in result.issues if i.category == LintCategory.IGNORE_PATH_ISSUE
+        ]
         assert len(ignore_path_issues) == 1
-        assert ignore_path_issues[0].severity == LintSeverity.WARNING
-        assert "tests/test_data" in ignore_path_issues[0].message
+        assert "docs/**" in ignore_path_issues[0].message
 
     def test_no_warning_for_valid_glob_paths(self, config_with_valid_ignore_paths):
         """Paths with ** or file wildcards should not produce warnings."""

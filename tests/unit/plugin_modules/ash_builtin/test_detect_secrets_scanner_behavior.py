@@ -885,6 +885,25 @@ def test_global_ignore_paths_exclude_files_from_the_scan(scanner):
     )
 
 
+def test_a_global_ignore_path_ending_in_a_slash_drops_the_directory(scanner):
+    """``**/generated/`` names a directory, so the key planted in it is not read."""
+    directory = Path(scanner.context.work_dir) / "generated"
+    directory.mkdir(parents=True, exist_ok=True)
+    source_with_planted_key(directory)
+
+    report = scanner.scan(
+        target=scanner.context.work_dir,
+        target_type="converted",
+        global_ignore_paths=[
+            IgnorePathWithReason(path="**/generated/", reason="generated code")
+        ],
+    )
+
+    assert report.runs[0].results == [], (
+        "the planted key was below a globally ignored directory"
+    )
+
+
 def test_a_non_matching_global_ignore_leaves_the_finding_in_place(scanner):
     """Control for the global-ignore test above."""
     source_with_planted_key(scanner.context.work_dir, name="generated_settings.py")

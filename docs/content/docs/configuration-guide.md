@@ -507,10 +507,10 @@ global_settings:
 
   # Paths to ignore during scanning
   ignore_paths:
-    - path: 'tests/test_data'
+    - path: 'tests/test_data/'
       reason: 'Test data only'
-    - path: 'node_modules/'
-      reason: 'Third-party dependencies'
+    - path: '**/vendor/'
+      reason: 'Vendored third-party code'
 
   # Findings to suppress based on rule ID, file path, and line numbers
   suppressions:
@@ -521,6 +521,21 @@ global_settings:
       reason: 'False positive due to test mock'  # Reason for suppression
       expiration: '2025-12-31'  # Optional expiration date (YYYY-MM-DD)
 ```
+
+An ignore path's `path` is a glob matched against a file's path below the source
+directory, anchored at both ends, with `**` for any number of directories. One
+ending in `/` names a directory and ignores everything below it, as `<dir>/**`
+does: `tests/test_data/` is the top-level `tests/test_data` directory, and
+`**/vendor/` a `vendor` directory at any depth. An ignore path drops every
+finding below it, a dependency scanner's included, so `**/node_modules/` hides
+the vulnerabilities npm-audit reports. A path naming a
+directory without the slash, such as `tests/test_data`, matches no file in it, and
+`ash config lint` warns about one. A suppression's `path` is read differently: one
+ending in `/` matches no file, and ASH warns after the scan about each such
+suppression that matched nothing, naming the `<dir>/**` that would. bandit and
+checkov also skip `node_modules`, `.venv` and `venv` directories on their own; ASH
+does not drop findings there, since the dependency scanners report theirs there
+(npm-audit at `node_modules/<package>/package.json`).
 
 An ignore path is a suppression. ASH does not convert a file under one or include
 it in the file lists it hands scanners, and leaves a finding any scanner reports
@@ -542,8 +557,9 @@ uploads the files it reads, so it refuses a directory holding a file an ignore p
 matches, whether the source directory or ASH's directory of converted files,
 wherever that is. Each file is matched as ASH matches the location snyk reports for
 a finding in it, its path below the directory snyk tests, so a file is refused
-exactly when ASH would drop its findings: a converted file by its path below the
-directory of converted files, such as `archive/src__bundle__zip/vendor/m.js`. An
+exactly when the operator's ignore paths would have ASH drop its findings: a
+converted file by its path below the directory of converted files, such as
+`archive/src__bundle__zip/vendor/m.js`. An
 ignore path naming a source archive or notebook exactly keeps it from being
 converted at all. It is `ERROR`,
 `snyk code test` is not started, and the error names the first such file and the

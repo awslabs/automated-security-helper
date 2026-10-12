@@ -171,6 +171,21 @@
 
 ### Behavior changes
 
+- **An ignore path ending in `/` ignores the directory.** `global_settings.ignore_paths`
+  entries are globs matched against a file's path below the source directory, and
+  a file's path never ends in `/`, so `vendor/` matched nothing: every file there
+  was scanned and reported. It is now matched as `vendor/**`, wherever ignore
+  paths are matched: dropping findings, the converters, detect-secrets, the
+  exclusions each tree-walking scanner is given, and snyk-code's refusal. It stays
+  anchored at the source directory (`**/vendor/` for any depth). `ash config lint`
+  no longer warns about such an ignore path. Suppression paths keep their meaning:
+  `build/` still matches no file, and ASH now warns once after the scan for each
+  suppression path ending in `/` that matched nothing, naming `build/**`. bandit's
+  and checkov's own exclusions, `node_modules/`, `.venv/` and `venv/`, were also
+  passed to that step as ignore paths, written the same way, and matched nothing.
+  They are no longer passed, so nothing changes for them: read as directories they
+  would have dropped every finding the dependency scanners report there, all of
+  npm-audit's (located at `node_modules/<package>/package.json`) among them.
 - **An output directory inside the scanned tree gets a `.gitignore`.** snyk-code
   read ASH's default output directory, `.ash/ash_output`, with the rest of the
   tree, and `snyk code test` uploaded an earlier run's reports and logs and the
