@@ -191,9 +191,13 @@ def test_control_repository_override_of_baseline_file_still_does_not_verify(
     )
     _config(repo / ".ash" / ".ash.yaml", {"baseline_file": outside.as_posix()})
 
-    _scan(repo, tmp_path / "out")
+    results = _scan(repo, tmp_path / "out")
 
     assert _issuer_requests(recorder) == [], recorder.requests
+    row = results["scanner_results"]["detect-secrets"]
+    assert int(row.get("finding_count") or 0) >= 1, (
+        "verification was refused by turning detection off: the key was not reported"
+    )
 
 
 # ---------------------------------------------------------------------------

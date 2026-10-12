@@ -98,7 +98,7 @@ def _project(root: Path) -> Path:
     return root
 
 
-def _scan(source: Path, out: Path, config: Path) -> None:
+def _scan(source: Path, out: Path, config: Path) -> dict:
     from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 
     try:
@@ -117,7 +117,9 @@ def _scan(source: Path, out: Path, config: Path) -> None:
         )
     except SystemExit:
         pass
-    assert (out / "ash_aggregated_results.json").is_file()
+    results = out / "ash_aggregated_results.json"
+    assert results.is_file()
+    return json.loads(results.read_text(encoding="utf-8"))
 
 
 def _issuer_requests(proxy: RecordingProxy) -> list:
@@ -147,9 +149,11 @@ def test_a_baseline_in_the_scanned_tree_s_own_checkout_does_not_verify(
     source = _project(checkout / "service")
     baseline = _verifying_baseline(checkout / "ops" / "verifying.baseline")
 
-    _scan(source, tmp_path / "out", _operator_config(tmp_path, baseline))
+    results = _scan(source, tmp_path / "out", _operator_config(tmp_path, baseline))
 
     assert _issuer_requests(recorder) == [], recorder.requests
+    row = results["scanner_results"]["detect-secrets"]
+    assert int(row.get("finding_count") or 0) >= 1, "detection went off with it"
 
 
 def test_control_an_operator_baseline_outside_any_checkout_verifies(recorder, tmp_path):

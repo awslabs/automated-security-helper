@@ -38,10 +38,15 @@ detect-secrets selected, so the config tiers are decided exactly as for ``ash sc
 repository; ``untrusted_config=True``: an MCP client's upload, as
 ``cli/mcp_tools.py`` passes it).
 
-Cases that read a ``.secrets.baseline`` run with the scanned directory as the
-working directory, because the base looks the baseline up from the process working
-directory (see test_detect_secrets_baseline_lookup.py); without that, the base would
-not read the baseline at all and these cases would pass for the wrong reason.
+Cases that read a ``.secrets.baseline`` run from a working directory outside the
+scanned tree (``elsewhere``): the scanner looks a relative baseline up from the
+source directory (see test_detect_secrets_baseline_lookup.py), so running from
+elsewhere still reads it, and a lookup that fell back to the working directory would
+not.
+
+Every case that refuses verification also asserts the planted key is still a
+finding: refusing verification by turning the detector off would send nothing and
+report nothing, and the request assertion alone cannot tell that from a fix.
 """
 
 import json
@@ -196,8 +201,12 @@ def _scan(
     return json.loads(results.read_text(encoding="utf-8"))
 
 
-def _workspace_scan(root: Path, out: Path, *, offline: bool, project: str) -> None:
-    """Run a workspace-mode scan of ``root`` with one project, detect-secrets only."""
+def _workspace_scan(root: Path, out: Path, *, offline: bool, project: str) -> dict:
+    """Run a workspace-mode scan of ``root`` with one project, detect-secrets only.
+
+    Returns the project's own results (``projects/<key>/``), which carry its
+    detect-secrets row.
+    """
     from automated_security_helper.interactions.run_ash_scan import run_ash_scan
     from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 
@@ -232,6 +241,9 @@ def _workspace_scan(root: Path, out: Path, *, offline: bool, project: str) -> No
         )
     except SystemExit:
         pass
+    results = out / "projects" / project / "ash_aggregated_results.json"
+    assert results.is_file(), f"the project wrote no {results.name}"
+    return json.loads(results.read_text(encoding="utf-8"))
 
 
 def _issuer_requests(proxy: RecordingProxy) -> list:
@@ -243,6 +255,14 @@ def _detect_secrets_findings(results: dict) -> int:
     return int(row.get("finding_count") or 0)
 
 
+def _assert_key_still_reported(results: dict) -> None:
+    """Refusing verification must leave detection on: the planted key is a finding."""
+    assert _detect_secrets_findings(results) >= 1, (
+        "verification was refused and the planted key was not reported either: "
+        "detection was turned off with it"
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1. --offline: no verification request from any source
 # ---------------------------------------------------------------------------
@@ -250,29 +270,30 @@ def _detect_secrets_findings(results: dict) -> int:
 
 class TestOfflineScanSendsNoVerificationRequest:
     def test_repository_baseline_enabling_verification(
-        self, recorder, repo, tmp_path, monkeypatch
+        self, recorder, repo, tmp_path, elsewhere
     ):
         _write_baseline(repo / ".secrets.baseline", _settings())
-        monkeypatch.chdir(repo)
 
-        _scan(repo, tmp_path / "out", offline=True)
+        results = _scan(repo, tmp_path / "out", offline=True)
 
         assert _issuer_requests(recorder) == [], (
             "an --offline scan sent the planted key to its issuer because the "
             f"repository's .secrets.baseline enabled verification: {recorder.requests}"
         )
+        _assert_key_still_reported(results)
 
     def test_operator_config_enabling_verification(
         self, recorder, repo, tmp_path, elsewhere
     ):
         operator = _write_ash_config(tmp_path / "operator" / "ash.yaml", _settings())
 
-        _scan(repo, tmp_path / "out", offline=True, config=operator)
+        results = _scan(repo, tmp_path / "out", offline=True, config=operator)
 
         assert _issuer_requests(recorder) == [], (
             "an --offline scan verified secrets because the operator config named "
             f"the verification filter: {recorder.requests}"
         )
+        _assert_key_still_reported(results)
 
     def test_operator_config_naming_the_filter_by_file_path(
         self, recorder, repo, tmp_path, elsewhere
@@ -281,19 +302,20 @@ class TestOfflineScanSendsNoVerificationRequest:
             tmp_path / "operator" / "ash.yaml", _settings(_filter_by_file(tmp_path))
         )
 
-        _scan(repo, tmp_path / "out", offline=True, config=operator)
+        results = _scan(repo, tmp_path / "out", offline=True, config=operator)
 
         assert _issuer_requests(recorder) == [], (
             "an --offline scan verified secrets through the verification filter "
             f"named by a file:// path: {recorder.requests}"
         )
+        _assert_key_still_reported(results)
 
     def test_mcp_client_config_enabling_verification(
         self, recorder, repo, tmp_path, elsewhere
     ):
         delivered = _write_ash_config(tmp_path / "delivered" / "ash.yaml", _settings())
 
-        _scan(
+        results = _scan(
             repo,
             tmp_path / "out",
             offline=True,
@@ -302,6 +324,7 @@ class TestOfflineScanSendsNoVerificationRequest:
         )
 
         assert _issuer_requests(recorder) == [], recorder.requests
+        _assert_key_still_reported(results)
 
     def test_workspace_project_config_enabling_verification(
         self, recorder, repo, tmp_path, elsewhere
@@ -309,9 +332,12 @@ class TestOfflineScanSendsNoVerificationRequest:
         """Workspace mode: the project's own config is repository-written too."""
         _write_ash_config(repo / ".ash" / ".ash.yaml", _settings())
 
-        _workspace_scan(tmp_path, tmp_path / "out", offline=True, project=repo.name)
+        results = _workspace_scan(
+            tmp_path, tmp_path / "out", offline=True, project=repo.name
+        )
 
         assert _issuer_requests(recorder) == [], recorder.requests
+        _assert_key_still_reported(results)
 
     def test_control_offline_scan_still_reports_the_key(
         self, recorder, repo, tmp_path, elsewhere
@@ -334,39 +360,40 @@ class TestOfflineScanSendsNoVerificationRequest:
 
 class TestOnlyTheOperatorEnablesVerification:
     def test_repository_baseline_cannot_enable_verification(
-        self, recorder, repo, tmp_path, monkeypatch
+        self, recorder, repo, tmp_path, elsewhere
     ):
         _write_baseline(repo / ".secrets.baseline", _settings())
-        monkeypatch.chdir(repo)
 
-        _scan(repo, tmp_path / "out", offline=False)
+        results = _scan(repo, tmp_path / "out", offline=False)
 
         assert _issuer_requests(recorder) == [], (
             "the scanned repository's .secrets.baseline made the scanning host send "
             f"the planted key to its issuer: {recorder.requests}"
         )
+        _assert_key_still_reported(results)
 
     def test_repository_baseline_under_ash_dir_cannot_enable_verification(
-        self, recorder, repo, tmp_path, monkeypatch
+        self, recorder, repo, tmp_path, elsewhere
     ):
         _write_baseline(repo / ".ash" / ".secrets.baseline", _settings())
-        monkeypatch.chdir(repo)
 
-        _scan(repo, tmp_path / "out", offline=False)
+        results = _scan(repo, tmp_path / "out", offline=False)
 
         assert _issuer_requests(recorder) == [], recorder.requests
+        _assert_key_still_reported(results)
 
     def test_repository_ash_config_cannot_enable_verification(
         self, recorder, repo, tmp_path, elsewhere
     ):
         _write_ash_config(repo / ".ash" / ".ash.yaml", _settings())
 
-        _scan(repo, tmp_path / "out", offline=False)
+        results = _scan(repo, tmp_path / "out", offline=False)
 
         assert _issuer_requests(recorder) == [], (
             "a repository-local .ash/.ash.yaml enabled secret verification: "
             f"{recorder.requests}"
         )
+        _assert_key_still_reported(results)
 
     def test_repository_ash_config_naming_the_filter_by_file_path(
         self, recorder, repo, tmp_path, elsewhere
@@ -375,9 +402,10 @@ class TestOnlyTheOperatorEnablesVerification:
             repo / ".ash" / ".ash.yaml", _settings(_filter_by_file(tmp_path))
         )
 
-        _scan(repo, tmp_path / "out", offline=False)
+        results = _scan(repo, tmp_path / "out", offline=False)
 
         assert _issuer_requests(recorder) == [], recorder.requests
+        _assert_key_still_reported(results)
 
     def test_repository_ash_config_naming_a_baseline_outside_the_tree(
         self, recorder, repo, tmp_path, elsewhere
@@ -399,16 +427,17 @@ class TestOnlyTheOperatorEnablesVerification:
         (repo / ".ash").mkdir()
         (repo / ".ash" / ".ash.yaml").write_text(json.dumps(document), encoding="utf-8")
 
-        _scan(repo, tmp_path / "out", offline=False)
+        results = _scan(repo, tmp_path / "out", offline=False)
 
         assert _issuer_requests(recorder) == [], recorder.requests
+        _assert_key_still_reported(results)
 
     def test_mcp_client_config_cannot_enable_verification(
         self, recorder, repo, tmp_path, elsewhere
     ):
         delivered = _write_ash_config(tmp_path / "delivered" / "ash.yaml", _settings())
 
-        _scan(
+        results = _scan(
             repo,
             tmp_path / "out",
             offline=False,
@@ -419,18 +448,22 @@ class TestOnlyTheOperatorEnablesVerification:
         assert _issuer_requests(recorder) == [], (
             f"an MCP client's config enabled secret verification: {recorder.requests}"
         )
+        _assert_key_still_reported(results)
 
     def test_workspace_project_config_cannot_enable_verification(
         self, recorder, repo, tmp_path, elsewhere
     ):
         _write_ash_config(repo / ".ash" / ".ash.yaml", _settings())
 
-        _workspace_scan(tmp_path, tmp_path / "out", offline=False, project=repo.name)
+        results = _workspace_scan(
+            tmp_path, tmp_path / "out", offline=False, project=repo.name
+        )
 
         assert _issuer_requests(recorder) == [], (
             "a workspace project's own config enabled secret verification: "
             f"{recorder.requests}"
         )
+        _assert_key_still_reported(results)
 
     def test_control_operator_config_enables_verification_online(
         self, recorder, repo, tmp_path, elsewhere
