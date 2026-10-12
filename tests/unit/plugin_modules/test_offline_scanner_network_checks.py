@@ -57,7 +57,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import pytest
 
@@ -278,16 +278,46 @@ def _trivy(ctx, **options) -> TrivyRepoScanner:
 
 
 class TestTrivyRepoOffline:
+    @pytest.mark.parametrize("mode", ["offline", "online"])
     @TARGET_TYPES
-    def test_version_check_is_off(self, offline, context, target_type):
-        spawn = _record_scan(_trivy(context), context, target_type, offline)
+    def test_the_scan_runs_in_the_mode_asked_for(
+        self, mode, request, context, target_type, monkeypatch
+    ):
+        """What only offline mode does, against the same scan online.
 
-        assert spawn.has_flag("--skip-version-check") or spawn.env_is(
-            "TRIVY_SKIP_VERSION_CHECK", _TRUE
-        ), (
-            "offline trivy runs its version check against check.trivy.dev: "
-            f"{spawn.command}"
+        The update's skip flags and ``--offline-scan`` are on the scan in both
+        modes: online the shared update runs first and the scan skips its own
+        (``TrivyScannerBase._shared_update_flags``), and every scan gets
+        ``--offline-scan`` (``SCAN_FLAGS``) to stay off package registries. So
+        they cannot tell the modes apart. Only offline skips the shared database
+        update (``prepare_content_db``) and turns trivy's version check off by
+        environment rather than by flag.
+        """
+        request.getfixturevalue(mode)
+        updates: List[Any] = []
+        monkeypatch.setattr(
+            trivy_base,
+            "prepare_content_db",
+            lambda *args, **kwargs: updates.append(args),
         )
+
+        spawn = _record_scan(_trivy(context), context, target_type, monkeypatch)
+
+        for flag in (
+            "--skip-db-update",
+            "--skip-java-db-update",
+            "--offline-scan",
+            "--skip-check-update",
+        ):
+            assert spawn.has_flag(flag), (mode, flag, spawn.command)
+        if mode == "offline":
+            assert updates == [], "offline trivy updated its database"
+            assert spawn.env_is("TRIVY_SKIP_VERSION_CHECK", _TRUE), spawn.command
+            assert not spawn.has_flag("--skip-version-check"), spawn.command
+        else:
+            assert updates, "online trivy did not update its database first"
+            assert not spawn.env_is("TRIVY_SKIP_VERSION_CHECK", _TRUE), spawn.env
+            assert spawn.has_flag("--skip-version-check"), spawn.command
 
     @TARGET_TYPES
     def test_telemetry_is_off_even_when_the_config_turns_it_on(
@@ -334,28 +364,6 @@ class TestTrivyRepoOffline:
             f"offline trivy reads its config from the scanned tree ({in_tree}); "
             f"cwd={spawn.cwd}, argv={spawn.command}"
         )
-
-    @TARGET_TYPES
-    def test_control_database_and_checks_updates_are_off(
-        self, offline, context, target_type
-    ):
-        spawn = _record_scan(_trivy(context), context, target_type, offline)
-
-        for flag in (
-            "--skip-db-update",
-            "--skip-java-db-update",
-            "--offline-scan",
-            "--skip-check-update",
-        ):
-            assert spawn.has_flag(flag), (flag, spawn.command)
-
-    def test_control_online_scan_is_not_offline(self, online, context):
-        """trivy gets ``--offline-scan`` in every run, online too, which keeps it off
-        package registries, so the control looks for what only offline mode sets:
-        the offline tool environment's ``TRIVY_SKIP_VERSION_CHECK``."""
-        spawn = _record_scan(_trivy(context), context, "source", online)
-
-        assert not spawn.env_is("TRIVY_SKIP_VERSION_CHECK", _TRUE), spawn.command
 
 
 # ---------------------------------------------------------------------------
