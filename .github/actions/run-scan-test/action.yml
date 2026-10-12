@@ -656,10 +656,21 @@ runs:
         # -Config, the name Invoke-ASH declares. -ConfigFile is not one of its
         # parameters, so PowerShell passed it and the path through $AshArgs and the
         # scan ran without the community config this leg is named for.
-        if ("$env:ASH_TEST_CONFIG_FILE" -eq "community") {
-          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner -Config ".ash/.ash_community_plugins.yaml"
-        } else {
-          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner
+        # A refusal throws with $LASTEXITCODE set (3, or 1 without a runner), and so
+        # does any other error Invoke-ASH raises, with a code that is not 0. Uncaught,
+        # the step would end with exit 1 whatever the code; this prints the reason and
+        # exits with it. The `else { 1 }` covers an error raised before Invoke-ASH
+        # runs, such as a parameter it cannot bind, which sets no code.
+        try {
+          if ("$env:ASH_TEST_CONFIG_FILE" -eq "community") {
+            Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner -Config ".ash/.ash_community_plugins.yaml"
+          } else {
+            Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner
+          }
+        }
+        catch {
+          [Console]::Error.WriteLine($_.Exception.Message)
+          exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 })
         }
 
     # This step used to read `$Results.scanners.<name>.result`. Neither the key nor

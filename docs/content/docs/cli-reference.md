@@ -277,12 +277,28 @@ option this ASH passes it, such as `--config-from-scanned-repository` for a conf
 elsewhere in the scanned checkout. It then exits 2 without writing a results file, and
 the host refuses with exit 3 and asks for the image to be rebuilt from this ASH.
 
-`Invoke-ASH` exits with these codes also under `$ErrorActionPreference = 'Stop'` (the
-default of a `pwsh` step on GitHub Actions), writing the reason to stderr; no
-PowerShell error record is raised. Called from a script, it exits that script with the
-code, also in a session you type into. Typed at a prompt, or in an editor's integrated
-console, it throws instead, once, so the session stays open, and `$LASTEXITCODE` holds
-the code; `pwsh -Command` exits with it. It runs the runner through
+`Invoke-ASH` refuses by throwing, with `$LASTEXITCODE` set to the code (3 for an
+input it refuses, 1 when it finds no OCI runner). It never calls `exit`, so a script
+that dot-sources `utils/ash_helpers.ps1` can catch the error and go on, and a session
+you type into, or one started with `-NoExit`, stays open. Any other error it raises
+leaves `$LASTEXITCODE` non-zero as well. Uncaught, the error ends `pwsh -File` and
+`pwsh -Command` with exit 1, as PowerShell does for any uncaught error, whatever the
+code. A CI step that needs the code wraps the call, also under
+`$ErrorActionPreference = 'Stop'` (the default of a `pwsh` step on GitHub Actions):
+
+```powershell
+try {
+    Invoke-ASH -SourceDir . -OutputDir ./.ash/ash_output
+}
+catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 })
+}
+```
+
+The `catch` block prints the reason, which the error carries, and exits with the code.
+The `else { 1 }` covers an error raised before `Invoke-ASH` runs, such as a parameter it
+cannot bind, which sets no code. It runs the runner through
 `Invoke-Expression`, and passes each path and value it was given by name, so PowerShell
 reads a directory named `a$(...)` as that name. Three inputs are still parsed as
 PowerShell: the arguments after the named parameters, which are passed through to `ash`

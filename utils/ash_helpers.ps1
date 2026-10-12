@@ -77,6 +77,18 @@ function Invoke-ASH {
 
     .EXAMPLE
     Get-Help Invoke-ASH
+
+    .EXAMPLE
+    try { Invoke-ASH -SourceDir . } catch { [Console]::Error.WriteLine($_.Exception.Message); exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }
+
+    As a CI step that needs the refusal's code: prints the reason and exits with it.
+
+    .NOTES
+    A refusal throws, with $LASTEXITCODE set to its code: 3 for an input Invoke-ASH
+    refuses, 1 when it finds no OCI runner. It never calls `exit`, so a script that
+    dot-sources these helpers can catch it and go on. Any other error Invoke-ASH
+    raises leaves $LASTEXITCODE non-zero too. Uncaught, `pwsh -File` and
+    `pwsh -Command` exit 1, as PowerShell does for any uncaught error.
     #>
     [CmdletBinding()]
     param(
@@ -152,6 +164,11 @@ function Invoke-ASH {
         $AshArgs = $null
     )
     begin {
+        # A refusal (Stop-AshRefusal) sets $LASTEXITCODE before it throws. Any other
+        # error raised here, such as an output directory that cannot be created under
+        # Stop, leaves it at 1 when it is 0, so `catch { exit $LASTEXITCODE }` in a CI
+        # step never exits 0 after a failure. `break` rethrows the error unchanged.
+        trap { if (-not $global:LASTEXITCODE) { $global:LASTEXITCODE = 1 }; break }
         # ValidateSet and -eq ignore case, and so does the build: -BuildTarget NON-ROOT
         # is non-root. Lower-cased once, so the --target value and the image tag are too.
         $BuildTarget = $BuildTarget.ToLowerInvariant()
@@ -663,94 +680,31 @@ function Invoke-ASH {
             }
         }
         catch {
-            # Rethrown as it is: writing it as an error record first showed it twice.
+            # As in begin: whatever raised, $LASTEXITCODE is not left at 0. Rethrown
+            # as it is: writing it as an error record first showed it twice.
+            if (-not $global:LASTEXITCODE) { $global:LASTEXITCODE = 1 }
             throw
         }
     }
 }
 
-function Test-AshInteractiveSession {
-    <#
-    .SYNOPSIS
-    Whether this PowerShell session is one a person types into.
-
-    .DESCRIPTION
-    Decided from the call stack first: when a script file is among Invoke-ASH's
-    callers, `exit` ends that script and nothing else, so the session that ran it
-    stays whether a person types into it or not. With no script among the callers,
-    Invoke-ASH was typed at a prompt or given in a -Command string, which the call
-    stack cannot tell apart. Then a host other than the console host (an editor's
-    integrated console) is typed into, and for the console host the process command
-    line decides: pwsh and powershell started with a command or a script to run
-    (-Command, -File, -EncodedCommand, a script path, or -NonInteractive) end when it
-    does; one started without either, or with -NoExit, is typed into. Parameter
-    names may be abbreviated, as PowerShell accepts them.
-    #>
-    param(
-        [string[]]
-        $Arguments = [Environment]::GetCommandLineArgs(),
-        [string]
-        $HostName = $Host.Name,
-        [AllowNull()]
-        [string[]]
-        $ScriptFrames = $null
-    )
-    if ($null -eq $ScriptFrames) {
-        $helpers = $MyInvocation.MyCommand.ScriptBlock.File
-        $ScriptFrames = @(
-            Get-PSCallStack |
-                Where-Object { $_.ScriptName -and $_.ScriptName -ne $helpers } |
-                ForEach-Object { $_.ScriptName }
-        )
-    }
-    if ($ScriptFrames.Count -gt 0) {
-        return $false
-    }
-    if ($HostName -and $HostName -notin @('ConsoleHost', 'Default Host')) {
-        return $true
-    }
-    $rest = @($Arguments | Select-Object -Skip 1)
-    foreach ($argument in $rest) {
-        $flag = ("$argument" -replace '^/', '-').ToLowerInvariant()
-        if ($flag.Length -ge 4 -and '-noexit'.StartsWith($flag)) {
-            return $true
-        }
-    }
-    foreach ($argument in $rest) {
-        $flag = ("$argument" -replace '^/', '-').ToLowerInvariant()
-        if ($flag -like '*.ps1' -or $flag -in @('-c', '-f', '-e', '-ec')) {
-            return $false
-        }
-        foreach ($name in @('-command', '-file', '-encodedcommand')) {
-            if ($flag.Length -ge 4 -and $name.StartsWith($flag)) {
-                return $false
-            }
-        }
-        if ($flag.Length -ge 5 -and '-noninteractive'.StartsWith($flag)) {
-            return $false
-        }
-    }
-    return $true
-}
-
 function Stop-AshRefusal {
     <#
     .SYNOPSIS
-    End an Invoke-ASH run that is refused, with its exit code and message.
+    End an Invoke-ASH run that is refused: set $LASTEXITCODE to its code and throw.
 
     .DESCRIPTION
-    The message goes to stderr directly: Write-Error under
-    $ErrorActionPreference = 'Stop' would end the script with exit 1 before the exit
-    code is set. In a session a person types into, the refusal throws instead of
-    exiting, so the session stays open; $LASTEXITCODE holds the code either way.
+    It never calls `exit`. In a function a script dot-sources, `exit` ends that whole
+    script, so its caller could neither handle the refusal nor go on. The thrown
+    error carries the message; a caller that catches it reads the code from
+    $LASTEXITCODE, and a CI step that needs the code exits with it:
+    `try { Invoke-ASH ... } catch { [Console]::Error.WriteLine($_.Exception.Message); exit $LASTEXITCODE }`.
+    Uncaught, `pwsh -File` and `pwsh -Command` exit 1, as PowerShell does for any
+    uncaught error. The code is set first, before anything else can raise.
     #>
     param([int]$ExitCode, [string]$Message)
     $global:LASTEXITCODE = $ExitCode
-    if (Test-AshInteractiveSession) {
-        throw "ERROR: $Message"
-    }
-    [Console]::Error.WriteLine("ERROR: $Message")
-    exit $ExitCode
+    throw "ERROR: $Message"
 }
 
 Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'OCIRunner' -ScriptBlock {

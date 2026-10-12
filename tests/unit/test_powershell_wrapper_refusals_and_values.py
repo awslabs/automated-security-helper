@@ -1,14 +1,15 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``Invoke-ASH`` exits with the code it means and passes each given path as a value.
+"""``Invoke-ASH`` refuses with the code it means and passes each given path as a value.
 
 utils/ash_helpers.ps1:
 
-- Each refusal writes its message to stderr directly and then runs ``exit 3`` (or
-  ``exit 1``). ``Write-Error`` would not do: under ``$ErrorActionPreference =
-  'Stop'``, which GitHub Actions sets for every ``pwsh`` step and many scripts set
-  themselves, it is a terminating error, and the caller would see exit 1.
+- Each refusal sets ``$LASTEXITCODE`` to 3 (or 1) and throws. A CI step wraps the
+  call, ``try { Invoke-ASH ... } catch { ...; exit $LASTEXITCODE }``, and these
+  tests run it that way, under ``$ErrorActionPreference = 'Stop'``, which GitHub
+  Actions sets for every ``pwsh`` step. ``Write-Error`` would not do for a refusal:
+  under ``Stop`` it is a terminating error raised before the code is set.
 - The build and run commands are strings run by ``Invoke-Expression``, which parses
   them as PowerShell. Every path and value the operator gives is written into them
   by its variable name (``"$sourceDirFull"``), which ``Invoke-Expression`` expands
@@ -124,18 +125,14 @@ def test_the_check_sees_a_spliced_value():
     assert _spliced(new) == []
 
 
-def test_no_refusal_writes_with_write_error_before_it_exits():
+def test_no_refusal_writes_with_write_error():
+    """Under ``$ErrorActionPreference = 'Stop'`` a Write-Error is itself a terminating
+    error, raised before the refusal sets ``$LASTEXITCODE``. Refusals go through
+    Stop-AshRefusal, which sets the code and throws."""
     lines = [line.strip() for line in HELPERS.read_text(encoding="utf-8").splitlines()]
-    exits = [
-        i for i, line in enumerate(lines) if re.fullmatch(r"exit (\d+|\$\w+)", line)
-    ]
 
-    assert exits, "no exit found"
-    for index in exits:
-        before = [line for line in lines[max(0, index - 3) : index] if line]
-        assert not any(line.startswith("Write-Error") for line in before[-1:]), lines[
-            index - 1
-        ]
+    assert [line for line in lines if line.startswith("Write-Error")] == []
+    assert any(line.startswith("Stop-AshRefusal 3 ") for line in lines)
 
 
 @pytest.fixture
@@ -166,9 +163,13 @@ def recording_docker(tmp_path, pwsh) -> Path:
 
 
 def _invoke(pwsh, tmp_path: Path, bin_dir: Path, arguments: str):
+    """Run Invoke-ASH as a CI step does: under ``Stop``, wrapped so a refusal, which
+    throws, ends the step with its code (docs/content/docs/cli-reference.md)."""
     script = (
         f"$ErrorActionPreference = 'Stop'; . '{HELPERS.as_posix()}'; "
-        f"Invoke-ASH -OCIRunner docker -NoBuild {arguments}; "
+        f"try {{ Invoke-ASH -OCIRunner docker -NoBuild {arguments} }} "
+        "catch { [Console]::Error.WriteLine($_.Exception.Message); "
+        "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }; "
         "exit [int]$LASTEXITCODE"
     )
     env = {k: v for k, v in os.environ.items() if k not in ("PATH", "ASH_CONFIG")}

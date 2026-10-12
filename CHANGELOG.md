@@ -525,13 +525,19 @@
   `--config` that could not be handed to the container, or a path `--mount` cannot
   carry, refused the scan with exit 3 only after the previous run's results and reports
   had been cleared from the output directory. The inputs are now checked first.
-- **`Invoke-ASH` exits 3 when it refuses, and passes each path as written.** Its refusals
-  wrote their message with `Write-Error`, which under `$ErrorActionPreference = 'Stop'`
-  (every `pwsh` step on GitHub Actions) ends the script with exit 1 before its `exit 3`;
-  they now write to stderr directly and raise no PowerShell error record. In a session
-  a person types into (pwsh started without `-Command`, `-File` or a script), a
-  refusal throws instead of exiting, so the session stays open, with `$LASTEXITCODE`
-  set. It refuses a non-root build when it runs as root (`id -u` is 0) without
+- **`Invoke-ASH` refuses by throwing with `$LASTEXITCODE` set to 3, and passes each path
+  as written.** Its refusals wrote their message with `Write-Error` and then ran
+  `exit 3`. Under `$ErrorActionPreference = 'Stop'` (every `pwsh` step on GitHub
+  Actions) the `Write-Error` ended the script with exit 1 first, and in a script that
+  dot-sources `utils/ash_helpers.ps1` the `exit` ended that whole script before it
+  could handle the refusal. Every refusal now sets `$LASTEXITCODE` (3, or 1 when no OCI
+  runner is found) and throws; nothing in the helpers calls `exit`, so a caller can
+  catch the error and go on, and a `-NoExit` session stays open. Any other error
+  `Invoke-ASH` raises leaves `$LASTEXITCODE` non-zero too. Uncaught, `pwsh -File`
+  exits 1, as PowerShell does for any uncaught error, so a CI step that needs exit 3
+  wraps the call: `try { Invoke-ASH ... } catch { [Console]::Error.WriteLine($_.Exception.Message); exit $LASTEXITCODE }`
+  (the CLI reference gives the full form). This repository's run-scan-test action does.
+  It refuses a non-root build when it runs as root (`id -u` is 0) without
   `-ContainerUID`, or with `-ContainerUID 0` or `-ContainerGID 0`, exit 3, naming
   `-BuildTarget ci`; a `-ContainerUID` or `-ContainerGID` that is not a number, exit 3;
   and a `-Config` outside the source directory with an `extends` entry, exit 3, since

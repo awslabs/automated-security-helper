@@ -12,9 +12,13 @@ utils/ash_helpers.ps1, matching ``ash --mode container`` and ``./ash``:
   builds as before.
 - A ``-Config`` outside the source directory is mounted on its own, without the
   files it extends, so one with an ``extends`` entry is refused.
-- Every refusal ends the run with its exit code when Invoke-ASH runs from a script
-  or ``pwsh -Command``, and throws in a session a person types into, where ``exit``
-  would close that session (``Test-AshInteractiveSession``).
+- Every refusal sets ``$LASTEXITCODE`` to its code (3, or 1 without a runner) and
+  throws; nothing in the helpers calls ``exit``. A script that dot-sources them can
+  catch the error and carry on, and a session started with ``-NoExit`` stays open.
+  A CI step that needs the code wraps the call, ``try { Invoke-ASH ... } catch {
+  ...; exit $LASTEXITCODE }``; uncaught, ``pwsh -File`` exits 1, as PowerShell does
+  for any uncaught error. Any other error Invoke-ASH raises leaves ``$LASTEXITCODE``
+  non-zero too, so that wrapper cannot turn it into exit 0.
 
 The text tests run everywhere. The ones that run the script need ``pwsh``: they
 skip on a developer machine without it and fail in CI, as
@@ -44,18 +48,72 @@ def _text() -> str:
     return HELPERS.read_text(encoding="utf-8")
 
 
-def test_every_exit_goes_through_the_one_refusal_helper():
-    lines = [line.strip() for line in _text().splitlines()]
-    exits = [i for i, line in enumerate(lines) if re.match(r"exit\b", line)]
-    helper = next(
-        i for i, line in enumerate(lines) if line.startswith("function Stop-AshRefusal")
+def _code_lines() -> list:
+    """The helpers' lines without comments and comment-based help."""
+    lines, in_help = [], False
+    for raw in _text().splitlines():
+        line = raw.strip()
+        if line.startswith("<#"):
+            in_help = True
+        if in_help:
+            in_help = not line.endswith("#>")
+            continue
+        if line and not line.startswith("#"):
+            lines.append(line)
+    return lines
+
+
+def test_nothing_in_the_helpers_exits():
+    """``exit`` in a dot-sourced function ends the caller's whole script."""
+    exits = [line for line in _code_lines() if re.search(r"(^|[;{]\s*)exit\b", line)]
+
+    assert exits == []
+
+
+def test_a_refusal_sets_the_code_and_throws():
+    lines = _code_lines()
+    start = lines.index("function Stop-AshRefusal {")
+    body = lines[start + 1 : lines.index("}", start)]
+
+    assert body == [
+        "param([int]$ExitCode, [string]$Message)",
+        "$global:LASTEXITCODE = $ExitCode",
+        'throw "ERROR: $Message"',
+    ]
+
+
+def test_the_scan_test_step_exits_with_the_refusal_code():
+    """The powershell legs of run-scan-test call Invoke-ASH inside the wrapper, so a
+    refusal ends the step with its code, not PowerShell's 1."""
+    import yaml
+
+    action = REPO_ROOT / ".github" / "actions" / "run-scan-test" / "action.yml"
+    steps = yaml.safe_load(action.read_text(encoding="utf-8"))["runs"]["steps"]
+    (run,) = [
+        step["run"]
+        for step in steps
+        if step.get("shell") == "pwsh" and "Invoke-ASH -" in step.get("run", "")
+    ]
+    lines = run.splitlines()
+    calls = [
+        i for i, line in enumerate(lines) if line.strip().startswith("Invoke-ASH ")
+    ]
+    opened = next(i for i, line in enumerate(lines) if line.strip() == "try {")
+    caught = next(i for i, line in enumerate(lines) if line.strip() == "catch {")
+
+    assert len(calls) == 2
+    assert all(opened < i < caught for i in calls)
+    assert "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 })" in "\n".join(
+        lines[caught:]
     )
 
-    assert exits, "no exit found"
-    assert all(helper < i < helper + 25 for i in exits), [lines[i] for i in exits]
-    body = "\n".join(lines[helper : helper + 25])
-    assert "if (Test-AshInteractiveSession)" in body
-    assert "throw" in body
+
+def test_the_session_detection_is_gone():
+    """Exit or throw used to depend on the call stack and the command line."""
+    text = _text()
+
+    for name in ("Test-AshInteractiveSession", "Get-PSCallStack", "GetCommandLineArgs"):
+        assert name not in text
 
 
 def test_the_root_refusal_names_the_opt_in():
@@ -74,52 +132,30 @@ def pwsh():
     return PWSH
 
 
-@pytest.mark.parametrize(
-    ("arguments", "interactive"),
-    [
-        pytest.param([], True, id="bare"),
-        pytest.param(["-NoProfile", "-NoLogo"], True, id="profile-flags"),
-        pytest.param(["-NoExit", "-Command", "x"], True, id="no-exit"),
-        pytest.param(["-Command", "x"], False, id="command"),
-        pytest.param(["-c", "x"], False, id="c"),
-        pytest.param(["-NoProfile", "-File", "a.ps1"], False, id="file"),
-        pytest.param(["a.ps1"], False, id="positional-script"),
-        pytest.param(["-EncodedCommand", "eAA="], False, id="encoded"),
-        pytest.param(["-NonInteractive"], False, id="non-interactive"),
-    ],
-)
-def test_the_session_test_reads_the_command_line(arguments, interactive, pwsh):
-    quoted = ",".join(f"'{a}'" for a in ["pwsh", *arguments])
-    script = (
-        f". '{HELPERS.as_posix()}'; "
-        f"if (Test-AshInteractiveSession -Arguments @({quoted})) {{ exit 10 }} "
-        "else { exit 11 }"
-    )
-    result = subprocess.run(  # nosec B603 - fixed interpreter, script built here
-        [pwsh, "-NoProfile", "-NonInteractive", "-Command", script],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-
-    assert result.returncode == (10 if interactive else 11), result.stderr
-
-
-def _pwsh_script(pwsh, tmp_path: Path, body: str, *, file: bool = True):
+def _pwsh_script(
+    pwsh,
+    tmp_path: Path,
+    body: str,
+    *,
+    file: bool = True,
+    flags: tuple = ("-NonInteractive",),
+    stdin: Optional[str] = None,
+):
     """Run *body* with the helpers dot-sourced, as a script file or a -Command string."""
     script = f". '{HELPERS.as_posix()}'\n{body}\n"
     if file:
         path = tmp_path / "caller.ps1"
         path.write_text(script, encoding="utf-8")
-        command = [pwsh, "-NoProfile", "-NonInteractive", "-File", str(path)]
+        command = [pwsh, "-NoProfile", *flags, "-File", str(path)]
     else:
-        command = [pwsh, "-NoProfile", "-NonInteractive", "-Command", script]
+        command = [pwsh, "-NoProfile", *flags, "-Command", script]
     env = {k: v for k, v in os.environ.items() if k != "ASH_CONFIG"}
+    env["NO_COLOR"] = "1"
     return subprocess.run(  # nosec B603 - fixed interpreter, script built here
         command,
         cwd=tmp_path,
         env=env,
+        input=stdin,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -128,46 +164,104 @@ def _pwsh_script(pwsh, tmp_path: Path, body: str, *, file: bool = True):
     )
 
 
-def test_inside_a_script_the_session_is_not_the_one_typed_into(pwsh, tmp_path):
-    """The call stack decides first: a refusal inside a script file exits that
-    script, whatever the process command line says (here, a bare ``pwsh``)."""
+#: A call Invoke-ASH refuses with exit 3 before it looks for a runner: --mount cannot
+#: carry a comma.
+REFUSED = (
+    "Invoke-ASH -OCIRunner absent-runner-name -NoBuild -SourceDir src -OutputDir 'a,b'"
+)
+REFUSAL_TEXT = "cannot be handed to the container runner"
+#: The form docs/content/docs/cli-reference.md gives a CI step that needs the code.
+WRAPPED = (
+    "try {{ {call} }} catch {{ [Console]::Error.WriteLine($_.Exception.Message); "
+    "exit $(if ($LASTEXITCODE) {{ $LASTEXITCODE }} else {{ 1 }}) }}"
+)
+
+
+@pytest.fixture
+def src(tmp_path) -> Path:
+    path = tmp_path / "src"
+    path.mkdir()
+    return path
+
+
+def test_a_dot_sourcing_script_catches_a_refusal_and_carries_on(pwsh, src, tmp_path):
+    """The refusal throws, with $LASTEXITCODE set, and does not end the caller."""
     result = _pwsh_script(
         pwsh,
         tmp_path,
-        "if (Test-AshInteractiveSession -Arguments @('pwsh')) { 'INTERACTIVE' } "
-        "else { 'SCRIPT' }",
+        "$ErrorActionPreference = 'Stop'\n"
+        f'try {{ {REFUSED} }} catch {{ "caught $LASTEXITCODE" }}\n'
+        "'carried on'\n"
+        "exit 0",
     )
 
-    assert result.stdout.strip() == "SCRIPT", result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.split() == ["caught", "3", "carried", "on"], result.stdout
 
 
-def test_without_a_script_a_hosted_console_is_typed_into(pwsh, tmp_path):
-    """No script frame: an editor's console host is a session a person types into,
-    even when it was started with -Command."""
+def test_the_wrapped_call_exits_with_the_refusal_code(pwsh, src, tmp_path):
+    """``pwsh -File`` with the documented wrapper, under ``Stop`` as on GitHub."""
     result = _pwsh_script(
         pwsh,
         tmp_path,
-        "if (Test-AshInteractiveSession -Arguments @('pwsh', '-Command', 'x') "
-        "-HostName 'Visual Studio Code Host') { 'INTERACTIVE' } else { 'SCRIPT' }",
+        "$ErrorActionPreference = 'Stop'\n" + WRAPPED.format(call=REFUSED),
+    )
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert result.stderr.count(REFUSAL_TEXT) == 1, result.stderr
+
+
+def test_an_uncaught_refusal_under_file_exits_1(pwsh, src, tmp_path):
+    """PowerShell's exit code for any uncaught error; documented, not ASH's choice."""
+    result = _pwsh_script(pwsh, tmp_path, f"{REFUSED}\n'after'")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "after" not in result.stdout
+    assert " ".join(result.stderr.split()).count(REFUSAL_TEXT) == 1, result.stderr
+
+
+def test_a_no_exit_session_stays_open_after_a_refusal(pwsh, src, tmp_path):
+    """The session reads the next commands from stdin after the refusal."""
+    result = _pwsh_script(
+        pwsh,
+        tmp_path,
+        REFUSED,
         file=False,
+        flags=("-NoExit",),
+        stdin='Write-Output "alive $LASTEXITCODE"\nexit 7\n',
     )
 
-    assert result.stdout.strip() == "INTERACTIVE", result.stdout + result.stderr
+    assert result.returncode == 7, result.stdout + result.stderr
+    assert "alive 3" in result.stdout
 
 
-def test_a_refusal_that_throws_is_printed_once(pwsh, tmp_path):
-    """In a session typed into, the refusal throws; Invoke-ASH does not also write it
-    as an error record first."""
-    (tmp_path / "src").mkdir()
+def test_another_error_leaves_the_code_non_zero(pwsh, src, tmp_path):
+    """So ``catch { exit $LASTEXITCODE }`` cannot exit 0 after a failure that is not
+    a refusal: here the output directory cannot be created under a file."""
+    (tmp_path / "blocker").write_text("", encoding="utf-8")
     result = _pwsh_script(
         pwsh,
         tmp_path,
-        "function Test-AshInteractiveSession { $true }\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        "$global:LASTEXITCODE = 0\n"
+        "try { Invoke-ASH -OCIRunner absent-runner-name -NoBuild -SourceDir src "
+        '-OutputDir blocker/out } catch { "code $LASTEXITCODE" }',
+    )
+
+    assert result.stdout.split() == ["code", "1"], result.stdout + result.stderr
+
+
+def test_a_refusal_is_printed_once(pwsh, src, tmp_path):
+    """Uncaught, PowerShell prints the error; Invoke-ASH does not print it as well."""
+    result = _pwsh_script(
+        pwsh,
+        tmp_path,
         "Invoke-ASH -OCIRunner absent-runner-name -NoBuild -SourceDir src -OutputDir out",
         file=False,
     )
 
     output = result.stdout + result.stderr
+    assert result.returncode == 1, output
     assert output.count("Unable to resolve an OCI_RUNNER") == 1, output
 
 
@@ -188,9 +282,11 @@ def host(tmp_path, pwsh):
     def invoke(arguments: str, uid: Optional[str] = "1000", gid: Optional[str] = None):
         if uid is not None:
             fixed_id_dir(bin_dir, uid, gid if gid is not None else uid)
+        # As a CI step runs it: under Stop, wrapped so a refusal ends it with its code.
+        call = f"Invoke-ASH -OCIRunner docker -SourceDir src -OutputDir out {arguments}"
         script = (
             f"$ErrorActionPreference = 'Stop'; . '{HELPERS.as_posix()}'; "
-            f"Invoke-ASH -OCIRunner docker -SourceDir src -OutputDir out {arguments}; "
+            f"{WRAPPED.format(call=call)}; "
             "exit [int]$LASTEXITCODE"
         )
         env = {k: v for k, v in os.environ.items() if k not in ("PATH", "ASH_CONFIG")}
