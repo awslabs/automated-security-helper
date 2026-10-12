@@ -204,7 +204,7 @@ ACTIONLINT_CHECKS_URL = (
     "https://github.com/rhysd/actionlint/blob/v1.7.12/docs/checks.md"
 )
 
-#: The ``-format`` template. ``{{json .}}`` is the error list as a JSON array, encoded
+#: The ``actionlint -format`` template. ``{{json .}}`` is the error list as a JSON array, encoded
 #: by actionlint; ``getVersion`` is the running binary's version. Passed as one argv
 #: element, never through a shell.
 ACTIONLINT_FORMAT = '{"version":{{getVersion | json}},"errors":{{json .}}}'

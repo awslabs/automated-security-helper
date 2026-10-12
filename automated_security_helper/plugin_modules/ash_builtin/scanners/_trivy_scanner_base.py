@@ -77,18 +77,18 @@ from automated_security_helper.utils.package_identity import (
 
 C = TypeVar("C", bound=ScannerPluginConfigBase)
 
-#: Flags every trivy scan gets, online or offline. ``--offline-scan``: trivy scans
+#: Flags every trivy scan gets, online or offline. ``trivy --offline-scan``: trivy scans
 #: never contact package registries; the database refresh is a separate step
 #: (``_shared_update_flags``). Measured with trivy 0.75.0: an online ``trivy fs`` of a
 #: pom.xml requested its parent and dependency POMs from the repository the pom.xml
 #: declares and from Maven Central, and with the flag requested nothing. trivy then
 #: resolves Maven dependencies from the scanned tree and the local Maven repository
-#: (``~/.m2/repository``) only. ``--skip-version-check``: without it trivy asks
+#: (``~/.m2/repository``) only. ``trivy --skip-version-check``: without it trivy asks
 #: check.trivy.dev about new versions and announcements (measured through a proxy on
 #: 127.0.0.1, online), which a scan has no use for.
 SCAN_FLAGS = ("--offline-scan", "--skip-version-check")
 
-#: The flags that skip trivy's own updates offline. ``--skip-db-update`` makes trivy
+#: The flags that skip trivy's own updates offline. ``trivy --skip-db-update`` makes trivy
 #: use whatever vulnerability database is in its cache, of any age; ASH's scan-time
 #: staleness check (``utils/content_db_staleness.py``) is what holds that database
 #: to its declared bound.

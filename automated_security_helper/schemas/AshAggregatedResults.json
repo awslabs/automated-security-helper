@@ -8488,7 +8488,7 @@
         },
         "honor_inline_ignores": {
           "default": false,
-          "description": "Honor gitleaks' inline `gitleaks:allow` comments. Off by default: gitleaks runs with `--ignore-gitleaks-allow`, so every finding reaches ASH, where suppressions are reported and counted. Honored only when set by --config-overrides or a config file outside the scanned tree; from a config in the scanned tree it is ignored with a warning.",
+          "description": "Honor gitleaks' inline `gitleaks:allow` comments. Off by default: ASH runs `gitleaks --ignore-gitleaks-allow`, so every finding reaches ASH, where suppressions are reported and counted. Honored only when set by --config-overrides or a config file outside the scanned tree; from a config in the scanned tree it is ignored with a warning.",
           "title": "Honor Inline Ignores",
           "type": "boolean"
         },
@@ -20856,7 +20856,7 @@
             }
           ],
           "default": null,
-          "description": "A trivy config file (trivy.yaml), passed as --config. Unset, ASH passes an empty one, so a trivy.yaml in the scanned repository is not read: its settings (severity, scan.skip-files, db.repository, ...) can drop findings with nothing in the report saying so, and module.dir can load WASM modules. Honored only when set by --config-overrides or a config file outside the scanned tree, for a file outside that tree; otherwise ignored with a warning. A path that does not exist fails the scan.",
+          "description": "A trivy config file (trivy.yaml), passed as trivy --config. Unset, ASH passes an empty one, so a trivy.yaml in the scanned repository is not read: its settings (severity, scan.skip-files, db.repository, ...) can drop findings with nothing in the report saying so, and module.dir can load WASM modules. Honored only when set by --config-overrides or a config file outside the scanned tree, for a file outside that tree; otherwise ignored with a warning. A path that does not exist fails the scan.",
           "title": "Config File"
         },
         "disable_telemetry": {
@@ -20879,7 +20879,7 @@
             }
           ],
           "default": null,
-          "description": "A trivy ignore file, passed as --ignorefile. Honored only when set by --config-overrides or a config file outside the scanned tree, for a file outside that tree; a relative path is taken from the source directory. Otherwise TRIVY_IGNOREFILE is used, for a file outside the tree, and failing that trivy gets an empty one, so a .trivyignore in the scanned repository does not remove findings. As for trivy-repo.",
+          "description": "A trivy ignore file, passed as trivy --ignorefile. Honored only when set by --config-overrides or a config file outside the scanned tree, for a file outside that tree; a relative path is taken from the source directory. Otherwise TRIVY_IGNOREFILE is used, for a file outside the tree, and failing that trivy gets an empty one, so a .trivyignore in the scanned repository does not remove findings. As for trivy-repo.",
           "title": "Ignore File"
         },
         "ignore_unfixed": {
@@ -20946,7 +20946,7 @@
             }
           ],
           "default": null,
-          "description": "A trivy secret scanning config (trivy-secret.yaml), passed as --secret-config. Only read when scanners includes secret. Honored only under the same rule as ignore_file, and otherwise TRIVY_SECRET_CONFIG is used, for a file outside the tree, and failing that trivy gets an empty one, so a trivy-secret.yaml in the scanned repository does not disable secret rules. As for trivy-repo.",
+          "description": "A trivy secret scanning config (trivy-secret.yaml), passed as trivy --secret-config. Only read when scanners includes secret. Honored only under the same rule as ignore_file, and otherwise TRIVY_SECRET_CONFIG is used, for a file outside the tree, and failing that trivy gets an empty one, so a trivy-secret.yaml in the scanned repository does not disable secret rules. As for trivy-repo.",
           "title": "Secret Config File"
         },
         "severity_threshold": {
@@ -22943,12 +22943,12 @@
             }
           ],
           "default": null,
-          "description": "Path to a zizmor configuration file, passed as `--config`. Relative paths are resolved against the source directory; absolute paths are used as given. Honored only when set by --config-overrides or a config file outside the scanned tree; otherwise it runs `zizmor --no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned repository is not read.",
+          "description": "Path to a zizmor configuration file, passed as `zizmor --config`. Relative paths are resolved against the source directory; absolute paths are used as given. Honored only when set by --config-overrides or a config file outside the scanned tree; otherwise it runs `zizmor --no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned repository is not read.",
           "title": "Config File"
         },
         "honor_inline_ignores": {
           "default": false,
-          "description": "Honor zizmor's inline `# zizmor: ignore[...]` comments and the `ignore` rules of the operator's `config_file`. Off by default: zizmor runs with `--no-ignores`, so every finding reaches ASH, where suppressions are reported and counted. Honored only when set by --config-overrides or a config file outside the scanned tree; from a config in the scanned tree it is ignored with a warning.",
+          "description": "Honor zizmor's inline `# zizmor: ignore[...]` comments and the `ignore` rules of the operator's `config_file`. Off by default: ASH runs `zizmor --no-ignores`, so every finding reaches ASH, where suppressions are reported and counted. Honored only when set by --config-overrides or a config file outside the scanned tree; from a config in the scanned tree it is ignored with a warning.",
           "title": "Honor Inline Ignores",
           "type": "boolean"
         },
@@ -22960,7 +22960,7 @@
         },
         "online_audits": {
           "default": false,
-          "description": "Allow zizmor's online audits. Off by default: zizmor runs with `--offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, `--offline` is not passed, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Honored only when set by --config-overrides or a config file outside the scanned tree, and ignored, with a warning, when ASH runs in offline mode.",
+          "description": "Allow zizmor's online audits. Off by default: ASH runs `zizmor --offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, ASH does not pass `zizmor --offline`, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Honored only when set by --config-overrides or a config file outside the scanned tree, and ignored, with a warning, when ASH runs in offline mode.",
           "title": "Online Audits",
           "type": "boolean"
         },

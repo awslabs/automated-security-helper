@@ -174,7 +174,7 @@ from automated_security_helper.utils.scanned_tree import (
     open_in_scanned_tree,
 )
 
-#: The text gitleaks writes in place of a secret under ``--redact``.
+#: The text gitleaks writes in place of a secret under ``gitleaks --redact``.
 REDACTED = "REDACTED"
 
 #: Exit code gitleaks is told to use when it finds leaks. See the module docstring.
@@ -189,7 +189,8 @@ _monotonic = time.monotonic
 TREE_CONFIG_NAMES = (".gitleaks.toml", ".ash/.gitleaks.toml")
 
 #: Environment variables gitleaks reads a config from. When either is set, outside
-#: the scanner sandbox, ASH passes no ``--config`` and gitleaks resolves it.
+#: the scanner sandbox, ASH does not pass ``gitleaks --config`` and gitleaks
+#: resolves it.
 CONFIG_ENV_VARS = ("GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML")
 
 #: The ignore file gitleaks always reads at the root of its scan path.
@@ -351,7 +352,7 @@ class GitleaksScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "Honor gitleaks' inline `gitleaks:allow` comments. Off by default: "
-                "gitleaks runs with `--ignore-gitleaks-allow`, so every finding "
+                "ASH runs `gitleaks --ignore-gitleaks-allow`, so every finding "
                 "reaches ASH, where suppressions are reported and counted. Honored "
                 "only when set by --config-overrides or a config file outside the "
                 "scanned tree; from a config in the scanned tree it is ignored "

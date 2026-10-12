@@ -393,7 +393,7 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "Path to a zizmor configuration file, passed as `--config`. "
+                "Path to a zizmor configuration file, passed as `zizmor --config`. "
                 "Relative paths are resolved against the source directory; "
                 "absolute paths are used as given. Honored only when set by "
                 "--config-overrides or a config file outside the scanned tree; "
@@ -416,10 +416,11 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
         bool,
         Field(
             description=(
-                "Allow zizmor's online audits. Off by default: zizmor runs with "
-                "`--offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN "
-                "is removed from its environment. When true, `--offline` is not "
-                "passed, those variables reach zizmor unchanged, and zizmor may "
+                "Allow zizmor's online audits. Off by default: ASH runs "
+                "`zizmor --offline` and any GH_TOKEN, GITHUB_TOKEN or "
+                "ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, "
+                "ASH does not pass `zizmor --offline`, those variables reach zizmor "
+                "unchanged, and zizmor may "
                 "call the GitHub API with the token. ASH never reads or logs the "
                 "token. Honored only when set by --config-overrides or a config "
                 "file outside the scanned tree, and ignored, with a warning, when "
@@ -433,7 +434,7 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "Honor zizmor's inline `# zizmor: ignore[...]` comments and the "
                 "`ignore` rules of the operator's `config_file`. Off by default: "
-                "zizmor runs with `--no-ignores`, so every finding reaches ASH, "
+                "ASH runs `zizmor --no-ignores`, so every finding reaches ASH, "
                 "where suppressions are reported and counted. Honored only when "
                 "set by --config-overrides or a config file outside the scanned "
                 "tree; from a config in the scanned tree it is ignored with a "

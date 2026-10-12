@@ -186,17 +186,17 @@ _CHECK_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
 _RULE_ID_ALPHABET = string.digits + string.ascii_uppercase + string.ascii_lowercase
 
 #: The most option text cfn-lint may be given; the rest of ``_ARGV_CHAR_BUDGET`` is
-#: left for templates. A ``--mandatory-checks`` list longer than this comes from an
+#: left for templates. A ``cfn-lint --mandatory-checks`` list longer than this comes from an
 #: ignore list too long to express, and is refused rather than truncated.
 _OPTION_CHAR_BUDGET = 20000
 
-#: The ``--configure-rule`` value passed when the operator configures no rule, so
+#: The ``cfn-lint --configure-rule`` value passed when the operator configures no rule, so
 #: that a template's own configure_rules never apply (``_configure_rule_args``).
 #: E3012's ``strict`` is false by default, so this sets it to what it already is;
 #: measured with 1.43.3 and 1.57.2, it changes no finding on the fixture templates.
 _NO_OP_CONFIGURE_RULE = "E3012:strict=false"
 
-#: The ``--ignore-checks`` value passed when nothing is ignored, so that a
+#: The ``cfn-lint --ignore-checks`` value passed when nothing is ignored, so that a
 #: template's own ignore_checks never stand in for the command line's (see
 #: ``_honor_inline_ignores``). It ignores nothing: every rule is mandatory then,
 #: and mandatory outranks ignored. It is not a prefix of E0000, which cfn-lint
@@ -206,7 +206,7 @@ _NO_OP_IGNORE_CHECK = "W0000"
 #: What a configure_rules key may be when it is passed on the command line.
 _CONFIG_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-#: Characters cfn-lint's ``--configure-rule`` parser splits a value on
+#: Characters the ``cfn-lint --configure-rule`` parser splits a value on
 #: (cfnlint/config.py, ``RuleConfigurationAction``), so a value holding one cannot
 #: be passed whole.
 _CONFIGURE_RULE_SEPARATORS = frozenset(",:=")

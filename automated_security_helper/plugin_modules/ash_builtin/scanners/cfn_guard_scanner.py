@@ -153,7 +153,7 @@ _SUCCESS_EXIT_CODES = frozenset({0, 19})
 _COMMAND = "cfn-guard"
 _RULE_SET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
-#: The files cfn-guard 3.2.1 reads from a ``--rules`` directory, case-sensitively
+#: The files cfn-guard 3.2.1 reads from a ``cfn-guard --rules`` directory, case-sensitively
 #: (measured: ``x.ruleset`` read, ``UP.GUARD`` and ``x.txt`` not).
 _RULE_SUFFIXES = (".guard", ".ruleset")
 

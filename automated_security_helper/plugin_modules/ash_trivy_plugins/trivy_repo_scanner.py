@@ -71,8 +71,8 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "A trivy config file (trivy.yaml), passed as --config. Unset, ASH "
-                "passes an empty one, so trivy does not load a trivy.yaml from the "
+                "A trivy config file (trivy.yaml), passed as trivy --config. Unset, "
+                "ASH passes an empty one, so trivy does not load a trivy.yaml from the "
                 "directory it runs in. Honored only when set by --config-overrides "
                 "or a config file outside the scanned tree, for a file outside that "
                 "tree; otherwise ignored with a warning. A path that does not exist "
@@ -84,8 +84,8 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "A directory of trivy modules, passed as --module-dir. Unset, ASH "
-                "passes an empty directory of its own. Honored under the same rule "
+                "A directory of trivy modules, passed as trivy --module-dir. Unset, "
+                "ASH passes an empty directory of its own. Honored under the same rule "
                 "as config_file. A path that is not a directory fails the scan."
             ),
         ),
@@ -95,7 +95,7 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
         str | None,
         Field(
             description=(
-                "A trivy ignore file, passed as --ignorefile. Honored only when set "
+                "A trivy ignore file, passed as trivy --ignorefile. Honored only when set "
                 "by --config-overrides or a config file outside the scanned tree, "
                 "for a file outside that tree; a relative path is taken from the "
                 "source directory. Otherwise TRIVY_IGNOREFILE is used, for a file "
@@ -109,7 +109,7 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "A trivy secret scanning config (trivy-secret.yaml), passed as "
-                "--secret-config. Honored only under the same rule as ignore_file, "
+                "trivy --secret-config. Honored only under the same rule as ignore_file, "
                 "and otherwise TRIVY_SECRET_CONFIG is used, for a file outside the "
                 "tree, and failing that trivy gets an empty one, so a "
                 "trivy-secret.yaml in the scanned repository does not disable secret "

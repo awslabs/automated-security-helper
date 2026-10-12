@@ -180,11 +180,11 @@ _SARIF_LEVEL = {
     "LOW": "note",
 }
 
-#: Characters trivy's ``--skip-dirs`` reads as glob syntax.
+#: Characters ``trivy --skip-dirs`` reads as glob syntax.
 _GLOB_SPECIAL = frozenset("*?[]{}\\")
 
-#: trivy's ``--timeout`` when ASH's ``scan_timeout`` is null (unbounded). trivy has no
-#: value that means "no deadline": measured with 0.75.0, ``--timeout=0s`` is a deadline
+#: ``trivy --timeout`` when ASH's ``scan_timeout`` is null (unbounded). trivy has no
+#: value that means "no deadline": measured with 0.75.0, ``trivy --timeout=0s`` is a deadline
 #: that has already passed, and a scan that analyzes files one at a time (secret
 #: scanning, OS packages) exits 1 with "context deadline exceeded". This is the largest
 #: whole number of hours a Go duration holds, about 292 years; one hour more is refused
@@ -262,8 +262,8 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "A trivy config file (trivy.yaml), passed as --config. Unset, ASH "
-                "passes an empty one, so a trivy.yaml in the scanned repository is not "
+                "A trivy config file (trivy.yaml), passed as trivy --config. Unset, "
+                "ASH passes an empty one, so a trivy.yaml in the scanned repository is not "
                 "read: its settings (severity, scan.skip-files, db.repository, ...) can "
                 "drop findings with nothing in the report saying so, and module.dir "
                 "can load WASM modules. Honored only when set by --config-overrides "
@@ -277,7 +277,7 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "A trivy ignore file, passed as --ignorefile. Honored only when set "
+                "A trivy ignore file, passed as trivy --ignorefile. Honored only when set "
                 "by --config-overrides or a config file outside the scanned tree, "
                 "for a file outside that tree; a relative path is taken from the "
                 "source directory. Otherwise TRIVY_IGNOREFILE is used, for a file "
@@ -292,7 +292,7 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "A trivy secret scanning config (trivy-secret.yaml), passed as "
-                "--secret-config. Only read when scanners includes secret. Honored "
+                "trivy --secret-config. Only read when scanners includes secret. Honored "
                 "only under the same rule as ignore_file, and otherwise "
                 "TRIVY_SECRET_CONFIG is used, for a file outside the tree, and "
                 "failing that trivy gets an empty one, so a trivy-secret.yaml in the "
