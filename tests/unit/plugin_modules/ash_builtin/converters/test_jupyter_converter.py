@@ -737,8 +737,11 @@ class TestConvert:
 
         results = converter.convert()
 
+        # By the converted file's name: nbconvert is handed a staged copy, so
+        # its argv does not name the notebook.
         assert len(results) == 1
-        assert [Path(cmd[6]).name for cmd in run.calls] == [client.name]
+        assert len(run.calls) == 1
+        assert results[0].name.endswith(expected_output_name(client))
 
     def test_ignore_suppressions_converts_a_notebook_under_an_ignore_path(
         self, converter, monkeypatch
@@ -757,7 +760,8 @@ class TestConvert:
         results = converter.convert()
 
         assert len(results) == 1
-        assert [Path(cmd[6]).name for cmd in run.calls] == [vendor.name]
+        assert len(run.calls) == 1
+        assert results[0].name.endswith(expected_output_name(vendor))
 
     def test_uv_execution_is_preferred_and_skips_the_subprocess_fallback(
         self, converter, tmp_path, monkeypatch

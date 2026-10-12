@@ -310,7 +310,9 @@ def test_the_jupyter_converter_gives_jupyter_an_empty_stdin(
     )
 
     record = tmp_path / "read.log"
-    _fake_tool(tools, "jupyter", record, stdout="7.16.4")
+    # Without uv the converter runs an installed jupyter-nbconvert directly, by
+    # its absolute path, for the version check and the conversion both.
+    _fake_tool(tools, "jupyter-nbconvert", record, stdout="7.16.4")
     converter = JupyterConverter(
         context=test_plugin_context, config=JupyterConverterConfig()
     )
