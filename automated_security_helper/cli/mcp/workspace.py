@@ -109,6 +109,7 @@ Failure modes and known limitations
 from __future__ import annotations
 
 import asyncio
+import threading
 from contextlib import suppress
 from pathlib import Path
 from typing import (
@@ -130,6 +131,8 @@ from automated_security_helper.cli.mcp.session_identity import (
     UNIDENTIFIED_SESSION_ID,
 )
 from automated_security_helper.cli.mcp.sessions import (
+    MCPSession,
+    ScanPresence,
     finish_ended_session,
     get_default_registry,
 )
@@ -1000,11 +1003,86 @@ def _workspace_ceiling_unreachable(payload: WorkspaceResults) -> Dict[str, int]:
     return totals
 
 
+class _WorkspaceScanClaim:
+    """A workspace scan's claim on its session, held until nothing of the scan runs.
+
+    ``mcp_scan_workspace`` claims the session (``MCPSession.try_claim_scan``)
+    before it resolves the workspace. ``_execute`` then hands the run to a worker
+    thread, and cancelling the call (the client cancels it, or its request ends)
+    does not stop that thread: it goes on reading the session's tree and writing
+    under it. So the claim is released, and a session that ended meanwhile is
+    removed (``finish_ended_session``), by whichever of the two leaves last: the
+    call, or the worker it handed the run to. A worker that the call left before
+    it started never runs the scan.
+    """
+
+    def __init__(self, session: MCPSession, session_id: str) -> None:
+        self._session = session
+        self._session_id = session_id
+        self._lock = threading.Lock()
+        self._holder = "call"  # then "worker", then "released"
+
+    def worker_starts(self) -> bool:
+        """Take the claim over for the worker; False if the call already left."""
+        with self._lock:
+            if self._holder == "released":
+                return False
+            self._holder = "worker"
+            return True
+
+    def worker_returns(self) -> None:
+        with self._lock:
+            self._holder = "released"
+        self._release()
+
+    def call_returns(self) -> None:
+        """Release the claim, unless a worker that started holds it."""
+        with self._lock:
+            if self._holder != "call":
+                return
+            self._holder = "released"
+        self._release()
+
+    def _release(self) -> None:
+        self._session.release_scan()
+        finish_ended_session(self._session_id)
+
+
+def _session_holds_something_on_disk(session_id: str, profile: Optional[str]) -> bool:
+    """True if the session's sandbox has what a workspace scan of it can read.
+
+    That is a delivered tree (``source``) or a config its profile put there
+    (``config``), or a ``profile`` named for this call, which is put there before
+    the scan reads it. Checked on disk, so it holds for a tree another server
+    sharing the workspace root delivered.
+    """
+    from automated_security_helper.cli.mcp.sandbox import (
+        CONFIG_DIR_NAME,
+        SOURCE_DIR_NAME,
+    )
+    from automated_security_helper.cli.mcp.session_paths import session_directory
+    from automated_security_helper.cli.mcp.source_delivery import (
+        resolve_workspace_root,
+    )
+
+    if profile is not None:
+        return True
+    try:
+        sandbox = session_directory(resolve_workspace_root(), session_id)
+        return any(
+            (sandbox / name).exists() for name in (SOURCE_DIR_NAME, CONFIG_DIR_NAME)
+        )
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
 async def _execute(
     plan: WorkspacePlan,
     settings: ProjectScanSettings,
     project_outputs: Dict[str, Path],
     progress_reporter: Optional[ProgressReporter],
+    claim: Optional[_WorkspaceScanClaim] = None,
+    session_id: Optional[str] = None,
 ) -> WorkspaceRunResult:
     """Run the workspace off the event loop, with a progress monitor beside it.
 
@@ -1017,14 +1095,18 @@ async def _execute(
     execution has returned there is nothing left to report, and an orphaned poll
     loop would keep emitting progress for a scan that is over.
 
-    ``ASH_OFFLINE`` is set here because that environment variable is the only thing
-    scanners actually consult. ``settings.offline`` reaches the orchestrator as a
-    declared field (``core/orchestrator.py``) and is never read; the gate scanners use
-    is ``is_offline_mode()`` in ``core/constants.py``, which tests
-    ``os.environ["ASH_OFFLINE"]``. So before this, requesting ``offline=True`` over MCP
-    was accepted, threaded through two layers, and silently did nothing -- the scan ran
-    with full network access while reporting that it had not. The CLI already sets the
-    variable around its own invocations; this path bypassed that.
+    Everything the run itself needs is held by the worker thread, from when it
+    starts until ``execute_workspace`` returns, because a cancelled call does not
+    stop the thread: the session's claim (:class:`_WorkspaceScanClaim`), the
+    session's ``ScanPresence`` for the TTL sweep of other servers, and
+    ``ASH_OFFLINE`` for an offline scan.
+
+    ``ASH_OFFLINE`` is set because that environment variable is the only thing
+    scanners consult. ``settings.offline`` reaches the orchestrator as a declared
+    field (``core/orchestrator.py``) and is never read; the gate scanners use is
+    ``is_offline_mode()`` in ``core/constants.py``, which tests
+    ``os.environ["ASH_OFFLINE"]``. The CLI sets the variable around its own
+    invocations, and this path sets it the same way.
 
     The variable is held (``utils/process_env.hold_environ``) rather than set and
     restored: with two sessions' offline scans overlapping, the first to end would put
@@ -1039,23 +1121,39 @@ async def _execute(
     the environment, which is a change across every scanner rather than a fix to this
     call site.
     """
+
+    def run() -> WorkspaceRunResult:
+        if claim is not None and not claim.worker_starts():
+            raise RuntimeError("the workspace scan was cancelled before it started")
+        try:
+            with ScanPresence(session_id if claim is not None else None):
+                # Held under the process-wide environment lock, because other
+                # sessions' scans may be copying the environment for a spawn on
+                # another thread right now, and counted, so overlapping offline
+                # scans keep it until the last one returns.
+                offline_held = bool(settings.offline)
+                if offline_held:
+                    hold_environ("ASH_OFFLINE", "YES")
+                try:
+                    # Resolved from this module's globals at call time, so a test
+                    # that replaces cli.mcp.workspace.execute_workspace is what
+                    # runs.
+                    return execute_workspace(plan, settings)
+                finally:
+                    if offline_held:
+                        release_environ("ASH_OFFLINE")
+        finally:
+            if claim is not None:
+                claim.worker_returns()
+
     monitor: Optional["asyncio.Task[None]"] = None
     if progress_reporter is not None and project_outputs:
         monitor = asyncio.create_task(
             monitor_workspace_progress(progress_reporter, dict(project_outputs))
         )
-    # Under the process-wide environment lock, because other sessions' scans may
-    # be copying the environment for a spawn on another thread right now.
-    offline_held = bool(settings.offline)
-    if offline_held:
-        hold_environ("ASH_OFFLINE", "YES")
     try:
-        # Resolved from this module's globals at call time, so a test that
-        # replaces cli.mcp.workspace.execute_workspace is what runs.
-        return await asyncio.to_thread(execute_workspace, plan, settings)
+        return await asyncio.to_thread(run)
     finally:
-        if offline_held:
-            release_environ("ASH_OFFLINE")
         if monitor is not None:
             monitor.cancel()
             with suppress(asyncio.CancelledError):
@@ -1206,8 +1304,9 @@ async def _scan_workspace(
     progress_reporter: Optional[ProgressReporter] = None,
     session_id: Optional[str] = None,
     profile: Optional[str] = None,
+    claim: Optional[_WorkspaceScanClaim] = None,
 ) -> Dict[str, Any]:
-    """``mcp_scan_workspace`` once the session's tree is claimed."""
+    """``mcp_scan_workspace`` once the session's tree is claimed, if it has one."""
     # Before resolution, because resolution is the read this gate guards. Every
     # other gate in this function runs after it, for the reasons the module
     # docstring gives.
@@ -1311,7 +1410,14 @@ async def _scan_workspace(
             plan, settings, clean_output=clean_output
         )
         registered = _register_projects(plan, project_outputs, session_id)
-        result = await _execute(plan, settings, project_outputs, progress_reporter)
+        result = await _execute(
+            plan,
+            settings,
+            project_outputs,
+            progress_reporter,
+            claim=claim,
+            session_id=session_id,
+        )
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         _close_registrations(registered, None, error=str(exc))
         return _error_response(exc, "scan_workspace")
@@ -1373,12 +1479,16 @@ async def mcp_scan_workspace(
     resolved project directories, so it cannot precede resolution, and every
     filesystem write happens after it.
 
-    A scan of a tree this session delivered claims the session for the whole run
-    (``MCPSession.try_claim_scan``), from before the workspace is resolved until
-    the run returns: ``clear_source``, ``set_source_git`` and
+    A scan by a session that has delivered a tree, or whose profile put a config
+    in its sandbox, claims the session (``MCPSession.try_claim_scan``) from before
+    the workspace is resolved until the scan's worker thread returns, even when
+    the call is cancelled first: ``clear_source``, ``set_source_git`` and
     ``set_source_zip_finalize`` are refused meanwhile with ``source_delivery_busy``,
-    and a session that ends meanwhile is removed once the scan returns. The scan
-    is refused the same way while one of those calls is changing the tree.
+    and a session that ends meanwhile is removed once the worker returns. The
+    scan is refused the same way while one of those calls is changing the tree.
+    A session that has delivered nothing has nothing of its own for the scan to
+    hold, so its scan of a directory the operator granted takes no claim and
+    creates nothing under the workspace root.
 
     Args:
         workspace_file: Path to the ``.code-workspace`` definition. Confined as a
@@ -1424,24 +1534,33 @@ async def mcp_scan_workspace(
         enabled reporter that cannot produce a workspace artifact or a project
         that is not a git repository under precommit.
     """
-    claimed = None
-    if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
+    claim: Optional[_WorkspaceScanClaim] = None
+    if (
+        session_id is not None
+        and session_id != UNIDENTIFIED_SESSION_ID
+        and _session_holds_something_on_disk(session_id, profile)
+    ):
         try:
-            claimed = get_default_registry().get_or_create(session_id)
+            # The in-memory session: the claim creates nothing on disk.
+            session: Optional[MCPSession] = get_default_registry().session_for(
+                session_id
+            )
         except ValueError:
             # An id that names no directory has no delivered tree to hold; the
             # checks below refuse it.
-            claimed = None
-        if claimed is not None and not claimed.try_claim_scan():
-            response = _error_response(
-                SourceDeliveryBusyError(
-                    "the delivered source of this session is being changed; start "
-                    "the workspace scan after the change finishes"
-                ),
-                "scan_workspace",
-            )
-            response["error_type"] = SOURCE_DELIVERY_BUSY
-            return response
+            session = None
+        if session is not None:
+            if not session.try_claim_scan():
+                response = _error_response(
+                    SourceDeliveryBusyError(
+                        "the delivered source of this session is being changed; "
+                        "start the workspace scan after the change finishes"
+                    ),
+                    "scan_workspace",
+                )
+                response["error_type"] = SOURCE_DELIVERY_BUSY
+                return response
+            claim = _WorkspaceScanClaim(session, session_id)
     try:
         return await _scan_workspace(
             workspace_file=workspace_file,
@@ -1456,8 +1575,9 @@ async def mcp_scan_workspace(
             progress_reporter=progress_reporter,
             session_id=session_id,
             profile=profile,
+            claim=claim,
         )
     finally:
-        if claimed is not None:
-            claimed.release_scan()
-            finish_ended_session(session_id)
+        # A worker that started holds the claim until it returns.
+        if claim is not None:
+            claim.call_returns()
