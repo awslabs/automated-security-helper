@@ -265,15 +265,16 @@ for id_flag in UID GID; do
   id_value="CONTAINER_${id_flag}"
   if [[ "${!id_given}" = "YES" && ! "${!id_value}" =~ ^[0-9]+$ ]]; then
     echo "ERROR: Container ${id_flag} must be a numeric value: '${!id_value}'." >&2
-    exit 1
+    exit 3
   fi
 done
 
 # The non-root stage creates its user with `adduser --uid <UID> --gid <GID>`. UID 0 is
 # root, which already exists: that build fails at that step, after the whole core stage
 # has been built. GID 0 is root's group, which would give the unprivileged user root's
-# group rights over the image. Either is refused before building, as `ash build-image`
-# does. Any spelling of zero counts, since the build reads UID=00 as 0 too.
+# group rights over the image. Either is refused before building, with exit 3, as
+# `ash --mode container`, `ash build-image` and Invoke-ASH refuse it. Any spelling of
+# zero counts, since the build reads UID=00 as 0 too.
 if [[ "${NO_BUILD}" = "NO" && "${TARGET_STAGE}" = "non-root" ]]; then
   BUILD_UID="${HOST_UID}"
   BUILD_GID="${HOST_GID}"
@@ -285,11 +286,11 @@ if [[ "${NO_BUILD}" = "NO" && "${TARGET_STAGE}" = "non-root" ]]; then
   fi
   if [[ "${BUILD_UID}" =~ ^0+$ ]]; then
     echo "ERROR: The non-root image stage creates a user with UID 0, which is root: ASH is running as root, or --container-uid 0 was given. Pass --build-target ci to build the image that runs as root. Another --container-uid and --container-gid work only when the output directory is writable by that UID: the container runs as that user and writes its reports there." >&2
-    exit 1
+    exit 3
   fi
   if [[ "${BUILD_GID}" =~ ^0+$ ]]; then
     echo "ERROR: The non-root image stage gives its user GID 0, which is root's group: ASH is running with GID 0, or --container-gid 0 was given. Pass --build-target ci to build the image that runs as root. Another --container-gid works only when the output directory is writable by the container's user, which writes its reports there." >&2
-    exit 1
+    exit 3
   fi
 fi
 

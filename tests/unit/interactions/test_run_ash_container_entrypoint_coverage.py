@@ -166,7 +166,7 @@ class TestContainerIdValidation:
             source_dir=tmp_path, container_uid="root", build=False, run=False
         )
 
-        assert result.returncode == 1
+        assert result.returncode == 3
         assert result.stderr == "Container UID must be a numeric value"
 
     def test_a_non_numeric_container_gid_is_refused(self, container_stubs, tmp_path):
@@ -174,7 +174,7 @@ class TestContainerIdValidation:
             source_dir=tmp_path, container_gid="wheel", build=False, run=False
         )
 
-        assert result.returncode == 1
+        assert result.returncode == 3
         assert result.stderr == "Container GID must be a numeric value"
 
     def test_the_host_ids_are_used_when_none_are_given(self, container_stubs, tmp_path):

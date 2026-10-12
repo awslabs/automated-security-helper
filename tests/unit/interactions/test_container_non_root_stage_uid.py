@@ -87,7 +87,7 @@ def test_a_non_root_build_as_uid_0_is_refused_before_building(
     )
 
     assert commands == [], f"a runner command was started: {commands}"
-    assert result.returncode == 1
+    assert result.returncode == 3
     assert not rac.container_was_started(result)
     assert "--build-target ci" in result.stderr
     assert "--container-uid" in result.stderr
@@ -149,7 +149,7 @@ def test_a_uid_of_digits_other_than_0_to_9_is_not_a_number(uid, commands):
     )
 
     assert commands == []
-    assert result.returncode == 1
+    assert result.returncode == 3
     assert "Container UID must be a numeric value" in result.stderr
 
 
@@ -167,7 +167,7 @@ def test_a_non_root_build_with_gid_0_is_refused_before_building(gid, commands):
     )
 
     assert commands == [], f"a runner command was started: {commands}"
-    assert result.returncode == 1
+    assert result.returncode == 3
     assert not rac.container_was_started(result)
     assert "GID 0" in result.stderr
     assert "--build-target ci" in result.stderr
@@ -189,7 +189,7 @@ def test_a_gid_of_anything_but_0_to_9_is_not_a_number(gid, commands):
     )
 
     assert commands == []
-    assert result.returncode == 1
+    assert result.returncode == 3
     assert "Container GID must be a numeric value" in result.stderr
 
 
@@ -270,5 +270,5 @@ def test_the_refusal_names_the_opt_in_exactly(commands):
         source_dir="src", output_dir="out", ash_revision_to_install="v3.7.0"
     )
 
-    assert result.returncode == 1
+    assert result.returncode == 3
     assert "Pass --build-target ci " in result.stderr

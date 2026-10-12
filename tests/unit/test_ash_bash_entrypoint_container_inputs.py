@@ -577,7 +577,8 @@ class TestANonRootBuildAsUid0IsRefused:
     """The ``non-root`` stage creates its user with ``adduser --uid <UID>``, and UID 0
     is root, which already exists: the build fails at that step after the whole
     ``core`` stage has been built. As in ``ash build-image``, the wrapper refuses it
-    before building, with exit 1 and the two ways forward. Any spelling of zero
+    before building, with exit 3, the code Invoke-ASH and ``ash --mode container``
+    give the same refusal, and names ``--build-target ci``. Any spelling of zero
     counts: the build reads ``UID=00`` as 0 too."""
 
     @pytest.mark.parametrize("uid", ["0", "00"])
@@ -586,7 +587,7 @@ class TestANonRootBuildAsUid0IsRefused:
             fake_runner, project, ["--no-run", "--container-uid", uid]
         )
 
-        assert rc == 1, output
+        assert rc == 3, output
         assert calls == []
         assert "--build-target ci" in output
 
@@ -595,7 +596,7 @@ class TestANonRootBuildAsUid0IsRefused:
             fake_runner, project, ["--no-run"], host_ids=("0", UNPRIVILEGED_GID)
         )
 
-        assert rc == 1, output
+        assert rc == 3, output
         assert calls == []
         assert "--build-target ci" in output
 
@@ -624,7 +625,7 @@ class TestANonRootBuildAsUid0IsRefused:
             ["--no-run", "--container-uid", "1000", "--container-gid", gid],
         )
 
-        assert rc == 1, output
+        assert rc == 3, output
         assert calls == []
         assert "GID 0" in output
         assert "--build-target ci" in output
@@ -635,7 +636,7 @@ class TestANonRootBuildAsUid0IsRefused:
             fake_runner, project, ["--no-run", flag, "1x"]
         )
 
-        assert rc == 1, output
+        assert rc == 3, output
         assert calls == []
         assert "must be a numeric value" in output
 

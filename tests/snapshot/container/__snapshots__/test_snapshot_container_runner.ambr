@@ -59,7 +59,7 @@
 # ---
 # name: TestRefusals.test_non_numeric_container_uid
   dict({
-    'exit_code': 1,
+    'exit_code': 3,
     'stderr': '',
     'stdout': '''
       Container UID must be a numeric value

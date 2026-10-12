@@ -398,12 +398,14 @@
   `automated-security-helper:non-root` tag, and its own layer-cache scope on GitHub
   Actions). A job that runs as root (AWS CodeBuild, container-based GitLab or Jenkins
   jobs) cannot build `non-root`, whose user would get UID 0, and is refused before the
-  build with that explanation (exit 1): pass `--build-target ci` there. `./ash` refuses
+  build with that explanation (exit 3): pass `--build-target ci` there. `./ash` refuses
   it the same way, and so does `Invoke-ASH`, run as root or given `-ContainerUID 0`
   (exit 3, naming `-BuildTarget ci`); any spelling of zero such as `00` counts. A GID
   of 0, root's group, is refused for a `non-root` build in the same three places. A
   `--container-uid` or `--container-gid` holding anything but the digits 0-9 (`²`, `1x`)
-  is refused as not numeric, by `./ash` and `Invoke-ASH` as well. See the breaking
+  is refused as not numeric, by `./ash` and `Invoke-ASH` as well. All three refusals
+  exit 3 from all three entry points; `ash --mode container` and `./ash` used to exit 1
+  for them. See the breaking
   change above. This repository's
   validate-container action now passes `--build-target ci` to every build and scan.
 - **On Windows, container mode and `ash build-image` default to the `ci` stage.** The
@@ -1164,10 +1166,11 @@
   `ash --mode container`, `ash build-image`, `./ash` and `Invoke-ASH` build the
   `non-root` stage by default, CI or not, and refuse that build before it starts when
   its user would get UID 0 or GID 0, which is what a job running as root gives it
-  (AWS CodeBuild, container-based GitLab and Jenkins jobs). The refusal exits 1 (3 for
-  `Invoke-ASH`) and names the opt-in: `--build-target ci` (`-BuildTarget ci` for
-  `Invoke-ASH`), the stage that runs as root, or `--container-uid` and
-  `--container-gid` for the non-root user. In AWS CodeBuild:
+  (AWS CodeBuild, container-based GitLab and Jenkins jobs). The refusal exits 3 from all
+  three entry points and names the opt-in: `--build-target ci` (`-BuildTarget ci` for
+  `Invoke-ASH`), the stage that runs as root. Another `--container-uid` and
+  `--container-gid` work only when the output directory is writable by that UID. In AWS
+  CodeBuild:
   `ash --mode container --build-target ci`. An unprivileged user, such as a
   GitHub-hosted runner's, builds `non-root` as before.
 - **MCP scans can now end in a new terminal status, `incomplete`.** Clients

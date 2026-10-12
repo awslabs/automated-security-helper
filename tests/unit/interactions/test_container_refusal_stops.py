@@ -91,7 +91,9 @@ class TestARefusalEndsTheScan:
     def test_non_numeric_uid(self, runtime):
         result = CliRunner().invoke(app, [*SCAN, "--container-uid", "root"])
 
-        _assert_stopped_after_refusal(result, "Container UID must be a numeric value")
+        _assert_stopped_after_refusal(
+            result, "Container UID must be a numeric value", exit_code=3
+        )
 
     def test_unsafe_revision(self, runtime):
         result = CliRunner().invoke(

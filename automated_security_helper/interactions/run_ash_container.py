@@ -1801,13 +1801,14 @@ def run_ash_container(
 
     # Validate container UID and GID if specified. 0-9 only: str.isdigit also accepts
     # digits such as "²" or "٠", which neither the build nor int() reads as a UID.
+    # Exit 3, as ./ash and Invoke-ASH refuse the same input.
     if container_uid is not None:
         if not _ASCII_DIGITS.fullmatch(container_uid):
             typer.secho("Container UID must be a numeric value", fg=typer.colors.RED)
             return _not_started(
                 create_completed_process(
                     args=[],
-                    returncode=1,
+                    returncode=3,
                     stdout="",
                     stderr="Container UID must be a numeric value",
                 )
@@ -1821,7 +1822,7 @@ def run_ash_container(
             return _not_started(
                 create_completed_process(
                     args=[],
-                    returncode=1,
+                    returncode=3,
                     stdout="",
                     stderr="Container GID must be a numeric value",
                 )
@@ -1877,7 +1878,7 @@ def run_ash_container(
             typer.secho(root_uid_refusal, fg=typer.colors.RED)
             return _not_started(
                 create_completed_process(
-                    args=[], returncode=1, stdout="", stderr=root_uid_refusal
+                    args=[], returncode=3, stdout="", stderr=root_uid_refusal
                 )
             )
 
