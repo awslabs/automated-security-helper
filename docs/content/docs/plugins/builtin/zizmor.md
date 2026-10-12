@@ -58,10 +58,10 @@ scanners:
 - `persona`: zizmor's [persona](https://docs.zizmor.sh/usage/#using-personas).
   `regular` has the fewest false positives, `pedantic` adds code-smell findings,
   and `auditor` reports everything.
-- `config_file`: passed as `--config`, when the operator set it: from
+- `config_file`: passed as `zizmor --config`, when the operator set it: from
   `--config-overrides`, or an ASH config file outside the scanned tree. A relative
   path is resolved against the source directory; an absolute path may point outside
-  it (a config shared across repositories). Without it, ASH runs zizmor with
+  it (a config shared across repositories). Without it, ASH runs
   `zizmor --no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned
   repository is not read: a config there can disable audits or ignore findings,
   which zizmor then never reports, so they would be neither in ASH's results nor
@@ -90,13 +90,13 @@ scanners:
 
 ## Network access and tokens
 
-zizmor always runs with `--offline` unless `online_audits: true`. Offline is the
+ASH always runs `zizmor --offline` unless `online_audits: true`. Offline is the
 default because zizmor reads a GitHub token from `GH_TOKEN`, `GITHUB_TOKEN` or
 `ZIZMOR_GITHUB_TOKEN` by itself, and a token that happens to be in a CI job's
 environment is not permission to use it. While offline, ASH removes those three
 variables from zizmor's environment.
 
-`online_audits: true` disables `--offline` and lets those variables reach zizmor
+`online_audits: true` drops `zizmor --offline` and lets those variables reach zizmor
 unchanged, which enables the audits that query the GitHub API (for example
 known-vulnerable actions and impostor commits). It is honored only when the
 operator sets it, with `--config-overrides` or an ASH config file outside the
@@ -152,7 +152,7 @@ global_settings:
 zizmor's own [ignore comments](https://docs.zizmor.sh/usage/#ignoring-results)
 (`# zizmor: ignore[template-injection]`) are not honored by default. Such a comment
 makes zizmor drop the finding before ASH sees it, so it would be neither reported
-nor counted as suppressed; ASH runs zizmor with `--no-ignores`, which also turns off
+nor counted as suppressed; ASH runs `zizmor --no-ignores`, which also turns off
 the `ignore` rules of an operator's `config_file` (its other settings still apply).
 To honor both, the operator sets `honor_inline_ignores: true` with
 `--config-overrides` or in an ASH config file outside the scanned tree; set by an

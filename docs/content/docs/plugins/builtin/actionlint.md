@@ -42,7 +42,7 @@ scanners:
 
 ### `config_file`
 
-ASH always hands actionlint an explicit `-config-file`, and it is never the scanned repository's own:
+ASH always passes `actionlint -config-file` with a config of its choosing, and it is never the scanned repository's own:
 
 1. `options.config_file`, when the operator set it: from `--config-overrides`, or an ASH config file outside the scanned tree. A relative path resolves against the source directory and an absolute one is used as given; the file the operator names may be inside the scanned tree. A path that does not exist fails the scan with `ERROR`, and so does a path inside the tree that leads out of it through a symbolic link, without running actionlint: the scanned repository decides what is at that path, actionlint quotes the start of a value it cannot parse, and ASH logs a config's `ignore` patterns.
 2. Otherwise an empty config ASH writes into its own results directory.
@@ -51,7 +51,7 @@ A `.github/actionlint.yaml` or `.github/actionlint.yml` in the scanned repositor
 
 ### `shellcheck` and `pyflakes`
 
-actionlint runs `shellcheck` on `run:` scripts and `pyflakes` on `shell: python` steps when they are on `PATH`, and skips them silently when they are not. Results would then depend on what a host happens to have installed, so ASH disables both by default (`-shellcheck= -pyflakes=`).
+actionlint runs `shellcheck` on `run:` scripts and `pyflakes` on `shell: python` steps when they are on `PATH`, and skips them silently when they are not. Results would then depend on what a host happens to have installed, so ASH disables both by default (`actionlint -shellcheck= -pyflakes=`).
 
 To use them, set the option to `shellcheck` or `pyflakes`, which is looked up in the absolute directories on `PATH` and in ASH's bin directory, and handed to actionlint as an absolute path. If the configured tool cannot be found or is not executable, the scanner reports `MISSING` rather than running without it. shellcheck and pyflakes findings are LOW severity. Neither is installed in the ASH container image.
 

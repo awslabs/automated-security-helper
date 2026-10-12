@@ -819,7 +819,7 @@ scanners:
       severity_threshold: null   # gates the verdict, as for every scanner
 ```
 
-A scanner-level `severity_threshold` gates the verdict as it does for every other scanner: findings below it are reported and do not fail the scan. It is not passed to trivy as `--severity`. See [Trivy filesystem scanner](plugins/builtin/trivy.md).
+A scanner-level `severity_threshold` gates the verdict as it does for every other scanner: findings below it are reported and do not fail the scan. ASH does not pass it as `trivy --severity`. See [Trivy filesystem scanner](plugins/builtin/trivy.md).
 
 ### zizmor
 
@@ -835,7 +835,7 @@ scanners:
       install_timeout: 300
 ```
 
-zizmor runs with `--no-config` and `--offline` unless the operator sets these. See [zizmor](plugins/builtin/zizmor.md).
+ASH runs `zizmor --no-config` and `zizmor --offline` unless the operator sets these. See [zizmor](plugins/builtin/zizmor.md).
 
 ## UV Tool Management
 

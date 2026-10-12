@@ -50,10 +50,10 @@ scanners:
       # false follows ASH (--offline / ASH_OFFLINE); true forces trivy offline.
       offline: false
       # Gates the verdict, as for every scanner. Findings below it are still
-      # reported. Not passed to trivy as --severity.
+      # reported. ASH does not pass it as trivy --severity.
       severity_threshold: null
       # Seconds before the trivy process is killed; also passed as trivy --timeout.
-      # null leaves both unbounded: trivy gets --timeout=2562047h (about 292
+      # null leaves both unbounded: ASH passes trivy --timeout=2562047h (about 292
       # years), since it reads 0s as a deadline already passed. Its default is 5m.
       scan_timeout: 1800
 ```
@@ -82,7 +82,7 @@ To accept a finding, prefer an ASH suppression, which is recorded in the reports
 
 Each finding is reported at trivy's own severity for it (CRITICAL, HIGH, MEDIUM, LOW), not at a band of its CVSS score, so a finding trivy rates HIGH is reported HIGH whatever its score. A finding trivy rates UNKNOWN falls back to ASH's usual SARIF mapping: the rule's CVSS score (`security-severity`), then the SARIF level.
 
-`severity_threshold` works as for every other scanner: ASH applies it after the scan, to that severity, so a finding below it is still reported and does not fail the scan. It is not passed to trivy as `--severity`, which would drop those findings before ASH saw them.
+`severity_threshold` works as for every other scanner: ASH applies it after the scan, to that severity, so a finding below it is still reported and does not fail the scan. ASH does not pass it as `trivy --severity`, which would drop those findings before ASH saw them.
 
 The severity is read per finding, from the `Severity:` line trivy writes in each result's message, not from the result's SARIF rule. trivy writes one rule per advisory, and one advisory can be rated differently for two packages in the same scan (Debian, for example, rates some binutils advisories CRITICAL for `binutils` and LOW for `gdb`); the rule carries only one of those ratings.
 
@@ -100,10 +100,10 @@ Symbol-scoped suppressions (function or class) do not apply: a dependency findin
 
 The database is declared as `trivy-db` in `automated_security_helper/utils/content_databases.py`, with a 24h bound measured from its `UpdatedAt`, which is trivy's own rule for its published database. After the scan, ASH reads `UpdatedAt` from `trivy version --format json` and fails the scan when the database is older than that (`content_db_staleness: warn` or `--allow-stale-content-db` turns the failure into a warning carried in every report). This is the same check grype's database gets. In an image built with `OFFLINE=YES` the stale database warns instead of failing; see [Offline and air-gapped use](#offline-and-air-gapped-use).
 
-- Online, ASH updates the database once per scan before trivy and trivy-repo run (`trivy image --download-db-only`, outside the scanner sandbox and under a lock in trivy's cache, so the two never write it at the same time), and fails the scan if it cannot download one. The update runs from an empty directory outside the scanned tree with an explicit `--config`: an empty one, or your `config_file` when it is honored, so a database mirror it names applies. Both scanners then run with `--skip-db-update --skip-java-db-update`, `trivy --skip-check-update` when `misconfig` is on, and `trivy --cache-dir` naming the cache the update wrote, so the scan only reads the cache. `fs` and `repository` scans never read the Java database.
+- Online, ASH updates the database once per scan before trivy and trivy-repo run (`trivy image --download-db-only`, outside the scanner sandbox and under a lock in trivy's cache, so the two never write it at the same time), and fails the scan if it cannot download one. The update runs from an empty directory outside the scanned tree with an explicit `trivy --config`: an empty one, or your `config_file` when it is honored, so a database mirror it names applies. Both scanners then run with `trivy --skip-db-update --skip-java-db-update`, `trivy --skip-check-update` when `misconfig` is on, and `trivy --cache-dir` naming the cache the update wrote, so the scan only reads the cache. `fs` and `repository` scans never read the Java database.
 - If you turn trivy's own update off, with `TRIVY_SKIP_DB_UPDATE=true` or `db.skip-update: true` in your `config_file`, ASH does not run its update either: trivy refuses to download a database under that setting, and you set it to keep trivy off the database registry, for example in CI that restores a cached database. ASH logs a warning naming the setting, and trivy and trivy-repo read the database already in the cache. The post-scan check still holds it to the 24h bound, so a cache you do not keep current fails the scan (or warns, under `content_db_staleness: warn`).
-- Offline, ASH passes `--skip-db-update --skip-java-db-update --skip-check-update`, so trivy uses whatever database is in its cache, and the post-scan check holds it to the bound.
-- Online or offline, trivy scans never contact package registries: ASH passes `--offline-scan` on every scan, and the database refresh is the separate step above. trivy then resolves Maven dependencies from the `pom.xml` files in the scanned tree and the local Maven repository (`~/.m2/repository`), not from the repositories a `pom.xml` declares or Maven Central. Every scan also gets `--skip-version-check`, so trivy does not check for new versions or announcements. trivy-repo gets both flags.
+- Offline, ASH passes `trivy --skip-db-update --skip-java-db-update --skip-check-update`, so trivy uses whatever database is in its cache, and the post-scan check holds it to the bound.
+- Online or offline, trivy scans never contact package registries: ASH passes `trivy --offline-scan` on every scan, and the database refresh is the separate step above. trivy then resolves Maven dependencies from the `pom.xml` files in the scanned tree and the local Maven repository (`~/.m2/repository`), not from the repositories a `pom.xml` declares or Maven Central. Every scan also gets `trivy --skip-version-check`, so trivy does not check for new versions or announcements. trivy-repo gets both flags.
 - Where the database is kept: `TRIVY_CACHE_DIR` when it is set. Otherwise, online, the update, the scan and the post-scan check use `~/.cache/trivy` (`~/Library/Caches/trivy` on macOS) on every platform, which is not trivy's own default on Windows (`%LocalAppData%\trivy`) or when `XDG_CACHE_HOME` is set (`$XDG_CACHE_HOME/trivy`), so an online scan there downloads the database again into `~/.cache/trivy` the first time. Offline, ASH names no cache directory, and trivy uses its own default. To keep one database for both, set `TRIVY_CACHE_DIR`.
 
 The database is only read by the `vuln` scanner; with `vuln` off nothing is measured.

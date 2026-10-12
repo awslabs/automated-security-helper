@@ -47,7 +47,7 @@ The scanned repository's own gitleaks configuration is not used. A `.gitleaks.to
 
 1. `options.config_file`, when the operator set it: from `--config-overrides`, or an ASH config file outside the scanned tree. A path that does not exist fails the scan rather than falling back to gitleaks' default rules.
 2. Otherwise, if `GITLEAKS_CONFIG` or `GITLEAKS_CONFIG_TOML` is set in the environment, gitleaks resolves the config from it. Under `--sandbox` those variables are not passed in, and step 3 applies.
-3. Otherwise gitleaks' default rules, through a config ASH writes that extends them and adds nothing. It is passed as `--config`, so gitleaks does not fall back to a `.gitleaks.toml` in the scanned tree.
+3. Otherwise gitleaks' default rules, through a config ASH writes that extends them and adds nothing. It is passed as `gitleaks --config`, so gitleaks does not fall back to a `.gitleaks.toml` in the scanned tree.
 
 `config_file`, `baseline_path`, `max_target_megabytes` or `honor_inline_ignores` set by an ASH config inside the scanned tree (`.ash/.ash.yaml`) is ignored with a warning, and a `.gitleaks.toml` or `.ash/.gitleaks.toml` in the tree is noted at INFO. The operator's files may be absolute paths or point outside the source directory, and a file the operator names may also be inside the scanned tree, unless that path leads out of the tree through a symlink: the scanned repository decides what is there, so such a path stops the scanner with an error and gitleaks is not run.
 

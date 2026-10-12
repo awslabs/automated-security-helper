@@ -106,18 +106,18 @@ scanners:
 | Option               | Type      | Default                                      | Description                                                             |
 | -------------------- | --------- | -------------------------------------------- | ----------------------------------------------------------------------- |
 | `scanners`           | List[str] | `["vuln", "misconfig", "secret", "license"]` | Types of scans to perform                                               |
-| `severity_threshold` | str       | `null`                                       | Minimum severity that fails the scan (`ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`); `null` uses the global threshold. Findings below it are still reported; it is not passed to trivy as `--severity` |
+| `severity_threshold` | str       | `null`                                       | Minimum severity that fails the scan (`ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`); `null` uses the global threshold. Findings below it are still reported; ASH does not pass it as `trivy --severity` |
 | `ignore_unfixed`     | bool      | `true`                                       | Ignore vulnerabilities without available fixes                          |
 | `license_full`       | bool      | `true`                                       | Enable full license scanning (more comprehensive but slower)            |
 | `disable_telemetry`  | bool      | `true`                                       | Disable Trivy telemetry data collection                                 |
-| `config_file`        | str       | `null`                                       | A trivy config file, passed as `--config`; see below                    |
-| `module_dir`         | str       | `null`                                       | A directory of trivy modules, passed as `--module-dir`; see below       |
-| `ignore_file`        | str       | `null`                                       | A trivy ignore file, passed as `--ignorefile`; see below                |
-| `secret_config_file` | str       | `null`                                       | A trivy secret-scanning config, passed as `--secret-config`; see below  |
+| `config_file`        | str       | `null`                                       | A trivy config file, passed as `trivy --config`; see below              |
+| `module_dir`         | str       | `null`                                       | A directory of trivy modules, passed as `trivy --module-dir`; see below |
+| `ignore_file`        | str       | `null`                                       | A trivy ignore file, passed as `trivy --ignorefile`; see below          |
+| `secret_config_file` | str       | `null`                                       | A trivy secret-scanning config, passed as `trivy --secret-config`; see below |
 | `offline`            | bool      | `false`                                      | Run offline even when ASH does not; ASH's offline mode applies regardless |
-| `scan_timeout`       | int       | `1800`                                       | Seconds ASH lets trivy run; trivy's own 5-minute `--timeout` still applies |
+| `scan_timeout`       | int       | `1800`                                       | Seconds ASH lets trivy run; ASH does not pass `trivy --timeout`, so trivy's own 5-minute default still applies |
 
-trivy-repo always passes `--config` and `--module-dir`, so trivy does not load a `trivy.yaml` from the directory it runs in. Unset, they name an empty config file and an empty directory ASH creates in the scanner's results directory. `config_file` and `module_dir` are honored only when set through `--config-overrides` or a config file outside the scanned tree, and only for paths outside that tree, which a path written inside the tree and led out of it by a symbolic link there is not; otherwise they are ignored with a warning. A configured path that does not exist fails the scan.
+trivy-repo always passes `trivy --config` and `trivy --module-dir`, so trivy does not load a `trivy.yaml` from the directory it runs in. Unset, they name an empty config file and an empty directory ASH creates in the scanner's results directory. `config_file` and `module_dir` are honored only when set through `--config-overrides` or a config file outside the scanned tree, and only for paths outside that tree, which a path written inside the tree and led out of it by a symbolic link there is not; otherwise they are ignored with a warning. A configured path that does not exist fails the scan.
 
 `ignore_file` and `secret_config_file` follow the same rule. Unset or refused, trivy-repo uses `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG` from the environment for a file outside the scanned tree, and otherwise an empty file ASH writes, so a `.trivyignore` or `trivy-secret.yaml` in the scanned repository does not remove findings or disable secret rules.
 
@@ -1505,7 +1505,7 @@ ash --scanners trivy-repo
 The copied database has to be current. After the scan ASH reads its `UpdatedAt`
 (from `trivy version --format json`) and exits 1 once it is more than 24 hours old,
 which is trivy's own rule: the published database sets `NextUpdate` 24 hours after
-`UpdatedAt`, and trivy online replaces it after that. Offline, `--skip-db-update`
+`UpdatedAt`, and trivy online replaces it after that. Offline, `trivy --skip-db-update`
 bypasses that rule, so ASH applies it instead. Repeat steps 1 and 2 to refresh the
 database, or pass `--allow-stale-content-db` (config: `content_db_staleness: warn`)
 to scan with an older one and have the reports say so.
