@@ -663,8 +663,9 @@ def build_scanner_policy(
             whatever the rest says. Set from a config file in the scanned tree,
             which may take network away but not grant it.
         tool_config_dir: The directory of config files ASH wrote for this scanner
-            run's tool (``utils/tool_config_dir``). Read-only, and data: no program
-            is run from it.
+            run's tool (``utils/tool_config_dir``). Read-only, and in
+            ``scan_data``, so a backend that limits where programs run from
+            (sandbox-exec) runs none from it.
     """
     real_home = Path.home()
     if network_scanners is None:

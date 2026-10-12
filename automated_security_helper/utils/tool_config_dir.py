@@ -33,7 +33,8 @@ Each scanner run has a directory of its own for these files
   with ``O_EXCL`` and ``O_NOFOLLOW``, so it is a new file ASH wrote;
 * readable, and not writable, by that scanner under ``--sandbox``:
   ``utils/sandbox/scope.prepare_spawn`` adds :func:`active_tool_config_dir` to each
-  spawn's read grants, as data a program may not be run from;
+  spawn's read grants, as scan data, which sandbox-exec (the one backend that
+  limits where programs run from) does not let a program run from;
 * removed when the run ends, whether the tool succeeded, failed or never started.
 
 Failure modes and known limitations

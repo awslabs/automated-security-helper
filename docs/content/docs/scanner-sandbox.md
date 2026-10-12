@@ -74,7 +74,8 @@ it needs.
   and secret config) are in a directory of that scanner run's own, outside the
   scanned tree (normally in the system temporary directory, never under one another
   account can change), made with mode 0700 and removed when the run ends. The
-  scanner can read it and cannot write to it or run programs from it.
+  scanner can read it and cannot write to it. Under sandbox-exec, the one backend
+  that limits where programs run from, it cannot run programs from it either.
 - System directories (`/usr`, `/etc`, `/opt`, `/nix`) and the directories on `PATH`
   are read-only. Inside `$HOME` only `PATH` entries named `bin`, `sbin` or `Scripts`
   are mounted, and a tool's install prefix only when it is deeper than a directory
