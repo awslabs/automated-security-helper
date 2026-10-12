@@ -139,7 +139,9 @@ it needs.
   virtual environment made with `~/python3 -m venv`, or a link in `~/.config`), or
   when `ASH_BIN_PATH` names a home or a directory directly in one that is not a
   `bin` directory. Use an interpreter or virtual environment outside the home
-  directory, or one created from the interpreter's real path.
+  directory, or one created from the interpreter's real path. A virtual environment
+  made from a Python whose prefix is refused keeps that prefix as its base, so it is
+  refused too.
 - A virtual environment or conda installation directly in a home is told apart from
   any other directory there by its marker (`pyvenv.cfg`, `conda-meta`) and by a short
   list of directories that never count as one, whatever marker they hold:

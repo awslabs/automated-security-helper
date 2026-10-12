@@ -368,8 +368,47 @@ def test_a_python_built_with_its_prefix_directly_in_the_home_is_refused(
 
     message = str(refused.value)
     assert repr(prefix.as_posix()) in message, message
-    assert "more of one than a single Python installation" in message, message
-    assert "outside the home directory" in message, message
+    assert "is not a single Python installation" in message, message
+    assert "Use a Python installed outside the home directory" in message, message
+    assert "a virtual environment made from this one is refused too" in message
+
+
+def test_a_venv_made_from_a_python_in_the_home_is_refused_and_told_why(
+    world, monkeypatch
+):
+    """A venv outside the home made from ~/py312 keeps it as sys.base_prefix, so it
+    is refused too, and the message says so instead of suggesting a venv."""
+    prefix = world.home / "py312"
+    real = _python(prefix / "bin" / "python3.12")
+    (prefix / "lib" / "python3.12").mkdir(parents=True)
+    venv = world.source / ".venv"
+    venv_python = _venv(venv, real)
+
+    with pytest.raises(SandboxUnavailable) as refused:
+        _build(world, monkeypatch, venv_python, venv, prefix)
+
+    message = str(refused.value)
+    assert repr(prefix.as_posix()) in message, message
+    assert "a virtual environment made from this one is refused too" in message
+    assert "virtual environment created from" not in message, message
+
+
+def test_a_link_in_a_directory_holding_a_home_is_refused_for_that_reason(
+    world, monkeypatch
+):
+    """The link's directory holds the home, so it is not called a directory in a
+    home, and the Python is not told to move outside the home it is not in."""
+    usr, real = _system_python(world)
+    executable = _link(world.home.parent / "python3", real)
+
+    with pytest.raises(SandboxUnavailable) as refused:
+        _build(world, monkeypatch, executable, usr)
+
+    message = str(refused.value)
+    assert repr(world.home.parent.as_posix()) in message, message
+    assert "a directory holding a home" in message, message
+    assert "a directory in a home" not in message, message
+    assert "outside the home directory" not in message, message
 
 
 def _in_which_home(world, which_home):
@@ -483,7 +522,10 @@ def test_an_interpreter_directly_in_another_top_level_directory_is_refused(
     with pytest.raises(SandboxUnavailable) as refused:
         _build(world, monkeypatch, executable, prefix)
 
-    assert repr("/") in str(refused.value), str(refused.value)
+    message = str(refused.value)
+    assert repr("/") in message, message
+    assert "is the filesystem root" in message, message
+    assert "home directory" not in message, message
 
 
 def test_a_sys_prefix_of_root_is_still_refused(world, monkeypatch):
