@@ -2570,3 +2570,145 @@ class TestShardsWithoutAStoredConfigAreRefused:
         merged = merge_shard_results(as_loaded(build_shards(3)))
 
         assert merged.ash_config is not None
+
+
+class TestScanSetRecordsAcrossShards:
+    """The scan-set records in ``metadata`` are every shard's, not shard 0's.
+
+    Each shard builds ASH's scan set itself, so each records what it left out:
+    ``metadata.inputs_not_scanned`` (the links leaving the tree) and
+    ``metadata.ignore_file_exclusions``. Shards scan the same tree and normally
+    agree, but a shard that ran on a different checkout, or with
+    ``--no-honor-ignore-files``, does not, and the merged report took shard 0's
+    alone (``model_copy`` of the lowest-indexed shard), so what another shard's
+    scan-set readers did not scan was dropped from the report.
+    """
+
+    @staticmethod
+    def _not_scanned(*paths):
+        from automated_security_helper.models.asharp_model import InputNotScanned
+
+        return [
+            InputNotScanned(path=path, reason="link leaves the scanned tree")
+            for path in paths
+        ]
+
+    @staticmethod
+    def _exclusions(honored=True, by=None, output_dir=0, count=None):
+        from automated_security_helper.models.core import IgnoreFileExclusions
+
+        by = dict(by or {})
+        return IgnoreFileExclusions(
+            honored=honored,
+            excluded_file_count=sum(by.values()) if count is None else count,
+            by_ignore_file=by,
+            output_dir_file_count=output_dir,
+        )
+
+    def test_every_shards_inputs_not_scanned_are_listed_once(self):
+        shards = build_shards(3)
+        shards[0].metadata.inputs_not_scanned = self._not_scanned("a.py", "b.py")
+        shards[1].metadata.inputs_not_scanned = self._not_scanned("b.py", "c/d.py")
+        shards[2].metadata.inputs_not_scanned = None
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert [row.path for row in merged.metadata.inputs_not_scanned] == [
+            "a.py",
+            "b.py",
+            "c/d.py",
+        ]
+
+    def test_a_row_only_a_later_shard_recorded_is_kept(self):
+        shards = build_shards(2)
+        shards[1].metadata.inputs_not_scanned = self._not_scanned("only/here.py")
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert [row.path for row in merged.metadata.inputs_not_scanned] == [
+            "only/here.py"
+        ]
+
+    def test_no_shard_with_a_row_leaves_none(self):
+        merged = merge_shard_results(as_loaded(build_shards(3)))
+
+        assert merged.metadata.inputs_not_scanned is None
+
+    def test_ignore_file_exclusions_take_every_shards_counts(self):
+        shards = build_shards(3)
+        shards[0].metadata.ignore_file_exclusions = self._exclusions(
+            by={".gitignore": 2, "sub/.ignore": 0}
+        )
+        shards[1].metadata.ignore_file_exclusions = self._exclusions(
+            by={".gitignore": 1, "sub/.ignore": 3}, output_dir=4
+        )
+        shards[2].metadata.ignore_file_exclusions = None
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        record = merged.metadata.ignore_file_exclusions
+        assert record.by_ignore_file == {".gitignore": 2, "sub/.ignore": 3}
+        assert record.excluded_file_count == 5
+        assert record.output_dir_file_count == 4
+        assert record.honored is True
+
+    def test_a_shard_that_did_not_honor_the_ignore_files_says_so(self):
+        shards = build_shards(2)
+        shards[0].metadata.ignore_file_exclusions = self._exclusions(
+            by={".gitignore": 2}
+        )
+        shards[1].metadata.ignore_file_exclusions = self._exclusions(honored=False)
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        record = merged.metadata.ignore_file_exclusions
+        assert record.honored is False
+        # What the honoring shard's scan-set readers left out still counts.
+        assert record.by_ignore_file == {".gitignore": 2}
+        assert record.excluded_file_count == 2
+
+    def test_agreeing_shards_give_the_shards_record(self):
+        shards = build_shards(3)
+        for shard in shards:
+            shard.metadata.ignore_file_exclusions = self._exclusions(
+                by={".gitignore": 2}, output_dir=1
+            )
+            shard.metadata.inputs_not_scanned = self._not_scanned("x.py")
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert merged.metadata.ignore_file_exclusions == self._exclusions(
+            by={".gitignore": 2}, output_dir=1
+        )
+        assert merged.metadata.inputs_not_scanned == self._not_scanned("x.py")
+
+    def test_the_merge_does_not_depend_on_the_order_shards_are_given(self):
+        def shards():
+            built = build_shards(3)
+            built[0].metadata.inputs_not_scanned = self._not_scanned("a.py")
+            built[2].metadata.inputs_not_scanned = self._not_scanned("z.py", "a.py")
+            built[1].metadata.ignore_file_exclusions = self._exclusions(
+                by={".gitignore": 1}
+            )
+            return built
+
+        forward = merge_shard_results(as_loaded(shards()))
+        backward = merge_shard_results(as_loaded(list(reversed(shards()))))
+
+        assert (
+            forward.metadata.inputs_not_scanned == backward.metadata.inputs_not_scanned
+        )
+        assert (
+            forward.metadata.ignore_file_exclusions
+            == backward.metadata.ignore_file_exclusions
+        )
+
+    def test_the_shards_are_not_changed(self):
+        shards = build_shards(2)
+        shards[0].metadata.inputs_not_scanned = self._not_scanned("a.py")
+        shards[1].metadata.inputs_not_scanned = self._not_scanned("b.py")
+        before = [shard.model_dump_json() for shard in shards]
+
+        merge_shard_results(as_loaded(shards))
+
+        assert [shard.model_dump_json() for shard in shards] == before

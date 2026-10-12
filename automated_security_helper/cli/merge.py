@@ -181,8 +181,10 @@ from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ConverterStatusInfo,
     FailedInputInfo,
+    InputNotScanned,
     RefusedInputInfo,
 )
+from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import (
     PluginModuleError,
@@ -963,6 +965,7 @@ def merge_shard_results(
             merged.cyclonedx = shard.cyclonedx
 
     _adopt_owning_shard_results(merged, shards, owner_by_scanner)
+    _merge_scan_set_records(merged, shards)
     _merge_timing(merged, shards)
     _record_merge_provenance(merged, shards)
 
@@ -982,6 +985,63 @@ def merge_shard_results(
     # every count would still be the base shard's, so a merged report would show
     # the union's findings under one shard's totals.
     return populate_metrics_from_unified_source(aggregated_results=merged)
+
+
+def _merge_scan_set_records(
+    merged: AshAggregatedResults,
+    shards: Sequence[Tuple[Path, AshAggregatedResults, ShardAssignment]],
+) -> None:
+    """Set the merged scan-set records in ``metadata`` from every shard's.
+
+    Each shard builds ASH's scan set itself and records what it left out:
+    ``inputs_not_scanned`` (the links leaving the scanned tree) and
+    ``ignore_file_exclusions``. Shards normally agree, since they scan one tree, but
+    one that ran on a different checkout or with ``--no-honor-ignore-files`` does
+    not, and its scan-set readers did not scan what it left out. So the merged
+    report records what any shard left out, in shard order:
+
+    * ``inputs_not_scanned``: every shard's rows, each (path, reason) once, first
+      record kept; None when no shard recorded one.
+    * ``ignore_file_exclusions``: ``honored`` only when every shard honored the
+      ignore files (as a workspace's merged record says); for each ignore file the
+      most any shard says it removed; ``excluded_file_count`` the sum of those, or
+      the largest shard count when that is more (a shard that did not honor the
+      ignore files can count files the caller's ignore files removed without
+      naming them); ``output_dir_file_count`` the largest. None when no shard
+      recorded one.
+
+    Shards are visited in index order, so the result does not depend on the order
+    they were passed in. No shard is modified.
+    """
+    rows: Dict[Tuple[str, str], InputNotScanned] = {}
+    for _, shard, _ in shards:
+        for row in shard.metadata.inputs_not_scanned or []:
+            rows.setdefault((row.path, row.reason), row)
+    merged.metadata.inputs_not_scanned = (
+        [row.model_copy() for row in rows.values()] if rows else None
+    )
+
+    records = [
+        shard.metadata.ignore_file_exclusions
+        for _, shard, _ in shards
+        if shard.metadata.ignore_file_exclusions is not None
+    ]
+    if not records:
+        merged.metadata.ignore_file_exclusions = None
+        return
+    by_ignore_file: Dict[str, int] = {}
+    for record in records:
+        for path, count in record.by_ignore_file.items():
+            by_ignore_file[path] = max(by_ignore_file.get(path, 0), count)
+    merged.metadata.ignore_file_exclusions = IgnoreFileExclusions(
+        honored=all(record.honored for record in records),
+        excluded_file_count=max(
+            sum(by_ignore_file.values()),
+            max(record.excluded_file_count for record in records),
+        ),
+        by_ignore_file=by_ignore_file,
+        output_dir_file_count=max(record.output_dir_file_count for record in records),
+    )
 
 
 def _merge_converter_rows(
