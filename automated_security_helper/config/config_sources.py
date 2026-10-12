@@ -279,16 +279,18 @@ def read_config_bytes(path: Path) -> bytes:
     ``OSError`` for anything else, and ``ASHConfigSourceError`` for a file longer
     than ``ASH_CONFIG_MAX_FILE_BYTES``.
     """
+    nonblock = getattr(os, "O_NONBLOCK", 0)
     flags = (
-        os.O_RDONLY
-        | getattr(os, "O_NONBLOCK", 0)
-        | getattr(os, "O_NOCTTY", 0)
-        | getattr(os, "O_BINARY", 0)
+        os.O_RDONLY | nonblock | getattr(os, "O_NOCTTY", 0) | getattr(os, "O_BINARY", 0)
     )
     fd = os.open(path, flags)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise OSError(errno.EINVAL, "not a regular file", os.fspath(path))
+        if nonblock:
+            # O_NONBLOCK was for the open. A regular file is then read normally:
+            # on some filesystems a non-blocking read of one can return early.
+            os.set_blocking(fd, True)
         limit = ASH_CONFIG_MAX_FILE_BYTES
         chunks: List[bytes] = []
         remaining = limit + 1
@@ -523,7 +525,28 @@ def _not_permitted(found: Path) -> ASHConfigInputNotPermittedError:
     )
 
 
+def _on_windows() -> bool:
+    return os.name == "nt"
+
+
+def _is_a_link(path: Path) -> bool:
+    """Whether `path` is a symbolic link or, on Windows, any reparse point."""
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    if stat.S_ISLNK(info.st_mode):
+        return True
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    return bool(getattr(info, "st_file_attributes", 0) & reparse)
+
+
 def _permitted(path: Path, permit: PermitBase) -> bool:
+    if _on_windows() and _is_a_link(path):
+        # Resolving a link on Windows can open a connection to the host a UNC
+        # target names, so a linked source is refused unresolved, as an extends
+        # base whose spelling leaves the root is (_resolve_base_path).
+        return False
     # realpath reads links and opens nothing, and does not raise on a loop.
     return permit(Path(os.path.realpath(path)))
 

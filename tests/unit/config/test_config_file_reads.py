@@ -306,6 +306,26 @@ class TestDiscoveryThatCannotLookIsRefused:
         assert resolve_config(source_dir=tmp_path).project_name == "ash-scan"
 
 
+class TestTheReadItselfBlocks:
+    def test_o_nonblock_is_cleared_once_the_file_is_known_to_be_regular(
+        self, tmp_path, monkeypatch
+    ):
+        """O_NONBLOCK is there for the open; a regular file is then read normally."""
+        path = tmp_path / "cfg.yaml"
+        path.write_text("project_name: x\n", encoding="utf-8")
+        blocking = []
+        real_read = os.read
+
+        def recording_read(fd, n):
+            blocking.append(os.get_blocking(fd))
+            return real_read(fd, n)
+
+        monkeypatch.setattr(os, "read", recording_read)
+
+        assert config_sources.read_config_bytes(path) == b"project_name: x\n"
+        assert blocking and all(blocking), blocking
+
+
 class TestAPyprojectLinkThatCannotBeFollowedIsNamedForWhatItIs:
     """Each was reported as "a symbolic link to nothing"."""
 

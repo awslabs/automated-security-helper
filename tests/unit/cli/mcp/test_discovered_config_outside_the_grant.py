@@ -175,6 +175,42 @@ class TestDiscoveryChecksEachCandidateBeforeOpeningIt:
         assert "Errno" not in str(excinfo.value)
         assert str(outside) not in str(excinfo.value)
 
+    def test_on_windows_a_linked_candidate_is_refused_unresolved(
+        self, tree, monkeypatch
+    ):
+        """Resolving a link on Windows can open a connection to the host a UNC
+        target names, so under a permit a linked source is refused, not resolved,
+        as an extends base outside the root is."""
+        inside = tree.scan / "real.toml"
+        inside.write_text('[tool.ash]\nproject_name = "x"\n', encoding="utf-8")
+        (tree.scan / "pyproject.toml").symlink_to(inside)
+        monkeypatch.setattr(config_sources, "_on_windows", lambda: True)
+        resolved = []
+        real_realpath = os.path.realpath
+
+        def recording_realpath(path, *args, **kwargs):
+            resolved.append(Path(path))
+            return real_realpath(path, *args, **kwargs)
+
+        monkeypatch.setattr(os.path, "realpath", recording_realpath)
+
+        with pytest.raises(ASHConfigInputNotPermittedError):
+            config_sources.discover_config_source(tree.scan, permit=_gate())
+
+        assert tree.scan / "pyproject.toml" not in resolved
+
+    def test_control_on_windows_a_plain_candidate_is_still_checked_and_used(
+        self, tree, monkeypatch
+    ):
+        (tree.scan / "pyproject.toml").write_text(
+            '[tool.ash]\nproject_name = "x"\n', encoding="utf-8"
+        )
+        monkeypatch.setattr(config_sources, "_on_windows", lambda: True)
+
+        discovery = config_sources.discover_config_source(tree.scan, permit=_gate())
+
+        assert discovery.selected.path == tree.scan / "pyproject.toml"
+
     def test_control_a_candidate_inside_the_grant_is_discovered(self, tree):
         (tree.scan / "pyproject.toml").write_text(
             '[tool.ash]\nproject_name = "in-tree"\n', encoding="utf-8"
