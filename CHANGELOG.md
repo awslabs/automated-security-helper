@@ -101,18 +101,9 @@
   installs the same pinned binaries locally, and the uv tools (cfn-lint and zizmor)
   within their `tool_version` ranges; and nix mode supplies them (cfn-guard from its
   pinned release asset, its rules installed by the shell on first entry and again whenever they are not the pinned bundle, and trivy's
-  database refreshed on every entry). A tool that is absent is MISSING, as for every builtin scanner,
-  except where the scanner has nothing to scan: actionlint (no workflow it would lint),
-  zizmor (no workflow or composite action), cfn-lint and cfn-guard (no CloudFormation
-  template) answer that from the file selection their scan makes, over the source and
-  converted trees, so under the rule that a scanner with nothing to scan is `SKIPPED`
-  whether or not its tool is installed they are `SKIPPED` on such a tree. That rule is
-  ASH's check for scanners with nothing to scan; without it an absent tool is
-  `MISSING` on every tree. gitleaks and trivy give their tool the whole tree and cannot
-  tell, so an absent gitleaks or trivy is always MISSING. Each of the six states
-  whether it is Python-only: `--python-only` runs cfn-lint and zizmor, which ASH runs
-  through uv, and leaves out actionlint, cfn-guard, gitleaks and trivy, which are
-  native binaries. Under
+  database refreshed on every entry). A tool that is absent is MISSING, as for every builtin scanner.
+  `--python-only` runs cfn-lint and zizmor, which ASH runs through uv, and does not run
+  actionlint, cfn-guard, gitleaks or trivy, which are native binaries. Under
   `--sandbox` each gets what it declares, listed in
   `docs/content/docs/scanner-sandbox.md`. See
   [Built-in Scanners](docs/content/docs/plugins/builtin/scanners.md).
@@ -223,8 +214,8 @@
 - **A default scan runs six more scanners.** actionlint, cfn-lint, cfn-guard,
   gitleaks, trivy and zizmor are builtin and on by default, so a scan with an existing
   config now reports their findings too, and a run whose host lacks one of their tools
-  records it MISSING (unless that scanner has nothing to scan, see Features), which
-  fails the incomplete-scan gate (exit 1) exactly as a missing grype or semgrep does. Run `ash dependencies install`, use the container
+  records it MISSING, which fails the incomplete-scan gate (exit 1) exactly as a
+  missing grype or semgrep does. Run `ash dependencies install`, use the container
   image, or set `scanners.<name>.enabled: false` for any you do not want. Their
   findings count toward `fail_on_findings` like any scanner's, so a scan that passed
   can now exit 2. The reusable workflow

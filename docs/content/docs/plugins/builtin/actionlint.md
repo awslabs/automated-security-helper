@@ -24,7 +24,7 @@ A `uses: ./...` in a workflow makes actionlint read the action metadata or reusa
 
 If the scan root has no workflow files, actionlint does not run and the scanner reports `SKIPPED` (it evaluated nothing). A scan that selects only actionlint (`--scanners actionlint`) on such a tree therefore exits 1 with "Scan ran no scanners".
 
-actionlint answers whether a scan has anything for it from this same selection, over the source tree and the converted files, so under the rule that a scanner with nothing to scan is `SKIPPED` whether or not its tool is installed, a missing actionlint on a tree with no workflow it would lint is `SKIPPED`, not `MISSING`. A workflow skipped for one of the reasons above does not count. actionlint is a native binary, so `--python-only` leaves it out.
+actionlint is a native binary, so `--python-only` does not run it.
 
 ## Configuration
 
