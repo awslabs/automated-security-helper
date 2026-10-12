@@ -229,8 +229,17 @@ def test_the_stage_is_built_by_its_lower_case_name(written, host):
         "-NoRun -ContainerUID 1000 -ContainerGID 0",
         "-NoRun -ContainerUID 0",
         "-NoRun -ContainerUID 1x",
+        # .NET's `$` matches before a final line feed; the ID check must not.
+        '-NoRun -ContainerUID "1000`n"',
+        '-NoRun -ContainerUID 1000 -ContainerGID "1000`n"',
     ],
-    ids=["gid-0", "uid-0", "uid-not-a-number"],
+    ids=[
+        "gid-0",
+        "uid-0",
+        "uid-not-a-number",
+        "uid-with-a-trailing-line-feed",
+        "gid-with-a-trailing-line-feed",
+    ],
 )
 def test_an_id_the_non_root_stage_cannot_use_is_refused(arguments, host):
     result, calls = host(arguments)

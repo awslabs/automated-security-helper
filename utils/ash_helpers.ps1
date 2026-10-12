@@ -403,7 +403,8 @@ function Invoke-ASH {
                     # -ContainerUID and -ContainerGID become build arguments, read as
                     # numbers.
                     foreach ($id in @(@('UID', $ContainerUID), @('GID', $ContainerGID))) {
-                        if ($id[1] -and $id[1] -notmatch '^[0-9]+$') {
+                        # \A and \z: .NET's ^ and $ also match around a final line feed.
+                        if ($id[1] -and $id[1] -notmatch '\A[0-9]+\z') {
                             Stop-AshRefusal 3 "Container $($id[0]) must be a numeric value: '$($id[1])'."
                         }
                     }
@@ -419,10 +420,10 @@ function Invoke-ASH {
                         if (-not $buildUid -and -not ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) -and (Get-Command id -ErrorAction SilentlyContinue)) {
                             $buildUid = "$(& id -u)".Trim()
                         }
-                        if ($buildUid -match '^0+$') {
+                        if ($buildUid -match '\A0+\z') {
                             Stop-AshRefusal 3 "The non-root image stage creates a user with UID 0, which is root: Invoke-ASH is running as root, or -ContainerUID 0 was given. Pass -BuildTarget ci to build the image that runs as root. Another -ContainerUID and -ContainerGID work only when the output directory is writable by that UID: the container runs as that user and writes its reports there."
                         }
-                        if ($ContainerGID -match '^0+$') {
+                        if ($ContainerGID -match '\A0+\z') {
                             Stop-AshRefusal 3 "The non-root image stage gives its user GID 0, which is root's group: -ContainerGID 0 was given. Pass -BuildTarget ci to build the image that runs as root. Another -ContainerGID works only when the output directory is writable by the container's user, which writes its reports there."
                         }
                     }
