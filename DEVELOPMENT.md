@@ -299,6 +299,11 @@ uv run python scripts/check_pinned_tool_versions.py
 uv run python scripts/check_pinned_tool_versions.py --fail-on-outdated --markdown
 ```
 
+For each pin that is behind it lists every value the bump has to change: the entries
+in `tool_downloads.py`, the Dockerfile ARG, and each tracked file that repeats one of
+the pin's digests, found with `git grep` (nix's SRI copies, a CI install check, test
+fixtures).
+
 It exits 0 when nothing is behind (or without `--fail-on-outdated`), 1 when a pin is
 behind with `--fail-on-outdated` or a Dockerfile apt pin is no longer installable, and
 2 when a lookup failed or the pins could not be read. GitHub allows 60 anonymous API

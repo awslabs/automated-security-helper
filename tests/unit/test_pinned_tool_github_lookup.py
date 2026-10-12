@@ -137,6 +137,7 @@ def _trivy_pin():
         ecosystem=checker.GITHUB,
         project=_TRIVY,
         pinned_in=("TOOL_VERSIONS",),
+        kind=checker.RELEASE_BINARY,
     )
 
 
@@ -334,8 +335,12 @@ class TestA403WithTheTokenIsRetriedWithoutIt:
 
         results = checker.check(
             [
-                checker.Pin("bandit", "1.0.0", checker.PYPI, "bandit", ("x",)),
-                checker.Pin("cfn-nag", "1.0.0", checker.RUBYGEMS, "cfn-nag", ("x",)),
+                checker.Pin(
+                    "bandit", "1.0.0", checker.PYPI, "bandit", ("x",), checker.UV_TOOL
+                ),
+                checker.Pin(
+                    "cfn-nag", "1.0.0", checker.RUBYGEMS, "cfn-nag", ("x",), checker.GEM
+                ),
             ]
         )
 

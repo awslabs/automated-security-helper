@@ -17,17 +17,25 @@ where it was set, including past the upstream release that fixes a vulnerability
 the scanner exists to find.
 
 This script reads the pins from the module itself and asks each upstream for its
-latest release: the GitHub releases API for the release binaries and the license-only
-entries, PyPI's JSON API for the uv-tool pins, and the RubyGems API for cfn-nag. It
-prints pinned against latest, and for each pin that is behind, every place in the
-module a bump has to change. ``.github/workflows/ash-pinned-tool-versions.yml`` runs
-it weekly with ``--fail-on-outdated``.
+latest release: the GitHub releases API for the release binaries and the rules
+bundles, PyPI's JSON API for the uv-tool pins, and the RubyGems API for cfn-nag. It
+prints pinned against latest, and for each pin that is behind, every value a bump has
+to change: the module's entries, the Dockerfile ARG, and each tracked file that
+repeats one of the pin's digests. ``.github/workflows/ash-pinned-tool-versions.yml``
+runs it weekly with ``--fail-on-outdated``.
 
 There is no second list of tools here. The pins come from ``TOOL_VERSIONS``,
-``THIRD_PARTY_LICENSES`` and ``CFN_NAG_GEM_VERSION``, so a tool pinned in any of them
-is checked without editing this file. A pin kept in a new module-level name would not
-be; ``tests/unit/test_pinned_tool_version_check.py`` fails on any module
-global named like a version pin that ``PIN_SOURCES`` below does not name.
+``THIRD_PARTY_LICENSES``, ``RULES_BUNDLES`` and ``CFN_NAG_GEM_VERSION``, so a tool
+pinned in any of them is checked without editing this file. A pin kept in a new
+module-level name would not be; ``tests/unit/test_pinned_tool_version_check.py``
+fails on any module global named like a version pin that ``PIN_SOURCES`` below does
+not name.
+
+Each pin is one of ``PIN_KINDS``, and each kind has its own bump steps. A license
+entry that no download pin names is refused, because what a bump of it changes is
+kept somewhere this script does not read. The same test file builds the steps for
+every real pin and fails when one leaves out a value a bump changes, read
+independently from the module's tables, the Dockerfile and the tracked files.
 
 The Dockerfile's apt pins
 -------------------------
@@ -99,11 +107,14 @@ unavailable, 2 when a lookup failed or the pins could not be read.
 from __future__ import annotations
 
 import argparse
+import ast
+import base64
 import importlib.util
 import json
 import lzma
 import os
 import re
+import subprocess  # nosec B404 - git grep over this checkout, for bump steps only
 import sys
 import urllib.error
 import urllib.parse
@@ -123,7 +134,21 @@ GEMFILE = "automated_security_helper/assets/Gemfile"
 # The module-level names of tool_downloads.py this script reads pins from. Any other
 # global named like a version pin fails the unit tests, so a new kind of pin is added
 # here on purpose rather than skipped by omission.
-PIN_SOURCES = ("TOOL_VERSIONS", "THIRD_PARTY_LICENSES", "CFN_NAG_GEM_VERSION")
+PIN_SOURCES = (
+    "TOOL_VERSIONS",
+    "THIRD_PARTY_LICENSES",
+    "RULES_BUNDLES",
+    "CFN_NAG_GEM_VERSION",
+)
+
+# The kinds of pin enumerate_pins reports. bump_steps has steps for each, and a pin of
+# any other shape is refused when the pins are read, rather than given steps that
+# leave out what a bump of it changes.
+RELEASE_BINARY = "release-binary"  # TOOL_VERSIONS: one release asset per platform
+UV_TOOL = "uv-tool"  # THIRD_PARTY_LICENSES with a distribution: a PyPI release
+RULES_BUNDLE = "rules-bundle"  # RULES_BUNDLES: one release archive of rule files
+GEM = "gem"  # CFN_NAG_GEM_VERSION
+PIN_KINDS = (RELEASE_BINARY, UV_TOOL, RULES_BUNDLE, GEM)
 
 # The gem CFN_NAG_GEM_VERSION is the version of; see assets/Gemfile.
 CFN_NAG_GEM = "cfn-nag"
@@ -169,7 +194,8 @@ class Pin:
     ``version`` is spelled exactly as the module spells it, leading ``v`` and all.
     ``project`` is ``owner/repo`` for a GitHub release, the distribution name for
     PyPI and the gem name for RubyGems. ``pinned_in`` names the module tables that
-    carry this tool's version, which is what a bump has to edit.
+    carry this tool's version, which is what a bump has to edit. ``kind`` is one of
+    ``PIN_KINDS``, and decides which steps ``bump_steps`` gives.
     """
 
     tool: str
@@ -177,6 +203,7 @@ class Pin:
     ecosystem: str
     project: str
     pinned_in: tuple[str, ...]
+    kind: str
 
 
 @dataclass(frozen=True)
@@ -225,23 +252,33 @@ def enumerate_pins(pins: Any) -> list[Pin]:
     """Every pin ``pins`` carries, one per tool, sorted by tool name.
 
     Raises:
-        PinEnumerationError: when a pin cannot be attributed to an upstream, or
-            when two tables disagree about one tool's version. Both are refused
-            rather than skipped, because a skipped pin is a pin nobody is told about.
+        PinEnumerationError: when a pin cannot be attributed to an upstream, when
+            two tables disagree about one tool's version, or when a pin is of no
+            kind in ``PIN_KINDS``. All are refused rather than skipped, because a
+            skipped pin is a pin nobody is told about.
     """
     tool_versions: dict[str, str] = pins.TOOL_VERSIONS
     licenses: dict[str, Any] = pins.THIRD_PARTY_LICENSES
+    bundles: dict[str, Any] = getattr(pins, "RULES_BUNDLES", {})
     release_urls: dict[str, str] = getattr(pins, "_RELEASE_BASE_URLS", {})
 
     result: list[Pin] = []
-    for tool in sorted(set(tool_versions) | set(licenses)):
+    for tool in sorted(set(tool_versions) | set(licenses) | set(bundles)):
         entry = licenses.get(tool)
+        downloads = [
+            name
+            for name, table in (
+                ("TOOL_VERSIONS", tool_versions),
+                ("RULES_BUNDLES", bundles),
+            )
+            if tool in table
+        ]
         pinned_in: list[str] = []
 
         if entry is not None and entry.distribution:
-            if tool in tool_versions:
+            if downloads:
                 raise PinEnumerationError(
-                    f"{tool} is both a release-asset pin in TOOL_VERSIONS and a uv-tool "
+                    f"{tool} is both a download pin in {downloads[0]} and a uv-tool "
                     f"pin (distribution {entry.distribution!r}); pick one."
                 )
             result.append(
@@ -251,12 +288,18 @@ def enumerate_pins(pins: Any) -> list[Pin]:
                     ecosystem=PYPI,
                     project=entry.distribution,
                     pinned_in=("THIRD_PARTY_LICENSES (uv-tool pin)",),
+                    kind=UV_TOOL,
                 )
             )
             continue
 
+        if len(downloads) > 1:
+            raise PinEnumerationError(
+                f"{tool} is pinned in both TOOL_VERSIONS and RULES_BUNDLES; pick one."
+            )
         if tool in tool_versions:
             version = tool_versions[tool]
+            kind = RELEASE_BINARY
             pinned_in.append("TOOL_VERSIONS")
             if tool not in release_urls:
                 raise PinEnumerationError(
@@ -266,20 +309,29 @@ def enumerate_pins(pins: Any) -> list[Pin]:
             project = _github_project(
                 release_urls[tool], f"_RELEASE_BASE_URLS[{tool!r}]"
             )
-            if entry is not None:
-                pinned_in.append("THIRD_PARTY_LICENSES")
-                if entry.version != version:
-                    raise PinEnumerationError(
-                        f"{tool} is {version} in TOOL_VERSIONS and {entry.version} in "
-                        f"THIRD_PARTY_LICENSES; a version bump is half-applied."
-                    )
+        elif tool in bundles:
+            version = bundles[tool].version
+            kind = RULES_BUNDLE
+            pinned_in.append("RULES_BUNDLES")
+            project = _github_project(bundles[tool].url, f"RULES_BUNDLES[{tool!r}].url")
         else:
-            # A license-only entry: bundled, but not downloaded through this module.
-            version = entry.version
-            pinned_in.append("THIRD_PARTY_LICENSES")
-            project = _github_project(
-                entry.repository, f"THIRD_PARTY_LICENSES[{tool!r}].repository"
+            # Only a license entry names it, so the version a bump changes is kept
+            # somewhere this script does not read, and its steps would leave it out.
+            recorded = entry.version if entry is not None else None
+            raise PinEnumerationError(
+                f"THIRD_PARTY_LICENSES[{tool!r}] records {recorded}, but {tool} is "
+                "not in TOOL_VERSIONS or RULES_BUNDLES and has no distribution, so this "
+                "script cannot tell what a bump of it changes. Give it a kind in "
+                "PIN_KINDS, with its own steps in bump_steps."
             )
+
+        if entry is not None:
+            pinned_in.append("THIRD_PARTY_LICENSES")
+            if entry.version != version:
+                raise PinEnumerationError(
+                    f"{tool} is {version} in {pinned_in[0]} and {entry.version} in "
+                    f"THIRD_PARTY_LICENSES; a version bump is half-applied."
+                )
 
         result.append(
             Pin(
@@ -288,6 +340,7 @@ def enumerate_pins(pins: Any) -> list[Pin]:
                 ecosystem=GITHUB,
                 project=project,
                 pinned_in=tuple(pinned_in),
+                kind=kind,
             )
         )
 
@@ -300,6 +353,7 @@ def enumerate_pins(pins: Any) -> list[Pin]:
                 ecosystem=RUBYGEMS,
                 project=CFN_NAG_GEM,
                 pinned_in=("CFN_NAG_GEM_VERSION",),
+                kind=GEM,
             )
         )
 
@@ -557,11 +611,20 @@ def exit_code(results: Iterable[Result], fail_on_outdated: bool) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _arg_stem(tool: str) -> str:
+    """The Dockerfile ARG name a tool's version is under, without ``_VERSION``.
+
+    A hyphen cannot be used in a Dockerfile ARG name (``${CFN-GUARD_VERSION}`` parses
+    as a default-value expansion), so cfn-guard's is ``CFN_GUARD_VERSION``.
+    """
+    return tool.upper().replace("-", "_")
+
+
 def _dockerfile_args(tool: str, dockerfile: Path) -> list[str]:
     """``Dockerfile:<line>`` for each ``ARG <TOOL>_VERSION=`` line."""
     if not dockerfile.is_file():
         return []
-    pattern = re.compile(rf"^\s*ARG\s+{re.escape(tool.upper())}_VERSION=")
+    pattern = re.compile(rf"^\s*ARG\s+{re.escape(_arg_stem(tool))}_VERSION=")
     return [
         f"Dockerfile:{number}"
         for number, line in enumerate(
@@ -598,50 +661,224 @@ def _license_steps(pins: Any, tool: str, latest: str) -> list[str]:
     return steps
 
 
-def bump_steps(pins: Any, result: Result, dockerfile: Path = DOCKERFILE) -> list[str]:
-    """Every edit a bump of ``result.pin`` to ``result.latest`` needs, in order."""
-    pin, latest = result.pin, result.latest or "<latest>"
+def _global_name(pins: Any, value: Any) -> str | None:
+    """The module-level name ``value`` is bound to in ``pins``, if any."""
+    return next(
+        (n for n, v in vars(pins).items() if v is value and not n.startswith("__")),
+        None,
+    )
+
+
+def _release_binary_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
     tool = pin.tool
-    steps: list[str] = []
-
-    if pin.ecosystem == RUBYGEMS:
-        return [
-            f"CFN_NAG_GEM_VERSION -> {latest}",
-            f'{GEMFILE}: gem "{CFN_NAG_GEM}", "{latest}"',
-            (
-                "automated_security_helper/assets/Gemfile.lock: regenerate with "
-                f"`bundle lock --update {CFN_NAG_GEM}` in that directory"
-            ),
-        ]
-
-    if "TOOL_VERSIONS" in pin.pinned_in:
-        old_bare = pin.version.lstrip("v")
-        filenames = list(pins._ASSET_TABLES.get(tool, {}).values())
-        steps.append(f'TOOL_VERSIONS["{tool}"] -> {latest}')
-        if filenames and all(old_bare in name for name in filenames):
-            steps.append(
-                f"asset filenames for {tool} ({len(filenames)}): replace {old_bare} "
-                f"with {latest.lstrip('v')} and check each still exists upstream"
-            )
-        taken_at = getattr(pins, "_DIGESTS_TAKEN_AT", {})
-        if tool in taken_at:
-            steps.append(f'_DIGESTS_TAKEN_AT["{tool}"] -> {latest}')
-        archive = [n for n in filenames if n in pins._DIGESTS]
+    old_bare = pin.version.lstrip("v")
+    table = pins._ASSET_TABLES.get(tool, {})
+    filenames = list(table.values())
+    steps = [f'TOOL_VERSIONS["{tool}"] -> {latest}']
+    if filenames and all(old_bare in name for name in filenames):
         steps.append(
-            f"_DIGESTS: {len(archive)} archive digest(s), "
-            "from the release's checksums file or the asset's GitHub `digest` field"
+            f"{_global_name(pins, table) or 'asset filenames'}: the {len(filenames)} "
+            f"asset file names of {tool}, {old_bare} -> {latest.lstrip('v')}; check "
+            "each still exists upstream"
         )
-        executable = [n for n in filenames if n in pins._EXECUTABLE_DIGESTS]
-        if executable:
-            steps.append(
-                f"_EXECUTABLE_DIGESTS: {len(executable)} executable digest(s), "
-                "hashed from each verified archive's extracted member"
-            )
-        args = _dockerfile_args(tool, dockerfile)
-        if args:
-            steps.append(f"ARG {tool.upper()}_VERSION in {', '.join(args)}")
+    taken_at = getattr(pins, "_DIGESTS_TAKEN_AT", {})
+    if tool in taken_at:
+        steps.append(f'_DIGESTS_TAKEN_AT["{tool}"] -> {latest}')
+    archive = [n for n in filenames if n in pins._DIGESTS]
+    steps.append(
+        f"_DIGESTS: {len(archive)} archive digest(s), "
+        "from the release's checksums file or the asset's GitHub `digest` field"
+    )
+    executable = [n for n in filenames if n in pins._EXECUTABLE_DIGESTS]
+    if executable:
+        steps.append(
+            f"_EXECUTABLE_DIGESTS: {len(executable)} executable digest(s), "
+            "hashed from each verified archive's extracted member"
+        )
+    return steps + _license_steps(pins, tool, latest)
 
-    steps += _license_steps(pins, tool, latest)
+
+def _uv_tool_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
+    return _license_steps(pins, pin.tool, latest)
+
+
+def _bundle_version_name(pins: Any, tool: str) -> str | None:
+    """The module-level name ``RULES_BUNDLES[tool]`` takes its ``version=`` from.
+
+    Read from the module's source, because the value alone does not say which
+    constant to edit. None when the entry spells the version out, or is not found.
+    """
+    source = Path(getattr(pins, "__file__", None) or PACKAGE_ROOT.parent / PINS_FILE)
+    for node in ast.parse(source.read_text(encoding="utf-8")).body:
+        targets: list[ast.expr]
+        value: ast.expr | None
+        if isinstance(node, ast.Assign):
+            targets, value = list(node.targets), node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if not isinstance(value, ast.Dict) or not any(
+            isinstance(t, ast.Name) and t.id == "RULES_BUNDLES" for t in targets
+        ):
+            continue
+        for key, call in zip(value.keys, value.values):
+            if not (isinstance(key, ast.Constant) and key.value == tool):
+                continue
+            if isinstance(call, ast.Call):
+                for keyword in call.keywords:
+                    if keyword.arg == "version" and isinstance(keyword.value, ast.Name):
+                        return keyword.value.id
+    return None
+
+
+def _rules_bundle_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
+    """What a bump of a rules bundle changes: the RulesBundle docstring's procedure."""
+    tool = pin.tool
+    bundle = pins.RULES_BUNDLES[tool]
+    old_bare, new_bare = pin.version.lstrip("v"), latest.lstrip("v")
+    archive = bundle.url.rsplit("/", 1)[-1]
+    if old_bare in bundle.url:
+        new_url = bundle.url.replace(old_bare, new_bare)
+        new_archive = new_url.rsplit("/", 1)[-1]
+    else:
+        new_url = new_archive = "<the new release's archive>"
+    entry = f'RULES_BUNDLES["{tool}"]'
+    constant = _bundle_version_name(pins, tool)
+    steps = [
+        (
+            f"{constant} -> {latest}: {entry} takes its version from it, and its url "
+            f"becomes {new_url}"
+            if constant
+            else f"{entry}.version -> {latest}, and its url -> {new_url}"
+        ),
+        (
+            f'_DIGESTS["{archive}"] -> "{new_archive}": sha256sum of {new_url}, '
+            "downloaded once"
+        ),
+    ]
+    if archive in getattr(pins, "_BUNDLE_CONTENTS_DIGESTS", {}):
+        steps.append(
+            f'_BUNDLE_CONTENTS_DIGESTS["{archive}"] -> "{new_archive}": '
+            "rules_bundles.contents_digest of the map rules_bundles.extract_bundle "
+            "returns for that archive, once it matches its new _DIGESTS entry"
+        )
+    return steps + _license_steps(pins, tool, latest)
+
+
+def _gem_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
+    return [
+        f"CFN_NAG_GEM_VERSION -> {latest}",
+        f'{GEMFILE}: gem "{CFN_NAG_GEM}", "{latest}"',
+        (
+            f"{GEMFILE}.lock: regenerate with "
+            f"`bundle lock --update {CFN_NAG_GEM}` in that directory"
+        ),
+    ]
+
+
+# One function per kind in PIN_KINDS; a test keeps the two in step.
+_KIND_STEPS: dict[str, Callable[[Any, Pin, str], list[str]]] = {
+    RELEASE_BINARY: _release_binary_steps,
+    UV_TOOL: _uv_tool_steps,
+    RULES_BUNDLE: _rules_bundle_steps,
+    GEM: _gem_steps,
+}
+
+
+def _pinned_digests(pins: Any, pin: Pin) -> list[str]:
+    """Every digest and commit the module pins for ``pin``; a bump replaces each."""
+    if pin.kind == RELEASE_BINARY:
+        archives = list(pins._ASSET_TABLES.get(pin.tool, {}).values())
+    elif pin.kind == RULES_BUNDLE:
+        archives = [pins.RULES_BUNDLES[pin.tool].url.rsplit("/", 1)[-1]]
+    else:
+        archives = []
+    values: list[str] = []
+    for archive in archives:
+        for table in ("_DIGESTS", "_EXECUTABLE_DIGESTS", "_BUNDLE_CONTENTS_DIGESTS"):
+            value = getattr(pins, table, {}).get(archive)
+            if value:
+                values.append(value)
+    entry = pins.THIRD_PARTY_LICENSES.get(pin.tool)
+    if entry is not None:
+        values.append(entry.commit)
+        values += [f.sha256 for f in entry.files if f.sha256]
+    return list(dict.fromkeys(v.lower() for v in values if v))
+
+
+def _copy_steps(pins: Any, pin: Pin, repo_root: Path) -> list[str]:
+    """One step per tracked file outside the pins module that repeats a pinned digest.
+
+    nix's package expressions (in SRI form), a CI install check and test fixtures
+    carry copies of some digests, and a bump has to change those too. They are found
+    with ``git grep`` over the tracked files, as hex and as the ``sha256-<base64>``
+    string nix writes, so a copy added later is named without editing this script.
+    """
+    spellings: list[str] = []
+    for digest in _pinned_digests(pins, pin):
+        spellings.append(digest)
+        if len(digest) == 64:
+            sri = base64.b64encode(bytes.fromhex(digest)).decode("ascii")
+            spellings.append(f"sha256-{sri}")
+    if not spellings:
+        return []
+    argv = ["git", "-C", str(repo_root), "grep", "-n", "-I", "-F"]
+    for spelling in spellings:
+        argv += ["-e", spelling]
+    argv += ["--", ".", f":(exclude){PINS_FILE}"]
+    try:
+        found = subprocess.run(  # nosec B603 B607 - git, fixed arguments, this checkout
+            argv, capture_output=True, text=True, timeout=60, check=False
+        )
+        failure = None if found.returncode in (0, 1) else found.stderr.strip()[:200]
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        failure = str(exc)
+    if failure is not None:
+        return [
+            f"search every file outside {PINS_FILE} for these pinned values of "
+            f"{pin.tool} and replace each copy (git grep failed: {failure}): "
+            + ", ".join(spellings)
+        ]
+    lines: dict[str, list[str]] = {}
+    for line in found.stdout.splitlines():
+        path, number, _ = line.split(":", 2)
+        lines.setdefault(path, []).append(number)
+    return [
+        f"{path}:{','.join(numbers)}: a copy of a digest {pin.tool} pins; replace it "
+        "with the new value"
+        for path, numbers in sorted(lines.items())
+    ]
+
+
+def bump_steps(
+    pins: Any,
+    result: Result,
+    dockerfile: Path = DOCKERFILE,
+    repo_root: Path = REPO_ROOT,
+) -> list[str]:
+    """Every edit a bump of ``result.pin`` to ``result.latest`` needs, in order.
+
+    The steps for the pin's kind, then for every kind: the Dockerfile ARG that
+    carries the version, each tracked file that repeats one of its digests, and a
+    search for anything else that spells the old version.
+
+    Raises:
+        ValueError: for a pin whose kind has no steps here. enumerate_pins never
+            returns one; a Pin built by hand can.
+    """
+    pin, latest = result.pin, result.latest or "<latest>"
+    kind_steps = _KIND_STEPS.get(pin.kind)
+    if kind_steps is None:
+        raise ValueError(
+            f"{pin.tool} is a {pin.kind!r} pin, and bump_steps has steps for "
+            f"{', '.join(PIN_KINDS)} only"
+        )
+    steps = kind_steps(pins, pin, latest)
+    args = _dockerfile_args(pin.tool, dockerfile)
+    if args:
+        steps.append(f"ARG {_arg_stem(pin.tool)}_VERSION in {', '.join(args)}")
+    steps += _copy_steps(pins, pin, repo_root)
     steps.append(
         f"then `git grep -nF {pin.version.lstrip('v')}` for every other mention, and "
         "recompute the ferret-scan line ranges in .ash/.ash_community_plugins.yaml if "

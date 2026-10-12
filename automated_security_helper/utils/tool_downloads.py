@@ -646,7 +646,10 @@ def get_rules_bundle(name: str) -> RulesBundle:
 # scanner's name, because it is also the key ``--uv-tool-pins`` overrides.
 #
 # ``scripts/check_pinned_tool_versions.py`` reads new entries from these tables and
-# needs no edit to start reporting the tool's upstream releases.
+# needs no edit to start reporting the tool's upstream releases and what a bump of it
+# changes, as long as ``TOOL_VERSIONS`` or ``RULES_BUNDLES`` pins its download or it
+# has a ``distribution``. An entry none of those name is refused until the script is
+# taught what kind of pin it is.
 #
 # Known limitations
 # -----------------

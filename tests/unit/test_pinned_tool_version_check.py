@@ -17,10 +17,13 @@ transports are replaced with one that fails the test if anything reaches it.
 
 from __future__ import annotations
 
+import base64
 import dataclasses
+import functools
 import importlib.util
 import re
 import socket
+import subprocess  # nosec B404 - git ls-files over this checkout only
 import sys
 import urllib.request
 from pathlib import Path
@@ -33,6 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "check_pinned_tool_versions.py"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-pinned-tool-versions.yml"
 PINS_FILE = REPO_ROOT / "automated_security_helper" / "utils" / "tool_downloads.py"
+DOCKERFILE = REPO_ROOT / "Dockerfile"
 
 
 def _load_script():
@@ -273,6 +277,7 @@ def _pin(tool="grype", version="v1.0.0", ecosystem=None):
         ecosystem=ecosystem or checker.GITHUB,
         project=f"example/{tool}",
         pinned_in=("TOOL_VERSIONS",),
+        kind=checker.RELEASE_BINARY,
     )
 
 
@@ -414,6 +419,346 @@ class TestBumpGuidance:
         assert "Bumping a version" in source
         assert "# Adding a tool" in source
         assert "check_pinned_tool_versions.py" in source
+
+
+# ---------------------------------------------------------------------------
+# Every value a bump changes is named in its steps
+#
+# What a bump of one pin changes is read here from the module's tables, the
+# Dockerfile and the tracked files, independently of bump_steps. The steps for each
+# real pin must name all of it. A table keyed by a tool that is not named in its
+# steps, and not listed below with the reason a bump leaves it alone, fails the test,
+# so a value added to the module later cannot be left out of the guidance unnoticed.
+# ---------------------------------------------------------------------------
+
+#: Module tables keyed by a tool or one of its assets whose entry a version bump
+#: leaves as it is.
+_TABLES_A_BUMP_LEAVES = {
+    "_ASSET_TABLES": "maps the tool to its asset table, which its own step names",
+    "_RELEASE_BASE_URLS": "the project's release download prefix, for every version",
+    "_BARE_EXECUTABLE_TOOLS": "whether the release asset is the executable itself",
+}
+
+#: Dockerfile ``ARG <NAME>_VERSION`` lines that are not a pin this script reports.
+_DOCKERFILE_ARGS_THAT_ARE_NOT_PINS = {
+    "BUNDLER_VERSION": "the bundler the image installs the cfn-nag gems with",
+}
+
+PINS_REL = PINS_FILE.relative_to(REPO_ROOT).as_posix()
+GEMFILE_REL = "automated_security_helper/assets/Gemfile"
+
+
+def _kind(pins: Any, tool: str) -> str:
+    """The kind of pin ``tool`` is, read from the module's tables."""
+    if tool == checker.CFN_NAG_GEM:
+        return "gem"
+    if tool in getattr(pins, "RULES_BUNDLES", {}):
+        return "rules-bundle"
+    if tool in pins.TOOL_VERSIONS:
+        return "release-binary"
+    entry = pins.THIRD_PARTY_LICENSES.get(tool)
+    if entry is not None and entry.distribution:
+        return "uv-tool"
+    return "unknown"
+
+
+def _archives(pins: Any, tool: str) -> list[str]:
+    """The file names of what a bump of ``tool`` downloads."""
+    names = list(pins._ASSET_TABLES.get(tool, {}).values())
+    bundle = getattr(pins, "RULES_BUNDLES", {}).get(tool)
+    if bundle is not None:
+        names.append(bundle.url.rsplit("/", 1)[-1])
+    return names
+
+
+def _pinned_digests(pins: Any, tool: str) -> set[str]:
+    """Every digest and commit the module pins for ``tool``; a bump replaces each."""
+    values: set[str] = set()
+    for archive in _archives(pins, tool):
+        for table in ("_DIGESTS", "_EXECUTABLE_DIGESTS", "_BUNDLE_CONTENTS_DIGESTS"):
+            value = getattr(pins, table, {}).get(archive)
+            if value:
+                values.add(value)
+    for key, value in pins._THIRD_PARTY_HASHES.items():
+        if key == f"{tool} commit" or key.startswith(f"{tool}/"):
+            values.add(value)
+    return values
+
+
+def _spellings(digest: str) -> set[str]:
+    """``digest`` as hex, and as the SRI string nix writes for a SHA256."""
+    spellings = {digest}
+    if len(digest) == 64:
+        sri = base64.b64encode(bytes.fromhex(digest)).decode("ascii")
+        spellings.add(f"sha256-{sri}")
+    return spellings
+
+
+@functools.lru_cache(maxsize=1)
+def _tracked_text() -> dict[str, str]:
+    """Every tracked text file but the pins module, by repository-relative path."""
+    listed = subprocess.run(  # nosec B603 B607 - git over this checkout
+        ["git", "-C", str(REPO_ROOT), "ls-files", "-z"],
+        capture_output=True,
+        check=True,
+        timeout=60,
+    ).stdout
+    text: dict[str, str] = {}
+    for raw in listed.split(b"\0"):
+        name = raw.decode("utf-8")
+        path = REPO_ROOT / name
+        if not name or name == PINS_REL or path.is_symlink() or not path.is_file():
+            continue
+        data = path.read_bytes()
+        if b"\0" not in data[:8192]:
+            text[name] = data.decode("utf-8", "replace")
+    return text
+
+
+def _copies_elsewhere(pins: Any, tool: str) -> list[str]:
+    """Tracked files outside the pins module that hold one of ``tool``'s digests."""
+    spellings = {s for d in _pinned_digests(pins, tool) for s in _spellings(d)}
+    return sorted(
+        name
+        for name, text in _tracked_text().items()
+        if any(s in text for s in spellings)
+    )
+
+
+def _dockerfile_args(tool: str) -> list[str]:
+    stem = tool.upper().replace("-", "_")
+    return [
+        f"Dockerfile:{number}"
+        for number, line in enumerate(
+            DOCKERFILE.read_text(encoding="utf-8").splitlines(), start=1
+        )
+        if re.match(rf"\s*ARG\s+{re.escape(stem)}_VERSION=", line)
+    ]
+
+
+def _tables_keyed_by(pins: Any, tool: str) -> list[str]:
+    """Module tables with an entry for ``tool`` or one of its downloads."""
+    archives = set(_archives(pins, tool))
+    names = []
+    for name, value in vars(pins).items():
+        if name.startswith("__") or not isinstance(value, (dict, set, frozenset)):
+            continue
+        for key in value:
+            if isinstance(key, str) and (
+                key == tool
+                or key in archives
+                or key.startswith((f"{tool} ", f"{tool}/"))
+            ):
+                names.append(name)
+                break
+    return sorted(n for n in names if n not in _TABLES_A_BUMP_LEAVES)
+
+
+def _bundle_version_name(tool: str) -> str | None:
+    """The name RULES_BUNDLES[tool]'s ``version=`` is written as, read from the text."""
+    source = PINS_FILE.read_text(encoding="utf-8")
+    match = re.search(
+        rf'"{re.escape(tool)}": RulesBundle\((?:(?!RulesBundle\().)*?'
+        r"version=([A-Za-z_][A-Za-z0-9_]*),",
+        source,
+        re.DOTALL,
+    )
+    return match.group(1) if match else None
+
+
+def _needles(pins: Any, pin: Any) -> list[str]:
+    """Text a bump of ``pin`` has to name, one string per value it changes."""
+    tool, bare = pin.tool, pin.version.lstrip("v")
+    kind = _kind(pins, tool)
+    needles: list[str] = []
+    if kind == "gem":
+        needles += ["CFN_NAG_GEM_VERSION", GEMFILE_REL, f"{GEMFILE_REL}.lock"]
+    if kind == "release-binary":
+        needles.append(f'TOOL_VERSIONS["{tool}"]')
+        table = pins._ASSET_TABLES[tool]
+        if all(bare in name for name in table.values()):
+            # The module-level name of the tool's asset table: its file names move.
+            needles.append(next(n for n, v in vars(pins).items() if v is table))
+        if tool in pins._DIGESTS_TAKEN_AT:
+            needles.append(f'_DIGESTS_TAKEN_AT["{tool}"]')
+    if kind == "rules-bundle":
+        needles.append(f'RULES_BUNDLES["{tool}"]')
+        constant = _bundle_version_name(tool)
+        if constant:
+            needles.append(constant)
+        needles += ["rules_bundles.extract_bundle", "contents_digest"]
+    for archive in _archives(pins, tool):
+        for table in ("_DIGESTS", "_EXECUTABLE_DIGESTS", "_BUNDLE_CONTENTS_DIGESTS"):
+            if archive in getattr(pins, table, {}):
+                needles.append(
+                    f'{table}["{archive}"]' if kind == "rules-bundle" else f"{table}:"
+                )
+    entry = pins.THIRD_PARTY_LICENSES.get(tool)
+    if entry is not None:
+        needles.append(f'THIRD_PARTY_LICENSES["{tool}"].version')
+        needles += [
+            f'_THIRD_PARTY_HASHES["{key}"]'
+            for key in pins._THIRD_PARTY_HASHES
+            if key == f"{tool} commit" or key.startswith(f"{tool}/")
+        ]
+        needles += [f.name for f in entry.files if not f.url]
+    needles += _dockerfile_args(tool)
+    needles += _copies_elsewhere(pins, tool)
+    needles += _tables_keyed_by(pins, tool)
+    needles += [f"git grep -nF {bare}", "ferret-scan line ranges"]
+    return list(dict.fromkeys(needles))
+
+
+def _steps_text(pins: Any, pin: Any) -> str:
+    latest = "v9.9.9" if pin.version.startswith("v") else "9.9.9"
+    return "\n".join(checker.bump_steps(pins, checker.Result(pin, latest, "outdated")))
+
+
+def _unnamed(pins: Any, pin: Any, steps: str) -> list[str]:
+    return [needle for needle in _needles(pins, pin) if needle not in steps]
+
+
+_REAL_PINS = checker.enumerate_pins(checker.load_pins_module())
+
+
+class TestBumpStepsNameEveryValueABumpChanges:
+    @pytest.mark.parametrize("tool", [p.tool for p in _REAL_PINS])
+    def test_every_value_is_named(self, pins: Any, tool: str) -> None:
+        pin = {p.tool: p for p in checker.enumerate_pins(pins)}[tool]
+        steps = _steps_text(pins, pin)
+        unnamed = _unnamed(pins, pin, steps)
+        assert not unnamed, (
+            f"{tool} ({_kind(pins, tool)}): the bump steps do not name {unnamed}:\n"
+            f"{steps}"
+        )
+
+    def test_every_pin_is_a_known_kind_and_every_kind_is_tested(
+        self, pins: Any
+    ) -> None:
+        kinds = {p.tool: _kind(pins, p.tool) for p in checker.enumerate_pins(pins)}
+        assert "unknown" not in kinds.values(), kinds
+        assert set(kinds.values()) == {
+            "gem",
+            "release-binary",
+            "rules-bundle",
+            "uv-tool",
+        }
+        # The script's own list: each kind it knows has a real pin above, so the
+        # parametrized test covers it, and each has its own steps.
+        assert set(checker.PIN_KINDS) == set(kinds.values())
+        assert set(checker._KIND_STEPS) == set(checker.PIN_KINDS)
+
+    def test_each_pin_reports_the_kind_its_tables_give(self, pins: Any) -> None:
+        for pin in checker.enumerate_pins(pins):
+            assert pin.kind == _kind(pins, pin.tool), pin
+
+    def test_a_license_entry_no_download_pin_names_is_refused(
+        self, pins: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A new kind of pin: refused when read, not given half its steps."""
+        entry = dataclasses.replace(
+            pins.THIRD_PARTY_LICENSES["actionlint"], tool="fakelicensed"
+        )
+        monkeypatch.setitem(pins.THIRD_PARTY_LICENSES, "fakelicensed", entry)
+        with pytest.raises(checker.PinEnumerationError, match="PIN_KINDS"):
+            checker.enumerate_pins(pins)
+
+    def test_a_tool_in_both_download_tables_is_refused(
+        self, pins: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = pins.RULES_BUNDLES["aws-guard-rules-registry"]
+        monkeypatch.setitem(pins.RULES_BUNDLES, "grype", bundle)
+        with pytest.raises(checker.PinEnumerationError, match="pick one"):
+            checker.enumerate_pins(pins)
+
+    def test_a_half_applied_rules_bundle_bump_is_refused(
+        self, pins: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = pins.RULES_BUNDLES["aws-guard-rules-registry"]
+        monkeypatch.setitem(
+            pins.RULES_BUNDLES,
+            "aws-guard-rules-registry",
+            dataclasses.replace(bundle, version="9.9.9"),
+        )
+        with pytest.raises(checker.PinEnumerationError, match="half-applied"):
+            checker.enumerate_pins(pins)
+
+    def test_a_pin_of_another_kind_has_no_steps(self, pins: Any) -> None:
+        pin = dataclasses.replace(_pin(), kind="future")
+        with pytest.raises(ValueError, match="'future'"):
+            checker.bump_steps(pins, checker.Result(pin, "v9.9.9", "outdated"))
+
+    def test_the_rules_registry_names_its_release_and_both_digests(
+        self, pins: Any
+    ) -> None:
+        """The values a bump of the Guard Rules Registry changes, by name."""
+        pin = {p.tool: p for p in checker.enumerate_pins(pins)}[
+            "aws-guard-rules-registry"
+        ]
+        steps = _steps_text(pins, pin)
+        for needle in (
+            "_CFN_GUARD_RULES_RELEASE -> 9.9.9",
+            '_DIGESTS["ruleset-build-v1.0.2.zip"]',
+            '_BUNDLE_CONTENTS_DIGESTS["ruleset-build-v1.0.2.zip"]',
+            "ruleset-build-v9.9.9.zip",
+            "rules_bundles.extract_bundle",
+            'THIRD_PARTY_LICENSES["aws-guard-rules-registry"].version -> 9.9.9',
+            "ferret-scan line ranges",
+        ):
+            assert needle in steps, f"{needle!r} missing from:\n{steps}"
+
+    def test_the_needles_are_not_vacuous(self, pins: Any) -> None:
+        """Positive control: what the test above requires, for two pins."""
+        by_tool = {p.tool: p for p in checker.enumerate_pins(pins)}
+        registry = _needles(pins, by_tool["aws-guard-rules-registry"])
+        assert "_CFN_GUARD_RULES_RELEASE" in registry
+        assert '_BUNDLE_CONTENTS_DIGESTS["ruleset-build-v1.0.2.zip"]' in registry
+        assert len(registry) >= 10, registry
+        cfn_guard = _needles(pins, by_tool["cfn-guard"])
+        assert "nix/cfn-guard.nix" in cfn_guard
+        assert any(n.startswith("Dockerfile:") for n in cfn_guard), cfn_guard
+
+    def test_a_step_left_out_is_caught(self, pins: Any) -> None:
+        """Negative control: the same steps with one dropped fail the check."""
+        pin = {p.tool: p for p in checker.enumerate_pins(pins)}["grype"]
+        steps = [
+            s
+            for s in checker.bump_steps(pins, checker.Result(pin, "v9.9.9", "outdated"))
+            if "_EXECUTABLE_DIGESTS" not in s
+        ]
+        assert "_EXECUTABLE_DIGESTS:" in _unnamed(pins, pin, "\n".join(steps))
+
+    def test_a_new_table_keyed_by_a_tool_is_caught(
+        self, pins: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Negative control: a value added to the module later needs a step."""
+        monkeypatch.setattr(pins, "_GRYPE_SIGNATURES", {"grype": "sig"}, raising=False)
+        pin = {p.tool: p for p in checker.enumerate_pins(pins)}["grype"]
+        assert "_GRYPE_SIGNATURES" in _unnamed(pins, pin, _steps_text(pins, pin))
+
+    def test_every_dockerfile_version_arg_belongs_to_a_pin(self, pins: Any) -> None:
+        """A version pinned in the Dockerfile that no pin owns would get no step."""
+        stems = {p.tool.upper().replace("-", "_") for p in checker.enumerate_pins(pins)}
+        args = re.findall(
+            r"^\s*ARG\s+([A-Z0-9_]+)_VERSION=",
+            DOCKERFILE.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        unowned = sorted(
+            {f"{a}_VERSION" for a in args if a not in stems}
+            - set(_DOCKERFILE_ARGS_THAT_ARE_NOT_PINS)
+        )
+        assert not unowned, unowned
+
+    def test_an_apt_pin_names_the_new_version_and_every_line(self) -> None:
+        """The Dockerfile's apt pins: the report gives the edit and every line."""
+        pin = checker.enumerate_apt_pins()[0]
+        report = checker.render_apt_report(
+            [checker.AptResult(pin, "amd64", "9.9.9-1", "outdated")]
+        )
+        assert f"{pin.package}={pin.version} -> {pin.package}=9.9.9-1" in report
+        for number in pin.lines:
+            assert f"Dockerfile:{number}" in report
 
 
 class TestWorkflow:
