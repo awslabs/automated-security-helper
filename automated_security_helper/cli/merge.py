@@ -1579,7 +1579,9 @@ def verify_verdict_settings_agree(
     produced under different settings. Compared after ``--config-overrides`` are
     applied, so an override that sets the value for every shard settles it, and a
     setting the command line's flag decides (``cli_values``, keyed as
-    ``VERDICT_FLAGS``) is not compared at all.
+    ``VERDICT_FLAGS``) is not compared at all. A shard that recorded no
+    configuration at all is left out: it has no value to disagree with, and
+    ``merge_shard_results`` refuses it, naming it as one with no scan configuration.
 
     Raises:
         ASHConfigValidationError: Naming each setting that differs and every
@@ -1588,6 +1590,8 @@ def verify_verdict_settings_agree(
     decided = _decided_by_flags(cli_values)
     shards = []
     for path, results in _in_index_order(loaded):
+        if results.ash_config is None:
+            continue
         assignment = read_shard_assignment(results)
         label = (
             f"shard {assignment.shard_index}"
