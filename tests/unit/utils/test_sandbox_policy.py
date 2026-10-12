@@ -1938,6 +1938,46 @@ class TestSandboxExecProfile:
         assert allows[1][0] > deny_at
         assert _subpaths(allows[1][1]) == {_as_argv(venv_bin)}
 
+    def test_a_path_entry_inside_the_scanned_tree_is_no_exec_grant(
+        self, layout, monkeypatch, tmp_path
+    ):
+        """A PATH entry in the repository or the output is the scan's data.
+
+        The tree's exec deny would otherwise be given back for it after the deny,
+        so the repository's programs ran under sandbox-exec. A tool directory on
+        PATH outside the tree is still granted, which shows PATH was read.
+        """
+        inside = [layout.source / ".venv" / "bin", layout.output / "bin"]
+        outside = tmp_path / "tools" / "bin"
+        for directory in [*inside, outside]:
+            directory.mkdir(parents=True)
+        monkeypatch.setenv(
+            "PATH", os.pathsep.join(str(p) for p in [*inside, outside, "/usr/bin"])
+        )
+        policy = _policy(layout, argv0="/usr/bin/true")
+        lines = SandboxExecBackend().profile(policy, tmp_path / "private-tmp")
+        allowed = set().union(
+            *(
+                _subpaths(rule)
+                for _, rule in _indexed(lines.splitlines(), "(allow process-exec ")
+            )
+        )
+        landlock = LandlockBackend()
+        plan = landlock.plan(["/usr/bin/true"], {"PATH": "/usr/bin"}, policy)
+        try:
+            document = json.loads(plan.argv[plan.argv.index("--policy") + 1])
+        finally:
+            plan.run_cleanup()
+
+        assert Path(os.path.realpath(outside)) in _resolved(policy.executable)
+        assert _as_argv(outside) in allowed
+        for directory in inside:
+            assert Path(os.path.realpath(directory)) not in _resolved(
+                policy.executable
+            ), directory
+            assert _as_argv(directory) not in allowed, directory
+            assert _as_argv(directory) not in document["read_only"], directory
+
     def test_the_keychain_files_are_denied_after_every_file_allow(
         self, layout, tmp_path
     ):

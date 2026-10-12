@@ -445,21 +445,28 @@ def _homes() -> List[Path]:
     return homes if other is None else [*homes, other]
 
 
-def _path_directories() -> List[Path]:
+def _path_directories(trees: Sequence[Path] = ()) -> List[Path]:
     """Directories on PATH, minus ones that would expose far more than programs.
 
     Skipped: a relative entry (``.``), ``/``, a home directory itself, and any entry
     inside a home directory not named ``bin``, ``sbin`` or ``Scripts``. A PATH entry
     such as ``~/.config/tool`` would otherwise mount a configuration directory, and
     those hold tokens. The home directories are $HOME's and, when HOME names another
-    directory, the passwd entry's.
+    directory, the passwd entry's. Also skipped: an entry inside one of ``trees``
+    (the scanned tree and the output directory). Those are the scan's data, which
+    the repository writes, and as a tool directory an entry there would be given
+    back as runnable after sandbox-exec denies running anything from the tree.
     """
+    from automated_security_helper.utils.scanned_tree import is_inside_tree
+
     homes = _homes()
     entries = []
     for raw in os.environ.get("PATH", "").split(os.pathsep):
         if not raw or not os.path.isabs(raw):
             continue
         path = Path(raw)
+        if any(is_inside_tree(path, tree) for tree in trees):
+            continue
         try:
             resolved = path.resolve()
         except OSError:
@@ -977,7 +984,7 @@ def build_scanner_policy(
     scan_tree = [] if requirements.staged_input_only else [source_dir, output_dir]
     read_only = _existing(
         [Path(p) for p in SYSTEM_READ_PATHS]
-        + _path_directories()
+        + _path_directories([source_dir, output_dir])
         + _uv_directories()
         + _ash_paths()
         + _executable_prefix(argv0)
