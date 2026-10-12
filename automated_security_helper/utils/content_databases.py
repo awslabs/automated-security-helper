@@ -465,7 +465,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{name}={value}")
         return 0
 
-    built = parse_timestamp(args.built)
+    # The value comes from the database's own metadata, and the workflows print this
+    # program's output into a step log, where a line holding `::` or `##[` can be read
+    # as a workflow command. So a value that does not parse is refused without being
+    # printed, and with no traceback, which would quote it.
+    try:
+        built = parse_timestamp(args.built)
+    except ValueError:
+        print(
+            "--built is not an RFC 3339 timestamp with a timezone, so the database's "
+            "age cannot be checked; it is neither used nor saved.",
+            file=sys.stderr,
+        )
+        return 2
     allowed = (save_allowed if args.purpose == "save" else use_allowed)(
         entry, built, now
     )

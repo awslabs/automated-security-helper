@@ -29,6 +29,7 @@ import math
 import pytest
 
 from tests.utils import github_actions as ga
+from tests.utils import workflow_commands as wc
 
 CONTEXT = ga.base_context(
     event_name="pull_request",
@@ -207,3 +208,36 @@ class TestGithubEnvLayering:
             step["env"], {**ga.base_context(), "env": {"F": "file"}}
         )
         assert rendered["F2"] == "file"
+
+
+class TestTheOneLineHelperIsSharedWithinAJob:
+    """A step that loads the helper sees what its job's definer wrote, and only that."""
+
+    DEFINER = {"name": wc.DEFINER_NAME, "shell": "bash", "run": wc.DEFINER_RUN}
+    LOADER = {
+        "name": "loads it",
+        "shell": "bash",
+        "run": wc.HELPER_SOURCE + '\nprintf "%s\\n" "$(one_line "a::b")"\n',
+    }
+
+    def _run(self, tmp_path, steps):
+        workflow = ga.Workflow(tmp_path / "w.yml", {})
+        job = {"steps": steps}
+        return ga.run_step(
+            ga.StepSandbox(tmp_path), workflow, job, self.LOADER, ga.base_context()
+        )
+
+    def test_a_definer_before_the_step_is_run_first(self, tmp_path):
+        run = self._run(tmp_path, [self.DEFINER, dict(self.LOADER)])
+        assert run.proc.returncode == 0, run.describe()
+        assert run.proc.stdout == "a: :b\n", run.describe()
+
+    def test_a_definer_after_the_step_is_not(self, tmp_path):
+        run = self._run(tmp_path, [dict(self.LOADER), self.DEFINER])
+        assert run.proc.returncode != 0, run.describe()
+        assert "ash-one-line.sh" in run.proc.stderr, run.describe()
+
+    def test_a_job_without_a_definer_leaves_the_file_missing(self, tmp_path):
+        run = self._run(tmp_path, [dict(self.LOADER)])
+        assert run.proc.returncode != 0, run.describe()
+        assert "ash-one-line.sh" in run.proc.stderr, run.describe()

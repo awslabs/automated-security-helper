@@ -42,6 +42,10 @@ holds a different config, as a pull request's merge commit would.
 4. The informational job passes no ``config-ref``, so it scans with the pull
    request's own config; and a caller that sets neither input gets no
    ``--config`` at all (controls; both pass before the fix).
+5. What the tool-config step prints from the fetched config (a scanner's name in a
+   refusal or in the list of rewritten paths, and a traceback quoting a line of a
+   config that does not parse) stays on its line: it adds no workflow command
+   (test_workflow_commands_print_no_unchecked_value.py has the other steps).
 
 What it does not cover
 ----------------------
@@ -66,8 +70,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from tests.utils import github_actions as ga
+from tests.utils import workflow_commands as wc
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 pytestmark = pytest.mark.skipif(
@@ -1285,3 +1291,73 @@ class TestTheConfigComesFromTheCommitTheAshInstallIsPinnedTo:
         run, steps = _run_config_ref_step(repo, context, inputs)
         assert run is not None and run.proc.returncode == 0, run and run.describe()
         assert steps["config-ref"]["outputs"]["commit"] == later
+
+
+# --------------------------------------------------------------------------- 5
+
+WITH_COMMAND_TEXT = [pytest.param(v, id=k) for k, v in wc.COMMAND_TEXT_VALUES.items()]
+
+#: Configs that do not parse, where PyYAML's error quotes the line holding the
+#: command text: at the start of a line, and the legacy marker inside one.
+UNPARSABLE = [
+    pytest.param(
+        "scanners:\n  bandit: {\n::warning::from the value\n",
+        "::warning::from the value",
+        id="command",
+    ),
+    pytest.param(
+        "scanners:\n  key: value\n bad: x ##[warning]from the value\n",
+        "##[warning]from the value",
+        id="legacy marker",
+    ),
+]
+
+
+class TestTheToolConfigStepPrintsTheConfigOnOneLine:
+    def _repo(self, tmp_path, config: str, **files: str) -> Repository:
+        return Repository(tmp_path, base_files={CONFIG_PATH: config, **files})
+
+    @staticmethod
+    def _config(scanner: str, config_file: str) -> str:
+        return yaml.safe_dump(
+            {"scanners": {scanner: {"options": {"config_file": config_file}}}}
+        )
+
+    @staticmethod
+    def _assert_one_line(run: ga.StepRun, command: str, commands: int) -> None:
+        lines = ga.workflow_command_lines(run.proc.stdout, run.proc.stderr)
+        assert len(lines) == commands, f"{lines}\n{run.describe()}"
+        printed = run.proc.stdout + run.proc.stderr
+        assert command not in printed, run.describe()
+        assert "from the value" in printed, run.describe()
+
+    @pytest.mark.parametrize("value", WITH_COMMAND_TEXT)
+    def test_a_refusal_naming_the_scanner(self, tmp_path, value):
+        repo = self._repo(tmp_path, self._config(value, ".ash/missing.yaml"))
+        context = _pull_request(repo.base_sha, fork=False)
+        run, steps = _run_config_ref_step(repo, context, _required_inputs(context))
+        assert steps.get("config-ref-files", {}).get("outcome") == "failure", steps
+        self._assert_one_line(run, wc.command_text(value), commands=1)
+
+    @pytest.mark.parametrize("value", WITH_COMMAND_TEXT)
+    def test_the_rewritten_paths_naming_the_scanner(self, tmp_path, value):
+        repo = self._repo(
+            tmp_path,
+            self._config(value, ".ash/tool.yaml"),
+            **{".ash/tool.yaml": "{}\n"},
+        )
+        context = _pull_request(repo.base_sha, fork=False)
+        run, steps = _run_config_ref_step(repo, context, _required_inputs(context))
+        assert steps.get("config-ref-files", {}).get("outcome") == "success", (
+            run and run.describe()
+        )
+        self._assert_one_line(run, wc.command_text(value), commands=0)
+
+    @pytest.mark.parametrize("config,command", UNPARSABLE)
+    def test_a_traceback_quoting_the_config(self, tmp_path, config, command):
+        repo = self._repo(tmp_path, config)
+        context = _pull_request(repo.base_sha, fork=False)
+        run, steps = _run_config_ref_step(repo, context, _required_inputs(context))
+        assert steps.get("config-ref-files", {}).get("outcome") == "failure", steps
+        assert "Traceback" in run.proc.stderr, run.describe()
+        self._assert_one_line(run, command, commands=0)

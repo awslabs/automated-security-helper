@@ -157,6 +157,23 @@ jobs:
     permissions:
       contents: read
     steps:
+      # The same helper run-ash-security-scan.yml writes, byte for byte (a test holds
+      # the copies equal): `built` below comes from the downloaded database's
+      # metadata, and one_line keeps it on the line it is printed in.
+      - name: Write the one_line helper
+        shell: bash
+        run: |
+          cat > "${RUNNER_TEMP}/ash-one-line.sh" <<'EOF'
+          one_line() {
+            local LC_ALL=C
+            local text="${1//[[:cntrl:]]/ }"
+            text="${text//$'\xc2'[$'\x80'-$'\x9f']/ }"
+            text="${text//$'\xe2\x80'[$'\xa8\xa9']/ }"
+            while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done
+            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/'# #['}"; done
+            printf '%s' "${text}"
+          }
+          EOF
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -203,13 +220,14 @@ jobs:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
           set -uo pipefail
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           built="$("${ASH_TOOL_BIN}/grype" db status -o json 2>/dev/null \
             | python -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
           if [ -n "${built}" ] && python -m automated_security_helper.utils.content_databases \
               check-age grype-db --built "${built}" --for save; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::not saving the grype database (built '${built:-unknown}'): too close to its bound to be cached."
+            echo "::warning::not saving the grype database (built '$(one_line "${built:-unknown}")'): too close to its bound to be cached."
           fi
 
       - name: Save the grype database cache (main only)

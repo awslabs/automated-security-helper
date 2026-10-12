@@ -49,6 +49,7 @@ from typing import Any
 import pytest
 
 from tests.utils import github_actions as ga
+from tests.utils import workflow_commands as wc
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 pytestmark = pytest.mark.skipif(
@@ -187,14 +188,16 @@ class TestTheAshRefIsResolvedOnce:
     def test_the_pin_follows_only_the_input_check(self):
         # The input check (test_an_input_cannot_add_a_workflow_command.py) runs
         # first, so nothing prints an input before it is checked. It runs no tool and
-        # writes only its own outputs, so the pin is still the first step that
-        # resolves or installs anything.
+        # writes only its own outputs. The one_line definer comes next: it writes the
+        # helper file and nothing else (tests/utils/workflow_commands.py). So the pin
+        # is still the first step that resolves or installs anything.
         _, job = _workflow_and_job()
         steps = job.get("steps") or []
         names = [step.get("name") for step in steps]
         index = names.index(_pin_step().get("name"))
         assert names[:index] == [
-            "Refuse an input that could start a workflow command"
+            "Refuse an input that could start a workflow command",
+            wc.DEFINER_NAME,
         ], f"the steps before the one that pins the ASH ref: {names[:index]}"
         check = steps[0]
         assert "uses" not in check, check
@@ -203,6 +206,9 @@ class TestTheAshRefIsResolvedOnce:
             assert word not in script, (
                 f"the input check runs or writes {word.strip()!r}"
             )
+        definer = steps[1]
+        assert "uses" not in definer, definer
+        assert definer.get("run") == wc.DEFINER_RUN, definer.get("run")
 
     @pytest.mark.parametrize(
         "ash_version,expected",

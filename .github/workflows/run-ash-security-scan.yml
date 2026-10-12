@@ -372,6 +372,32 @@ jobs:
           done
           echo "No string input holds a line break, another control character or the legacy command marker."
 
+      # A VALUE PRINTED IN A WORKFLOW COMMAND STAYS ON ITS LINE
+      #
+      # The runner reads a line as a command when it starts with `::` after leading
+      # spaces, or holds `##[` anywhere, and it ends a line at CR as well as LF. A
+      # step that prints a value it has not checked passes it through one_line,
+      # which turns every control character into a space, `::` into `: :` and `##[`
+      # into `# #[`. Each step runs in its own shell, so this step writes the
+      # function once to RUNNER_TEMP, which every step of this job shares, and a
+      # step that needs it loads the file with `. "${RUNNER_TEMP}/ash-one-line.sh"`.
+      # The function reads bytes in the C locale (C0, DEL, C1 and U+2028/U+2029),
+      # so the runner's locale does not change what it replaces.
+      - name: Write the one_line helper
+        shell: bash
+        run: |
+          cat > "${RUNNER_TEMP}/ash-one-line.sh" <<'EOF'
+          one_line() {
+            local LC_ALL=C
+            local text="${1//[[:cntrl:]]/ }"
+            text="${text//$'\xc2'[$'\x80'-$'\x9f']/ }"
+            text="${text//$'\xe2\x80'[$'\xa8\xa9']/ }"
+            while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done
+            while [[ "${text}" == *'##['* ]]; do text="${text//'##['/'# #['}"; done
+            printf '%s' "${text}"
+          }
+          EOF
+
       # THE ASH REF IS RESOLVED TO ONE COMMIT, ONCE, BEFORE ANYTHING INSTALLS ASH
       #
       # ash-version may be a branch or a tag (refs/heads/main in the merge queue,
@@ -656,6 +682,8 @@ jobs:
           import re
           import subprocess
           import sys
+          import traceback
+          import unicodedata
           from pathlib import Path
 
           import yaml
@@ -666,8 +694,34 @@ jobs:
           dest_root = Path(os.environ["DEST_ROOT"])
 
 
+          # The Python form of the one_line helper: the messages below quote paths,
+          # keys and values from the fetched config and its tool configs, so each
+          # printed line passes through it and stays one line with no command in it.
+          def one_line(text):
+              text = "".join(
+                  " " if unicodedata.category(c) in ("Cc", "Zl", "Zp") else c
+                  for c in str(text)
+              )
+              while "::" in text:
+                  text = text.replace("::", ": :")
+              while "##[" in text:
+                  text = text.replace("##[", "# #[")
+              return text
+
+
+          # An error this program does not catch prints a traceback, which can quote the
+          # config: a YAML error shows the line it stopped at. Each line of it goes
+          # through one_line too.
+          def report_through_one_line(kind, error, trace):
+              for line in "".join(traceback.format_exception(kind, error, trace)).splitlines():
+                  print(one_line(line), file=sys.stderr)
+
+
+          sys.excepthook = report_through_one_line
+
+
           def fail(message):
-              print(f"::error::{message}")
+              print(f"::error::{one_line(message)}")
               sys.exit(1)
 
 
@@ -860,7 +914,7 @@ jobs:
               path = config_file.with_name(config_file.name + ".config-ref.yaml")
               path.write_text(yaml.dump(document, Dumper=Dumper, sort_keys=False), encoding="utf-8")
               for line in rewritten:
-                  print(line)
+                  print(one_line(line))
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"path={path}\n")
           PY
@@ -1022,14 +1076,17 @@ jobs:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
           set -uo pipefail
+          # `built` comes from the downloaded database's metadata, so it is printed
+          # through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           built="$("${ASH_TOOL_BIN}/grype" db status -o json 2>/dev/null \
             | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
           if [ -n "${built}" ] && uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- \
               python -I -m automated_security_helper.utils.content_databases \
               check-age grype-db --built "${built}" --for use; then
-            echo "restored grype database built ${built} is inside its bound; using it"
+            echo "restored grype database built $(one_line "${built}") is inside its bound; using it"
           else
-            echo "::warning::discarding the restored grype database (built '${built:-unknown}'): it is not inside the bound ASH declares for it. grype will download a fresh one."
+            echo "::warning::discarding the restored grype database (built '$(one_line "${built:-unknown}")'): it is not inside the bound ASH declares for it. grype will download a fresh one."
             rm -rf ~/.cache/grype/db
           fi
 
@@ -1077,12 +1134,15 @@ jobs:
         if: inputs.install-opengrep
         run: |
           set -euo pipefail
+          # The machine name, the ASH source and the pin are printed through
+          # one_line: a tool reports the first two, and ASH's pin table the third.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           INSTALL_DIR="$HOME/.opengrep/cli/latest"
           BIN="$INSTALL_DIR/opengrep"
           case "$(uname -m)" in
             x86_64) ARCH=amd64 ;;
             aarch64|arm64) ARCH=arm64 ;;
-            *) echo "::error::no pinned OpenGrep for machine $(uname -m)"; exit 1 ;;
+            *) echo "::error::no pinned OpenGrep for machine $(one_line "$(uname -m)")"; exit 1 ;;
           esac
           # `python -I`: without it `-c` puts the working directory -- the CALLER's
           # checkout -- first on sys.path, so an `automated_security_helper/` directory
@@ -1094,7 +1154,7 @@ jobs:
           if ! PINNED="$(uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- python -I -c \
               'import sys; from automated_security_helper.utils.tool_downloads import get_tool_asset; print(get_tool_asset("opengrep", "linux", sys.argv[1]).sha256)' \
               "${ARCH}")" || [ -z "${PINNED}" ]; then
-            echo "::error::this ASH revision (${ASH_UVX_SOURCE}) pins no SHA256 for OpenGrep, so there is nothing to verify the binary against, and it will not be installed unverified. To fix: set the ash-version input to a revision that pins OpenGrep (main, or the first release after v3.7.1), or set install-opengrep: false."
+            echo "::error::this ASH revision ($(one_line "${ASH_UVX_SOURCE}")) pins no SHA256 for OpenGrep, so there is nothing to verify the binary against, and it will not be installed unverified. To fix: set the ash-version input to a revision that pins OpenGrep (main, or the first release after v3.7.1), or set install-opengrep: false."
             exit 1
           fi
           matches_pin() {
@@ -1102,10 +1162,10 @@ jobs:
               && [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "${PINNED}" ]
           }
           if matches_pin; then
-            echo "Reusing cached OpenGrep binary; SHA256 ${PINNED} matches the pin"
+            echo "Reusing cached OpenGrep binary; SHA256 $(one_line "${PINNED}") matches the pin"
           else
             if [ -e "$INSTALL_DIR" ]; then
-              echo "Discarding the restored OpenGrep cache: it does not hold a binary matching the pinned SHA256 ${PINNED}"
+              echo "Discarding the restored OpenGrep cache: it does not hold a binary matching the pinned SHA256 $(one_line "${PINNED}")"
             fi
             rm -rf "$INSTALL_DIR"
             mkdir -p "$INSTALL_DIR"
@@ -1120,7 +1180,7 @@ jobs:
           fi
           if ! matches_pin; then
             rm -rf "$INSTALL_DIR"
-            echo "::error::the installed OpenGrep binary does not match the pinned SHA256 ${PINNED}; removed it rather than put it on PATH"
+            echo "::error::the installed OpenGrep binary does not match the pinned SHA256 $(one_line "${PINNED}"); removed it rather than put it on PATH"
             exit 1
           fi
           echo "$INSTALL_DIR" >> "$GITHUB_PATH"
@@ -1200,6 +1260,9 @@ jobs:
           # checkout had one, which is every run where ASH scans itself: on a pull
           # request that is the pull request's Gemfile, so the pull request chose the
           # cfn-nag that scanned it, whatever ref ASH itself came from.
+          # Every path this step prints, the ones `command -v` reports included, goes
+          # through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           GEMFILE="${RUNNER_TEMP}/ash-cfn-nag/Gemfile"
           mkdir -p "$(dirname "${GEMFILE}")"
           curl -sSfL "${ASH_ASSETS_URL}/Gemfile" -o "${GEMFILE}"
@@ -1208,10 +1271,10 @@ jobs:
           # fetch that left nothing names the file instead of surfacing as Bundler's
           # frozen-mode refusal.
           if [ ! -s "${GEMFILE}.lock" ]; then
-            echo "::error::No Gemfile.lock beside ${GEMFILE}; cfn-nag installs only what that lockfile records." >&2
+            echo "::error::No Gemfile.lock beside $(one_line "${GEMFILE}"); cfn-nag installs only what that lockfile records." >&2
             exit 1
           fi
-          echo "Installing cfn-nag from ${GEMFILE}"
+          echo "Installing cfn-nag from $(one_line "${GEMFILE}")"
           # Every tool is resolved with `command -v` as the runner user rather than
           # assumed on PATH. The failure this names -- Ruby absent for the runner
           # user -- is otherwise invisible until the scan reports cfn-nag MISSING,
@@ -1228,7 +1291,7 @@ jobs:
           GEM_CMD="$(command -v gem || true)"
           RUBY_CMD="$(command -v ruby || true)"
           if [ -z "${BUNDLE_BIN}" ] || [ -z "${GEM_CMD}" ] || [ -z "${RUBY_CMD}" ]; then
-            echo "::error::Ruby is not on PATH for the runner user (bundle='${BUNDLE_BIN}' gem='${GEM_CMD}' ruby='${RUBY_CMD}'), so cfn-nag cannot be installed and would be reported MISSING. This image no longer ships ruby-full; add a ruby/setup-ruby step." >&2
+            echo "::error::Ruby is not on PATH for the runner user (bundle='$(one_line "${BUNDLE_BIN}")' gem='$(one_line "${GEM_CMD}")' ruby='$(one_line "${RUBY_CMD}")'), so cfn-nag cannot be installed and would be reported MISSING. This image no longer ships ruby-full; add a ruby/setup-ruby step." >&2
             exit 1
           fi
 
@@ -1284,8 +1347,10 @@ jobs:
           # Printed unconditionally, not folded into a failure branch. When this step
           # failed, the log carried the error and nothing about where it had looked,
           # so the cause could not be read off the record at all.
-          echo "--- binstub directory ${BINSTUB_DIR} ---"
-          ls -la "${BINSTUB_DIR}" || echo "(cannot list '${BINSTUB_DIR}')"
+          echo "--- binstub directory $(one_line "${BINSTUB_DIR}") ---"
+          # ls's own error quotes the path as it is, so it is dropped for the line
+          # below, which prints the path through one_line.
+          ls -la "${BINSTUB_DIR}" 2>/dev/null || echo "(cannot list '$(one_line "${BINSTUB_DIR}")')"
           echo "--- gem environment ---"
           "${GEM_CMD}" environment
 
@@ -1297,11 +1362,11 @@ jobs:
           #
           # First, that the name resolves.
           if ! CFN_NAG_SCAN="$(PATH="${BINSTUB_DIR}:${PATH}" command -v cfn_nag_scan)"; then
-            echo "::error::cfn-nag installed but cfn_nag_scan is not on PATH. Looked in '${BINSTUB_DIR}'. ASH invokes it by bare name, so it would report cfn-nag MISSING and pass a tree it never scanned." >&2
+            echo "::error::cfn-nag installed but cfn_nag_scan is not on PATH. Looked in '$(one_line "${BINSTUB_DIR}")'. ASH invokes it by bare name, so it would report cfn-nag MISSING and pass a tree it never scanned." >&2
             "${BUNDLE_BIN}" info cfn-nag || true
             exit 1
           fi
-          echo "cfn_nag_scan resolves to ${CFN_NAG_SCAN}"
+          echo "cfn_nag_scan resolves to $(one_line "${CFN_NAG_SCAN}")"
 
           # Second, that it RUNS. Resolving only proves a file is there; a bundler
           # binstub still has to find its Gemfile and activate the bundle at startup,
@@ -1309,8 +1374,13 @@ jobs:
           # again cfn-nag MISSING. `--help` exits 0 and prints the version, so it
           # exercises the whole path without needing a template.
           if ! PATH="${BINSTUB_DIR}:${PATH}" cfn_nag_scan --help >/dev/null 2>&1; then
-            echo "::error::cfn_nag_scan is on PATH at '${CFN_NAG_SCAN}' but will not run. Output follows." >&2
-            PATH="${BINSTUB_DIR}:${PATH}" cfn_nag_scan --help || true
+            echo "::error::cfn_nag_scan is on PATH at '$(one_line "${CFN_NAG_SCAN}")' but will not run. Output follows." >&2
+            # Through one_line a line at a time: what fails here quotes the path it
+            # ran, as bash's own "Permission denied" does.
+            PATH="${BINSTUB_DIR}:${PATH}" cfn_nag_scan --help 2>&1 \
+              | while IFS= read -r line || [ -n "${line}" ]; do
+                  printf '%s\n' "$(one_line "${line}")"
+                done >&2 || true
             exit 1
           fi
           echo "cfn_nag_scan --help exits 0, so the wrapper runs and its bundle activates"
@@ -1411,6 +1481,9 @@ jobs:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
           set -uo pipefail
+          # `built` comes from the downloaded database's metadata, so it is printed
+          # through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           built="$("${ASH_TOOL_BIN}/grype" db status -o json 2>/dev/null \
             | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
           if [ -n "${built}" ] && uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- \
@@ -1418,7 +1491,7 @@ jobs:
               check-age grype-db --built "${built}" --for save; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::not saving the grype database (built '${built:-unknown}'): too close to its bound to be cached."
+            echo "::warning::not saving the grype database (built '$(one_line "${built:-unknown}")'): too close to its bound to be cached."
           fi
 
       - name: Save the grype vulnerability database (default branch only)

@@ -31,6 +31,11 @@ What it models
   working directory Actions would use, with the environment layered workflow ->
   job -> step, and with ``uv``, ``uvx``, ``curl``, ``bundle``, ``gem``, ``ruby``
   and ``grype`` replaced by stubs that record argv, cwd and selected variables.
+* ``RUNNER_TEMP`` shared by a job's steps, for the one_line helper only: a step
+  that loads ``${RUNNER_TEMP}/ash-one-line.sh`` runs after the job's own
+  ``Write the one_line helper`` step, if the job has one before it
+  (``tests/utils/workflow_commands.py``). A job without one leaves the step to fail
+  on the missing file, as a runner would.
 
 What it does not model
 ----------------------
@@ -53,6 +58,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import yaml
+
+from tests.utils.workflow_commands import DEFINER_NAME, HELPER_FILE, HELPER_SOURCE
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
@@ -929,6 +936,7 @@ def run_step(
     """
     if "run" not in step:
         raise ExpressionError(f"step {step.get('name')!r} has no run: block")
+    _write_the_helper_first(sandbox, workflow, job, step, context)
     ctx = dict(context)
     ctx["runner"] = sandbox.runner_context()
     github = dict(ctx.get("github") or {})
@@ -1003,6 +1011,35 @@ def run_step(
         if line
     ]
     return StepRun(str(step.get("name")), proc, calls)
+
+
+def _write_the_helper_first(
+    sandbox: StepSandbox,
+    workflow: Workflow,
+    job: dict[str, Any],
+    step: dict[str, Any],
+    context: dict[str, Any],
+) -> None:
+    """Run the job's one_line definer before a step that loads the helper.
+
+    On a runner, every step of a job shares RUNNER_TEMP, so a step that loads the
+    helper finds what the definer wrote earlier in the job. A test that runs the
+    loading step alone gets the same: the definer from the same job, run first, and
+    only if it comes before the step. Steps are matched by content, because tests
+    often load the workflow again to pick the step.
+    """
+    if HELPER_SOURCE not in str(step.get("run") or ""):
+        return
+    if (sandbox.runner_temp / HELPER_FILE).exists():
+        return
+    for earlier in job.get("steps") or []:
+        if earlier == step:
+            return
+        if isinstance(earlier, dict) and earlier.get("name") == DEFINER_NAME:
+            run = run_step(sandbox, workflow, job, earlier, context)
+            if run.proc.returncode != 0:
+                raise ExpressionError(f"the one_line definer failed:\n{run.describe()}")
+            return
 
 
 def read_github_env(sandbox: StepSandbox) -> dict[str, str]:

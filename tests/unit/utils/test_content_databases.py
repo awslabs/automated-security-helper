@@ -36,6 +36,7 @@ import pytest
 import yaml
 
 from automated_security_helper.utils import content_databases as cdb
+from tests.utils import workflow_commands as wc
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REGISTRY = REPO_ROOT / "automated_security_helper" / "utils" / "content_databases.py"
@@ -353,8 +354,9 @@ def _step(workflow: Path, name: str) -> str:
 
 
 def _run_guard(
-    tmp_path: Path, script: str, built: datetime
+    tmp_path: Path, workflow: Path, script: str, built: datetime
 ) -> tuple[subprocess.CompletedProcess, Path, Path]:
+    """Run a guard step's script, after its job's one_line definer, as a runner would."""
     home = tmp_path / "home"
     db = home / ".cache" / "grype" / "db"
     db.mkdir(parents=True)
@@ -372,9 +374,12 @@ def _run_guard(
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
     output = tmp_path / "github_output"
     output.write_text("")
+    runner_temp = tmp_path / "runner-temp"
+    runner_temp.mkdir()
     env = {
         "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
         "HOME": str(home),
+        "RUNNER_TEMP": str(runner_temp),
         "ASH_TOOL_BIN": str(tools),
         "ASH_UVX_SOURCE": "unused-by-the-stub",
         "GITHUB_OUTPUT": str(output),
@@ -382,6 +387,16 @@ def _run_guard(
         "STUB_PYTHON": sys.executable,
         "PYTHONPATH": str(REPO_ROOT),
     }
+    # The guards print the database's build time through one_line, which an earlier
+    # step of their job writes to RUNNER_TEMP.
+    definer = subprocess.run(
+        ["bash", "-e", "-c", _step(workflow, wc.DEFINER_NAME)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert definer.returncode == 0, definer.stdout + definer.stderr
     proc = subprocess.run(  # nosec B603 B607 — fixed interpreter, the workflow's own script
         ["bash", "-e", "-c", script],
         env=env,
@@ -403,7 +418,7 @@ class TestTheCiGuards:
     def test_a_restored_database_past_the_bound_is_deleted_not_used(self, tmp_path):
         script = _step(SCAN_WORKFLOW, self.RESTORE_GUARD)
         built = datetime.now(UTC) - GRYPE.max_age - timedelta(hours=1)
-        proc, db, _ = _run_guard(tmp_path, script, built)
+        proc, db, _ = _run_guard(tmp_path, SCAN_WORKFLOW, script, built)
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert not db.exists(), (
             "a stale restored database must be removed before the scan"
@@ -413,7 +428,7 @@ class TestTheCiGuards:
     def test_a_restored_database_inside_the_bound_is_kept(self, tmp_path):
         script = _step(SCAN_WORKFLOW, self.RESTORE_GUARD)
         proc, db, _ = _run_guard(
-            tmp_path, script, datetime.now(UTC) - timedelta(hours=30)
+            tmp_path, SCAN_WORKFLOW, script, datetime.now(UTC) - timedelta(hours=30)
         )
         assert db.exists(), proc.stdout + proc.stderr
         assert "inside its bound" in proc.stdout
@@ -437,7 +452,7 @@ class TestTheCiGuards:
             - (GRYPE.max_age - cdb.bucket_width(GRYPE))
             - timedelta(hours=1)
         )
-        proc, _, output = _run_guard(tmp_path, script, built)
+        proc, _, output = _run_guard(tmp_path, workflow, script, built)
         assert "ok=true" not in output.read_text(), proc.stdout + proc.stderr
         assert "not saving the grype database" in proc.stdout
 
@@ -454,7 +469,7 @@ class TestTheCiGuards:
     def test_a_fresh_database_is_saved(self, tmp_path, workflow, name):
         script = _step(workflow, name)
         proc, _, output = _run_guard(
-            tmp_path, script, datetime.now(UTC) - timedelta(hours=3)
+            tmp_path, workflow, script, datetime.now(UTC) - timedelta(hours=3)
         )
         assert "ok=true" in output.read_text(), proc.stdout + proc.stderr
 
@@ -507,6 +522,52 @@ class TestTheCommandLineInProcess:
     def test_a_timestamp_without_a_zone_is_rejected(self):
         with pytest.raises(ValueError, match="no timezone"):
             cdb.parse_timestamp("2026-09-30T00:00:00")
+
+    @pytest.mark.parametrize("purpose", ["use", "save"])
+    @pytest.mark.parametrize(
+        "built,command",
+        [
+            pytest.param(
+                "x\r::warning::from the value",
+                "::warning::from the value",
+                id="carriage return",
+            ),
+            pytest.param(
+                "x\n::warning::from the value",
+                "::warning::from the value",
+                id="line feed",
+            ),
+            pytest.param(
+                "::warning::from the value", "::warning::from the value", id="command"
+            ),
+            pytest.param(
+                "x ##[warning]from the value",
+                "##[warning]from the value",
+                id="legacy marker",
+            ),
+            pytest.param("2026-09-30T00:00:00", None, id="no timezone"),
+            pytest.param("not a timestamp", None, id="not a timestamp"),
+        ],
+    )
+    def test_check_age_refuses_a_build_time_it_cannot_read_without_printing_it(
+        self, capsys, built, command, purpose
+    ):
+        """The workflows pass --built from the database's metadata and print the output.
+
+        The runner reads a line of a step's output that starts with `::`, or holds
+        `##[`, as a workflow command. So a value that does not parse is refused with
+        exit 2, and neither the value nor a traceback quoting it is printed.
+        """
+        assert (
+            cdb.main(["check-age", "grype-db", "--built", built, "--for", purpose]) == 2
+        )
+        captured = capsys.readouterr()
+        printed = captured.out + captured.err
+        assert built not in printed, printed
+        assert "Traceback" not in printed, printed
+        assert "RFC 3339" in captured.err, printed
+        if command is not None:
+            assert command not in printed, printed
 
     def test_go_duration_spellings(self):
         assert cdb.go_duration(timedelta(hours=96)) == "96h"

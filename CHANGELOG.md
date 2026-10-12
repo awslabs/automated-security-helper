@@ -1874,6 +1874,19 @@
   return, and the pull request title check refuses such a title before printing
   it.
 
+- **The reusable scan workflow prints a value it did not check on one line, with no
+  workflow command in it.** Values that do not come from an input, such as a
+  restored grype database's build time, the paths `command -v` reports for Ruby and
+  cfn-nag, the machine name and OpenGrep pin, and the scanner names in the config
+  read from `config-ref`, now pass through a `one_line` helper before a step prints
+  them. It turns every control character into a space, `::` into `: :` and `##[`
+  into `# #[`. A traceback from the `config-ref` tool-config step, which can quote a
+  line of a config that does not parse, goes through it too, as does the grype
+  database cache job in `ash-repo-scan.yml`.
+  `python -m automated_security_helper.utils.content_databases check-age` exits 2,
+  without printing the value or a traceback, when `--built` is not an RFC 3339
+  timestamp with a timezone.
+
 - **`ash scan` refuses a `--source-dir` that does not exist.** A missing path, from
   `--source-dir` or `ASH_SOURCE_DIR`, used to be scanned anyway: every scanner found
   no files and the run could exit 0, the same answer as a clean scan of the directory

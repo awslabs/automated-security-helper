@@ -66,6 +66,7 @@ import pytest
 import yaml
 
 from tests.utils import github_actions as ga
+from tests.utils import workflow_commands as wc
 
 pytestmark = pytest.mark.skipif(
     os.name == "nt" or shutil.which("bash") is None or shutil.which("git") is None,
@@ -502,20 +503,9 @@ class TestNothingReadsAnUncheckedValueAfterARefusal:
         assert running, "no step runs after a failed pin; the locator is broken"
 
 
-def _installed_locales() -> set[str]:
-    listing = subprocess.run(  # nosec B603 B607 - fixed argv
-        ["locale", "-a"], capture_output=True, text=True, check=False
-    ).stdout
-    return {name.strip().lower().replace("-", "") for name in listing.splitlines()}
-
-
 #: The locales a runner may give a step. C and C.UTF-8 are in every glibc image;
 #: en_US.UTF-8 where it is installed.
-LOCALES = [
-    "C",
-    "C.UTF-8",
-    *(["en_US.UTF-8"] if "en_us.utf8" in _installed_locales() else []),
-]
+LOCALES = wc.runner_locales()
 
 #: Every code point a refusal covers: the C0 and C1 controls, DEL, and U+2028 and
 #: U+2029, which a UTF-8 locale's [[:cntrl:]] matches and the C locale's does not.
