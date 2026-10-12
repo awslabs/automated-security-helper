@@ -959,7 +959,7 @@ class TestFirejailHidesBothHomes:
     ):
         passwd_home = tmp_path / "passwd-home"
         passwd_home.mkdir()
-        monkeypatch.setattr(backends_module, "_passwd_home", lambda: passwd_home)
+        _fake_passwd_home(monkeypatch, passwd_home)
         argv = self._argv(layout)
         assert "--private" in argv
         assert f"--blacklist={_as_argv(layout.home)}" in argv
@@ -971,7 +971,7 @@ class TestFirejailHidesBothHomes:
         passwd_home = tmp_path / "passwd-home"
         venv_bin = passwd_home / "work" / "venv" / "bin"
         venv_bin.mkdir(parents=True)
-        monkeypatch.setattr(backends_module, "_passwd_home", lambda: passwd_home)
+        _fake_passwd_home(monkeypatch, passwd_home)
         monkeypatch.setenv("PATH", str(venv_bin))
         argv = self._argv(layout)
         assert f"--whitelist={_as_argv(venv_bin)}" in argv
@@ -988,7 +988,7 @@ class TestFirejailHidesBothHomes:
         monkeypatch.setenv("USERPROFILE", str(home))
         passwd_home = tmp_path / "passwd-home"
         passwd_home.mkdir()
-        monkeypatch.setattr(backends_module, "_passwd_home", lambda: passwd_home)
+        _fake_passwd_home(monkeypatch, passwd_home)
         argv = self._argv(layout)
         assert not [a for a in argv if a.startswith("--blacklist=") and "home" in a]
         assert "--private" in argv
@@ -1251,6 +1251,29 @@ class TestAshsInterpreterThroughAHome:
         monkeypatch.setattr(sys, prefix.split(".")[1], str(layout.home))
         with pytest.raises(SandboxUnavailable, match="home directory"):
             _policy(layout)
+
+    @pytest.mark.parametrize("in_home", ["HOME", "passwd home"])
+    def test_a_python_built_with_the_home_as_its_prefix(
+        self, layout, tmp_path, monkeypatch, in_home
+    ):
+        """--prefix=<home>: a real <home>/bin/python3, every prefix the home itself.
+
+        Refused whichever home it is, rather than mounting that home for every
+        scanner; argv0 is a system tool, so only ASH's own paths are in play.
+        """
+        home = layout.home
+        if in_home == "passwd home":
+            home = tmp_path / "passwd-home"
+            _fake_passwd_home(monkeypatch, home)
+        python = home / "bin" / "python3"
+        python.parent.mkdir(parents=True, exist_ok=True)
+        python.write_bytes(b"\x7fELF")
+        (home / "lib" / "python3.12").mkdir(parents=True)
+        monkeypatch.setattr(sys, "executable", str(python))
+        for name in ("prefix", "exec_prefix", "base_prefix"):
+            monkeypatch.setattr(sys, name, str(home))
+        with pytest.raises(SandboxUnavailable, match="home directory"):
+            _policy(layout, argv0="/usr/bin/true")
 
     @pytest.mark.parametrize("where", ["bin/python3", ".local/opt/py/bin/python3"])
     def test_a_link_in_a_bin_directory_in_the_home(
