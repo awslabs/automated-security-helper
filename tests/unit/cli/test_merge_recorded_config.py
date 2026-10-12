@@ -310,6 +310,26 @@ class _Harness:
     def options(self, reporter_class: type) -> Dict[str, Any]:
         return _section(self.instance(reporter_class).config).get("options") or {}
 
+    def merged_section(self, reporter_class: type) -> Dict[str, Any]:
+        """``reporter_class``'s section in the merged results' config, as confined.
+
+        ``ash merge`` builds a reporter that sends findings off the host only when
+        the operator enables it, so for one it does not build, the settings it
+        would have had are read from the merged results file.
+        """
+        from automated_security_helper.base.plugin_config import plugin_config_key
+        from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+        merged = AshAggregatedResults.model_validate_json(
+            (self.output_dir / RESULTS_FILE_NAME).read_text("utf-8")
+        )
+        assert merged.ash_config is not None
+        return _section(
+            merged.ash_config.get_plugin_config(
+                "reporter", plugin_config_key(reporter_class)
+            )
+        )
+
     def ignoring(self) -> List[str]:
         return [message for message in self.warnings if message.startswith("Ignoring")]
 
@@ -363,10 +383,12 @@ class TestRecordedReporterDestinations:
         result = harness.merge(shard_paths, "--config", str(operator))
 
         _assert_merged(result, harness)
-        options = harness.options(harness.S3Reporter)
+        # The operator does not enable S3, so it is not built at all.
+        assert harness.built_of(harness.S3Reporter) == []
+        options = harness.merged_section(harness.S3Reporter).get("options") or {}
         assert options.get("bucket_name") is None
         assert options.get("aws_region") is None
-        assert options.get("key_prefix") == "ash-reports/"
+        assert options.get("key_prefix") != "shard-prefix/"
         assert "S3Reporter" not in harness.reported
         assert harness.uploads == []
         assert not (harness.output_dir / "reports" / "ash.s3.json").exists()
@@ -394,8 +416,10 @@ class TestRecordedReporterDestinations:
         result = harness.merge(shard_paths, "--config", str(operator))
 
         _assert_merged(result, harness)
-        assert harness.options(harness.S3Reporter).get("bucket_name") is None
-        assert _section(harness.instance(harness.S3Reporter).config)["enabled"] is False
+        assert harness.built_of(harness.S3Reporter) == []
+        recorded = harness.merged_section(harness.S3Reporter)
+        assert (recorded.get("options") or {}).get("bucket_name") is None
+        assert recorded["enabled"] is False
         assert "S3Reporter" not in harness.reported
         assert harness.uploads == []
         assert not (harness.output_dir / "reports" / "ash.s3.json").exists()
@@ -448,10 +472,15 @@ class TestRecordedReporterDestinations:
         result = harness.merge(shard_paths, "--config", str(operator))
 
         _assert_merged(result, harness)
-        hub = harness.options(harness.SecurityHubReporter)
+        # Neither is enabled by the operator, so neither is built.
+        assert harness.built_of(harness.SecurityHubReporter) == []
+        assert harness.built_of(harness.BedrockSummaryReporter) == []
+        hub = harness.merged_section(harness.SecurityHubReporter).get("options") or {}
         assert hub.get("aws_region") != "eu-west-1"
         assert hub.get("account_id") is None
-        bedrock = harness.options(harness.BedrockSummaryReporter)
+        bedrock = (
+            harness.merged_section(harness.BedrockSummaryReporter).get("options") or {}
+        )
         assert bedrock.get("aws_region") != "ap-southeast-2"
         assert bedrock.get("model_id") != "shard-model"
         ignored = harness.ignored_keys()
@@ -744,7 +773,8 @@ class TestEnablementIsTheOperators:
         _assert_merged(result, harness)
         assert "S3Reporter" not in harness.reported
         assert harness.uploads == []
-        assert _section(harness.instance(harness.S3Reporter).config)["enabled"] is False
+        assert harness.built_of(harness.S3Reporter) == []
+        assert harness.merged_section(harness.S3Reporter)["enabled"] is False
         assert "reporters.s3.enabled" in harness.ignored_keys()
 
     def test_a_shard_does_not_turn_on_bedrock_the_operators_config_turns_off(
@@ -819,15 +849,15 @@ class TestEnablementIsTheOperators:
         assert named, harness.warnings
         assert "ash merge's --config-overrides or --config" in named[0]
 
-    def test_a_shard_does_not_turn_off_a_reporter_the_operator_leaves_on_by_default(
+    def test_a_shard_does_not_turn_on_a_reporter_the_operator_leaves_off_by_default(
         self, harness
     ):
-        """The operator's config is silent, so the reporter's default (on) applies."""
+        """The operator's config is silent, so the reporter's default (off) applies."""
         harness.satisfy(harness.SecurityHubReporter)
         shard_paths = harness.write_shards(
             {
                 "ash_plugin_modules": [AWS],
-                "reporters": {"aws-security-hub": {"enabled": False}},
+                "reporters": {"aws-security-hub": {"enabled": True}},
             }
         )
         operator = _write_yaml(
@@ -837,9 +867,9 @@ class TestEnablementIsTheOperators:
         result = harness.merge(shard_paths, "--config", str(operator))
 
         _assert_merged(result, harness)
-        built = _section(harness.instance(harness.SecurityHubReporter).config)
-        assert built["enabled"] is True
-        assert "SecurityHubReporter" in harness.reported
+        assert harness.built_of(harness.SecurityHubReporter) == []
+        assert harness.merged_section(harness.SecurityHubReporter)["enabled"] is False
+        assert "SecurityHubReporter" not in harness.reported
         assert "reporters.aws-security-hub.enabled" in harness.ignored_keys()
 
     def test_a_shard_does_not_turn_off_a_plugin_reporter_with_destinations(
@@ -877,7 +907,7 @@ class TestEnablementIsTheOperators:
         result = harness.merge(shard_paths, "--config", str(operator))
 
         _assert_merged(result, harness)
-        assert _section(harness.instance(harness.S3Reporter).config)["enabled"] is False
+        assert harness.merged_section(harness.S3Reporter)["enabled"] is False
         assert "reporters.s3.enabled" not in harness.ignored_keys()
 
 
@@ -1397,11 +1427,13 @@ class TestAnOperatorConfigThatNamesNothingReadable:
 
 
 class TestOperatorConfigOutsideTheRecordedConfig:
-    """``--config`` supplies values for what the shards recorded and adds nothing.
+    """``--config`` supplies values for what the shards recorded and adds no module.
 
-    A plugin module or reporter setting the file names that the shards did not
-    record does not apply, so each is named in a warning with the override that
-    would add it.
+    A plugin module the file names that the shards did not record is not imported,
+    so it is named in a warning with the override that would add it. A reporter
+    that sends findings off the host is the operator's to turn on, in a merge as in
+    a scan, so its section in ``--config`` applies whether or not the shards
+    recorded one; it runs once its module is loaded.
     """
 
     OPERATOR = {
@@ -1417,7 +1449,7 @@ class TestOperatorConfigOutsideTheRecordedConfig:
         },
     }
 
-    def test_a_module_and_reporter_the_shards_did_not_record_are_named(self, harness):
+    def test_a_module_the_shards_did_not_record_is_named(self, harness):
         shard_paths = harness.write_shards({"project_name": "test-merge"})
         operator = _write_yaml(
             harness.tmp_path / "operator" / "ash.yaml", self.OPERATOR
@@ -1432,19 +1464,42 @@ class TestOperatorConfigOutsideTheRecordedConfig:
         assert module, harness.warnings
         assert "--config-overrides" in module[0]
         _assert_says_it_is_quoted_for_a_posix_shell(module[0])
-        bucket = [
+        # The operator's S3 section applies though the shards recorded none, so
+        # none of it is named as not applying.
+        s3 = harness.merged_section(harness.S3Reporter)
+        assert s3["enabled"] is True
+        assert s3["options"]["bucket_name"] == "operator-bucket"
+        assert s3["options"]["aws_region"] == "us-east-2"
+        assert not [
             m
             for m in harness.warnings
-            if "--config-overrides reporters.s3.options.bucket_name=operator-bucket"
-            in m
-        ]
-        assert bucket, harness.warnings
-        # Nothing in it needs quoting, so it is written the same for every shell.
-        assert POSIX_SHELL_NOTE not in bucket[0], bucket[0]
-        assert any(
-            "--config-overrides reporters.s3.options.aws_region=us-east-2" in m
+            if "reporters.s3." in m and "does not apply" in m
+        ], harness.warnings
+
+    def test_a_reporter_setting_the_shards_did_not_record_is_named(self, harness):
+        """A local reporter's option the shards recorded no section for does not apply."""
+        harness.reporters.append(_EndpointReporter)
+        shard_paths = harness.write_shards({"project_name": "test-merge"})
+        operator = _write_yaml(
+            harness.tmp_path / "operator" / "ash.yaml",
+            {
+                "reporters": {
+                    "endpoint-reporter": {
+                        "options": {"endpoint": "https://operator.invalid/"}
+                    }
+                }
+            },
+        )
+
+        result = harness.merge(shard_paths, "--config", str(operator))
+
+        _assert_merged(result, harness)
+        named = [
+            m
             for m in harness.warnings
-        ), harness.warnings
+            if "--config-overrides reporters.endpoint-reporter.options.endpoint=" in m
+        ]
+        assert named, harness.warnings
 
     def test_values_the_recorded_config_takes_are_not_named(self, harness):
         """Control: the shards record the module and an S3 section, so all of it applies."""

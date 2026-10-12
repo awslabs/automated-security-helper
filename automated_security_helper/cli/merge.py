@@ -2073,13 +2073,18 @@ def merge_command(
     logger.info(f"Wrote merged results to {merged_file}")
 
     # The plugins were loaded above, before anything was written.
-    # A reporter that sends findings off the host runs only when the operator's
-    # own --config enables it. The configuration the shards carried came from
-    # whatever config each shard's scan read, a file in the scanned repository
-    # included, and the reporter would send the merged findings with this host's
-    # credentials; so that configuration decides nothing for it, in either
-    # direction.
-    operator_config = resolve_config(config_path=config) if config else None
+    # A reporter that sends findings off the host runs only when the operator
+    # enables it, with --config or --config-overrides. The configuration the
+    # shards carried came from whatever config each shard's scan read, a file in
+    # the scanned repository included, and the reporter would send the merged
+    # findings with this host's credentials; so that configuration decides nothing
+    # for it, in either direction. Nor does a config file found on this host: only
+    # what the operator named here counts.
+    operator_config: Optional[AshConfig] = None
+    if config or overrides:
+        operator_config = apply_config_overrides(
+            trusted_config if config else AshConfig(), overrides
+        )
     local_reporters, off_host_reporters, notices = select_merge_reporters(
         reporter_plugins,
         shard_config=merged.ash_config,
@@ -2176,8 +2181,9 @@ def select_merge_reporters(
 ]:
     """Split ``ash merge``'s reporters into local and off-host ones, and say what was ignored.
 
-    A reporter that sends findings off the host runs only when the operator's own
-    ``--config`` sets ``enabled: true`` in its section (``off_host_reporter_refused``).
+    A reporter that sends findings off the host runs only when ``operator_config``,
+    the operator's own ``--config`` with ``--config-overrides`` applied, sets
+    ``enabled: true`` in its section (``off_host_reporter_refused``).
     The configuration the shards recorded is ignored for it, in both directions:
     a shard's ``enabled: true`` does not run it and a shard's ``enabled: false``
     does not stop it. Where the shards' value disagrees with the operator's
