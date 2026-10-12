@@ -386,9 +386,39 @@ def test_an_input_that_resolves_outside_the_target_is_not_passed(
         inputs = _relative(scanner._collect_inputs(repo, "source", []), repo)
     assert inputs == EXPECTED_INPUTS
     if link.endswith(".yml"):
-        assert "resolves outside the scan root" in caplog.text
+        # The scan set zizmor reads leaves a file link out of the tree out before
+        # zizmor's own check sees it, and names the link, not its target.
+        assert f"Not scanning {link!r}: link leaves the scanned tree" in caplog.text
+        assert outside.as_posix() not in caplog.text
     # A symlinked directory is not descended into by the scan set, so its action
     # never becomes a candidate; held here so a change there cannot let it through.
+
+
+def test_a_converted_input_that_resolves_outside_the_target_is_not_passed(
+    repo, tmp_path, caplog
+):
+    """The converted target is not read through the scan set, so zizmor's own
+    check is what keeps a link out of the tree from reaching zizmor."""
+    outside = tmp_path / "outside" / "leak.yml"
+    outside.parent.mkdir(parents=True)
+    outside.write_text((repo / ".github" / "workflows" / "clean.yml").read_text())
+    scanner = _scanner(repo)
+    converted = Path(scanner._plugin_context.work_dir)
+    workflows = converted / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    _symlink_or_skip(workflows / "leak.yml", outside)
+    (workflows / "clean.yml").write_text(outside.read_text())
+
+    with caplog.at_level("WARNING"):
+        inputs = _relative(
+            scanner._collect_inputs(converted, "converted", []), converted
+        )
+
+    assert inputs == [".github/workflows/clean.yml"]
+    assert (
+        "Not auditing .github/workflows/leak.yml: it resolves outside the scan root."
+        in caplog.text
+    )
 
 
 @pytest.mark.parametrize(
