@@ -355,19 +355,26 @@ async def mcp_scan_directory(
                 ),
             }
     # Counted against the operator's per-session limit from here until the scan
-    # returns; the task uncounts it. See sessions.per_session_scan_limit.
-    counted_session = None
-    if claimed_session is not None:
-        from automated_security_helper.cli.mcp.sessions import (
-            per_session_scan_limit,
-            session_scan_limit_refusal,
-        )
+    # returns; the task uncounts it. A limited caller with no session counts on
+    # the count all such callers share. See sessions.per_session_scan_limit.
+    from automated_security_helper.cli.mcp.sessions import (
+        per_session_scan_limit,
+        session_scan_limit_refusal,
+        sessionless_scan_count,
+    )
 
-        limit = per_session_scan_limit(session_id)
+    counted: Optional[Any] = None
+    limit = per_session_scan_limit(session_id)
+    if claimed_session is not None:
         if not claimed_session.try_start_scan(limit):
             claimed_session.release_scan()
             return session_scan_limit_refusal("scan_directory", limit)
-        counted_session = claimed_session
+        counted = claimed_session
+    elif limit is not None:
+        shared = sessionless_scan_count()
+        if not shared.try_start_scan(limit):
+            return session_scan_limit_refusal("scan_directory", limit, shared=True)
+        counted = shared
     scan_task_started = False
 
     try:
@@ -402,7 +409,7 @@ async def mcp_scan_directory(
                 config_path=config_path,
                 session_id=session_id,
                 scan_claim=claimed_session,
-                scan_counted=counted_session,
+                scan_counted=counted,
             )
         )
         scan_task_started = True
@@ -451,8 +458,8 @@ async def mcp_scan_directory(
         # The task releases the claim and the count once it has started; a scan
         # that never started releases them here.
         if not scan_task_started:
-            if counted_session is not None:
-                counted_session.scan_returned()
+            if counted is not None:
+                counted.scan_returned()
             if claimed_session is not None:
                 claimed_session.release_scan()
 
@@ -472,8 +479,9 @@ async def _run_scan_async(
     Arguments as :func:`_run_scan`, plus ``scan_claim``: the ``MCPSession``
     whose scan claim :func:`mcp_scan_directory` took, released when the scan
     returns, before a session that ended meanwhile is removed; and
-    ``scan_counted``: the ``MCPSession`` that counted this scan against its
-    per-session limit, uncounted at the same time.
+    ``scan_counted``: what counted this scan against the per-session limit (its
+    ``MCPSession``, or for a caller with no session the shared
+    ``sessions.ScanCount``), uncounted at the same time.
     """
     try:
         await _run_scan(

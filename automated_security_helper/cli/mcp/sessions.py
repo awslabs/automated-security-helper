@@ -69,6 +69,36 @@ if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
 
 
+class ScanCount:
+    """Scans counted against the per-session limit and not yet returned.
+
+    Each session has one (:meth:`MCPSession.try_start_scan`), and every caller
+    with no session shares one more (:func:`sessionless_scan_count`).
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._running = 0
+
+    def try_start_scan(self, limit: Optional[int]) -> bool:
+        """Count a scan as running, unless ``limit`` already are.
+
+        Counted and checked under one lock, so two calls at once can't both take
+        the last place. ``None`` is no limit. Each True is paired with one
+        :meth:`scan_returned`, once nothing of that scan runs any more.
+        """
+        with self._lock:
+            if limit is not None and self._running >= limit:
+                return False
+            self._running += 1
+            return True
+
+    def scan_returned(self) -> None:
+        """Uncount a scan :meth:`try_start_scan` counted."""
+        with self._lock:
+            self._running = max(0, self._running - 1)
+
+
 class MCPSession(BaseModel):
     """Per-connection state for an MCP client.
 
@@ -123,9 +153,9 @@ class MCPSession(BaseModel):
     _state_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
     _claimed_scans: int = PrivateAttr(default=0)
     _changing: bool = PrivateAttr(default=False)
-    # Scans counted against the per-session limit and not yet returned; guarded
-    # by _state_lock. See try_start_scan.
-    _running_scans: int = PrivateAttr(default=0)
+    # Scans counted against the per-session limit and not yet returned. See
+    # try_start_scan.
+    _scan_count: ScanCount = PrivateAttr(default_factory=ScanCount)
 
     @property
     def lock(self) -> threading.Lock:
@@ -184,20 +214,13 @@ class MCPSession(BaseModel):
     def try_start_scan(self, limit: Optional[int]) -> bool:
         """Count a scan of this session as running, unless ``limit`` already are.
 
-        Counted and checked under one lock, so two calls at once can't both take
-        the last place. ``None`` is no limit. Each True is paired with one
-        :meth:`scan_returned`, once nothing of that scan runs any more.
+        See :meth:`ScanCount.try_start_scan`.
         """
-        with self._state_lock:
-            if limit is not None and self._running_scans >= limit:
-                return False
-            self._running_scans += 1
-            return True
+        return self._scan_count.try_start_scan(limit)
 
     def scan_returned(self) -> None:
         """Uncount a scan :meth:`try_start_scan` counted."""
-        with self._state_lock:
-            self._running_scans = max(0, self._running_scans - 1)
+        self._scan_count.scan_returned()
 
 
 # Resolve the ``AshConfig`` forward reference. Pydantic v2 refuses to
@@ -232,6 +255,9 @@ class MCPSessionRegistry:
         """
         self._sessions: Dict[str, MCPSession] = {}
         self._lock = threading.RLock()
+        #: The scans of every caller with no session, counted as one session's.
+        #: See per_session_scan_limit.
+        self.sessionless_scans = ScanCount()
         self._explicit_parent = workspace_parent
         if workspace_parent is not None:
             workspace_parent.mkdir(parents=True, exist_ok=True)
@@ -441,6 +467,17 @@ def per_session_scan_limit(session_id: Optional[str]) -> Optional[int]:
 
     Only a caller of a network transport is limited. stdio has one session, the
     local client's, and nobody to share the host with.
+
+    A limited caller with no session counts against :func:`sessionless_scan_count`,
+    one count all such callers share, under the same limit. Over the network that
+    is a caller with no session the server issued
+    (``session_identity.UNIDENTIFIED_SESSION_ID``): every caller of a stateless
+    streamable-HTTP server run without ``--trust-upstream-session-id``, and a
+    request on sse or stateful streamable-HTTP that names no issued session. With
+    ``ASH_MCP_TRANSPORT`` set it is also an in-process caller that passes no
+    session id. Shared rather than uncounted, because these callers can't be told
+    apart, and leaving them uncounted would let any of them start as many scans
+    as it liked.
     """
     from automated_security_helper.cli.mcp.sandbox import caller_is_remote
     from automated_security_helper.config.ash_config import (
@@ -457,18 +494,40 @@ def per_session_scan_limit(session_id: Optional[str]) -> Optional[int]:
     return settings.max_concurrent_scans_per_session or None
 
 
-def session_scan_limit_refusal(operation: str, limit: int) -> Dict[str, Any]:
-    """The response for a scan refused because its session is at its limit."""
-    return {
-        "success": False,
-        "operation": operation,
-        "error_type": SESSION_SCAN_LIMIT,
-        "error": (
+def sessionless_scan_count() -> ScanCount:
+    """The count every limited caller with no session shares; see per_session_scan_limit."""
+    return get_default_registry().sessionless_scans
+
+
+def session_scan_limit_refusal(
+    operation: str, limit: int, *, shared: bool = False
+) -> Dict[str, Any]:
+    """The response for a scan refused because its session is at its limit.
+
+    ``shared``: the caller has no session and counted on
+    :func:`sessionless_scan_count`. Such a caller can't use cancel_scan, so the
+    message doesn't suggest it.
+    """
+    if shared:
+        error = (
+            f"callers with no session the server issued share one count, and "
+            f"{limit} scan(s) of theirs are already running, which is the "
+            f"server's per-session limit (mcp-resource-management."
+            f"max_concurrent_scans_per_session); start another once one has "
+            f"finished"
+        )
+    else:
+        error = (
             f"this session is already running {limit} scan(s), which is the "
             f"server's per-session limit (mcp-resource-management."
             f"max_concurrent_scans_per_session); start another once one has "
             f"finished, or cancel one with cancel_scan"
-        ),
+        )
+    return {
+        "success": False,
+        "operation": operation,
+        "error_type": SESSION_SCAN_LIMIT,
+        "error": error,
     }
 
 
@@ -883,12 +942,14 @@ __all__ = [
     "MCPSession",
     "MCPSessionRegistry",
     "SESSION_SCAN_LIMIT",
+    "ScanCount",
     "StdioServerPresence",
     "end_session",
     "finish_ended_session",
     "get_default_registry",
     "per_session_scan_limit",
     "session_scan_limit_refusal",
+    "sessionless_scan_count",
     "reset_default_registry_for_tests",
     "sweep_stale_workspaces",
     "touch_session_workspace",

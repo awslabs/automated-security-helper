@@ -122,6 +122,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    Union,
 )
 
 from automated_security_helper.cli.mcp.progress_monitor import (
@@ -132,6 +133,7 @@ from automated_security_helper.cli.mcp.session_identity import (
 )
 from automated_security_helper.cli.mcp.sessions import (
     MCPSession,
+    ScanCount,
     ScanPresence,
     finish_ended_session,
     get_default_registry,
@@ -1016,26 +1018,31 @@ class _WorkspaceScanClaim:
     call, or the worker it handed the run to. A worker that the call left before
     it started never runs the scan.
 
-    The same object carries the scan's place in its session's per-session limit
-    (``MCPSession.try_start_scan``), released at the same time. ``claimed`` and
-    ``counted`` say which of the two this scan took: a session that delivered
-    nothing takes no claim, and a session of stdio is not counted.
+    The same object carries the scan's place in the per-session limit
+    (``try_start_scan``), released at the same time: its session's place, or, for
+    a caller with no session, a place in the count all such callers share
+    (``sessions.sessionless_scan_count``). ``claimed`` is the session whose tree
+    the scan holds, None when it delivered nothing. ``counted`` holds the scan's
+    place, None when no limit applies (stdio).
     """
 
     def __init__(
         self,
-        session: MCPSession,
-        session_id: str,
+        session_id: Optional[str],
         *,
-        claimed: bool = True,
-        counted: bool = False,
+        claimed: Optional[MCPSession] = None,
+        counted: Optional[Union[MCPSession, ScanCount]] = None,
     ) -> None:
-        self._session = session
         self._session_id = session_id
-        self.claimed = claimed
-        self.counted = counted
+        self._claimed = claimed
+        self._counted = counted
         self._lock = threading.Lock()
         self._holder = "call"  # then "worker", then "released"
+
+    @property
+    def claimed(self) -> bool:
+        """True when the scan holds its session's tree."""
+        return self._claimed is not None
 
     def worker_starts(self) -> bool:
         """Take the claim over for the worker; False if the call already left."""
@@ -1059,10 +1066,10 @@ class _WorkspaceScanClaim:
         self._release()
 
     def _release(self) -> None:
-        if self.counted:
-            self._session.scan_returned()
-        if self.claimed:
-            self._session.release_scan()
+        if self._counted is not None:
+            self._counted.scan_returned()
+        if self._claimed is not None:
+            self._claimed.release_scan()
             finish_ended_session(self._session_id)
 
 
@@ -1561,16 +1568,17 @@ async def mcp_scan_workspace(
         enabled reporter that cannot produce a workspace artifact or a project
         that is not a git repository under precommit.
     """
-    claim: Optional[_WorkspaceScanClaim] = None
-    if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
-        from automated_security_helper.cli.mcp.sessions import (
-            per_session_scan_limit,
-            session_scan_limit_refusal,
-        )
+    from automated_security_helper.cli.mcp.sessions import (
+        per_session_scan_limit,
+        session_scan_limit_refusal,
+        sessionless_scan_count,
+    )
 
+    limit = per_session_scan_limit(session_id)
+    session: Optional[MCPSession] = None
+    claims_tree = False
+    if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
         claims_tree = _session_holds_something_on_disk(session_id, profile)
-        limit = per_session_scan_limit(session_id)
-        session: Optional[MCPSession] = None
         if claims_tree or limit is not None:
             try:
                 # The in-memory session: neither hold creates anything on disk.
@@ -1579,28 +1587,31 @@ async def mcp_scan_workspace(
                 # An id that names no directory has no delivered tree to hold;
                 # the checks below refuse it.
                 session = None
-        if session is not None:
-            if claims_tree and not session.try_claim_scan():
-                response = _error_response(
-                    SourceDeliveryBusyError(
-                        "the delivered source of this session is being changed; "
-                        "start the workspace scan after the change finishes"
-                    ),
-                    "scan_workspace",
-                )
-                response["error_type"] = SOURCE_DELIVERY_BUSY
-                return response
-            # One place in the per-session limit, however many projects.
-            if limit is not None and not session.try_start_scan(limit):
-                if claims_tree:
-                    session.release_scan()
-                return session_scan_limit_refusal("scan_workspace", limit)
-            claim = _WorkspaceScanClaim(
-                session,
-                session_id,
-                claimed=claims_tree,
-                counted=limit is not None,
+    claimed = session if claims_tree else None
+    if claimed is not None and not claimed.try_claim_scan():
+        response = _error_response(
+            SourceDeliveryBusyError(
+                "the delivered source of this session is being changed; "
+                "start the workspace scan after the change finishes"
+            ),
+            "scan_workspace",
+        )
+        response["error_type"] = SOURCE_DELIVERY_BUSY
+        return response
+    counted: Optional[Union[MCPSession, ScanCount]] = None
+    if limit is not None:
+        # One place, however many projects: in the session's count, or, for a
+        # caller with no session, in the one all such callers share.
+        counted = session if session is not None else sessionless_scan_count()
+        if not counted.try_start_scan(limit):
+            if claimed is not None:
+                claimed.release_scan()
+            return session_scan_limit_refusal(
+                "scan_workspace", limit, shared=session is None
             )
+    claim: Optional[_WorkspaceScanClaim] = None
+    if claimed is not None or counted is not None:
+        claim = _WorkspaceScanClaim(session_id, claimed=claimed, counted=counted)
     try:
         return await _scan_workspace(
             workspace_file=workspace_file,

@@ -14,6 +14,12 @@ A ``run_ash_scan`` counts from its start until its scan returns. A
 ``run_ash_workspace_scan`` counts once, however many projects it has, until its
 worker thread returns, even when the call is cancelled first. stdio's one
 session is not limited.
+
+A caller the limit applies to but that has no session counts against one count
+that all such callers share, under the same limit. Over the network that is a
+caller with no session the server issued: every caller of a stateless
+streamable-HTTP server run without ``--trust-upstream-session-id``, and a
+request on sse or stateful streamable-HTTP that names no issued session.
 """
 
 from __future__ import annotations
@@ -29,7 +35,10 @@ import pytest
 from automated_security_helper.cli.mcp import sessions
 from automated_security_helper.cli.mcp import workspace as workspace_module
 from automated_security_helper.cli.mcp.profile_registry import DEFAULT_SESSION_ID
-from automated_security_helper.cli.mcp.session_identity import serving_local_client
+from automated_security_helper.cli.mcp.session_identity import (
+    UNIDENTIFIED_SESSION_ID,
+    serving_local_client,
+)
 from automated_security_helper.cli.mcp_tools import mcp_scan_directory
 
 LIMIT_REFUSED = "session_scan_limit"
@@ -356,6 +365,152 @@ def test_a_cancelled_workspace_scan_counts_until_its_worker_returns(
     assert observed["while_running"].get("error_type") == LIMIT_REFUSED
 
 
+# -- callers with no session ------------------------------------------------------
+
+
+def _second_workspace(granted: Path) -> Path:
+    """A workspace of other projects than dev.code-workspace's, so the two never overlap."""
+    path = granted / "ops.code-workspace"
+    path.write_text(
+        json.dumps({"folders": [{"path": "one"}, {"path": "two"}]}), encoding="utf-8"
+    )
+    return path
+
+
+async def _workspace_scan(
+    workspace_file: Path, output_dir: Path, session_id: str
+) -> Dict[str, Any]:
+    return await workspace_module.mcp_scan_workspace(
+        workspace_file=str(workspace_file),
+        output_dir=str(output_dir),
+        session_id=session_id,
+    )
+
+
+def test_callers_with_no_session_share_one_count_and_sessions_are_unaffected(
+    tmp_path, monkeypatch, granted, held, blocked_workspace
+) -> None:
+    """A caller with no session has no session to count on; it counts on the shared one."""
+    _limit(tmp_path, monkeypatch, 1)
+    ops = _second_workspace(granted)
+
+    async def main():
+        first = asyncio.create_task(
+            _workspace_scan(
+                granted / "dev.code-workspace",
+                granted / "out-1",
+                UNIDENTIFIED_SESSION_ID,
+            )
+        )
+        await asyncio.to_thread(blocked_workspace["started"].wait, 30)
+        second = asyncio.create_task(
+            _workspace_scan(ops, granted / "out-2", UNIDENTIFIED_SESSION_ID)
+        )
+        # A refusal returns at once; a scan let through waits in execute_workspace.
+        await asyncio.wait({second}, timeout=10)
+        try:
+            with_a_session = await _start(granted, "session-a", "three")
+        finally:
+            blocked_workspace["release"].set()
+        results = (await first, await second, with_a_session)
+        await _finish(held)
+        return results
+
+    first, second, with_a_session = asyncio.run(main())
+
+    assert first.get("success") is True, first
+    assert second.get("success") is False, second
+    assert second.get("error_type") == LIMIT_REFUSED, second
+    assert "max_concurrent_scans_per_session" in second.get("error", ""), second
+    assert "cancel_scan" not in second.get("error", ""), (
+        "a caller with no session cannot cancel a scan, so the refusal must not "
+        f"suggest it: {second}"
+    )
+    assert with_a_session.get("success") is True, with_a_session
+
+
+def test_the_shared_place_comes_back_when_the_scan_returns(
+    tmp_path, monkeypatch, granted, blocked_workspace
+) -> None:
+    _limit(tmp_path, monkeypatch, 1)
+    blocked_workspace["release"].set()
+
+    async def main() -> List[Dict[str, Any]]:
+        return [
+            await _workspace_scan(
+                granted / "dev.code-workspace",
+                granted / "out-1",
+                UNIDENTIFIED_SESSION_ID,
+            )
+            for _ in range(2)
+        ]
+
+    first, again = asyncio.run(main())
+
+    assert first.get("success") is True, first
+    assert again.get("success") is True, again
+
+
+def test_a_cancelled_scan_of_a_caller_with_no_session_counts_until_its_worker_returns(
+    tmp_path, monkeypatch, granted, blocked_workspace
+) -> None:
+    _limit(tmp_path, monkeypatch, 1)
+    ops = _second_workspace(granted)
+    observed: Dict[str, Any] = {}
+
+    async def main():
+        scan = asyncio.create_task(
+            _workspace_scan(
+                granted / "dev.code-workspace",
+                granted / "out-1",
+                UNIDENTIFIED_SESSION_ID,
+            )
+        )
+        await asyncio.to_thread(blocked_workspace["started"].wait, 30)
+        scan.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await scan
+        second = asyncio.create_task(
+            _workspace_scan(ops, granted / "out-2", UNIDENTIFIED_SESSION_ID)
+        )
+        await asyncio.wait({second}, timeout=10)
+        blocked_workspace["release"].set()
+        observed["while_running"] = await second
+
+    asyncio.run(main())
+
+    assert observed["while_running"].get("error_type") == LIMIT_REFUSED
+
+
+def test_an_in_process_caller_with_no_session_counts_when_every_caller_is_remote(
+    tmp_path, monkeypatch, granted, held
+) -> None:
+    """ASH_MCP_TRANSPORT makes every caller remote, an in-process one with no id too."""
+    _limit(tmp_path, monkeypatch, 1)
+    monkeypatch.setenv("ASH_MCP_TRANSPORT", "streamable-http")
+
+    async def main() -> List[Dict[str, Any]]:
+        try:
+            return [
+                await mcp_scan_directory(
+                    directory_path=str(granted / "one"), session_id=None
+                ),
+                await mcp_scan_directory(
+                    directory_path=str(granted / "two"), session_id=None
+                ),
+                await _start(granted, "session-a", "three"),
+            ]
+        finally:
+            await _finish(held)
+
+    first, second, with_a_session = asyncio.run(main())
+
+    assert first.get("success") is True, first
+    assert second.get("success") is False, second
+    assert second.get("error_type") == LIMIT_REFUSED, second
+    assert with_a_session.get("success") is True, with_a_session
+
+
 # -- over the protocol ------------------------------------------------------------
 
 
@@ -397,3 +552,59 @@ def test_the_refusal_reaches_a_client_over_streamable_http(
     assert second.get("success") is False, second
     assert second.get("error_type") == LIMIT_REFUSED, second
     assert other.get("success") is True, other
+
+
+def test_callers_of_a_stateless_server_share_one_count(
+    tmp_path, monkeypatch, granted, blocked_workspace
+) -> None:
+    """Without --trust-upstream-session-id no caller of a stateless server has a session."""
+    from starlette.testclient import TestClient
+
+    from automated_security_helper.cli.mcp import build_streamable_http_app
+    from tests.utils.mcp_transport_harness import (
+        LOOPBACK_BASE_URL,
+        LOOPBACK_PORT,
+        StreamableHttpClient,
+    )
+
+    _limit(tmp_path, monkeypatch, 1)
+    ops = _second_workspace(granted)
+    app = build_streamable_http_app(
+        mount_path="/mcp", stateless_http=True, host="127.0.0.1", port=LOOPBACK_PORT
+    )
+    results: Dict[str, Any] = {}
+    # A second scan that is let through waits in execute_workspace; this ends it.
+    backstop = threading.Timer(15, blocked_workspace["release"].set)
+    backstop.start()
+    try:
+        with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
+            http = StreamableHttpClient(client)
+            _issued, headers = http.open_session()
+
+            def first() -> None:
+                results["first"] = http.call_tool(
+                    "run_ash_workspace_scan",
+                    {
+                        "workspace_file": str(granted / "dev.code-workspace"),
+                        "output_dir": str(granted / "out-1"),
+                    },
+                    headers,
+                )
+
+            worker = threading.Thread(target=first)
+            worker.start()
+            assert blocked_workspace["started"].wait(30), "the first scan never ran"
+            results["second"] = http.call_tool(
+                "run_ash_workspace_scan",
+                {"workspace_file": str(ops), "output_dir": str(granted / "out-2")},
+                headers,
+            )
+            blocked_workspace["release"].set()
+            worker.join(30)
+    finally:
+        blocked_workspace["release"].set()
+        backstop.cancel()
+
+    assert results["first"].get("success") is True, results["first"]
+    assert results["second"].get("success") is False, results["second"]
+    assert results["second"].get("error_type") == LIMIT_REFUSED, results["second"]
