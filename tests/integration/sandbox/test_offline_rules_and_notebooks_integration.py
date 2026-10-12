@@ -146,14 +146,17 @@ def _source(tmp_path: Path) -> Path:
     return source
 
 
-def test_a_semgrep_run_with_a_rejected_rule_file_fails_the_scan(tmp_path):
+@pytest.mark.parametrize("sandbox", ["off", "bwrap"])
+def test_a_semgrep_run_with_a_rejected_rule_file_fails_the_scan(tmp_path, sandbox):
     _require("semgrep")
+    if sandbox != "off":
+        _require_bwrap()
     _source(tmp_path)
     rules = _rules(tmp_path, BROKEN_RULE)
 
     result, output = _scan(
         tmp_path,
-        "off",
+        sandbox,
         scanners="semgrep",
         env_extra={"SEMGREP_RULES_CACHE_DIR": str(rules)},
         extra=["--fail-on-findings"],
