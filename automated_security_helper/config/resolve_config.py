@@ -744,20 +744,32 @@ def resolve_config(
         # the sandbox settings it writes itself.
         if default_in_tree and default_config_chain():
             trusted, wrote_mode = _with_own_sandbox(
-                trusted, default_config_chain()[-1], root, ash_config_named
+                trusted,
+                default_config_chain()[-1],
+                root,
+                ash_config_named,
+                trees,
+                default_names,
             )
             # ASH_CONFIG's own mode is the floor only when no operator file sets
             # one: below, the floor is the operator file's mode when there is one.
             own_mode = own_mode or (wrote_mode and operator is None)
         if operator is not None:
             trusted, wrote_mode = _with_own_sandbox(
-                trusted, operator.chain[-1], root, [Path(trusted_config_path)]
+                trusted,
+                operator.chain[-1],
+                root,
+                [Path(trusted_config_path)],
+                trees,
+                operator.names,
             )
             own_mode = own_mode or wrote_mode
     # The same for the config file the scan selected: an operator's --config
     # outside every checkout that extends a base inside one.
     if chain and not untrusted_config:
-        trusted, wrote_mode = _with_own_sandbox(trusted, chain[-1], root, named)
+        trusted, wrote_mode = _with_own_sandbox(
+            trusted, chain[-1], root, named, trees, names
+        )
         own_mode = own_mode or wrote_mode
     # The operator's mode is a floor wherever its file lives: a mode other than off
     # grants nothing, so an operator file in the tree may still turn the sandbox on.
@@ -1151,7 +1163,12 @@ def _own_sandbox_settings(path: Path) -> Dict[str, Any]:
 
 
 def _with_own_sandbox(
-    trusted: AshConfig, path: Path, scan_root: Path, lexical: List[Path]
+    trusted: AshConfig,
+    path: Path,
+    scan_root: Path,
+    lexical: List[Path],
+    trees: Iterable[Path],
+    names: Optional[ChainNames],
 ) -> Tuple[AshConfig, bool]:
     """``trusted`` with the sandbox settings ``path`` writes, when ``path`` may grant.
 
@@ -1159,13 +1176,18 @@ def _with_own_sandbox(
     because of a base: an operator's file outside every checkout that extends one
     inside. Its own settings are the operator's, and the base's are not, so only
     the file's own ``sandbox`` section joins the trusted settings. Judged by its
-    resolved path and by ``lexical``, the names it was given.
+    resolved path and by ``lexical``, the names it was given, and, as every file
+    of the chain is, by ``_not_the_operators`` over ``trees`` and ``names``: a
+    file inside a scanned tree or one an MCP client delivered grants nothing, even
+    outside every checkout.
 
     Returns the settings and whether the file wrote its own ``mode``. A section
     that does not validate on its own (one the file's ``patch`` repairs, say) adds
     nothing, so the file then keeps no grants, as before this rule.
     """
-    if repository_written([path], scan_root, lexical):
+    if repository_written([path], scan_root, lexical) or _not_the_operators(
+        [path], trees, names
+    ):
         return trusted, False
     own = _own_sandbox_settings(path)
     if not own:
