@@ -66,6 +66,19 @@ def test_the_exit_message_prints_the_names_inert(capsys):
     assert_inert(capsys.readouterr().out)
 
 
+def test_a_converter_failure_is_inert_in_the_gate_reason():
+    """A crashed converter's exception text can quote a file name too."""
+    model = AshAggregatedResults()
+    model.converter_results["archive"] = ConverterStatusInfo(
+        failure=f"OSError: cannot read {ESCAPE_RESET} or {REORDERED}"
+    )
+
+    ((name, reason),) = incomplete_converters(model)
+
+    assert name == "archive"
+    assert_inert(reason)
+
+
 def test_more_than_five_failed_inputs_are_named_up_to_five_and_counted():
     names = [f"f{i}.zip" for i in range(7)]
 

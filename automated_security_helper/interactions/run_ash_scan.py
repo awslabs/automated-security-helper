@@ -722,10 +722,13 @@ def incomplete_converters(
             )
             if reason
         ]
+        # Both reasons reach the terminal, the log and the MCP payload, and both
+        # can quote the scanned tree's file names: an exception's text as well as
+        # the failed and refused inputs. So each is shown as inert text.
         if failure:
-            listed.append((name, str(failure)))
+            listed.append((name, inert_text(str(failure))))
         elif lost:
-            listed.append((name, "; ".join(lost)))
+            listed.append((name, inert_text("; ".join(lost))))
         elif getattr(row, "dependencies_satisfied", True) is False:
             # An unavailable converter costs coverage only if it had inputs. The count
             # is established without its tool, which is what makes it answerable for a
