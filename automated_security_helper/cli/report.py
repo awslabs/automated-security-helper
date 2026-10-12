@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import os
 from pathlib import Path
 from typing import Annotated, List, Optional
 import typer
@@ -25,8 +26,10 @@ from automated_security_helper.config.plugin_module_trust import (
 )
 from automated_security_helper.config.reporter_trust import (
     confine_declared_reporter_destinations,
+    confine_off_host_reporters_to_overrides,
 )
 from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.config.untrusted_source import REPORT_CONFIG_FILE
 from automated_security_helper.core.constants import ASH_CONFIG_SOURCES_DESCRIPTION
 from automated_security_helper.core.enums import AshLogLevel, ExportFormat
 from automated_security_helper.core.exceptions import ASHConfigValidationError
@@ -197,6 +200,16 @@ def report_command(
         ash_config = resolve_config(
             config_path=config, config_overrides=config_overrides
         )
+        # The stored results do not say which tree was scanned, so the config file
+        # read here may be that tree's own even when resolve_config cannot place it
+        # in a git checkout or under the working directory (a scanned directory
+        # beside this one). It does not choose whether a reporter sends findings
+        # off the host, or where: those come from --config-overrides.
+        named_file = config or os.environ.get("ASH_CONFIG")
+        if named_file:
+            confine_off_host_reporters_to_overrides(
+                ash_config, [Path(named_file)], config_overrides, REPORT_CONFIG_FILE
+            )
     except ASHConfigValidationError as e:
         print(f"[red]Invalid configuration: {e}[/red]")
         raise typer.Exit(3)
@@ -284,10 +297,10 @@ def report_command(
                 ASH_LOGGER.trace(e)
         raise typer.Exit(1)
 
-    # A reporter that sends findings off the host runs only when the operator's
-    # config enables it, as it would in a scan. Naming it with --format is not
-    # enough: it would send the stored findings with whatever credentials the
-    # host has.
+    # A reporter that sends findings off the host runs only when the operator
+    # enables it, which here means --config-overrides: a config file does not
+    # choose it (see above). Naming it with --format is not enough: it would send
+    # the stored findings with whatever credentials the host has.
     plugin_config = ash_config.get_plugin_config(
         plugin_type="reporter", plugin_name=report_format
     )
@@ -295,9 +308,9 @@ def report_command(
         name = reporter_plugin.config.name
         print(
             f"[red]Error: reporter '{name}' sends findings off the host and is not "
-            "enabled in the configuration. Enable it in an operator config "
-            f"(reporters.{name}.enabled: true) or with --config-overrides "
-            f"reporters.{name}.enabled=true.[/red]"
+            "enabled. ash report takes whether it runs, and where it sends, from "
+            f"--config-overrides: pass --config-overrides reporters.{name}.enabled=true "
+            "and its destination options.[/red]"
         )
         raise typer.Exit(1)
 

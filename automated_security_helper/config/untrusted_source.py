@@ -87,3 +87,21 @@ SHARD_RECORDED = UntrustedSource(
     ),
     fills_missing_sections=False,
 )
+
+#: A config file ``ash report`` reads (``--config``, ``ASH_CONFIG``), for the
+#: reporters that send findings off the host. Stored results do not record which
+#: tree was scanned, so a file outside the working directory and every git
+#: checkout may still be the scanned tree's own (``reporter_trust.
+#: confine_off_host_reporters_to_overrides``).
+REPORT_CONFIG_FILE = UntrustedSource(
+    reason=(
+        "ash report cannot tell that config from the scanned repository's own, "
+        "since stored results do not record which tree was scanned"
+    ),
+    remedy=(
+        "To send findings off the host from ash report, pass the reporter's "
+        "settings with --config-overrides (for example "
+        "--config-overrides reporters.s3.enabled=true)."
+    ),
+    modules_remedy="To load a module, pass it with ash report's --config-overrides.",
+)

@@ -278,6 +278,47 @@ def confine_reporter_destinations(
     )
 
 
+def confine_off_host_reporters_to_overrides(
+    config: "AshConfig",
+    files: Sequence[Path],
+    config_overrides: Optional[Sequence[str]],
+    source: UntrustedSource,
+) -> None:
+    """Take the off-host reporters' ``enabled`` and destinations from the defaults and overrides.
+
+    For a command given stored results, which do not record which tree was
+    scanned: ``ash report``. ``resolve_config`` holds a config file to the
+    repository's rules when the file is inside a git checkout or the working
+    directory, but a ``--config`` (or ``ASH_CONFIG``) file outside both may still
+    be the scanned tree's own ``.ash/.ash.yaml``, as when CI scans a directory
+    and reports from another. Here ``files`` are held to those rules for the
+    reporters ``REPORTER_DESTINATION_OPTIONS`` and ``REPORTER_ENABLED_DEFAULTS``
+    list, with ``source`` naming why and the fix in the warning. The trusted base
+    is ASH's defaults with the reporter overrides replayed onto it, so an override
+    still turns a reporter on and aims it. The files' other settings, a local
+    reporter's options among them, are kept.
+
+    The record ``confine_declared_reporter_destinations`` reads is replaced, so a
+    reporter a plugin module declares is held to the same base. A file
+    ``resolve_config`` already held stays named, with the section spellings it
+    recorded.
+    """
+    from automated_security_helper.config.ash_config import AshConfig
+
+    if not files:
+        return
+    already = list(config._in_tree_config_files)
+    written = config._in_tree_reporter_keys
+    confine_reporter_destinations(
+        config,
+        AshConfig(),
+        config_overrides,
+        [*already, *(path for path in files if path not in already)],
+        source=source,
+    )
+    config._in_tree_reporter_keys = written
+
+
 def written_reporter_keys(documents: Iterable[Any]) -> Tuple[str, ...]:
     """The keys of the ``reporters`` sections ``documents`` write, in order, once each.
 

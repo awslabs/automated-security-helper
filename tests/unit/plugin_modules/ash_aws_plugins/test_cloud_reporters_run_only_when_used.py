@@ -413,13 +413,18 @@ class TestReportCommand:
 
     @pytest.mark.parametrize(
         "enabled_line",
-        ["", "    enabled: false\n"],
-        ids=["no-enabled-key", "enabled-false"],
+        ["", "    enabled: false\n", "    enabled: true\n"],
+        ids=["no-enabled-key", "enabled-false", "enabled-true"],
     )
-    def test_an_s3_section_that_does_not_enable_it_is_refused(
+    def test_an_s3_section_in_the_config_file_is_refused(
         self, tmp_path, requests, sessions, enabled_line
     ):
-        """Complete options are not enough: only ``enabled: true`` lets it upload."""
+        """A config file does not turn it on, whatever its section says.
+
+        Stored results do not record which tree was scanned, so ash report takes
+        whether an off-host reporter runs from --config-overrides only
+        (tests/unit/cli/test_report_config_file_does_not_send_off_host.py).
+        """
         output_dir = tmp_path / "out"
         _stored_results(output_dir)
         config = self._s3_operator_config(tmp_path, enabled_line)
@@ -431,13 +436,13 @@ class TestReportCommand:
         assert requests == []
         assert sessions == []
 
-    def test_an_s3_section_that_enables_it_reaches_put_object(self, tmp_path, requests):
-        """Control: the same options with ``enabled: true`` get as far as PutObject.
+    def test_overrides_that_enable_s3_reach_put_object(self, tmp_path, requests):
+        """Control: the operator's overrides turn it on and aim it, as far as PutObject.
 
-        Called directly rather than through CliRunner: the refused upload logs an
-        error, and a record pytest's live logging writes during an invoke swaps
-        sys.stdout under CliRunner, which then fails reading its own closed
-        output stream.
+        The config file still names the plugin module. Called directly rather
+        than through CliRunner: the refused upload logs an error, and a record
+        pytest's live logging writes during an invoke swaps sys.stdout under
+        CliRunner, which then fails reading its own closed output stream.
         """
         import typer
 
@@ -446,7 +451,6 @@ class TestReportCommand:
 
         output_dir = tmp_path / "out"
         _stored_results(output_dir)
-        config = self._s3_operator_config(tmp_path, "    enabled: true\n")
 
         # The refused upload leaves the reporter with no receipt, so the
         # command exits 1 after the attempt.
@@ -455,8 +459,13 @@ class TestReportCommand:
                 report_format="s3",
                 output_dir=str(output_dir),
                 log_level=AshLogLevel.ERROR,
-                config=str(config),
-                config_overrides=None,
+                config=str(self._plugin_config(tmp_path)),
+                config_overrides=[
+                    "reporters.s3.enabled=true",
+                    "reporters.s3.options.bucket_name=b",
+                    "reporters.s3.options.aws_region=us-east-1",
+                    "reporters.s3.options.max_retries=0",
+                ],
                 verbose=False,
                 debug=False,
                 color=False,

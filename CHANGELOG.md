@@ -181,6 +181,21 @@
   option out keeps the operator's value. An MCP client's config was already
   refused for setting it.
 
+- **`ash report` takes an off-host reporter's `enabled` and destination from
+  `--config-overrides` only.** Stored results do not record which tree was scanned,
+  so a `--config` file, or the file `ASH_CONFIG` names, may be the scanned
+  repository's own `.ash/.ash.yaml`: a CI job that scanned a directory and ran
+  `ash report --format s3 --config <that directory>/.ash/.ash.yaml` from another
+  one sent the findings to the bucket the repository chose, when that directory
+  was not a git checkout. Now such a file's `enabled` and destination options for
+  the S3, CloudWatch Logs, Security Hub and Bedrock summary reporters (and for a
+  plugin reporter's declared destination options) are ignored with a warning that
+  names the override to pass, as for a config file inside the scanned tree. Its
+  other settings, such as a local reporter's options, still apply. An operator who
+  enabled one of these reporters for `ash report` in a config file passes
+  `--config-overrides reporters.<name>.enabled=true` and its destination options
+  instead.
+
 - **`--mode container` and `--mode nix` refuse an unusable config before anything
   starts.** The config file the scan inside the image or Nix shell will use (`--config`,
   the file `ASH_CONFIG` names, or the one found in the source directory) is read on the

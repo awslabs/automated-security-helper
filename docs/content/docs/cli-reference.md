@@ -1009,6 +1009,17 @@ example), the threshold is the built-in `MEDIUM` (or `ASH_DEFAULT_SEVERITY_LEVEL
 and its source is shown as `unavailable`; the configuration of the machine
 running `ash report` is not used in its place.
 
+A reporter that sends findings off the host (S3, CloudWatch Logs, Security Hub,
+the Bedrock summary) runs from `ash report` only when `--config-overrides`
+enables it, and its destination options (bucket, region, log group, account,
+model) come from `--config-overrides` too. Stored results do not record which
+tree was scanned, so a `--config` file, or the file `ASH_CONFIG` names, may be
+the scanned repository's own `.ash/.ash.yaml` even when it is outside the working
+directory and every git checkout. Its `enabled` and destination options for those
+reporters are ignored with a warning; its other settings still apply. For
+example: `ash report --format s3 --config-overrides reporters.s3.enabled=true
+--config-overrides reporters.s3.options.bucket_name=my-bucket`.
+
 ### Examples
 
 ```bash

@@ -65,7 +65,11 @@ reporters.<name>.enabled=true`.
   or `ash merge` that would otherwise run it logs one warning naming the reporter
   and the key to set; the warning names no option value and changes nothing.
 - `ash report --format <name>` refuses an AWS reporter that is not enabled, and
-  exits 1 with the setting to change.
+  exits 1 with the setting to change. For `ash report` that setting, and the
+  reporter's destination options, come from `--config-overrides`: stored results
+  do not record which tree was scanned, so a `--config` or `ASH_CONFIG` file may
+  be the scanned repository's own, and its values for these reporters are ignored
+  with a warning ([ash report](../../cli-reference.md#report-options)).
 - `ash merge` runs an AWS reporter only when the operator's own `--config`
   enables it, whatever the shards' recorded config says, in either direction.
 - A reporter plugin that sends findings off the host declares
