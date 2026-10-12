@@ -22,7 +22,8 @@ operation sets from the directory of the file that holds the operation. The file
 ``ASH_CONFIG`` names is read the same way. ``--config-overrides``, and the CLI
 flags that become overrides, are taken from the working directory ASH runs in
 (``anchor_override_paths``), and so are ``TRIVY_IGNOREFILE`` and
-``TRIVY_SECRET_CONFIG``, which trivy-repo reads in place of its two options. A
+``TRIVY_SECRET_CONFIG``, which trivy-repo reads in place of its two options, and
+``TRIVY_CONFIG``, the trivy config file it passes with ``--config``. A
 value that is already absolute, starts with ``~`` (the scanner expands it), holds
 ``$`` (the sandbox expands it) or is a URL is left as written.
 

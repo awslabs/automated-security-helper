@@ -1974,8 +1974,8 @@
   not from the source directory being scanned.** In a config file outside the tree (`--config`,
   `ASH_CONFIG`, a workspace's `--config`, an MCP profile) it is taken from that
   file's directory, in an `extends` base from the base's directory, and in
-  `--config-overrides`, `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG` from the
-  working directory. Before, the scanners joined it to the source directory, so
+  `--config-overrides`, `TRIVY_IGNOREFILE`, `TRIVY_SECRET_CONFIG` and `TRIVY_CONFIG`
+  from the working directory. Before, the scanners joined it to the source directory, so
   an operator config naming `bandit.yaml` had bandit read a `bandit.yaml` at the
   root of the scanned repository. It covers `config_file` of bandit, checkov,
   ferret-scan, grype and syft, detect-secrets' `baseline_file` and `file://`

@@ -1508,7 +1508,9 @@ the flags refuses the command, while it ignores the variables.
 Online and offline, ASH passes `--config`: `TRIVY_CONFIG` when that names a file
 outside the scanned tree, otherwise an empty config ASH ships, so a `trivy.yaml` in
 the scanned repository is never read. Its settings can reach the network (a VEX
-repository, client/server mode) or change what is reported.
+repository, client/server mode) or change what is reported. A relative path in
+`TRIVY_CONFIG` is taken from the working directory ASH runs in, as one in
+`TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG` is, not from the source directory.
 
 Offline, trivy's Terraform checks do not run. trivy downloads the source of every
 `module` block it evaluates (a registry module from registry.terraform.io, a `git::`

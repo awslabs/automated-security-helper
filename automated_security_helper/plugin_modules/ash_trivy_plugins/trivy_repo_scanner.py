@@ -413,9 +413,15 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
         what is reported. So trivy always gets ``TRIVY_CONFIG`` when that names a
         file outside the scanned tree (config/path_trust.py), and otherwise ASH's
         empty config (``EMPTY_TOOL_CONFIG``, readable under every sandbox backend).
+        The variable is the operator's, set where ASH runs, so a relative path in
+        it is taken from the working directory, as ``TRIVY_IGNOREFILE``'s and
+        ``TRIVY_SECRET_CONFIG``'s are (config/operator_paths.py).
         """
+        from automated_security_helper.config.operator_paths import anchored_path
+
         source_dir = Path(self.context.source_dir)
-        configured = os.environ.get("TRIVY_CONFIG")
+        variable = os.environ.get("TRIVY_CONFIG")
+        configured = anchored_path(variable, Path.cwd())
         if configured:
             path = honored_path(
                 configured,
@@ -426,7 +432,7 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             if path is not None:
                 if not path.is_file():
                     raise ScannerError(
-                        f"TRIVY_CONFIG is {configured!r}, which is not a file "
+                        f"TRIVY_CONFIG is {variable!r}, which is not a file "
                         f"(resolved to {path.as_posix()}). Fix the path or unset it; "
                         "trivy is not run without it."
                     )

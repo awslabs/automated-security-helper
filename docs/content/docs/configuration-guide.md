@@ -1014,8 +1014,8 @@ not from the source directory being scanned:
   `--config`, an MCP profile), from that file's directory; in an `extends` base,
   from the base's directory; and in a `patch` operation, from the directory of the
   file that holds it;
-- in `--config-overrides`, in a CLI flag, and in `TRIVY_IGNOREFILE` or
-  `TRIVY_SECRET_CONFIG`, from the working directory ASH runs in.
+- in `--config-overrides`, in a CLI flag, and in `TRIVY_IGNOREFILE`,
+  `TRIVY_SECRET_CONFIG` or `TRIVY_CONFIG`, from the working directory ASH runs in.
 
 This covers `config_file` of bandit, checkov, ferret-scan, grype and syft,
 detect-secrets' `baseline_file` and the `file://` entries of its `scan_settings`,
