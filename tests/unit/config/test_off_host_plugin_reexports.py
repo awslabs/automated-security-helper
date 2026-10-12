@@ -248,6 +248,55 @@ def test_the_command_line_naming_the_off_host_package_itself_selects_its_class(
     assert _dropped(result["warnings"], "S3Reporter"), result["warnings"]
 
 
+def test_config_overrides_naming_the_package_selects_them(tmp_path, site):
+    """``--config-overrides`` is the operator's, so it is part of the trusted list.
+
+    The scan without the override runs next, in the same process, over the same
+    tree.
+    """
+    source = _tree(tmp_path, [PACKAGE])
+    override = f'ash_plugin_modules+=["{PACKAGE}"]'
+
+    named, unnamed = _engines(
+        site, [_scan(source, config_overrides=[override]), _scan(source)]
+    )
+
+    assert "SnykCodeScanner" in named["scanners"], named
+    assert "S3Reporter" in named["reporters"], named
+    assert not _dropped(named["warnings"], "'SnykCodeScanner'"), named["warnings"]
+    assert not _dropped(named["warnings"], "'S3Reporter'"), named["warnings"]
+    assert "SnykCodeScanner" not in unnamed["scanners"], unnamed
+    assert "S3Reporter" not in unnamed["reporters"], unnamed
+
+
+def test_the_command_line_naming_an_off_host_module_selects_only_its_class(
+    tmp_path, site
+):
+    """A trusted name covers the module it names, not that module's siblings.
+
+    ``s3_reporter`` lists no class, so nothing but its name can select S3Reporter.
+    """
+    result = _engine(site, _tree(tmp_path, [PACKAGE]), cli=[f"{AWS}.s3_reporter"])
+
+    assert "S3Reporter" in result["reporters"], result
+    siblings = set(OFF_HOST_REPORTERS) - {"S3Reporter"}
+    assert not siblings & set(result["reporters"]), result
+    assert "SnykCodeScanner" not in result["scanners"], result
+
+
+def test_a_name_that_only_starts_like_the_package_trusts_none_of_its_classes(
+    tmp_path, site
+):
+    """``ash_aws`` is a prefix of ``ash_aws_plugins``'s name, not a package around it."""
+    prefix = AWS.removesuffix("_plugins")
+
+    result = _engine(site, _tree(tmp_path, [PACKAGE]), cli=[prefix])
+
+    assert not set(OFF_HOST_REPORTERS) & set(result["reporters"]), result
+    assert not set(OFF_HOST_SCANNERS) & set(result["scanners"]), result
+    assert _dropped(result["warnings"], "S3Reporter"), result["warnings"]
+
+
 def test_a_delivered_config_naming_the_package_does_not_select_them(tmp_path, site):
     upload = _write(tmp_path / "upload" / "ash.yaml", {"ash_plugin_modules": [PACKAGE]})
     source = tmp_path / "repo"
