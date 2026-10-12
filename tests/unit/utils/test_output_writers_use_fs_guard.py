@@ -167,6 +167,16 @@ _DETECT_SECRETS_CHILD = (
     "the worker child's output file, created exclusively after its parent "
     "wrote the request beside it with fs_guard and removed the name"
 )
+_MCP_PROFILE_COPY = (
+    "the MCP server's workspace root: a session's profile copy, saved to a "
+    "staging name and renamed over it"
+)
+_TOOL_CONFIG_DIR = (
+    "a scanner run's own tool-config directory, new from mkdtemp with mode 0700 "
+    "(in the temporary directory, or under the output directory when that is the "
+    "private place outside the scanned tree), each file in it created with O_EXCL "
+    "and O_NOFOLLOW"
+)
 
 #: (module, function, kind) -> (number of such calls, where they write). Each writes
 #: outside every output directory, or is the guarded implementation itself.
@@ -226,6 +236,11 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         "open",
     ): (1, _MCP_SESSIONS),
     (f"{_ASH}/cli/mcp/sessions.py", "_a_scan_holds", "open"): (1, _MCP_SESSIONS),
+    (
+        f"{_ASH}/cli/mcp/profile_registry.py",
+        "materialize_session_config",
+        "os.replace",
+    ): (1, _MCP_PROFILE_COPY),
     (f"{_ASH}/cli/mcp/sessions.py", "_scan_presence_guard", "open"): (
         1,
         _MCP_SESSIONS,
@@ -278,6 +293,10 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         "os.replace",
     ): (1, _OPERATOR_DESTINATION),
     (f"{_ASH}/utils/cdk_nag_worker.py", "main", "open"): (1, _CDK_NAG_CHILD),
+    (f"{_ASH}/utils/tool_config_dir.py", "write_tool_config", "os.fdopen"): (
+        1,
+        _TOOL_CONFIG_DIR,
+    ),
     (f"{_ASH}/utils/detect_secrets_worker.py", "main", "open"): (
         1,
         _DETECT_SECRETS_CHILD,

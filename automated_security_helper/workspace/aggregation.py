@@ -121,10 +121,8 @@ from __future__ import annotations
 
 import copy
 import json
-import os
 import re
 import shutil
-import uuid
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
@@ -1084,18 +1082,25 @@ def stamp_run_record(results_path: Path, record: Dict[str, Any]) -> bool:
     ``"validation_checkpoints": [],`` line that ``write`` emits, that line with the
     record, then the rest, SARIF runs included, unchanged. Nothing is loaded or
     serialized whole, so ``write``'s memory bound holds. The copy replaces the file
-    atomically, with the mode a plain write would give it.
+    atomically, with the mode a plain write would give it, through
+    ``fs_guard.open_for_atomic_write``: a link at the file or at a directory below
+    the output directory is refused, not written through.
 
     Returns False, with the file unchanged, when it cannot be read or replaced or
     is not one ``write`` wrote.
     """
-    staging: Optional[Path] = None
+    from automated_security_helper.utils.sandbox.fs_guard import (
+        open_for_atomic_write,
+    )
+
+    class _NotWritten(Exception):
+        """Raised inside the copy, which discards the staging file."""
+
     try:
         path = Path(results_path)
-        staging = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
         with (
             open(path, "r", encoding="utf-8") as source,
-            open(staging, "x", encoding="utf-8") as target,
+            open_for_atomic_write(path) as target,
         ):
             # In pieces of at most _STAMP_READ_LIMIT, so a long header line is
             # copied without being held whole, and a file that is not one write()
@@ -1104,7 +1109,7 @@ def stamp_run_record(results_path: Path, record: Dict[str, Any]) -> bool:
             while True:
                 piece = source.readline(_STAMP_READ_LIMIT)
                 if not piece:
-                    return False
+                    raise _NotWritten
                 if at_line_start:
                     if piece == _EMPTY_CHECKPOINTS_LINE:
                         target.write(
@@ -1113,15 +1118,10 @@ def stamp_run_record(results_path: Path, record: Dict[str, Any]) -> bool:
                         )
                         break
                     if piece.startswith('"sarif": '):
-                        return False
+                        raise _NotWritten
                 target.write(piece)
                 at_line_start = piece.endswith("\n")
             shutil.copyfileobj(source, target)
-        os.replace(staging, path)
-        staging = None
         return True
-    except (OSError, TypeError, ValueError):
+    except (_NotWritten, OSError, TypeError, ValueError):
         return False
-    finally:
-        if staging is not None:
-            staging.unlink(missing_ok=True)

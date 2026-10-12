@@ -366,7 +366,7 @@ class TestRunWorkspaceModeSettings:
         self, recorded_workspace_execution, logger, tmp_path, monkeypatch
     ):
         """The outer process then finds no marker and fails closed."""
-        from automated_security_helper.workspace import aggregation
+        import os
 
         expected = _run_result(tmp_path)
         _write_unified_results(tmp_path, expected.results_path)
@@ -377,7 +377,8 @@ class TestRunWorkspaceModeSettings:
         def no_replace(*args, **kwargs):
             raise OSError("no space left on device")
 
-        monkeypatch.setattr(aggregation.os, "replace", no_replace)
+        # The rename fs_guard.open_for_atomic_write makes when the stamp's copy ends.
+        monkeypatch.setattr(os, "replace", no_replace)
         opts = ScanOptions(
             source_dir=tmp_path,
             output_dir=tmp_path / "out",

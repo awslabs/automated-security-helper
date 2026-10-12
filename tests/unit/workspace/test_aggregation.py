@@ -1349,6 +1349,25 @@ class TestStampingARunRecord:
         assert all(0 < size <= 4096 for size, _ in reads), reads
         assert sum(length for _, length in reads) < 4096 + 64, reads
 
+    def test_a_link_at_the_results_file_is_not_written_through(self, tmp_path):
+        """In the output directory a scan writes to, the stamp refuses a link at the
+        file and leaves both the link and the file it names as they were."""
+        from automated_security_helper.utils.sandbox.fs_guard import writable_root
+        from automated_security_helper.workspace.aggregation import stamp_run_record
+
+        path = self._written(tmp_path)
+        elsewhere = tmp_path / "elsewhere.json"
+        elsewhere.write_bytes(path.read_bytes())
+        before = elsewhere.read_bytes()
+        path.unlink()
+        path.symlink_to(elsewhere)
+
+        with writable_root(path.parent):
+            assert not stamp_run_record(path, self.RECORD)
+
+        assert path.is_symlink()
+        assert elsewhere.read_bytes() == before
+
     def test_a_file_the_aggregator_did_not_write_is_left_unchanged(self, tmp_path):
         from automated_security_helper.workspace.aggregation import stamp_run_record
 
@@ -1362,6 +1381,8 @@ class TestStampingARunRecord:
     def test_a_failed_rewrite_leaves_the_file_and_no_staging_file(
         self, tmp_path, monkeypatch
     ):
+        import os
+
         from automated_security_helper.workspace import aggregation
 
         path = self._written(tmp_path)
@@ -1370,7 +1391,8 @@ class TestStampingARunRecord:
         def no_replace(*args, **kwargs):
             raise OSError("no space left on device")
 
-        monkeypatch.setattr(aggregation.os, "replace", no_replace)
+        # The rename fs_guard.open_for_atomic_write makes when the copy ends.
+        monkeypatch.setattr(os, "replace", no_replace)
 
         assert not aggregation.stamp_run_record(path, self.RECORD)
         assert path.read_bytes() == before
