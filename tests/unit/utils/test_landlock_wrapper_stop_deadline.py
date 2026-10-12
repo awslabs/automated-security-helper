@@ -23,6 +23,7 @@ import time
 import pytest
 
 from automated_security_helper.utils.sandbox import landlock_exec
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, KillAfter
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux", reason="the wrapper uses prctl and /proc, Linux only"
@@ -79,7 +80,10 @@ def _driver(scanner: str):
         [sys.executable, "-I", "-c", DRIVER, landlock_exec.__file__, scanner],
         stdout=subprocess.PIPE,
     )
-    word, pid = process.stdout.readline().split()
+    # readline() blocks until the driver writes or exits; the kill ends one that
+    # does neither.
+    with KillAfter(process, "the wrapper's driver"):
+        word, pid = process.stdout.readline().split()
     assert word == b"ready"
     return process, int(pid)
 
@@ -100,15 +104,16 @@ def _stop_and_time(process: subprocess.Popen) -> float:
 def _finish(process: subprocess.Popen) -> None:
     if process.poll() is None:
         process.kill()
-        process.wait()
+        process.wait(timeout=CHILD_TIMEOUT_SECONDS)
     process.stdout.close()
 
 
 def test_a_wrapper_stopped_while_its_scanner_runs_finishes_inside_the_grace():
     process, scanner = _driver("stop")
     try:
-        elapsed = _stop_and_time(process)
-        killed = _killed(process)
+        with KillAfter(process, "the wrapper's driver"):
+            elapsed = _stop_and_time(process)
+            killed = _killed(process)
     finally:
         _finish(process)
 
@@ -124,9 +129,10 @@ def test_a_wrapper_stopped_while_it_reaps_finishes_inside_the_grace():
     """
     process, scanner = _driver("exit")
     try:
-        assert process.stdout.readline() == b"reaping\n"
-        elapsed = _stop_and_time(process)
-        killed = _killed(process)
+        with KillAfter(process, "the wrapper's driver"):
+            assert process.stdout.readline() == b"reaping\n"
+            elapsed = _stop_and_time(process)
+            killed = _killed(process)
     finally:
         _finish(process)
 
@@ -139,7 +145,8 @@ def test_without_a_stop_the_reap_runs_to_its_own_deadline():
     """Control: the descendant that never goes away keeps the loop running."""
     process, _scanner = _driver("exit")
     try:
-        assert process.stdout.readline() == b"reaping\n"
+        with KillAfter(process, "the wrapper's driver"):
+            assert process.stdout.readline() == b"reaping\n"
         started = time.monotonic()
         process.wait(timeout=30)
         elapsed = time.monotonic() - started

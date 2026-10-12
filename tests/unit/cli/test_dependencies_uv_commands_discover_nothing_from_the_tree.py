@@ -36,6 +36,7 @@ from typing import List
 import pytest
 
 from automated_security_helper.cli import dependencies as dependencies_module
+from tests.utils.helpers import bound_run_command
 from tests.utils.planted_uv import (
     PIP_LIST,
     RUN,
@@ -69,6 +70,7 @@ def _run_from(argv: List[str], cwd: Path) -> None:
 def _through_the_installer(argv: List[str], repo: Path, monkeypatch) -> None:
     monkeypatch.setattr(dependencies_module, "print", lambda *a, **k: None)
     monkeypatch.chdir(repo)
+    bound_run_command(monkeypatch)
     dependencies_module.run_command(argv)
 
 

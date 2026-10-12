@@ -21,6 +21,7 @@ from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.utils.sandbox import fs_guard
 from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.backends import SpawnPlan
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="POSIX symlinks and directory descriptors"
@@ -225,6 +226,7 @@ def test_a_stream_log_written_after_the_spawn_released_its_roots_is_still_guarde
             stdout_preference="write",
             stderr_preference="write",
             class_name="Probe",
+            timeout=CHILD_TIMEOUT_SECONDS,
         )
 
     assert swapped, "the stream-log write was never reached"
