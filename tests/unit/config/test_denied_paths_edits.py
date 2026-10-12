@@ -75,13 +75,17 @@ def test_an_edited_list_adds_to_the_defaults() -> None:
 
 
 def test_replace_uses_the_list_as_written_and_names_what_it_drops(ash_log) -> None:
+    from automated_security_helper.config.ash_config import ALWAYS_DENIED_PATHS
+
     policy = _policy(denied_paths=["/project_name"], replace_default_denied_paths=True)
 
-    assert policy.denied_paths == ["/project_name"]
+    # As written, and the entries ASH always denies, which no list removes.
+    assert policy.denied_paths == ["/project_name", *ALWAYS_DENIED_PATHS]
     (warning,) = [
         r.getMessage() for r in ash_log if "replace_default" in r.getMessage()
     ]
     assert "/fail_on_findings" in warning
+    assert "/sandbox," not in warning, "an always-denied entry is not dropped"
     ccp.policy_of(
         AshConfig.model_validate(
             {

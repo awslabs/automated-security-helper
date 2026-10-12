@@ -911,10 +911,10 @@ class RuntimeOverridesConfig(BaseModel):
         # no file to scan instead, so a client may not change them. Options that
         # only tune output or performance, or whose default already reports the
         # least they can, are not listed. Of cdk-nag's packs only the one on by
-        # default is listed: turning another on reports more.
+        # default is listed: turning another on reports more. The detect-secrets
+        # baseline, which can drop findings too, is listed above with its settings.
         "/scanners/opengrep/options/exclude_rule",
         "/scanners/semgrep/options/exclude_rule",
-        "/scanners/detect-secrets/options/baseline_file",
         "/scanners/bandit/options/confidence_level",
         "/scanners/checkov/options/frameworks",
         "/scanners/checkov/options/skip_frameworks",
@@ -1027,6 +1027,12 @@ class RuntimeOverridesConfig(BaseModel):
     #: ``denied_paths`` is already the list that applies.
     _listed_denied_paths: Optional[Tuple[str, ...]] = PrivateAttr(default=None)
     _effective: bool = PrivateAttr(default=False)
+    #: ``denied_paths`` as the profile wrote it, before ``_keep_the_always_denied_paths``
+    #: added the ALWAYS_DENIED_PATHS entries it left out; None when it set no list.
+    #: Whether the list is a shipped default, and which fields the operator's own
+    #: list names, are decided from what was written
+    #: (``client_config_policy.policy_is_default`` and ``exempt_paths``).
+    _written_denied_paths: Optional[Tuple[str, ...]] = PrivateAttr(default=None)
 
     replace_default_denied_paths: Annotated[
         bool,
@@ -1069,8 +1075,11 @@ class RuntimeOverridesConfig(BaseModel):
         """Add each ALWAYS_DENIED_PATHS entry the list leaves out, at its end.
 
         Assigned only when one is missing, so a default policy (which holds them all)
-        is the shipped list unchanged and keeps its serialized shape.
+        is the shipped list unchanged and keeps its serialized shape. The list as
+        written is kept first (``_written_denied_paths``).
         """
+        if "denied_paths" in self.model_fields_set:
+            self._written_denied_paths = tuple(self.denied_paths)
         missing = [
             entry for entry in ALWAYS_DENIED_PATHS if entry not in self.denied_paths
         ]

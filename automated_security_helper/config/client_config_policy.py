@@ -82,6 +82,7 @@ from typing import (
 from pydantic import BaseModel, ConfigDict
 
 from automated_security_helper.config.ash_config import (
+    ALWAYS_DENIED_PATHS,
     AshConfig,
     RuntimeOverridesConfig,
 )
@@ -262,6 +263,85 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/reporters/bedrock-summary-reporter/**",
             "/reporters/gitlab-sast/options/exclude_suppressed",
         ),
+        (
+            "/fail_on_findings",
+            "/fail_on_incomplete_scanners",
+            "/content_db_staleness",
+            "/content_db_staleness_overrides",
+            "/honor_ignore_files",
+            "/sandbox",
+            "/sandbox/**",
+            "/ash_plugin_modules",
+            "/ash_plugin_modules/**",
+            "/scanners/detect-secrets/options/scan_settings/filters_used",
+            "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+            "/scanners/detect-secrets/options/scan_settings/plugins_used",
+            "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+            "/scanners/detect-secrets/options/baseline_file",
+            "/global_settings/ignore_paths",
+            "/global_settings/suppressions",
+            "/global_settings/mcp",
+            "/global_settings/mcp/**",
+            "/scanners/opengrep/options/exclude_rule",
+            "/scanners/semgrep/options/exclude_rule",
+            "/scanners/bandit/options/confidence_level",
+            "/scanners/checkov/options/frameworks",
+            "/scanners/checkov/options/skip_frameworks",
+            "/scanners/opengrep/options/config",
+            "/scanners/opengrep/options/patterns",
+            "/scanners/opengrep/options/severity",
+            "/scanners/semgrep/options/config",
+            "/scanners/semgrep/options/severity",
+            "/scanners/detect-secrets/options/scan_settings",
+            "/scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks",
+            "/scanners/ferret-scan/options/checks",
+            "/scanners/ferret-scan/options/confidence_levels",
+            "/scanners/ferret-scan/options/disable_ip_types",
+            "/scanners/ferret-scan/options/enable_preprocessors",
+            "/scanners/ferret-scan/options/finding_limit",
+            "/scanners/ferret-scan/options/profile",
+            "/scanners/ferret-scan/options/recursive",
+            "/scanners/ferret-scan/options/respect_gitignore",
+            "/scanners/ferret-scan/options/use_default_config",
+            "/scanners/ferret-scan/options/validator_budget",
+            "/scanners/trivy-repo/options/license_full",
+            "/scanners/trivy-repo/options/scanners",
+            "/scanners/*/options/offline",
+            "/scanners/ferret-scan/options/max_live_bytes",
+            "/scanners/bandit/options/config_file",
+            "/scanners/checkov/options/config_file",
+            "/scanners/ferret-scan/options/config_file",
+            "/scanners/grype/options/config_file",
+            "/scanners/syft/options/config_file",
+            "/scanners/trivy-repo/options/secret_config_file",
+            "/scanners/snyk-code/options/honor_tree_exclusions",
+            "/scanners/*/options/tool_version",
+            "/converters/jupyter/options/tool_version",
+            "/scanners/opengrep/options/version",
+            "/scanners/opengrep/options/sha256",
+            "/scanners/opengrep/options/metrics",
+            "/scanners/semgrep/options/metrics",
+            "/reporters/bedrock-summary-reporter/options/aws_*",
+            "/reporters/cloudwatch-logs/**",
+            "/reporters/aws-security-hub/**",
+            "/reporters/bedrock-summary-reporter/options/model_id",
+            "/reporters/bedrock-summary-reporter/options/output_file",
+            "/reporters/bedrock-summary-reporter/options/output_executive_file",
+            "/reporters/bedrock-summary-reporter/options/output_technical_file",
+            "/reporters/s3/**",
+            "/reporters/bedrock-summary-reporter/**",
+            "/reporters/gitlab-sast/options/exclude_suppressed",
+            "/scanners/detect-secrets/**",
+            "/scanners/npm-audit/**",
+            "/scanners/opengrep/**",
+            "/scanners/semgrep/**",
+            "/scanners/snyk-code/**",
+            "/scanners/trivy-repo/**",
+            "/converters/archive/options/max_members",
+            "/converters/archive/options/max_member_bytes",
+            "/converters/archive/options/max_total_bytes",
+            "/converters/archive/options/max_compression_ratio",
+        ),
     )
 )
 
@@ -354,21 +434,26 @@ def effective_policy(policy: RuntimeOverridesConfig) -> RuntimeOverridesConfig:
       per list.
     * With ``replace_default_denied_paths``, the list is used as written, and
       each default entry it leaves out is named in a warning, once per list.
+    * Whatever the list, the ALWAYS_DENIED_PATHS entries apply.
 
-    The operator's own list is kept on the copy (``_listed_denied_paths``),
-    since ``exempt_paths`` decides from what the operator wrote rather than from
-    the merged list. Applying this to its own result changes nothing.
+    The operator's own list, as written, is kept on the copy
+    (``_listed_denied_paths``), since ``exempt_paths`` decides from what the
+    operator wrote rather than from the merged list. Applying this to its own
+    result changes nothing.
     """
     if policy._effective:
         return policy
     current = list(RuntimeOverridesConfig().denied_paths)
     listed: Optional[Tuple[str, ...]] = (
-        None if policy_is_default(policy) else tuple(policy.denied_paths)
+        None if policy_is_default(policy) else _written_denied_paths(policy)
     )
     if listed is None:
         effective = current
     elif policy.replace_default_denied_paths:
-        effective = list(listed)
+        effective = [
+            *listed,
+            *(entry for entry in ALWAYS_DENIED_PATHS if entry not in set(listed)),
+        ]
         removed = [entry for entry in current if entry not in set(effective)]
         if removed and (True, frozenset(effective)) not in _WARNED_REPLACEMENTS:
             _WARNED_REPLACEMENTS.add((True, frozenset(effective)))
@@ -430,17 +515,30 @@ def rules_from(config: AshConfig) -> ClientConfigRules:
     return ClientConfigRules(policy=policy_of(config), base=config)
 
 
+def _written_denied_paths(policy: RuntimeOverridesConfig) -> Tuple[str, ...]:
+    """``policy``'s ``denied_paths`` as the profile wrote it.
+
+    Without the ALWAYS_DENIED_PATHS entries the model adds to every list
+    (``RuntimeOverridesConfig._keep_the_always_denied_paths``): they are denied
+    whatever the list, so they do not make a written-out default the operator's
+    own list, nor say which fields the operator's list names.
+    """
+    written = policy._written_denied_paths
+    return written if written is not None else tuple(policy.denied_paths)
+
+
 def policy_is_default(policy: RuntimeOverridesConfig) -> bool:
     """Whether ``policy``'s ``denied_paths`` is a default rather than the operator's own.
 
-    Unset, or equal (as a set) to a list in ``SHIPPED_DEFAULT_DENIED_PATHS``.
-    For a policy ``effective_policy`` returned, whether the operator's list was.
+    Unset, or, as written, equal (as a set) to a list in
+    ``SHIPPED_DEFAULT_DENIED_PATHS``. For a policy ``effective_policy`` returned,
+    whether the operator's list was.
     """
     if policy._effective:
         return policy._listed_denied_paths is None
     if "denied_paths" not in policy.model_fields_set:
         return True
-    return frozenset(policy.denied_paths) in SHIPPED_DEFAULT_DENIED_PATHS
+    return frozenset(_written_denied_paths(policy)) in SHIPPED_DEFAULT_DENIED_PATHS
 
 
 def _names(entry: str, pointer: str) -> bool:
@@ -474,7 +572,9 @@ def exempt_paths(policy: RuntimeOverridesConfig) -> Tuple[str, ...]:
     if policy_is_default(policy):
         return candidates
     listed = (
-        policy._listed_denied_paths if policy._effective else tuple(policy.denied_paths)
+        policy._listed_denied_paths
+        if policy._effective
+        else _written_denied_paths(policy)
     ) or ()
     return tuple(
         candidate
