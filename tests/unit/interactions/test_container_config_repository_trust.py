@@ -11,11 +11,14 @@ repository the operator keeps their config in. Container mode
 mounts a ``--config`` from outside ``--source-dir`` at ``/ash-config``, where the
 scan inside sees it outside its own tree. The host decides, with the same rule a
 local scan uses, and tells the scan inside with ``--config-from-scanned-repository``,
-which applies the in-tree limits to the config and every file it extends.
+which applies the in-tree limits to the config and every file it extends
+(``sandbox_grants.marked_repository_written``), with the warnings a local scan
+gives.
 """
 
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List
@@ -28,6 +31,7 @@ from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrate
 from automated_security_helper.interactions.run_ash_container import (
     _assemble_run_command,
 )
+from automated_security_helper.utils.log import ASH_LOGGER
 from tests.utils.config_link_layouts import (
     LINKED_LAYOUTS,
     LINKS_OUTSIDE_EVERY_CHECKOUT,
@@ -210,29 +214,122 @@ class TestTheHostTellsTheContainer:
 
 class TestTheScanInsideAppliesTheSameLimits:
     def test_the_inner_cli_accepts_the_mark(self, monkeypatch, tmp_path):
+        """The mark makes the config's files repository-written while the scan
+        runs (``sandbox_grants.marked_repository_written``). It is not
+        ``untrusted_config``, which is for a file an MCP client delivered."""
         from automated_security_helper.cli import scan as scan_cli
         from automated_security_helper.cli.main import app
+        from automated_security_helper.config.sandbox_grants import (
+            repository_written,
+        )
 
-        seen: Dict[str, Any] = {}
-        monkeypatch.setattr(scan_cli, "run_ash_scan", lambda **kw: seen.update(kw))
-        (tmp_path / "src").mkdir()
+        source = tmp_path / "src"
+        source.mkdir()
         config = tmp_path / "ash.yaml"
         config.write_text("project_name: p\n", encoding="utf-8")
+        seen: Dict[str, Any] = {}
+
+        def run(**kwargs):
+            seen["kwargs"] = kwargs
+            seen["written"] = repository_written([config.resolve()], source)
+
+        monkeypatch.setattr(scan_cli, "run_ash_scan", run)
 
         result = CliRunner().invoke(
             app,
-            [
-                "scan",
-                "--source-dir",
-                str(tmp_path / "src"),
-                "--config",
-                str(config),
-                FLAG,
-            ],
+            ["scan", "--source-dir", str(source), "--config", str(config), FLAG],
         )
 
         assert result.exit_code == 0, result.output
-        assert seen["untrusted_config"] is True
+        assert seen["written"] == [config.resolve()]
+        assert seen["kwargs"].get("untrusted_config", False) is False
+        # Only while the scan runs.
+        assert repository_written([config.resolve()], source) == []
+
+    def test_the_mark_needs_a_config(self, monkeypatch, tmp_path):
+        from automated_security_helper.cli import scan as scan_cli
+        from automated_security_helper.cli.main import app
+
+        monkeypatch.setattr(scan_cli, "run_ash_scan", lambda **kw: None)
+        (tmp_path / "src").mkdir()
+
+        result = CliRunner().invoke(
+            app, ["scan", "--source-dir", str(tmp_path / "src"), FLAG]
+        )
+
+        assert result.exit_code == 3, result.output
+        assert FLAG in result.output
+
+    def test_a_marked_config_is_limited_with_a_warning_as_on_the_host(
+        self, checkout, monkeypatch, tmp_path
+    ):
+        """Through the scan inside's command line, as the orchestrator resolves it:
+        a marked config that sets a sandbox grant, a plugin module and
+        honor_ignore_files is limited, with the host's warnings, and not refused
+        as a file an MCP client delivered."""
+        from automated_security_helper.cli import scan as scan_cli
+        from automated_security_helper.cli.main import app
+
+        text = (
+            "project_name: p\n"
+            "sandbox:\n  extra_read_paths:\n    - /opt/grant\n"
+            f"ash_plugin_modules:\n  - {UNINSTALLED}\n"
+            "honor_ignore_files: false\n"
+        )
+        config = checkout["ci"] / "ash.yaml"
+        config.write_text(text, encoding="utf-8")
+        mounted = tmp_path / "ash-config"
+        mounted.mkdir()
+        shutil.copy(config, mounted / "ash.yaml")
+        inner_source = tmp_path / "inner-src"
+        inner_source.mkdir()
+        local = resolve_config(config_path=config, source_dir=checkout["source"])
+        seen: Dict[str, Any] = {}
+
+        def run(**kwargs):
+            seen["config"] = resolve_config(
+                config_path=kwargs["config"],
+                source_dir=kwargs["source_dir"],
+                untrusted_config=kwargs.get("untrusted_config", False),
+            )
+
+        monkeypatch.setattr(scan_cli, "run_ash_scan", run)
+        messages: List[str] = []
+
+        class _Collect(logging.Handler):
+            def emit(self, record):
+                messages.append(" ".join(record.getMessage().split()))
+
+        handler = _Collect(level=logging.WARNING)
+        ASH_LOGGER.addHandler(handler)
+        try:
+            result = CliRunner().invoke(
+                app,
+                [
+                    "scan",
+                    "--source-dir",
+                    str(inner_source),
+                    "--config",
+                    str(mounted / "ash.yaml"),
+                    FLAG,
+                ],
+            )
+        finally:
+            ASH_LOGGER.removeHandler(handler)
+
+        assert result.exit_code == 0, result.output
+        inside = seen["config"]
+        assert inside.sandbox.extra_read_paths == local.sandbox.extra_read_paths == []
+        assert inside.ash_plugin_modules == local.ash_plugin_modules
+        assert UNINSTALLED not in inside.ash_plugin_modules
+        assert inside.honor_ignore_files is local.honor_ignore_files is True
+        (honor,) = [
+            message
+            for message in messages
+            if "Ignoring honor_ignore_files from" in message and str(mounted) in message
+        ]
+        assert "someone other than the operator may have written it" in honor
+        assert "MCP client" not in honor
 
     @pytest.mark.parametrize("mode", ["container", "nix"])
     def test_the_mark_on_any_other_scan_is_a_usage_error(
@@ -269,6 +366,10 @@ class TestTheScanInsideAppliesTheSameLimits:
         self, checkout, tmp_path
     ):
         """The container sees a copy at /ash-config, outside its own tree."""
+        from automated_security_helper.config.sandbox_grants import (
+            marked_repository_written,
+        )
+
         config = checkout["ci"] / "ash.yaml"
         config.write_text(
             f"project_name: p\nash_plugin_modules:\n  - {UNINSTALLED}\n",
@@ -281,11 +382,10 @@ class TestTheScanInsideAppliesTheSameLimits:
         inner_source.mkdir()
 
         local = resolve_config(config_path=config, source_dir=checkout["source"])
-        marked = resolve_config(
-            config_path=mounted / "ash.yaml",
-            source_dir=inner_source,
-            untrusted_config=True,
-        )
+        with marked_repository_written(mounted / "ash.yaml"):
+            marked = resolve_config(
+                config_path=mounted / "ash.yaml", source_dir=inner_source
+            )
         unmarked = resolve_config(
             config_path=mounted / "ash.yaml", source_dir=inner_source
         )

@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import contextlib
 import os
 
 # `print` shadows the builtin on purpose: this is rich's documented import
@@ -528,7 +529,7 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--config-from-scanned-repository",
             hidden=True,
-            help="Apply the limits ASH puts on a repository-written config file to the --config file and every file it extends, wherever they are. Container mode passes this to the scan inside the container when the config, or a file it extends, is inside a git checkout (the scanned one or another) but outside --source-dir, where that scan cannot see it.",
+            help="Apply the limits ASH puts on a repository-written config file to the --config file and every file it extends, wherever they are. Container mode passes this to the scan inside the container when the config, or a file it extends, is inside a git checkout (the scanned one or another) but outside --source-dir, where that scan cannot see it. In a workspace scan it marks the --config file that is layered over every project's own config and used alone by a project without one, from planning on.",
         ),
     ] = False,
     ### WORKSPACE-RELATED OPTIONS
@@ -749,6 +750,42 @@ def run_ash_scan_cli_command(
             f"honor_ignore_files={'true' if honor_ignore_files else 'false'}"
         )
 
+    # The hidden flag is how container mode tells the scan inside the container that
+    # the --config it mounted at /ash-config, or a file that config extends, is in a
+    # git checkout or the scanned directory on the host, which this scan cannot see.
+    # The mark makes that file, and every file a chain rooted at it extends,
+    # repository-written for the whole command, from planning on, in a one-directory
+    # scan and a workspace scan alike (sandbox_grants.marked_repository_written). It
+    # is not resolve_config's untrusted_config, which is for a file an MCP client
+    # delivered and holds it to the client's rules. That scan runs in local mode
+    # with a --config; any other scan cannot apply the mark, so it is a usage error
+    # with exit 3 rather than run_ash_scan's ValueError.
+    if config_from_scanned_repository:
+        if (mode or RunMode.local) != RunMode.local:
+            typer.secho(
+                "--config-from-scanned-repository is passed by container mode to the "
+                "scan inside the container and applies only to a scan in local mode. "
+                "Leave it out: container mode decides it on the host.",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(3)
+        if config is None:
+            typer.secho(
+                "--config-from-scanned-repository marks the --config file, and this "
+                "scan has none. Leave it out: container mode decides it on the host.",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(3)
+        from automated_security_helper.config.sandbox_grants import (
+            marked_repository_written,
+        )
+
+        marks = contextlib.ExitStack()
+        marks.enter_context(marked_repository_written(Path(config)))
+        ctx.call_on_close(marks.close)
+
     workspace_plan: WorkspacePlan | None = None
     if workspace is not None:
         workspace_plan = _handle_workspace_mode(
@@ -862,22 +899,6 @@ def run_ash_scan_cli_command(
                         f"'{fmt}' is not a valid format. Valid formats are: {', '.join(valid_formats)}"
                     )
 
-    # The hidden flag is how container mode tells the scan inside the container that its
-    # config was written by the repository being scanned. That scan is a
-    # single-directory local scan; any other scan cannot apply the mark, so it is a
-    # usage error with exit 3 rather than run_ash_scan's ValueError.
-    if config_from_scanned_repository and (
-        (mode or RunMode.local) != RunMode.local or workspace_plan is not None
-    ):
-        typer.secho(
-            "--config-from-scanned-repository is passed by container mode to the scan "
-            "inside the container and applies only to a single-directory scan in "
-            "local mode. Leave it out: container mode decides it on the host.",
-            fg=typer.colors.RED,
-            err=True,
-        )
-        raise typer.Exit(3)
-
     # Call run_ash_scan with all parameters
     run_ash_scan(
         source_dir=source_dir,
@@ -930,6 +951,5 @@ def run_ash_scan_cli_command(
         custom_build_arg=custom_build_arg,
         workspace_plan=workspace_plan,
         allow_missing_projects=allow_missing_projects,
-        untrusted_config=config_from_scanned_repository,
         workspace_config_as_named=workspace_config,
     )

@@ -547,17 +547,25 @@
   is looked up on `PATH` as before. `./ash` (`OCI_RUNNER`) and `ash --mode container`
   (`--oci-runner`) already ran the path they were given, and now have tests that
   pin it.
-- **A container workspace scan refuses a `--config` the repository could have written.**
+- **A container workspace scan limits a `--config` the repository could have written.**
   A one-directory container scan marks a config from outside `--source-dir` that is in
   a git checkout (`--config-from-scanned-repository`), and the scan inside limits it as
-  repository-written. A workspace scan inside the container refuses that mark, so in
+  repository-written. A workspace scan inside the container refused that mark, so in
   workspace mode the host passed such a config unmarked, and the scan inside gave it
   the operator's grants (`sandbox.extra_read_paths` and the other sandbox settings).
-  `ash --mode container --workspace` now refuses it with exit 3 before anything is
-  built, mounted or cleared: a config in the scanned checkout or another one, or named
-  through a link to such a file, outside the workspace root. Keep `--config` outside
-  every git checkout, or inside the workspace. A config inside the workspace root, read
-  through `/src`, and one outside every checkout are used as before. `./ash` and
+  `ash --mode container --workspace` now marks a config in another git checkout, such
+  as an ops repository beside the workspace, and the workspace scan inside treats it,
+  and every file it extends, as repository-written for every project and for the
+  plan, as a local workspace scan does: the same five confinements, the same
+  warnings, and its `sandbox.mode` still sets the floor. In a one-directory scan and a
+  workspace scan alike, the scan inside holds that verdict as a mark on the mounted
+  files, so its warnings call the file repository-written, as the host's do. A config
+  in the checkout around the workspace root, or reached through a link there, is
+  refused with exit 3 before anything is built, mounted or cleared. Keep `--config`,
+  and every file it extends, outside every git checkout. A config inside the
+  workspace root is refused as in a local workspace scan, because the operator's
+  config may not be one of the workspace's files; one outside every checkout is used
+  as before. `./ash` and
   `Invoke-ASH`, which scan one directory and hand the scan inside `--source-dir /src`,
   now refuse a `--workspace` passed through with exit 3 instead of starting a
   container that refused it.

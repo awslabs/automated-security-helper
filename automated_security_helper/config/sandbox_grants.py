@@ -71,8 +71,9 @@ names the file and the setting; pass them with ``--config-overrides``.
 """
 
 import os
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterable, List, Mapping, Optional, Sequence
+from typing import Iterable, Iterator, List, Mapping, Optional, Sequence
 
 from automated_security_helper.config.ash_config import SandboxConfig
 from automated_security_helper.config.config_sources import describe_config_path
@@ -82,6 +83,47 @@ from automated_security_helper.config.untrusted_source import (
 )
 from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
+
+#: Config files the host marked as repository-written for the scan inside a
+#: container, by resolved path; see ``marked_repository_written``.
+_MARKED: List[Path] = []
+
+#: Why a marked config file is not the operator's, for ``untrusted_reason``.
+MARKED_REASON = (
+    "the host that started this scan in a container found it in a git checkout or "
+    "the scanned directory"
+)
+
+
+@contextmanager
+def marked_repository_written(config: Path) -> Iterator[None]:
+    """Treat ``config``, and every file a chain rooted at it extends, as
+    repository-written while the block runs.
+
+    For the scan inside a container, over one directory or a workspace. The host
+    found the ``--config`` it mounted at ``/ash-config`` in a git checkout or the
+    scanned directory and passed ``--config-from-scanned-repository``; the mounted
+    copy is in no checkout inside the container, so the mark carries the host's
+    verdict to every resolution of that config: the scan's, or in a workspace each
+    project's and the plan's. ``untrusted_reason`` and ``repository_written`` read
+    it, so every step that decides what a repository-written file may not choose
+    sees it, as the any-checkout rule does on the host. The scanned-tree rule
+    (``in_tree_reason``, ``files_inside``) does not: on the host a file in another
+    checkout is outside the scanned tree, so a workspace may still layer it over
+    its projects (``resolve_config.check_operator_config``), and here it is outside
+    ``/src`` as well. Files outside the chain, the projects' own included, are
+    judged as before. A mark only takes grants away.
+    """
+    marked = Path(os.path.realpath(config))
+    _MARKED.append(marked)
+    try:
+        yield
+    finally:
+        _MARKED.remove(marked)
+
+
+def _marked(path: Path) -> bool:
+    return bool(_MARKED) and Path(os.path.realpath(path)) in _MARKED
 
 
 def is_within(path: Path, root: Path) -> bool:
@@ -240,8 +282,11 @@ def untrusted_reason(path: Path, scan_root: Path) -> Optional[str]:
     scan root by any of the root's names; or reached through a symlink that sits
     in one (``links_followed``). Pass the path as it was named, not resolved: every
     spelling is checked here, and resolving first would hide a symlink's own
-    location.
+    location. A config file a host marked (``marked_repository_written``) is
+    repository-written wherever it is.
     """
+    if _marked(path):
+        return MARKED_REASON
     checkout = checkout_containing(path)
     if checkout is not None:
         return f"it is inside the git checkout at {checkout.as_posix()}"
@@ -324,7 +369,11 @@ def repository_written(
     """The files of a config ``chain`` that may not grant sandbox access.
 
     Args:
-        chain: The files a config was built from, as resolved paths.
+        chain: The files a config was built from, as resolved paths, in merge
+            order with the root config last (``ResolvedConfigDocument.chain``; in a
+            workspace, the operator's config layered over a project's comes last).
+            When that last file is one a host marked
+            (``marked_repository_written``), every file of the chain is returned.
         scan_root: The directory being scanned.
         lexical: The same files as they were named, where that is known (the
             config path the operator passed or ASH discovered). A file whose name
@@ -333,7 +382,7 @@ def repository_written(
             caller other than the operator supplied (an MCP client's upload).
     """
     chain = list(chain)
-    if all_untrusted:
+    if all_untrusted or (chain and _marked(chain[-1])):
         return chain or [Path(path) for path in lexical]
     untrusted = [path for path in chain if untrusted_path(path, scan_root)]
     for path in lexical:

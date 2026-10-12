@@ -259,12 +259,15 @@ when the config or a file it extends is inside a git checkout, the one holding
 the scanned tree, but outside `--source-dir` itself, where the scan inside the
 container cannot see that, the host passes it `--config-from-scanned-repository`
 (`./ash` and `Invoke-ASH` do the same for the config file, following its path one link
-at a time as the host does). A workspace scan inside the
-container refuses that flag, so in workspace mode `--mode container` refuses such a
-`--config` instead, with exit 3 before anything is built or mounted: keep `--config`
-outside every git checkout, or inside the workspace. A config inside the workspace root is
-read through `/src` and judged by the scan inside, and one outside every checkout is
-the operator's. `./ash` and `Invoke-ASH` scan one directory and refuse a `--workspace`
+at a time as the host does). In workspace mode the host marks a `--config` from
+another git checkout the same way, and the workspace scan inside limits it, and every
+file it extends, for every project, as a local workspace scan does. One in the
+checkout around the workspace root, or reached through a link there, is refused with
+exit 3 before anything is built or mounted: keep `--config`, and every file it
+extends, outside every git checkout. A config inside the workspace root is refused
+as in a local workspace scan, because the operator's config may not be one of the
+workspace's files, and one outside every checkout is the operator's. `./ash` and
+`Invoke-ASH` scan one directory and refuse a `--workspace`
 passed through to `ash` with exit 3; use `ash --mode container --workspace`. In
 workspace mode the policy file the host resolved (`--workspace-config`, or the one found in the workspace
 root) is handed to the container the same way, and is refused with exit 3, as a

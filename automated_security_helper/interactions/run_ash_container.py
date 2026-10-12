@@ -1372,32 +1372,39 @@ def _written_by_the_scanned_repository(
 def _refuse_repository_config_in_a_workspace(
     config: str, config_files: List[Path], source_dir: Path
 ) -> None:
-    """Refuse, in workspace mode, a mounted config a one-directory scan would mark.
+    """Refuse, in workspace mode, a mounted config from the workspace's own checkout.
 
-    A one-directory scan passes CONFIG_FROM_SCANNED_REPOSITORY_FLAG for a config whose
-    mounted files the repository could have written (:func:`_written_by_the_scanned_repository`),
-    and the scan inside limits it. A workspace scan inside the container refuses that
-    flag, because it applies only to a single-directory scan, so the verdict cannot
-    be handed over; unmarked, the file at /ash-config is in no checkout there and would
-    get the operator's grants. Such a config is refused instead, whichever file of its
-    chain makes it so, before anything is built or mounted. A config inside the
-    workspace root mounts no file of its own (it is read through /src and judged by
-    the scan inside), and one outside every checkout is the operator's; both are used
-    as before.
+    *source_dir* is the workspace root. A config mounted from another git checkout
+    is marked with CONFIG_FROM_SCANNED_REPOSITORY_FLAG, as in a one-directory scan,
+    and the workspace scan inside limits it for every project
+    (``sandbox_grants.marked_repository_written``). One in the checkout around the
+    workspace root, or reached through a link there (``sandbox_grants.in_tree_reason``),
+    is the scanned repository's own file outside the tree the scan inside sees, and
+    is refused instead, whichever file of its chain makes it so, before anything is
+    built or mounted. ``run_ash_scan`` refuses it before this as well, with
+    ``resolve_config.check_operator_config``'s message, which a caller of this
+    module does not run. A config inside the workspace root mounts no file of its
+    own: it is read through /src, and refused as in a local workspace scan, because
+    the operator's config may not be one of the workspace's files. One outside
+    every checkout is the operator's.
     """
-    from automated_security_helper.config.sandbox_grants import repository_written
+    from automated_security_helper.config.sandbox_grants import in_tree_reason
 
-    written = repository_written(config_files, Path(source_dir), [Path(config)])
-    if not config_files or not written:
+    inside = [
+        path
+        for path in [*config_files, Path(config)]
+        if in_tree_reason(path, Path(source_dir)) is not None
+    ]
+    if not config_files or not inside:
         return
     raise ContainerInputError(
-        f"The config file {config!r} is one the repository being scanned could have "
-        f"written: {', '.join(path.as_posix() for path in written)} is in a git "
-        "checkout, or reached through one, and outside the workspace root "
-        f"{Path(source_dir).as_posix()}. A workspace scan inside the container cannot "
-        "be told so, and would give it the operator's grants, so container mode "
-        "refuses it. Keep --config outside every git checkout, or inside the "
-        "workspace."
+        f"The config file {config!r} is the scanned repository's: "
+        f"{', '.join(path.as_posix() for path in inside)} is in the git checkout "
+        "around the workspace root "
+        f"{Path(source_dir).as_posix()}, or reached through a link there, and "
+        "outside the workspace root, where the workspace scan inside the container "
+        "cannot see it. Container mode refuses it in workspace mode. Keep --config, "
+        "and every file it extends, outside every git checkout."
     )
 
 
@@ -1741,18 +1748,16 @@ def _assemble_run_command(
         cmd.extend(config_mounts)
         # A config inside the source directory is read through /src, which is the
         # inner scan's own tree, and mounts no host file; one mounted from elsewhere
-        # needs the host's verdict, judged by its files and the name it was given.
-        # A workspace scan cannot take the verdict, so there a config that would be
-        # marked is refused, here as well as before the build, so the rule holds
-        # whichever checks a caller ran first.
+        # needs the host's verdict, judged by its files and the name it was given,
+        # in a one-directory scan and a workspace scan alike. In workspace mode a
+        # config from the workspace's own checkout is refused, here as well as
+        # before the build, so the rule holds whichever checks a caller ran first.
         if workspace_relative_file is not None:
             _refuse_repository_config_in_a_workspace(config, config_files, source_dir)
-        config_from_scanned_repository = (
-            workspace_relative_file is None
-            and bool(config_files)
-            and _written_by_the_scanned_repository(
-                config_files, source_dir, [Path(config)]
-            )
+        config_from_scanned_repository = bool(
+            config_files
+        ) and _written_by_the_scanned_repository(
+            config_files, source_dir, [Path(config)]
         )
     inner_workspace_config = None
     if workspace_config and workspace_relative_file is not None:

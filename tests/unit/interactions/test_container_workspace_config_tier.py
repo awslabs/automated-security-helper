@@ -1,24 +1,29 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A workspace scan in container mode refuses a config it cannot mark.
+"""A workspace scan in container mode marks or refuses a config the repository
+could have written.
 
 A one-directory container scan mounts a config from outside ``--source-dir`` at
 ``/ash-config`` and, when a local scan would count it as repository-written (it is
 in a git checkout, or reached through the scanned tree), passes
 ``--config-from-scanned-repository`` so the scan inside limits it. A workspace scan
-inside the container refuses that flag: it applies only to a single-directory scan.
-So in workspace mode the host had no way to hand the verdict over, and passed the
-config unmarked. The scan inside, which sees ``/ash-config`` in no checkout, then
+inside the container refused that flag, so in workspace mode the host passed the
+config unmarked, and the scan inside, which sees ``/ash-config`` in no checkout,
 gave it the operator's grants (``sandbox.extra_read_paths`` and the rest).
 
-Container mode now refuses such a config in workspace mode with exit 3, before
-anything is built, mounted or cleared: exactly the configs a one-directory scan
-would mark, judged by the files it would mount (a file it extends stays inside the
-config's own directory, so none of its bases can be in a checkout the config is
-not in; ``config_sources.default_confinement_root``). A config inside the
-workspace root is read through ``/src`` and judged by the scan inside, as before,
-and one outside every checkout is the operator's.
+In workspace mode the host now marks a config from another git checkout, and the
+workspace scan inside accepts the mark and limits that config, and the files it
+extends, for every project (``sandbox_grants.marked_repository_written``; the
+settings that come out are compared with a local workspace scan's in
+test_container_workspace_config_parity.py). A config in the checkout around the
+workspace root, or reached through a link there, is refused with exit 3 before
+anything is built, mounted or cleared, judged by the files it would mount (a file
+it extends stays inside the config's own directory;
+``config_sources.default_confinement_root``). The scan CLI refuses it before that,
+as a local workspace scan refuses an operator config inside the workspace's tree
+(``resolve_config.check_operator_config``). A config inside the workspace root is
+read through ``/src``, and one outside every checkout is the operator's.
 """
 
 from __future__ import annotations
@@ -37,7 +42,7 @@ from automated_security_helper.utils.subprocess_utils import create_completed_pr
 from tests.utils.config_link_layouts import config_through_links
 
 GRANT = "project_name: tier\nsandbox:\n  extra_read_paths:\n    - /opt/tier-grant\n"
-FIX = "Keep --config outside every git checkout, or inside the workspace"
+FIX = "Keep --config, and every file it extends, outside every git checkout"
 
 
 @pytest.fixture
@@ -103,19 +108,15 @@ def _run_command(commands: List[List[str]]) -> List[str]:
     "where",
     [
         "the-config-in-the-checkout-outside-the-workspace",
-        "the-config-in-another-checkout",
         "a-link-outside-the-checkout-to-a-config-in-it",
         "a-link-in-the-checkout-on-the-way-to-a-config-outside-it",
     ],
 )
-def test_a_config_the_repository_could_have_written_is_refused(
+def test_a_config_in_the_workspaces_own_checkout_is_refused(
     where, checkout, commands, tmp_path
 ):
     if where == "the-config-in-the-checkout-outside-the-workspace":
         config = _config(checkout / "other" / "ash-config.yaml")
-    elif where == "the-config-in-another-checkout":
-        (tmp_path / "elsewhere" / ".git").mkdir(parents=True)
-        config = _config(tmp_path / "elsewhere" / "ash-config.yaml")
     elif where == "a-link-in-the-checkout-on-the-way-to-a-config-outside-it":
         (checkout / "ci").mkdir()
         config = config_through_links(
@@ -138,10 +139,125 @@ def test_a_config_the_repository_could_have_written_is_refused(
     assert FIX in result.stderr
 
 
+@pytest.mark.parametrize(
+    "where",
+    [
+        "the-config-in-another-checkout",
+        "a-config-extending-a-base-in-another-checkout",
+        "a-link-in-another-checkout-to-a-config-outside-every-checkout",
+    ],
+)
+def test_a_config_in_another_checkout_is_marked_for_the_scan_inside(
+    where, checkout, commands, tmp_path
+):
+    """Not the workspace's own checkout: mounted at /ash-config and marked, so the
+    scan inside limits it as a local workspace scan does."""
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / ".git").mkdir(parents=True)
+    if where == "the-config-in-another-checkout":
+        config = _config(elsewhere / "ash-config.yaml")
+    elif where == "a-config-extending-a-base-in-another-checkout":
+        _config(elsewhere / "base.yaml")
+        config = _config(
+            elsewhere / "ash-config.yaml", "project_name: tier\nextends: base.yaml\n"
+        )
+    else:
+        target = _config(tmp_path / "operator" / "ash-config.yaml")
+        config = elsewhere / "ash-config.yaml"
+        config.symlink_to(target)
+
+    result = _workspace_run(checkout, config, tmp_path)
+
+    assert result.returncode != 3, result.stderr
+    run = _run_command(commands)
+    assert run[run.index("--config") + 1] == "/ash-config/ash-config.yaml"
+    assert rac.CONFIG_FROM_SCANNED_REPOSITORY_FLAG in run
+
+
+def test_the_inner_workspace_scan_accepts_the_mark(monkeypatch, tmp_path):
+    """The scan inside the container treats the marked --config, and every file
+    it extends, as repository-written while it runs, and only those files."""
+    from automated_security_helper.cli import scan as scan_cli
+    from automated_security_helper.config.sandbox_grants import repository_written
+
+    workspace = tmp_path / "src"
+    (workspace / "proj").mkdir(parents=True)
+    (workspace / "proj" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (workspace / "ash.code-workspace").write_text(
+        json.dumps({"folders": [{"path": "proj"}]}), encoding="utf-8"
+    )
+    mounted = tmp_path / "ash-config"
+    base = _config(mounted / "base.yaml")
+    config = _config(
+        mounted / "ash-config.yaml", "project_name: t\nextends: base.yaml\n"
+    )
+    beside = _config(mounted / "not-in-the-chain.yaml")
+    seen = {}
+
+    def run(**kwargs):
+        seen["kwargs"] = kwargs
+        seen["written"] = repository_written(
+            [base.resolve(), config.resolve()], workspace
+        )
+        seen["beside"] = repository_written([beside.resolve()], workspace)
+        seen["project"] = repository_written(
+            [(workspace / "proj" / "a.py").resolve()], tmp_path / "unrelated"
+        )
+
+    monkeypatch.setattr(scan_cli, "run_ash_scan", run)
+    monkeypatch.chdir(workspace)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--workspace",
+            str(workspace / "ash.code-workspace"),
+            "--config",
+            str(config),
+            rac.CONFIG_FROM_SCANNED_REPOSITORY_FLAG,
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen["written"] == [base.resolve(), config.resolve()]
+    assert seen["beside"] == []
+    assert seen["project"] == []
+    # Applied by the mark, not by untrusted_config, which is for an MCP client's file.
+    assert seen["kwargs"].get("untrusted_config", False) is False
+    # Only while the scan runs.
+    assert repository_written([config.resolve()], workspace) == []
+
+
+def test_the_inner_workspace_scan_needs_a_config_for_the_mark(monkeypatch, tmp_path):
+    from automated_security_helper.cli import scan as scan_cli
+
+    workspace = tmp_path / "src"
+    (workspace / "proj").mkdir(parents=True)
+    (workspace / "ash.code-workspace").write_text(
+        json.dumps({"folders": [{"path": "proj"}]}), encoding="utf-8"
+    )
+    monkeypatch.setattr(scan_cli, "run_ash_scan", lambda **kw: None)
+    monkeypatch.chdir(workspace)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--workspace",
+            str(workspace / "ash.code-workspace"),
+            rac.CONFIG_FROM_SCANNED_REPOSITORY_FLAG,
+        ],
+    )
+
+    assert result.exit_code == 3, result.output
+    assert rac.CONFIG_FROM_SCANNED_REPOSITORY_FLAG in result.output
+
+
 def test_a_config_inside_the_workspace_is_read_through_src(
     checkout, commands, tmp_path
 ):
-    """Control: the scan inside sees it in its own tree and judges it there."""
+    """Control: read through /src, in the scan's own tree inside, and not marked."""
     config = _config(checkout / "ws" / "ws-config.yaml")
 
     result = _workspace_run(checkout, config, tmp_path)
@@ -221,6 +337,9 @@ def test_the_assembled_command_refuses_it_on_its_own(checkout, tmp_path):
 def test_the_scan_cli_refuses_it_before_clearing_the_output(
     checkout, commands, tmp_path
 ):
+    """The CLI's own workspace check comes first, with its message: the operator's
+    config is layered over every project, so none of its files may be the
+    workspace's."""
     config = _config(checkout / "other" / "ash-config.yaml")
     output = tmp_path / "out"
     (output / "reports").mkdir(parents=True)
@@ -246,4 +365,6 @@ def test_the_scan_cli_refuses_it_before_clearing_the_output(
     assert result.exit_code == 3, result.output
     assert commands == []
     assert (output / "reports" / "previous.txt").read_text(encoding="utf-8") == "kept\n"
-    assert FIX in " ".join(result.output.split())
+    message = " ".join(result.output.split())
+    assert "ash-config.yaml" in message, message
+    assert "is inside the checkout" in message, message
