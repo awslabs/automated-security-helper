@@ -1552,7 +1552,13 @@
   (`/reporters/s3/**`, `/reporters/aws-security-hub/**`, `/reporters/cloudwatch-logs/**`
   and `/reporters/bedrock-summary-reporter/**`), so a client cannot turn one on or
   choose where it sends, whatever a profile's list says; the default list now holds
-  all four whole.
+  all four whole. So are the scanners that send data off the host:
+  `/scanners/snyk-code/**` (uploads the source), `/scanners/npm-audit/**` and
+  `/scanners/trivy-repo/**` (dependency lists), `/scanners/detect-secrets/**`
+  (candidate secrets, when verifying) and `/scanners/semgrep/**` and
+  `/scanners/opengrep/**` (usage metrics). A client can no longer turn one of them
+  on or off or change any of its options; an operator's own configuration and scans
+  are unchanged.
 
 - **snyk-code on a tree with no file Snyk supports is SKIPPED, not ERROR.**
   `snyk code test` exits 3 when the target holds no file it reads ("no supported

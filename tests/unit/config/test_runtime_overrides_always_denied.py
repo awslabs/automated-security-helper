@@ -63,6 +63,12 @@ FLOOR = [
     "/reporters/aws-security-hub/**",
     "/reporters/cloudwatch-logs/**",
     "/reporters/bedrock-summary-reporter/**",
+    "/scanners/detect-secrets/**",
+    "/scanners/npm-audit/**",
+    "/scanners/opengrep/**",
+    "/scanners/semgrep/**",
+    "/scanners/snyk-code/**",
+    "/scanners/trivy-repo/**",
 ]
 
 #: The reporters that send results off the host, each a whole section.

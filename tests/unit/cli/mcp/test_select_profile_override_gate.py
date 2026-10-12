@@ -410,6 +410,53 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
             }
         },
     ),
+    # The scanners that send data off the host, each refused whole: an option the
+    # narrower detect-secrets entries leave open, metrics turned on, a scanner
+    # turned off, and an add-on scanner's section added.
+    "/scanners/detect-secrets/**": (
+        {
+            "op": "replace",
+            "path": "/scanners/detect_secrets/options/skip_generated_lockfiles",
+            "value": False,
+        },
+        {
+            "scanners": {
+                "detect-secrets": {"options": {"skip_generated_lockfiles": False}}
+            }
+        },
+    ),
+    "/scanners/npm-audit/**": (
+        {"op": "replace", "path": "/scanners/npm_audit/enabled", "value": False},
+        {"scanners": {"npm-audit": {"enabled": False}}},
+    ),
+    "/scanners/opengrep/**": (
+        {"op": "replace", "path": "/scanners/opengrep/options/metrics", "value": "on"},
+        {"scanners": {"opengrep": {"options": {"metrics": "on"}}}},
+    ),
+    "/scanners/semgrep/**": (
+        {"op": "replace", "path": "/scanners/semgrep/options/metrics", "value": "on"},
+        {"scanners": {"semgrep": {"options": {"metrics": "on"}}}},
+    ),
+    "/scanners/snyk-code/**": (
+        {
+            "op": "add",
+            "path": "/scanners/snyk-code",
+            "value": {"enabled": True, "options": {}},
+        },
+        {"scanners": {"snyk-code": {"enabled": True, "options": {}}}},
+    ),
+    "/scanners/trivy-repo/**": (
+        {
+            "op": "add",
+            "path": "/scanners/trivy-repo",
+            "value": {"enabled": True, "options": {"disable_telemetry": False}},
+        },
+        {
+            "scanners": {
+                "trivy-repo": {"enabled": True, "options": {"disable_telemetry": False}}
+            }
+        },
+    ),
     "/scanners/detect-secrets/options/scan_settings/filters_used": (
         {
             "op": "replace",

@@ -362,9 +362,10 @@ class TestDefaults:
         up to (but not including) the first wildcard segment.
 
         Plugin-provided reporters (`bedrock-summary-reporter`, `cloudwatch-logs`,
-        `aws-security-hub`, `s3`) are NOT present on a default `AshConfig`; we
-        materialize them here via model_validate so the schema check covers
-        extras that real plugins add, the AWS reporters from their own models.
+        `aws-security-hub`, `s3`) and scanners (`snyk-code`, `trivy-repo`) are NOT
+        present on a default `AshConfig`; we materialize them here via
+        model_validate so the schema check covers extras that real plugins add,
+        from their own models.
         """
         from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
             BedrockSummaryReporterConfig,
@@ -374,6 +375,12 @@ class TestDefaults:
         )
         from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter import (
             SecurityHubReporterConfig,
+        )
+        from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
+            SnykCodeScannerConfig,
+        )
+        from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+            TrivyRepoScannerConfig,
         )
 
         cfg = AshConfig.model_validate(
@@ -387,7 +394,11 @@ class TestDefaults:
                     ),
                     "cloudwatch-logs": {"options": {"aws_region": "us-east-1"}},
                     "s3": S3ReporterConfig().model_dump(by_alias=True),
-                }
+                },
+                "scanners": {
+                    "snyk-code": SnykCodeScannerConfig().model_dump(by_alias=True),
+                    "trivy-repo": TrivyRepoScannerConfig().model_dump(by_alias=True),
+                },
             }
         )
         dumped = cfg.model_dump(by_alias=True)
@@ -1094,18 +1105,18 @@ class TestDenialsMatchEitherSeparator:
         assert "denied_paths" in excinfo.value.rule
 
     def test_value_pattern_binds_to_either_spelling(self) -> None:
-        # trivy-repo, not an off-host reporter: those sections are always denied
-        # whole, so a value pattern under one is never reached.
+        # ferret-scan, a plugin that sends nothing off the host: those that do are
+        # always denied whole, so a value pattern under one is never reached.
         allowlist = RuntimeOverridesConfig(
             enabled=True,
             allowed_paths=["/**"],
             denied_paths=[],
-            denied_value_patterns={"/scanners/trivy-repo/options/ignore_file": r"^x$"},
+            denied_value_patterns={"/scanners/ferret-scan/options/config_file": r"^x$"},
         )
         ops = [
             {
                 "op": "add",
-                "path": "/scanners/trivy_repo/options/ignore_file",
+                "path": "/scanners/ferret_scan/options/config_file",
                 "value": "x",
             }
         ]
@@ -1192,19 +1203,20 @@ class TestDenialsMatchEveryPluginSpelling:
         assert "denied_paths" in excinfo.value.rule
 
     def test_value_pattern_binds_to_every_spelling(self) -> None:
-        # trivy-repo, not the Bedrock reporter: an off-host reporter's section is
-        # always denied whole, so a value pattern under it is never reached.
+        # ferret-scan, a plugin that sends nothing off the host: a section of one
+        # that does is always denied whole, so a value pattern under it is never
+        # reached.
         allowlist = RuntimeOverridesConfig(
             enabled=True,
             allowed_paths=["/**"],
             denied_paths=[],
-            denied_value_patterns={"/scanners/trivy-repo/options/ignore_file": r"^x$"},
+            denied_value_patterns={"/scanners/ferret-scan/options/config_file": r"^x$"},
         )
         ops = [
             {
                 "op": "add",
-                "path": "/scanners/TrivyRepo",
-                "value": {"options": {"ignore_file": "x"}},
+                "path": "/scanners/FerretScan",
+                "value": {"options": {"config_file": "x"}},
             }
         ]
         with pytest.raises(RuntimePatchDeniedError) as excinfo:

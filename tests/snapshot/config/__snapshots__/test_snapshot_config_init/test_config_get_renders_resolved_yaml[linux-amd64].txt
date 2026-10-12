@@ -33,6 +33,12 @@ global_settings:
       - /reporters/aws-security-hub/**
       - /reporters/s3/**
       - /reporters/bedrock-summary-reporter/**
+      - /scanners/detect-secrets/**
+      - /scanners/npm-audit/**
+      - /scanners/opengrep/**
+      - /scanners/semgrep/**
+      - /scanners/snyk-code/**
+      - /scanners/trivy-repo/**
       - /converters/archive/options/max_members
       - /converters/archive/options/max_member_bytes
       - /converters/archive/options/max_total_bytes

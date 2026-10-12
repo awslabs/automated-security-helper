@@ -698,9 +698,13 @@ ARCHIVE_LIMIT_RUNTIME_PATHS: Tuple[str, ...] = tuple(
 #: imported into ASH's own process. The detect-secrets settings that turn on secret
 #: verification (each candidate secret is sent to its issuer) or import a plugin or
 #: filter from a file, and the baseline that can carry both. The archive extraction
-#: limits. And the reporters that send results off the host, each a whole section, so
-#: a client can neither turn one on nor choose where it sends (``**`` also matches the
-#: section itself).
+#: limits. And every plugin that sends data off the host, each a whole section, so a
+#: client can neither turn one on or off nor change what it sends or where (``**``
+#: also matches the section itself): the reporters that send the results, and the
+#: scanners that send the source (snyk-code), dependency lists (npm-audit,
+#: trivy-repo), candidate secrets (detect-secrets) or usage metrics (semgrep,
+#: opengrep). tests/unit/config/test_off_host_plugins_are_operator_only.py lists what
+#: each one sends and classifies every plugin.
 #:
 #: A floor rather than the default alone: denied_paths was replaced whole by a
 #: profile's own list, so adding one entry dropped every shipped one.
@@ -719,6 +723,12 @@ ALWAYS_DENIED_PATHS = (
     "/reporters/aws-security-hub/**",
     "/reporters/cloudwatch-logs/**",
     "/reporters/bedrock-summary-reporter/**",
+    "/scanners/detect-secrets/**",
+    "/scanners/npm-audit/**",
+    "/scanners/opengrep/**",
+    "/scanners/semgrep/**",
+    "/scanners/snyk-code/**",
+    "/scanners/trivy-repo/**",
 )
 
 
@@ -759,9 +769,11 @@ class RuntimeOverridesConfig(BaseModel):
                 "A list set here replaces the defaults, except for the entries ASH "
                 "always denies (the scanner sandbox, ash_plugin_modules, the "
                 "detect-secrets verification, plugin and baseline settings, the "
-                "archive converter's extraction limits, and the s3, "
-                "aws-security-hub, cloudwatch-logs and bedrock-summary-reporter "
-                "reporter sections): those are added to any list."
+                "archive converter's extraction limits, and the sections of the "
+                "plugins that send data off the host: the s3, aws-security-hub, "
+                "cloudwatch-logs and bedrock-summary-reporter reporters and the "
+                "detect-secrets, npm-audit, opengrep, semgrep, snyk-code and "
+                "trivy-repo scanners): those are added to any list."
             )
         ),
     ] = [
@@ -805,6 +817,16 @@ class RuntimeOverridesConfig(BaseModel):
         "/reporters/aws-security-hub/**",
         "/reporters/s3/**",
         "/reporters/bedrock-summary-reporter/**",
+        # The scanners that send data off the host, whole, for the same reason: the
+        # source (snyk-code), dependency lists (npm-audit, trivy-repo), candidate
+        # secrets (detect-secrets) or usage metrics (semgrep, opengrep). Also in
+        # ALWAYS_DENIED_PATHS.
+        "/scanners/detect-secrets/**",
+        "/scanners/npm-audit/**",
+        "/scanners/opengrep/**",
+        "/scanners/semgrep/**",
+        "/scanners/snyk-code/**",
+        "/scanners/trivy-repo/**",
         # The archive converter's extraction limits bound what extracting an
         # archive in the scanned tree may write, so a client may not raise them.
         # A write at an ancestor (/converters/archive, /converters) is refused too.
