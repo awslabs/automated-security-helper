@@ -10,6 +10,10 @@ report it and the scan exits 2. Before, only bandit did: it reads the whole
 directory, while detect-secrets is handed the file list left after the ignore
 paths, and that list did not follow the flag.
 
+ASH's own output directory is not an ignore path. Findings located there stay
+out of the results with the flag set, which the last test checks with a file
+planted in the output directory.
+
 The scan runs as a subprocess of the installed ``ash`` entry point, so the exit
 code is the one a user sees.
 """
@@ -138,3 +142,23 @@ def test_with_the_flag_one_scan_reports_both_scanners_findings(tmp_path):
     assert code == 2, log
     reported = {f[0] for f in _findings(output, log) if f[1] == "app.py"}
     assert reported == set(SCANNERS), log
+
+
+def test_a_finding_in_the_output_directory_stays_out_with_the_flag(tmp_path):
+    """The output directory is left out whatever the flag says.
+
+    The output directory is the default one, inside the scanned tree, and holds a
+    file with the same two findings app.py has above. Those tests are the control:
+    the same content elsewhere in the tree is reported.
+    """
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "clean.py").write_text("def add(a, b):\n    return a + b\n")
+    output = source / ".ash" / "ash_output"
+    output.mkdir(parents=True)
+    (output / "planted.py").write_text(FINDINGS_PY, encoding="utf-8")
+
+    code, log = _scan(source, output, SCANNERS, ignore_suppressions=True)
+
+    assert code == 0, log
+    assert [f for f in _findings(output, log) if f[1] == "planted.py"] == [], log

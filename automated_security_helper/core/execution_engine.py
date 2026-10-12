@@ -558,22 +558,27 @@ class ScanExecutionEngine:
                         # Final suppression pass on the merged SARIF before reporters read it.
                         # Per-scanner suppression passes may miss findings whose paths only
                         # become matchable after merge/normalization in the aggregated context.
-                        if (
-                            not self._context.ignore_suppressions
-                            and self._results
-                            and self._results.sarif
-                        ):
+                        if self._results and self._results.sarif:
                             from automated_security_helper.utils.sarif_utils import (
                                 apply_suppressions_to_sarif,
+                                exclude_output_dir_results,
                             )
 
-                            self._results.sarif = apply_suppressions_to_sarif(
-                                sarif_report=self._results.sarif,
-                                plugin_context=self._context,
-                                used_suppressions=getattr(
-                                    self._results, "used_suppressions", None
-                                ),
-                            )
+                            if not self._context.ignore_suppressions:
+                                self._results.sarif = apply_suppressions_to_sarif(
+                                    sarif_report=self._results.sarif,
+                                    plugin_context=self._context,
+                                    used_suppressions=getattr(
+                                        self._results, "used_suppressions", None
+                                    ),
+                                )
+                            else:
+                                # The flag lifts suppressions and ignore paths,
+                                # not the exclusion of ASH's own output directory.
+                                self._results.sarif = exclude_output_dir_results(
+                                    sarif_report=self._results.sarif,
+                                    plugin_context=self._context,
+                                )
 
                         # Refresh metrics after final suppression pass so exit code
                         # reflects the post-suppression state.

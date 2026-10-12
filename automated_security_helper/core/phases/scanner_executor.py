@@ -26,6 +26,7 @@ from automated_security_helper.utils.sandbox.scope import (
 )
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
+    exclude_output_dir_results,
     sanitize_sarif_paths,
 )
 from automated_security_helper.utils.tool_config_dir import tool_config_scope
@@ -544,6 +545,13 @@ class ScannerExecutor:
                         )
                         if not self.plugin_context.ignore_suppressions:
                             raw_results = apply_suppressions_to_sarif(
+                                sarif_report=raw_results,
+                                plugin_context=self.plugin_context,
+                            )
+                        else:
+                            # The flag lifts suppressions and ignore paths, not
+                            # the exclusion of ASH's own output directory.
+                            raw_results = exclude_output_dir_results(
                                 sarif_report=raw_results,
                                 plugin_context=self.plugin_context,
                             )

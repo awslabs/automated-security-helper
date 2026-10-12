@@ -12,6 +12,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
+    exclude_output_dir_results,
     normalize_sarif_result_severities,
     sanitize_sarif_paths,
 )
@@ -101,6 +102,12 @@ class ScanResultProcessor:
             else:
                 ASH_LOGGER.debug(
                     "Skipping suppression application due to --ignore-suppressions flag"
+                )
+                # The flag lifts suppressions and ignore paths, not the exclusion
+                # of ASH's own output directory.
+                sanitized_sarif = exclude_output_dir_results(
+                    sarif_report=sanitized_sarif,
+                    plugin_context=self.plugin_context,
                 )
 
             scanner_version = None

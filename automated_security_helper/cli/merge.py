@@ -1117,6 +1117,10 @@ def apply_aggregated_suppressions(
     the call is what ``ash scan`` does, so skipping it is what keeps the verdicts
     equal in the configurations no fixture here exercises.
 
+    Under the flag both paths apply ``exclude_output_dir_results`` instead: the
+    flag lifts suppressions and ignore paths, and ASH's own output directory is
+    neither, so results located there stay out either way.
+
     Args:
         merged: The merged results, with metrics already populated from the union.
         plugin_context: Carries the scan's own config and ``ignore_suppressions``.
@@ -1126,29 +1130,31 @@ def apply_aggregated_suppressions(
         rather than mutated in place only because
         ``populate_metrics_from_unified_source`` returns the model.
     """
-    if (
-        not plugin_context.ignore_suppressions
-        and merged is not None
-        and merged.sarif is not None
-    ):
+    if merged is not None and merged.sarif is not None:
         # Imported here, matching the engine, which imports it inside the report
         # branch. sarif_utils pulls in the SARIF model and the config tree, and
         # ``ash merge`` reaches this point only after a successful merge.
         from automated_security_helper.utils.sarif_utils import (
             apply_suppressions_to_sarif,
+            exclude_output_dir_results,
         )
 
-        merged.sarif = apply_suppressions_to_sarif(
-            sarif_report=merged.sarif,
-            plugin_context=plugin_context,
-            used_suppressions=getattr(merged, "used_suppressions", None),
-        )
+        if not plugin_context.ignore_suppressions:
+            merged.sarif = apply_suppressions_to_sarif(
+                sarif_report=merged.sarif,
+                plugin_context=plugin_context,
+                used_suppressions=getattr(merged, "used_suppressions", None),
+            )
+        else:
+            merged.sarif = exclude_output_dir_results(
+                sarif_report=merged.sarif, plugin_context=plugin_context
+            )
 
     # Recomputed unconditionally, not only when suppressions ran. Under
-    # ``--ignore-suppressions`` the counts merge_shard_results already produced are
-    # correct, so this is a no-op there; making it conditional would put the "did
-    # the counts get refreshed" question on the same branch as "did suppressions
-    # run", and the exit code depends on the first.
+    # ``--ignore-suppressions`` the counts change only when a result in the output
+    # directory was removed; making this conditional would put the "did the counts
+    # get refreshed" question on the same branch as "did suppressions run", and the
+    # exit code depends on the first.
     return populate_metrics_from_unified_source(aggregated_results=merged)
 
 
