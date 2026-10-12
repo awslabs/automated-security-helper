@@ -247,13 +247,15 @@ class AshPluginManager(BaseModel):
         registrations = self._registrations(plugin_type)
         with self._registry_lock:
             key = plugin_module_name
-            existing = registrations.get(key) if registrations is not None else None
-            if (
-                existing is not None
-                and existing.plugin_module_path != plugin_module_path
-            ):
-                key = f"{plugin_module_path}:{plugin_module_name}"
+            existing = None
+            if registrations is not None:
                 existing = registrations.get(key)
+                if (
+                    existing is not None
+                    and existing.plugin_module_path != plugin_module_path
+                ):
+                    key = f"{plugin_module_path}:{plugin_module_name}"
+                    existing = registrations.get(key)
             already_registered = existing is not None
             if registrations is not None and not already_registered:
                 registrations[key] = AshPluginRegistration(
