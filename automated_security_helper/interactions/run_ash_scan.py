@@ -1526,7 +1526,7 @@ def _refuse_an_inner_run_that_did_not_complete(
         found = "holds no record that the run completed"
     # In container mode the inner ASH is the image's, which can be older than this
     # one. In nix mode it is started with this ASH's own interpreter
-    # (run_ash_nix.inner_ash_command), so the message names that instead.
+    # (run_ash_nix._this_ash), so the message names that instead.
     if mode == "container":
         older = (
             " An ASH older than this one does not write that record: "

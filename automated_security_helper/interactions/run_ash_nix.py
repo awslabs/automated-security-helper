@@ -153,39 +153,22 @@ _INNER_ENTRY_POINT = (
 
 
 def _this_ash() -> List[str]:
-    """The command that runs the ASH running now.
-
-    ``nix develop --command`` starts it in the scan's own directory, which ``-c``
-    puts first on ``sys.path``: an ``automated_security_helper/`` there would run in
-    place of ASH. The directory is left as it is, and the command drops that entry
-    (``utils/python_child.python_code_argv``).
-    """
-    return python_code_argv(_INNER_ENTRY_POINT)
-
-
-#: What the inner run executes: this ASH's command line, started by this ASH's own
-#: interpreter. Python puts the working directory first on ``sys.path`` for ``-c``,
-#: and the working directory is usually the scanned repository, so it is removed
-#: before anything is imported.
-INNER_ASH_BOOTSTRAP = (
-    "import sys; "
-    "sys.path[:] = [entry for entry in sys.path if entry not in ('', '.')]; "
-    "sys.argv[0] = 'ash'; "
-    "from automated_security_helper.cli.entrypoint import main; "
-    "main()"
-)
-
-
-def inner_ash_command() -> List[str]:
-    """The command that starts this ASH inside the shell.
+    """The command that starts the ASH running now inside the shell.
 
     This ASH's interpreter rather than whichever ``ash`` comes first on the shell's
     PATH, so the inner run is the same ASH as the outer one: the flake supplies
     scanners, not ASH, and an older ``ash`` earlier on PATH would scan without
     writing the completion record the outer process reads back
     (utils/inner_run_outcome.py).
+
+    ``nix develop --command`` starts it in the scan's own directory, which ``-c``
+    puts first on ``sys.path``: an ``automated_security_helper/`` there would run in
+    place of ASH. The directory is left as it is, and the command drops that entry
+    (``utils/python_child.python_code_argv``). A directory ``PYTHONPATH`` names
+    stays on ``sys.path``, the working directory included: Python makes a ``.`` or
+    an empty entry there absolute, so no check of the entry tells it apart.
     """
-    return [sys.executable, "-c", INNER_ASH_BOOTSTRAP]
+    return python_code_argv(_INNER_ENTRY_POINT)
 
 
 def build_nix_command(

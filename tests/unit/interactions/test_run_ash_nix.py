@@ -170,9 +170,7 @@ class TestBuildNixCommand:
         self, tmp_path
     ):
         """-c puts the working directory, the scanned tree, first on sys.path."""
-        from automated_security_helper.interactions.run_ash_nix import (
-            inner_ash_command,
-        )
+        from automated_security_helper.interactions.run_ash_nix import _this_ash
         from tests.utils.helpers import REPO_ROOT
 
         planted = tmp_path / "automated_security_helper"
@@ -183,7 +181,7 @@ class TestBuildNixCommand:
         env = dict(os.environ, PYTHONPATH=str(REPO_ROOT))
 
         completed = subprocess.run(  # nosec B603 - the command under test
-            [*inner_ash_command(), "--version"],
+            [*_this_ash(), "--version"],
             cwd=tmp_path,
             env=env,
             capture_output=True,
