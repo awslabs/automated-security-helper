@@ -203,12 +203,10 @@ def test_a_resolved_git_keeps_the_options():
 
 
 #: Call sites that start git without ``git_argv``, each with the reason it is not
-#: changed here. Keep this list short; a new entry needs the same argument.
-_OUTSIDE_THIS_CHANGE = {
-    # The MCP server's clone of a URL the client names: a fresh clone, whose
-    # config git writes itself, with its environment handled in that module.
-    "cli/mcp/source_delivery.py",
-}
+#: changed here. Empty: the MCP server's clone, fetch and checkout
+#: (cli/mcp/source_delivery.py) are built by git_argv too. A new entry needs an
+#: argument of its own.
+_OUTSIDE_THIS_CHANGE: set[str] = set()
 
 
 def _starts_with_git(element: ast.expr) -> bool:

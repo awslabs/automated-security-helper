@@ -10,9 +10,10 @@ checkout inside the new clone. Two settings make git start a program:
 - hooks, from ``core.hooksPath`` or the clone's ``.git/hooks``, which git runs on
   checkout and on ref updates.
 
-Every command of a delivery passes ``-c core.fsmonitor=false`` and
-``-c core.hooksPath=/dev/null`` ahead of the subcommand. There they outrank the
-repository's config, and nothing is written into the clone's ``.git/config``.
+Every command of a delivery is built by ``utils/git_command.git_argv``, which puts
+``-c core.fsmonitor=false`` and ``-c core.hooksPath=/dev/null`` ahead of the
+subcommand. There they outrank the repository's config, and nothing is written into
+the clone's ``.git/config``.
 
 The tests clone a local fixture repository, so ``_GIT_ARGV`` is extended with
 ``protocol.file.allow=always``. It also names an ``init.templateDir`` whose
@@ -34,6 +35,7 @@ from typing import Dict, List
 import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
+from automated_security_helper.utils import git_command
 
 FSMONITOR = ("-c", "core.fsmonitor=false")
 HOOKS_PATH = ("-c", "core.hooksPath=/dev/null")
@@ -159,15 +161,22 @@ def test_a_delivery_runs_no_hook_and_no_fsmonitor(fixture) -> None:
     assert _marks(fixture.fsmonitor_ran) == 0, "a command ran the fsmonitor"
 
 
-def test_without_the_hooks_option_the_hooks_run(fixture, monkeypatch) -> None:
-    """The control for the hooks: the same delivery without core.hooksPath."""
-    options = list(sd._GIT_CONFIG)
+def _leave_out(monkeypatch, option) -> None:
+    """Build the delivery's git commands without one of git_argv's two options."""
+    options = list(git_command.GIT_SAFETY_OPTIONS)
     index = next(
-        i for i in range(len(options) - 1) if options[i : i + 2] == list(HOOKS_PATH)
+        i for i in range(len(options) - 1) if options[i : i + 2] == list(option)
     )
     monkeypatch.setattr(
-        sd, "_GIT_CONFIG", tuple(options[:index] + options[index + 2 :])
+        git_command,
+        "GIT_SAFETY_OPTIONS",
+        tuple(options[:index] + options[index + 2 :]),
     )
+
+
+def test_without_the_hooks_option_the_hooks_run(fixture, monkeypatch) -> None:
+    """The control for the hooks: the same delivery without core.hooksPath."""
+    _leave_out(monkeypatch, HOOKS_PATH)
 
     _deliver(fixture)
 
@@ -177,13 +186,7 @@ def test_without_the_hooks_option_the_hooks_run(fixture, monkeypatch) -> None:
 
 def test_without_the_fsmonitor_option_the_fsmonitor_runs(fixture, monkeypatch) -> None:
     """The control for the fsmonitor: the same delivery without core.fsmonitor."""
-    options = list(sd._GIT_CONFIG)
-    index = next(
-        i for i in range(len(options) - 1) if options[i : i + 2] == list(FSMONITOR)
-    )
-    monkeypatch.setattr(
-        sd, "_GIT_CONFIG", tuple(options[:index] + options[index + 2 :])
-    )
+    _leave_out(monkeypatch, FSMONITOR)
 
     _deliver(fixture)
 

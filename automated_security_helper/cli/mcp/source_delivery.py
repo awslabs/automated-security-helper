@@ -75,6 +75,7 @@ from automated_security_helper.cli.mcp.session_paths import (
 from automated_security_helper.utils.path_containment import (
     validate_contained_path,
 )
+from automated_security_helper.utils.git_command import GIT_PROGRAM, git_argv
 from automated_security_helper.utils.process_env import snapshot_environ
 
 # ---------------------------------------------------------------------------
@@ -333,10 +334,10 @@ _GIT_SSH_COMMAND = " ".join(
 #: list, so no configured helper runs; only the https and ssh protocols are
 #: allowed, for submodules and anything else git might reach as well as for the
 #: clone itself; an http redirect is not followed, so an allowed host cannot send
-#: git to one that is not. ``core.fsmonitor=false`` and
-#: ``core.hooksPath=/dev/null`` keep git from starting the fsmonitor command or a
-#: hook (the clone's post-checkout, the checkout's, a fetch's ref-update hooks),
-#: wherever they were configured.
+#: git to one that is not. Every command is built by ``git_argv``, which also puts
+#: ``core.fsmonitor=false`` and ``core.hooksPath=/dev/null`` before these, so git
+#: starts neither the fsmonitor command nor a hook (the clone's post-checkout, the
+#: checkout's, a fetch's ref-update hooks), wherever they were configured.
 _GIT_CONFIG = (
     "-c",
     "credential.helper=",
@@ -350,14 +351,10 @@ _GIT_CONFIG = (
     "protocol.ssh.allow=always",
     "-c",
     "http.followRedirects=false",
-    "-c",
-    "core.fsmonitor=false",
-    "-c",
-    "core.hooksPath=/dev/null",
 )
 
 #: The program a delivery runs as git. A tuple so a test can name a stand-in.
-_GIT_ARGV: Tuple[str, ...] = ("git",)
+_GIT_ARGV: Tuple[str, ...] = (GIT_PROGRAM,)
 
 #: Seconds each git command of a delivery (the clone, and for a ref the fetch
 #: and the checkout) may run. A command still running then is stopped together
@@ -769,23 +766,23 @@ def _clone(
     url: str,
     ref: Optional[str],
     *,
-    git: str,
     depth: int,
     target: Path,
     env: Dict[str, str],
+    git: Optional[str] = None,
 ) -> None:
     """Run the clone, and for a ref the fetch and checkout, into ``target``.
 
-    ``git`` is ``_git_executable()``'s answer; the rest of ``_GIT_ARGV`` follows it.
+    ``git`` is ``_git_executable()``'s answer, resolved here when not given; the
+    rest of ``_GIT_ARGV`` follows it. Every command is built by ``git_argv``.
 
     Raises:
         RuntimeError: when the clone or the checkout fails; ``target`` is removed.
         GitTimeoutError: when a command runs past ``GIT_TIMEOUT_SECONDS``.
     """
 
-    argv = [git, *_GIT_ARGV[1:]]
-    cmd = [
-        *argv,
+    program = (git if git is not None else _git_executable(), *_GIT_ARGV[1:])
+    cmd = git_argv(
         *_GIT_CONFIG,
         "clone",
         "--depth",
@@ -795,7 +792,8 @@ def _clone(
         "--",
         url,
         str(target),
-    ]
+        program=program,
+    )
     result = _run_git(cmd, env=env)
     if result.returncode != 0:
         shutil.rmtree(target, ignore_errors=True)
@@ -811,8 +809,7 @@ def _clone(
     # fails (a commit id the remote won't serve by id) leaves the checkout to
     # find the ref in the clone itself, and to report it if it isn't there.
     fetch = _run_git(
-        [
-            *argv,
+        git_argv(
             *_GIT_CONFIG,
             "-C",
             str(target),
@@ -821,20 +818,21 @@ def _clone(
             str(depth),
             "origin",
             ref,
-        ],
+            program=program,
+        ),
         env=env,
     )
     revision = "FETCH_HEAD" if fetch.returncode == 0 else ref
     checkout = _run_git(
-        [
-            *argv,
+        git_argv(
             *_GIT_CONFIG,
             "-C",
             str(target),
             "checkout",
             "--detach",
             revision,
-        ],
+            program=program,
+        ),
         env=env,
     )
     if checkout.returncode != 0:

@@ -25,6 +25,12 @@ package is built here.
 
 from __future__ import annotations
 
+from typing import Sequence, Union
+
+#: The program name every git command ASH runs starts from, before a caller resolves
+#: it to an absolute path.
+GIT_PROGRAM = "git"
+
 #: Put before the subcommand in every git command ASH runs; see the module docstring.
 GIT_SAFETY_OPTIONS: tuple[str, ...] = (
     "-c",
@@ -34,10 +40,13 @@ GIT_SAFETY_OPTIONS: tuple[str, ...] = (
 )
 
 
-def git_argv(*args: str, program: str = "git") -> list[str]:
-    """``[program, *GIT_SAFETY_OPTIONS, *args]``: a git command for ``subprocess``.
+def git_argv(*args: str, program: Union[str, Sequence[str]] = GIT_PROGRAM) -> list[str]:
+    """``[*program, *GIT_SAFETY_OPTIONS, *args]``: a git command for ``subprocess``.
 
     ``program`` is the git to run: the bare name, or the absolute path a caller
     resolved so that Windows does not look for git in the working directory first.
+    A sequence is the program followed by what must come before the options, such
+    as a stand-in script run through its interpreter.
     """
-    return [program, *GIT_SAFETY_OPTIONS, *args]
+    prefix = [program] if isinstance(program, str) else list(program)
+    return [*prefix, *GIT_SAFETY_OPTIONS, *args]
