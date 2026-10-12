@@ -502,8 +502,8 @@ def also_runs(*executables: str) -> Iterator[None]:
     environment was readable only while a broad directory around uv (all of
     ~/.local, for a uv in ~/.local/bin) was mounted. Each executable named here gets
     the grants argv0 gets, through the same breadth filter
-    (``policy._executable_prefix``): its directory and install prefix, never a home
-    or a directory directly in one. Only ASH's own code names them; nothing a
+    (``policy._executable_prefix``): its directory and install prefix, never a home,
+    a directory holding one, or a directory directly in one. Only ASH's own code names them; nothing a
     scanner's options say reaches this.
     """
     token = _ALSO_RUNS.set(_ALSO_RUNS.get() + tuple(executables))

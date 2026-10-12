@@ -196,3 +196,60 @@ def test_a_named_executable_gets_argv0s_breadth_filter(homes, recorded, tmp_path
     readable = _real(recorded.policies[-1].read_only)
     assert Path(os.path.realpath(target.parent)) in readable
     assert not _covers(readable, passwd_home / ".ssh")
+
+
+@pytest.fixture
+def python_above_the_homes(homes, tmp_path):
+    """A Python at <dir>/bin/python3 whose <dir> holds both homes.
+
+    The CI shape: HOME=$WORK/home with a Python or venv at $WORK. A tool venv
+    outside the homes runs on it through its bin/python link.
+    """
+    real_python = _executable(tmp_path / "bin" / "python3")
+    venv = tmp_path / "tools" / "faketool"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "pyvenv.cfg").write_text(f"home = {real_python.parent}\n")
+    (venv / "bin" / "python").symlink_to(real_python)
+    return real_python, venv / "bin" / "python"
+
+
+def _assert_no_directory_holding_a_home(readable, homes, tmp_path, real_python):
+    home, passwd_home = homes
+    assert Path(os.path.realpath(real_python.parent)) in readable
+    assert Path(os.path.realpath(tmp_path)) not in readable
+    for secret in (passwd_home / ".ssh", passwd_home / ".local", home):
+        assert not _covers(readable, secret), secret
+
+
+def test_also_runs_never_mounts_a_directory_holding_a_home(
+    homes, recorded, tmp_path, python_above_the_homes
+):
+    """The interpreter's install prefix holds both homes, so only its bin is granted."""
+    real_python, venv_python = python_above_the_homes
+
+    with scope_module.also_runs(str(venv_python)):
+        _plan(["/usr/bin/true"])
+
+    _assert_no_directory_holding_a_home(
+        _real(recorded.policies[-1].read_only), homes, tmp_path, real_python
+    )
+
+
+@pytest.mark.parametrize("spawned", ["argv0", "shebang"])
+def test_a_spawns_own_program_never_mounts_a_directory_holding_a_home(
+    homes, recorded, tmp_path, python_above_the_homes, spawned
+):
+    """The same breadth filter for argv0, and for the interpreter a script names."""
+    real_python, venv_python = python_above_the_homes
+    if spawned == "argv0":
+        argv0 = venv_python
+    else:
+        argv0 = tmp_path / "tools" / "faketool" / "bin" / "faketool"
+        argv0.write_text(f"#!{venv_python}\nprint('tool')\n")
+        argv0.chmod(0o755)
+
+    _plan([str(argv0), "--version"])
+
+    _assert_no_directory_holding_a_home(
+        _real(recorded.policies[-1].read_only), homes, tmp_path, real_python
+    )

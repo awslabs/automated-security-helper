@@ -608,12 +608,12 @@ def _executable_prefix(argv0: str) -> List[Path]:
     homes = _homes()
 
     def too_broad(prefix: Path) -> bool:
-        # A prefix of /, of a home directory, or directly under one (~/.local,
-        # ~/.cargo, ~/.toolbox) holds far more than the tool: ~/.local/share carries
-        # keyrings and ~/.cargo carries credentials.toml. Deeper prefixes, such as
+        # A prefix of /, of a home directory, of a directory holding one (a Python
+        # at $WORK/bin with HOME=$WORK/home), or directly under one (~/.local,
+        # ~/.cargo) holds far more than the tool: ~/.local/share carries keyrings
+        # and ~/.cargo carries credentials.toml. Deeper prefixes, such as
         # ~/.nvm/versions/node/v22, are a single installation.
-        real = Path(os.path.realpath(prefix))
-        return real == Path("/") or real in homes or real.parent in homes
+        return _broader_than_a_tool(prefix, homes)
 
     paths: List[Path] = []
     candidates = set(_symlink_hops(Path(found))) | {Path(os.path.realpath(found))}
