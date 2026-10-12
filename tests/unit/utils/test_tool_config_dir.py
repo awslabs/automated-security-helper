@@ -129,6 +129,19 @@ def test_outside_a_scope_each_file_gets_its_own_directory(tree) -> None:
     assert not in_scanned_tree(first, tree.source)
 
 
+def test_without_a_usable_temporary_directory_the_output_directory_is_used(
+    tree, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def no_temporary_directory() -> str:
+        raise FileNotFoundError(2, "No usable temporary directory found")
+
+    monkeypatch.setattr(tempfile, "gettempdir", no_temporary_directory)
+    with tool_config_scope(_context(tree.source, tree.outside)):
+        written = write_tool_config("x.yaml", "{}\n")
+        assert written.parent.parent == tree.outside
+    assert not written.parent.exists()
+
+
 # A directory another local account can change: it could rename the directory ASH
 # made there and put its own in its place before the file is written or read.
 

@@ -23,7 +23,7 @@ Each scanner run has a directory of its own for these files
 * made by ``tempfile.mkdtemp``, so it is new, its name is not known in advance,
   and its mode is 0700. It is in the system temporary directory, or under the
   output directory when the temporary directory is inside the scanned tree and the
-  output directory is not;
+  output directory is not, or when there is no usable temporary directory;
 * never under a directory another local account could change: one it owns, or
   one its group or everyone can write without the sticky bit, anywhere from the
   candidate up to ``/``. Such an account could otherwise rename the new directory
@@ -197,11 +197,16 @@ def _new_directory(scan_root: Optional[Path], output_dir: Optional[Path]) -> Pat
     A candidate that another account could change (:func:`_changeable_by_others`)
     is never used, and with no other candidate nothing is written.
     """
-    candidates = [Path(tempfile.gettempdir())]
+    candidates: List[Path] = []
+    passed_over: List[str] = []
+    try:
+        candidates.append(Path(tempfile.gettempdir()))
+    except OSError as e:
+        # tempfile raises FileNotFoundError when no candidate it tries is usable.
+        passed_over.append(f"the temporary directory: {e}")
     if output_dir is not None and output_dir.is_dir():
         candidates.append(output_dir)
     private: List[Path] = []
-    passed_over: List[str] = []
     for parent in candidates:
         reason = _changeable_by_others(parent)
         if reason is None:
