@@ -2466,6 +2466,17 @@
 
 ### Fixes
 
+- **bandit reads no file in `global_settings.ignore_paths`.** bandit's `--exclude`
+  value was built once, when the scanner was constructed, so the scan's ignore
+  paths never reached it: bandit read the ignored files, and its own results under
+  `scanners/bandit/` held their findings, which the reports then dropped. The
+  value is now built for each scan. Each ignore path is matched as ASH matches it
+  when it drops findings, and passed as the ignored files themselves, or as a
+  directory whose every file is ignored. An entry that bandit would also apply to
+  a file nobody ignored (bandit leaves out every path an entry is a substring of)
+  is not passed, and bandit then reads that file and ASH drops its findings as
+  before. An option changed after the scanner was built, such as
+  `scanners.bandit.options.excluded_paths`, now reaches bandit too.
 - **A plugin module that failed to import in any shard or workspace project fails
   the combined results too.** `metadata.plugin_load_errors` lists the plugin modules
   a scan could not import, and the completeness gate

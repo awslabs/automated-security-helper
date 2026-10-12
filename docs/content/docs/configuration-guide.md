@@ -512,7 +512,10 @@ global_settings:
 
 An ignore path is a suppression. ASH does not convert a file under one or include
 it in the file lists it hands scanners, and leaves a finding any scanner reports
-there out of the results. `--ignore-suppressions` lifts ignore paths along with
+there out of the results. bandit is also told, in its `--exclude`, to leave out the
+files an ignore path matches. The other scanners that walk the directory
+themselves still read them, and ASH drops what they find there.
+`--ignore-suppressions` lifts ignore paths along with
 suppressions: every scanner reads those files and their findings are reported. See
 [Temporarily Disabling Suppressions](suppressions.md#temporarily-disabling-suppressions).
 

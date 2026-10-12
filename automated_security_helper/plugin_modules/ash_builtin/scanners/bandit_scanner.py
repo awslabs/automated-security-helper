@@ -1,5 +1,6 @@
 """Module containing the Bandit security scanner implementation."""
 
+import bisect
 import fnmatch
 import logging
 import os
@@ -32,11 +33,23 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
-from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
+from automated_security_helper.utils.link_exclusions import (
+    ignored_entries,
+    walked_files,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import mask_secrets_in_sarif
 from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
+
+
+#: What an ``--exclude`` entry cannot hold: bandit splits the value on commas and
+#: reads ``* ? [`` as fnmatch syntax, and a line break fails ASH's flag-key check.
+_BANDIT_EXCLUDE_UNSAFE = frozenset(",*?[\n\r")
+
+#: The longest ``--exclude=...`` argument passed. Linux refuses one argument longer
+#: than 128 KiB (MAX_ARG_STRLEN) with E2BIG.
+_EXCLUDE_ARGUMENT_LIMIT = 120 * 1024
 
 
 class BanditScannerConfigOptions(ScannerOptionsBase):
@@ -304,21 +317,32 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         if self.config.options.ignore_nosec:
             self.args.extra_args.append(ToolExtraArg(key="--ignore-nosec", value=None))
 
-        bandit_excludes = []
+        # Rebuilt, with the scan's own entries, when each command is assembled
+        # (_execute_scan); this one is the value from the configuration alone.
+        self.args.extra_args.append(
+            ToolExtraArg(
+                key=f"--exclude={','.join(self._configured_excludes())}", value=None
+            )
+        )
+
+        return super()._process_config_options()
+
+    def _configured_excludes(self) -> List[str]:
+        """The ``--exclude`` entries the configuration gives, read when called.
+
+        ASH's known ignore paths, each as ``<path>/**`` and ``**/<path>/**``, and each
+        ``scanners.bandit.options.excluded_paths`` entry as ``**/<path>/**``.
+        """
+        entries = []
         for item in KNOWN_IGNORE_PATHS:
-            bandit_excludes.append(str(Path(item).joinpath("**")))
-            bandit_excludes.append(str(Path("**").joinpath(item, "**")))
+            entries.append(str(Path(item).joinpath("**")))
+            entries.append(str(Path("**").joinpath(item, "**")))
         for item in self.config.options.excluded_paths:
             ASH_LOGGER.debug(
                 f"Path '{item.path}' excluded from {self.config.name} scan for reason: {item.reason}"
             )
-            bandit_excludes.append(str(Path("**").joinpath(item.path, "**")))
-
-        self.args.extra_args.append(
-            ToolExtraArg(key=f"--exclude={','.join(bandit_excludes)}", value=None)
-        )
-
-        return super()._process_config_options()
+            entries.append(str(Path("**").joinpath(item.path, "**")))
+        return entries
 
     # Bandit emits exit code 1 when findings are present; treat that as success
     # alongside 0. (Same as base default, but spelled out for clarity.)
@@ -356,36 +380,59 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     ):
         """Resolve final argv and results path for Bandit.
 
-        Merges global ignore paths into the configured excluded_paths for the
-        duration of argument resolution, then restores the original list to
-        avoid accumulation across repeated scan() calls.
+        The ``--exclude`` value is assembled here, for this scan, from the current
+        configuration (``_configured_excludes``), the links leaving ``target``
+        (``_link_excludes``) and the scan's global ignore paths
+        (``_ignore_excludes``). It was built once at construction, so the global
+        ignore paths, which a scan passes in, never reached bandit, and an option
+        changed after construction did not either. The value, and the ``--ini``,
+        are in a new extra_args list for this resolution only; the list extra_args
+        held is put back as it was, unchanged.
         """
         target_results_dir = self.results_dir.joinpath(target_type)
         results_file = target_results_dir.joinpath("bandit.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
 
-        original_excluded_paths = self.config.options.excluded_paths
-        self.config.options.excluded_paths = list(original_excluded_paths) + list(
-            global_ignore_paths
+        files, links = walked_files(target)
+        entries = self._configured_excludes() + self._link_excludes(
+            target, files=files, links=links
         )
-        # Added to the --exclude value for this resolution only, like the paths
-        # above: the entries depend on the target, and extra_args persists across
-        # scan() calls. A new list: the one extra_args holds is put back as it
-        # was, unchanged.
+        length = len(f"--exclude={','.join(entries)}".encode())
+        if length > _EXCLUDE_ARGUMENT_LIMIT:
+            raise ScannerError(
+                f"Not running bandit on {Path(target).as_posix()}: its --exclude "
+                f"value, with the {len(links)} links that leave the scanned tree, is "
+                f"longer than one command-line argument can be "
+                f"({_EXCLUDE_ARGUMENT_LIMIT} bytes)."
+            )
+        left_out = 0
+        for entry in self._ignore_excludes(target, files, global_ignore_paths):
+            added = len(entry.encode()) + (1 if entries else 0)
+            if length + added > _EXCLUDE_ARGUMENT_LIMIT:
+                left_out += 1
+                continue
+            entries.append(entry)
+            length += added
+        if left_out:
+            self._plugin_log(
+                f"{left_out} paths the global ignore paths match are not in bandit's "
+                "--exclude, which would be longer than one command-line argument "
+                "can be; bandit reads them, and ASH drops their findings.",
+                target_type=target_type,
+                level=logging.WARNING,
+            )
+
         original_extra_args = self.args.extra_args
-        link_excludes = self._link_excludes(target)
         ini_file = self._ini_file or empty_tool_config(
             "bandit-empty.ini", "[bandit]\n", context=self.context
         )
         self.args.extra_args = [
             *(
-                ToolExtraArg(
-                    key=f"{arg.key},{','.join(link_excludes)}", value=arg.value
-                )
-                if link_excludes and arg.key.startswith("--exclude=")
-                else arg
+                arg
                 for arg in original_extra_args
+                if not arg.key.startswith("--exclude=")
             ),
+            ToolExtraArg(key=f"--exclude={','.join(entries)}", value=None),
             ToolExtraArg(key="--ini", value=ini_file.as_posix()),
         ]
         try:
@@ -393,12 +440,61 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 target=target, results_file=results_file
             )
         finally:
-            self.config.options.excluded_paths = original_excluded_paths
             self.args.extra_args = original_extra_args
 
         return final_args, results_file, None
 
-    def _link_excludes(self, target: Path) -> List[str]:
+    def _ignore_excludes(
+        self,
+        target: Path,
+        files: List[str],
+        global_ignore_paths: List[IgnorePathWithReason],
+    ) -> List[str]:
+        """``--exclude`` entries for the files the global ignore paths match.
+
+        The files and fully ignored directories come from ``ignored_entries``, which
+        matches each pattern as ASH does when it drops findings. Each is passed as
+        bandit's walk spells it, ``<target>/<path>`` (a directory with its trailing
+        ``/``). bandit 1.9.4 also leaves out every path an entry is a substring of,
+        and reads ``,`` as a separator and ``* ? [`` as pattern syntax, so an entry
+        is left out of the value when it holds one of those or a line break, or
+        when it is the start of a path that is not ignored (``x.py`` of ``x.pyw``).
+        bandit then reads that file, and ASH drops its findings after the scan. None
+        on Windows, where bandit's walk does not join paths with ``/``.
+        """
+        if os.sep != "/":
+            return []
+        relative_entries = ignored_entries(
+            target, self.context.source_dir, global_ignore_paths, files
+        )
+        if not relative_entries:
+            return []
+        root = Path(target).as_posix()
+        walked = sorted(f"{root}/{relative}" for relative in files)
+        # A path holding the root a second time could hold an entry other than at
+        # its start; there are normally none.
+        repeated = [path for path in walked if path.find(root, 1) != -1]
+        entries = []
+        for relative in relative_entries:
+            entry = f"{root}/{relative}"
+            if any(character in entry for character in _BANDIT_EXCLUDE_UNSAFE):
+                continue
+            if not entry.endswith("/"):
+                index = bisect.bisect_left(walked, entry)
+                after = walked[index + 1] if index + 1 < len(walked) else ""
+                if after.startswith(entry):
+                    continue
+            if any(entry in path and not path.startswith(entry) for path in repeated):
+                continue
+            entries.append(entry)
+        return entries
+
+    def _link_excludes(
+        self,
+        target: Path,
+        files: List[str] | None = None,
+        links: List[str] | None = None,
+    ) -> List[str]:
         """``--exclude`` entries for each link to a file whose target leaves ``target``.
 
         bandit reads a link to a file wherever it points: its walk lists the link
@@ -411,8 +507,12 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         leaves out a walked file when an entry matches its path with ``fnmatch`` or
         is a substring of it. So each entry is the link's path as bandit's walk
         spells it, ``<target>/<path below it>``, and it is used only when it leaves
-        out that file alone: it holds no comma and no ``*``, ``?`` or ``[``, and no
-        other file's path under ``target`` contains it.
+        out that file alone: it holds no comma, no ``*``, ``?`` or ``[``, and no line
+        break (a flag key with one fails ASH's own check, which would drop the whole
+        ``--exclude``), and no other file's path under ``target`` contains it.
+
+        ``files`` and ``links`` are ``walked_files(target)``, when the caller has
+        walked it already.
 
         Raises:
             ScannerError: Naming the first link that cannot be left out that way,
@@ -420,18 +520,18 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 ``/`` (Windows). bandit is then not run on ``target``, rather than
                 read the file the link points at.
         """
-        all_files: List[str] = []
-        links = file_links_leaving_tree(target, all_files=all_files)
+        if files is None or links is None:
+            files, links = walked_files(target)
         if not links:
             return []
         root = Path(target).as_posix()
-        walked = [f"{root}/{relative}" for relative in all_files]
+        walked = [f"{root}/{relative}" for relative in files]
         entries = []
         for relative in links:
             entry = f"{root}/{relative}"
             if (
                 os.sep != "/"
-                or any(character in entry for character in ",*?[")
+                or any(character in entry for character in _BANDIT_EXCLUDE_UNSAFE)
                 or any(entry in other for other in walked if other != entry)
             ):
                 raise ScannerError(
@@ -488,8 +588,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             if entry
         ]
         root = Path(target).as_posix()
-        all_files: List[str] = []
-        file_links_leaving_tree(target, all_files=all_files)
+        all_files, _ = walked_files(target)
         python = [
             f"{root}/{relative}"
             for relative in all_files
