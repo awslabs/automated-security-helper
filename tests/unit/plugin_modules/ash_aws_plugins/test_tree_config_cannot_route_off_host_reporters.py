@@ -271,6 +271,64 @@ def test_the_workspace_route_keeps_the_trees_destinations_and_off_switch(
     assert f"reporters.{section}.enabled" in _warnings(ash_log)
 
 
+#: A destination the operator's config sets for each reporter, so the test can
+#: tell it from the reporter's default.
+_OPERATOR_DESTINATIONS: Dict[str, Tuple[str, Any]] = {
+    "aws-security-hub": ("account_id", "000000000002"),
+    "bedrock-summary-reporter": ("model_id", "operator.model-v1:0"),
+    "cloudwatch-logs": ("log_group_name", "operator-log-group"),
+    "s3": ("bucket_name", "operator-bucket"),
+}
+
+
+def _built(config, reporter: str, root: Path):
+    """The reporter built from ``config`` as ``ReportPhase`` builds it."""
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.ash_config import AshConfig
+
+    context = PluginContext(
+        source_dir=root / "src",
+        output_dir=root / "out",
+        work_dir=root / "work",
+        config=AshConfig(),
+    )
+    found = config.get_plugin_config("reporter", reporter)
+    return _reporter_class(reporter)(context=context, config=found)
+
+
+def _null_section_configs(tmp_path: Path, reporter: str, section: str, on: bool):
+    """The CLI and workspace routes' configs for a tree that writes the section as null."""
+    name, value = _OPERATOR_DESTINATIONS[reporter]
+    operator = _write(
+        tmp_path / "operator" / "ash.yaml",
+        {"reporters": {reporter: {"enabled": on, "options": {name: value}}}},
+    )
+    repo = tmp_path / "workspace" / "repo"
+    project = _write(repo / ".ash" / ".ash.yaml", {"reporters": {section: None}})
+    return (
+        _cli(repo, config_path=project, trusted_config_path=operator),
+        _workspace(tmp_path, project, operator),
+    )
+
+
+@pytest.mark.parametrize("on", [False, True], ids=["operator-off", "operator-on"])
+@pytest.mark.parametrize(
+    "reporter,section",
+    [(r, s) for r in sorted(REPORTER_ENABLED_DEFAULTS) for s in _SECTION_SPELLINGS[r]],
+)
+def test_a_null_section_in_the_tree_reads_as_an_empty_one(
+    tmp_path, reporter, section, on
+):
+    """Left null, the section would build the reporter from its defaults: on, and
+    pointed at the defaults' destination rather than the operator's."""
+    name, value = _OPERATOR_DESTINATIONS[reporter]
+
+    for config in _null_section_configs(tmp_path, reporter, section, on):
+        built = _built(config, reporter, tmp_path / "context")
+        assert built.config.enabled is on
+        assert getattr(built.config.options, name) == value
+
+
 @pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
 def test_off_by_default_neither_route_lets_the_tree_turn_one_on(
     tmp_path, ash_log, monkeypatch, reporter

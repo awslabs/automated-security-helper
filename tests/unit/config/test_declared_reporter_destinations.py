@@ -363,6 +363,35 @@ def test_a_project_config_does_not_turn_on_a_reporter_the_operator_turned_off(
     assert len(_ignoring(result["warnings"], enabled_key)) == 1, result["warnings"]
 
 
+@pytest.mark.parametrize("on", [False, True], ids=["operator-off", "operator-on"])
+def test_a_null_section_in_a_project_config_reads_as_an_empty_one(tmp_path, site, on):
+    """Left null, the section would build the reporter from its defaults: on, and
+    sending to the default endpoint rather than the operator's."""
+    project = _write(
+        tmp_path / "repo" / ".ash" / ".ash.yaml", {"reporters": {REPORTER: None}}
+    )
+    operator = _write(
+        tmp_path / "operator" / "ash.yaml",
+        {
+            "reporters": {
+                REPORTER: {"enabled": on, "options": {"endpoint": OPERATOR_ENDPOINT}}
+            }
+        },
+    )
+
+    result = _scan(
+        tmp_path,
+        site,
+        config_path=str(project),
+        trusted_config_path=str(operator),
+    )
+
+    if on:
+        assert result["sent"]["endpoint"] == OPERATOR_ENDPOINT, result
+    else:
+        assert result["sent"] is None, result
+
+
 # ---------------------------------------------------------------------------
 # (b) --config-overrides and (c) an operator config outside the tree
 # ---------------------------------------------------------------------------

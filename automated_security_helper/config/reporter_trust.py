@@ -197,6 +197,17 @@ def _as_dict(section: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _as_section(section: Any) -> Dict[str, Any]:
+    """A section of the config being confined, a null or other non-mapping one as empty.
+
+    Left as it is, ``reporters: {s3: null}`` builds the reporter from its own
+    defaults (``get_plugin_config`` returns None), which may be on and point
+    elsewhere than the trusted base, so it is confined as a section that sets
+    nothing.
+    """
+    return _as_dict(section) or {}
+
+
 def confine_reporter_destinations(
     config: "AshConfig",
     trusted_config: "AshConfig",
@@ -448,9 +459,7 @@ def _confine_options(
         trusted_section = _as_dict(trusted_config.get_plugin_config("reporter", plugin))
         trusted_options = dict((trusted_section or {}).get("options") or {})
         for key in _sections_of(config, plugin):
-            section = _as_dict(extras[key])
-            if section is None:
-                continue
+            section = _as_section(extras[key])
             options = dict(section.get("options") or {})
             changed = False
             for name in option_names:
@@ -521,9 +530,7 @@ def _confine_enabled(
                 extras[plugin] = {"enabled": False}
             continue
         for key in keys:
-            section = _as_dict(extras[key])
-            if section is None:
-                continue
+            section = _as_section(extras[key])
             current = section.get("enabled", _MISSING)
             if turns_a_reporter_off(current) or (
                 current is _MISSING and _reads_as_off(default)
@@ -557,9 +564,7 @@ def _take_trusted_enabled(
             extras[plugin] = {"enabled": wanted}
         return ignored
     for key in keys:
-        section = _as_dict(extras[key])
-        if section is None:
-            continue
+        section = _as_section(extras[key])
         current = section.get("enabled", _MISSING)
         if current is _MISSING:
             if _reads_as_off(default) != wanted:
