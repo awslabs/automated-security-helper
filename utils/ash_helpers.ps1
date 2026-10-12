@@ -81,7 +81,7 @@ function Invoke-ASH {
     [CmdletBinding()]
     param(
         [parameter(Position = 0)]
-        [ValidateScript({ Test-Path $_ })]
+        [ValidateScript({ Test-Path -LiteralPath $_ })]
         [string]
         $SourceDir = (Get-Location).Path,
         [parameter()]
@@ -230,16 +230,18 @@ function Invoke-ASH {
             @('docker', 'finch', 'nerdctl', 'podman')
         }
 
-        # Resolve source and output directories
-        $sourceDirFull = Get-Item $SourceDir | Select-Object -ExpandProperty FullName
+        # Resolve source and output directories. -LiteralPath: -Path reads '[', ']',
+        # '*' and '?' as wildcards, so 'src[1]' would name 'src1'. New-Item has no
+        # -LiteralPath and reads its -Path as written.
+        $sourceDirFull = Get-Item -LiteralPath $SourceDir | Select-Object -ExpandProperty FullName
         Write-Verbose "Resolved SourceDir to: $sourceDirFull"
 
         # Create the output directory if it doesn't exist
-        if (-not (Test-Path $OutputDir)) {
+        if (-not (Test-Path -LiteralPath $OutputDir)) {
             Write-Verbose "Creating OutputDir: $OutputDir"
-            New-Item $OutputDir -ItemType Directory -Force | Out-Null
+            New-Item -Path $OutputDir -ItemType Directory -Force | Out-Null
         }
-        $outputDirFull = Get-Item $OutputDir | Select-Object -ExpandProperty FullName
+        $outputDirFull = Get-Item -LiteralPath $OutputDir | Select-Object -ExpandProperty FullName
 
         # --mount reads its value as comma-separated fields, so a comma in a host path
         # starts a field of its own (a,b), a double quote starts CSV

@@ -548,3 +548,13 @@ def test_the_powershell_wrapper_mounts_only_the_documented_destinations(ps1):
     assert assigned and all(
         value.startswith(('"/src/', '"/ash-config/')) for value in assigned
     ), assigned
+
+
+def test_the_powershell_wrapper_reads_source_and_output_paths_literally(ps1):
+    """-Path takes '[', ']', '*' and '?' as wildcards (about_Wildcards), so a source
+    directory named 'src[1]' would resolve to 'src1' when that exists."""
+    by_path = re.findall(
+        r"\b(?:Get-Item|Test-Path|New-Item)\s+(?!-LiteralPath)\$(?:_|SourceDir|OutputDir)\b",
+        ps1,
+    )
+    assert by_path == [], by_path

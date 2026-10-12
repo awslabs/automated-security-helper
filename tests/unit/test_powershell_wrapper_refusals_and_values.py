@@ -226,6 +226,29 @@ def test_an_output_directory_over_the_source_is_refused(
     assert "above it" in " ".join(result.stderr.split())
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the recording runner is a POSIX shell script; Windows gets a .cmd stub",
+)
+def test_a_source_and_output_named_with_wildcard_characters_are_those_names(
+    pwsh, recording_docker, tmp_path
+):
+    """'src[1]' is a name, not a pattern that also matches 'src1'."""
+    (tmp_path / "src[1]").mkdir()
+    (tmp_path / "src1").mkdir()
+    (tmp_path / "out1").mkdir()
+
+    result = _invoke(
+        pwsh, tmp_path, recording_docker, "-SourceDir 'src[1]' -OutputDir 'out[1]'"
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = (tmp_path / "docker-args.txt").read_text(encoding="utf-8").splitlines()
+    assert f"type=bind,source={tmp_path / 'src[1]'},destination=/src,readonly" in args
+    assert f"type=bind,source={tmp_path / 'out[1]'},destination=/out" in args
+    assert (tmp_path / "out[1]").is_dir()
+
+
 def test_an_output_directory_inside_the_source_runs(pwsh, recording_docker, tmp_path):
     """Control: the default .ash/ash_output is inside the source."""
     (tmp_path / "src").mkdir()
