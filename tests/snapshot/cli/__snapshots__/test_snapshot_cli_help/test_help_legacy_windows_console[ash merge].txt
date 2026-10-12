@@ -30,16 +30,21 @@
 │                                                                           configuration asks    │
 │                                                                           for.                  │
 │    --config              -c                          <str>                The operator's config │
-│                                                                           file. Which plugin    │
-│                                                                           modules are imported, │
-│                                                                           which off-host        │
-│                                                                           reporters run, and    │
-│                                                                           where reporters send  │
-│                                                                           findings come from    │
-│                                                                           it, the defaults and  │
-│                                                                           --config-overrides,   │
-│                                                                           not from the shards'  │
-│                                                                           recorded config.      │
+│                                                                           file. Its values      │
+│                                                                           replace the shards'   │
+│                                                                           for the settings a    │
+│                                                                           shard's recorded      │
+│                                                                           config cannot choose, │
+│                                                                           such as where         │
+│                                                                           reporters send        │
+│                                                                           findings and which    │
+│                                                                           off-host reporters    │
+│                                                                           run. It adds no       │
+│                                                                           plugin module or      │
+│                                                                           reporter the shards   │
+│                                                                           did not record; use   │
+│                                                                           --config-overrides    │
+│                                                                           for that.             │
 │                                                                           [env var: ASH_CONFIG] │
 │    --config-overrides                                <str>                Configuration         │
 │                                                                           overrides as          │

@@ -203,9 +203,14 @@ from automated_security_helper.base.plugin_context import PluginContext
 # model_validate_json raises PydanticUserError. ``ash report`` gets the same
 # rebuild by side effect of importing resolve_config; relying on an import made
 # for another purpose is what makes this fragile, so the dependency is named here.
-from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.ash_config import AshConfig, reduced_plugin_name
+from automated_security_helper.config.plugin_module_trust import split_plugin_modules
 from automated_security_helper.config.reporter_trust import (
+    REPORTER_DESTINATION_OPTIONS,
+    REPORTER_ENABLED_DEFAULTS,
     confine_declared_reporter_destinations,
+    declared_destination_options,
+    declared_enabled_defaults,
 )
 from automated_security_helper.config.resolve_config import (
     apply_config_overrides,
@@ -1388,6 +1393,89 @@ def warn_on_ignored_operator_verdict_settings(
         )
 
 
+def _section_dict(section: Any) -> Dict[str, Any]:
+    if isinstance(section, dict):
+        return section
+    if hasattr(section, "model_dump"):
+        return section.model_dump(by_alias=True)
+    return {}
+
+
+def _apply_hint(key: str, value: Any) -> str:
+    """The ``--config-overrides`` that sets ``key`` to ``value``, shortened when long."""
+    text = _override_value(value)
+    if len(text) > 60:
+        return f"pass its value with --config-overrides {key}=VALUE"
+    if isinstance(value, (list, dict)):
+        return f"pass --config-overrides '{key}={text}'"
+    return f"pass --config-overrides {key}={text}"
+
+
+def warn_on_unapplied_operator_settings(
+    trusted_config: AshConfig,
+    effective: AshConfig,
+    reporter_classes: Sequence[type],
+) -> None:
+    """Name each plugin module and reporter setting ``--config`` sets that does not apply.
+
+    ``--config`` supplies the operator's values for the settings the shards'
+    recorded config names, and adds nothing: a plugin module the shards did not
+    record is not imported, and a reporter's ``enabled`` or destination option
+    for a section the shards did not record is not used. Each such entry is named
+    with the ``--config-overrides`` that would add it. Compared after every
+    confinement step and the plugin load, so only what really did not apply is
+    named.
+    """
+    effective_modules = set(split_plugin_modules(effective.ash_plugin_modules))
+    for name in split_plugin_modules(trusted_config.ash_plugin_modules):
+        if name in effective_modules:
+            continue
+        ASH_LOGGER.warning(
+            f"ash merge's --config names the ash_plugin_modules entry {name!r}, which "
+            "does not apply: the shards did not record it, and --config supplies "
+            "values for what the shards recorded without adding to it. To load it, "
+            f"pass --config-overrides 'ash_plugin_modules+={json.dumps([name])}'."
+        )
+    destinations: Dict[str, Tuple[str, ...]] = dict(REPORTER_DESTINATION_OPTIONS)
+    destinations.update(declared_destination_options(reporter_classes))
+    defaults: Dict[str, bool] = dict(REPORTER_ENABLED_DEFAULTS)
+    defaults.update(declared_enabled_defaults(reporter_classes))
+    written = trusted_config.model_dump(mode="json", by_alias=True, exclude_unset=True)
+    for section_key, section in (written.get("reporters") or {}).items():
+        if not isinstance(section, dict):
+            continue
+        plugin = next(
+            (
+                known
+                for known in destinations
+                if reduced_plugin_name(known) == reduced_plugin_name(section_key)
+            ),
+            None,
+        )
+        if plugin is None:
+            continue
+        current = _section_dict(effective.get_plugin_config("reporter", plugin))
+        unapplied: List[Tuple[str, Any]] = []
+        if "enabled" in section and bool(
+            current.get("enabled", defaults.get(plugin, True))
+        ) != bool(section["enabled"]):
+            unapplied.append((f"reporters.{section_key}.enabled", section["enabled"]))
+        options = section.get("options") or {}
+        current_options = current.get("options") or {}
+        for option in destinations[plugin]:
+            if option in options and current_options.get(option) != options[option]:
+                unapplied.append(
+                    (f"reporters.{section_key}.options.{option}", options[option])
+                )
+        for key, value in unapplied:
+            ASH_LOGGER.warning(
+                f"ash merge's --config sets {key}, which does not apply: the shards "
+                f"recorded no {section_key} section to take it, and --config supplies "
+                "values for what the shards recorded without adding to it. To apply "
+                f"it, {_apply_hint(key, value)}."
+            )
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -1451,10 +1539,11 @@ def merge_command(
             "--config",
             "-c",
             help=(
-                "The operator's config file. Which plugin modules are imported, "
-                "which off-host reporters run, and where reporters send findings "
-                "come from it, the defaults and --config-overrides, not from the "
-                "shards' recorded config."
+                "The operator's config file. Its values replace the shards' for "
+                "the settings a shard's recorded config cannot choose, such as "
+                "where reporters send findings and which off-host reporters run. "
+                "It adds no plugin module or reporter the shards did not record; "
+                "use --config-overrides for that."
             ),
             envvar="ASH_CONFIG",
         ),
@@ -1635,6 +1724,9 @@ def merge_command(
     # these as confined too.
     confine_declared_reporter_destinations(
         merged.ash_config, reporter_plugins, source=SHARD_RECORDED
+    )
+    warn_on_unapplied_operator_settings(
+        trusted_config, merged.ash_config, reporter_plugins
     )
 
     merged = apply_aggregated_suppressions(merged, plugin_context)

@@ -1199,6 +1199,72 @@ class TestVerdictSettings:
         assert not [m for m in harness.warnings if "ash merge's --config sets" in m]
 
 
+class TestOperatorConfigOutsideTheRecordedConfig:
+    """``--config`` supplies values for what the shards recorded and adds nothing.
+
+    A plugin module or reporter setting the file names that the shards did not
+    record does not apply, so each is named in a warning with the override that
+    would add it.
+    """
+
+    OPERATOR = {
+        "ash_plugin_modules": [AWS],
+        "reporters": {
+            "s3": {
+                "enabled": True,
+                "options": {
+                    "bucket_name": "operator-bucket",
+                    "aws_region": "us-east-2",
+                },
+            }
+        },
+    }
+
+    def test_a_module_and_reporter_the_shards_did_not_record_are_named(self, harness):
+        shard_paths = harness.write_shards({"project_name": "test-merge"})
+        operator = _write_yaml(
+            harness.tmp_path / "operator" / "ash.yaml", self.OPERATOR
+        )
+
+        result = harness.merge(shard_paths, "--config", str(operator))
+
+        _assert_merged(result, harness)
+        assert harness.loaded_modules == [[]]
+        assert harness.uploads == []
+        module = [m for m in harness.warnings if f'ash_plugin_modules+=["{AWS}"]' in m]
+        assert module, harness.warnings
+        assert "--config-overrides" in module[0]
+        bucket = [
+            m
+            for m in harness.warnings
+            if "--config-overrides reporters.s3.options.bucket_name=operator-bucket"
+            in m
+        ]
+        assert bucket, harness.warnings
+        assert any(
+            "--config-overrides reporters.s3.options.aws_region=us-east-2" in m
+            for m in harness.warnings
+        ), harness.warnings
+
+    def test_values_the_recorded_config_takes_are_not_named(self, harness):
+        """Control: the shards record the module and an S3 section, so all of it applies."""
+        shard_paths = harness.write_shards(
+            {"ash_plugin_modules": [AWS], "reporters": {"s3": {"enabled": True}}}
+        )
+        operator = _write_yaml(
+            harness.tmp_path / "operator" / "ash.yaml", self.OPERATOR
+        )
+
+        result = harness.merge(shard_paths, "--config", str(operator))
+
+        _assert_merged(result, harness)
+        assert harness.loaded_modules == [[AWS]]
+        assert harness.options(harness.S3Reporter)["bucket_name"] == "operator-bucket"
+        assert not [m for m in harness.warnings if "does not apply" in m], (
+            harness.warnings
+        )
+
+
 class TestTheRealChain:
     """``ash merge`` in a fresh process, with nothing patched.
 
