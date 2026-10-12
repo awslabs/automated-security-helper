@@ -552,6 +552,58 @@ def test_a_refusal_record_that_is_a_link_is_not_read(tmp_path, outer):
 
 
 @OUTER
+@pytest.mark.parametrize("kind", ["symlink", "directory"])
+def test_a_results_file_that_is_not_a_regular_file_is_not_read(tmp_path, outer, kind):
+    """It refuses the read-back without being read: a link could name any file."""
+    opts = _opts(tmp_path)
+    logger = MagicMock()
+    elsewhere = tmp_path / "elsewhere.ini"
+    elsewhere.write_text("[default]\nkey = NOT-TO-BE-ECHOED\n", encoding="utf-8")
+    results_file = opts.output_dir / "ash_aggregated_results.json"
+
+    def inner(run_id: str) -> int:
+        opts.output_dir.mkdir(parents=True, exist_ok=True)
+        if kind == "symlink":
+            results_file.symlink_to(elsewhere)
+        else:
+            results_file.mkdir()
+        return 0
+
+    with pytest.raises(SystemExit) as refused:
+        outer(opts, inner, logger)
+
+    assert refused.value.code == 1
+    reason = str(getattr(refused.value, "reason", ""))
+    expected = "is a symlink" if kind == "symlink" else "is not a regular file"
+    assert f"{results_file.as_posix()} {expected}" in reason, reason
+    assert "NOT-TO-BE-ECHOED" not in _errors(logger) + reason
+
+
+@OUTER
+def test_a_results_file_that_does_not_parse_is_reported_without_its_content(
+    tmp_path, outer
+):
+    opts = _opts(tmp_path)
+    logger = MagicMock()
+
+    def inner(run_id: str) -> int:
+        opts.output_dir.mkdir(parents=True, exist_ok=True)
+        (opts.output_dir / "ash_aggregated_results.json").write_text(
+            json.dumps({"name": {"value": "NOT-TO-BE-ECHOED"}}), encoding="utf-8"
+        )
+        return 0
+
+    with pytest.raises(SystemExit) as refused:
+        outer(opts, inner, logger)
+
+    assert refused.value.code == 1
+    errors = _errors(logger)
+    assert "Failed to parse results file" in errors, errors
+    assert "name" in errors, errors
+    assert "NOT-TO-BE-ECHOED" not in errors, errors
+
+
+@OUTER
 def test_an_earlier_runs_refusal_record_is_removed_before_the_inner_run(
     tmp_path, outer
 ):

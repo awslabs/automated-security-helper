@@ -930,9 +930,11 @@
   refused before any project is scanned, or `--phases report`), and an inner run
   that failed after the scan phase had written the results file, which used to be
   read back as a verdict. The refusal is never written into the results file, so no
-  results file holding only a refusal is left behind. A refusal record that is a
-  link or not a regular file refuses the read-back without being read, and an
-  earlier run's is removed before the inner run starts. A record an earlier run
+  results file holding only a refusal is left behind. A refusal record or results
+  file that is a link or not a regular file refuses the read-back without being
+  read, and an earlier run's refusal record is removed before the inner run
+  starts. A results file that does not parse is reported by the fields that
+  failed, without the values the file held there. A record an earlier run
   left in a file read back with `--use-existing` is ignored, and is dropped when
   the file is loaded, so reports do not repeat it; `ash merge` drops each shard's
   records the same way. The inner run takes the ID out

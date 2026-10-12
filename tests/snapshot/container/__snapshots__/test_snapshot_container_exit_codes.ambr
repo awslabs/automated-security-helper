@@ -178,9 +178,7 @@
       [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
                    INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
       Running ASH scan using built image...
-                   ERROR    Failed to parse results file: 1 validation error for AshAggregatedResults
-                              Invalid JSON: key must be a string at line 1 column 2
-                                For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/json_invalid
+                   ERROR    Failed to parse results file <TMP>/out/ash_aggregated_results.json: Invalid JSON: key must be a string at line 1 column 2
   
     ''',
   })

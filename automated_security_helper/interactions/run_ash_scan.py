@@ -25,7 +25,7 @@ from typing import (
 )
 
 import typer
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 # `print` shadows the builtin on purpose: this is rich's documented import
 # idiom, so every print() below renders markup and respects the console. The
@@ -1211,6 +1211,54 @@ def _record_inner_refusal(
         )
 
 
+def _refuse_an_inner_file_that_is_not_regular(path: Path, what: str) -> None:
+    """Exit 1, without reading it, when a file the inner run left is not a regular file.
+
+    The inner run, a container's included, can leave a link at a path this
+    process reads, naming any file on the host. ``what`` names the file's content
+    in the message.
+    """
+    problem = not_a_regular_file(path)
+    if problem is None:
+        return
+    reason = (
+        f"{path.as_posix()} {problem}, so {what} is not read. ASH writes that file "
+        "as a regular file; remove it and run ASH again."
+    )
+    print(f"[bold red]ERROR (1) {escape_markup(reason)}[/bold red]")
+    raise ReportPathRefusedExit(reason)
+
+
+def _read_back_inner_results(
+    output_file: Path, logger
+) -> Optional[AshAggregatedResults]:
+    """The inner run's results file, parsed; None when there is none.
+
+    Exits 1 when it is not a regular file, or does not parse. The parse error
+    names each field that failed, without the values the file held there.
+    """
+    _refuse_an_inner_file_that_is_not_regular(output_file, "the inner run's results")
+    if not output_file.exists():
+        return None
+    with open(output_file, mode="r", encoding="utf-8") as f:
+        content = f.read()
+    try:
+        return AshAggregatedResults.model_validate_json(content)
+    except ValidationError as e:
+        problems = "; ".join(
+            (
+                f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+                if error["loc"]
+                else error["msg"]
+            )
+            for error in e.errors(include_input=False, include_url=False)[:10]
+        )
+        logger.error(f"Failed to parse results file {output_file}: {problems}")
+    except ValueError as e:
+        logger.error(f"Failed to parse results file {output_file}: {type(e).__name__}")
+    sys.exit(1)
+
+
 def _refuse_an_inner_run_that_was_refused(opts: ScanOptions, run_id: str) -> None:
     """Exit 1 with the refusal the inner run recorded, given as this process sees the paths.
 
@@ -1218,15 +1266,9 @@ def _refuse_an_inner_run_that_was_refused(opts: ScanOptions, run_id: str) -> Non
     wrote. A record that is a link, or not a regular file, refuses the read-back
     without being read; one with another run's ID is ignored.
     """
-    outcome_file = opts.output_dir / INNER_RUN_OUTCOME_FILE
-    problem = not_a_regular_file(outcome_file)
-    if problem is not None:
-        reason = (
-            f"{outcome_file.as_posix()} {problem}, so the inner run's outcome is not "
-            "read. ASH writes that file as a regular file; remove it and run ASH again."
-        )
-        print(f"[bold red]ERROR (1) {escape_markup(reason)}[/bold red]")
-        raise ReportPathRefusedExit(reason)
+    _refuse_an_inner_file_that_is_not_regular(
+        opts.output_dir / INNER_RUN_OUTCOME_FILE, "the inner run's outcome"
+    )
     refusal = read_refusal_outcome(opts.output_dir, run_id)
     if refusal is not None:
         reason = as_seen_from_the_host(
@@ -2015,14 +2057,8 @@ def _run_container_mode(
     _refuse_an_inner_run_that_was_refused(opts, outer_run_id)
 
     output_file = opts.output_dir / "ash_aggregated_results.json"
-    if output_file.exists():
-        with open(output_file, mode="r", encoding="utf-8") as f:
-            content = f.read()
-        try:
-            results = AshAggregatedResults.model_validate_json(content)
-        except Exception as e:
-            logger.error(f"Failed to parse results file: {e}")
-            sys.exit(1)
+    results = _read_back_inner_results(output_file, logger)
+    if results is not None:
         _refuse_an_inner_run_that_did_not_complete(
             results, opts, outer_run_id, "container", output_file, logger
         )
@@ -2081,14 +2117,8 @@ def _run_nix_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
     # The inner scan wrote to the same output directory this process was given, so unlike
     # container mode there is no path to translate back.
     output_file = opts.output_dir / "ash_aggregated_results.json"
-    if output_file.exists():
-        with open(output_file, mode="r", encoding="utf-8") as f:
-            content = f.read()
-        try:
-            results = AshAggregatedResults.model_validate_json(content)
-        except Exception as e:
-            logger.error(f"Failed to parse results file: {e}")
-            sys.exit(1)
+    results = _read_back_inner_results(output_file, logger)
+    if results is not None:
         _refuse_an_inner_run_that_did_not_complete(
             results, opts, outer_run_id, "nix", output_file, logger
         )

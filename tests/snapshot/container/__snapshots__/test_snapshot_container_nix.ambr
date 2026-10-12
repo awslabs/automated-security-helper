@@ -274,9 +274,7 @@
     'stderr': '',
     'stdout': '''
       [<LOG_TIME>] INFO     Entering Nix shell from flake: path:<REPO>
-                   ERROR    Failed to parse results file: 1 validation error for AshAggregatedResults
-                              Invalid JSON: key must be a string at line 1 column 2
-                                For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/json_invalid
+                   ERROR    Failed to parse results file <TMP>/out/ash_aggregated_results.json: Invalid JSON: key must be a string at line 1 column 2
   
     ''',
   })
