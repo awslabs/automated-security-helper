@@ -17,6 +17,11 @@ canary is in nothing it recorded. The control, where no ignore path matches, sho
 the stand-in does receive the canary, so its absence in the refused case means
 something.
 
+ASH's own output directory is the other thing snyk must not be given: by default it
+is inside the tree, and holds an earlier run's reports. The ``.gitignore`` ASH writes
+there before any scanner starts keeps it from snyk, which honors one (read from
+snyk's sources, not measured; the stand-in models the one rule ASH writes).
+
 snyk-code has no exclusion option of its own, so the operator's ignore paths are the
 only rule the refusal checks; the last test fails if the scanner gains one.
 """
@@ -38,6 +43,7 @@ from automated_security_helper.config.client_scanner_exclusions import (
 )
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -53,7 +59,9 @@ CANARY = "snyk-canary-4b1f0e9d7c"
 
 #: The stand-in snyk. It reads every file below the directory it is given, as the
 #: real program reads what it uploads, and writes its arguments and each file's
-#: path and text to ``received.json`` in the record directory.
+#: path and text to ``received.json`` in the record directory. It models snyk's
+#: .gitignore handling for the one rule ASH writes: a directory whose .gitignore
+#: holds ``*`` is not read, and is listed under ``pruned``.
 _STAND_IN = """#!{python} -I
 import json, os, sys
 
@@ -61,14 +69,22 @@ args = sys.argv[1:]
 output = next(a for a in args if a.startswith("--sarif-file-output="))
 target = args[args.index(output) - 1]
 files = {{}}
-for directory, _subdirectories, names in os.walk(target):
+pruned = []
+for directory, subdirectories, names in os.walk(target):
+    if ".gitignore" in names:
+        ignore = os.path.join(directory, ".gitignore")
+        with open(ignore, encoding="utf-8", errors="replace") as handle:
+            if any(line.strip() == "*" for line in handle):
+                pruned.append(os.path.relpath(directory, target))
+                subdirectories[:] = []
+                continue
     for name in names:
         path = os.path.join(directory, name)
         with open(path, encoding="utf-8", errors="replace") as handle:
             files[os.path.relpath(path, target)] = handle.read()
 os.makedirs({record!r}, exist_ok=True)
 with open(os.path.join({record!r}, "received.json"), "w", encoding="utf-8") as handle:
-    json.dump({{"argv": args, "files": files}}, handle)
+    json.dump({{"argv": args, "files": files, "pruned": pruned}}, handle)
 sarif = {{"version": "2.1.0", "runs": [
     {{"tool": {{"driver": {{"name": "SnykCode", "rules": []}}}}, "results": []}}
 ]}}
@@ -236,6 +252,57 @@ def test_the_first_path_is_shown_with_its_controls_escaped(tmp_path, record):
     assert "the first 'thirdparty/a\\nb\\x1b[31m.js'" in errors, errors
     assert name not in errors
     assert _received(record) is None, "the stand-in snyk ran"
+
+
+REPORT_CANARY = "snyk-report-canary-91d2c4"
+
+
+def _earlier_report(context: PluginContext) -> None:
+    """What an earlier run left in the output directory: a report."""
+    reports = Path(context.output_dir) / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    (reports / "ash.html").write_text(f"<p>{REPORT_CANARY}</p>\n", encoding="utf-8")
+
+
+def test_a_later_run_sends_snyk_nothing_from_an_output_dir_in_the_tree(
+    tmp_path, record
+):
+    """The output directory's .gitignore, written before any scanner starts, keeps
+    an earlier run's reports from snyk, as far as the stand-in models snyk's
+    .gitignore handling."""
+    context = _context(tmp_path, [])
+    _earlier_report(context)
+    ASHScanOrchestrator(
+        source_dir=Path(context.source_dir),
+        output_dir=Path(context.output_dir),
+        config_path=None,
+        config_overrides=None,
+        no_cleanup=False,
+        metadata=None,
+        ash_plugin_modules=[],
+    ).ensure_directories()
+
+    container = _run(context, Path(context.source_dir), "source")
+
+    assert container.status != ScannerStatus.ERROR, _errors(container)
+    received = _received(record)
+    assert received is not None, "the stand-in snyk did not run"
+    assert received["pruned"] == [".ash/ash_output"]
+    assert [name for name in received["files"] if name.startswith(".ash/")] == []
+    assert REPORT_CANARY not in json.dumps(received)
+
+
+def test_without_the_gitignore_snyk_reads_the_output_dir(tmp_path, record):
+    """The control: the stand-in reads ASH's output when nothing ignores it."""
+    context = _context(tmp_path, [])
+    _earlier_report(context)
+
+    _run(context, Path(context.source_dir), "source")
+
+    received = _received(record)
+    assert received is not None, "the stand-in snyk did not run"
+    assert received["pruned"] == []
+    assert REPORT_CANARY in received["files"][".ash/ash_output/reports/ash.html"]
 
 
 def test_snyk_code_has_no_exclusion_option_the_refusal_does_not_check():

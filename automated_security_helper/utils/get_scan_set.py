@@ -15,6 +15,7 @@ import os
 
 from automated_security_helper.utils.git_command import git_argv
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.output_dir_links import OUTPUT_GITIGNORE
 from automated_security_helper.utils.scanned_tree import (
     REASON_LINK_LEAVES_TREE,
     TreeInputRefused,
@@ -323,9 +324,11 @@ def file_links_leaving_tree(
     return sorted(links)
 
 
-#: The log files the running scan has already opened in its output directory when
-#: the scan set is built. Not counted among the files found there.
-_THIS_RUNS_LOG_FILES = frozenset({"ash.log", "ash.log.jsonl"})
+#: The files the running scan has already written at the top of its output directory
+#: when the scan set is built: its logs, and the .gitignore it writes there when the
+#: directory is inside the tree (output_dir_links.ignore_output_dir_in_git). Not
+#: counted among the files found there.
+_THIS_RUNS_FILES = frozenset({"ash.log", "ash.log.jsonl", OUTPUT_GITIGNORE})
 
 
 def _directory_identity(
@@ -387,13 +390,11 @@ def _is_own_output(candidate: str, own: Optional[_OwnOutput]) -> bool:
 
 
 def _count_files_in_own_output(directory: str) -> int:
-    """How many files were already in ASH's output directory, this run's logs aside."""
+    """How many files were already in ASH's output directory, this run's own aside."""
     count = 0
     for root, _dirs, files in _walk_unless_link(directory):
         count += sum(
-            1
-            for name in files
-            if not (root == directory and name in _THIS_RUNS_LOG_FILES)
+            1 for name in files if not (root == directory and name in _THIS_RUNS_FILES)
         )
     return count
 

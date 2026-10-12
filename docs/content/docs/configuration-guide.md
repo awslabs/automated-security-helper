@@ -463,6 +463,15 @@ they were left out, and a warning names the directory. They are an earlier run's
 output, or repository files that sit where ASH writes; to scan repository files
 there, write ASH's output outside the scanned tree with `--output-dir`.
 
+When the output directory is inside the source directory, ASH also writes a
+`.gitignore` there holding `*` before any scanner starts, unless something is
+already at that name. A tool that reads the tree itself and honors `.gitignore`
+files then leaves ASH's output out too. snyk-code relies on it, since
+`snyk code test` uploads what it reads; that snyk honors the file is read from its
+sources, not measured. An existing `.gitignore` there is left as it is, nothing is
+written for an output directory outside the tree, and a link at that name stops the
+scan with exit code 3, as one at `ash.log` does.
+
 `ash.summary.txt` and `ash.summary.md` print the total in their scan metadata, for
 example `Ignore files: the scanned repository's .gitignore and .ignore files
 excluded 7 files from ASH's scan set`, or say that the ignore files were not

@@ -51,6 +51,13 @@ OUTPUT_LOG_FILES = ("ash.log", "ash.log.jsonl")
 #: project's output tree, and the aggregator's spool (workspace/aggregation.py).
 WORKSPACE_OUTPUT_DIRS = ("projects", ".workspace-spool")
 
+#: The ignore file ASH writes in an output directory inside the scanned tree; see
+#: ignore_output_dir_in_git.
+OUTPUT_GITIGNORE = ".gitignore"
+
+#: Its text: one rule that ignores everything in the directory, itself included.
+OUTPUT_GITIGNORE_TEXT = "# ASH's output directory, not part of the scanned tree.\n*\n"
+
 WHY = (
     "ASH does not write to, clear or mount its output directory through a link, "
     "whatever the sandbox mode."
@@ -166,7 +173,9 @@ def linked_output_component(
       path of ``root`` too, which catches a redirection out of the tree that the
       walk cannot see;
     - each of OUTPUT_WORKING_DIRS, OUTPUT_RESULT_FILES and OUTPUT_LOG_FILES under
-      it, and with ``workspace`` each of WORKSPACE_OUTPUT_DIRS.
+      it, and with ``workspace`` each of WORKSPACE_OUTPUT_DIRS;
+    - for an output directory below ``root``, OUTPUT_GITIGNORE, which
+      ignore_output_dir_in_git writes there.
 
     Args:
         root: The scanned tree for a scan; for a workspace project, the workspace's
@@ -198,7 +207,8 @@ def linked_output_component(
     if is_link(spelled):
         return f"the output directory {spelled.as_posix()} is {_kind(spelled)}"
     lexical = Path(os.path.abspath(spelled))
-    if root_path is not None and _is_below(lexical, root_path, root_identity):
+    inside_root = root_path is not None and _is_below(lexical, root_path, root_identity)
+    if root_path is not None and inside_root:
         real_root = Path(os.path.realpath(root_path))
         actual = Path(os.path.realpath(lexical))
         if not _is_below(actual, real_root, root_identity):
@@ -211,6 +221,8 @@ def linked_output_component(
     )
     if workspace:
         names += WORKSPACE_OUTPUT_DIRS
+    if inside_root:
+        names += (OUTPUT_GITIGNORE,)
     for name in names:
         entry = spelled / name
         if is_link(entry):
@@ -233,6 +245,45 @@ def refuse_linked_output_dir(
     found = linked_output_component(root, output_dir, workspace=workspace)
     if found is not None:
         raise OutputDirLinkRefused(found, remedy)
+
+
+def ignore_output_dir_in_git(source_dir: PathLike, output_dir: PathLike) -> bool:
+    """Write OUTPUT_GITIGNORE, ignoring everything, in an output directory in the tree.
+
+    A tool that reads the scanned tree itself and honors the ``.gitignore`` files in
+    it then leaves ASH's output out: an earlier run's reports and logs, and the
+    converted files. ``snyk code test`` is one (read from snyk's sources, not
+    measured): it uploads the files it reads and has no option that leaves out a
+    path, and the default output directory, ``.ash/ash_output``, is inside the tree.
+    ``ash config init`` writes ``.ash/.gitignore`` for the same reason, but a tree
+    that never had one sent ASH's output with the source. ASH's own scan set leaves
+    the output directory out whatever the ignore files say.
+
+    Nothing is written when the output directory is not below ``source_dir`` or does
+    not exist, or when something is already at the name: a ``.gitignore`` there is
+    the repository's or an earlier run's, and is left as it is. A link at the name
+    is refused, never followed: linked_output_component names it before the run,
+    and the write itself is fs_guard.open_for_write with the output directory as its
+    root and O_EXCL, which refuses one made since with OutputLinkRefused.
+
+    Returns:
+        Whether it wrote the file.
+    """
+    source = Path(os.path.abspath(source_dir))
+    output = Path(os.path.abspath(output_dir))
+    if not output.is_dir() or not _is_below(output, source, _identity(source)):
+        return False
+    # Imported here: fs_guard imports this module (see open_no_follow).
+    from automated_security_helper.utils.sandbox import fs_guard
+
+    try:
+        with fs_guard.open_for_write(
+            output / OUTPUT_GITIGNORE, root=output, exclusive=True
+        ) as handle:
+            handle.write(OUTPUT_GITIGNORE_TEXT)
+    except FileExistsError:
+        return False
+    return True
 
 
 def open_no_follow(

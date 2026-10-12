@@ -2065,6 +2065,35 @@ def _setup_logger(opts: ScanOptions):
         raise OutputDirRefusedExit(refused.found, reason) from refused
 
 
+def _ignore_output_dir_in_git(opts: ScanOptions) -> None:
+    """Write the output directory's ``.gitignore`` when it is inside the source tree.
+
+    Here, once the logger has created the directory and before any mode starts, so
+    that it covers every run mode. In container mode only the host can: the scan
+    inside writes to ``/out``, which is not below ``/src``, though the same
+    directory is visible below ``/src`` too, and a scanner reading the tree there
+    reads it. See utils/output_dir_links.ignore_output_dir_in_git. A link at the
+    name stops the scan with exit 3, as one at ``ash.log`` does.
+    """
+    from automated_security_helper.utils.output_dir_links import (
+        OutputDirLinkRefused,
+        ignore_output_dir_in_git,
+    )
+
+    try:
+        ignore_output_dir_in_git(opts.source_dir, opts.output_dir)
+    except OutputDirLinkRefused as refused:
+        reason = (
+            f"{refused}. Remove it, or choose an output directory outside the "
+            "scanned tree."
+        )
+        print(
+            f"[bold red]ERROR ({OUTPUT_DIR_REFUSED_EXIT_CODE}) "
+            f"{escape_markup(reason)}[/bold red]"
+        )
+        raise OutputDirRefusedExit(refused.found, reason) from refused
+
+
 # ---------------------------------------------------------------------------
 # _run_container_mode
 # ---------------------------------------------------------------------------
@@ -4090,6 +4119,7 @@ def run_ash_scan(
 def _run_with_options(opts: ScanOptions, scan_start_time: float):
     """The rest of ``run_ash_scan``, from the logger on, with its root registered."""
     logger = _setup_logger(opts)
+    _ignore_output_dir_in_git(opts)
 
     if opts.workspace_plan is not None and opts.mode != RunMode.container:
         # Workspace mode owns its own verdict and its own summary. It does not go

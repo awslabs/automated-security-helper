@@ -189,7 +189,10 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.output_dir_links import (
     WHY as OUTPUT_LINK_WHY,
 )
-from automated_security_helper.utils.output_dir_links import refuse_linked_output_dir
+from automated_security_helper.utils.output_dir_links import (
+    ignore_output_dir_in_git,
+    refuse_linked_output_dir,
+)
 
 #: The remedy for this tool's caller, which names the output tree with output_dir.
 MCP_WORKSPACE_OUTPUT_REMEDY = (
@@ -954,6 +957,10 @@ def _prepare_project_outputs(
                         f"for this project may complete early."
                     )
         outputs[project.key] = project_output
+    # A project at the workspace root would read every project's output below it;
+    # see ignore_output_dir_in_git. A link at the name raises OutputLinkRefused,
+    # an OutputDirLinkRefused too.
+    ignore_output_dir_in_git(plan.workspace_root, settings.output_dir)
     return outputs
 
 

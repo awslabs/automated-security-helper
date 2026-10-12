@@ -171,6 +171,21 @@
 
 ### Behavior changes
 
+- **An output directory inside the scanned tree gets a `.gitignore`.** snyk-code
+  read ASH's default output directory, `.ash/ash_output`, with the rest of the
+  tree, and `snyk code test` uploaded an earlier run's reports and logs and the
+  converted files, unless the tree's own `.gitignore` left them out (`ash config
+  init` writes `.ash/.gitignore` for that, but a tree that never ran it had
+  none). ASH now writes `<output_dir>/.gitignore` holding `*` when the output
+  directory is inside the source directory, before any scanner starts: from the
+  CLI in every run mode (in container mode, on the host), and from the
+  orchestrator for MCP and API scans. snyk honors it, as read from snyk's sources,
+  not measured. An existing `.gitignore` there is never overwritten, nothing is
+  written for an output directory outside the tree, and a link at that name is
+  refused, never followed, and stops the scan with exit code 3. git, and any
+  other tool that honors `.gitignore`, now leaves the output directory out too.
+  The file does not count among the files already in the output directory that
+  the scan-set warning reports.
 - **Only the operator turns trivy-repo's telemetry on.** A config file inside a git
   checkout or the scanned directory could set
   `scanners.trivy-repo.options.disable_telemetry: false`, and trivy then sent

@@ -53,6 +53,7 @@ from automated_security_helper.utils.output_dir_links import (
     OUTPUT_RESULT_FILES,
     OUTPUT_WORKING_DIRS,
     OutputDirLinkRefused,
+    ignore_output_dir_in_git,
     refuse_linked_output_dir,
 )
 from automated_security_helper.utils.report_path_links import (
@@ -566,7 +567,9 @@ class ASHScanOrchestrator(BaseModel):
         is True, and output_dir if it doesn't exist. A working directory left by a
         previous run is removed first. An output directory or working directory
         that is a link is refused before anything here runs, so the clean-up cannot
-        delete inside wherever it points.
+        delete inside wherever it points. An output directory inside the source
+        directory gets a ``.gitignore`` that ignores everything in it, unless one is
+        there already (utils/output_dir_links.ignore_output_dir_in_git).
 
         Raises:
             ASHValidationError: the output directory, or a working directory or
@@ -584,6 +587,10 @@ class ASHScanOrchestrator(BaseModel):
                 f"Creating output directory if it does not exist: {self.output_dir}"
             )
             self.output_dir.mkdir(parents=True, exist_ok=True)
+            # Inside the scanned tree, a .gitignore keeps ASH's output from a tool
+            # that reads the tree and honors one, such as snyk code test, which
+            # uploads what it reads. Before any scanner starts.
+            ignore_output_dir_in_git(self.source_dir, self.output_dir)
 
             # If we're using existing results, only ensure the reports directory
             # exists. A plain mkdir: a link there was refused at the top of this
