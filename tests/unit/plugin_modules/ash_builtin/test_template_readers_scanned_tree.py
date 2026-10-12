@@ -269,13 +269,44 @@ class TestCfnNag:
         assert [Path(p).parent.parent.name.endswith("real__yaml") for p in inputs] == [
             True
         ]
-        assert "Skipped t.yaml: it is a symbolic link" in " ".join(scanner.errors)
         warnings = [r.getMessage() for r in ash_records if r.levelno == logging.WARNING]
-        assert any("Skipped t.yaml: it is a symbolic link" in w for w in warnings)
+        if target_type == "source":
+            # The link's target is outside the tree, so the scan set cfn-nag reads
+            # leaves it out before cfn-nag's own check sees it.
+            assert "Not scanning 't.yaml': link leaves the scanned tree" in warnings
+            assert "t.yaml" not in " ".join(scanner.errors)
+        else:
+            assert "Skipped t.yaml: it is a symbolic link" in " ".join(scanner.errors)
+            assert any("Skipped t.yaml: it is a symbolic link" in w for w in warnings)
         assert MARKER not in logged(ash_records)
         assert tree_files_with_marker(plugin_context) == []
         # A skipped file is not a failed target: a repository full of symlinked
         # JSON must not turn the scanner red.
+        assert scanner.targets_failed == 0
+        assert scanner.targets_attempted == 1
+
+    @needs_symlinks
+    def test_an_in_tree_link_in_the_source_is_skipped_warned_and_recorded(
+        self, cfn_nag, plugin_context, ash_records
+    ):
+        """cfn-nag's own check still refuses a link the scan set keeps."""
+        scanner, run = cfn_nag
+        root = plugin_context.source_dir
+        (root / "real.yaml").write_text(
+            VALID_TEMPLATE.replace(MARKER.lower(), "in-tree")
+        )
+        (root / "t.yaml").symlink_to(root / "real.yaml")
+
+        scanner.scan(target=root, target_type="source")
+
+        inputs = cfn_nag_inputs(run)
+        assert [Path(p).name for p in inputs] == ["template.yaml"]
+        assert [Path(p).parent.parent.name.endswith("real__yaml") for p in inputs] == [
+            True
+        ]
+        assert "Skipped t.yaml: it is a symbolic link" in " ".join(scanner.errors)
+        warnings = [r.getMessage() for r in ash_records if r.levelno == logging.WARNING]
+        assert any("Skipped t.yaml: it is a symbolic link" in w for w in warnings)
         assert scanner.targets_failed == 0
         assert scanner.targets_attempted == 1
 
@@ -351,10 +382,40 @@ class TestCdkNag:
         assert templates == ["real.yaml"]
         # The wrapper is told the root, so it reads the template under the same rule.
         assert double.call_args.kwargs["scan_root"] == root
-        assert "Skipped t.yaml: it is a symbolic link" in " ".join(scanner.errors)
+        if target_type == "source":
+            # Left out of the scan set cdk-nag reads: the link's target is outside.
+            warnings = [
+                r.getMessage() for r in ash_records if r.levelno == logging.WARNING
+            ]
+            assert "Not scanning 't.yaml': link leaves the scanned tree" in warnings
+            assert "t.yaml" not in " ".join(scanner.errors)
+        else:
+            assert "Skipped t.yaml: it is a symbolic link" in " ".join(scanner.errors)
         assert scanner.targets_attempted == 1
         assert scanner.targets_failed == 0
         assert MARKER not in logged(ash_records)
+
+    @needs_symlinks
+    def test_an_in_tree_link_in_the_source_never_reaches_the_wrapper(
+        self, cdk_nag, plugin_context
+    ):
+        """cdk-nag's own check still refuses a link the scan set keeps."""
+        scanner, double = cdk_nag
+        root = plugin_context.source_dir
+        (root / "real.yaml").write_text(
+            VALID_TEMPLATE.replace(MARKER.lower(), "in-tree")
+        )
+        (root / "t.yaml").symlink_to(root / "real.yaml")
+
+        scanner.scan(target=root, target_type="source")
+
+        templates = [
+            Path(c.kwargs["template_path"]).name for c in double.call_args_list
+        ]
+        assert templates == ["real.yaml"]
+        assert "Skipped t.yaml: it is a symbolic link" in " ".join(scanner.errors)
+        assert scanner.targets_attempted == 1
+        assert scanner.targets_failed == 0
 
     def test_an_unparseable_file_is_logged_without_its_content(
         self, cdk_nag, plugin_context, ash_records

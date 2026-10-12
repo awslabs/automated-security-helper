@@ -418,6 +418,13 @@ Out of scope:
   work directory in ASH's process. The tools a converter starts are not ASH code and
   are sandboxed; see [Converters](#converters). `git` runs only for
   `--changed-files-only` and workspace planning, never inside a scanner.
+- Links in the scanned tree. ASH's scan set leaves out a link to a file whose target
+  is outside the source directory, and warns about each one (see
+  [Ignore files and the scan set](configuration-guide.md#ignore-files-and-the-scan-set)),
+  so the scanners and converters that read the scan set are not given it.
+  bandit, semgrep, opengrep, checkov, grype and syft walk the source directory
+  themselves, and snyk-code passes it to the Snyk CLI as it is; what each of those
+  does with such a link is the tool's own behavior.
 - Plugin modules. A config file can list `ash_plugin_modules`, which ASH imports into
   its own process, so they run unsandboxed. From a config file inside the scanned
   tree, only installed modules outside the tree are imported (see

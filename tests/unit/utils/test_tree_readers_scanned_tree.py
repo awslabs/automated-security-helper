@@ -98,11 +98,15 @@ class TestIgnoreFiles:
         ]
         assert not any(f.endswith("noise.log") for f in files)
         assert any(f.endswith("kept.tmp") for f in files)
+        # Two things are true of it: its target is outside the tree, so it is not in
+        # the scan set, and its rules were not applied.
+        assert not any(f.endswith(".gitignore") and "sub" in f for f in files)
         assert warnings_seen == [
+            "Not scanning 'sub/.gitignore': link leaves the scanned tree",
             (
                 "Skipped ignore file 'sub/.gitignore': it is a symbolic link, so its "
                 "rules were not applied"
-            )
+            ),
         ]
 
     def test_a_symlinked_root_gitignore_does_not_prune_the_walk(self, layout):

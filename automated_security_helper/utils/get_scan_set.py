@@ -17,8 +17,11 @@ from automated_security_helper.utils.git_command import git_argv
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.output_dir_links import open_no_follow
 from automated_security_helper.utils.scanned_tree import (
+    REASON_LINK_LEAVES_TREE,
     TreeInputRefused,
     open_in_scanned_tree,
+    relative_display,
+    resolves_inside,
 )
 
 ASH_INCLUSIONS = [
@@ -235,6 +238,32 @@ def _walk_unless_link(top: str | Path):
     return os.walk(top)
 
 
+def _left_out_as_a_link_leaving_the_tree(
+    full_path: str, root: str, links_not_scanned: Optional[List[str]]
+) -> bool:
+    """Whether *full_path* is a file link whose target leaves *root*; if so, say so.
+
+    ``os.walk`` lists a link to a file among the files, and a scanner given the scan
+    set opens it by name, which reads wherever the link points. A link the
+    repository committed points wherever its author chose, so one whose target, every
+    link resolved (:func:`~automated_security_helper.utils.scanned_tree.resolves_inside`),
+    is outside the scan root is left out of the scan set. A link to a file inside the
+    tree stays, as do links to directories, which the walk does not descend anyway.
+
+    When the answer is yes, a warning names the link by its path below *root*,
+    escaped with ``repr``, and not its target, which is outside the tree; and
+    *full_path* is appended to *links_not_scanned* when one is given.
+    """
+    if not os.path.islink(full_path) or resolves_inside(full_path, root):
+        return False
+    ASH_LOGGER.warning(
+        f"Not scanning {relative_display(full_path, root)!r}: {REASON_LINK_LEAVES_TREE}"
+    )
+    if links_not_scanned is not None:
+        links_not_scanned.append(full_path)
+    return True
+
+
 #: The log files the running scan has already opened in its output directory when
 #: the scan set is built. Not counted among the files found there.
 _THIS_RUNS_LOG_FILES = frozenset({"ash.log", "ash.log.jsonl"})
@@ -441,6 +470,7 @@ def _collect_ignorefiles_and_all_files(
     pruned_counts: Optional[Dict[str, int]] = None,
     own_output: Optional[str] = None,
     own_output_counts: Optional[Dict[str, int]] = None,
+    links_not_scanned: Optional[List[str]] = None,
 ) -> tuple[List[str], List[str]]:
     """Walk the directory tree once to collect ignore files and all file paths.
 
@@ -473,6 +503,12 @@ def _collect_ignorefiles_and_all_files(
             reached it, this run's log files aside
             (:func:`_count_files_in_own_output`). They are left out like the rest
             of the directory, and the caller reports them.
+        links_not_scanned: Filled, when given, with each file link the walk left
+            out because its target leaves *path*
+            (:func:`_left_out_as_a_link_leaving_the_tree`). Such a link is not in
+            the file paths returned, so nothing counts it as removed by an ignore
+            file. An ignore file that is such a link is still returned among the
+            ignore files, where reading it is refused and reported as before.
 
     Returns a tuple of (ignore_file_paths, all_file_paths).
     """
@@ -565,6 +601,8 @@ def _collect_ignorefiles_and_all_files(
             full_path = os.path.join(root, f)
             if honor_ignore_files and f in IGNORE_FILE_NAMES:
                 ignore_files.append(full_path)
+            if _left_out_as_a_link_leaving_the_tree(full_path, path, links_not_scanned):
+                continue
             all_files.append(full_path)
 
     # Append any user-specified ignore files
@@ -1047,7 +1085,16 @@ def get_files_not_matching_spec(
     spec,
     debug: bool = False,
     _all_files: List[str] | None = None,
+    links_not_scanned: Optional[List[str]] = None,
 ):
+    """The files under *path* that *spec* does not leave out, sorted.
+
+    A file link whose target leaves *path* is never returned, whether the walk here
+    found it or the caller passed it in *_all_files*; each one is warned about and
+    appended to *links_not_scanned* when given
+    (:func:`_left_out_as_a_link_leaving_the_tree`). :func:`scan_set` passes the
+    files its own walk already filtered, so it sees each link once.
+    """
     if _all_files is None:
         # Fallback: walk again if called standalone without pre-collected files
         _all_files = []
@@ -1068,6 +1115,8 @@ def get_files_not_matching_spec(
         # inc_full stays native throughout, because callers use it to open files.
         # Both helpers below normalize internally and only for their own comparison.
         if _is_bundled_cdk_path(inc_full):
+            continue
+        if _left_out_as_a_link_leaving_the_tree(inc_full, path, links_not_scanned):
             continue
         file_path = Path(inc_full)
         if spec.match(file_path) and not forced_inclusions.match(file_path):
@@ -1364,6 +1413,7 @@ def scan_set(
     filter_pattern: Optional[re.Pattern] = None,
     honor_ignore_files: bool = True,
     exclusions: Optional[Dict[str, Any]] = None,
+    links_not_scanned: Optional[List[Dict[str, str]]] = None,
 ) -> list[str]:
     """Get list of files not matching .gitignore underneath source path.
 
@@ -1389,6 +1439,13 @@ def scan_set(
             removed (:func:`ignore_file_exclusion_record`), which the orchestrator
             stores as ``metadata.ignore_file_exclusions``. Left empty when the
             scan set was reused from *output*, since nothing was matched then.
+        links_not_scanned: When given, extended with ``{"path", "reason"}`` for
+            each file link left out of the scan set because its target leaves
+            *source* (:func:`_left_out_as_a_link_leaving_the_tree`): the path below
+            *source* with ``/`` separators, and the reason
+            ``REASON_LINK_LEAVES_TREE``, sorted by path. Left empty when the scan set
+            was reused from *output*, whose list already leaves them out. Every
+            such link is also warned about, whether or not this is given.
 
     Returns:
         List of files not matching ignore specifications.
@@ -1423,6 +1480,7 @@ def scan_set(
 
     pruned_counts: Dict[str, int] = {}
     own_output_counts: Dict[str, int] = {}
+    walked_links: List[str] = []
     if not ashignore_content or not ashscanset_list:
         # Single os.walk pass collects both ignore files and the full file list
         discovered_ignores, all_files = _collect_ignorefiles_and_all_files(
@@ -1433,6 +1491,7 @@ def scan_set(
             pruned_counts=pruned_counts,
             own_output=output,
             own_output_counts=own_output_counts,
+            links_not_scanned=walked_links,
         )
         for directory, found in own_output_counts.items():
             if found:
@@ -1473,7 +1532,18 @@ def scan_set(
             spec,
             debug=debug,
             _all_files=all_files,
+            links_not_scanned=walked_links,
         )
+        if links_not_scanned is not None:
+            links_not_scanned.extend(
+                {
+                    "path": relative_display(link, source),
+                    "reason": REASON_LINK_LEAVES_TREE,
+                }
+                for link in sorted(
+                    walked_links, key=lambda link: relative_display(link, source)
+                )
+            )
         counts = report_ignore_file_exclusions(
             source,
             spec,

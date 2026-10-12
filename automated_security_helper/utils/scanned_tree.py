@@ -111,6 +111,8 @@ REASON_NOT_REGULAR = "it is not a regular file"
 REASON_HARDLINK = "it has more than one hard link"
 REASON_CHANGED = "it changed while it was being checked"
 REASON_RESOLVES_OUTSIDE = "it is a symbolic link that resolves outside the scanned tree"
+#: Why the scan set leaves out a file link: see :func:`resolves_inside`.
+REASON_LINK_LEAVES_TREE = "link leaves the scanned tree"
 
 
 def _parent_symlink_reason(component: str) -> str:
@@ -369,6 +371,24 @@ def _open_by_checked_path(
         os.close(fd)
         raise
     return fd
+
+
+def resolves_inside(path: PathLike, root: PathLike) -> bool:
+    """Whether *path*, every link in it resolved, is strictly below *root* resolved.
+
+    Both are resolved with ``os.path.realpath``, so a root reached through a link (the
+    operator's choice) and a link inside the tree that points elsewhere inside it both
+    count as inside; a link whose target, after any chain of links, is outside the
+    root does not. A path that does not exist is resolved as far as it goes, so a
+    dangling link is judged by where it points. The scan set uses this to leave out
+    file links that leave the tree (``get_scan_set``); it says nothing about whether
+    the path is a regular file.
+    """
+    real_root = Path(os.path.realpath(root))
+    resolved = Path(os.path.realpath(_absolute(path)))
+    return len(resolved.parts) > len(real_root.parts) and _starts_with(
+        resolved, real_root
+    )
 
 
 def _resolved_inside(

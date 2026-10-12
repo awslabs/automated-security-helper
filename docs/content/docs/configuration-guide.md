@@ -322,7 +322,18 @@ template (`*.template.json`) an ignore file matches is kept, unless it sits in a
 directory the root `.gitignore` excludes. bandit, semgrep, opengrep, checkov, grype
 and syft walk the source directory themselves, with their own ignore rules, so this
 setting does not change what they read: in a git checkout, semgrep and opengrep
-still skip the files git ignores.
+still skip the files git ignores. snyk-code passes the source directory to the Snyk
+CLI as it is.
+
+A link to a file is in the scan set only when its target, with every link on the way
+resolved, is inside the source directory. A link that leaves the tree (to an absolute
+path elsewhere, up through `..`, or through a link to a directory outside) is not
+scanned: a warning names it, as `Not scanning 'vendor/config.py': link leaves the
+scanned tree`, and names only the link, not where it points. A link to a file inside
+the tree stays in the scan set, and a source directory that is itself reached through
+a link is scanned as given. This applies to the readers of the scan set listed above.
+The scanners that walk the source directory themselves, and snyk-code, do not read
+the scan set, so it does not decide whether they follow such a link.
 
 `honor_ignore_files` is a top-level key, and it defaults to `true`. To scan the files
 the repository's ignore files match as well, set it to `false` in a config file

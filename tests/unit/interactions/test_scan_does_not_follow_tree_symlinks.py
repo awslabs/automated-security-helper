@@ -16,8 +16,12 @@ Everything ASH does around it is real.
 
 The tree holds, beside a "host" directory with a marker string in every file:
 
-- ``a.zip``, ``b.tar``, ``nb.ipynb``: symlinks to host files;
-- ``sub/.gitignore``: a symlink to a host file;
+- ``a.zip``, ``b.tar``, ``nb.ipynb``: symlinks to host files, which the scan set
+  leaves out because their targets leave the tree, so no converter sees them;
+- ``sub/.gitignore``: a symlink to a host file, left out of the scan set the same
+  way, and whose rules are not applied;
+- ``c.zip``, ``d.tar``, ``nb2.ipynb``: symlinks to the regular files below, which the
+  scan set keeps and each converter refuses;
 - ``ok.zip``, ``ok.tar``, ``ok.ipynb``: regular files, the positive control, two of
   them carrying members that are links or whose names leave the destination.
 """
@@ -183,6 +187,9 @@ def build(base: Path) -> tuple[Path, Path]:
         symlink.linkname = str(host / "secret.py")
         archive.addfile(symlink)
         tar_member(archive, "../escape_tar.py", f"E = '{MARKER}'\n".encode())
+    for link, target in (("c.zip", "ok.zip"), ("d.tar", "ok.tar")):
+        (tree / link).symlink_to(target)
+    (tree / "nb2.ipynb").symlink_to("ok.ipynb")
     (tree / ".gitignore").write_text("*.log\n")
     (tree / "app.py").write_text("print('hello')\n")
     return tree, host
@@ -300,9 +307,9 @@ def test_each_refused_input_is_named_in_one_warning(scan):
     member = "Skipped member '{}' of archive '{}': {}"
     assert sorted(warnings) == sorted(
         [
-            "Skipped converter input 'a.zip': it is a symbolic link",
-            "Skipped converter input 'b.tar': it is a symbolic link",
-            "Skipped converter input 'nb.ipynb': it is a symbolic link",
+            "Skipped converter input 'c.zip': it is a symbolic link",
+            "Skipped converter input 'd.tar': it is a symbolic link",
+            "Skipped converter input 'nb2.ipynb': it is a symbolic link",
             (
                 "Skipped ignore file 'sub/.gitignore': it is a symbolic link, so its "
                 "rules were not applied"
@@ -319,6 +326,20 @@ def test_each_refused_input_is_named_in_one_warning(scan):
     )
 
 
+def test_each_link_leaving_the_tree_is_named_in_one_warning(scan):
+    """The scan set leaves them out, so no converter or scanner is given them."""
+    _, _, output = scan
+    warnings = [
+        line.split("\t", 3)[-1].strip()
+        for line in (output / "ash.log").read_text().splitlines()
+        if "\tWARNING\t" in line and "Not scanning" in line
+    ]
+    assert sorted(warnings) == sorted(
+        f"Not scanning {name!r}: link leaves the scanned tree"
+        for name in ("a.zip", "b.tar", "nb.ipynb", "sub/.gitignore")
+    )
+
+
 def test_refused_inputs_are_recorded_in_the_results(scan):
     _, _, output = scan
     results = json.loads((output / "ash_aggregated_results.json").read_text())
@@ -331,15 +352,15 @@ def test_refused_inputs_are_recorded_in_the_results(scan):
 
     assert refused("archive") == sorted(
         [
-            ("a.zip", None, "it is a symbolic link"),
-            ("b.tar", None, "it is a symbolic link"),
+            ("c.zip", None, "it is a symbolic link"),
+            ("d.tar", None, "it is a symbolic link"),
             ("ok.zip", "link.py", "it is a symbolic or hard link"),
             ("ok.zip", "../escape.py", "its path contains a '..' component"),
             ("ok.tar", "link_tar.py", "it is a symbolic or hard link"),
             ("ok.tar", "../escape_tar.py", "its path contains a '..' component"),
         ]
     )
-    assert refused("jupyter") == [("nb.ipynb", None, "it is a symbolic link")]
+    assert refused("jupyter") == [("nb2.ipynb", None, "it is a symbolic link")]
     # A refusal is not a converter failure: the gate for incomplete conversion is
     # about converters that did not run.
     assert rows["archive"]["failure"] is None
