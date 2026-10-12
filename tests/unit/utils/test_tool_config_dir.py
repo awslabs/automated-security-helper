@@ -300,3 +300,86 @@ def test_the_grant_adds_the_directory_read_only_and_nothing_else(
     assert reals(granted.cache) == reals(without.cache)
     assert directory not in reals(granted.executable)
     assert directory in reals(granted.scan_data)
+
+
+class _RecordingBackend:
+    """A sandbox backend that records each spawn's policy and changes nothing."""
+
+    name = "recording"
+
+    def __init__(self) -> None:
+        self.policies: list = []
+
+    def plan(self, argv, env, policy):
+        from automated_security_helper.utils.sandbox.backends import SpawnPlan
+
+        self.policies.append(policy)
+        return SpawnPlan(argv=list(argv), env=dict(env))
+
+
+@posix_only
+def test_runs_in_two_threads_each_see_and_are_granted_only_their_own_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scanner runs share the process. Each run's directory is its thread's alone.
+
+    Both runs write before either looks, and neither ends before both have
+    looked, so a lookup that answered with another run's directory, such as the
+    one made last, is seen.
+    """
+    import threading
+
+    from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+    from automated_security_helper.utils.sandbox.scope import (
+        SandboxScope,
+        prepare_spawn,
+        sandbox_scope,
+    )
+
+    _temp_dir(monkeypatch, tmp_path / "temp", 0o700)
+    barrier = threading.Barrier(2, timeout=60)
+    seen: dict = {}
+    failures: list = []
+
+    def run(name: str) -> None:
+        try:
+            source = tmp_path / name / "repo"
+            (source / ".git").mkdir(parents=True)
+            output = tmp_path / name / "out"
+            results = output / "scanners" / "probe"
+            results.mkdir(parents=True)
+            backend = _RecordingBackend()
+            scope = SandboxScope(
+                backend=backend,  # type: ignore[arg-type]
+                scanner_name="probe",
+                requirements=SandboxRequirements(),
+                source_dir=source,
+                output_dir=output,
+                results_dir=results,
+                scan_target=source,
+                offline=True,
+            )
+            with sandbox_scope(scope), tool_config_scope(_context(source, output)):
+                written = write_tool_config("x.yaml", "{}\n")
+                barrier.wait()
+                active = active_tool_config_dir()
+                prepare_spawn(["/bin/true"], {"PATH": "/usr/bin:/bin"}, None)
+                barrier.wait()
+            seen[name] = (written.parent, active, backend.policies[-1])
+        except BaseException as e:  # reported below, in the test's own thread
+            failures.append(e)
+            barrier.abort()
+
+    threads = [threading.Thread(target=run, args=(name,)) for name in ("a", "b")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=120)
+    assert not failures, failures
+    (a_dir, a_active, a_policy), (b_dir, b_active, b_policy) = seen["a"], seen["b"]
+    assert a_dir != b_dir
+    assert (a_active, b_active) == (a_dir, b_dir)
+    a_granted = {_real(p) for p in a_policy.read_only}
+    b_granted = {_real(p) for p in b_policy.read_only}
+    assert _real(a_dir) in a_granted and _real(b_dir) not in a_granted
+    assert _real(b_dir) in b_granted and _real(a_dir) not in b_granted
