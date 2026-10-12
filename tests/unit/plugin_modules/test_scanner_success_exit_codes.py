@@ -403,9 +403,10 @@ def test_an_accepted_exit_code_after_a_rejected_one_is_graded_on_its_own(
     assert rows["converted"].exit_code == 0
 
 
-#: Scanners that start each target at exit code 0. snyk-code is not listed: its
-#: scan() keeps the code it holds until its tool's run records a new one.
-RESET_PER_TARGET = [name for name in EXECUTED if name != "snyk-code"]
+#: Scanners that start each target at exit code 0: every executed one, snyk-code
+#: included (its scan() resets the code at its start, and its tool's run then
+#: records that target's own code).
+RESET_PER_TARGET = list(EXECUTED)
 
 
 @pytest.mark.parametrize("name", RESET_PER_TARGET)
