@@ -301,6 +301,10 @@
     are all the operator's, or that has none, selects one only when that config's
     `ash_plugin_modules` or `--ash-plugin-modules` loads it; it used to select
     every one any earlier scan had loaded.
+  - A class that another package defines as a subclass of one of those classes is
+    held to the same rule. It is also selected when the trusted modules load the
+    module or package that defines the off-host class it subclasses; it used to be
+    selected whenever its own package was loaded.
   - bandit's, grype's and syft's own config files are the operator's.
     `scanners.bandit.options.config_file`, `scanners.grype.options.config_file`
     and `scanners.syft.options.config_file` from such a file are ignored; ASH no

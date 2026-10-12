@@ -47,7 +47,10 @@ which ``ScanExecutionEngine`` and ``ash report`` call once the plugin modules ar
 loaded, drops each selected class whose defining module (``cls.__module__``) is
 inside an off-host package, unless a trusted entry or ``--ash-plugin-modules``
 names that module or a package around it, or names a module that lists the
-class. One warning names each dropped class and its package. A config with no
+class. A class another package defines as a subclass of one of those classes
+sends what its base sends, so the check walks ``cls.__mro__``: such a class is
+also kept when a trusted entry names the base's module or a package around it.
+One warning names each dropped class and its package. A config with no
 trusted list recorded is built only from the operator's files, so its own
 ``ash_plugin_modules`` are the trusted entries. That check covers every config
 because the classes a scan is offered are every class registered in the process
@@ -263,6 +266,21 @@ def _within(module: str, name: str) -> bool:
     return module == name or module.startswith(name + ".")
 
 
+def _off_host_bases(cls: type) -> Dict[str, type]:
+    """By off-host package, the first class of ``cls.__mro__`` defined in it.
+
+    That is ``cls`` itself for a class an off-host package defines, and the base
+    it derives from for a subclass another package defines. Empty for a class
+    that derives from no class an off-host package defines.
+    """
+    bases: Dict[str, type] = {}
+    for base in getattr(cls, "__mro__", (cls,)):
+        package = off_host_package(getattr(base, "__module__", "") or "")
+        if package is not None:
+            bases.setdefault(package, base)
+    return bases
+
+
 def drop_untrusted_off_host_plugins(
     config: Optional["AshConfig"],
     plugins: Mapping[str, Sequence[type]],
@@ -274,8 +292,11 @@ def drop_untrusted_off_host_plugins(
     ``OFF_HOST_PLUGIN_PACKAGES`` is kept only when a trusted module name (the
     config's ``_trusted_plugin_modules`` and ``operator_modules``) is that module
     or a package around it, or is an imported module that lists the class in its
-    ``ASH_SCANNERS``, ``ASH_REPORTERS`` or ``ASH_CONVERTERS``. Every other class is
-    kept. For a config ``resolve_config`` recorded no trusted list on, every file
+    ``ASH_SCANNERS``, ``ASH_REPORTERS`` or ``ASH_CONVERTERS``. A class defined
+    elsewhere that derives from such a class (``_off_host_bases``) is kept under
+    the same terms, or when a trusted name is the base's defining module or a
+    package around it, for the base of each off-host package it derives from.
+    Every other class is kept. For a config ``resolve_config`` recorded no trusted list on, every file
     it was built from is the operator's, so its own ``ash_plugin_modules`` are the
     trusted names. The classes a scan is offered are every class registered in the
     process so far, and the MCP server runs every scan in the server's process, so
@@ -313,15 +334,29 @@ def drop_untrusted_off_host_plugins(
         kept: List[type] = []
         for cls in classes:
             module = getattr(cls, "__module__", "") or ""
-            package = off_host_package(module)
+            bases = _off_host_bases(cls)
             if (
-                package is None
+                not bases
                 or any(_within(module, name) for name in trusted)
                 or any(cls is entry for entry in listed)
+                or all(
+                    any(_within(base.__module__, name) for name in trusted)
+                    for base in bases.values()
+                )
             ):
                 kept.append(cls)
                 continue
-            entry = f"{getattr(cls, '__name__', cls)!r} from {package}"
+            label = repr(getattr(cls, "__name__", cls))
+            derived = [
+                f"{base.__name__!r} from {package}"
+                for package, base in bases.items()
+                if base is not cls
+            ]
+            entry = (
+                f"{label} from {module} (a subclass of {' and '.join(derived)})"
+                if derived
+                else f"{label} from {next(iter(bases))}"
+            )
             if entry not in dropped:
                 dropped.append(entry)
         selected[kind] = kept
@@ -329,10 +364,11 @@ def drop_untrusted_off_host_plugins(
         ASH_LOGGER.warning(
             f"Plugin classes {', '.join(dropped)} are not selected: they send "
             "findings or source off the host, and no module that "
-            "--ash-plugin-modules or the operator's configuration names defines or "
-            "lists them. A module that a config inside the scanned tree, or one an "
-            "MCP client delivered, loads can import them, as can an earlier scan in "
-            "the same process. Load their package with --ash-plugin-modules, "
+            "--ash-plugin-modules or the operator's configuration names lists "
+            "them, defines them, or defines the off-host class they subclass. A "
+            "module that a config inside the scanned tree, or one an MCP client "
+            "delivered, loads can import them, as can an earlier scan in the same "
+            "process. Load their package with --ash-plugin-modules, "
             "--config-overrides or a config file outside the tree."
         )
     return selected

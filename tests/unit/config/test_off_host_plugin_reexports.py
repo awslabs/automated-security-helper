@@ -14,7 +14,8 @@ loads that package or a module that lists the class.
 
 Registration lasts for the rest of the process, and the MCP server runs every
 scan in the server's process, so a scan is also checked after an earlier scan
-in that process loaded those classes.
+in that process loaded those classes. A class another package defines as a
+subclass of one of them is checked the same way.
 
 The re-exporting package is written outside the scanned tree and put on the
 path of a subprocess, because importing a plugin package registers its plugins
@@ -43,6 +44,31 @@ from {AWS}.s3_reporter import S3Reporter
 
 ASH_SCANNERS = [SnykCodeScanner]
 ASH_REPORTERS = [S3Reporter]
+"""
+
+SUBCLASS_PACKAGE = "subclass_ash_plugins"
+
+_SUBCLASS_SOURCE = f"""
+from automated_security_helper.plugins.decorators import (
+    ash_reporter_plugin,
+    ash_scanner_plugin,
+)
+from {SNYK}.snyk_code_scanner import SnykCodeScanner
+from {AWS}.s3_reporter import S3Reporter
+
+
+@ash_scanner_plugin
+class DerivedSnykScanner(SnykCodeScanner):
+    pass
+
+
+@ash_reporter_plugin
+class DerivedS3Reporter(S3Reporter):
+    pass
+
+
+ASH_SCANNERS = [DerivedSnykScanner]
+ASH_REPORTERS = [DerivedS3Reporter]
 """
 
 #: The classes the two off-host packages define.
@@ -107,10 +133,15 @@ _AMBIENT = (
 
 @pytest.fixture
 def site(tmp_path: Path) -> Path:
-    """An installed package outside the scanned tree that re-exports both classes."""
+    """Installed packages outside the scanned tree: one re-exports both classes,
+    the other defines a subclass of each."""
     path = tmp_path / "site"
-    (path / PACKAGE).mkdir(parents=True)
-    (path / PACKAGE / "__init__.py").write_text(_PACKAGE_SOURCE, encoding="utf-8")
+    for package, source in (
+        (PACKAGE, _PACKAGE_SOURCE),
+        (SUBCLASS_PACKAGE, _SUBCLASS_SOURCE),
+    ):
+        (path / package).mkdir(parents=True)
+        (path / package / "__init__.py").write_text(source, encoding="utf-8")
     return path
 
 
@@ -236,6 +267,37 @@ def test_without_a_package_that_re_exports_nothing_is_dropped(tmp_path, site):
     assert not [w for w in result["warnings"] if "not selected" in w], result
 
 
+def test_a_repository_config_naming_a_package_of_subclasses_does_not_select_them(
+    tmp_path, site
+):
+    """A subclass defined in another package sends what its off-host base sends."""
+    result = _engine(site, _tree(tmp_path, [SUBCLASS_PACKAGE]))
+
+    assert "DerivedSnykScanner" not in result["scanners"], result
+    assert "DerivedS3Reporter" not in result["reporters"], result
+    [scanner] = _dropped(result["warnings"], "DerivedSnykScanner")
+    assert SNYK in scanner, scanner
+    [reporter] = _dropped(result["warnings"], "DerivedS3Reporter")
+    assert AWS in reporter, reporter
+
+
+def test_the_command_line_selects_a_subclass_by_loading_its_package_or_its_base(
+    tmp_path, site
+):
+    """Naming the subclass's own package, or the off-host package its base is in."""
+    source = _tree(tmp_path, [SUBCLASS_PACKAGE])
+
+    own, base = _engines(
+        site, [_scan(source, [SUBCLASS_PACKAGE]), _scan(source, [SNYK])]
+    )
+
+    assert "DerivedSnykScanner" in own["scanners"], own
+    assert "DerivedS3Reporter" in own["reporters"], own
+    assert "DerivedSnykScanner" in base["scanners"], base
+    assert "DerivedS3Reporter" not in base["reporters"], base
+    assert _dropped(base["warnings"], "DerivedS3Reporter"), base["warnings"]
+
+
 @pytest.mark.parametrize("first", ["tree", "operator"])
 def test_a_later_scan_in_the_same_process_selects_only_what_it_loads(
     tmp_path, site, first
@@ -288,6 +350,32 @@ def test_a_class_outside_the_off_host_packages_is_kept(tmp_path):
     kept = drop_untrusted_off_host_plugins(config, {"scanner": [LocalScanner]}, [])
 
     assert kept == {"scanner": [LocalScanner]}
+
+
+def test_a_subclass_is_checked_against_the_off_host_class_it_derives_from():
+    """Kept when a trusted name covers its own module or its off-host base's."""
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.plugin_module_trust import (
+        drop_untrusted_off_host_plugins,
+    )
+
+    class OffHostReporter:
+        pass
+
+    OffHostReporter.__module__ = f"{AWS}.s3_reporter"
+
+    class DerivedReporter(OffHostReporter):
+        pass
+
+    DerivedReporter.__module__ = "other_ash_plugins.reporter"
+    config = AshConfig()
+    config._trusted_plugin_modules = ()
+    plugins = {"reporter": [DerivedReporter]}
+
+    assert drop_untrusted_off_host_plugins(config, plugins, []) == {"reporter": []}
+    for names in (["other_ash_plugins"], [AWS], [f"{AWS}.s3_reporter"]):
+        kept = drop_untrusted_off_host_plugins(config, plugins, names)
+        assert kept == plugins, names
 
 
 def test_a_config_with_no_untrusted_file_selects_what_its_own_modules_load():
