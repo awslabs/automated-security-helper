@@ -580,8 +580,10 @@ on which:
     `aws-security-hub`, `s3`, `cloudwatch-logs` and `bedrock-summary-reporter` run
     (`enabled`; `false` is not refused, here or in a client's runtime overrides,
     but it takes no effect: the server's `enabled` applies, as in the `enabled`
-    row above, and a warning names the client's value. A reporter that writes
-    only local files is not covered), every other `aws-security-hub`, `s3` and
+    row above, and a warning names the client's value. A `patch` op that writes
+    `enabled` is refused whatever its value, as is any `patch` op on a denied
+    path. A reporter that writes only local files is not covered), every other
+    `aws-security-hub`, `s3` and
     `bedrock-summary-reporter`
     setting (each section is a whole-section entry, as `cloudwatch-logs` is),
     and the GitLab SAST reporter's

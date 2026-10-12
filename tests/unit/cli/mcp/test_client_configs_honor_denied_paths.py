@@ -677,6 +677,21 @@ def test_a_clients_enabled_false_is_accepted_and_ignored(
     assert _warned(ash_log, f"reporters.{reporter}.enabled")
 
 
+@pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
+def test_a_patch_op_in_an_upload_setting_enabled_false_is_refused(
+    _server, reporter
+) -> None:
+    """A ``patch`` op on a denied path is refused whatever it writes. Its
+    ``enabled: false`` would take no effect anyway, so nothing is lost."""
+    op = {"op": "add", "path": f"/reporters/{reporter}/enabled", "value": False}
+    document = {"reporters": {reporter: {}}, "patch": [op]}
+    source = _upload({"ash.yaml": yaml.safe_dump(document)})
+    _assert_refused(
+        _scan_resolution(_server["target"], str(source / "ash.yaml")),
+        key=f"/reporters/{reporter}/enabled",
+    )
+
+
 def _bind_with_runtime_overrides(
     _server: Dict[str, Any], reporter: str, mode: str, enabled: bool
 ) -> Dict[str, Any]:

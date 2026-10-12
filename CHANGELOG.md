@@ -118,8 +118,10 @@
   accepted rather than refused, but it takes no effect: the server's `enabled`, or
   the reporter's own default where the server's config sets none, applies, and a
   warning names the client's value. Before, the client's value turned the reporter
-  off. `enabled: true` is still refused. A server run with no operator config of
-  its own gives each reporter its default.
+  off. `enabled: true` is still refused, and so is a `patch` op in a delivered file
+  that writes `enabled`, whatever value it writes, as every `patch` op on a denied
+  path is. A server run with no operator config of its own gives each reporter its
+  default.
 
 - **Under the MCP server, a config file the operator did not set aside resolves no
   `!ENV` for a remote client.** `!ENV` reads the server's environment. For a remote
