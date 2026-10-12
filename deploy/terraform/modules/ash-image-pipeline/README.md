@@ -60,7 +60,11 @@ Two stacked Docker builds:
      environment variables and execs it. It reads the auth header value from
      that file, or from `ASH_MCP_AUTH_HEADER_VALUE` when an operator sets it
      directly, and removes both variables first, so `ash mcp` and the scanners
-     it starts see neither.
+     it starts see neither. It hands the value to `ash mcp` in a new in-memory
+     file, as `--auth-header-value-fd N`, which `ash mcp` reads once and closes,
+     so the value is on no command line. An `ash_version` whose `ash mcp` has no
+     `--auth-header-value-fd` gets `--auth-header-value` instead, with a warning
+     on stderr.
 
 The wrapper exists because Bedrock AgentCore Runtime has **no container command
 override** — its `container_configuration` block accepts only `container_uri`.

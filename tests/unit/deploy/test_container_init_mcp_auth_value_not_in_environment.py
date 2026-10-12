@@ -242,6 +242,19 @@ def _stop(process: subprocess.Popen) -> bytes:
     return out + err
 
 
+def _command_lines() -> List[bytes]:
+    """Every process's command line, as any local user can read it."""
+    lines = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            lines.append((entry / "cmdline").read_bytes())
+        except OSError:
+            continue
+    return lines
+
+
 def _assert_serves_and_keeps_the_value_to_itself(process, port):
     assert _post(port, None) == 401
     assert _post(port, "another-value") == 401
@@ -249,6 +262,10 @@ def _assert_serves_and_keeps_the_value_to_itself(process, port):
 
     cmdline = Path(f"/proc/{process.pid}/cmdline").read_bytes().split(b"\0")
     assert b"mcp" in cmdline, cmdline  # the exec'd ash mcp, not a script before it
+    # Handed over on a descriptor, so the value is on no command line.
+    assert b"--auth-header-value-fd" in cmdline, cmdline
+    assert b"--auth-header-value" not in cmdline, cmdline
+    assert not [line for line in _command_lines() if SECRET_VALUE.encode() in line]
     environ = _environ_of(process.pid)
     assert not [e for e in environ if e.startswith(b"ASH_MCP_AUTH_HEADER_VALUE")]
     assert not [e for e in environ if SECRET_VALUE.encode() in e]
@@ -325,6 +342,81 @@ class TestTheExecdCommandsEnvironment:
         assert result.returncode == 1, result.stdout + result.stderr
         assert "ASH_MCP_AUTH_HEADER_VALUE_FD" in result.stderr
         assert "ash-mcp-serve: exec " not in result.stderr
+
+
+STAND_IN_ASH = """\
+#!{python}
+import json
+import os
+import sys
+
+if sys.argv[1:] == ["mcp", "--help"]:
+    print("Usage: ash mcp [OPTIONS]\\n  --auth-header-name TEXT\\n  --auth-header-value TEXT")
+    if os.environ.get("STAND_IN_HAS_FD") == "1":
+        print("  --auth-header-value-fd INTEGER")
+    sys.exit(0)
+record = {{"argv": sys.argv[1:]}}
+if "--auth-header-value-fd" in sys.argv:
+    fd = int(sys.argv[sys.argv.index("--auth-header-value-fd") + 1])
+    os.lseek(fd, 0, os.SEEK_SET)
+    record["handed_over"] = os.read(fd, 65536).decode("utf-8")
+with open(os.environ["STAND_IN_RECORD"], "w", encoding="utf-8") as out:
+    json.dump(record, out)
+"""
+
+
+class TestTheHandOverToAshMcp:
+    """What ash-mcp-serve passes ``ash mcp``, with a stand-in ``ash`` on PATH."""
+
+    def _run(self, child_env, tmp_path, has_fd: bool):
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        ash = bin_dir / "ash"
+        ash.write_text(STAND_IN_ASH.format(python=sys.executable), encoding="utf-8")
+        ash.chmod(0o755)
+        record = tmp_path / "record.json"
+        env = _scrubbed(child_env)
+        env.update(
+            {
+                "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+                "ASH_MCP_AUTH_HEADER_NAME": HEADER_NAME,
+                "ASH_MCP_AUTH_HEADER_VALUE": SECRET_VALUE,
+                "STAND_IN_RECORD": str(record),
+                "STAND_IN_HAS_FD": "1" if has_fd else "0",
+            }
+        )
+        result = subprocess.run(  # nosec B603 - fixed script, list argv
+            [sys.executable, str(SERVE)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        return json.loads(record.read_text(encoding="utf-8")), result.stderr
+
+    def test_an_ash_with_the_option_gets_the_value_on_a_descriptor(
+        self, child_env, tmp_path
+    ):
+        seen, printed = self._run(child_env, tmp_path, has_fd=True)
+
+        assert "--auth-header-value-fd" in seen["argv"]
+        assert "--auth-header-value" not in seen["argv"]
+        assert SECRET_VALUE not in " ".join(seen["argv"])
+        assert seen["handed_over"] == SECRET_VALUE
+        assert SECRET_VALUE not in printed
+        assert "WARNING" not in printed
+
+    def test_an_older_ash_gets_it_on_the_command_line_with_a_warning(
+        self, child_env, tmp_path
+    ):
+        seen, printed = self._run(child_env, tmp_path, has_fd=False)
+
+        index = seen["argv"].index("--auth-header-value")
+        assert seen["argv"][index + 1] == SECRET_VALUE
+        assert "--auth-header-value-fd" in printed and "WARNING" in printed
+        assert SECRET_VALUE not in printed
 
 
 class TestTheServer:

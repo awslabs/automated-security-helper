@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess  # nosec B404 - runs this image's own `ash mcp --help`
 import sys
 
 DEFAULT_TRANSPORT = "streamable-http"
@@ -116,6 +117,43 @@ def _take_header_value() -> str:
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+def _ash_mcp_supports(flag: str) -> bool:
+    """Whether this image's ``ash mcp`` accepts ``flag``; AshVersion decides that."""
+    try:
+        result = subprocess.run(  # nosec B603 B607 - fixed argv, the image's ash
+            ["ash", "mcp", "--help"],
+            env={**os.environ, "COLUMNS": "200"},
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return flag in result.stdout + result.stderr
+
+
+def _hand_over(value: str) -> int:
+    """An in-memory file holding ``value`` that ``ash mcp`` inherits across exec.
+
+    For ``ash mcp --auth-header-value-fd``, which reads it once and closes it, so
+    the value is on no command line (``/proc/<pid>/cmdline`` is readable by every
+    local user, and from the host by anyone who can list its processes). memfd
+    for the reason ash-container-init uses one: not a file on the container's
+    storage, and not a pipe, whose capacity bounds what can be written before
+    anything reads it.
+    """
+    try:
+        fd = os.memfd_create("ash-mcp-auth-header-value", 0)
+    except (AttributeError, OSError) as exc:
+        _fail(f"could not create an in-memory file for the MCP auth header value: {exc}")
+    data = value.encode("utf-8")
+    written = 0
+    while written < len(data):
+        written += os.write(fd, data[written:])
+    os.set_inheritable(fd, True)
+    return fd
+
+
 def _split_hosts(raw: str) -> list[str]:
     """Split a Host allowlist on commas and whitespace, dropping empties."""
     separated = raw.replace(",", " ")
@@ -168,7 +206,18 @@ def build_argv() -> list[str]:
         )
     if header_name:
         argv += ["--auth-header-name", header_name]
-        argv += ["--auth-header-value", header_value]
+        if _ash_mcp_supports("--auth-header-value-fd"):
+            argv += ["--auth-header-value-fd", str(_hand_over(header_value))]
+        else:
+            # An AshVersion older than the option: the only form it takes.
+            print(
+                "ash-mcp-serve: WARNING: this image's ash mcp has no "
+                "--auth-header-value-fd, so the auth header value is passed on its "
+                "command line, where other local users can read it. Deploy an "
+                "AshVersion whose ash mcp accepts --auth-header-value-fd.",
+                file=sys.stderr,
+            )
+            argv += ["--auth-header-value", header_value]
 
     # Repeatable flag. Passing the known proxy or load balancer hostname keeps
     # the MCP SDK's DNS-rebinding protection on: without it, protection is
