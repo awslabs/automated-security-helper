@@ -230,7 +230,11 @@ class TestSyft:
     def test_config_file_inside_the_tree_is_not_passed(self, mode, context):
         spawn = _scan(_syft(context, config_file=".syft.yaml"), context, mode)
 
-        assert spawn.values("--config") == []
+        # syft is always given a config, so it reads none from the tree: here the
+        # empty one ASH writes outside it, in place of the file in the tree.
+        (named,) = spawn.values("--config")
+        assert not _inside(Path(named), context.source_dir), spawn.command
+        assert Path(named).name != ".syft.yaml"
 
     def test_config_file_outside_the_tree_is_passed(self, mode, context, tmp_path):
         operator = tmp_path / "operator" / "syft.yaml"
