@@ -106,6 +106,71 @@ def test_the_session_test_reads_the_command_line(arguments, interactive, pwsh):
     assert result.returncode == (10 if interactive else 11), result.stderr
 
 
+def _pwsh_script(pwsh, tmp_path: Path, body: str, *, file: bool = True):
+    """Run *body* with the helpers dot-sourced, as a script file or a -Command string."""
+    script = f". '{HELPERS.as_posix()}'\n{body}\n"
+    if file:
+        path = tmp_path / "caller.ps1"
+        path.write_text(script, encoding="utf-8")
+        command = [pwsh, "-NoProfile", "-NonInteractive", "-File", str(path)]
+    else:
+        command = [pwsh, "-NoProfile", "-NonInteractive", "-Command", script]
+    env = {k: v for k, v in os.environ.items() if k != "ASH_CONFIG"}
+    return subprocess.run(  # nosec B603 - fixed interpreter, script built here
+        command,
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+
+
+def test_inside_a_script_the_session_is_not_the_one_typed_into(pwsh, tmp_path):
+    """The call stack decides first: a refusal inside a script file exits that
+    script, whatever the process command line says (here, a bare ``pwsh``)."""
+    result = _pwsh_script(
+        pwsh,
+        tmp_path,
+        "if (Test-AshInteractiveSession -Arguments @('pwsh')) { 'INTERACTIVE' } "
+        "else { 'SCRIPT' }",
+    )
+
+    assert result.stdout.strip() == "SCRIPT", result.stdout + result.stderr
+
+
+def test_without_a_script_a_hosted_console_is_typed_into(pwsh, tmp_path):
+    """No script frame: an editor's console host is a session a person types into,
+    even when it was started with -Command."""
+    result = _pwsh_script(
+        pwsh,
+        tmp_path,
+        "if (Test-AshInteractiveSession -Arguments @('pwsh', '-Command', 'x') "
+        "-HostName 'Visual Studio Code Host') { 'INTERACTIVE' } else { 'SCRIPT' }",
+        file=False,
+    )
+
+    assert result.stdout.strip() == "INTERACTIVE", result.stdout + result.stderr
+
+
+def test_a_refusal_that_throws_is_printed_once(pwsh, tmp_path):
+    """In a session typed into, the refusal throws; Invoke-ASH does not also write it
+    as an error record first."""
+    (tmp_path / "src").mkdir()
+    result = _pwsh_script(
+        pwsh,
+        tmp_path,
+        "function Test-AshInteractiveSession { $true }\n"
+        "Invoke-ASH -OCIRunner absent-runner-name -NoBuild -SourceDir src -OutputDir out",
+        file=False,
+    )
+
+    output = result.stdout + result.stderr
+    assert output.count("Unable to resolve an OCI_RUNNER") == 1, output
+
+
 @pytest.fixture
 def host(tmp_path, pwsh):
     """A PATH with a recording docker and an ``id`` that reports a chosen UID."""

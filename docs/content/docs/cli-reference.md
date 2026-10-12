@@ -269,9 +269,10 @@ the host refuses with exit 3 and asks for the image to be rebuilt from this ASH.
 
 `Invoke-ASH` exits with these codes also under `$ErrorActionPreference = 'Stop'` (the
 default of a `pwsh` step on GitHub Actions), writing the reason to stderr; no
-PowerShell error record is raised. Run from a session you type into, rather than from
-a script or `pwsh -Command`, it throws instead, so the session stays open, and
-`$LASTEXITCODE` holds the code. It runs the runner through
+PowerShell error record is raised. Called from a script, it exits that script with the
+code, also in a session you type into. Typed at a prompt, or in an editor's integrated
+console, it throws instead, once, so the session stays open, and `$LASTEXITCODE` holds
+the code; `pwsh -Command` exits with it. It runs the runner through
 `Invoke-Expression`, and passes each path and value it was given by name, so PowerShell
 reads a directory named `a$(...)` as that name. Three inputs are still parsed as
 PowerShell: the arguments after the named parameters, which are passed through to `ash`

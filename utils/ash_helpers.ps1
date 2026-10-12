@@ -587,8 +587,8 @@ function Invoke-ASH {
             }
         }
         catch {
-            Write-Error $_
-            throw $_
+            # Rethrown as it is: writing it as an error record first showed it twice.
+            throw
         }
     }
 }
@@ -599,15 +599,40 @@ function Test-AshInteractiveSession {
     Whether this PowerShell session is one a person types into.
 
     .DESCRIPTION
-    pwsh and powershell started with a command or a script to run (-Command, -File,
-    -EncodedCommand, a script path, or -NonInteractive) end when it does. One started
-    without either, or with -NoExit, is a session a person types into, which `exit`
-    would close. Parameter names may be abbreviated, as PowerShell accepts them.
+    Decided from the call stack first: when a script file is among Invoke-ASH's
+    callers, `exit` ends that script and nothing else, so the session that ran it
+    stays whether a person types into it or not. With no script among the callers,
+    Invoke-ASH was typed at a prompt or given in a -Command string, which the call
+    stack cannot tell apart. Then a host other than the console host (an editor's
+    integrated console) is typed into, and for the console host the process command
+    line decides: pwsh and powershell started with a command or a script to run
+    (-Command, -File, -EncodedCommand, a script path, or -NonInteractive) end when it
+    does; one started without either, or with -NoExit, is typed into. Parameter
+    names may be abbreviated, as PowerShell accepts them.
     #>
     param(
         [string[]]
-        $Arguments = [Environment]::GetCommandLineArgs()
+        $Arguments = [Environment]::GetCommandLineArgs(),
+        [string]
+        $HostName = $Host.Name,
+        [AllowNull()]
+        [string[]]
+        $ScriptFrames = $null
     )
+    if ($null -eq $ScriptFrames) {
+        $helpers = $MyInvocation.MyCommand.ScriptBlock.File
+        $ScriptFrames = @(
+            Get-PSCallStack |
+                Where-Object { $_.ScriptName -and $_.ScriptName -ne $helpers } |
+                ForEach-Object { $_.ScriptName }
+        )
+    }
+    if ($ScriptFrames.Count -gt 0) {
+        return $false
+    }
+    if ($HostName -and $HostName -notin @('ConsoleHost', 'Default Host')) {
+        return $true
+    }
     $rest = @($Arguments | Select-Object -Skip 1)
     foreach ($argument in $rest) {
         $flag = ("$argument" -replace '^/', '-').ToLowerInvariant()
