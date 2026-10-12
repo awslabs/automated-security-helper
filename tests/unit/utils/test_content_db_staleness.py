@@ -1336,3 +1336,13 @@ class TestTheProbeReadsNothingTheRepositoryWrote:
             cdb.STALENESS_FAIL,
         )
         self._assert_fresh(record, fresh)
+
+
+def test_the_probes_pass_the_same_empty_config_the_refresh_does():
+    """The probes keep their own copy of the path, so it is checked against the
+    refresh's: a renamed or moved file would otherwise leave the probes reading a
+    config that does not exist."""
+    from automated_security_helper.utils import content_db_refresh
+
+    assert staleness.EMPTY_TOOL_CONFIG == content_db_refresh.EMPTY_TOOL_CONFIG
+    assert staleness.EMPTY_TOOL_CONFIG.is_file()

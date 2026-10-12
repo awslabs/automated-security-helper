@@ -104,7 +104,6 @@ from typing import (
     Sequence,
 )
 
-from automated_security_helper.utils.content_db_refresh import EMPTY_TOOL_CONFIG
 from automated_security_helper.utils.content_databases import (
     CONTENT_DATABASES,
     DEFAULT_STALENESS_POLICY,
@@ -125,6 +124,14 @@ if TYPE_CHECKING:
     from automated_security_helper.schemas.sarif_schema_model import Notification
 
 STALE_NOTIFICATION_ID = "ASH-CONTENT-DB-STALE"
+
+#: ``content_db_refresh.EMPTY_TOOL_CONFIG``, the empty config file every grype and
+#: trivy command ASH runs is given. The same path, kept here rather than imported:
+#: the markdown, text and flat-json reporters reach this module, and importing
+#: content_db_refresh would put the database updates it runs in their import graph
+#: (tests/unit/config/test_off_host_plugin_modules_from_repo_config.py).
+#: tests/unit/utils/test_content_db_staleness.py checks the two are equal.
+EMPTY_TOOL_CONFIG = Path(__file__).resolve().with_name("empty-tool-config.yaml")
 
 
 class ContentDatabaseAbsent(ValueError):
