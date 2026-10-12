@@ -17,7 +17,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import pytest
 import yaml
@@ -29,21 +29,41 @@ from automated_security_helper.config.reporter_trust import (
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.utils.log import ASH_LOGGER
 
-#: Values that read like what a repository would write, for some options. Every
-#: other option gets ``repo-<name>``, which no default is.
-_EXAMPLE_VALUES: Dict[str, str] = {
-    "aws_region": "repo-region-1",
+#: Values that read like what a repository would write, for some options, each of
+#: the type its options model validates and none of them a default. Every other
+#: option is a string, and gets ``repo-<name>``, which no default is.
+_EXAMPLE_VALUES: Dict[str, Any] = {
+    # A real region name: the options models refuse anything else.
+    "aws_region": "eu-west-3",
     "account_id": "000000000001",
     # Plain file names: a path is replaced by the options' own validation from
     # any source, which would satisfy these tests without the destination check.
     "output_file": "repo-summary.md",
     "output_executive_file": "repo-executive.md",
     "output_technical_file": "repo-technical.md",
+    "max_retries": 7,
+    "base_delay": 2.0,
+    "max_delay": 30.0,
+    "include_code_snippets": True,
+    "exclude_scanner_types": [],
+    "actionable_only": False,
+    "max_findings_to_analyze": 999,
+    "max_findings_per_severity": 999,
+    "summarize_findings": True,
+    "batch_processing": True,
+    "compliance_frameworks": ["Repo framework"],
+    "enable_fallback_models": False,
+    "add_section_headers": False,
+    "output_markdown": False,
+    "include_sections": ["executive_summary"],
+    "exclude_sections": ["technical_analysis"],
+    "group_by_severity": False,
+    "archive_resolved_findings": True,
 }
 
 # Every option listed in config/reporter_trust.py, with a value no default has.
 # Derived from the table, so an option added there is covered here.
-REPO_VALUES: Dict[str, Dict[str, str]] = {
+REPO_VALUES: Dict[str, Dict[str, Any]] = {
     reporter: {name: _EXAMPLE_VALUES.get(name, f"repo-{name}") for name in names}
     for reporter, names in REPORTER_DESTINATION_OPTIONS.items()
 }
@@ -241,8 +261,17 @@ _TABLE_CASES = [
 def test_a_repository_config_repeating_the_operators_value_applies(
     tmp_path, ash_log, reporter, name
 ):
-    """The same value is no change: it applies, with no warning."""
-    section = {reporter: {"options": {name: REPO_VALUES[reporter][name]}}}
+    """The same value is no change: it applies, with no warning, and the reporter
+    built from the section holds it."""
+    from automated_security_helper.base.plugin_config import plugin_config_key
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.plugin_modules.ash_aws_plugins import (
+        ASH_REPORTERS,
+    )
+
+    value = REPO_VALUES[reporter][name]
+    section = {reporter: {"options": {name: value}}}
     source = tmp_path / "repo"
     project = _write_config(source / ".ash" / ".ash.yaml", section)
     operator = _write_config(tmp_path / "operator" / "ash.yaml", section)
@@ -251,8 +280,20 @@ def test_a_repository_config_repeating_the_operators_value_applies(
         config_path=project, source_dir=source, trusted_config_path=operator
     )
 
-    assert _options(config, reporter)[name] == REPO_VALUES[reporter][name]
+    assert _options(config, reporter)[name] == value
     assert not any(name in message for message in _warnings(ash_log))
+    reporter_class = next(c for c in ASH_REPORTERS if plugin_config_key(c) == reporter)
+    built = reporter_class(
+        context=PluginContext(
+            source_dir=tmp_path / "src",
+            output_dir=tmp_path / "out",
+            work_dir=tmp_path / "work",
+            config=AshConfig(),
+        ),
+        config=config.get_plugin_config("reporter", reporter),
+    )
+    if hasattr(built.config.options, name):
+        assert getattr(built.config.options, name) == value
 
 
 @pytest.mark.parametrize(
@@ -460,6 +501,41 @@ def test_an_in_tree_config_cannot_turn_one_off(tmp_path, ash_log, reporter, oper
     assert _enabled(config, reporter) is expected
     warnings = "\n".join(_warnings(ash_log))
     assert f"reporters.{reporter}.enabled" in warnings, warnings
+
+
+@pytest.mark.parametrize("value", [0, "no", "false"])
+def test_a_tree_enabled_read_as_false_is_confined_too(tmp_path, ash_log, value):
+    """Not only ``false`` itself: any value the reporter reads as off is the tree's
+    choice too, and is ignored with a warning where the operator has it on."""
+    source = tmp_path / "repo"
+    project = _write_config(source / ".ash" / ".ash.yaml", {"s3": {"enabled": value}})
+
+    config = resolve_config(
+        config_path=project,
+        source_dir=source,
+        trusted_config_path=_operator(tmp_path, "s3", True),
+    )
+
+    assert _enabled(config, "s3") is True
+    assert any("reporters.s3.enabled" in m for m in _warnings(ash_log))
+
+
+@pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+def test_a_tree_repeating_the_operators_off_is_not_warned(tmp_path, ash_log, reporter):
+    """``enabled: false`` where the operator has the reporter off changes nothing."""
+    source = tmp_path / "repo"
+    project = _write_config(
+        source / ".ash" / ".ash.yaml", {reporter: {"enabled": False}}
+    )
+
+    config = resolve_config(
+        config_path=project,
+        source_dir=source,
+        trusted_config_path=_operator_off(tmp_path, reporter),
+    )
+
+    assert _enabled(config, reporter) is False
+    assert not any("enabled" in message for message in _warnings(ash_log))
 
 
 @pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))

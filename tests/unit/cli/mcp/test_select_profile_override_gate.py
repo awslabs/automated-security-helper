@@ -777,6 +777,66 @@ def test_a_client_still_cannot_turn_a_reporter_on(
     _assert_unbound("override")
 
 
+@pytest.mark.parametrize("value", [0, "no"])
+def test_an_enabled_read_as_false_is_not_the_exemption(
+    tmp_path: Path, value: Any
+) -> None:
+    """Only ``false`` itself is exempt from the reporter's entry; another value the
+    model reads as false is refused like ``true``."""
+    document = _profile(allowed_paths=["/**"])
+    document["reporters"] = {"s3": {"enabled": True}}
+    _install(tmp_path, document)
+
+    patched = mcp_select_profile(
+        "op",
+        patch_ops=[{"op": "replace", "path": "/reporters/s3/enabled", "value": value}],
+        session_id="patch",
+    )
+
+    assert patched["success"] is False, patched
+    assert "denied_paths entry" in patched["error"], patched["error"]
+    _assert_unbound("patch")
+
+
+def test_replacing_a_reporters_options_with_false_is_refused(tmp_path: Path) -> None:
+    """Only ``/reporters/<name>/enabled`` is exempt, not another field of the section."""
+    document = _profile(allowed_paths=["/**"])
+    document["reporters"] = {"s3": {"enabled": True, "options": {"bucket_name": "b"}}}
+    _install(tmp_path, document)
+
+    patched = mcp_select_profile(
+        "op",
+        patch_ops=[{"op": "replace", "path": "/reporters/s3/options", "value": False}],
+        session_id="patch",
+    )
+
+    assert patched["success"] is False, patched
+    assert "denied_paths entry" in patched["error"], patched["error"]
+    _assert_unbound("patch")
+
+
+@pytest.mark.parametrize("op", ["add", "replace"])
+def test_writing_only_enabled_false_over_an_existing_section_is_refused(
+    tmp_path: Path, op: str
+) -> None:
+    """A section holding only ``enabled: false`` is exempt where the profile has no
+    section for the reporter. Written over the profile's section it drops the
+    section's other settings, so it is refused."""
+    document = _profile(allowed_paths=["/**"])
+    document["reporters"] = {"s3": {"enabled": True, "options": {"bucket_name": "b"}}}
+    _install(tmp_path, document)
+
+    patched = mcp_select_profile(
+        "op",
+        patch_ops=[{"op": op, "path": "/reporters/s3", "value": {"enabled": False}}],
+        session_id="patch",
+    )
+
+    assert patched["success"] is False, patched
+    assert "denied_paths entry" in patched["error"], patched["error"]
+    _assert_unbound("patch")
+
+
 @pytest.mark.parametrize("shape", ["leaf", "section"])
 def test_the_enabled_false_exemption_is_for_off_host_reporters_only(
     tmp_path: Path, shape: str

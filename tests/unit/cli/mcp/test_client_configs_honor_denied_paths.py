@@ -209,6 +209,19 @@ def test_every_spelling_of_the_denied_plugin_section_is_refused(
     )
 
 
+@pytest.mark.parametrize("value", ["0", "'no'"])
+def test_an_upload_enabled_read_as_false_is_not_the_exemption(
+    _server, value: str
+) -> None:
+    """Only ``false`` itself is let through the reporter's entry; another value
+    the model reads as false is refused like ``true``."""
+    source = _upload({"ash.yaml": f"reporters:\n  s3:\n    enabled: {value}\n"})
+    _assert_refused(
+        _scan_resolution(_server["target"], str(source / "ash.yaml")),
+        key="reporters.s3.enabled",
+    )
+
+
 def test_a_local_reporters_enabled_false_is_refused_where_the_operator_denies_it(
     _server,
 ) -> None:
