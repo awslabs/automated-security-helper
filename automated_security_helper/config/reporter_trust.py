@@ -174,19 +174,26 @@ def turns_a_reporter_off(value: Any) -> bool:
     return value is False
 
 
-def _reads_as_off(value: Any) -> bool:
-    """Whether the reporter reads ``enabled: value`` as off, as its config model does.
-
-    For the trusted base's value, which the operator may have written in any
-    form the reporter's model accepts (``"no"``, ``0``). A value the model would
-    refuse counts as on, so it confines nothing.
-    """
+def _reads_as(value: Any) -> Optional[bool]:
+    """``enabled: value`` as the reporter's config model reads it, or None if it refuses it."""
     from pydantic import TypeAdapter, ValidationError
 
     try:
-        return TypeAdapter(bool).validate_python(value) is False
+        return TypeAdapter(bool).validate_python(value)
     except ValidationError:
-        return False
+        return None
+
+
+def _reads_as_off(value: Any) -> bool:
+    """Whether the reporter does not run with ``enabled: value``.
+
+    For the trusted base's value, which the operator may have written in any
+    form the reporter's model accepts (``"no"``, ``0``). A value the model would
+    refuse (``"disabled"``, ``null``) counts as off: the operator's own config
+    could not build the reporter with it, so it did not turn the reporter on,
+    and a config that is not the operator's does not either.
+    """
+    return _reads_as(value) is not True
 
 
 def _as_dict(section: Any) -> Optional[Dict[str, Any]]:
@@ -563,7 +570,7 @@ def _take_trusted_enabled(
 
     ``wanted`` is the trusted base's value as the reporter reads it, its default
     where the trusted base sets none. A section whose ``enabled`` the reporter
-    reads differently has its key returned; one that writes none is set only
+    reads differently, or would refuse, has its key returned; one that writes none is set only
     where the reporter's default differs from ``wanted``. A config with no
     section for the reporter gets one in that case too.
     """
@@ -584,7 +591,7 @@ def _take_trusted_enabled(
                 continue
         elif current is wanted:
             continue
-        elif _reads_as_off(current) == wanted:
+        elif _reads_as(current) != wanted:
             ignored.append(f"reporters.{key}.enabled")
         section["enabled"] = wanted
         extras[key] = section

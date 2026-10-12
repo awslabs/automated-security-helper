@@ -359,6 +359,30 @@ def test_a_tree_config_without_the_section_keeps_the_operators_options(
     assert f"reporters.{reporter}" not in _warnings(ash_log)
 
 
+@pytest.mark.parametrize("value", ["disabled", "maybe", 2, None])
+@pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+def test_an_operator_enabled_the_model_refuses_reads_as_off(
+    tmp_path, monkeypatch, ash_log, reporter, value
+):
+    """ASH_CONFIG's ``enabled: disabled`` cannot build the reporter, so the
+    operator did not turn it on, and a tree's ``enabled: true`` does not either."""
+    name, destination = _OPERATOR_DESTINATIONS[reporter]
+    operator = _write(
+        tmp_path / "operator" / "ash.yaml",
+        {"reporters": {reporter: {"enabled": value, "options": {name: destination}}}},
+    )
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    repo = tmp_path / "workspace" / "repo"
+    project = _write(
+        repo / ".ash" / ".ash.yaml", {"reporters": {reporter: {"enabled": True}}}
+    )
+
+    for config in (_cli(repo), _workspace(tmp_path, project, operator)):
+        built = _built(config, reporter, tmp_path / "context")
+        assert built.config.enabled is False
+    assert f"reporters.{reporter}.enabled" in _warnings(ash_log)
+
+
 @pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
 def test_off_by_default_neither_route_lets_the_tree_turn_one_on(
     tmp_path, ash_log, monkeypatch, reporter
