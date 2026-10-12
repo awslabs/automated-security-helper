@@ -229,19 +229,59 @@ class TestCloudReportersNeedTheOperator:
     def test_rerendering_stored_results_contacts_nothing(
         self, tmp_path, cloud, reports_run, constructed
     ):
-        from automated_security_helper.config.default_config import get_default_config
-        from automated_security_helper.interactions.run_ash_scan import run_ash_scan
+        from tests.utils.helpers import results_of_a_scan
+
+        output_dir, results_file, operator_config = self._stored(
+            tmp_path, results_of_a_scan()
+        )
+
+        self._rerender(tmp_path, output_dir, results_file, operator_config)
+
+        assert (output_dir / "reports" / "ash.sarif").exists()
+        # Precondition: the run built every cloud reporter, so "contacted
+        # nothing" is about reporters it had, not ones it never saw.
+        assert set(constructed) == {cls.__name__ for cls in CLOUD_REPORTERS}
+        assert not cloud.any(), cloud.summary()
+        assert reports_run == []
+
+    def test_rerendering_results_that_hold_no_scan_is_refused(
+        self, tmp_path, cloud, reports_run
+    ):
+        """Results with no scanner entry and no finding read as a clean scan, so
+        ``--use-existing`` refuses them before any reporter runs."""
         from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+        output_dir, results_file, operator_config = self._stored(
+            tmp_path, AshAggregatedResults()
+        )
+
+        with pytest.raises(SystemExit) as exited:
+            self._rerender(tmp_path, output_dir, results_file, operator_config)
+
+        assert exited.value.code == 1
+        assert not (output_dir / "reports" / "ash.sarif").exists()
+        assert not cloud.any(), cloud.summary()
+        assert reports_run == []
+
+    @staticmethod
+    def _stored(tmp_path, stored):
+        """An output directory holding ``stored``, and an operator config whose
+        cloud reporter sections are complete but enable none of them."""
+        from automated_security_helper.config.default_config import get_default_config
 
         output_dir = tmp_path / "out"
         output_dir.mkdir()
-        stored = AshAggregatedResults()
         stored.ash_config = get_default_config()
         results_file = output_dir / "ash_aggregated_results.json"
         results_file.write_text(stored.model_dump_json(by_alias=True), encoding="utf-8")
         operator_config = tmp_path / "operator" / "ash.yaml"
         operator_config.parent.mkdir()
         operator_config.write_text(COMPLETE_OPTIONS_NO_ENABLED, encoding="utf-8")
+        return output_dir, results_file, operator_config
+
+    @staticmethod
+    def _rerender(tmp_path, output_dir, results_file, operator_config):
+        from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 
         run_ash_scan(
             source_dir=str(_source_tree(tmp_path)),
@@ -259,13 +299,6 @@ class TestCloudReportersNeedTheOperator:
             # run builds the AWS reporters however the plugin registry is scoped.
             ash_plugin_modules=[AWS_PLUGIN_MODULE],
         )
-
-        assert (output_dir / "reports" / "ash.sarif").exists()
-        # Precondition: the run built every cloud reporter, so "contacted
-        # nothing" is about reporters it had, not ones it never saw.
-        assert set(constructed) == {cls.__name__ for cls in CLOUD_REPORTERS}
-        assert not cloud.any(), cloud.summary()
-        assert reports_run == []
 
     def test_an_operator_config_that_enables_a_cloud_reporter_reaches_it(
         self, tmp_path, cloud, reports_run
