@@ -38,6 +38,16 @@ def main() -> int:
             if spec["secret"] not in f.read():
                 raise RuntimeError("read something, but not the planted file")
 
+    def read_link_in_source(key):
+        # A symlink committed in the source tree, read by its in-tree name: the
+        # sandbox hides its target unless the target is on the read list.
+        def read():
+            with open(spec[key], encoding="utf-8") as f:
+                if spec["secret"] not in f.read():
+                    raise RuntimeError("read something, but not the link's target")
+
+        return read
+
     def write_outside_output():
         with open(os.path.join(spec["outside_dir"], "written.txt"), "w") as f:
             f.write("written")
@@ -169,6 +179,8 @@ def main() -> int:
     checks = {
         "read_ssh_key": read_ssh_key,
         "read_outside_source": read_outside_source,
+        "read_link_to_home": read_link_in_source("link_to_home"),
+        "read_link_elsewhere": read_link_in_source("link_elsewhere"),
         "write_outside_output": write_outside_output,
         "write_elsewhere_in_output": write_elsewhere_in_output,
         "modify_source": modify_source,

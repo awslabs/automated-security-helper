@@ -420,6 +420,22 @@ own results, and, if the scanner is allowed a network, talk to the network. It c
 read the rest of your home directory, write outside its results directory, modify the
 source tree, or see environment variables outside the allowlist.
 
+A symlink in the tree is resolved inside the sandbox, so it reads only what the
+sandbox shows. Under bwrap and Landlock a link to a file outside the read list, in
+`$HOME` or anywhere else, cannot be read. firejail shows everything outside `$HOME`
+and `/tmp`, and sandbox-exec reads everywhere except `$HOME` and the shared temporary
+directories, so under those two a link can be read unless its target is in what they
+hide.
+
+A hard link is not a link to anything: it is the file, under another name, and
+nothing tells it apart from an ordinary file. A file in the tree that is a hard link to
+a file outside it is read as part of the tree, by ASH and by every scanner, sandbox or
+not. ASH does not try to detect one; a git checkout never makes one, but a tree copied
+or unpacked by another tool can. What contains a scanner that reads one is the
+sandbox: with no network unless it is granted one, and writes only to its results
+directory, what it read reaches only its results. ASH's own writes refuse a file
+another name refers to (see [What a sandboxed scanner can do](#what-a-sandboxed-scanner-can-do)).
+
 Out of scope:
 
 - ASH itself and `git`, which run unsandboxed. ASH is the trusted base, and that

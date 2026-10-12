@@ -235,9 +235,17 @@ def _scan(
     (outside / "secret.txt").write_text(CANARY)
     for link_target in ("outside-results.txt", "outside-log.txt"):
         (outside / link_target).write_text("original\n")
+    # Outside $HOME and outside every read list.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "secret.txt").write_text(CANARY)
     source = tmp_path / "src"
     source.mkdir()
     (source / "app.py").write_text("print('hello')\n")
+    # Committed in the tree, as a repository can: each names a file the sandbox
+    # does not grant, one inside $HOME and one outside it.
+    (source / "link_to_home").symlink_to(outside / "secret.txt")
+    (source / "link_elsewhere").symlink_to(elsewhere / "secret.txt")
     shutil.copy(FIXTURE / "escape_probe.py", source / "escape_probe.py")
     (source / ".ash").mkdir()
     (source / ".ash" / ".ash.yaml").write_text("project_name: sandbox-escape\n")
@@ -258,6 +266,8 @@ def _scan(
         "home": str(home),
         "secret": CANARY,
         "outside_file": str(outside / "secret.txt"),
+        "link_to_home": str(source / "link_to_home"),
+        "link_elsewhere": str(source / "link_elsewhere"),
         "outside_dir": str(outside),
         "output_dir": str(output),
         "source_dir": str(source),
@@ -439,6 +449,18 @@ KNOWN_GAPS = {
     },
 }
 
+#: Attempts whose outcome under a backend depends on where the test's temporary
+#: directory is, so they are not scored there. firejail shows everything outside
+#: $HOME and /tmp, and sandbox-exec reads everywhere except $HOME and the shared
+#: temporary directories (scanner-sandbox.md), so a link to a file outside $HOME is
+#: hidden or not depending on whether the temporary directory is /tmp. Both limits
+#: are pinned in the docs by test_sandbox_docs_state_the_link_target_limits; bwrap
+#: and Landlock hide that file wherever it is, and are scored.
+NOT_SCORED = {
+    "firejail": {"read_link_elsewhere"},
+    "sandbox-exec": {"read_link_elsewhere"},
+}
+
 #: What has to keep working inside every sandbox. uv writes its cache on every run,
 #: so wherever UV_CACHE_DIR points has to be writable: the host cache through
 #: bwrap's overlay, a private directory under the other backends. Stream and
@@ -476,6 +498,8 @@ def _control(tmp_path_factory, listeners: _Listeners, *, online: bool) -> set:
 
 
 def _assert_blocked(backend: str, outcomes: Dict[str, str]) -> None:
+    for name in NOT_SCORED.get(backend, set()):
+        outcomes.pop(name, None)
     gaps = KNOWN_GAPS.get(backend, {})
     for name in gaps:
         if name in outcomes:
