@@ -42,7 +42,7 @@ from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.utils import subprocess_utils
 assert Path(rac.__file__).resolve().is_relative_to(Path(site).resolve())
 seen = []
-def record(cmd_list, check=True, debug=False, shell=False):
+def record(cmd_list, check=True, debug=False, shell=False, env=None):
     seen.append([str(c) for c in cmd_list if c is not None])
     return subprocess_utils.create_completed_process(args=seen[-1], returncode=0)
 rac.run_cmd_direct = record
