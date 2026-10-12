@@ -730,7 +730,16 @@ def _ash_paths() -> List[Path]:
 
 
 def _is_an_installation_root(path: Path) -> bool:
-    """Whether ``path`` is a venv's root (pyvenv.cfg) or a conda installation's."""
+    """Whether ``path`` is a venv's root (pyvenv.cfg) or a conda installation's.
+
+    A marker alone is not enough where the directory holds the user's data:
+    ``.local`` holds ``.local/share`` and the keyrings in it, and a pyvenv.cfg or
+    conda-meta there (``conda create -p ~/.local``, or one any program run as the
+    user wrote) would admit it. So ``.local``, and any directory holding
+    share/keyrings, is never an installation root.
+    """
+    if path.name == ".local" or os.path.lexists(path / "share" / "keyrings"):
+        return False
     return (path / "pyvenv.cfg").is_file() or (path / "conda-meta").is_dir()
 
 

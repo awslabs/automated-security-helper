@@ -341,6 +341,47 @@ def test_a_prefix_directly_in_the_home_that_is_no_venv_is_refused(world, monkeyp
     assert repr(prefix.as_posix()) in str(refused.value), str(refused.value)
 
 
+def _in_which_home(world, which_home):
+    """HOME's directory, or a passwd entry's home that HOME is not."""
+    if which_home == "HOME":
+        return world.home
+    passwd_home = world.root / "passwd-home"
+    (passwd_home / ".ssh").mkdir(parents=True)
+    world.set_passwd_home(passwd_home)
+    return passwd_home
+
+
+@pytest.mark.parametrize("which_home", ["HOME", "passwd home"])
+@pytest.mark.parametrize("marker", ["pyvenv.cfg", "conda-meta"])
+@pytest.mark.parametrize(
+    "root, keyrings", [(".local", False), ("data", True)], ids=[".local", "keyrings"]
+)
+def test_a_planted_venv_marker_does_not_admit_dot_local(
+    world, monkeypatch, which_home, marker, root, keyrings
+):
+    """A marker alone does not make ~/.local one installation.
+
+    ~/.local holds ~/.local/share and the keyrings in it, and a pyvenv.cfg or a
+    conda-meta directory there (``conda create -p ~/.local``, or one written by any
+    program run as the user) would otherwise admit it as a venv or conda root. The
+    same for any directory directly in a home that holds share/keyrings.
+    """
+    home = _in_which_home(world, which_home)
+    prefix = home / root
+    if keyrings:
+        (prefix / "share" / "keyrings").mkdir(parents=True)
+    executable = _python(prefix / "bin" / "python3.12")
+    if marker == "pyvenv.cfg":
+        (prefix / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    else:
+        (prefix / "conda-meta").mkdir()
+
+    with pytest.raises(SandboxUnavailable) as refused:
+        _build(world, monkeypatch, executable, prefix)
+
+    assert repr(prefix.as_posix()) in str(refused.value), str(refused.value)
+
+
 def _a_real_file_at(monkeypatch, executable):
     """Model a real interpreter file at ``executable``, with no link on the way.
 

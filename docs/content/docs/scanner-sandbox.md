@@ -119,7 +119,9 @@ it needs.
   it would mount that whole directory, and so is a Python whose `sys.prefix` is `/`.
   The scanner is refused rather than given the home when
   the Python's prefix is a home directory or a directory directly in one that is
-  not a virtual environment or conda installation (`~/.local`), when the Python is
+  not a virtual environment or conda installation (`~/.local`, which never counts as
+  one, nor does a directory holding `share/keyrings`, whatever marker it has), when
+  the Python is
   reached through a link kept directly in a home (a virtual environment made with
   `~/python3 -m venv`), or when `ASH_BIN_PATH` names a home or a directory directly
   in one not named `bin`. Use an interpreter or virtual environment outside the
