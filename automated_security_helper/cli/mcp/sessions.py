@@ -50,6 +50,7 @@ from __future__ import annotations
 import contextlib
 import os
 import shutil
+import sys
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -542,7 +543,9 @@ _STDIO_SERVERS_LOCK = ".lock"
 def _try_lock(handle: Any) -> bool:
     """Take an exclusive lock on ``handle`` without waiting; True if taken."""
     try:
-        if os.name == "nt":
+        # sys.platform rather than os.name: it is the check mypy reads, so the
+        # Windows-only msvcrt names are checked on Windows alone.
+        if sys.platform == "win32":
             import msvcrt
 
             handle.seek(0)
@@ -557,7 +560,7 @@ def _try_lock(handle: Any) -> bool:
 
 
 def _lock_blocking(handle: Any) -> None:
-    if os.name == "nt":
+    if sys.platform == "win32":
         import msvcrt
 
         handle.seek(0)
