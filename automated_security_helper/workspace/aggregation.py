@@ -128,6 +128,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from automated_security_helper.core.exceptions import WorkspacePatternError
 from automated_security_helper.models.workspace import (
+    ProjectInputNotScanned,
     WorkspaceProjectResult,
     WorkspaceResults,
 )
@@ -658,6 +659,45 @@ def no_scanner_ran_for_project(results: Any) -> bool:
         getattr(getattr(results, "metadata", None), "expected_scanners", None) or []
     )
     return no_scanner_ran(scanner_statuses(results), expected)
+
+
+def inputs_not_scanned_for_project(
+    results: Any, relative_path: str
+) -> List[ProjectInputNotScanned]:
+    """This project's inputs that a scanner found and did not scan, workspace-relative.
+
+    Read through ``unified_metrics.inputs_not_scanned``, the reader the
+    single-directory summaries use, so the two modes list the same entries. A path
+    the scanner recorded relative to the project gets the project's
+    ``relative_path`` in front; one it could only record as absolute is kept as it
+    is.
+
+    The reader is imported inside the function for the reason its siblings above
+    give.
+
+    Args:
+        results: One project's ``AshAggregatedResults``, or ``None``.
+        relative_path: The project's workspace-relative path.
+
+    Returns:
+        The entries, in the reader's order.
+    """
+    from automated_security_helper.core.unified_metrics import inputs_not_scanned
+
+    if results is None:
+        return []
+    entries = []
+    for scanner, path, reason in inputs_not_scanned(results):
+        recorded = PurePosixPath(path)
+        shown = (
+            path
+            if recorded.is_absolute()
+            else (PurePosixPath(relative_path) / recorded).as_posix()
+        )
+        entries.append(
+            ProjectInputNotScanned(scanner=scanner, path=shown, reason=reason)
+        )
+    return entries
 
 
 def _worse_status(left: Optional[str], right: Optional[str]) -> Optional[str]:

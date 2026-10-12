@@ -45,6 +45,7 @@ from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -217,6 +218,10 @@ def inputs_not_scanned(
     inputs_not_scanned``), in scanner order. A scanner that did not scan an input says
     nothing about it in its findings, and its status cannot say which input it was, so
     the summaries list them beside the table, as they do coverage shortfalls.
+
+    For a workspace scan, whose unified results carry no per-target reports, they are
+    read off each project's entry (``WorkspaceProjectResult.inputs_not_scanned``,
+    workspace-relative paths), in workspace order, after any per-target ones.
     """
     entries = []
     for scanner_name in sorted(asharp_model.additional_reports or {}):
@@ -232,6 +237,10 @@ def inputs_not_scanned(
                 path, reason = item.get("path"), item.get("reason")
                 if isinstance(path, str) and isinstance(reason, str):
                     entries.append((scanner_name, path, reason))
+    if is_workspace_scan(asharp_model):
+        for project in asharp_model.workspace.projects:
+            for item in project.inputs_not_scanned:
+                entries.append((item.scanner, item.path, item.reason))
     return entries
 
 

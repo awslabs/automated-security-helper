@@ -870,6 +870,8 @@
           }),
           'incomplete_scanners': list([
           ]),
+          'inputs_not_scanned': list([
+          ]),
           'invalid_config': False,
           'no_scanner_ran': False,
           'output_path': 'projects/api',
@@ -900,6 +902,8 @@
           }),
           'incomplete_scanners': list([
           ]),
+          'inputs_not_scanned': list([
+          ]),
           'invalid_config': False,
           'no_scanner_ran': False,
           'output_path': 'projects/web',
@@ -929,6 +933,8 @@
           'incomplete_converters': dict({
           }),
           'incomplete_scanners': list([
+          ]),
+          'inputs_not_scanned': list([
           ]),
           'invalid_config': False,
           'no_scanner_ran': False,

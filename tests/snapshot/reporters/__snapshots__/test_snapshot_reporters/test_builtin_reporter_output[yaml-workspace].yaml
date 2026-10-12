@@ -706,6 +706,7 @@ workspace:
     incomplete_converters: {}
     incomplete_scanners:
     - npm-audit
+    inputs_not_scanned: []
     invalid_config: false
     no_scanner_ran: false
     output_path: projects/api
@@ -731,6 +732,7 @@ workspace:
     ignore_file_exclusions: null
     incomplete_converters: {}
     incomplete_scanners: []
+    inputs_not_scanned: []
     invalid_config: false
     no_scanner_ran: false
     output_path: projects/web

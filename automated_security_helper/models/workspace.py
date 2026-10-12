@@ -263,6 +263,23 @@ class ProjectRunStatus(str, Enum):
     FAILED = "failed"
 
 
+class ProjectInputNotScanned(BaseModel):
+    """One input a project's scanner found and did not scan, and why."""
+
+    scanner: Annotated[str, Field(..., min_length=1, description="The scanner.")]
+    path: Annotated[
+        str,
+        Field(
+            ...,
+            description=(
+                "The input's workspace-relative path, '/' separated: the project's "
+                "relative_path joined to the path the scanner recorded."
+            ),
+        ),
+    ]
+    reason: Annotated[str, Field(..., description="Why the scanner did not scan it.")]
+
+
 class WorkspaceProjectResult(BaseModel):
     """One project's outcome, as it appears in the aggregated results."""
 
@@ -401,6 +418,20 @@ class WorkspaceProjectResult(BaseModel):
                 "through the unified metrics rather than off `scanners`, so a "
                 "scanner the operator excluded on a host that also lacks its tool "
                 "reads SKIPPED here rather than MISSING."
+            ),
+        ),
+    ]
+    inputs_not_scanned: Annotated[
+        List[ProjectInputNotScanned],
+        Field(
+            default_factory=list,
+            description=(
+                "Every input one of this project's scanners found and did not scan "
+                "(an offline npm-audit's lockfiles, for instance), with the reason. "
+                "The project's own results list them per target; the workspace "
+                "results carry no per-target reports, so they are repeated here, "
+                "for the merged summaries and the console. A scanner's status "
+                "cannot say which input it skipped."
             ),
         ),
     ]

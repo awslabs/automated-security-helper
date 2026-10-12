@@ -1411,7 +1411,9 @@ rows in each project's `incomplete_converters`.
 `--no-fail-on-incomplete-scanners` applies per project as well, and it
 clears only the verdict: `incomplete_scanners` and `incomplete_converters` still
 name what did not run, because turning the gate off accepts the risk rather than
-asserting the scan was complete.
+asserting the scan was complete. Each project's `inputs_not_scanned` names the
+inputs its scanners found and did not scan (an offline npm-audit's lockfiles), with
+workspace-relative paths, and the merged summaries and the console list them.
 
 An incomplete project outranks findings, as in a single-project scan: a workspace
 where project A is incomplete and project B has actionable findings exits `1`, not

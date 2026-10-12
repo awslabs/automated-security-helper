@@ -204,6 +204,19 @@ def print_coverage_shortfalls(
         )
 
 
+def not_scanned_line(scanner_name: str, path: str, reason: str) -> str:
+    """The console line for one input a scanner did not scan, as Rich markup.
+
+    The path is the scanned repository's: its control characters (a terminal escape
+    sequence, a newline) are escaped before its markup is. Shared by the
+    single-directory table and the workspace summary, so both print it one way.
+    """
+    return (
+        f"[bold yellow]Not scanned:[/bold yellow] {escape(scanner_name)} did not "
+        f"scan {escape(escape_controls(path))}: {escape(reason)}"
+    )
+
+
 def print_inputs_not_scanned(
     asharp_model: AshAggregatedResults, console: Console
 ) -> None:
@@ -213,12 +226,7 @@ def print_inputs_not_scanned(
     cannot say which input went unexamined. Nothing is printed when there is none.
     """
     for scanner_name, path, reason in inputs_not_scanned(asharp_model):
-        # The path is the scanned repository's: its control characters (a terminal
-        # escape sequence, a newline) are escaped before its markup is.
-        console.print(
-            f"[bold yellow]Not scanned:[/bold yellow] {escape(scanner_name)} did not "
-            f"scan {escape(escape_controls(path))}: {escape(reason)}"
-        )
+        console.print(not_scanned_line(scanner_name, path, reason))
 
 
 def print_stale_content_databases(

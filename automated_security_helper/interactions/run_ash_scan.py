@@ -2573,15 +2573,39 @@ def _print_workspace_summary(
                 f"  [bold red]failed[/bold red]   {entry.display_label}: {entry.error}"
             )
             continue
-        colour = "bold red" if entry.exceeds_threshold else "green"
-        verdict = "FAIL" if entry.exceeds_threshold else "pass"
+        # An incomplete project fails like one over its threshold: it exits 1, and
+        # "pass" beside it contradicted the run's own status.
+        failing = entry.exceeds_threshold or entry.scan_incomplete
+        colour = "bold red" if failing else "green"
+        verdict = "FAIL" if failing else "pass"
+        incomplete = ""
+        if entry.incomplete_scanners:
+            incomplete = "; incomplete: " + escape_markup(
+                ", ".join(entry.incomplete_scanners)
+            )
+        elif entry.scan_incomplete:
+            incomplete = "; incomplete"
         print(
             f"  [{colour}]{verdict}[/{colour}]     {entry.display_label} -- "
             f"{entry.actionable_finding_count} actionable of "
             f"{entry.finding_count} at threshold "
             f"{entry.severity_threshold or 'none'} "
-            f"({entry.duration_seconds:.1f}s)"
+            f"({entry.duration_seconds:.1f}s){incomplete}"
         )
+
+    # Each project's inputs a scanner did not scan, as a single-directory scan lists
+    # its own beside the table (metrics_table.print_inputs_not_scanned).
+    not_scanned = [
+        item for entry in result.payload.projects for item in entry.inputs_not_scanned
+    ]
+    if not_scanned:
+        # Imported here: metrics_table loads ash_config, which importing this
+        # module must not (test_forward_ref_resolves_in_any_import_order.py).
+        from automated_security_helper.core.metrics_table import not_scanned_line
+
+        print("")
+        for item in not_scanned:
+            print(f"  {not_scanned_line(item.scanner, item.path, item.reason)}")
 
     print("")
     print(f"  Aggregated results: {result.results_path.as_posix()}")

@@ -305,6 +305,7 @@ from automated_security_helper.workspace.aggregation import (
     has_finding_at_min_severity,
     incomplete_converters_for_project,
     incomplete_scanners_for_project,
+    inputs_not_scanned_for_project,
     no_scanner_ran_for_project,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
@@ -870,6 +871,11 @@ def _scan_one_project(
         output_path=output_path,
         scanners=statuses,
         incomplete_scanners=incomplete,
+        # The unified results carry no per-target reports, so without this the
+        # merged summaries and the console could not name what went unscanned.
+        inputs_not_scanned=inputs_not_scanned_for_project(
+            results, project.relative_path
+        ),
         no_scanner_ran=measured_nothing,
         incomplete_converters=incomplete_conversions,
         # A stale content database under `content_db_staleness: fail` fails the project

@@ -12888,6 +12888,34 @@
       "title": "Primitive",
       "type": "string"
     },
+    "ProjectInputNotScanned": {
+      "description": "One input a project's scanner found and did not scan, and why.",
+      "properties": {
+        "path": {
+          "description": "The input's workspace-relative path, '/' separated: the project's relative_path joined to the path the scanner recorded.",
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why the scanner did not scan it.",
+          "title": "Reason",
+          "type": "string"
+        },
+        "scanner": {
+          "description": "The scanner.",
+          "minLength": 1,
+          "title": "Scanner",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scanner",
+        "path",
+        "reason"
+      ],
+      "title": "ProjectInputNotScanned",
+      "type": "object"
+    },
     "ProjectRunStatus": {
       "description": "What became of one project once execution started.\n\n``SKIPPED`` covers both skip reasons and carries ``skip_reason`` to say\nwhich; ``FAILED`` is reserved for a project that was attempted and produced\nno verdict, which is the only one of the three that fails the workspace.",
       "enum": [
@@ -22080,6 +22108,14 @@
             "type": "string"
           },
           "title": "Incomplete Scanners",
+          "type": "array"
+        },
+        "inputs_not_scanned": {
+          "description": "Every input one of this project's scanners found and did not scan (an offline npm-audit's lockfiles, for instance), with the reason. The project's own results list them per target; the workspace results carry no per-target reports, so they are repeated here, for the merged summaries and the console. A scanner's status cannot say which input it skipped.",
+          "items": {
+            "$ref": "#/$defs/ProjectInputNotScanned"
+          },
+          "title": "Inputs Not Scanned",
           "type": "array"
         },
         "invalid_config": {

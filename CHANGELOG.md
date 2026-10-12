@@ -326,7 +326,11 @@
   audited is recorded as not scanned, with the reason, in the scanner's
   `inputs_not_scanned` in `ash_aggregated_results.json`, on the console after the
   summary table, and in a new "Inputs not scanned" section of `ash.summary.md` and
-  `ash.summary.txt`. When there was a lockfile to audit, the scanner is MISSING, as
+  `ash.summary.txt`. A workspace scan lists every project's, with workspace-relative
+  paths: in a new `inputs_not_scanned` list on each project's entry in the workspace
+  results, in the merged summaries, and after the per-project lines of the workspace
+  console summary, whose line for an incomplete project now reads FAIL with the
+  scanners that did not complete rather than `pass`. When there was a lockfile to audit, the scanner is MISSING, as
   snyk-code is offline, so an offline scan of a Node.js project now fails under the
   default completeness gate (`fail_on_incomplete_scanners`) with exit code 1. Pass
   `--exclude-scanners npm-audit` to scan offline without it. A project with no

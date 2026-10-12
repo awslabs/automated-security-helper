@@ -210,7 +210,9 @@ over the network on their own:
   have audited is listed as not scanned, with the reason, in
   `ash_aggregated_results.json` (the scanner's `inputs_not_scanned`), the console
   summary, and the "Inputs not scanned" section of `ash.summary.md` and
-  `ash.summary.txt`. When there is a lockfile, npm-audit is MISSING, as snyk-code is,
+  `ash.summary.txt`. A workspace scan lists every project's, with workspace-relative
+  paths, in each project's `inputs_not_scanned` entry in the workspace results, the
+  merged summaries and the workspace console summary. When there is a lockfile, npm-audit is MISSING, as snyk-code is,
   so the scan fails under the default completeness gate (exit code 1). To scan a
   Node.js project offline without it, pass `--exclude-scanners npm-audit`. A project
   with no lockfile has nothing to audit, and npm-audit is SKIPPED.
