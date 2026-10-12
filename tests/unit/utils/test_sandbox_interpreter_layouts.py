@@ -341,6 +341,28 @@ def test_a_prefix_directly_in_the_home_that_is_no_venv_is_refused(world, monkeyp
     assert repr(prefix.as_posix()) in str(refused.value), str(refused.value)
 
 
+def test_a_python_built_with_its_prefix_directly_in_the_home_is_refused(
+    world, monkeypatch
+):
+    """Pin: ./configure --prefix=$HOME/py312 stays refused, and says what to do.
+
+    Its prefix is a real installation (lib/python3.12/os.py), but nothing tells it
+    apart from any other directory directly in the home, so it is not mounted.
+    """
+    prefix = world.home / "py312"
+    executable = _python(prefix / "bin" / "python3.12")
+    (prefix / "lib" / "python3.12").mkdir(parents=True)
+    (prefix / "lib" / "python3.12" / "os.py").write_text("")
+
+    with pytest.raises(SandboxUnavailable) as refused:
+        _build(world, monkeypatch, executable, prefix)
+
+    message = str(refused.value)
+    assert repr(prefix.as_posix()) in message, message
+    assert "more of one than a single Python installation" in message, message
+    assert "outside the home directory" in message, message
+
+
 def _in_which_home(world, which_home):
     """HOME's directory, or a passwd entry's home that HOME is not."""
     if which_home == "HOME":
