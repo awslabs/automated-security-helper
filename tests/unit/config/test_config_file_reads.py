@@ -31,6 +31,7 @@ from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
     ASHConfigValidationError,
 )
+from tests.utils.open_audit import record_opens
 
 needs_fifo = pytest.mark.skipif(
     not hasattr(os, "mkfifo"), reason="FIFOs are a POSIX file type"
@@ -171,16 +172,12 @@ class TestSpecialFilesAreNotRead:
 
 
 def _record_opens(monkeypatch) -> list:
-    """Every ``os.open`` made while the test runs, as (path, flags)."""
-    opened: list = []
-    real_open = os.open
+    """Every open made while the test runs, as (path, flags).
 
-    def recording_open(path, flags, *args, **kwargs):
-        opened.append((Path(os.fspath(path)), flags))
-        return real_open(path, flags, *args, **kwargs)
-
-    monkeypatch.setattr(os, "open", recording_open)
-    return opened
+    From the interpreter's audit hook, so ``open()``, ``io.open`` and
+    ``Path.read_text`` are seen as well as ``os.open``.
+    """
+    return record_opens(monkeypatch)
 
 
 def _special_pyproject(kind: str, directory: Path) -> Path:
@@ -215,9 +212,14 @@ class TestDiscoveryOpensOnlyRegularFiles:
         pyproject = _special_pyproject(kind, tmp_path)
         opened = _record_opens(monkeypatch)
 
-        with pytest.raises(ASHConfigSourceError, match="not a regular file"):
-            config_sources.discover_config_source(tmp_path)
+        # In a thread with a deadline: an open of the FIFO without O_NONBLOCK
+        # would block the test rather than fail it.
+        error = _returns_promptly(
+            lambda: config_sources.discover_config_source(tmp_path), pyproject
+        )
 
+        assert isinstance(error, ASHConfigSourceError), error
+        assert "not a regular file" in str(error)
         assert [p for p, _ in opened if p.name == pyproject.name] == []
 
     @pytest.mark.parametrize("kind", SPECIAL_PYPROJECTS)
@@ -227,12 +229,25 @@ class TestDiscoveryOpensOnlyRegularFiles:
         (tmp_path / ".ash.yaml").write_text("project_name: x\n", encoding="utf-8")
         pyproject = _special_pyproject(kind, tmp_path)
         opened = _record_opens(monkeypatch)
+        found = {}
 
-        discovery = config_sources.discover_config_source(tmp_path)
+        def discover():
+            found["discovery"] = config_sources.discover_config_source(tmp_path)
 
+        assert _returns_promptly(discover, pyproject) is None
+        discovery = found["discovery"]
         assert discovery.selected.path == tmp_path / ".ash.yaml"
         assert discovery.ignored == []
         assert [p for p, _ in opened if p.name == pyproject.name] == []
+
+    def test_control_the_recorder_sees_a_builtin_open(self, tmp_path, monkeypatch):
+        path = tmp_path / "seen.txt"
+        path.write_text("x", encoding="utf-8")
+        opened = _record_opens(monkeypatch)
+
+        path.read_text(encoding="utf-8")
+
+        assert path in [p for p, _ in opened]
 
     def test_control_a_regular_pyproject_is_read(self, tmp_path):
         (tmp_path / "pyproject.toml").write_text(

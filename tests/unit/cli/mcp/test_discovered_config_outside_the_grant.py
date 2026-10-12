@@ -36,6 +36,7 @@ from automated_security_helper.cli.mcp.sandbox import (
 )
 from automated_security_helper.config import config_sources
 from automated_security_helper.core.exceptions import ASHConfigInputNotPermittedError
+from tests.utils.open_audit import record_opens
 
 _SESSION = "client-one"
 _MARKER = "TARGET-CONTENT-MARKER"
@@ -94,15 +95,8 @@ def tree(tmp_path, monkeypatch):
 
 
 def _record_opens(monkeypatch) -> List[Path]:
-    opened: List[Path] = []
-    real_open = os.open
-
-    def recording_open(path, flags, *args, **kwargs):
-        opened.append(Path(os.fspath(path)))
-        return real_open(path, flags, *args, **kwargs)
-
-    monkeypatch.setattr(os, "open", recording_open)
-    return opened
+    """Every path opened while the test runs, by any route (the audit hook)."""
+    return record_opens(monkeypatch, with_flags=False)
 
 
 def _gate():
