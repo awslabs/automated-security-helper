@@ -665,6 +665,117 @@ def _neighbor(line, context_start, context_lines):
     )
 
 
+class TestOneFileUnderTwoNames:
+    """A secret finding and a neighbor that name one file differently still match."""
+
+    def _masked_context(self, secret_uri, neighbor_uri):
+        model = _results(
+            _result(
+                "SECRET-KEYWORD",
+                secret_uri,
+                2,
+                "Secret of type 'Keyword' detected",
+                scanner="detect-secrets",
+            ),
+            _result(
+                "B404",
+                neighbor_uri,
+                1,
+                "import",
+                snippet=OTHER_LINE,
+                context=(1, OTHER_LINE + ASSIGN_LINE),
+                scanner="bandit",
+            ),
+        )
+        mask_secrets_in_results(model)
+        return _region_text(model.sarif.runs[0].results[1], "contextRegion")
+
+    @pytest.mark.parametrize(
+        "secret_uri, neighbor_uri",
+        [
+            ("src/app/settings.py", "app/settings.py"),
+            ("app/settings.py", "src/app/settings.py"),
+            ("my%20app/settings.py", "my app/settings.py"),
+            ("file:///work/my%20app/settings.py", "my app/settings.py"),
+            ("./app/settings.py", "app\\settings.py"),
+        ],
+        ids=[
+            "neighbor-relative-to-deeper-dir",
+            "secret-relative-to-deeper-dir",
+            "percent-encoded",
+            "file-uri-percent-encoded",
+            "dot-slash-and-backslash",
+        ],
+    )
+    def test_the_same_file_is_masked(self, secret_uri, neighbor_uri):
+        assert self._masked_context(secret_uri, neighbor_uri) == (
+            OTHER_LINE + MASKED_LINE + "\n"
+        )
+
+    @pytest.mark.parametrize(
+        "secret_uri, neighbor_uri",
+        [
+            ("app/settings.py", "xapp/settings.py"),
+            ("app/settings.py", "other/settings.py"),
+        ],
+        ids=["name-suffix-not-a-directory", "another-directory"],
+    )
+    def test_another_file_of_the_same_name_is_left_alone(
+        self, secret_uri, neighbor_uri
+    ):
+        """Control: a suffix match needs a path separator at the join."""
+        assert self._masked_context(secret_uri, neighbor_uri) == (
+            OTHER_LINE + ASSIGN_LINE
+        )
+
+
+class TestSaveModel:
+    def test_results_filled_in_after_the_model_was_built_are_masked_when_saved(
+        self, tmp_path
+    ):
+        """A scan without a report phase builds its model empty and fills it in later.
+
+        ``model_post_init`` then masked nothing, so ``save_model`` is the masking
+        that keeps the file clean.
+        """
+        model = AshAggregatedResults()
+        model.sarif = SarifReport.model_validate(
+            {
+                "version": "2.1.0",
+                "runs": [
+                    {
+                        "tool": {"driver": {"name": "test"}},
+                        "results": [
+                            _result(
+                                "B105",
+                                "app.py",
+                                1,
+                                HARDCODED + "'" + VALUE + "'",
+                                snippet=ASSIGN_LINE,
+                                scanner="bandit",
+                            ),
+                            _result(
+                                "B602",
+                                "deploy.py",
+                                5,
+                                "subprocess call",
+                                snippet=REUSE_LINE,
+                                scanner="bandit",
+                            ),
+                        ],
+                    }
+                ],
+            }
+        )
+        assert VALUE in model.sarif.model_dump_json()
+
+        model.save_model(tmp_path)
+
+        text = (tmp_path / "ash_aggregated_results.json").read_text(encoding="utf-8")
+        assert "B602" in text
+        assert VALUE not in text
+
+
 class TestPrivateKeyBlocks:
     """A key reported on its BEGIN line is masked through its END line in every snippet."""
 

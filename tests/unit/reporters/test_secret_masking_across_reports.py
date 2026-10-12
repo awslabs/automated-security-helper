@@ -344,6 +344,29 @@ class TestWorkspaceScan:
         assert SECRETS.found_in(text) == [], f"{relative} holds a secret value"
 
 
+class TestScanWithoutAReportPhase:
+    """``--phases convert --phases scan`` writes the results file with no report phase.
+
+    That run builds its model empty and fills it in afterwards, so the masking
+    when the model is built finds nothing; the masking when it is saved is what
+    keeps the file clean.
+    """
+
+    def test_the_results_file_holds_no_secret_value(self, tmp_path):
+        from automated_security_helper.core.enums import ExecutionPhase
+
+        output_dir = run_secret_bearing_scan(
+            tmp_path, phases=[ExecutionPhase.CONVERT, ExecutionPhase.SCAN]
+        )
+
+        assert not (output_dir / "reports" / "ash.sarif").exists(), (
+            "a report phase ran, so this checks the usual path"
+        )
+        text = _read(output_dir, "ash_aggregated_results.json")
+        assert "B105" in text
+        assert SECRETS.found_in(text) == []
+
+
 @pytest.fixture(scope="module")
 def two_project_output(tmp_path_factory):
     """One workspace scan of two projects that share one value; see TWO_PROJECT_FILES."""

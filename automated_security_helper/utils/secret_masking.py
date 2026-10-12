@@ -4,6 +4,7 @@ import html
 import json
 import re
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
+from urllib.parse import unquote
 
 from pydantic import BaseModel, ConfigDict
 
@@ -293,9 +294,15 @@ def _text_of(message: Any) -> Optional[str]:
 
 
 def _normalized_uri(uri: Any) -> Optional[str]:
+    """``uri`` as a plain relative or absolute path, for comparing two names of a file.
+
+    Backslashes become slashes, ``file://`` and leading ``./`` go, and
+    percent-encoding is decoded: SARIF URIs are URI references, so
+    ``my%20app/settings.py`` and ``my app/settings.py`` name one file.
+    """
     if not isinstance(uri, str) or not uri:
         return None
-    text = uri.replace("\\", "/")
+    text = unquote(uri.replace("\\", "/"))
     text = text.removeprefix("file://")
     while text.startswith("./"):
         text = text[2:]

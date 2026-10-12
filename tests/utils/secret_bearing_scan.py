@@ -473,11 +473,11 @@ SCAN_CONFIG = (
 )
 
 
-def run_secret_bearing_scan(root: Path) -> Path:
+def run_secret_bearing_scan(root: Path, phases: List[Any] | None = None) -> Path:
     """Scan the fixture tree with bandit (canned) and detect-secrets; return the output dir.
 
     Runs through ``run_ash_scan``, the function the CLI and the MCP server call,
-    with the default (parallel) strategy.
+    with the default (parallel) strategy. ``phases`` is passed on as ``--phases``.
     """
     from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 
@@ -501,6 +501,7 @@ def run_secret_bearing_scan(root: Path) -> Path:
             show_summary=False,
             fail_on_findings=False,
             color=False,
+            phases=phases,
         )
     return output_dir
 
