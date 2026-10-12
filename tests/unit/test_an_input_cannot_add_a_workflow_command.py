@@ -58,6 +58,7 @@ import os
 import re
 import shutil
 import subprocess
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -499,6 +500,184 @@ class TestNothingReadsAnUncheckedValueAfterARefusal:
         ]
         assert reading == [], reading
         assert running, "no step runs after a failed pin; the locator is broken"
+
+
+def _installed_locales() -> set[str]:
+    listing = subprocess.run(  # nosec B603 B607 - fixed argv
+        ["locale", "-a"], capture_output=True, text=True, check=False
+    ).stdout
+    return {name.strip().lower().replace("-", "") for name in listing.splitlines()}
+
+
+#: The locales a runner may give a step. C and C.UTF-8 are in every glibc image;
+#: en_US.UTF-8 where it is installed.
+LOCALES = [
+    "C",
+    "C.UTF-8",
+    *(["en_US.UTF-8"] if "en_us.utf8" in _installed_locales() else []),
+]
+
+#: Every code point a refusal covers: the C0 and C1 controls, DEL, and U+2028 and
+#: U+2029, which a UTF-8 locale's [[:cntrl:]] matches and the C locale's does not.
+REFUSED_CHARACTERS = [
+    chr(c)
+    for c in range(1, 0x2030)
+    if unicodedata.category(chr(c)) in ("Cc", "Zl", "Zp")
+]
+#: A sample of them for the smaller checks: two C1 controls, U+2028 and U+2029.
+REFUSED_SAMPLE = [chr(0x85), chr(0x9B), chr(0x2028), chr(0x2029)]
+#: Characters a refusal must let through, whatever the locale: e acute, no-break
+#: space, ideographic space, zero-width no-break space, an emoji and a letter.
+ACCEPTED_CHARACTERS = [
+    chr(0xE9),
+    chr(0xA0),
+    chr(0x3000),
+    chr(0xFEFF),
+    chr(0x1F600),
+    "x",
+]
+
+
+def _refused(run: ga.StepRun) -> bool:
+    return run.proc.returncode != 0 and any(
+        line.startswith("::error::")
+        for line in ga.workflow_command_lines(run.proc.stdout, run.proc.stderr)
+    )
+
+
+def _wrongly_answered(
+    runs: list[tuple[str, ga.StepRun]], refused: list[str]
+) -> list[str]:
+    return [
+        f"U+{ord(character):04X}"
+        for character, run in runs
+        if _refused(run) != (character in refused)
+    ]
+
+
+class TestTheCheckGivesTheSameAnswerInEveryLocale:
+    """In the C locale [[:cntrl:]] is C0 and DEL only; in a UTF-8 locale it is also
+    C1 and U+2028 and U+2029. The checks read bytes, so the locale cannot change
+    which values they refuse."""
+
+    @pytest.mark.parametrize("locale_name", LOCALES)
+    def test_the_scan_workflows_input_check(self, tmp_path, locale_name):
+        workflow, job = _scan_workflow()
+        step = _input_check_step()
+        runs = []
+        for index, character in enumerate(REFUSED_CHARACTERS + ACCEPTED_CHARACTERS):
+            runs.append(
+                (
+                    character,
+                    ga.run_step(
+                        ga.StepSandbox(tmp_path / str(index)),
+                        workflow,
+                        job,
+                        step,
+                        _scan_context(**{"ash-args": f"--a{character}b"}),
+                        extra_env={**NO_NETWORK_GIT, "LC_ALL": locale_name},
+                    ),
+                )
+            )
+        wrong = _wrongly_answered(runs, REFUSED_CHARACTERS)
+        assert wrong == [], (
+            f"under LC_ALL={locale_name}, refused the wrong way: {wrong}"
+        )
+
+    @pytest.mark.parametrize("locale_name", LOCALES)
+    @pytest.mark.parametrize(
+        "action,name",
+        [("prepull-base-image", "dockerfile"), ("run-scan-test", "config-file")],
+    )
+    def test_the_composite_actions_input_checks(
+        self, tmp_path, locale_name, action, name
+    ):
+        doc = _action(action)
+        runs = []
+        for index, character in enumerate(REFUSED_SAMPLE + ACCEPTED_CHARACTERS):
+            runs.append(
+                (
+                    character,
+                    ga.run_step(
+                        ga.StepSandbox(tmp_path / str(index)),
+                        ga.Workflow(ACTIONS_DIR / action / "action.yml", {}),
+                        {},
+                        _first_step(action),
+                        _action_context(
+                            doc, ACTIONS_DIR / action, **{name: f"a{character}b"}
+                        ),
+                        extra_env={"LC_ALL": locale_name, "RUNNER_ARCH": "X64"},
+                    ),
+                )
+            )
+        wrong = _wrongly_answered(runs, REFUSED_SAMPLE)
+        assert wrong == [], (
+            f"under LC_ALL={locale_name}, refused the wrong way: {wrong}"
+        )
+
+    @pytest.mark.parametrize("locale_name", LOCALES)
+    def test_the_pull_request_title_check(self, tmp_path, locale_name):
+        workflow = ga.load_workflow(TITLE_WORKFLOW)
+        job = workflow.jobs["pr-title"]
+        (step,) = [
+            s
+            for s in job["steps"]
+            if s.get("name") == "Validate PR title with commitizen"
+        ]
+        runs = []
+        for index, character in enumerate(REFUSED_SAMPLE + ACCEPTED_CHARACTERS):
+            sandbox = ga.StepSandbox(tmp_path / str(index))
+            sandbox.install_stub("cz", sandbox.stub_dir)
+            context = ga.base_context(
+                event_name="pull_request",
+                event={"pull_request": {"title": f"fix: a{character}b"}},
+            )
+            runs.append(
+                (
+                    character,
+                    ga.run_step(
+                        sandbox,
+                        workflow,
+                        job,
+                        step,
+                        context,
+                        extra_env={"LC_ALL": locale_name},
+                    ),
+                )
+            )
+        wrong = _wrongly_answered(runs, REFUSED_SAMPLE)
+        assert wrong == [], (
+            f"under LC_ALL={locale_name}, refused the wrong way: {wrong}"
+        )
+
+    @pytest.mark.parametrize(
+        "step_id,name", [("ash-pin", "ash-version"), ("config-ref", "config-ref")]
+    )
+    def test_a_space_outside_ascii_gets_the_same_answer_in_every_locale(
+        self, tmp_path, step_id, name
+    ):
+        """[[:space:]] is ASCII whitespace in C and also U+3000 and others in a UTF-8
+        locale; read in C, every locale treats U+3000 the same way."""
+        workflow, job = _scan_workflow()
+        (step,) = [s for s in job["steps"] if s.get("id") == step_id]
+        answers = {}
+        for locale_name in LOCALES:
+            sandbox = ga.StepSandbox(tmp_path / locale_name)
+            _git("init", "-q", ".", cwd=sandbox.workspace)
+            values = {name: "x" + chr(0x3000) + "y", "config": ".ash/.ash.yaml"}
+            run = ga.run_step(
+                sandbox,
+                workflow,
+                job,
+                step,
+                _scan_context(**values),
+                extra_env={**NO_NETWORK_GIT, "LC_ALL": locale_name},
+            )
+            answers[locale_name] = (
+                run.proc.returncode,
+                ga.workflow_command_lines(run.proc.stdout, run.proc.stderr),
+            )
+        assert len({repr(a) for a in answers.values()}) == 1, answers
 
 
 class TestConfigRefIsNotReadAsAnOption:

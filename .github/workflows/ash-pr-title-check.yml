@@ -48,11 +48,19 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          case "$PR_TITLE" in
-            *[[:cntrl:]]* | *'##['*)
-              echo "::error::the pull request title holds a line break, another control character or the legacy command marker, so it is refused without being printed. Edit the title."
-              exit 1
-              ;;
-          esac
+          # Byte by byte, in the C locale, so the runner's locale cannot change the
+          # answer: [[:cntrl:]] is C0 and DEL there, and the UTF-8 bytes of C1 and of
+          # U+2028 and U+2029 are named. Only this check; commitizen keeps the
+          # runner's locale.
+          if (
+            export LC_ALL=C
+            case "$PR_TITLE" in
+              *[[:cntrl:]]* | *$'\xc2'[$'\x80'-$'\x9f']* | *$'\xe2\x80'[$'\xa8\xa9']* | *'##['*) exit 0 ;;
+            esac
+            exit 1
+          ); then
+            echo "::error::the pull request title holds a line break, another control character or the legacy command marker, so it is refused without being printed. Edit the title."
+            exit 1
+          fi
           echo "Checking: $PR_TITLE"
           cz check --message "$PR_TITLE"

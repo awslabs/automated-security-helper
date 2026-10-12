@@ -43,9 +43,13 @@ runs:
         IN_OFFLINE: ${{ inputs.offline }}
       run: |
         set -euo pipefail
+        # Byte by byte, so the answer does not depend on the runner's locale: in C,
+        # [[:cntrl:]] is C0 and DEL, and the UTF-8 bytes of C1 (U+0080 to U+009F) and
+        # of U+2028 and U+2029 are named.
+        export LC_ALL=C
         refuse_command_text() {
           case "$2" in
-            *[[:cntrl:]]* | *'##['*)
+            *[[:cntrl:]]* | *$'\xc2'[$'\x80'-$'\x9f']* | *$'\xe2\x80'[$'\xa8\xa9']* | *'##['*)
               echo "::error::the $1 input holds a line break, another control character or the legacy command marker, so it is refused without being printed."
               exit 1
               ;;

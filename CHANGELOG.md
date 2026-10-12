@@ -1859,7 +1859,9 @@
   `a/b`, a line feed and `::warning::...` added a warning of the caller's choosing,
   and other inputs reached git's and ASH's error messages unchecked. The job's
   first step now fails, naming the input without printing it, when any string
-  input holds a line break, another control character or `##[`. A block scalar of
+  input holds a line break, another control character or `##[`. The control
+  characters are the C0 and C1 controls, DEL, U+2028 and U+2029, matched byte by
+  byte, so the runner's locale does not change the answer. A block scalar of
   one line (`ash-args: |`, which YAML ends with a line feed) is fine: that one
   trailing line feed is dropped. More than one line is refused, and that includes
   `ash-args`, which Run ASH read one line of: a multi-line `ash-args` used to lose

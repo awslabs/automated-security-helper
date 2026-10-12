@@ -346,13 +346,19 @@ jobs:
           INPUT_BASE_REF: ${{ inputs.base-ref }}
         run: |
           set -euo pipefail
+          # Byte by byte, so the answer is the same whatever locale the runner has: in
+          # the C locale [[:cntrl:]] is the C0 controls and DEL, and the UTF-8 bytes of
+          # the C1 controls (U+0080 to U+009F) and of U+2028 and U+2029 are named
+          # here. In a UTF-8 locale [[:cntrl:]] would match those as well; in C it
+          # would not.
+          export LC_ALL=C
           for var in "${!INPUT_@}"; do
             given="${!var}"
             value="${given%$'\n'}"
             name="${var#INPUT_}"
             name="${name,,}"
             case "${value}" in
-              *[[:cntrl:]]* | *'##['*)
+              *[[:cntrl:]]* | *$'\xc2'[$'\x80'-$'\x9f']* | *$'\xe2\x80'[$'\xa8\xa9']* | *'##['*)
                 echo "::error::the ${name//_/-} input holds a line break, another control character or the legacy command marker, so it is refused without being printed. A block scalar of one line is fine; more than one line is refused."
                 exit 1
                 ;;
@@ -386,6 +392,9 @@ jobs:
           ASH_VERSION: ${{ steps.inputs.outputs.ash_version }}
         run: |
           set -euo pipefail
+          # The C locale, so [[:space:]] and [[:cntrl:]] below mean the same bytes on
+          # every runner image.
+          export LC_ALL=C
           # Neither refusal prints the value, so this step prints nothing it has not
           # checked even when it runs without the input check. The messages after
           # these two checks may print it.
@@ -479,6 +488,9 @@ jobs:
           ASH_COMMIT: ${{ steps.ash-pin.outputs.commit }}
         run: |
           set -euo pipefail
+          # The C locale, so [[:space:]] and [[:cntrl:]] below mean the same bytes on
+          # every runner image.
+          export LC_ALL=C
           case "${CONFIG_REF_MISSING}" in
             refuse|defaults|"") ;;
             *)
